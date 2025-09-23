@@ -3316,8 +3316,12 @@ def _down_or_stop_clusters(
     if successes:
         click.echo('  ✓ Succeeded: ' + ', '.join(successes))
     if failures:
-        click.echo('  ✗ Failed: ' + ', '.join(n for (n, _) in failures))
-    if failures:
+        failed_pretty = []
+        for name, reason in failures:
+            first = reason.strip().splitlines()[0]
+            first = first if len(first) <= 120 else first[:120] + '…'
+            failed_pretty.append(f'{name} ({first})')
+        click.echo('  ✗ Failed: ' + ', '.join(failed_pretty))
         raise click.ClickException('Some clusters failed. See summary above.')
 
 
