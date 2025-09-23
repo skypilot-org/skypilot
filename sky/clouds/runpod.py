@@ -2,7 +2,6 @@
 
 from importlib import util as import_lib_util
 import os
-import sys
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
