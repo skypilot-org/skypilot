@@ -31,6 +31,7 @@ from sky.skylet import constants as skylet_constants
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import subprocess_utils
+from sky.utils import thread_utils
 from sky.utils import ux_utils
 
 # Use the explicit logger name so that the logger is under the
@@ -123,8 +124,8 @@ def _cleanup(service_name: str) -> bool:
     serve_state.remove_ha_recovery_script(service_name)
     failed = False
     replica_infos = serve_state.get_replica_infos(service_name)
-    info2proc: Dict[replica_managers.ReplicaInfo,
-                    multiprocessing.Process] = dict()
+    info2thr: Dict[replica_managers.ReplicaInfo,
+                   thread_utils.SafeThread] = dict()
     # NOTE(dev): This relies on `sky/serve/serve_utils.py::
     # generate_replica_cluster_name`. Change it if you change the function.
     existing_cluster_names = global_user_state.get_cluster_names_start_with(
@@ -135,9 +136,9 @@ def _cleanup(service_name: str) -> bool:
                         f'{info.replica_id} not found. Might be a failed '
                         'cluster. Skipping.')
             continue
-        p = multiprocessing.Process(target=replica_managers.terminate_cluster,
+        t = thread_utils.SafeThread(target=replica_managers.terminate_cluster,
                                     args=(info.cluster_name,))
-        info2proc[info] = p
+        info2thr[info] = t
         # Set replica status to `SHUTTING_DOWN`
         info.status_property.sky_launch_status = (
             replica_managers.common_utils.ProcessStatus.SUCCEEDED)
@@ -157,32 +158,32 @@ def _cleanup(service_name: str) -> bool:
 
     # Please reference to sky/serve/replica_managers.py::_refresh_process_pool.
     # TODO(tian): Refactor to use the same logic and code.
-    while info2proc:
-        snapshot = list(info2proc.items())
-        for info, p in snapshot:
-            if p.is_alive():
+    while info2thr:
+        snapshot = list(info2thr.items())
+        for info, t in snapshot:
+            if t.is_alive():
                 continue
             if (info.status_property.sky_down_status ==
                     replica_managers.common_utils.ProcessStatus.SCHEDULED):
                 if controller_utils.can_terminate(service_name):
                     try:
-                        p.start()
+                        t.start()
                     except Exception as e:  # pylint: disable=broad-except
                         _set_to_failed_cleanup(info)
-                        logger.error(f'Failed to start process for replica '
+                        logger.error(f'Failed to start thread for replica '
                                      f'{info.replica_id}: {e}')
-                        del info2proc[info]
+                        del info2thr[info]
                     else:
                         info.status_property.sky_down_status = (
                             common_utils.ProcessStatus.RUNNING)
                         serve_state.add_or_update_replica(
                             service_name, info.replica_id, info)
             else:
-                logger.info('Terminate process for replica '
+                logger.info('Terminate thread for replica '
                             f'{info.replica_id} finished.')
-                p.join()
-                del info2proc[info]
-                if p.exitcode == 0:
+                t.join()
+                del info2thr[info]
+                if t.exitcode == 0:
                     serve_state.remove_replica(service_name, info.replica_id)
                     logger.info(
                         f'Replica {info.replica_id} terminated successfully.')

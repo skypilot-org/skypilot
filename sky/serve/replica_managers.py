@@ -1,7 +1,6 @@
 """ReplicaManager: handles the creation and deletion of endpoint replicas."""
 import dataclasses
 import functools
-import multiprocessing
 from multiprocessing import pool as mp_pool
 import os
 import threading
@@ -15,13 +14,12 @@ import filelock
 import requests
 
 from sky import backends
-from sky import core
 from sky import exceptions
-from sky import execution
 from sky import global_user_state
 from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
+from sky.client import sdk
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -29,16 +27,18 @@ from sky.serve import service
 from sky.serve import spot_placer
 from sky.skylet import constants
 from sky.skylet import job_lib
-from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import env_options
 from sky.utils import resources_utils
 from sky.utils import status_lib
+from sky.utils import thread_utils
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
+    import logging
+
     from sky.serve import service_spec
 
 logger = sky_logging.init_logger(__name__)
@@ -61,6 +61,8 @@ ProcessStatus = common_utils.ProcessStatus
 def launch_cluster(replica_id: int,
                    service_task_yaml_path: str,
                    cluster_name: str,
+                   log_file: str,
+                   replica_to_request_id: serve_utils.ThreadSafeDict[int, str],
                    resources_override: Optional[Dict[str, Any]] = None,
                    retry_until_up: bool = True,
                    max_retry: int = 3) -> None:
@@ -74,10 +76,13 @@ def launch_cluster(replica_id: int,
             or some error happened before provisioning and will happen again
             if retry.
     """
+    # Use a different logger for each replica to avoid logging to the same file.
+    launch_logger = sky_logging.init_logger(
+        f'{__name__}.launch_cluster.{cluster_name}', log_file=log_file)
     if resources_override is not None:
-        logger.info(f'Scaling up replica (id: {replica_id}) cluster '
-                    f'{cluster_name} with resources override: '
-                    f'{resources_override}')
+        launch_logger.info(f'Scaling up replica (id: {replica_id}) cluster '
+                           f'{cluster_name} with resources override: '
+                           f'{resources_override}')
     try:
         config = yaml_utils.read_yaml(
             os.path.expanduser(service_task_yaml_path))
@@ -90,11 +95,12 @@ def launch_cluster(replica_id: int,
             task.set_resources(type(resources)(overrided_resources))
         task.update_envs({serve_constants.REPLICA_ID_ENV_VAR: str(replica_id)})
 
-        logger.info(f'Launching replica (id: {replica_id}) cluster '
-                    f'{cluster_name} with resources: {task.resources}')
+        launch_logger.info(f'Launching replica (id: {replica_id}) cluster '
+                           f'{cluster_name} with resources: {task.resources}')
     except Exception as e:  # pylint: disable=broad-except
-        logger.error('Failed to construct task object from yaml file with '
-                     f'error {common_utils.format_exception(e)}')
+        launch_logger.error(
+            'Failed to construct task object from yaml file with '
+            f'error {common_utils.format_exception(e)}')
         raise RuntimeError(
             f'Failed to launch the sky serve replica cluster {cluster_name} '
             'due to failing to initialize sky.Task from yaml file.') from e
@@ -103,17 +109,19 @@ def launch_cluster(replica_id: int,
     while True:
         retry_cnt += 1
         try:
-            usage_lib.messages.usage.set_internal()
-            execution.launch(task,
-                             cluster_name,
-                             retry_until_up=retry_until_up,
-                             _is_launched_by_sky_serve_controller=True)
-            logger.info(f'Replica cluster {cluster_name} launched.')
+            request_id = sdk.launch(task,
+                                    cluster_name,
+                                    retry_until_up=retry_until_up,
+                                    _is_launched_by_sky_serve_controller=True)
+            replica_to_request_id[replica_id] = request_id
+            with open(log_file, 'a', encoding='utf-8') as f:
+                sdk.stream_and_get(request_id, output_stream=f)
+            launch_logger.info(f'Replica cluster {cluster_name} launched.')
         except (exceptions.InvalidClusterNameError,
                 exceptions.NoCloudAccessError,
                 exceptions.ResourcesMismatchError) as e:
-            logger.error('Failure happened before provisioning. '
-                         f'{common_utils.format_exception(e)}')
+            launch_logger.error('Failure happened before provisioning. '
+                                f'{common_utils.format_exception(e)}')
             raise RuntimeError('Failed to launch the sky serve replica '
                                f'cluster {cluster_name}.') from e
         except exceptions.ResourcesUnavailableError as e:
@@ -122,44 +130,54 @@ def launch_cluster(replica_id: int,
                     for err in e.failover_history):
                 raise RuntimeError('Failed to launch the sky serve replica '
                                    f'cluster {cluster_name}.') from e
-            logger.info('Failed to launch the sky serve replica cluster with '
-                        f'error: {common_utils.format_exception(e)})')
+            launch_logger.info(
+                'Failed to launch the sky serve replica cluster with '
+                f'error: {common_utils.format_exception(e)})')
         except Exception as e:  # pylint: disable=broad-except
-            logger.info('Failed to launch the sky serve replica cluster with '
-                        f'error: {common_utils.format_exception(e)})')
+            launch_logger.info(
+                'Failed to launch the sky serve replica cluster with '
+                f'error: {common_utils.format_exception(e)})')
             with ux_utils.enable_traceback():
-                logger.info(f'  Traceback: {traceback.format_exc()}')
+                launch_logger.info(f'  Traceback: {traceback.format_exc()}')
         else:  # No exception, the launch succeeds.
             return
 
-        terminate_cluster(cluster_name)
+        terminate_cluster(cluster_name,
+                          log_file=log_file,
+                          down_logger=launch_logger)
         if retry_cnt >= max_retry:
             raise RuntimeError('Failed to launch the sky serve replica cluster '
                                f'{cluster_name} after {max_retry} retries.')
         gap_seconds = backoff.current_backoff()
-        logger.info('Retrying to launch the sky serve replica cluster '
-                    f'in {gap_seconds:.1f} seconds.')
+        launch_logger.info('Retrying to launch the sky serve replica cluster '
+                           f'in {gap_seconds:.1f} seconds.')
         time.sleep(gap_seconds)
 
 
 # TODO(tian): Combine this with
 # sky/spot/recovery_strategy.py::terminate_cluster
 def terminate_cluster(cluster_name: str,
+                      log_file: str,
                       replica_drain_delay_seconds: int = 0,
+                      down_logger: Optional['logging.Logger'] = None,
                       max_retry: int = 3) -> None:
     """Terminate the sky serve replica cluster."""
+    if down_logger is None:
+        down_logger = sky_logging.init_logger(
+            f'{__name__}.terminate_cluster.{cluster_name}', log_file=log_file)
     time.sleep(replica_drain_delay_seconds)
     retry_cnt = 0
     backoff = common_utils.Backoff()
     while True:
         retry_cnt += 1
         try:
-            usage_lib.messages.usage.set_internal()
-            core.down(cluster_name)
+            request_id = sdk.down(cluster_name)
+            with open(log_file, 'a', encoding='utf-8') as f:
+                sdk.stream_and_get(request_id, output_stream=f)
             return
         except ValueError:
             # The cluster is already terminated.
-            logger.info(
+            down_logger.info(
                 f'Replica cluster {cluster_name} is already terminated.')
             return
         except Exception as e:  # pylint: disable=broad-except
@@ -167,11 +185,11 @@ def terminate_cluster(cluster_name: str,
                 raise RuntimeError('Failed to terminate the sky serve replica '
                                    f'cluster {cluster_name}.') from e
             gap_seconds = backoff.current_backoff()
-            logger.error(
+            down_logger.error(
                 'Failed to terminate the sky serve replica cluster '
                 f'{cluster_name}. Retrying after {gap_seconds} seconds.'
                 f'Details: {common_utils.format_exception(e)}')
-            logger.error(f'  Traceback: {traceback.format_exc()}')
+            down_logger.error(f'  Traceback: {traceback.format_exc()}')
             time.sleep(gap_seconds)
 
 
@@ -363,16 +381,16 @@ class ReplicaStatusProperty:
             return serve_state.ReplicaStatus.UNKNOWN
         if self.sky_launch_status == common_utils.ProcessStatus.FAILED:
             # sky.launch failed
-            # The down process has not been started if it reaches here,
+            # The down thread has not been started if it reaches here,
             # due to the `if self.sky_down_status is not None`` check above.
-            # However, it should have been started by _refresh_process_pool.
+            # However, it should have been started by _refresh_thread_pool.
             # If not started, this means some bug prevent sky.down from
             # executing. It is also a potential resource leak, so we mark
             # it as FAILED_CLEANUP.
             return serve_state.ReplicaStatus.FAILED_CLEANUP
         if self.user_app_failed:
             # Failed on user setup/run
-            # Same as above, the down process should have been started.
+            # Same as above, the down thread should have been started.
             return serve_state.ReplicaStatus.FAILED_CLEANUP
         if self.service_ready_now:
             # Service is ready
@@ -673,8 +691,8 @@ class SkyPilotReplicaManager(ReplicaManager):
     """Replica Manager for SkyPilot clusters.
 
     It will run three daemon to monitor the status of the replicas:
-        (1) _process_pool_refresher: Refresh the launch/down process pool
-            to monitor the progress of the launch/down process.
+        (1) _thread_pool_refresher: Refresh the launch/down thread pool
+            to monitor the progress of the launch/down thread.
         (2) _job_status_fetcher: Fetch the job status of the service to
             monitor the status of the service jobs.
         (3) _replica_prober: Do readiness probe to the replicas to monitor
@@ -688,18 +706,16 @@ class SkyPilotReplicaManager(ReplicaManager):
         task = task_lib.Task.from_yaml(service_task_yaml_path)
         self._spot_placer: Optional[spot_placer.SpotPlacer] = (
             spot_placer.SpotPlacer.from_task(spec, task))
-        # TODO(tian): Store launch/down pid in the replica table, to make the
-        # manager more persistent. Current blocker is that we need to manually
-        # poll the Process (by join or is_launch), otherwise, it will never
-        # finish and become a zombie process. Probably we could use
-        # psutil.Process(p.pid).status() == psutil.STATUS_ZOMBIE to check
-        # such cases.
-        self._launch_process_pool: serve_utils.ThreadSafeDict[
-            int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
-        self._down_process_pool: serve_utils.ThreadSafeDict[
-            int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
+        # TODO(tian): Store launch/down request id in the replica table, to make
+        # the manager more persistent.
+        self._launch_thread_pool: serve_utils.ThreadSafeDict[
+            int, thread_utils.SafeThread] = serve_utils.ThreadSafeDict()
+        self._replica_to_request_id: serve_utils.ThreadSafeDict[
+            int, str] = serve_utils.ThreadSafeDict()
+        self._down_thread_pool: serve_utils.ThreadSafeDict[
+            int, thread_utils.SafeThread] = serve_utils.ThreadSafeDict()
 
-        threading.Thread(target=self._process_pool_refresher).start()
+        threading.Thread(target=self._thread_pool_refresher).start()
         threading.Thread(target=self._job_status_fetcher).start()
         threading.Thread(target=self._replica_prober).start()
 
@@ -709,14 +725,14 @@ class SkyPilotReplicaManager(ReplicaManager):
     def _recover_replica_operations(self):
         """Let's see are there something to do for ReplicaManager in a
         recovery run"""
-        assert (not self._launch_process_pool and not self._down_process_pool
-               ), 'We should not have any running processes in a recovery run'
+        assert (not self._launch_thread_pool and not self._down_thread_pool
+               ), 'We should not have any running threads in a recovery run'
 
         # There is a FIFO queue with capacity _MAX_NUM_LAUNCH for
         # _launch_replica.
         # We prioritize PROVISIONING replicas since they were previously
         # launched but may have been interrupted and need to be restarted.
-        # This is why we process PENDING replicas only after PROVISIONING
+        # This is why we handle PENDING replicas only after PROVISIONING
         # replicas.
         to_up_replicas = serve_state.get_replicas_at_status(
             self._service_name, serve_state.ReplicaStatus.PROVISIONING)
@@ -753,8 +769,8 @@ class SkyPilotReplicaManager(ReplicaManager):
         replica_id: int,
         resources_override: Optional[Dict[str, Any]] = None,
     ) -> None:
-        if replica_id in self._launch_process_pool:
-            logger.warning(f'Launch process for replica {replica_id} '
+        if replica_id in self._launch_thread_pool:
+            logger.warning(f'Launch thread for replica {replica_id} '
                            'already exists. Skipping.')
             return
         logger.info(f'Launching replica {replica_id}...')
@@ -786,12 +802,10 @@ class SkyPilotReplicaManager(ReplicaManager):
             location = self._spot_placer.select_next_location(
                 current_spot_locations)
             resources_override.update(location.to_dict())
-        p = multiprocessing.Process(
-            target=ux_utils.RedirectOutputForProcess(
-                launch_cluster,
-                log_file_name,
-            ).run,
+        t = thread_utils.SafeThread(
+            target=launch_cluster,
             args=(replica_id, self.service_task_yaml_path, cluster_name,
+                  log_file_name, self._replica_to_request_id,
                   resources_override, retry_until_up),
         )
         replica_port = _get_resources_ports(self.service_task_yaml_path)
@@ -799,9 +813,9 @@ class SkyPilotReplicaManager(ReplicaManager):
         info = ReplicaInfo(replica_id, cluster_name, replica_port, use_spot,
                            location, self.latest_version, resources_override)
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
-        # Don't start right now; we will start it later in _refresh_process_pool
+        # Don't start right now; we will start it later in _refresh_thread_pool
         # to avoid too many sky.launch running at the same time.
-        self._launch_process_pool[replica_id] = p
+        self._launch_thread_pool[replica_id] = t
 
     @with_lock
     def scale_up(self,
@@ -811,7 +825,7 @@ class SkyPilotReplicaManager(ReplicaManager):
 
     def _handle_sky_down_finish(self, info: ReplicaInfo, exitcode: int) -> None:
         if exitcode != 0:
-            logger.error(f'Down process for replica {info.replica_id} '
+            logger.error(f'Down thread for replica {info.replica_id} '
                          f'exited abnormally with code {exitcode}.')
             info.status_property.sky_down_status = (
                 common_utils.ProcessStatus.FAILED)
@@ -871,7 +885,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 'the logs should always be synced down. '
                 'So that the user can see the logs to debug.')
 
-        if replica_id in self._launch_process_pool:
+        if replica_id in self._launch_thread_pool:
             info = serve_state.get_replica_info_from_id(self._service_name,
                                                         replica_id)
             assert info is not None
@@ -879,17 +893,32 @@ class SkyPilotReplicaManager(ReplicaManager):
                 common_utils.ProcessStatus.INTERRUPTED)
             serve_state.add_or_update_replica(self._service_name, replica_id,
                                               info)
-            launch_process = self._launch_process_pool[replica_id]
-            if launch_process.is_alive():
-                assert launch_process.pid is not None
-                launch_process.terminate()
-                launch_process.join()
-            logger.info(f'Interrupted launch process for replica {replica_id} '
+            launch_thread = self._launch_thread_pool[replica_id]
+            if launch_thread.is_alive():
+                rid_found = False
+                # Should found immediately but add a 1 second timeout
+                # to avoid blocking the thread.
+                for _ in range(10):
+                    if replica_id in self._replica_to_request_id:
+                        rid_found = True
+                        break
+                    time.sleep(0.1)
+                if rid_found:
+                    request_id = self._replica_to_request_id[replica_id]
+                    sdk.api_cancel(request_id)
+                else:
+                    logger.error(f'Launch thread for replica {replica_id} '
+                                 'is not found in the replica to request id '
+                                 'dictionary. skip api cancel here.')
+                launch_thread.join()
+            logger.info(f'Interrupted launch thread for replica {replica_id} '
                         'and deleted the cluster.')
-            del self._launch_process_pool[replica_id]
+            del self._launch_thread_pool[replica_id]
+            if replica_id in self._replica_to_request_id:
+                del self._replica_to_request_id[replica_id]
 
-        if replica_id in self._down_process_pool:
-            logger.warning(f'Terminate process for replica {replica_id} '
+        if replica_id in self._down_thread_pool:
+            logger.warning(f'Terminate thread for replica {replica_id} '
                            'already exists. Skipping.')
             return
 
@@ -954,22 +983,22 @@ class SkyPilotReplicaManager(ReplicaManager):
         # If the cluster does not exist, it means either the cluster never
         # exists (e.g., the cluster is scaled down before it gets a chance to
         # provision) or the cluster is preempted and cleaned up by the status
-        # refresh. In this case, we skip spawning a new down process to save
+        # refresh. In this case, we skip spawning a new down thread to save
         # controller resources.
         if global_user_state.get_cluster_from_name(info.cluster_name) is None:
             self._handle_sky_down_finish(info, exitcode=0)
             return
 
-        # Otherwise, start the process to terminate the cluster.
-        p = multiprocessing.Process(
-            target=ux_utils.RedirectOutputForProcess(terminate_cluster,
-                                                     log_file_name, 'a').run,
-            args=(info.cluster_name, replica_drain_delay_seconds),
+        # Otherwise, start the thread to terminate the cluster.
+        t = thread_utils.SafeThread(
+            target=terminate_cluster,
+            args=(info.cluster_name, log_file_name,
+                  replica_drain_delay_seconds),
         )
         info.status_property.sky_down_status = (
             common_utils.ProcessStatus.SCHEDULED)
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
-        self._down_process_pool[replica_id] = p
+        self._down_thread_pool[replica_id] = t
 
     @with_lock
     def scale_down(self, replica_id: int, purge: bool = False) -> None:
@@ -1034,17 +1063,17 @@ class SkyPilotReplicaManager(ReplicaManager):
     #################################
 
     @with_lock
-    def _refresh_process_pool(self) -> None:
-        """Refresh the launch/down process pool.
+    def _refresh_thread_pool(self) -> None:
+        """Refresh the launch/down thread pool.
 
-        This function will checks all sky.launch and sky.down process on
+        This function will checks all sky.launch and sky.down thread on
         the fly. If any of them finished, it will update the status of the
         corresponding replica.
         """
         # To avoid `dictionary changed size during iteration` error.
-        launch_process_pool_snapshot = list(self._launch_process_pool.items())
-        for replica_id, p in launch_process_pool_snapshot:
-            if p.is_alive():
+        launch_thread_pool_snapshot = list(self._launch_thread_pool.items())
+        for replica_id, t in launch_thread_pool_snapshot:
+            if t.is_alive():
                 continue
             with filelock.FileLock(controller_utils.get_resources_lock_path()):
                 info = serve_state.get_replica_info_from_id(
@@ -1054,24 +1083,26 @@ class SkyPilotReplicaManager(ReplicaManager):
                 if info.status == serve_state.ReplicaStatus.PENDING:
                     # sky.launch not started yet
                     if controller_utils.can_provision(self._service_name):
-                        p.start()
+                        t.start()
                         info.status_property.sky_launch_status = (
                             common_utils.ProcessStatus.RUNNING)
                 else:
                     # sky.launch finished
-                    # TODO(tian): Try-catch in process, and have an enum return
+                    # TODO(tian): Try-catch in thread, and have an enum return
                     # value to indicate which type of failure happened.
                     # Currently we only have user code failure since the
                     # retry_until_up flag is set to True, but it will be helpful
                     # when we enable user choose whether to retry or not.
                     logger.info(
-                        f'Launch process for replica {replica_id} finished.')
-                    del self._launch_process_pool[replica_id]
-                    if p.exitcode != 0:
+                        f'Launch thread for replica {replica_id} finished.')
+                    del self._launch_thread_pool[replica_id]
+                    if replica_id in self._replica_to_request_id:
+                        del self._replica_to_request_id[replica_id]
+                    if t.exitcode != 0:
                         logger.warning(
-                            f'Launch process for replica {replica_id} '
-                            f'exited abnormally with code {p.exitcode}.'
-                            ' Terminating...')
+                            f'Launch thread for replica {replica_id} '
+                            f'exited abnormally with code {t.exitcode}. '
+                            f'Error: {t.exc}. Terminating...')
                         info.status_property.sky_launch_status = (
                             common_utils.ProcessStatus.FAILED)
                         error_in_sky_launch = True
@@ -1080,7 +1111,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                             common_utils.ProcessStatus.SUCCEEDED)
                     if self._spot_placer is not None and info.is_spot:
                         # TODO(tian): Currently, we set the location to
-                        # preemptive if the launch process failed. This is
+                        # preemptive if the launch thread failed. This is
                         # because if the error is not related to the
                         # availability of the location, then all locations
                         # should failed for same reason. So it does not matter
@@ -1090,7 +1121,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                         # availability of the location later.
                         location = info.get_spot_location()
                         assert location is not None
-                        if p.exitcode != 0:
+                        if t.exitcode != 0:
                             self._spot_placer.set_preemptive(location)
                             info.status_property.failed_spot_availability = True
                         else:
@@ -1103,9 +1134,9 @@ class SkyPilotReplicaManager(ReplicaManager):
                     self._terminate_replica(replica_id,
                                             sync_down_logs=True,
                                             replica_drain_delay_seconds=0)
-        down_process_pool_snapshot = list(self._down_process_pool.items())
-        for replica_id, p in down_process_pool_snapshot:
-            if p.is_alive():
+        down_thread_pool_snapshot = list(self._down_thread_pool.items())
+        for replica_id, t in down_thread_pool_snapshot:
+            if t.is_alive():
                 continue
             info = serve_state.get_replica_info_from_id(self._service_name,
                                                         replica_id)
@@ -1114,16 +1145,16 @@ class SkyPilotReplicaManager(ReplicaManager):
                     common_utils.ProcessStatus.SCHEDULED):
                 # sky.down not started yet
                 if controller_utils.can_terminate(self._service_name):
-                    p.start()
+                    t.start()
                     info.status_property.sky_down_status = (
                         common_utils.ProcessStatus.RUNNING)
                     serve_state.add_or_update_replica(self._service_name,
                                                       replica_id, info)
             else:
                 logger.info(
-                    f'Terminate process for replica {replica_id} finished.')
-                del self._down_process_pool[replica_id]
-                self._handle_sky_down_finish(info, exitcode=p.exitcode)
+                    f'Terminate thread for replica {replica_id} finished.')
+                del self._down_thread_pool[replica_id]
+                self._handle_sky_down_finish(info, exitcode=t.exitcode)
 
         # Clean old version
         replica_infos = serve_state.get_replica_infos(self._service_name)
@@ -1142,16 +1173,16 @@ class SkyPilotReplicaManager(ReplicaManager):
             # newest version will be cleaned in serve down
             self.least_recent_version = current_least_recent_version
 
-    def _process_pool_refresher(self) -> None:
-        """Periodically refresh the launch/down process pool."""
+    def _thread_pool_refresher(self) -> None:
+        """Periodically refresh the launch/down thread pool."""
         while True:
-            logger.debug('Refreshing process pool.')
+            logger.debug('Refreshing thread pool.')
             try:
-                self._refresh_process_pool()
+                self._refresh_thread_pool()
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
-                # process pool refresher running.
-                logger.error('Error in process pool refresher: '
+                # thread pool refresher running.
+                logger.error('Error in thread pool refresher: '
                              f'{common_utils.format_exception(e)}')
                 with ux_utils.enable_traceback():
                     logger.error(f'  Traceback: {traceback.format_exc()}')
