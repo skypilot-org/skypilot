@@ -1,0 +1,48 @@
+resources:
+  accelerators: H100:8
+  ports: 8080
+
+num_nodes: 2
+
+envs:
+  MODEL_NAME: Qwen/Qwen3-8B
+  DIST_INIT_PORT: 29500
+
+setup: |
+  sudo usermod -aG docker $USER
+  sudo chmod 666 /var/run/docker.sock
+  uv pip install "ai-dynamo[sglang]==0.5.0" accelerate --system --prerelease=allow
+  uv pip install "sglang[all]==0.5.2" --system --prerelease=allow
+  curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/ai-dynamo/dynamo/v0.5.0/deploy/docker-compose.yml
+  docker compose -f docker-compose.yml up -d
+
+run: |
+  export GLOO_SOCKET_IFNAME=$(ip -o -4 route show to default | awk '{print $5}')
+  HEAD_IP=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+  TOTAL_GPUS=$((SKYPILOT_NUM_NODES * SKYPILOT_NUM_GPUS_PER_NODE))
+
+  # For disaggregation mode, we need dp-size > 1
+  # Setting TP to half of total GPUs and DP to 2 for proper distribution
+  TP_SIZE=$((TOTAL_GPUS / 2))
+  DP_SIZE=2
+
+  if [ "${SKYPILOT_NODE_RANK}" == "0" ]; then
+    # Start frontend with KV-aware routing enabled
+    python -m dynamo.frontend --router-mode kv --http-port 8080 &
+  fi
+
+  python -m dynamo.sglang \
+    --model-path $MODEL_NAME \
+    --tp $TP_SIZE \
+    --dp-size $DP_SIZE \
+    --dist-init-addr $HEAD_IP:$DIST_INIT_PORT \
+    --nnodes ${SKYPILOT_NUM_NODES} \
+    --node-rank ${SKYPILOT_NODE_RANK} \
+    --host 0.0.0.0 \
+    --port 8081 \
+    --enable-dp-attention \
+    --trust-remote-code \
+    --mem-fraction-static 0.82 \
+    --disaggregation-transfer-backend nixl \
+    --disaggregation-bootstrap-port 30001 \
+    --page-size 16
