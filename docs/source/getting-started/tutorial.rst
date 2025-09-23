@@ -68,7 +68,7 @@ This example uses SkyPilot to train a GPT-like model (inspired by Karpathy's `mi
   
   .. tab-item:: Python
 
-    We define a Python script with the resource requirements, the setup commands,
+    We use the :ref:`Python SDK <pythonapi>` to create a task with the resource requirements, the setup commands,
     and the commands to run:
 
     .. code-block:: python
@@ -113,6 +113,12 @@ This example uses SkyPilot to train a GPT-like model (inspired by Karpathy's `mi
       launch_request = sky.launch(task=minGPT_ddp_task, cluster_name=cluster_name)
       job_id, _ = sky.stream_and_get(launch_request)
       sky.tail_logs(cluster_name, job_id, follow=True)
+
+    .. tip::
+
+      In the code, the ``workdir`` and ``file_mounts`` fields are commented out. To
+      learn about how to use them to mount local dirs/files or object store buckets
+      (S3, GCS, R2) into your cluster, see :ref:`sync-code-artifacts`.
 
     .. tip::
 
