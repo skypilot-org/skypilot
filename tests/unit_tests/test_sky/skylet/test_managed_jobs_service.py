@@ -206,8 +206,7 @@ class TestGetAllJobIdsByName:
         request = managed_jobsv1_pb2.GetAllJobIdsByNameRequest(job_name='')
         response = self.service.GetAllJobIdsByName(request, mock.Mock())
 
-        # Empty string should be treated differently from None, but based on the
-        # implementation in state.py, empty string would match nothing
+        # Empty string should be treated differently from None
         assert response.job_ids == []
 
     def test_case_sensitive_matching(self):
