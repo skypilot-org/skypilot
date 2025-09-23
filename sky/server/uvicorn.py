@@ -15,6 +15,7 @@ from typing import Optional, Union
 
 import filelock
 import uvicorn
+from uvicorn._compat import asyncio_run
 from uvicorn.supervisors import multiprocess
 
 from sky import sky_logging
@@ -205,14 +206,20 @@ class Server(uvicorn.Server):
             db_utils.set_max_connections(self.max_db_connections)
         add_timestamp_prefix_for_server_logs()
         context_utils.hijack_sys_attrs()
-        # Use default loop policy of uvicorn (use uvloop if available).
-        self.config.setup_event_loop()
+        loop_factory = self.config.get_loop_factory()
         lag_threshold = perf_utils.get_loop_lag_threshold()
         if lag_threshold is not None:
-            event_loop = asyncio.get_event_loop()
-            # Same as set PYTHONASYNCIODEBUG=1, but with custom threshold.
-            event_loop.set_debug(True)
-            event_loop.slow_callback_duration = lag_threshold
+            original_factory = loop_factory
+
+            def _loop_with_debug():
+                loop = (original_factory()
+                        if original_factory is not None else
+                        asyncio.new_event_loop())
+                loop.set_debug(True)
+                loop.slow_callback_duration = lag_threshold
+                return loop
+
+            loop_factory = _loop_with_debug
         stop_monitor = threading.Event()
         monitor = threading.Thread(target=metrics_lib.process_monitor,
                                    args=('server', stop_monitor),
@@ -220,7 +227,8 @@ class Server(uvicorn.Server):
         monitor.start()
         try:
             with self.capture_signals():
-                asyncio.run(self.serve(*args, **kwargs))
+                asyncio_run(self.serve(*args, **kwargs),
+                            loop_factory=loop_factory)
         finally:
             stop_monitor.set()
             monitor.join()
