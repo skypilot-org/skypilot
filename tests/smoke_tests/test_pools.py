@@ -31,10 +31,12 @@ _TEARDOWN_POOL = ('sky jobs pool down {pool_name} -y')
 
 _CANCEL_POOL_JOBS = ('sky jobs cancel --pool {pool_name} -y')
 
+
 def cancel_jobs_and_teardown_pool(pool_name: str, timeout: int = 3):
     return f'{_CANCEL_POOL_JOBS.format(pool_name=pool_name)} || true && ' \
            f'sleep {timeout} && ' \
            f'{_TEARDOWN_POOL.format(pool_name=pool_name)}'
+
 
 def wait_until_pool_ready(pool_name: str,
                           timeout: int = 30,
@@ -88,10 +90,11 @@ def wait_until_worker_status(pool_name: str,
         'done; '
         'sleep 1')
 
+
 def wait_until_job_status(job_name: str,
-                           status: str,
-                           timeout: int = 30,
-                           time_between_checks: int = 5):
+                          status: str,
+                          timeout: int = 30,
+                          time_between_checks: int = 5):
     return (
         'start_time=$SECONDS; '
         'while true; do '
@@ -165,6 +168,7 @@ def basic_pool_conf(
         {setup_cmd}
     """)
 
+
 def basic_job_conf(
     job_name: str,
     run_cmd: str = 'echo "run message"',
@@ -180,6 +184,7 @@ def basic_job_conf(
 def write_yaml(yaml_file: tempfile.NamedTemporaryFile, config: str):
     yaml_file.write(config.encode())
     yaml_file.flush()
+
 
 def get_worker_cluster_name(pool_name: str, worker_id: int):
     return common_utils.make_cluster_name_on_cloud(
@@ -431,12 +436,12 @@ def test_update_workers_no_pool(generic_cloud: str):
                                           pool_name=pool_name))
         smoke_tests_utils.run_one_test(test)
 
+
 def test_pool_queueing(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
-    pool_config = basic_pool_conf(
-                            num_workers=1,
-                            infra=generic_cloud,
-                            setup_cmd='sleep infinity')
+    pool_config = basic_pool_conf(num_workers=1,
+                                  infra=generic_cloud,
+                                  setup_cmd='sleep infinity')
 
     job_name = f'{smoke_tests_utils.get_cluster_name()}-job'
     job_config = basic_job_conf(
@@ -454,11 +459,11 @@ def test_pool_queueing(generic_cloud: str):
             test = smoke_tests_utils.Test(
                 'test_pool_queueing',
                 [
-                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
-                                                          pool_yaml=pool_yaml.name),
+                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, pool_yaml=pool_yaml.name),
                     # Immediately attempt to launch the job.
-                    _LAUNCH_JOB_AND_CHECK_SUCCESS.format(pool_name=pool_name,
-                                                          job_yaml=job_yaml.name),
+                    _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, job_yaml=job_yaml.name),
                     # Ensure the job is pending.
                     wait_until_job_status(job_name, 'PENDING', timeout=timeout),
                 ],
@@ -476,9 +481,7 @@ def test_pool_preemption(generic_cloud: str):
     pool_name = f'{name}-pool'
     pool_name = common_utils.make_cluster_name_on_cloud(
         pool_name, sky.AWS.max_cluster_name_length())
-    pool_config = basic_pool_conf(
-                            num_workers=1,
-                            infra=f"aws/{region}")
+    pool_config = basic_pool_conf(num_workers=1, infra=f"aws/{region}")
 
     job_name = f'{smoke_tests_utils.get_cluster_name()}-job'
     job_config = basic_job_conf(
@@ -490,17 +493,19 @@ def test_pool_preemption(generic_cloud: str):
         with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
             write_yaml(pool_yaml, pool_config)
             write_yaml(job_yaml, job_config)
-            get_instance_id_cmd = smoke_tests_utils.AWS_GET_INSTANCE_ID.format(region=region, name_on_cloud=get_worker_cluster_name(pool_name, 1))
+            get_instance_id_cmd = smoke_tests_utils.AWS_GET_INSTANCE_ID.format(
+                region=region,
+                name_on_cloud=get_worker_cluster_name(pool_name, 1))
             test = smoke_tests_utils.Test(
                 'test_pool_preemption',
                 [
                     smoke_tests_utils.launch_cluster_for_cloud_cmd(
                         'aws', name, skip_remote_server_check=True),
-                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
-                                                          pool_yaml=pool_yaml.name),
+                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, pool_yaml=pool_yaml.name),
                     wait_until_pool_ready(pool_name, timeout=timeout),
-                    _LAUNCH_JOB_AND_CHECK_SUCCESS.format(pool_name=pool_name,
-                                                          job_yaml=job_yaml.name),
+                    _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, job_yaml=job_yaml.name),
                     wait_until_job_status(job_name, 'RUNNING', timeout=timeout),
                     # Restart the cluster manually.
                     smoke_tests_utils.run_cloud_cmd_on_cluster(
@@ -521,8 +526,8 @@ def test_pool_preemption(generic_cloud: str):
                 ],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud),
                 teardown=
-                    f'{cancel_jobs_and_teardown_pool(pool_name, timeout=10)} && '
-                    f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name, skip_remote_server_check=True)}',
+                f'{cancel_jobs_and_teardown_pool(pool_name, timeout=10)} && '
+                f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name, skip_remote_server_check=True)}',
             )
 
             smoke_tests_utils.run_one_test(test)
