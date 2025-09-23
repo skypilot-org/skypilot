@@ -374,6 +374,7 @@ class StrategyExecutor:
                             log_file = _get_logger_file(self._logger)
                             request_id = None
                             try:
+                                logger.debug('Launching the job...')
                                 request_id = await context_utils.to_thread(
                                     sdk.launch,
                                     self.dag,
@@ -392,6 +393,8 @@ class StrategyExecutor:
                                     # down=True,
                                     _is_launched_by_jobs_controller=True,
                                 )
+                                logger.debug('Job launched: '
+                                             f'request_id={request_id}')
                                 if log_file is None:
                                     raise OSError('Log file is None')
                                 with open(log_file, 'a', encoding='utf-8') as f:

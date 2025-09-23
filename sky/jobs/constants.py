@@ -10,6 +10,8 @@ JOBS_CONTROLLER_LOGS_DIR = '~/sky_logs/jobs_controller'
 
 JOBS_TASK_YAML_PREFIX = '~/.sky/managed_jobs'
 
+JOB_CONTROLLER_INDICATOR_FILE = '~/.sky/is_jobs_controller'
+
 CONSOLIDATED_SIGNAL_PATH = os.path.expanduser('~/.sky/signals/')
 SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
 # Resources as a dict for the jobs controller.
