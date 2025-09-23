@@ -8,10 +8,10 @@ Covers:
 import re
 from unittest import mock
 
-import pytest
-import yaml
 from jsonschema import validate
 from jsonschema import ValidationError
+import pytest
+import yaml
 
 from sky import resources as sky_resources
 from sky.utils import schemas
