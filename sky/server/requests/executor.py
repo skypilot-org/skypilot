@@ -568,11 +568,14 @@ async def execute_request_coroutine(request: api_requests.Request):
     except (Exception, KeyboardInterrupt, SystemExit) as e:
         # Handle any other error
         ctx.redirect_log(original_output)
-        ctx.cancel()
         api_requests.set_request_failed(request.request_id, e)
         logger.error(f'Request {request.request_id} interrupted due to '
                      f'unhandled exception: {common_utils.format_exception(e)}')
         raise
+    finally:
+        # Always cancel the context to kill potentially running background
+        # routine.
+        ctx.cancel()
 
 
 def prepare_request(
