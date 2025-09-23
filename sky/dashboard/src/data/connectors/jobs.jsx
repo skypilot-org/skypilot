@@ -12,49 +12,45 @@ import { apiClient } from './client';
 // Configuration
 const DEFAULT_TAIL_LINES = 10000;
 
-export async function getManagedJobs(options) {
-  const {
-    allUsers = true,
-    skipFinished = false,
-    nameMatch,
-    userMatch,
-    workspaceMatch,
-    poolMatch,
-    page,
-    limit,
-    statuses,
-  } = options || {};
+export async function getManagedJobs(options = {}) {
+  try {
+    const {
+      allUsers = true,
+      skipFinished = false,
+      nameMatch,
+      userMatch,
+      workspaceMatch,
+      poolMatch,
+      page,
+      limit,
+      statuses,
+    } = options;
 
-  const body = {
-    all_users: allUsers,
-    verbose: true,
-    skip_finished: skipFinished,
-  };
-  if (nameMatch !== undefined) body.name_match = nameMatch;
-  if (userMatch !== undefined) body.user_match = userMatch;
-  if (workspaceMatch !== undefined) body.workspace_match = workspaceMatch;
-  if (poolMatch !== undefined) body.pool_match = poolMatch;
-  if (page !== undefined) body.page = page;
-  if (limit !== undefined) body.limit = limit;
-  if (statuses !== undefined && statuses.length > 0) body.statuses = statuses;
+    const body = {
+      all_users: allUsers,
+      verbose: true,
+      skip_finished: skipFinished,
+    };
+    if (nameMatch !== undefined) body.name_match = nameMatch;
+    if (userMatch !== undefined) body.user_match = userMatch;
+    if (workspaceMatch !== undefined) body.workspace_match = workspaceMatch;
+    if (poolMatch !== undefined) body.pool_match = poolMatch;
+    if (page !== undefined) body.page = page;
+    if (limit !== undefined) body.limit = limit;
+    if (statuses !== undefined && statuses.length > 0) body.statuses = statuses;
 
-  const response = await apiClient.post(`/jobs/queue/v2`, body);
-  if (!response.ok) {
-    throw new Error(`Failed to schedule jobs query: ${response.status}`);
-  }
-
-  const id = response.headers.get('X-Skypilot-Request-ID');
-  const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
-  if (fetchedData.status !== 200) {
-    // For 500, check CLUSTER_NOT_UP and throw to avoid caching erroneous data
+    const response = await apiClient.post(`/jobs/queue/v2`, body);
+    const id = response.headers.get('X-Skypilot-Request-ID');
+    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
     if (fetchedData.status === 500) {
       try {
         const data = await fetchedData.json();
         if (data.detail && data.detail.error) {
           try {
             const error = JSON.parse(data.detail.error);
+            // Handle specific error types
             if (error.type && error.type === CLUSTER_NOT_UP_ERROR) {
-              throw new Error('CLUSTER_NOT_UP');
+              return { jobs: [], total: 0, controllerStopped: true };
             }
           } catch (jsonError) {
             console.error('Error parsing JSON:', jsonError);
@@ -63,118 +59,129 @@ export async function getManagedJobs(options) {
       } catch (parseError) {
         console.error('Error parsing JSON:', parseError);
       }
+      return { jobs: [], total: 0, controllerStopped: false };
     }
-    throw new Error(`Jobs result not OK: ${fetchedData.status}`);
-  }
-  // print out the response for debugging
-  const data = await fetchedData.json();
-  const parsed = data.return_value ? JSON.parse(data.return_value) : [];
-  const managedJobs = Array.isArray(parsed) ? parsed : parsed?.jobs || [];
-  const total = Array.isArray(parsed)
-    ? managedJobs.length
-    : (parsed?.total ?? managedJobs.length);
-  const totalNoFilter = parsed?.total_no_filter || total;
-  const statusCounts = parsed?.status_counts || {};
+    // print out the response for debugging
+    const data = await fetchedData.json();
+    const parsed = data.return_value ? JSON.parse(data.return_value) : [];
+    const managedJobs = Array.isArray(parsed) ? parsed : parsed?.jobs || [];
+    const total = Array.isArray(parsed)
+      ? managedJobs.length
+      : (parsed?.total ?? managedJobs.length);
+    const totalNoFilter = parsed?.total_no_filter || total;
+    const statusCounts = parsed?.status_counts || {};
 
-  // Process jobs data
-  const jobData = managedJobs.map((job) => {
-    let total_duration = 0;
-    if (job.end_at && job.submitted_at) {
-      total_duration = job.end_at - job.submitted_at;
-    } else if (job.submitted_at) {
-      total_duration = Date.now() / 1000 - job.submitted_at;
-    }
-
-    const events = [];
-    if (job.submitted_at) {
-      events.push({
-        type: 'PENDING',
-        timestamp: job.submitted_at,
-      });
-    }
-    if (job.start_at) {
-      events.push({
-        type: 'RUNNING',
-        timestamp: job.start_at,
-      });
-    }
-    if (job.end_at) {
-      events.push({
-        type: job.status,
-        timestamp: job.end_at,
-      });
-    }
-
-    let cloud = '';
-    let region = '';
-    let cluster_resources = '';
-    let infra = '';
-    let full_infra = '';
-
-    try {
-      cloud = job.cloud || '';
-      cluster_resources = job.cluster_resources;
-      region = job.region || '';
-
-      if (cloud) {
-        infra = cloud;
-        if (region) {
-          infra += `/${region}`;
-        }
+    // Process jobs data
+    const jobData = managedJobs.map((job) => {
+      let total_duration = 0;
+      if (job.end_at && job.submitted_at) {
+        total_duration = job.end_at - job.submitted_at;
+      } else if (job.submitted_at) {
+        total_duration = Date.now() / 1000 - job.submitted_at;
       }
 
-      full_infra = infra;
-      if (job.accelerators) {
-        const accel_str = Object.entries(job.accelerators)
-          .map(([key, value]) => `${value}x${key}`)
-          .join(', ');
-        if (accel_str) {
-          full_infra += ` (${accel_str})`;
-        }
+      const events = [];
+      if (job.submitted_at) {
+        events.push({
+          type: 'PENDING',
+          timestamp: job.submitted_at,
+        });
       }
-    } catch (e) {
-      cluster_resources = job.cluster_resources;
-    }
+      if (job.start_at) {
+        events.push({
+          type: 'RUNNING',
+          timestamp: job.start_at,
+        });
+      }
+      if (job.end_at) {
+        events.push({
+          type: job.status,
+          timestamp: job.end_at,
+        });
+      }
+
+      let cloud = '';
+      let region = '';
+      let cluster_resources = '';
+      let infra = '';
+      let full_infra = '';
+
+      try {
+        cloud = job.cloud || '';
+        cluster_resources = job.cluster_resources;
+        region = job.region || '';
+
+        if (cloud) {
+          infra = cloud;
+          if (region) {
+            infra += `/${region}`;
+          }
+        }
+
+        full_infra = infra;
+        if (job.accelerators) {
+          const accel_str = Object.entries(job.accelerators)
+            .map(([key, value]) => `${value}x${key}`)
+            .join(', ');
+          if (accel_str) {
+            full_infra += ` (${accel_str})`;
+          }
+        }
+      } catch (e) {
+        cluster_resources = job.cluster_resources;
+      }
+
+      return {
+        id: job.job_id,
+        task_job_id: job._job_id,
+        task: job.task_name,
+        name: job.job_name,
+        job_duration: job.job_duration,
+        total_duration: total_duration,
+        workspace: job.workspace,
+        status: job.status,
+        requested_resources: job.resources,
+        resources_str: cluster_resources,
+        resources_str_full: job.cluster_resources_full || cluster_resources,
+        cloud: cloud,
+        region: job.region,
+        infra: infra,
+        full_infra: full_infra,
+        recoveries: job.recovery_count,
+        details: job.details || job.failure_reason,
+        user: job.user_name,
+        user_hash: job.user_hash,
+        submitted_at: job.submitted_at
+          ? new Date(job.submitted_at * 1000)
+          : null,
+        events: events,
+        dag_yaml: job.user_yaml,
+        entrypoint: job.entrypoint,
+        git_commit: job.metadata?.git_commit || '-',
+        pool: job.pool,
+        pool_hash: job.pool_hash,
+        current_cluster_name: job.current_cluster_name,
+        job_id_on_pool_cluster: job.job_id_on_pool_cluster,
+      };
+    });
 
     return {
-      id: job.job_id,
-      task_job_id: job._job_id,
-      task: job.task_name,
-      name: job.job_name,
-      job_duration: job.job_duration,
-      total_duration: total_duration,
-      workspace: job.workspace,
-      status: job.status,
-      requested_resources: job.resources,
-      resources_str: cluster_resources,
-      resources_str_full: job.cluster_resources_full || cluster_resources,
-      cloud: cloud,
-      region: job.region,
-      infra: infra,
-      full_infra: full_infra,
-      recoveries: job.recovery_count,
-      details: job.details || job.failure_reason,
-      user: job.user_name,
-      user_hash: job.user_hash,
-      submitted_at: job.submitted_at ? new Date(job.submitted_at * 1000) : null,
-      events: events,
-      dag_yaml: job.user_yaml,
-      entrypoint: job.entrypoint,
-      git_commit: job.metadata?.git_commit || '-',
-      pool: job.pool,
-      pool_hash: job.pool_hash,
-      current_cluster_name: job.current_cluster_name,
-      job_id_on_pool_cluster: job.job_id_on_pool_cluster,
+      jobs: jobData,
+      total,
+      totalNoFilter,
+      controllerStopped: false,
+      statusCounts,
     };
-  });
-
-  return {
-    jobs: jobData,
-    total,
-    totalNoFilter,
-    controllerStopped: false,
-    statusCounts,
-  };
+  } catch (error) {
+    console.error('Error fetching managed job data:', error);
+    return {
+      jobs: [],
+      total: 0,
+      totalNoFilter: 0,
+      controllerStopped: false,
+      statusCounts: {},
+    };
+  }
 }
 
 /**
