@@ -287,9 +287,8 @@ class RunPod(clouds.Cloud):
     @classmethod
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Verify that the user has valid credentials for RunPod. """
-        dependency_error_msg = (
-            'Failed to import runpod or TOML parser. '
-            'Install: pip install "skypilot[runpod]".')
+        dependency_error_msg = ('Failed to import runpod or TOML parser. '
+                                'Install: pip install "skypilot[runpod]".')
         try:
             runpod_spec = import_lib_util.find_spec('runpod')
             if runpod_spec is None:
