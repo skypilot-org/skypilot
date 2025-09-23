@@ -54,7 +54,7 @@ export async function getManagedJobs(options) {
           try {
             const error = JSON.parse(data.detail.error);
             if (error.type && error.type === CLUSTER_NOT_UP_ERROR) {
-              throw new Error('CLUSTER_NOT_UP');
+              return { jobs: [], total: 0, controllerStopped: true };
             }
           } catch (jsonError) {
             console.error('Error parsing JSON:', jsonError);
