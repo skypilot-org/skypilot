@@ -3104,7 +3104,7 @@ def get_clusters(
             if record is not None and record['handle'] is not None
         ]
 
-    def _update_records_with_resources_str(
+    def _update_records_with_handle_info(
             records: List[Optional[Dict[str, Any]]]) -> None:
         """Add resource str to record"""
         for record in _get_records_with_handle(records):
@@ -3115,6 +3115,8 @@ def get_clusters(
             record[
                 'resources_str_full'] = resources_utils.get_readable_resources_repr(
                     handle, simplify=False)
+            if not summary_response:
+                record['cluster_name_on_cloud'] = handle.cluster_name_on_cloud
 
     def _update_records_with_credentials(
             records: List[Optional[Dict[str, Any]]]) -> None:
@@ -3173,21 +3175,10 @@ def get_clusters(
                 f'{handle.launched_resources.accelerators}'
                 if handle.launched_resources.accelerators else None)
 
-    def _update_records_with_cluster_name_on_cloud(
-            records: List[Optional[Dict[str, Any]]]) -> None:
-        """Add cluster_name_on_cloud to the record."""
-        for record in _get_records_with_handle(records):
-            handle = record['handle']
-            record['cluster_name_on_cloud'] = handle.cluster_name_on_cloud
-
-    # Add auth_config to the records
-    _update_records_with_resources_str(records)
+    # Add handle info to the records
+    _update_records_with_handle_info(records)
     if include_credentials:
         _update_records_with_credentials(records)
-
-    # Add cluster_name_on_cloud to the records
-    _update_records_with_cluster_name_on_cloud(records)
-
     if refresh == common.StatusRefreshMode.NONE:
         # Add resources to the records
         _update_records_with_resources(records)
@@ -3228,7 +3219,7 @@ def get_clusters(
                 cluster_name,
                 force_refresh_statuses=force_refresh_statuses,
                 acquire_per_cluster_status_lock=True)
-            _update_records_with_resources_str([record])
+            _update_records_with_handle_info([record])
             if include_credentials:
                 _update_records_with_credentials([record])
         except (exceptions.ClusterStatusFetchingError,
