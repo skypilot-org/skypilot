@@ -169,6 +169,8 @@ spec:
             # user specified config.
             cp /var/skypilot/config/config.yaml /root/.sky/config.yaml
           fi
+
+          
           {{- if .Values.apiService.sshNodePools }}
           mkdir -p /root/.sky
           # The PVC serves as the ground truth for the ssh_node_pools.yaml file, if it already exists we don't overwrite it

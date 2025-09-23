@@ -3349,9 +3349,22 @@ def check(infra_list: Tuple[str],
                            workspace=workspace)
     sdk.stream_and_get(request_id)
     api_server_url = server_common.get_server_url()
+    # Redact potential basic auth credentials in URL before printing.
+    try:
+        from urllib.parse import urlsplit # pylint: disable=import-outside-toplevel
+        from urllib.parse import urlunsplit # pylint: disable=import-outside-toplevel
+        u = urlsplit(api_server_url)
+        # Remove any userinfo from netloc
+        safe_host = u.hostname or ''
+        if u.port:
+            safe_host = f'{safe_host}:{u.port}'
+        safe_url = urlunsplit(
+            (u.scheme, safe_host, u.path, u.query, u.fragment))
+    except Exception:  # pylint: disable=broad-except
+        safe_url = api_server_url  # Fallback: print as-is if parsing fails
     click.echo()
-    click.echo(
-        click.style(f'Using SkyPilot API server: {api_server_url}', fg='green'))
+    click.echo(click.style(f'Using SkyPilot API server: {safe_url}',
+                           fg='green'))
 
 
 @cli.command()

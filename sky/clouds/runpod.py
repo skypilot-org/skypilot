@@ -286,14 +286,18 @@ class RunPod(clouds.Cloud):
     @classmethod
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Verify that the user has valid credentials for RunPod. """
-        dependency_error_msg = ('Failed to import runpod. '
-                                'To install, run: pip install skypilot[runpod]')
+        dependency_error_msg = (
+            'Failed to import runpod or TOML parser. '
+            'To install, run: pip install "skypilot[runpod]"; '
+            'for Python < 3.11 also ensure tomli is installed.')
         try:
             runpod_spec = import_lib_util.find_spec('runpod')
             if runpod_spec is None:
                 return False, dependency_error_msg
-            toml_spec = import_lib_util.find_spec('toml')
-            if toml_spec is None:
+            # Prefer stdlib tomllib (Python 3.11+); fallback to tomli
+            tomllib_spec = import_lib_util.find_spec('tomllib')
+            tomli_spec = import_lib_util.find_spec('tomli')
+            if tomllib_spec is None and tomli_spec is None:
                 return False, dependency_error_msg
         except ValueError:
             # docstring of importlib_util.find_spec:
@@ -322,9 +326,17 @@ class RunPod(clouds.Cloud):
         if not os.path.exists(credential_file):
             return False, '~/.runpod/config.toml does not exist.'
 
-        # we don't need to import toml here if config.toml does not exist,
-        # wait until we know the cred file exists.
-        import tomli as toml  # pylint: disable=import-outside-toplevel
+        # We don't need to import TOML parser if config.toml does not exist.
+        # When needed, prefer stdlib tomllib (py>=3.11); otherwise use tomli.
+        try:
+            try:
+                import tomllib as toml  # pylint: disable=import-outside-toplevel
+            except ModuleNotFoundError:  # py<3.11
+                import tomli as toml  # pylint: disable=import-outside-toplevel
+        except ModuleNotFoundError:
+            return False, (
+                '~/.runpod/config.toml exists but no TOML parser is available. '
+                'Install tomli for Python < 3.11: pip install tomli.')
 
         # Check for default api_key
         try:
