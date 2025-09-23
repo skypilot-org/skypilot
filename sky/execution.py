@@ -265,8 +265,10 @@ def _execute_dag(
 
     cluster_exists = False
     if cluster_name is not None:
-        cluster_record = global_user_state.get_cluster_from_name(cluster_name)
-        cluster_exists = cluster_record is not None
+        # We use launched_at to check if the cluster exists, because this
+        # db query is faster than get_cluster_from_name.
+        cluster_exists = global_user_state.cluster_with_name_exists(
+            cluster_name)
         # TODO(woosuk): If the cluster exists, print a warning that
         # `cpus` and `memory` are not used as a job scheduling constraint,
         # unlike `gpus`.

@@ -102,6 +102,7 @@ def status(
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
     include_credentials: bool = False,
+    summary_response: bool = False,
 ) -> List[responses.StatusResponse]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets cluster statuses.
@@ -181,7 +182,8 @@ def status(
         refresh=refresh,
         cluster_names=cluster_names,
         all_users=all_users,
-        include_credentials=include_credentials)
+        include_credentials=include_credentials,
+        summary_response=summary_response)
 
     status_responses = []
     for cluster in clusters:

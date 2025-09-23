@@ -316,6 +316,9 @@ class StatusBody(RequestBody):
     all_users: bool = True
     # TODO (kyuds): default to False post 0.10.5
     include_credentials: bool = True
+    # Only return fields that are needed for the
+    # dashboard / CLI summary response
+    summary_response: bool = False
 
 
 class StartBody(RequestBody):
@@ -709,19 +712,22 @@ class JobsDownloadLogsBody(RequestBody):
 
 class JobsPoolApplyBody(RequestBody):
     """The request body for the jobs pool apply endpoint."""
-    task: str
+    task: Optional[str] = None
+    workers: Optional[int] = None
     pool_name: str
     mode: serve.UpdateMode
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task_on_api_server(self.task,
-                                                          self.env_vars,
-                                                          workdir_only=False)
-        assert len(
-            dag.tasks) == 1, ('Must only specify one task in the DAG for '
-                              'a pool.', dag)
-        kwargs['task'] = dag.tasks[0]
+        if self.task is not None:
+            dag = common.process_mounts_in_task_on_api_server(
+                self.task, self.env_vars, workdir_only=False)
+            assert len(
+                dag.tasks) == 1, ('Must only specify one task in the DAG for '
+                                  'a pool.', dag)
+            kwargs['task'] = dag.tasks[0]
+        else:
+            kwargs['task'] = None
         return kwargs
 
 

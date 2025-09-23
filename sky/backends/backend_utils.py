@@ -3028,6 +3028,7 @@ def get_clusters(
     cluster_names: Optional[Union[str, List[str]]] = None,
     all_users: bool = True,
     include_credentials: bool = False,
+    summary_response: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _include_is_managed: bool = False,
@@ -3058,7 +3059,16 @@ def get_clusters(
     if cluster_names is not None:
         if isinstance(cluster_names, str):
             cluster_names = [cluster_names]
-        cluster_names = _get_glob_clusters(cluster_names, silent=True)
+        non_glob_cluster_names = []
+        glob_cluster_names = []
+        for cluster_name in cluster_names:
+            if ux_utils.is_glob_pattern(cluster_name):
+                glob_cluster_names.append(cluster_name)
+            else:
+                non_glob_cluster_names.append(cluster_name)
+        cluster_names = non_glob_cluster_names
+        if glob_cluster_names:
+            cluster_names += _get_glob_clusters(glob_cluster_names, silent=True)
 
     exclude_managed_clusters = False
     if not (_include_is_managed or env_options.Options.SHOW_DEBUG_INFO.get()):
@@ -3072,7 +3082,7 @@ def get_clusters(
         user_hashes_filter=user_hashes_filter,
         workspaces_filter=accessible_workspaces,
         cluster_names=cluster_names,
-    )
+        summary_response=summary_response)
 
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT
@@ -3080,12 +3090,10 @@ def get_clusters(
 
     if cluster_names is not None:
         record_names = {record['name'] for record in records}
-        not_exist_cluster_names = [
-            cluster_name for cluster_name in cluster_names
-            if cluster_name not in record_names
-        ]
-        if not_exist_cluster_names:
-            clusters_str = ', '.join(not_exist_cluster_names)
+        not_found_clusters = ux_utils.get_non_matched_query(
+            cluster_names, record_names)
+        if not_found_clusters:
+            clusters_str = ', '.join(not_found_clusters)
             logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
 
     def _get_records_with_handle(
@@ -3146,7 +3154,7 @@ def get_clusters(
             record['credentials'] = credential
 
     def _update_records_with_resources(
-            records: List[Optional[Dict[str, Any]]]) -> None:
+        records: List[Optional[Dict[str, Any]]],) -> None:
         """Add the resources to the record."""
         for record in _get_records_with_handle(records):
             handle = record['handle']
