@@ -1449,7 +1449,7 @@ def get_cluster_from_name(
                 cluster_table.c.storage_mounts_metadata,
                 cluster_table.c.cluster_ever_up,
                 cluster_table.c.status_updated_at, cluster_table.c.user_hash,
-                cluster_table.c.workspace,
+                cluster_table.c.config_hash, cluster_table.c.workspace,
                 cluster_table.c.is_managed)
         else:
             query = session.query(
@@ -1481,7 +1481,7 @@ def get_cluster_from_name(
     user_name = user.name if user is not None else None
     if summary_response:
         last_event = get_last_cluster_event(
-                row.cluster_hash, event_type=ClusterEventType.STATUS_CHANGE)
+            row.cluster_hash, event_type=ClusterEventType.STATUS_CHANGE)
     # TODO: use namedtuple instead of dict
     record = {
         'name': row.name,
@@ -1502,9 +1502,9 @@ def get_cluster_from_name(
         'user_name': user_name,
         'workspace': row.workspace,
         'is_managed': bool(row.is_managed),
+        'config_hash': row.config_hash,
     }
     if not summary_response:
-        record['config_hash'] = row.config_hash
         record['last_creation_yaml'] = row.last_creation_yaml
         record['last_creation_command'] = row.last_creation_command
         record['last_event'] = last_event
@@ -1562,7 +1562,7 @@ def get_clusters(
                 cluster_table.c.storage_mounts_metadata,
                 cluster_table.c.cluster_ever_up,
                 cluster_table.c.status_updated_at, cluster_table.c.user_hash,
-                cluster_table.c.workspace,
+                cluster_table.c.config_hash, cluster_table.c.workspace,
                 cluster_table.c.is_managed)
         else:
             query = session.query(
@@ -1650,9 +1650,9 @@ def get_clusters(
             'user_name': user_name,
             'workspace': row.workspace,
             'is_managed': bool(row.is_managed),
+            'config_hash': row.config_hash,
         }
         if not summary_response:
-            record['config_hash'] = row.config_hash
             record['last_creation_yaml'] = row.last_creation_yaml
             record['last_creation_command'] = row.last_creation_command
             record['last_event'] = last_cluster_event_dict.get(
