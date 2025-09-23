@@ -23,10 +23,10 @@ from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
-from sky.jobs import state as managed_job_state
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
+from sky.server import config as server_config
 from sky.setup_files import dependencies
 from sky.skylet import constants
 from sky.skylet import log_lib
@@ -1185,34 +1185,45 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
 
 # ======================= Resources Management Functions =======================
 
-# Based on testing, assume a running job process uses 350MB memory. We use the
-# same estimation for service controller process.
-JOB_MEMORY_MB = 350
 # Monitoring process for service is 1GB. This is based on an old estimation but
 # we keep it here for now.
 # TODO(tian): Remeasure this.
 SERVE_MONITORING_MEMORY_MB = 1024
-# The ratio of service controller process to job process. We will treat each
-# service as SERVE_PROC_RATIO job processes.
-SERVE_PROC_RATIO = SERVE_MONITORING_MEMORY_MB / JOB_MEMORY_MB
-# Past 2000 simultaneous jobs, we become unstable.
-# See https://github.com/skypilot-org/skypilot/issues/4649.
-MAX_JOB_LIMIT = 2000
-# Number of ongoing launches launches allowed per CPU, for managed jobs.
-JOB_LAUNCHES_PER_CPU = 4
-# Number of ongoing launches launches allowed per CPU, for services. This is
-# also based on an old estimation, but SKyServe indeed spawn a new process
-# for each launch operation, so it should be slightly more resources demanding
-# than managed jobs.
-SERVE_LAUNCHES_PER_CPU = 2
-# The ratio of service launch to job launch. This is inverted as the parallelism
-# is determined by 1 / LAUNCHES_PER_CPU.
-SERVE_LAUNCH_RATIO = JOB_LAUNCHES_PER_CPU / SERVE_LAUNCHES_PER_CPU
+# The resource consumption ratio of service launch to serve down.
+SERVE_LAUNCH_RATIO = 2.0
 
 # The _RESOURCES_LOCK should be held whenever we are checking the parallelism
 # control or updating the schedule_state of any job or service. Any code that
 # takes this lock must conclude by calling maybe_schedule_next_jobs.
 _RESOURCES_LOCK = '~/.sky/locks/controller_resources.lock'
+
+# keep 1GB reserved after the controllers
+MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB = 2048
+
+# NOTE: In the current implementation, we only consider the memory
+# The ratio of resoruces consumption for managed jobs and pool/serve.
+# This measures pool_resources / jobs_resources. If 2 GB memory is allocated to
+# jobs, then 2 * POOL_JOBS_RESOURCES_RATIO GB memory is allocated to pool/serve.
+POOL_JOBS_RESOURCES_RATIO = 1
+# Number of ongoing launches launches allowed per worker. Can probably be
+# increased a bit to around 16 but keeping it lower to just to be safe
+LAUNCHES_PER_WORKER = 8
+
+
+def get_total_usable_memory_mb(consolidation_mode: bool) -> float:
+    total_memory_mb = common_utils.get_mem_size_gb() * 1024
+    if consolidation_mode:
+        config = server_config.compute_server_config(deploy=True, quiet=True)
+        used = 0.0
+        used += MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB
+        used += (config.long_worker_config.garanteed_parallelism +
+                    config.long_worker_config.burstable_parallelism) * \
+            server_config.LONG_WORKER_MEM_GB * 1024
+        used += (config.short_worker_config.garanteed_parallelism +
+                    config.short_worker_config.burstable_parallelism) * \
+            server_config.SHORT_WORKER_MEM_GB * 1024
+        return total_memory_mb - used
+    return total_memory_mb - MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB
 
 
 @annotations.lru_cache(scope='global', maxsize=1)
@@ -1223,40 +1234,33 @@ def get_resources_lock_path() -> str:
 
 
 @annotations.lru_cache(scope='request')
-def _get_job_parallelism() -> int:
-    # note: only take the memory dedicated to serve. the 1/200 portion.
-    job_memory = JOB_MEMORY_MB * 1024 * 1024 ==> memory dedicated to serve 
-    job_limit = min(psutil.virtual_memory().total // job_memory, MAX_JOB_LIMIT)
-    return max(job_limit, 1)
+def _get_proc_parallelism(pool: bool) -> int:
+    consolidation_mode = skypilot_config.get_nested(
+        ('jobs' if pool else 'serve', 'controller', 'consolidation_mode'),
+        default_value=False)
+    total_memory_mb = get_total_usable_memory_mb(consolidation_mode)
+    return max(int(total_memory_mb / SERVE_MONITORING_MEMORY_MB), 1)
 
 
-@annotations.lru_cache(scope='request')
-def _get_launch_parallelism() -> int:
-    cpus = os.cpu_count() ==> cpu dedicated to serve 
-    return cpus * JOB_LAUNCHES_PER_CPU if cpus is not None else 1
+def can_provision(service_name: str) -> bool:
+    # TODO(tian): probe API server to see if there is any pending provision
+    # requests.
+    return can_terminate(service_name)
 
 
-def can_provision() -> bool:
-    # We always prioritize terminating over provisioning, to save the cost on
-    # idle resources.
-    if serve_state.total_number_scheduled_to_terminate_replicas() > 0:
-        return False
-    return can_terminate()
-
-
-def can_start_new_process() -> bool:
-    num_procs = (serve_state.get_num_services() * SERVE_PROC_RATIO +
-                 managed_job_state.get_num_alive_jobs())
-    return num_procs < _get_job_parallelism()
+def can_start_new_process(pool: bool) -> bool:
+    return serve_state.get_num_services() < _get_proc_parallelism(pool)
 
 
 # We limit the number of terminating replicas to the number of CPUs. This is
 # just a temporary solution to avoid overwhelming the controller. After one job
 # controller PR, we should use API server to handle resources management.
-def can_terminate() -> bool:
+def can_terminate(service_name: str) -> bool:
+    # TODO(tian): probe API server to see if there is any pending terminate
+    # requests.
     num_terminating = (
-        serve_state.total_number_provisioning_replicas() * SERVE_LAUNCH_RATIO +
-        # Each terminate process will take roughly the same CPUs as job launch.
-        serve_state.total_number_terminating_replicas() +
-        managed_job_state.get_num_launching_jobs())
-    return num_terminating < _get_launch_parallelism()
+        serve_state.total_number_provisioning_replicas(service_name) +
+        # Each terminate process will take roughly same resources as job launch.
+        serve_state.total_number_terminating_replicas(service_name) /
+        SERVE_LAUNCH_RATIO)
+    return num_terminating < LAUNCHES_PER_WORKER * POOL_JOBS_RESOURCES_RATIO

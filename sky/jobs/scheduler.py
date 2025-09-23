@@ -64,6 +64,7 @@ from sky.jobs import utils as managed_job_utils
 from sky.server import config as server_config
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
@@ -85,24 +86,12 @@ JOB_CONTROLLER_ENV_PATH = os.path.expanduser('~/.sky/job_controller_env')
 
 # Based on testing, each worker takes around 200-300MB memory. Keeping it
 # higher to be safe.
-JOB_MEMORY_MB = 400
-# Number of ongoing launches launches allowed per worker. Can probably be
-# increased a bit to around 16 but keeping it lower to just to be safe
-LAUNCHES_PER_WORKER = 8
+JOB_WORKER_MEMORY_MB = 400
 # this can probably be increased to around 300-400 but keeping it lower to just
 # to be safe
 JOBS_PER_WORKER = 200
 
-# keep 1GB reserved after the controllers
-MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB = 2048
-
 CURRENT_HASH = os.path.expanduser('~/.sky/wheels/current_sky_wheel_hash')
-
-# Maximum values for above constants. There will start to be lagging issues
-# at these numbers already.
-# JOB_MEMORY_MB = 200
-# LAUNCHES_PER_WORKER = 16
-# JOBS_PER_WORKER = 400
 
 
 def get_number_of_controllers() -> int:
@@ -123,43 +112,20 @@ def get_number_of_controllers() -> int:
     consolidation_mode = skypilot_config.get_nested(
         ('jobs', 'controller', 'consolidation_mode'), default_value=False)
 
-    total_memory_mb = common_utils.get_mem_size_gb() * 1024
-    # note: orginally, the logic is:
-    #   i) for consolidation mode, we assume we are running on remote api server
-    #      deploy mode. the amount of memory used by the api server is pre-allocated
-    #      on start. We reserved some space for the job controller.
-    #      See server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE. Now, we need
-    #      reserve more for pool/serve.
-    #  ii) for non-consolidation mode, we assume we are running on local api server
-    #      where workers are dynamically scaled. in this case we should count how
-    #      much api server worker each job controller is using. now we need to
-    #      factor in the api server worker used by pool/serve as well.
-    if consolidation_mode:
-        config = server_config.compute_server_config(deploy=True, quiet=True)
-
-        used = 0.0
-        used += MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB
-        used += (config.long_worker_config.garanteed_parallelism +
-                    config.long_worker_config.burstable_parallelism) * \
-            server_config.LONG_WORKER_MEM_GB * 1024
-        used += (config.short_worker_config.garanteed_parallelism +
-                    config.short_worker_config.burstable_parallelism) * \
-            server_config.SHORT_WORKER_MEM_GB * 1024
-
-        # static ratio: 200 job <==> 1 serve/pool
-        # note: the JOB_MEMORY_MB is the memory for one controller, which hosts
-        # lots of jobs.
-        return max(1, int((total_memory_mb - used) // (JOB_MEMORY_MB + 1/200 serve memory usage)))
-    else:
-        # note: in this we use local api server, where the api server dynbamically
-        # allocate memory for LONG/SHORT_WORKER (in api server). so we need to
-        # factor in the memory usage of the api server in jobs controller
-        # memory consumption.
-        return max(
-            1,
-            int((total_memory_mb - MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB) /
-                ((LAUNCHES_PER_WORKER * server_config.LONG_WORKER_MEM_GB) * 1024
-                 + JOB_MEMORY_MB + 1/200 serve memory usage)))
+    # Measure the resources consumption for both managed jobs
+    # and pool/serve in a static ratio.
+    job_and_pool_resources = JOB_WORKER_MEMORY_MB * (
+        1. + controller_utils.POOL_JOBS_RESOURCES_RATIO)
+    total_usable_memory_mb = controller_utils.get_total_usable_memory_mb(
+        consolidation_mode)
+    resources_per_worker = job_and_pool_resources
+    # Local API Server on jobs controller.
+    if not consolidation_mode:
+        launches_per_worker = controller_utils.LAUNCHES_PER_WORKER * (
+            1. + controller_utils.POOL_JOBS_RESOURCES_RATIO)
+        resources_per_worker += (launches_per_worker *
+                                 server_config.LONG_WORKER_MEM_GB) * 1024
+    return max(1, int(total_usable_memory_mb // resources_per_worker))
 
 
 def start_controller() -> None:
@@ -347,7 +313,7 @@ async def scheduled_launch(
     while True:
         async with starting_lock:
             starting_count = len(starting)
-            if starting_count < LAUNCHES_PER_WORKER:
+            if starting_count < controller_utils.LAUNCHES_PER_WORKER:
                 break
             job_logger.info('Too many jobs starting, waiting for a slot')
             await starting_signal.wait()

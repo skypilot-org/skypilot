@@ -164,7 +164,7 @@ def _cleanup(service_name: str) -> bool:
                 continue
             if (info.status_property.sky_down_status ==
                     replica_managers.common_utils.ProcessStatus.SCHEDULED):
-                if controller_utils.can_terminate():
+                if controller_utils.can_terminate(service_name):
                     try:
                         p.start()
                     except Exception as e:  # pylint: disable=broad-except
@@ -260,7 +260,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
 
     if not is_recovery:
         with filelock.FileLock(controller_utils.get_resources_lock_path()):
-            if not controller_utils.can_start_new_process():
+            if not controller_utils.can_start_new_process(task.service.pool):
                 cleanup_storage(tmp_task_yaml)
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
