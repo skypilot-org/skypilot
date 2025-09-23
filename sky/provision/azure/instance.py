@@ -362,9 +362,10 @@ def _create_instances(compute_client: 'azure_compute.ComputeManagementClient',
     return instances
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
+    del cluster_name  # unused
     # TODO(zhwu): This function is too long. We should refactor it.
     provider_config = config.provider_config
     resource_group = provider_config['resource_group']

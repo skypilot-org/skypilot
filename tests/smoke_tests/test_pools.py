@@ -11,6 +11,20 @@ from sky.skylet import events
 from sky.utils import common_utils
 from sky.utils import yaml_utils
 
+_LAUNCH_POOL_AND_CHECK_SUCCESS = (
+    's=$(sky jobs pool apply -p {pool_name} {pool_yaml} -y); '
+    'echo "$s"; '
+    'echo; echo; echo "$s" | grep "Successfully created pool"')
+
+_POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS = (
+    's=$(sky jobs pool apply -p {pool_name} --workers {num_workers} -y); '
+    'echo "$s"; '
+    'echo; echo; echo "$s" | grep "Successfully updated pool"')
+
+_TEARDOWN_POOL = ('sky jobs pool down {pool_name} -y')
+
+_CANCEL_POOL_JOBS = ('sky jobs pool cancel {pool_name} -y')
+
 
 def wait_until_pool_ready(pool_name: str,
                           timeout: int = 30,
@@ -37,6 +51,92 @@ def wait_until_pool_ready(pool_name: str,
         'done')
 
 
+def wait_until_worker_status(pool_name: str,
+                             status: str,
+                             timeout: int = 30,
+                             time_between_checks: int = 5):
+    status_str = f'sky jobs pool status {pool_name} | grep -A999 "^Pool Workers" | grep "^{pool_name}"'
+    return (
+        'start_time=$SECONDS; '
+        'while true; do '
+        f'if (( $SECONDS - $start_time > {timeout} )); then '
+        f'  echo "Timeout after {timeout} seconds waiting for worker status \'{status}\'"; exit 1; '
+        'fi; '
+        f's=$({status_str}); '
+        'echo "$s"; '
+        f'if echo "$s" | grep "{status}"; then '
+        '  break; '
+        'fi; '
+        'if echo "$s" | grep "FAILED"; then '
+        '  exit 1; '
+        'fi; '
+        'if echo "$s" | grep "SHUTTING_DOWN"; then '
+        '  exit 1; '
+        'fi; '
+        f'echo "Waiting for worker status to be {status}..."; '
+        f'sleep {time_between_checks}; '
+        'done; '
+        'sleep 1')
+
+
+def wait_until_num_workers(pool_name: str,
+                           num_workers: int,
+                           timeout: int = 30,
+                           time_between_checks: int = 5):
+    status_str = f'sky jobs pool status {pool_name} | grep "^{pool_name}"'
+
+    return (
+        'start_time=$SECONDS; '
+        'while true; do '
+        f'if (( $SECONDS - $start_time > {timeout} )); then '
+        f'  echo "Timeout after {timeout} seconds waiting for num workers {num_workers}"; exit 1; '
+        'fi; '
+        f's=$({status_str}); '
+        'echo "$s"; '
+        f'if echo "$s" | grep "{num_workers}/{num_workers}"; then '
+        '  break; '
+        'fi; '
+        'if echo "$s" | grep "FAILED"; then '
+        '  exit 1; '
+        'fi; '
+        f'echo "Waiting for num workers to be {num_workers}..."; '
+        f'sleep {time_between_checks}; '
+        'done')
+
+
+def check_for_setup_message(pool_name: str,
+                            setup_message: str,
+                            follow: bool = True):
+    return (
+        f's=$(sky jobs pool logs {pool_name} 1 {"--no-follow" if not follow else ""}); '
+        f'echo "$s"; echo; echo; echo "$s" | grep "{setup_message}"')
+
+
+def basic_pool_conf(
+    num_workers: int,
+    infra: str,
+    setup_cmd: str = 'echo "setup message"',
+):
+    return textwrap.dedent(f"""
+    pool:
+        workers: {num_workers}
+
+    resources:
+        cpus: 2+
+        memory: 4GB+
+        infra: {infra}
+
+    setup: |
+        {setup_cmd}
+    """)
+
+
+def write_pool_yaml(pool_yaml: tempfile.NamedTemporaryFile, pool_config: str):
+    pool_yaml.write(pool_config.encode())
+    pool_yaml.flush()
+
+
+@pytest.mark.resource_heavy
 def test_vllm_pool(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     pool_config = textwrap.dedent(f"""
@@ -45,6 +145,7 @@ def test_vllm_pool(generic_cloud: str):
 
     resources:
         accelerators: {{L4}}
+        infra: {generic_cloud}
 
     setup: |
         uv venv --python 3.10 --seed
@@ -90,6 +191,7 @@ def test_vllm_pool(generic_cloud: str):
         any_of:
             - use_spot: true
             - use_spot: false
+        infra: {generic_cloud}
 
     envs:
         START_IDX: 0  # Will be overridden by batch launcher script
@@ -167,3 +269,116 @@ def test_vllm_pool(generic_cloud: str):
             )
 
             smoke_tests_utils.run_one_test(test)
+
+
+def test_setup_logs_in_starting_pool(generic_cloud: str):
+    """Test that setup logs are streamed in starting state."""
+    # Do a very long setup so we know the setup logs are streamed in
+    pool_config = basic_pool_conf(
+        1,
+        infra=generic_cloud,
+        setup_cmd='for i in {1..10000}; do echo "Noisy setup $i"; sleep 1; done'
+    )
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        write_pool_yaml(pool_yaml, pool_config)
+        pool_name = f'{smoke_tests_utils.get_cluster_name()}-pool'
+        test = smoke_tests_utils.Test('test_setup_logs_in_starting_pool', [
+            _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
+                                                  pool_yaml=pool_yaml.name),
+            wait_until_worker_status(pool_name, 'STARTING', timeout=timeout),
+            check_for_setup_message(pool_name, 'Noisy setup 1', follow=False),
+        ],
+                                      timeout=timeout,
+                                      teardown=_TEARDOWN_POOL.format(
+                                          pool_name=pool_name))
+
+        smoke_tests_utils.run_one_test(test)
+
+
+def test_setup_logs_in_pool_exits(generic_cloud: str):
+    """Test that setup logs are streamed and exit once the setup is complete."""
+    """We omit --no-follow to test that we exit."""
+    pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        write_pool_yaml(pool_yaml, pool_config)
+        pool_name = f'{smoke_tests_utils.get_cluster_name()}-pool'
+        test = smoke_tests_utils.Test(
+            'test_setup_logs_in_starting_pool', [
+                _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
+                                                      pool_yaml=pool_yaml.name),
+                wait_until_worker_status(pool_name, 'READY', timeout=timeout),
+                check_for_setup_message(pool_name, 'setup message'),
+            ],
+            timeout=timeout,
+            teardown=_TEARDOWN_POOL.format(pool_name=pool_name))
+
+        smoke_tests_utils.run_one_test(test)
+
+
+def test_update_workers(generic_cloud: str):
+    """Test that we can update the number of workers in a pool, both 
+    up and down.
+    """
+    pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        write_pool_yaml(pool_yaml, pool_config)
+        pool_name = f'{smoke_tests_utils.get_cluster_name()}-pool'
+        test = smoke_tests_utils.Test(
+            'test_update_workers',
+            [
+                _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
+                                                      pool_yaml=pool_yaml.name),
+                wait_until_pool_ready(pool_name, timeout=timeout),
+                _POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS.format(
+                    pool_name=pool_name, num_workers=2),
+                wait_until_num_workers(pool_name, 2, timeout=timeout),
+                _POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS.format(
+                    pool_name=pool_name, num_workers=1),
+                # Shutting down takes a while, so we give it a longer timeout.
+                wait_until_num_workers(pool_name, 1, timeout=timeout),
+            ],
+            timeout=timeout,
+            teardown=_TEARDOWN_POOL.format(pool_name=pool_name),
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+def test_update_workers_and_yaml(generic_cloud: str):
+    """Test that we error if the user specifies a yaml and --workers.
+    """
+    pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        write_pool_yaml(pool_yaml, pool_config)
+        pool_name = f'{smoke_tests_utils.get_cluster_name()}-pool'
+        test = smoke_tests_utils.Test('test_update_workers_and_yaml', [
+            _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
+                                                  pool_yaml=pool_yaml.name),
+            f's=$(sky jobs pool apply {pool_yaml.name} -p {pool_name} --workers 2 -y 2>&1); echo "$s"; echo; echo; echo "$s" | grep "Cannot specify both --workers and POOL_YAML"',
+        ],
+                                      timeout=timeout,
+                                      teardown=_TEARDOWN_POOL.format(
+                                          pool_name=pool_name))
+        smoke_tests_utils.run_one_test(test)
+
+
+def test_update_workers_no_pool(generic_cloud: str):
+    """Test that we error if the user specifies a yaml and --workers.
+    """
+    pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        write_pool_yaml(pool_yaml, pool_config)
+        pool_name = f'{smoke_tests_utils.get_cluster_name()}-pool'
+        test = smoke_tests_utils.Test('test_update_workers_and_yaml', [
+            _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
+                                                  pool_yaml=pool_yaml.name),
+            f's=$(sky jobs pool apply --workers 2 -y 2>&1); echo "$s"; echo; echo; echo "$s" | grep "A pool name must be provided to update the number of workers."',
+        ],
+                                      timeout=timeout,
+                                      teardown=_TEARDOWN_POOL.format(
+                                          pool_name=pool_name))
+        smoke_tests_utils.run_one_test(test)

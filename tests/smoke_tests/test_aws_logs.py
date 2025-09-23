@@ -23,8 +23,9 @@ def test_log_collection_to_aws_cloudwatch(generic_cloud: str):
             'helm api server deployment set credential_file instead of env vars'
         )
     name = smoke_tests_utils.get_cluster_name()
-    # Calculate timestamp in milliseconds 1 hour ago via portable shell command
-    one_hour_ago = '$(( $(date +%s) - 3600 ))000'
+    # Calculate timestamp 1 hour ago in ISO format
+    one_hour_ago = (datetime.now(timezone.utc) -
+                    timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
     with tempfile.NamedTemporaryFile(mode='w') as base, \
         tempfile.NamedTemporaryFile(mode='w') as additional_tags:
         base.write(
@@ -45,10 +46,11 @@ def test_log_collection_to_aws_cloudwatch(generic_cloud: str):
                       skypilot_smoke_test_case: {name}-case
                 """))
         additional_tags.flush()
-        logs_cmd = 'for i in {1..10}; do echo $i; done'
+        logs_cmd = 'for i in {1..10}; do echo "test output $i"; done'
         validate_logs_cmd = (
             'echo $output && echo "===Validate logs from AWS CloudWatch===" && '
-            'for i in {1..10}; do echo $output | grep -q $i; done')
+            'for i in {1..10}; do echo $output | grep -q "test output $i"; done'
+        )
         test = smoke_tests_utils.Test(
             'log_collection_to_aws_cloudwatch',
             [
@@ -60,8 +62,8 @@ def test_log_collection_to_aws_cloudwatch(generic_cloud: str):
                 'sleep 10',
                 # Use AWS CLI to query CloudWatch logs
                 (f'output=$(aws logs --region us-east-1 filter-log-events --log-group-name skypilot-logs '
-                 f'--filter-pattern \'{{ $.\'"[\'skypilot.cluster_name\']"\' = "{name}" }}\' '
-                 f'--start-time {one_hour_ago} '
+                 f'--filter-pattern \'skypilot.cluster_name = "{name}"\' '
+                 f'--start-time $(date -d "{one_hour_ago}" +%s)000 '
                  f'--query "events[*].message" --output text) && '
                  f'{validate_logs_cmd}'),
                 smoke_tests_utils.with_config(
@@ -71,7 +73,7 @@ def test_log_collection_to_aws_cloudwatch(generic_cloud: str):
                 # Query logs for the job
                 (f'output=$(aws --region us-east-1 logs filter-log-events --log-group-name skypilot-logs '
                  f'--filter-pattern "%{name}-job%" '
-                 f'--start-time {one_hour_ago} '
+                 f'--start-time $(date -d "{one_hour_ago}" +%s)000 '
                  f'--query "events[*].message" --output text) && '
                  f'{validate_logs_cmd}'),
                 f'sky down -y {name}',
@@ -81,8 +83,8 @@ def test_log_collection_to_aws_cloudwatch(generic_cloud: str):
                 'sleep 10',
                 # Query logs with additional tags
                 (f'output=$(aws --region us-east-1 logs filter-log-events --log-group-name skypilot-logs '
-                 f'--filter-pattern \'{{ $.skypilot_smoke_test_case = "{name}-case" }}\' '
-                 f'--start-time {one_hour_ago} '
+                 f'--filter-pattern \'skypilot_smoke_test_case = "{name}-case"\' '
+                 f'--start-time $(date -d "{one_hour_ago}" +%s)000 '
                  f'--query "events[*].message" --output text) && '
                  f'{validate_logs_cmd}'),
             ],

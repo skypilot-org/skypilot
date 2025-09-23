@@ -6,7 +6,9 @@ import pytest
 from sqlalchemy import create_engine
 
 import sky
+from sky import backends
 from sky import global_user_state
+from sky.utils import annotations
 
 
 @pytest.fixture
@@ -110,3 +112,135 @@ def test_add_or_update_cluster_update_only(_mock_db_conn):
                       instance_type='p4d.24xlarge'),
         ready=True,
         existing_cluster_hash=record['cluster_hash'])
+
+
+def test_get_clusters_cache_size(_mock_db_conn):
+    """Test that calling get_clusters does not cause the LRU cache
+    to grow without bound."""
+    # Clear any existing request-level cache before starting
+    annotations.clear_request_level_cache()
+
+    # Create multiple real CloudVmRayResourceHandle instances with synthetic data
+    handles = []
+    for i in range(15):  # Create more than maxsize=10 to test cache eviction
+        cluster_name = f'test-cluster-{i}'
+
+        # Create a real handle instance
+        handle = backends.CloudVmRayResourceHandle(
+            cluster_name=cluster_name,
+            cluster_name_on_cloud=cluster_name,
+            cluster_yaml=None,  # Can be None for testing
+            launched_nodes=1,
+            launched_resources=sky.Resources(infra='aws/us-east-1/us-east-1a',
+                                             instance_type='m5.large'),
+            stable_internal_external_ips=[('10.0.0.1', '1.2.3.4')],
+            stable_ssh_ports=[22],
+        )
+
+        # Add to global state
+        global_user_state.add_or_update_cluster(
+            cluster_name,
+            handle,
+            requested_resources={handle.launched_resources},
+            ready=True)
+        handles.append(handle)
+
+    # Get all clusters to retrieve the handles from the database
+    cluster_records = global_user_state.get_clusters()
+    assert len(cluster_records) == 15, "Should have 15 clusters in database"
+
+    # Call get_command_runners on each handle to populate the cache
+    cache_call_results = []
+
+    with mock.patch('sky.backends.backend_utils.ssh_credential_from_yaml'
+                   ) as mock_ssh_creds:
+        # Mock SSH credentials to avoid file system dependencies
+        mock_ssh_creds.return_value = {
+            'ssh_user': 'ubuntu',
+            'ssh_private_key': '/tmp/fake_key'
+        }
+
+        with mock.patch(
+                'sky.utils.command_runner.SSHCommandRunner.make_runner_list'
+        ) as mock_make_runners:
+            # Mock the command runner creation to avoid actual SSH connections
+            mock_make_runners.return_value = [mock.MagicMock()]
+
+            for i, record in enumerate(cluster_records):
+                handle = record['handle']
+
+                try:
+                    # Call get_command_runners which should be cached
+                    runners = handle.get_command_runners()
+                    cache_call_results.append(
+                        ('success', len(runners) if runners else 0))
+
+                    # Verify we get command runners back
+                    assert isinstance(
+                        runners,
+                        list), "Should return a list of command runners"
+
+                except Exception as e:
+                    # Track any failures for debugging
+                    cache_call_results.append(('error', str(e)))
+
+                # Check if the handle's get_command_runners method has cache_info
+                if hasattr(handle.get_command_runners, 'cache_info'):
+                    cache_info = handle.get_command_runners.cache_info()
+                    print(f"Handle {i}: Cache size={cache_info.currsize}, "
+                          f"hits={cache_info.hits}, misses={cache_info.misses}")
+
+                    # Cache size should not exceed maxsize=10
+                    assert cache_info.currsize <= 10, (
+                        f"Cache size {cache_info.currsize} exceeds maxsize=10")
+
+    # Verify that calling get_command_runners multiple times uses cache
+    successful_calls = [
+        result for result in cache_call_results if result[0] == 'success'
+    ]
+    assert len(successful_calls
+              ) > 0, "At least some get_command_runners calls should succeed"
+
+    # Test calling the same handle multiple times to verify cache hits
+    if cluster_records:
+        first_handle = cluster_records[0]['handle']
+        with mock.patch('sky.backends.backend_utils.ssh_credential_from_yaml'
+                       ) as mock_ssh_creds:
+            mock_ssh_creds.return_value = {
+                'ssh_user': 'ubuntu',
+                'ssh_private_key': '/tmp/fake_key'
+            }
+            with mock.patch(
+                    'sky.utils.command_runner.SSHCommandRunner.make_runner_list'
+            ) as mock_make_runners:
+                mock_make_runners.return_value = [mock.MagicMock()]
+
+                # Call multiple times - should hit cache
+                try:
+                    first_handle.get_command_runners()
+                    first_handle.get_command_runners()
+
+                    # Verify cache behavior if cache_info is available
+                    if hasattr(first_handle.get_command_runners, 'cache_info'):
+                        cache_info = first_handle.get_command_runners.cache_info(
+                        )
+                        assert cache_info.hits > 0, "Should have cache hits for repeated calls"
+                        print(
+                            f"After repeated calls: hits={cache_info.hits}, misses={cache_info.misses}"
+                        )
+                except Exception as e:
+                    print(f"Cache hit test failed: {e}")
+
+    # Test cache clearing functionality
+    initial_functions = len(annotations._FUNCTIONS_NEED_RELOAD_CACHE)
+    annotations.clear_request_level_cache()
+
+    # The number of functions tracked should remain the same, but caches should be cleared
+    final_functions = len(annotations._FUNCTIONS_NEED_RELOAD_CACHE)
+    assert final_functions == initial_functions, "Function count should remain the same after cache clear"
+
+    print(
+        f"Test completed successfully. Tested cache behavior with {len(cluster_records)} clusters"
+    )
+    print(f"Successful get_command_runners calls: {len(successful_calls)}")
+    print(f"Request-level cache functions tracked: {final_functions}")

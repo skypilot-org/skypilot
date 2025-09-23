@@ -262,7 +262,7 @@ def _validate_consolidation_mode_config(current_is_consolidation_mode: bool,
     controller = controller_utils.get_controller_for_pool(pool).value
     if current_is_consolidation_mode:
         controller_cn = controller.cluster_name
-        if global_user_state.get_cluster_from_name(controller_cn) is not None:
+        if global_user_state.cluster_with_name_exists(controller_cn):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.InconsistentConsolidationModeError(
                     f'{colorama.Fore.RED}Consolidation mode for '
@@ -896,8 +896,8 @@ def _terminate_failed_services(
     # replicas, so we don't need to try again here.
     for replica_info in serve_state.get_replica_infos(service_name):
         # TODO(tian): Refresh latest status of the cluster.
-        if global_user_state.get_cluster_from_name(
-                replica_info.cluster_name) is not None:
+        if global_user_state.cluster_with_name_exists(
+                replica_info.cluster_name):
             remaining_replica_clusters.append(f'{replica_info.cluster_name!r}')
         serve_state.remove_replica(service_name, replica_info.replica_id)
 
@@ -1133,10 +1133,8 @@ def _process_line(line: str,
     # `✓ Cluster launched: new-http.  View logs at: *.log`
     # We should tail the detailed logs for user.
     def cluster_is_up() -> bool:
-        cluster_record = global_user_state.get_cluster_from_name(cluster_name)
-        if cluster_record is None:
-            return False
-        return cluster_record['status'] == status_lib.ClusterStatus.UP
+        status = global_user_state.get_status_from_cluster_name(cluster_name)
+        return status == status_lib.ClusterStatus.UP
 
     provision_api_log_prompt = re.match(_SKYPILOT_PROVISION_API_LOG_PATTERN,
                                         line)
@@ -1327,10 +1325,6 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
                 if not line.endswith('\n'):
                     line += '\n'
                 print(line, end='', flush=True)
-        return ''
-
-    # For pools, we don't stream the job logs as the run section is ignored.
-    if pool:
         return ''
 
     backend = backends.CloudVmRayBackend()
