@@ -3173,10 +3173,21 @@ def get_clusters(
                 f'{handle.launched_resources.accelerators}'
                 if handle.launched_resources.accelerators else None)
 
+    def _update_records_with_cluster_name_on_cloud(
+            records: List[Optional[Dict[str, Any]]]) -> None:
+        """Add cluster_name_on_cloud to the record."""
+        for record in _get_records_with_handle(records):
+            handle = record['handle']
+            record['cluster_name_on_cloud'] = handle.cluster_name_on_cloud
+
     # Add auth_config to the records
     _update_records_with_resources_str(records)
     if include_credentials:
         _update_records_with_credentials(records)
+
+    # Add cluster_name_on_cloud to the records
+    _update_records_with_cluster_name_on_cloud(records)
+
     if refresh == common.StatusRefreshMode.NONE:
         # Add resources to the records
         _update_records_with_resources(records)
