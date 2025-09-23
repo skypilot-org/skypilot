@@ -411,8 +411,9 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
         keys=('autoscaler',),
         default_value=None)
     autoscaler_is_set = autoscaler_type is not None
-    use_heuristic_detection = not kubernetes_enums.KubernetesAutoscalerType(
-        autoscaler_type).emits_autoscale_event()
+    use_heuristic_detection = (autoscaler_is_set and
+                               not kubernetes_enums.KubernetesAutoscalerType(
+                                   autoscaler_type).emits_autoscale_event())
     is_autoscaling = False
 
     def _evaluate_timeout() -> bool:
