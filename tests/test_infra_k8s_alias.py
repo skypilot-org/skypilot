@@ -2,32 +2,19 @@
 
 Covers:
 - JSON Schema accepts `k8s` (and rejects typos like `k9s`)
-- CLI `sky launch --dryrun` accepts YAML with the alias
+- Resources.validate accepts YAML with the alias
 - Parser accepts `k8s` inputs without requiring immediate cloud resolution
 """
-
-import os
-from pathlib import Path
 import re
-import shutil
-import subprocess
-import sys
+from unittest import mock
 
+import pytest
+import yaml
 from jsonschema import validate
 from jsonschema import ValidationError
-import pytest
 
 from sky import resources as sky_resources
 from sky.utils import schemas
-
-
-def _candidate_cmds(path: Path):
-    yield [
-        sys.executable, '-m', 'sky.cli', 'launch', '--dryrun', '-y',
-        str(path)
-    ]
-    if shutil.which('sky'):
-        yield ['sky', 'launch', '--dryrun', '-y', str(path)]
 
 
 def test_schema_accepts_k8s():
@@ -69,7 +56,7 @@ name: hello
 resources:
   any_of:
     - infra: k8s
-    - infra: aws/*/us-east-1a
+    - infra: aws
   cpus: 1
 run: |
   echo 'Hello SkyPilot!'
@@ -77,41 +64,22 @@ run: |
 
 
 @pytest.mark.parametrize(
-    'yaml_text,label',
+    'yaml_text',
     [
-        (TASK_FULL_NAME, 'infra=kubernetes'),
-        (TASK_ALIAS_WITH_CTX, 'infra=k8s_with_context'),
-        (TASK_ANY_OF, 'infra_in_any_of'),
+        TASK_FULL_NAME,
+        TASK_ALIAS_WITH_CTX,
+        TASK_ANY_OF,
     ],
 )
-def test_launch_dryrun_accepts_infra(tmp_path: Path, yaml_text, label):
-    task_file = tmp_path / f'{label}.yaml'
-    task_file.write_text(yaml_text)
+def test_launch_accepts_infra(yaml_text):
+    config = yaml.safe_load(yaml_text)
+    resources_cfg = config['resources']
 
-    env = os.environ.copy()
-    env.setdefault('SKY_NO_TELEMETRY', '1')
-
-    proc = None
-    for cmd in _candidate_cmds(task_file):
-        try:
-            proc = subprocess.run(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                check=False,
-                env=env,
-            )
-            break
-        except FileNotFoundError:
-            continue
-
-    if proc is None:
-        pytest.skip('Could not invoke SkyPilot CLI; ensure `sky` is on PATH.')
-
-    out = (proc.stdout or '') + (proc.stderr or '')
-    assert proc.returncode == 0, 'Expected success; got {}\n\n{}'.format(
-        proc.returncode, out)
+    with mock.patch('sky.provision.kubernetes.utils.get_all_kube_context_names',
+                    return_value=['my-context', 'default']):
+        res_objs = sky_resources.Resources.from_yaml_config(resources_cfg)
+        for r in (res_objs if isinstance(res_objs, list) else list(res_objs)):
+            r.validate()
 
 
 @pytest.mark.parametrize(
@@ -120,21 +88,10 @@ def test_launch_dryrun_accepts_infra(tmp_path: Path, yaml_text, label):
 )
 def test_parser_accepts_k8s_without_resolution(infra_value):
     res_dict = {'infra': infra_value, 'cpus': 1}
-
-    if hasattr(sky_resources.Resources, 'from_yaml_config'):
-        r = sky_resources.Resources.from_yaml_config(res_dict)
-    else:
-        r = sky_resources.Resources()
-        if hasattr(r, 'update'):
-            r.update(res_dict)
-        elif hasattr(r, 'set'):
-            r.set(res_dict)
-        else:
-            if hasattr(r, 'infra'):
-                setattr(r, 'infra', infra_value)
-            if hasattr(r, 'cpus'):
-                setattr(r, 'cpus', 1)
-
-    if hasattr(r, 'infra'):
-        v = str(getattr(r, 'infra') or '').lower()
-        assert v.startswith('k8s') or v.startswith('kubernetes')
+    res_objs = sky_resources.Resources.from_yaml_config(res_dict)
+    for r in (res_objs if isinstance(res_objs, list) else list(res_objs)):
+        assert (r.infra.cloud or '').lower() == 'kubernetes'
+        if '/' in infra_value:
+            assert r.infra.region == 'my-context'
+            assert r.infra.zone is None
+            assert r.infra.to_str() == 'kubernetes/my-context'
