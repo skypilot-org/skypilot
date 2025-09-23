@@ -21,7 +21,9 @@ class TestCostReportCore(unittest.TestCase):
             result = core.cost_report()
 
             # Should call with default 30 days
-            mock_get_history.assert_called_once_with(days=30)
+            mock_get_history.assert_called_once_with(days=30,
+                                                     abbreviate_response=False,
+                                                     cluster_hashes=None)
             self.assertEqual(result, [])
 
     def test_cost_report_custom_days(self):
@@ -33,7 +35,9 @@ class TestCostReportCore(unittest.TestCase):
             result = core.cost_report(days=7)
 
             # Should call with custom 7 days
-            mock_get_history.assert_called_once_with(days=7)
+            mock_get_history.assert_called_once_with(days=7,
+                                                     abbreviate_response=False,
+                                                     cluster_hashes=None)
             self.assertEqual(result, [])
 
     def test_cost_report_none_days(self):
@@ -45,7 +49,9 @@ class TestCostReportCore(unittest.TestCase):
             result = core.cost_report(days=None)
 
             # Should call with default 30 days when None is passed
-            mock_get_history.assert_called_once_with(days=30)
+            mock_get_history.assert_called_once_with(days=30,
+                                                     abbreviate_response=False,
+                                                     cluster_hashes=None)
             self.assertEqual(result, [])
 
     def test_cost_report_with_pickle_errors(self):
@@ -62,7 +68,9 @@ class TestCostReportCore(unittest.TestCase):
             result = core.cost_report(days=30)
 
             self.assertEqual(result, [])
-            mock_get_history.assert_called_once_with(days=30)
+            mock_get_history.assert_called_once_with(days=30,
+                                                     abbreviate_response=False,
+                                                     cluster_hashes=None)
 
 
 class TestCostReportStatusUtils(unittest.TestCase):

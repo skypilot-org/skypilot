@@ -45,6 +45,8 @@ extensions = [
     'notfound.extension',
     'sphinx.ext.autosectionlabel',
     'extension.linting',
+    'extension.markdown_export',
+    'extension.dynamic_llms_txt',
 ]
 # Needed for admonitions in markdown:
 # https://myst-parser.readthedocs.io/en/latest/syntax/admonitions.html
@@ -78,6 +80,11 @@ napoleon_custom_sections = [
 
 # Python methods should be presented in source code order
 autodoc_member_order = 'bysource'
+
+# Mock imports for modules that should not be loaded during doc build
+autodoc_mock_imports = [
+    'sky.schemas.generated',
+]
 
 
 # -- Options for HTML output

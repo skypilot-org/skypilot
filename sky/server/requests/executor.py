@@ -39,6 +39,7 @@ from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.metrics import utils as metrics_utils
 from sky.server import common as server_common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
@@ -422,10 +423,10 @@ def _request_execution_wrapper(request_id: str,
                     config = skypilot_config.to_dict()
                     logger.debug(f'request config: \n'
                                  f'{yaml_utils.dump_yaml_str(dict(config))}')
-                metrics_lib.SKY_APISERVER_PROCESS_EXECUTION_START_TOTAL.labels(
-                    request=request_name, pid=pid).inc()
-                with metrics_lib.time_it(name=request_name,
-                                         group='request_execution'):
+                (metrics_utils.SKY_APISERVER_PROCESS_EXECUTION_START_TOTAL.
+                 labels(request=request_name, pid=pid).inc())
+                with metrics_utils.time_it(name=request_name,
+                                           group='request_execution'):
                     return_value = func(**request_body.to_kwargs())
                 f.flush()
         except KeyboardInterrupt:
@@ -465,8 +466,11 @@ def _request_execution_wrapper(request_id: str,
                 # Capture the peak RSS before GC.
                 peak_rss = max(proc.memory_info().rss,
                                metrics_lib.peak_rss_bytes)
-                with metrics_lib.time_it(name='release_memory',
-                                         group='internal'):
+                # Clear request level cache to release all memory used by
+                # the request.
+                annotations.clear_request_level_cache()
+                with metrics_utils.time_it(name='release_memory',
+                                           group='internal'):
                     common_utils.release_memory()
                 _record_memory_metrics(request_name, proc, rss_begin, peak_rss)
             except Exception as e:  # pylint: disable=broad-except
@@ -490,11 +494,11 @@ def _record_memory_metrics(request_name: str, proc: psutil.Process,
     rss_end = proc.memory_info().rss
 
     # Answer "how much RSS this request contributed?"
-    metrics_lib.SKY_APISERVER_REQUEST_RSS_INCR_BYTES.labels(
+    metrics_utils.SKY_APISERVER_REQUEST_RSS_INCR_BYTES.labels(
         name=request_name).observe(max(rss_end - rss_begin, 0))
     # Estimate the memory usage by the request by capturing the
     # peak memory delta during the request execution.
-    metrics_lib.SKY_APISERVER_REQUEST_MEMORY_USAGE_BYTES.labels(
+    metrics_utils.SKY_APISERVER_REQUEST_MEMORY_USAGE_BYTES.labels(
         name=request_name).observe(max(peak_rss - rss_begin, 0))
 
 
@@ -641,7 +645,7 @@ async def schedule_request(request_id: str,
                           request_cluster_name, schedule_type,
                           is_skypilot_system)
 
-    @metrics_lib.time_me
+    @metrics_utils.time_me
     def enqueue():
         input_tuple = (request_id, ignore_return_value, retryable)
         logger.info(f'Queuing request: {request_id}')
