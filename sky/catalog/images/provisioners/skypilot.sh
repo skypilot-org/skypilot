@@ -1,5 +1,16 @@
 #!/bin/bash
 
+# Detect architecture
+ARCH=$(uname -m)
+
+if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+    echo "Detected ARM architecture: $ARCH"
+    ARCH_PATH="aarch64"
+else
+    echo "Detected x86_64 architecture"
+    ARCH_PATH="x86_64"
+fi
+
 # Stop and disable unattended-upgrades
 sudo systemctl stop unattended-upgrades || true
 sudo systemctl disable unattended-upgrades || true
@@ -24,10 +35,10 @@ mkdir -p ~/.ssh
 touch ~/.ssh/config
 
 # Install Miniconda
-curl -o Miniconda3-Linux-x86_64.sh https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh
-bash Miniconda3-Linux-x86_64.sh -b
+curl -o Miniconda3-Linux-${ARCH_PATH}.sh https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-${ARCH_PATH}.sh
+bash Miniconda3-Linux-${ARCH_PATH}.sh -b
 eval "$(~/miniconda3/bin/conda shell.bash hook)"
-rm Miniconda3-Linux-x86_64.sh
+rm Miniconda3-Linux-${ARCH_PATH}.sh
 conda init
 conda config --set auto_activate_base true
 conda activate base

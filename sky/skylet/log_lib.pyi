@@ -129,6 +129,15 @@ def run_bash_command_with_log(bash_command: str,
     ...
 
 
+def run_bash_command_with_log_and_return_pid(
+        bash_command: str,
+        log_path: str,
+        env_vars: Optional[Dict[str, str]] = ...,
+        stream_logs: bool = ...,
+        with_ray: bool = ...):
+    ...
+
+
 def tail_logs(job_id: int,
               log_dir: Optional[str],
               managed_job_id: Optional[int] = ...,

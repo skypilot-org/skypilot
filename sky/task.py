@@ -4,7 +4,6 @@ import inspect
 import json
 import os
 import re
-import typing
 from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
                     Union)
 
@@ -15,22 +14,18 @@ from sky import dag as dag_lib
 from sky import exceptions
 from sky import resources as resources_lib
 from sky import sky_logging
-from sky.adaptors import common as adaptors_common
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.provision import docker_utils
 from sky.serve import service_spec
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import git
 from sky.utils import registry
 from sky.utils import schemas
 from sky.utils import ux_utils
 from sky.utils import volume as volume_lib
-
-if typing.TYPE_CHECKING:
-    import yaml
-else:
-    yaml = adaptors_common.LazyImport('yaml')
+from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -570,7 +565,7 @@ class Task:
         secrets_overrides: Optional[List[Tuple[str, str]]] = None,
     ) -> 'Task':
         user_specified_yaml = config.pop('_user_specified_yaml',
-                                         common_utils.dump_yaml_str(config))
+                                         yaml_utils.dump_yaml_str(config))
         # More robust handling for 'envs': explicitly convert keys and values to
         # str, since users may pass '123' as keys/values which will get parsed
         # as int causing validate_schema() to fail.
@@ -836,7 +831,7 @@ class Task:
             #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
             # to raise errors on duplicate keys.
             user_specified_yaml = f.read()
-            config = yaml.safe_load(user_specified_yaml)
+            config = yaml_utils.safe_load(user_specified_yaml)
 
         if isinstance(config, str):
             with ux_utils.print_exception_no_traceback():
@@ -1602,6 +1597,67 @@ class Task:
                 d[k] = v
         return d
 
+    def update_workdir(self, workdir: Optional[str], git_url: Optional[str],
+                       git_ref: Optional[str]) -> 'Task':
+        """Updates the task workdir.
+
+        Args:
+            workdir: The workdir to update.
+            git_url: The git url to update.
+            git_ref: The git ref to update.
+        """
+        if self.workdir is None or isinstance(self.workdir, str):
+            if workdir is not None:
+                self.workdir = workdir
+                return self
+            if git_url is not None:
+                self.workdir = {}
+                self.workdir['url'] = git_url
+                if git_ref is not None:
+                    self.workdir['ref'] = git_ref
+                return self
+            return self
+        if git_url is not None:
+            self.workdir['url'] = git_url
+        if git_ref is not None:
+            self.workdir['ref'] = git_ref
+        return self
+
+    def update_envs_and_secrets_from_workdir(self) -> 'Task':
+        """Updates the task envs and secrets from the workdir."""
+        if self.workdir is None:
+            return self
+        if not isinstance(self.workdir, dict):
+            return self
+        url = self.workdir['url']
+        ref = self.workdir.get('ref', '')
+        token = os.environ.get(git.GIT_TOKEN_ENV_VAR)
+        ssh_key_path = os.environ.get(git.GIT_SSH_KEY_PATH_ENV_VAR)
+        try:
+            git_repo = git.GitRepo(url, ref, token, ssh_key_path)
+            clone_info = git_repo.get_repo_clone_info()
+            if clone_info is None:
+                return self
+            self.envs[git.GIT_URL_ENV_VAR] = clone_info.url
+            if ref:
+                ref_type = git_repo.get_ref_type()
+                if ref_type == git.GitRefType.COMMIT:
+                    self.envs[git.GIT_COMMIT_HASH_ENV_VAR] = ref
+                elif ref_type == git.GitRefType.BRANCH:
+                    self.envs[git.GIT_BRANCH_ENV_VAR] = ref
+                elif ref_type == git.GitRefType.TAG:
+                    self.envs[git.GIT_TAG_ENV_VAR] = ref
+            if clone_info.token is None and clone_info.ssh_key is None:
+                return self
+            if clone_info.token is not None:
+                self.secrets[git.GIT_TOKEN_ENV_VAR] = clone_info.token
+            if clone_info.ssh_key is not None:
+                self.secrets[git.GIT_SSH_KEY_ENV_VAR] = clone_info.ssh_key
+        except exceptions.GitError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'{str(e)}') from None
+        return self
+
     def to_yaml_config(self,
                        use_user_specified_yaml: bool = False) -> Dict[str, Any]:
         """Returns a yaml-style dict representation of the task.
@@ -1611,7 +1667,7 @@ class Task:
         if use_user_specified_yaml:
             if self._user_specified_yaml is None:
                 return self._to_yaml_config(redact_secrets=True)
-            config = yaml.safe_load(self._user_specified_yaml)
+            config = yaml_utils.safe_load(self._user_specified_yaml)
             if config.get('secrets') is not None:
                 config['secrets'] = {k: '<redacted>' for k in config['secrets']}
             return config

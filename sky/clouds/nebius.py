@@ -57,7 +57,8 @@ class Nebius(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             (f'Custom disk tier is currently not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
-            ('Custom network tier is currently not supported on Nebius.'),
+            ('Custom network tier is currently only supported for '
+             'H100:8 and H200:8 on Nebius.'),
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
             ('High availability controllers are not supported on Nebius.'),
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
@@ -86,7 +87,8 @@ class Nebius(clouds.Cloud):
             for acc_name, acc_count in resources.accelerators.items():
                 if acc_name.lower() in ('h100', 'h200') and acc_count == 8:
                     # Remove CUSTOM_NETWORK_TIER from unsupported features for
-                    # InfiniBand-capable accelerators
+                    # InfiniBand-capable accelerators. Refer to:
+                    # https://docs.nebius.com/compute/clusters/gpu#fabrics
                     unsupported.pop(
                         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
                         None)
@@ -243,9 +245,12 @@ class Nebius(clouds.Cloud):
                 'filesystem_mount_tag': f'filesystem-skypilot-{i+1}'
             })
 
+        use_static_ip_address = skypilot_config.get_nested(
+            ('nebius', 'use_static_ip_address'), default_value=False)
         resources_vars: Dict[str, Any] = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
+            'use_static_ip_address': use_static_ip_address,
             'region': region.name,
             'image_id': image_family,
             # Nebius does not support specific zones.
@@ -336,6 +341,7 @@ class Nebius(clouds.Cloud):
              acc_count,
              use_spot=resources.use_spot,
              cpus=resources.cpus,
+             memory=resources.memory,
              region=resources.region,
              zone=resources.zone,
              clouds='nebius')
@@ -361,10 +367,10 @@ class Nebius(clouds.Cloud):
                       f'{_INDENT_PREFIX}  $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > {nebius.tenant_id_path()} \n')  # pylint: disable=line-too-long
         if not nebius.is_token_or_cred_file_exist():
             return False, f'{token_cred_msg}'
-        sdk = nebius.sdk()
         tenant_id = nebius.get_tenant_id()
         if tenant_id is None:
             return False, f'{tenant_msg}'
+        sdk = nebius.sdk()
         try:
             service = nebius.iam().ProjectServiceClient(sdk)
             service.list(
@@ -442,7 +448,9 @@ class Nebius(clouds.Cloud):
         del workspace_config  # Unused
         sdk = nebius.sdk()
         profile_client = nebius.iam().ProfileServiceClient(sdk)
-        profile = profile_client.get(nebius.iam().GetProfileRequest()).wait()
+        profile = nebius.sync_call(
+            profile_client.get(nebius.iam().GetProfileRequest(),
+                               timeout=nebius.READ_TIMEOUT))
         if profile.user_profile is not None:
             if profile.user_profile.attributes is None:
                 raise exceptions.CloudUserIdentityError(

@@ -247,6 +247,13 @@ def get_accelerators_from_instance_type(
                                instance_type)
 
 
+def get_arch_from_instance_type(instance_type: str,
+                                clouds: CloudFilter = None) -> Optional[str]:
+    """Returns the arch from a instance type."""
+    return _map_clouds_catalog(clouds, 'get_arch_from_instance_type',
+                               instance_type)
+
+
 def get_instance_type_for_accelerator(
     acc_name: str,
     acc_count: Union[int, float],
@@ -326,6 +333,7 @@ def get_common_gpus() -> List[str]:
         'A10G',
         'A100',
         'A100-80GB',
+        'B200',
         'H100',
         'H200',
         'L4',

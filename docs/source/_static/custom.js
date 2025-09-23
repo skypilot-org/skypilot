@@ -1,3 +1,10 @@
+// Google Tag Manager
+(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+})(window,document,'script','dataLayer','GTM-WDLMDR6J');
+
 document.addEventListener('DOMContentLoaded', function () {
        var script = document.createElement('script');
        script.src = 'https://widget.kapa.ai/kapa-widget.bundle.js';
@@ -34,6 +41,9 @@ document.addEventListener('DOMContentLoaded', () => {
         { selector: '.toctree-l1 > a', text: 'Authentication and RBAC' },
         { selector: '.toctree-l1 > a', text: 'Volumes' },
         { selector: '.toctree-l2 > a', text: 'Upgrading API Server' },
+        { selector: '.toctree-l1 > a', text: 'High Availability Controller' },
+        { selector: '.toctree-l2 > a', text: 'High Availability Controller' },
+        { selector: '.toctree-l3 > a', text: 'Advanced: High Availability Controller' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {

@@ -45,6 +45,8 @@ extensions = [
     'notfound.extension',
     'sphinx.ext.autosectionlabel',
     'extension.linting',
+    'extension.markdown_export',
+    'extension.dynamic_llms_txt',
 ]
 # Needed for admonitions in markdown:
 # https://myst-parser.readthedocs.io/en/latest/syntax/admonitions.html
@@ -79,6 +81,11 @@ napoleon_custom_sections = [
 # Python methods should be presented in source code order
 autodoc_member_order = 'bysource'
 
+# Mock imports for modules that should not be loaded during doc build
+autodoc_mock_imports = [
+    'sky.schemas.generated',
+]
+
 
 # -- Options for HTML output
 def render_svg_logo(path):
@@ -87,6 +94,10 @@ def render_svg_logo(path):
 
     return content
 
+
+# Add extra paths that contain custom files here, relative to this directory.
+# These files are copied directly to the root of the documentation.
+html_extra_path = ['robots.txt']
 
 # html_theme = 'sphinx_book_theme'
 html_theme = 'pydata_sphinx_theme'
@@ -117,7 +128,7 @@ html_theme_options = {
         'icon': 'fab fa-github',
     }],
     'use_edit_page_button': True,
-    'announcement': '<div style="padding: 24px; text-align: center; font-size: 0.8rem; line-height: 1;">👋 Join us for the <b>SkyPilot AI Infra Meetup</b> in San Francisco on August 14! <a href="https://lu.ma/q1rfsjxk?utm_source=skydocs">Register here</a></div>',
+    'announcement': '',  # Put announcements such as meetups here.
     'secondary_sidebar_items': [
         'page-toc',
         'edit-this-page',

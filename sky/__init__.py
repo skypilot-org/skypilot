@@ -4,6 +4,8 @@ import subprocess
 from typing import Optional
 import urllib.request
 
+from sky.utils import directory_utils
+
 # Replaced with the current commit when building the wheels.
 _SKYPILOT_COMMIT_SHA = '{{SKYPILOT_COMMIT_SHA}}'
 
@@ -36,7 +38,7 @@ def _get_git_commit():
 
 __commit__ = _get_git_commit()
 __version__ = '1.0.0-dev0'
-__root_dir__ = os.path.dirname(os.path.abspath(__file__))
+__root_dir__ = directory_utils.get_sky_dir()
 
 
 # ---------------------- Proxy Configuration ---------------------- #
@@ -141,12 +143,14 @@ Kubernetes = clouds.Kubernetes
 K8s = Kubernetes
 OCI = clouds.OCI
 Paperspace = clouds.Paperspace
+PrimeIntellect = clouds.PrimeIntellect
 RunPod = clouds.RunPod
 Vast = clouds.Vast
 Vsphere = clouds.Vsphere
 Fluidstack = clouds.Fluidstack
 Nebius = clouds.Nebius
 Hyperbolic = clouds.Hyperbolic
+Seeweb = clouds.Seeweb
 
 __all__ = [
     '__version__',
@@ -160,6 +164,7 @@ __all__ = [
     'Lambda',
     'OCI',
     'Paperspace',
+    'PrimeIntellect',
     'RunPod',
     'Vast',
     'SCP',
@@ -167,6 +172,7 @@ __all__ = [
     'Fluidstack',
     'Nebius',
     'Hyperbolic',
+    'Seeweb',
     'Optimizer',
     'OptimizeTarget',
     'backends',

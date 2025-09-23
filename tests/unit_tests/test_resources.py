@@ -142,7 +142,10 @@ def test_no_cloud_labels_resources_single_enabled_cloud():
 @mock.patch('sky.catalog.instance_type_exists', return_value=True)
 @mock.patch('sky.catalog.get_accelerators_from_instance_type',
             return_value={'fake-acc': 2})
+@mock.patch('sky.clouds.aws.AWS.get_image_root_device_name',
+            return_value='/dev/sda1')
 @mock.patch('sky.catalog.get_image_id_from_tag', return_value='fake-image')
+@mock.patch('sky.catalog.get_arch_from_instance_type', return_value='fake-arch')
 @mock.patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
 def test_aws_make_deploy_variables(*mocks) -> None:
     os.environ[
@@ -165,6 +168,7 @@ def test_aws_make_deploy_variables(*mocks) -> None:
     expected_config_base = {
         'instance_type': resource.instance_type,
         'custom_resources': '{"fake-acc":2}',
+        'max_efa_interfaces': 0,
         'use_spot': False,
         'region': 'fake-region',
         'image_id': 'fake-image',
@@ -178,7 +182,8 @@ def test_aws_make_deploy_variables(*mocks) -> None:
         'docker_login_config': None,
         'docker_run_options': [],
         'initial_setup_commands': [],
-        'zones': 'fake-zone'
+        'zones': 'fake-zone',
+        'root_device_name': '/dev/sda1'
     }
 
     # test using defaults
@@ -226,7 +231,10 @@ def test_aws_make_deploy_variables(*mocks) -> None:
 @mock.patch('sky.catalog.instance_type_exists', return_value=True)
 @mock.patch('sky.catalog.get_accelerators_from_instance_type',
             return_value={'fake-acc': 2})
+@mock.patch('sky.clouds.aws.AWS.get_image_root_device_name',
+            return_value='/dev/xvda')
 @mock.patch('sky.catalog.get_image_id_from_tag', return_value='fake-image')
+@mock.patch('sky.catalog.get_arch_from_instance_type', return_value='fake-arch')
 @mock.patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
 def test_aws_make_deploy_variables_ssh_user(*mocks) -> None:
     os.environ[
@@ -249,6 +257,7 @@ def test_aws_make_deploy_variables_ssh_user(*mocks) -> None:
     expected_config_base = {
         'instance_type': resource.instance_type,
         'custom_resources': '{"fake-acc":2}',
+        'max_efa_interfaces': 0,
         'use_spot': False,
         'region': 'fake-region',
         'image_id': 'fake-image',
@@ -262,7 +271,8 @@ def test_aws_make_deploy_variables_ssh_user(*mocks) -> None:
         'docker_login_config': None,
         'docker_run_options': [],
         'initial_setup_commands': [],
-        'zones': 'fake-zone'
+        'zones': 'fake-zone',
+        'root_device_name': '/dev/xvda'
     }
 
     # test using defaults
@@ -454,6 +464,51 @@ def test_resources_ordered_preference():
 
     assert resources_list[2].infra.cloud.lower() == 'azure'
     assert resources_list[2].infra.region == 'eastus'
+
+
+def test_resources_any_of_dump_in_serve_version_bump():
+    any_of_1 = [
+        {
+            'accelerators': {
+                'H200': 1
+            },
+            'disk_size': 256,
+        },
+        {
+            'disk_size': 256,
+            'accelerators': {
+                'H100': 1
+            },
+        },
+        {
+            'disk_size': 256,
+            'accelerators': {
+                'L4': 4
+            },
+        },
+    ]
+    any_of_2 = [
+        {
+            'accelerators': {
+                'H100': 1
+            },
+            'disk_size': 256,
+        },
+        {
+            'accelerators': {
+                'L4': 4
+            },
+            'disk_size': 256,
+        },
+        {
+            'disk_size': 256,
+            'accelerators': {
+                'H200': 1
+            },
+        },
+    ]
+    assert (resources_utils.normalize_any_of_resources_config(any_of_1) ==
+            resources_utils.normalize_any_of_resources_config(any_of_2))
 
 
 def test_resources_any_of_ordered_exclusive():

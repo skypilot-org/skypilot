@@ -22,6 +22,7 @@ from sky.catalog import vsphere_catalog
 from sky.provision import common as provision_common
 from sky.provision.aws import config as aws_config
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.serve import serve_rpc_utils
 from sky.serve import serve_state
 from sky.server import common as server_common
 from sky.server import constants as server_constants
@@ -254,7 +255,12 @@ def mock_job_table_no_job(monkeypatch):
 def mock_job_table_one_job(monkeypatch):
     """Mock job table to return one job."""
 
-    def mock_get_job_table(*_, **__):
+    def mock_get_job_table(*args, **__):
+        # The third argument is the cmd.
+        cmd = args[2]
+        # Return no pools for the job table.
+        if 'get_service_status_encoded' in cmd:
+            return 0, message_utils.encode_payload([]), ''
         current_time = time.time()
         job_data = {
             'job_id': '1',
@@ -310,6 +316,17 @@ def mock_services_no_service(monkeypatch):
 
 
 @pytest.fixture
+def mock_services_no_service_grpc(monkeypatch):
+    """Mock services to return no services."""
+
+    def mock_get_services_grpc(*_, **__):
+        return []
+
+    monkeypatch.setattr(serve_rpc_utils.RpcRunner, 'get_service_status',
+                        mock_get_services_grpc)
+
+
+@pytest.fixture
 def mock_services_one_service(monkeypatch):
     """Mock services to return one service."""
 
@@ -335,6 +352,30 @@ def mock_services_one_service(monkeypatch):
             payload_type='service_status'), ''
 
     monkeypatch.setattr(CloudVmRayBackend, 'run_on_head', mock_get_services)
+
+
+@pytest.fixture
+def mock_services_one_service_grpc(monkeypatch):
+    """Mock services to return one services."""
+
+    def mock_get_services_grpc(*_, **__):
+        service = {
+            'name': 'test_service',
+            'controller_job_id': 1,
+            'uptime': 20,
+            'status': serve_state.ServiceStatus.READY,
+            'controller_port': 30001,
+            'load_balancer_port': 30000,
+            'endpoint': '4.3.2.1:30000',
+            'policy': None,
+            'requested_resources_str': '',
+            'replica_info': [],
+            'tls_encrypted': False,
+        }
+        return [service]
+
+    monkeypatch.setattr(serve_rpc_utils.RpcRunner, 'get_service_status',
+                        mock_get_services_grpc)
 
 
 @pytest.fixture

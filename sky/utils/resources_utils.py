@@ -5,7 +5,7 @@ import itertools
 import json
 import math
 import typing
-from typing import Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from sky import skypilot_config
 from sky.skylet import constants
@@ -435,3 +435,27 @@ def parse_time_minutes(time: str) -> int:
                 continue
 
     raise ValueError(f'Invalid time format: {time}')
+
+
+def normalize_any_of_resources_config(
+        any_of: List[Dict[str, Any]]) -> Tuple[str, ...]:
+    """Normalize a list of any_of resources config to a canonical form.
+
+    Args:
+        any_of: A list of any_of resources config.
+
+    Returns:
+        A normalized tuple representation that can be compared for equality.
+        Two lists with the same resource configurations in different orders
+        will produce the same normalized result.
+    """
+    if not any_of:
+        return tuple()
+
+    # Convert each config to JSON string with sorted keys, then sort the list
+    normalized_configs = [
+        json.dumps(config, sort_keys=True, separators=(',', ':'))
+        for config in any_of
+    ]
+
+    return tuple(sorted(normalized_configs))

@@ -6,10 +6,12 @@ import click
 import colorama
 
 from sky import backends
+from sky.schemas.api import responses
 from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import status_lib
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.provision.kubernetes import utils as kubernetes_utils
@@ -44,7 +46,7 @@ class StatusColumn:
         return val
 
 
-def show_status_table(cluster_records: List[_ClusterRecord],
+def show_status_table(cluster_records: List[responses.StatusResponse],
                       show_all: bool,
                       show_user: bool,
                       query_clusters: Optional[List[str]] = None,
@@ -104,11 +106,8 @@ def show_status_table(cluster_records: List[_ClusterRecord],
 
     if query_clusters:
         cluster_names = {record['name'] for record in cluster_records}
-        not_found_clusters = [
-            repr(cluster)
-            for cluster in query_clusters
-            if cluster not in cluster_names
-        ]
+        not_found_clusters = ux_utils.get_non_matched_query(
+            query_clusters, cluster_names)
         if not_found_clusters:
             cluster_str = 'Cluster'
             if len(not_found_clusters) > 1:

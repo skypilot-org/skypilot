@@ -19,20 +19,16 @@ import aiohttp
 import colorama
 
 from sky import admin_policy
-from sky import backends
+from sky import catalog
 from sky import exceptions
-from sky import models
 from sky import sky_logging
-import sky.catalog
 from sky.client import common as client_common
 from sky.client import sdk
-from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import rest
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
-from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import common
@@ -45,6 +41,11 @@ if typing.TYPE_CHECKING:
     import io
 
     import sky
+    from sky import backends
+    from sky import models
+    from sky.provision.kubernetes import utils as kubernetes_utils
+    from sky.skylet import autostop_lib
+    from sky.skylet import job_lib
 
 logger = sky_logging.init_logger(__name__)
 logging.getLogger('httpx').setLevel(logging.CRITICAL)
@@ -144,7 +145,8 @@ async def get(request_id: str) -> Any:
 async def stream_response_async(request_id: Optional[str],
                                 response: 'aiohttp.ClientResponse',
                                 output_stream: Optional['io.TextIOBase'] = None,
-                                resumable: bool = False) -> Any:
+                                resumable: bool = False,
+                                get_result: bool = True) -> Any:
     """Async version of stream_response that streams the response to the
     console.
 
@@ -155,6 +157,9 @@ async def stream_response_async(request_id: Optional[str],
             console.
         resumable: Whether the response is resumable on retry. If True, the
             streaming will start from the previous failure point on retry.
+
+    Returns:
+        Result of request_id if given. Will only return if get_result is True.
     """
 
     retry_context: Optional[rest.RetryContext] = None
@@ -170,7 +175,7 @@ async def stream_response_async(request_id: Optional[str],
                 elif line_count > retry_context.line_processed:
                     print(line, flush=True, end='', file=output_stream)
                     retry_context.line_processed = line_count
-        if request_id is not None:
+        if request_id is not None and get_result:
             return await get(request_id)
     except Exception:  # pylint: disable=broad-except
         logger.debug(f'To stream request logs: sky api logs {request_id}')
@@ -302,7 +307,7 @@ async def list_accelerators(
     require_price: bool = True,
     case_sensitive: bool = True,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> Dict[str, List[sky.catalog.common.InstanceTypeInfo]]:
+) -> Dict[str, List[catalog.common.InstanceTypeInfo]]:
     """Async version of list_accelerators() that lists the names of all
     accelerators offered by Sky."""
     request_id = await context_utils.to_thread(sdk.list_accelerators, gpus_only,
@@ -346,7 +351,7 @@ async def optimize(
         admin_policy_request_options: Optional[
             admin_policy.RequestOptions] = None,
         stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> sky.dag.Dag:
+) -> 'sky.Dag':
     """Async version of optimize() that finds the best execution plan for the
       given DAG."""
     request_id = await context_utils.to_thread(sdk.optimize, dag, minimize,
@@ -377,9 +382,10 @@ async def launch(
     cluster_name: Optional[str] = None,
     retry_until_up: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
+    wait_for: Optional['autostop_lib.AutostopWaitFor'] = None,
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
-    backend: Optional[backends.Backend] = None,
+    backend: Optional['backends.Backend'] = None,
     optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
@@ -391,12 +397,12 @@ async def launch(
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG,
-) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
+) -> Tuple[Optional[int], Optional['backends.ResourceHandle']]:
     """Async version of launch() that launches a cluster or task."""
     request_id = await context_utils.to_thread(
         sdk.launch, task, cluster_name, retry_until_up,
-        idle_minutes_to_autostop, dryrun, down, backend, optimize_target,
-        no_setup, clone_disk_from, fast, _need_confirmation,
+        idle_minutes_to_autostop, wait_for, dryrun, down, backend,
+        optimize_target, no_setup, clone_disk_from, fast, _need_confirmation,
         _is_launched_by_jobs_controller, _is_launched_by_sky_serve_controller,
         _disable_controller_check)
     if stream_logs is not None:
@@ -412,9 +418,9 @@ async def exec(  # pylint: disable=redefined-builtin
     cluster_name: Optional[str] = None,
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
-    backend: Optional[backends.Backend] = None,
+    backend: Optional['backends.Backend'] = None,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG,
-) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
+) -> Tuple[Optional[int], Optional['backends.ResourceHandle']]:
     """Async version of exec() that executes a task on an existing cluster."""
     request_id = await context_utils.to_thread(sdk.exec, task, cluster_name,
                                                dryrun, down, backend)
@@ -450,15 +456,17 @@ async def download_logs(cluster_name: str,
 async def start(
     cluster_name: str,
     idle_minutes_to_autostop: Optional[int] = None,
+    wait_for: Optional['autostop_lib.AutostopWaitFor'] = None,
     retry_until_up: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     force: bool = False,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG,
-) -> backends.CloudVmRayResourceHandle:
+) -> 'backends.CloudVmRayResourceHandle':
     """Async version of start() that restarts a cluster."""
     request_id = await context_utils.to_thread(sdk.start, cluster_name,
                                                idle_minutes_to_autostop,
-                                               retry_until_up, down, force)
+                                               wait_for, retry_until_up, down,
+                                               force)
     if stream_logs is not None:
         return await _stream_and_get(request_id, stream_logs)
     else:
@@ -498,13 +506,14 @@ async def stop(
 async def autostop(
     cluster_name: str,
     idle_minutes: int,
+    wait_for: Optional['autostop_lib.AutostopWaitFor'] = None,
     down: bool = False,  # pylint: disable=redefined-outer-name
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
 ) -> None:
     """Async version of autostop() that schedules an autostop/autodown for a
       cluster."""
     request_id = await context_utils.to_thread(sdk.autostop, cluster_name,
-                                               idle_minutes, down)
+                                               idle_minutes, wait_for, down)
     if stream_logs is not None:
         return await _stream_and_get(request_id, stream_logs)
     else:
@@ -534,7 +543,7 @@ async def job_status(
     cluster_name: str,
     job_ids: Optional[List[int]] = None,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> Dict[Optional[int], Optional[job_lib.JobStatus]]:
+) -> Dict[Optional[int], Optional['job_lib.JobStatus']]:
     """Async version of job_status() that gets the status of jobs on a
       cluster."""
     request_id = await context_utils.to_thread(sdk.job_status, cluster_name,
@@ -572,10 +581,16 @@ async def status(
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG,
+    *,
+    _include_credentials: bool = False,
 ) -> List[Dict[str, Any]]:
     """Async version of status() that gets cluster statuses."""
-    request_id = await context_utils.to_thread(sdk.status, cluster_names,
-                                               refresh, all_users)
+    request_id = await context_utils.to_thread(
+        sdk.status,
+        cluster_names,
+        refresh,
+        all_users,
+        _include_credentials=_include_credentials)
     if stream_logs is not None:
         return await _stream_and_get(request_id, stream_logs)
     else:
@@ -588,7 +603,7 @@ async def endpoints(
     cluster: str,
     port: Optional[Union[int, str]] = None,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> Dict[str, str]:
+) -> Dict[int, str]:
     """Async version of endpoints() that gets the endpoint for a given cluster
       and port number."""
     request_id = await context_utils.to_thread(sdk.endpoints, cluster, port)
@@ -708,7 +723,7 @@ async def realtime_kubernetes_gpu_availability(
     quantity_filter: Optional[int] = None,
     is_ssh: Optional[bool] = None,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> List[Tuple[str, List[models.RealtimeGpuAvailability]]]:
+) -> List[Tuple[str, List['models.RealtimeGpuAvailability']]]:
     """Async version of realtime_kubernetes_gpu_availability() that gets the
       real-time Kubernetes GPU availability."""
     request_id = await context_utils.to_thread(
@@ -725,7 +740,7 @@ async def realtime_kubernetes_gpu_availability(
 async def kubernetes_node_info(
     context: Optional[str] = None,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> models.KubernetesNodesInfo:
+) -> 'models.KubernetesNodesInfo':
     """Async version of kubernetes_node_info() that gets the resource
     information for all the nodes in the cluster."""
     request_id = await context_utils.to_thread(sdk.kubernetes_node_info,
@@ -740,8 +755,8 @@ async def kubernetes_node_info(
 @annotations.client_api
 async def status_kubernetes(
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> Tuple[List[kubernetes_utils.KubernetesSkyPilotClusterInfoPayload],
-           List[kubernetes_utils.KubernetesSkyPilotClusterInfoPayload],
+) -> Tuple[List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
+           List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
            List[Dict[str, Any]], Optional[str]]:
     """Async version of status_kubernetes() that gets all SkyPilot clusters
       and jobs in the Kubernetes cluster."""

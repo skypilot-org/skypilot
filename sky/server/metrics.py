@@ -1,35 +1,25 @@
 """Instrumentation for the API server."""
 
+import asyncio
+import multiprocessing
 import os
+import threading
 import time
+from typing import List
 
 import fastapi
 from prometheus_client import generate_latest
 from prometheus_client import multiprocess
 import prometheus_client as prom
+import psutil
 import starlette.middleware.base
 import uvicorn
 
+from sky import core
 from sky import sky_logging
+from sky.metrics import utils as metrics_utils
 
 logger = sky_logging.init_logger(__name__)
-
-# Total number of API server requests, grouped by path, method, and status.
-sky_apiserver_requests_total = prom.Counter(
-    'sky_apiserver_requests_total',
-    'Total number of API server requests',
-    ['path', 'method', 'status'],
-)
-
-# Time spent processing API server requests, grouped by path, method, and
-# status.
-sky_apiserver_request_duration_seconds = prom.Histogram(
-    'sky_apiserver_request_duration_seconds',
-    'Time spent processing API server requests',
-    ['path', 'method', 'status'],
-    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
-             float('inf')),
-)
 
 metrics_app = fastapi.FastAPI()
 
@@ -47,6 +37,42 @@ async def metrics() -> fastapi.Response:
     return fastapi.Response(content=data,
                             media_type=prom.CONTENT_TYPE_LATEST,
                             headers={'Cache-Control': 'no-cache'})
+
+
+@metrics_app.get('/gpu-metrics')
+async def gpu_metrics() -> fastapi.Response:
+    """Gets the GPU metrics from multiple external k8s clusters"""
+    contexts = core.get_all_contexts()
+    all_metrics: List[str] = []
+    successful_contexts = 0
+
+    tasks = [
+        asyncio.create_task(metrics_utils.get_metrics_for_context(context))
+        for context in contexts
+        if context != 'in-cluster'
+    ]
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for i, result in enumerate(results):
+        if isinstance(result, Exception):
+            logger.error(
+                f'Failed to get metrics for context {contexts[i]}: {result}')
+        elif isinstance(result, BaseException):
+            # Avoid changing behavior for non-Exception BaseExceptions
+            # like KeyboardInterrupt/SystemExit: re-raise them.
+            raise result
+        else:
+            metrics_text = result
+            all_metrics.append(metrics_text)
+            successful_contexts += 1
+
+    combined_metrics = '\n\n'.join(all_metrics)
+
+    # Return as plain text for Prometheus compatibility
+    return fastapi.Response(
+        content=combined_metrics,
+        media_type='text/plain; version=0.0.4; charset=utf-8')
 
 
 def build_metrics_server(host: str, port: int) -> uvicorn.Server:
@@ -76,7 +102,7 @@ class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
     async def dispatch(self, request: fastapi.Request, call_next):
         path = request.url.path
-        logger.info(f'PROM Middleware Request: {request}, {request.url.path}')
+        logger.debug(f'PROM Middleware Request: {request}, {request.url.path}')
         streaming = _is_streaming_api(path)
         if not streaming:
             # Exclude streaming APIs, the duration is not meaningful.
@@ -92,13 +118,41 @@ class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             status_code_group = '5xx'
             raise
         finally:
-            sky_apiserver_requests_total.labels(path=path,
-                                                method=method,
-                                                status=status_code_group).inc()
+            metrics_utils.SKY_APISERVER_REQUESTS_TOTAL.labels(
+                path=path, method=method, status=status_code_group).inc()
             if not streaming:
                 duration = time.time() - start_time
-                sky_apiserver_request_duration_seconds.labels(
+                metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS.labels(
                     path=path, method=method,
                     status=status_code_group).observe(duration)
 
         return response
+
+
+peak_rss_bytes = 0
+
+
+def process_monitor(process_type: str, stop: threading.Event):
+    pid = multiprocessing.current_process().pid
+    proc = psutil.Process(pid)
+    last_bucket_end = time.time()
+    bucket_peak = 0
+    global peak_rss_bytes
+    while not stop.is_set():
+        if time.time() - last_bucket_end >= 30:
+            # Reset peak RSS for the next time bucket.
+            last_bucket_end = time.time()
+            bucket_peak = 0
+        peak_rss_bytes = max(bucket_peak, proc.memory_info().rss)
+        metrics_utils.SKY_APISERVER_PROCESS_PEAK_RSS.labels(
+            pid=pid, type=process_type).set(peak_rss_bytes)
+        ctimes = proc.cpu_times()
+        metrics_utils.SKY_APISERVER_PROCESS_CPU_TOTAL.labels(pid=pid,
+                                                             type=process_type,
+                                                             mode='user').set(
+                                                                 ctimes.user)
+        metrics_utils.SKY_APISERVER_PROCESS_CPU_TOTAL.labels(pid=pid,
+                                                             type=process_type,
+                                                             mode='system').set(
+                                                                 ctimes.system)
+        time.sleep(1)

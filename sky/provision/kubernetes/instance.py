@@ -1,7 +1,9 @@
 """Kubernetes instance provisioning."""
 import copy
+import datetime
 import json
 import re
+import sys
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -32,6 +34,9 @@ POLL_INTERVAL = 2
 _TIMEOUT_FOR_POD_TERMINATION = 60  # 1 minutes
 _MAX_RETRIES = 3
 _NUM_THREADS = subprocess_utils.get_parallel_threads('kubernetes')
+
+# Pattern to extract SSH user from command output, handling MOTD contamination
+_SSH_USER_PATTERN = re.compile(r'SKYPILOT_SSH_USER: ([^\s\n]+)')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -190,14 +195,20 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                 break
         if event_message is not None:
             if pod_status == 'Pending':
-                logger.info(event_message)
+                out_of = {}
+                # key: resource name, value: (extra message, nice name)
                 if 'Insufficient cpu' in event_message:
-                    raise config_lib.KubernetesError(
-                        _lack_resource_msg('CPU', pod, details=event_message))
+                    out_of['CPU'] = (': Run \'kubectl get nodes -o '
+                                     'custom-columns=NAME:.metadata.name,'
+                                     'CPU:.status.allocatable.cpu\' to check '
+                                     'the available CPUs on the node.', 'CPUs')
                 if 'Insufficient memory' in event_message:
-                    raise config_lib.KubernetesError(
-                        _lack_resource_msg('memory', pod,
-                                           details=event_message))
+                    out_of['memory'] = (': Run \'kubectl get nodes -o '
+                                        'custom-columns=NAME:.metadata.name,'
+                                        'MEMORY:.status.allocatable.memory\' '
+                                        'to check the available memory on the '
+                                        'node.', 'Memory')
+
                 # TODO(aylei): after switching from smarter-device-manager to
                 # fusermount-server, we need a new way to check whether the
                 # fusermount-server daemonset is ready.
@@ -205,41 +216,77 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                     key for lf in kubernetes_utils.LABEL_FORMATTER_REGISTRY
                     for key in lf.get_label_keys()
                 ]
-                if pod.spec.node_selector:
-                    for label_key in pod.spec.node_selector.keys():
-                        if label_key in gpu_lf_keys:
-                            # TODO(romilb): We may have additional node
-                            #  affinity selectors in the future - in that
-                            #  case we will need to update this logic.
-                            # TODO(Doyoung): Update the error message raised
-                            # with the multi-host TPU support.
-                            gpu_resource_key = kubernetes_utils.get_gpu_resource_key(context)  # pylint: disable=line-too-long
-                            if 'Insufficient google.com/tpu' in event_message:
-                                extra_msg = (
-                                    f'Verify if '
-                                    f'{pod.spec.node_selector[label_key]}'
-                                    ' is available in the cluster. Note '
-                                    'that multi-host TPU podslices are '
-                                    'currently not unsupported.')
-                                raise config_lib.KubernetesError(
-                                    _lack_resource_msg('TPU',
-                                                       pod,
-                                                       extra_msg,
-                                                       details=event_message))
-                            elif ((f'Insufficient {gpu_resource_key}'
-                                   in event_message) or
-                                  ('didn\'t match Pod\'s node affinity/selector'
-                                   in event_message)):
-                                extra_msg = (
-                                    f'Verify if any node matching label  '
-                                    f'{pod.spec.node_selector[label_key]} and '
-                                    f'sufficient resource {gpu_resource_key} '
-                                    f'is available in the cluster.')
-                                raise config_lib.KubernetesError(
-                                    _lack_resource_msg('GPU',
-                                                       pod,
-                                                       extra_msg,
-                                                       details=event_message))
+                for label_key in gpu_lf_keys:
+                    # TODO(romilb): We may have additional node
+                    #  affinity selectors in the future - in that
+                    #  case we will need to update this logic.
+                    # TODO(Doyoung): Update the error message raised
+                    # with the multi-host TPU support.
+                    gpu_resource_key = kubernetes_utils.get_gpu_resource_key(
+                        context)  # pylint: disable=line-too-long
+                    if ((f'Insufficient {gpu_resource_key}' in event_message) or
+                        ('didn\'t match Pod\'s node affinity/selector'
+                         in event_message) and pod.spec.node_selector):
+                        if 'gpu' in gpu_resource_key.lower():
+                            info_msg = (
+                                ': Run \'sky show-gpus --infra kubernetes\' to '
+                                'see the available GPUs.')
+                        else:
+                            info_msg = ': '
+                        if (pod.spec.node_selector and
+                                label_key in pod.spec.node_selector):
+                            extra_msg = (
+                                f'Verify if any node matching label '
+                                f'{pod.spec.node_selector[label_key]} and '
+                                f'sufficient resource {gpu_resource_key} '
+                                f'is available in the cluster.')
+                            extra_msg = info_msg + ' ' + extra_msg
+                        else:
+                            extra_msg = info_msg
+                        if gpu_resource_key not in out_of or len(
+                                out_of[gpu_resource_key][0]) < len(extra_msg):
+                            out_of[f'{gpu_resource_key}'] = (extra_msg, 'GPUs')
+
+            if len(out_of) > 0:
+                # We are out of some resources. We should raise an error.
+                rsrc_err_msg = 'Insufficient resource capacity on the '
+                rsrc_err_msg += 'cluster:\n'
+                out_of_keys = list(out_of.keys())
+                for i in range(len(out_of_keys)):
+                    rsrc = out_of_keys[i]
+                    (extra_msg, nice_name) = out_of[rsrc]
+                    extra_msg = extra_msg if extra_msg else ''
+                    if i == len(out_of_keys) - 1:
+                        indent = '└──'
+                    else:
+                        indent = '├──'
+                    rsrc_err_msg += (f'{indent} Cluster does not have '
+                                     f'sufficient {nice_name} for your request'
+                                     f'{extra_msg}')
+                    if i != len(out_of_keys) - 1:
+                        rsrc_err_msg += '\n'
+
+                # Emit the error message without logging prefixes for better UX.
+                tmp_handler = sky_logging.EnvAwareHandler(sys.stdout)
+                tmp_handler.flush = sys.stdout.flush
+                tmp_handler.setFormatter(sky_logging.NO_PREFIX_FORMATTER)
+                tmp_handler.setLevel(sky_logging.ERROR)
+                prev_propagate = logger.propagate
+                try:
+                    logger.addHandler(tmp_handler)
+                    logger.propagate = False
+                    logger.error(ux_utils.error_message(f'{rsrc_err_msg}'))
+                finally:
+                    logger.removeHandler(tmp_handler)
+                    logger.propagate = prev_propagate
+                nice_names = [out_of[rsrc][1] for rsrc in out_of_keys]
+                raise config_lib.KubernetesError(
+                    f'{timeout_err_msg} '
+                    f'Pod status: {pod_status} '
+                    f'Details: \'{event_message}\' ',
+                    insufficent_resources=nice_names,
+                )
+
             raise config_lib.KubernetesError(f'{timeout_err_msg} '
                                              f'Pod status: {pod_status} '
                                              f'Details: \'{event_message}\' ')
@@ -797,15 +844,18 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                        'For more details, refer to https://docs.skypilot.co/en/latest/reference/config.html')  # pylint: disable=line-too-long
 
     needs_gpus = False
+    needs_gpus_nvidia = False
     limits = pod_spec['spec']['containers'][0].get('resources',
                                                    {}).get('limits')
     if limits is not None:
         needs_gpus = limits.get(kubernetes_utils.get_gpu_resource_key(context),
                                 0) > 0
+        needs_gpus_nvidia = limits.get(
+            kubernetes_utils.SUPPORTED_GPU_RESOURCE_KEYS['nvidia'], 0) > 0
 
     # TPU pods provisioned on GKE use the default containerd runtime.
     # Reference: https://cloud.google.com/kubernetes-engine/docs/how-to/migrate-containerd#overview  # pylint: disable=line-too-long
-    if nvidia_runtime_exists and needs_gpus:
+    if nvidia_runtime_exists and needs_gpus_nvidia:
         pod_spec['spec']['runtimeClassName'] = 'nvidia'
 
     logger.debug(f'run_instances: calling create_namespaced_pod '
@@ -1043,8 +1093,10 @@ def stop_instances(
     raise NotImplementedError()
 
 
-def _delete_services(name_prefix: str, namespace: str,
-                     context: Optional[str]) -> None:
+def _delete_services(name_prefix: str,
+                     namespace: str,
+                     context: Optional[str],
+                     skip_ssh_service: bool = False) -> None:
     """Delete services with the given name prefix.
 
     Args:
@@ -1053,7 +1105,9 @@ def _delete_services(name_prefix: str, namespace: str,
         context: Kubernetes context
     """
     # TODO(andy): We should use tag for the service filter.
-    for service_name in [name_prefix, f'{name_prefix}-ssh']:
+    services = ([name_prefix, f'{name_prefix}-ssh']
+                if not skip_ssh_service else [name_prefix])
+    for service_name in services:
         # Since we are not saving this lambda, it's a false positive.
         # TODO(andyl): Wait for
         # https://github.com/pylint-dev/pylint/issues/5263.
@@ -1079,6 +1133,9 @@ def _terminate_node(namespace: str,
         # Delete services for the head pod
         # services are specified in sky/templates/kubernetes-ray.yml.j2
         _delete_services(pod_name, namespace, context)
+    else:
+        # No ssh service is created for worker pods
+        _delete_services(pod_name, namespace, context, skip_ssh_service=True)
 
     # Note - delete pod after all other resources are deleted.
     # This is to ensure there are no leftover resources if this down is run
@@ -1222,7 +1279,11 @@ def get_cluster_info(
     assert cpu_request is not None, 'cpu_request should not be None'
 
     ssh_user = 'sky'
-    get_k8s_ssh_user_cmd = 'echo $(whoami)'
+    # Use pattern matching to extract SSH user, handling MOTD contamination.
+    # Some container images (like CUDA-Q) print MOTD when login shells start,
+    # which can contaminate command output. We use a unique pattern to extract
+    # the actual username reliably.
+    get_k8s_ssh_user_cmd = 'echo "SKYPILOT_SSH_USER: $(whoami)"'
     assert head_pod_name is not None
     runner = command_runner.KubernetesCommandRunner(
         ((namespace, context), head_pod_name))
@@ -1232,7 +1293,14 @@ def get_cluster_info(
                                     stream_logs=False)
     _raise_command_running_error('get ssh user', get_k8s_ssh_user_cmd,
                                  head_pod_name, rc, stdout + stderr)
-    ssh_user = stdout.strip()
+
+    # Extract SSH user using pattern matching
+    ssh_user_match = _SSH_USER_PATTERN.search(stdout)
+    if ssh_user_match:
+        ssh_user = ssh_user_match.group(1)
+    else:
+        raise ValueError('Failed to find SSH user identifier: '
+                         f'{stdout + stderr}')
     logger.debug(
         f'Using ssh user {ssh_user} for cluster {cluster_name_on_cloud}')
 
@@ -1251,9 +1319,11 @@ def get_cluster_info(
         provider_config=provider_config)
 
 
-def _get_pod_termination_reason(pod: Any) -> str:
+def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
+    """Get pod termination reason and write to cluster events."""
     reasons = []
-    if pod.status.container_statuses:
+    latest_timestamp = pod.status.start_time or datetime.datetime.min
+    if pod.status and pod.status.container_statuses:
         for container_status in pod.status.container_statuses:
             terminated = container_status.state.terminated
             if terminated:
@@ -1261,20 +1331,38 @@ def _get_pod_termination_reason(pod: Any) -> str:
                 reason = terminated.reason
                 if exit_code == 0:
                     # skip exit 0 (non-failed) just for sanity
+                    logger.debug(f'{pod.metadata.name}/{container_status.name} '
+                                 'had exit code 0. Skipping.')
                     continue
                 if reason is None:
                     # just in-case reason is None, have default for debugging
                     reason = f'exit({exit_code})'
                 reasons.append(reason)
+                if terminated.finished_at > latest_timestamp:
+                    latest_timestamp = terminated.finished_at
+
             # TODO (kyuds): later, if needed, query `last_state` too.
+
+    if not reasons:
+        return ''
 
     # Normally we will have a single container per pod for skypilot
     # but doing this just in-case there are multiple containers.
-    return ' | '.join(reasons)
+    pod_reason = ' | '.join(reasons)
+
+    global_user_state.add_cluster_event(
+        cluster_name,
+        None,
+        f'[kubernetes pod {pod.metadata.name} terminated] {pod_reason}',
+        global_user_state.ClusterEventType.DEBUG,
+        transitioned_at=int(latest_timestamp.timestamp()),
+    )
+    return pod_reason
 
 
 def _get_pod_missing_reason(context: Optional[str], namespace: str,
                             cluster_name: str, pod_name: str) -> Optional[str]:
+    """Get events for missing pod and write to cluster events."""
     logger.debug(f'Analyzing events for pod {pod_name}')
     pod_field_selector = (
         f'involvedObject.kind=Pod,involvedObject.name={pod_name}')
@@ -1290,6 +1378,8 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
     last_scheduled_node = None
     insert_new_pod_event = True
     new_event_inserted = False
+    inserted_pod_events = 0
+
     for event in pod_events:
         if event.reason == 'Scheduled':
             pattern = r'Successfully assigned (\S+) to (\S+)'
@@ -1310,10 +1400,18 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
                     transitioned_at=int(
                         event.metadata.creation_timestamp.timestamp()),
                     expose_duplicate_error=True)
+                logger.debug(f'[pod {pod_name}] encountered new pod event: '
+                             f'{event.metadata.creation_timestamp} '
+                             f'{event.reason} {event.message}')
             except db_utils.UniqueConstraintViolationError:
                 insert_new_pod_event = False
             else:
                 new_event_inserted = True
+                inserted_pod_events += 1
+
+    logger.debug(f'[pod {pod_name}] processed {len(pod_events)} pod events and '
+                 f'inserted {inserted_pod_events} new pod events '
+                 'previously unseen')
 
     if last_scheduled_node is not None:
         node_field_selector = ('involvedObject.kind=Node,'
@@ -1328,6 +1426,7 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
             # latest event appears first
             reverse=True)
         insert_new_node_event = True
+        inserted_node_events = 0
         for event in node_events:
             if insert_new_node_event:
                 # Try inserting the latest events first. If the event is a
@@ -1342,10 +1441,23 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
                         transitioned_at=int(
                             event.metadata.creation_timestamp.timestamp()),
                         expose_duplicate_error=True)
+                    logger.debug(
+                        f'[pod {pod_name}] encountered new node event: '
+                        f'{event.metadata.creation_timestamp} '
+                        f'{event.reason} {event.message}')
                 except db_utils.UniqueConstraintViolationError:
                     insert_new_node_event = False
                 else:
                     new_event_inserted = True
+                    inserted_node_events += 1
+
+        logger.debug(f'[pod {pod_name}: node {last_scheduled_node}] '
+                     f'processed {len(node_events)} node events and '
+                     f'inserted {inserted_node_events} new node events '
+                     'previously unseen')
+    else:
+        logger.debug(f'[pod {pod_name}] could not determine the node '
+                     'the pod was scheduled to')
 
     if not new_event_inserted:
         # If new event is not inserted, there is no useful information to
@@ -1387,13 +1499,15 @@ def query_instances(
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
+    # Mapping from pod phase to skypilot status. These are the only valid pod
+    # phases.
+    # https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-phase
     status_map = {
         'Pending': status_lib.ClusterStatus.INIT,
         'Running': status_lib.ClusterStatus.UP,
         'Failed': status_lib.ClusterStatus.INIT,
         'Unknown': None,
         'Succeeded': None,
-        'Terminating': None,
     }
 
     assert provider_config is not None
@@ -1437,12 +1551,15 @@ def query_instances(
     for pod in pods:
         phase = pod.status.phase
         pod_status = status_map[phase]
-        if non_terminated_only and pod_status is None:
-            continue
         reason = None
-        if phase == 'Failed':
-            reason = _get_pod_termination_reason(pod)
-            logger.debug(f'Pod Status Reason(s): {reason}')
+        if phase in ('Failed', 'Unknown'):
+            reason = _get_pod_termination_reason(pod, cluster_name)
+            logger.debug(f'Pod Status ({phase}) Reason(s): {reason}')
+        if non_terminated_only and pod_status is None:
+            logger.debug(f'Pod {pod.metadata.name} is terminated, but '
+                         'query_instances is called with '
+                         f'non_terminated_only=True. Phase: {phase}')
+            continue
         pod_name = pod.metadata.name
         reason = f'{pod_name}: {reason}' if reason is not None else None
         cluster_status[pod_name] = (pod_status, reason)
@@ -1465,7 +1582,8 @@ def query_instances(
                                              target_pod_name)
             reason = (f'{target_pod_name}: {reason}'
                       if reason is not None else None)
-            cluster_status[target_pod_name] = (None, reason)
+            if not non_terminated_only:
+                cluster_status[target_pod_name] = (None, reason)
 
     return cluster_status
 

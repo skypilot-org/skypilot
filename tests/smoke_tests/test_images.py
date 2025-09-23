@@ -456,6 +456,7 @@ def test_image_no_conda():
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 @pytest.mark.no_nebius  # Nebius does not support autodown
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support autodown
+@pytest.mark.no_seeweb  # Seeweb does not support autodown
 def test_custom_default_conda_env(generic_cloud: str):
     timeout = 80
     if generic_cloud == 'azure':
@@ -540,13 +541,13 @@ def test_kubernetes_docker_image_and_ssh():
                     cluster_status=[sky.ClusterStatus.UP],
                     timeout=5 * 60),
                 f'sky logs {name}-1 1 --status',
-                f'sky launch --fast -c {name}-1 {unprefixed_yaml_path}',
+                f'sky launch -y --fast -c {name}-1 {unprefixed_yaml_path}',
                 f'sky exec {name}-1 {unprefixed_yaml_path}',
                 f'sky logs {name}-1 2 --status',
                 f'sky logs {name}-1 3 --status',
                 # Second cluster
                 f'sky logs {name}-2 1 --status',
-                f'sky launch --fast -c {name}-2 {docker_yaml_path}',
+                f'sky launch -y --fast -c {name}-2 {docker_yaml_path}',
                 f'sky exec {name}-2 {docker_yaml_path}',
                 f'sky logs {name}-2 2 --status',
                 f'sky logs {name}-2 3 --status',
@@ -687,14 +688,34 @@ def test_helm_deploy_gke(request):
     test = smoke_tests_utils.Test(
         'helm_deploy_gke',
         [
-            f'bash tests/kubernetes/scripts/helm_gcp.sh {package_name} {helm_version}',
+            f'bash tests/kubernetes/scripts/helm_upgrade.sh {package_name} {helm_version} gcp',
         ],
         # GKE termination requires longer timeout.
-        timeout=30 * 60)
+        timeout=50 * 60)
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.aws
+def test_helm_deploy_eks(request):
+    if not request.config.getoption('--helm-package'):
+        # Test pulls image from dockerhub, unrelated to codebase. Package name
+        # indicates intentional testing - without it, test is meaningless.
+        pytest.skip('Skipping test as helm package is not set')
+
+    helm_version = request.config.getoption('--helm-version')
+    package_name = request.config.getoption('--helm-package')
+    test = smoke_tests_utils.Test(
+        'helm_deploy_eks',
+        [
+            f'bash tests/kubernetes/scripts/helm_upgrade.sh {package_name} {helm_version} aws',
+        ],
+        # EKS termination requires longer timeout.
+        timeout=50 * 60)
     smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.kubernetes
+@pytest.mark.no_remote_server
 def test_helm_deploy_okta():
     test = smoke_tests_utils.Test('helm_deploy_okta', [
         f'bash tests/kubernetes/scripts/helm_okta.sh',

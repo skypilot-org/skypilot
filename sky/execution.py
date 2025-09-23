@@ -3,6 +3,7 @@
 See `Stage` for a Task's life cycle.
 """
 import enum
+import logging
 import typing
 from typing import List, Optional, Tuple, Union
 
@@ -120,6 +121,7 @@ def _execute(
     _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
+    job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute an entrypoint.
 
@@ -173,19 +175,12 @@ def _execute(
         if dryrun.
     """
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
-    dag.resolve_and_validate_volumes()
-    if (not _is_launched_by_jobs_controller and
-            not _is_launched_by_sky_serve_controller):
-        # Only process pre-mount operations on API server.
-        dag.pre_mount_volumes()
     for task in dag.tasks:
-        if task.storage_mounts is not None:
-            for storage in task.storage_mounts.values():
-                # Ensure the storage is constructed.
-                storage.construct()
         for resource in task.resources:
             # For backward compatibility, we need to override the autostop
-            # config at server-side for legacy clients.
+            # config at server-side for legacy clients. This should be set
+            # before admin policy to make the admin policy get the final
+            # value of autostop config.
             # TODO(aylei): remove this after we bump the API version.
             resource.override_autostop_config(
                 down=down, idle_minutes=idle_minutes_to_autostop)
@@ -200,6 +195,16 @@ def _execute(
                 down=down,
                 dryrun=dryrun,
             )) as dag:
+        dag.resolve_and_validate_volumes()
+        if (not _is_launched_by_jobs_controller and
+                not _is_launched_by_sky_serve_controller):
+            # Only process pre-mount operations on API server.
+            dag.pre_mount_volumes()
+        for task in dag.tasks:
+            if task.storage_mounts is not None:
+                for storage in task.storage_mounts.values():
+                    # Ensure the storage is constructed.
+                    storage.construct()
         return _execute_dag(
             dag,
             dryrun=dryrun,
@@ -218,7 +223,8 @@ def _execute(
             _quiet_optimizer=_quiet_optimizer,
             _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller=
-            _is_launched_by_sky_serve_controller)
+            _is_launched_by_sky_serve_controller,
+            job_logger=job_logger)
 
 
 def _execute_dag(
@@ -240,6 +246,7 @@ def _execute_dag(
     _quiet_optimizer: bool,
     _is_launched_by_jobs_controller: bool,
     _is_launched_by_sky_serve_controller: bool,
+    job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute a DAG.
 
@@ -250,7 +257,7 @@ def _execute_dag(
     task = dag.tasks[0]
 
     if any(r.job_recovery is not None for r in task.resources):
-        logger.warning(
+        job_logger.warning(
             f'{colorama.Style.DIM}The task has `job_recovery` specified, '
             'but is launched as an unmanaged job. It will be ignored.'
             'To enable job recovery, use managed jobs: sky jobs launch.'
@@ -331,10 +338,10 @@ def _execute_dag(
                 # itself have no task running and start the auto{stop,down}
                 # process, before the task is submitted in the EXEC stage.
                 verb = 'torn down' if down else 'stopped'
-                logger.info(f'{colorama.Style.DIM}The cluster will '
-                            f'be {verb} after 1 minutes of idleness '
-                            '(after all jobs finish).'
-                            f'{colorama.Style.RESET_ALL}')
+                job_logger.info(f'{colorama.Style.DIM}The cluster will '
+                                f'be {verb} after 1 minutes of idleness '
+                                '(after all jobs finish).'
+                                f'{colorama.Style.RESET_ALL}')
                 idle_minutes_to_autostop = 1
             if Stage.DOWN in stages:
                 stages.remove(Stage.DOWN)
@@ -363,7 +370,7 @@ def _execute_dag(
             yellow = colorama.Fore.YELLOW
             bold = colorama.Style.BRIGHT
             reset = colorama.Style.RESET_ALL
-            logger.info(
+            job_logger.info(
                 f'{yellow}Launching a spot job that does not '
                 f'automatically recover from preemptions. To '
                 'get automatic recovery, use managed job instead: '
@@ -382,7 +389,7 @@ def _execute_dag(
                     controller = controller_utils.Controllers.from_name(
                         cluster_name)
                     if controller is not None:
-                        logger.info(
+                        job_logger.info(
                             f'Choosing resources for {controller.value.name}...'
                         )
                     dag = optimizer.Optimizer.optimize(dag,
@@ -424,7 +431,7 @@ def _execute_dag(
         if handle is None:
             assert dryrun, ('If not dryrun, handle must be set or '
                             'Stage.PROVISION must be included in stages.')
-            logger.info('Dryrun finished.')
+            job_logger.info('Dryrun finished.')
             return None, None
 
         do_workdir = (Stage.SYNC_WORKDIR in stages and not dryrun and
@@ -433,7 +440,7 @@ def _execute_dag(
                           (task.file_mounts is not None or
                            task.storage_mounts is not None))
         if do_workdir or do_file_mounts:
-            logger.info(ux_utils.starting_message('Syncing files.'))
+            job_logger.info(ux_utils.starting_message('Syncing files.'))
 
         if do_workdir:
             if cluster_name is not None:
@@ -453,11 +460,11 @@ def _execute_dag(
                                      task.storage_mounts)
 
         if no_setup:
-            logger.info('Setup commands skipped.')
+            job_logger.info('Setup commands skipped.')
         elif Stage.SETUP in stages and not dryrun:
             if skip_unnecessary_provisioning and provisioning_skipped:
-                logger.debug('Unnecessary provisioning was skipped, so '
-                             'skipping setup as well.')
+                job_logger.debug('Unnecessary provisioning was skipped, so '
+                                 'skipping setup as well.')
             else:
                 if cluster_name is not None:
                     global_user_state.add_cluster_event(
@@ -518,6 +525,7 @@ def launch(
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
+    job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launches a cluster or task.
@@ -685,7 +693,7 @@ def launch(
         _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,
-    )
+        job_logger=job_logger)
 
 
 @usage_lib.entrypoint
@@ -696,6 +704,7 @@ def exec(  # pylint: disable=redefined-builtin
     down: bool = False,
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
+    job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Executes a task on an existing cluster.
@@ -771,4 +780,5 @@ def exec(  # pylint: disable=redefined-builtin
         ],
         cluster_name=cluster_name,
         detach_run=True,
+        job_logger=job_logger,
     )

@@ -4,7 +4,7 @@ Autostop and Autodown
 ============================
 
 The **autostop** (or **autodown**) feature automatically stops (or tears down) a
-cluster after it becomes idle.
+cluster after it becomes :ref:`idle <auto-stop-setting-idleness-behavior>`.
 
 With autostop, users can simply submit jobs and leave their laptops, while
 ensuring no unnecessary spending occurs. After jobs have finished, the
@@ -100,10 +100,22 @@ To view the status of the cluster, use ``sky dashboard`` or ``sky status``:
 
 Clusters that are autostopped/autodowned are automatically removed from the status table.
 
+.. _auto-stop-setting-idleness-behavior:
+
 Setting idleness behavior
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-To control when the idleness timer resets, set the wait mode in the SkyPilot YAML:
+A cluster is considered idle if there are no in‑progress jobs (pending or running)
+and no active SSH sessions. You can change the idleness criteria in SkyPilot YAML with
+:ref:`resources.autostop.wait_for <yaml-spec-resources-autostop>`.
+
+``wait_for`` can be set as one of the followings:
+
+- ``jobs_and_ssh`` (default): Wait for in‑progress jobs and SSH connections to finish.
+- ``jobs``: Only wait for in‑progress jobs — useful for ignoring long‑running SSH or IDE connections.
+- ``none``: Wait for nothing; autostop right after ``idle_minutes`` — useful for ignoring long‑running jobs (e.g., Jupyter notebooks) and enforcing a hard time limit.
+
+Examples:
 
 .. code-block:: yaml
 
