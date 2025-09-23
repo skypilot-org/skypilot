@@ -450,7 +450,7 @@ def schedule_on_boot_check():
         executor.schedule_request(
             request_id='skypilot-server-on-boot-check',
             request_name='check',
-            request_body=payloads.RequestBody(),
+            request_body=payloads.CheckBody(),
             func=sky_check.check,
             schedule_type=requests_lib.ScheduleType.SHORT,
             is_skypilot_system=True,
