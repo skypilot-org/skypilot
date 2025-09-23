@@ -55,8 +55,6 @@ apiService:
   # Refer to https://docs.skypilot.co/en/latest/reference/config.html for more details.
   # @schema type: [string, null]
   config: null
-
-  
   # config: |
   #   admin_policy: admin_policy_examples.AddLabelsPolicy
   #

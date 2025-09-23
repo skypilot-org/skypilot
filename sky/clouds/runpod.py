@@ -2,6 +2,7 @@
 
 from importlib import util as import_lib_util
 import os
+import sys
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
@@ -286,9 +287,7 @@ class RunPod(clouds.Cloud):
     @classmethod
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Verify that the user has valid credentials for RunPod. """
-        # Build a context-aware hint based on Python version
         try:
-            import sys  # pylint: disable=import-outside-toplevel
             if sys.version_info >= (3, 11):
                 dependency_error_msg = (
                     'Failed to import runpod or TOML parser. '
@@ -296,7 +295,7 @@ class RunPod(clouds.Cloud):
             else:
                 dependency_error_msg = (
                     'Failed to import runpod or TOML parser. '
-                    'Install: pip install "skypilot[runpod]" tomli')
+                    'Install: pip install "skypilot[runpod]" tomli.')
         except Exception:  # pylint: disable=broad-except
             dependency_error_msg = (
                 'Failed to import runpod or TOML parser. '

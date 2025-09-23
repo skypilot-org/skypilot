@@ -3350,10 +3350,8 @@ def check(infra_list: Tuple[str],
     sdk.stream_and_get(request_id)
     api_server_url = server_common.get_server_url()
     click.echo()
-    # Print original URL to keep it clickable for dashboard access.
     click.echo(
-        click.style(f'Using SkyPilot API server: {api_server_url}',
-                    fg='green'))
+        click.style(f'Using SkyPilot API server: {api_server_url}', fg='green'))
 
 
 @cli.command()

@@ -168,9 +168,7 @@ spec:
             # If the config.yaml is empty, we initialize the config on PVC with
             # user specified config.
             cp /var/skypilot/config/config.yaml /root/.sky/config.yaml
-          fi
-
-          
+          fi          
           {{- if .Values.apiService.sshNodePools }}
           mkdir -p /root/.sky
           # The PVC serves as the ground truth for the ssh_node_pools.yaml file, if it already exists we don't overwrite it
