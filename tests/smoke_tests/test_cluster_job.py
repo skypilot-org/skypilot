@@ -700,6 +700,21 @@ def test_efa():
     smoke_tests_utils.run_one_test(test)
 
 
+# ---------- NeMo RL. ----------
+@pytest.mark.aws
+def test_nemorl():
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'nemorl',
+        [
+            f'sky launch -y -c {name} tests/test_yamls/nemorl.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Web apps with custom ports on GCP. ----------
 @pytest.mark.gcp
 def test_gcp_http_server_with_custom_ports():
