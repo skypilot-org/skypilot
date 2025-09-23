@@ -53,6 +53,7 @@ export async function getClusters({ clusterNames = null } = {}) {
       cluster_names: clusterNames,
       all_users: true,
       include_credentials: false,
+      summary_response: clusterNames == null,
     });
 
     const clusterData = clusters.map((cluster) => {
@@ -112,11 +113,19 @@ export async function getClusters({ clusterNames = null } = {}) {
   }
 }
 
-export async function getClusterHistory() {
+export async function getClusterHistory(clusterHash = null) {
   try {
-    const history = await apiClient.fetch('/cost_report', {
+    const requestBody = {
       days: 30,
-    });
+      dashboard_summary_response: true,
+    };
+
+    // If a specific cluster hash is provided, include it in the request
+    if (clusterHash) {
+      requestBody.cluster_hashes = [clusterHash];
+    }
+
+    const history = await apiClient.fetch('/cost_report', requestBody);
 
     console.log('Raw cluster history data:', history); // Debug log
 

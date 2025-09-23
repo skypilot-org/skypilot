@@ -185,8 +185,9 @@ def encode_cost_report(
     for cluster_report in cost_report:
         if cluster_report['status'] is not None:
             cluster_report['status'] = cluster_report['status'].value
-        cluster_report['resources'] = pickle_and_encode(
-            cluster_report['resources'])
+        if 'resources' in cluster_report:
+            cluster_report['resources'] = pickle_and_encode(
+                cluster_report['resources'])
     return cost_report
 
 

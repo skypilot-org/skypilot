@@ -617,6 +617,7 @@ exclude.py
             test_commands,
             teardown_commands,
             smoke_tests_utils.get_timeout(generic_cloud, 15 * 60),  # 15 mins
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         )
         smoke_tests_utils.run_one_test(test)
 

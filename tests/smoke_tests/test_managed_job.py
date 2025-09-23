@@ -940,6 +940,9 @@ def test_managed_jobs_storage(generic_cloud: str):
             'output.txt',
             storage_account_name=storage_account_name)
         az_output_check_cmd = f'{az_check_file_count} | grep 1'
+        nebius_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
+            storage_lib.StoreType.NEBIUS, output_storage_name, 'output.txt')
+        nebius_output_check_cmd = f'{nebius_check_file_count} | grep 1'
         cloud_dependencies_setup_cmd = ' && '.join(
             controller_utils._get_cloud_dependencies_installation_commands(
                 controller_utils.Controllers.JOBS_CONTROLLER))
@@ -951,7 +954,7 @@ def test_managed_jobs_storage(generic_cloud: str):
         output_check_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
             name, f'{cloud_dependencies_setup_cmd}; '
             f'{try_activating_gcp_service_account}; '
-            f'{{ {s3_output_check_cmd} || {gcs_output_check_cmd} || {az_output_check_cmd}; }}'
+            f'{{ {s3_output_check_cmd} || {gcs_output_check_cmd} || {az_output_check_cmd} || {nebius_output_check_cmd}; }}'
         )
         use_spot = ' --no-use-spot'
         storage_removed_check_s3_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_ls_cmd(
@@ -1270,6 +1273,11 @@ def _get_ha_kill_test(name: str, generic_cloud: str,
 @pytest.mark.kubernetes
 @pytest.mark.managed_jobs
 def test_managed_jobs_ha_kill_running(generic_cloud: str):
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip(
+            'Skipping HA test in non-docker remote api server environment as '
+            'controller might be managed by different user/test agents')
+
     name = smoke_tests_utils.get_cluster_name()
     test = _get_ha_kill_test(
         name,
@@ -1284,6 +1292,10 @@ def test_managed_jobs_ha_kill_running(generic_cloud: str):
 @pytest.mark.kubernetes
 @pytest.mark.managed_jobs
 def test_managed_jobs_ha_kill_starting(generic_cloud: str):
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip(
+            'Skipping HA test in non-docker remote api server environment as '
+            'controller might be managed by different user/test agents')
     name = smoke_tests_utils.get_cluster_name()
     test = _get_ha_kill_test(
         name,

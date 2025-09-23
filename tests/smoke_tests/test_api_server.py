@@ -1,10 +1,14 @@
-from typing import List
+from typing import List, Optional, TypeVar
 
 import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
+from sky.client import common as client_common
+from sky.server import common as server_common
 from sky.skylet import constants
+
+T = TypeVar('T')
 
 
 def set_user(user_id: str, user_name: str, commands: List[str]) -> List[str]:
@@ -215,3 +219,43 @@ def test_requests_scheduling(generic_cloud: str):
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+# ---- Test recent request tracking -----
+def test_recent_request_tracking(generic_cloud: str):
+    with smoke_tests_utils.override_sky_config():
+        # We need to override the sky api endpoint env if --remote-server is
+        # specified, so we can run the test on the remote server.
+        name = smoke_tests_utils.get_cluster_name()
+        task = sky.Task(run="whoami")
+        task.set_resources(
+            sky.Resources(infra=generic_cloud,
+                          **smoke_tests_utils.LOW_RESOURCE_PARAM))
+        try:
+            # launch two jobs
+            req_id = sky.launch(task, cluster_name=name)
+            sky.get(req_id)
+            req_id_exec = sky.exec(task, cluster_name=name)
+            sky.get(req_id_exec)
+
+            params = {
+                'request_id': None,
+                'log_path': None,
+                'tail': None,
+                'follow': True,
+                'format': 'console',
+            }
+            response = server_common.make_authenticated_request(
+                'GET',
+                '/api/stream',
+                params=params,
+                retry=False,
+                timeout=(
+                    client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
+                    None),
+                stream=True)
+            stream_request_id: Optional[server_common.RequestId[
+                T]] = server_common.get_stream_request_id(response)
+            assert req_id_exec == stream_request_id
+        finally:
+            sky.get(sky.down(name))

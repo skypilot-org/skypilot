@@ -1429,6 +1429,7 @@ def status(
     all_users: bool = False,
     *,
     _include_credentials: bool = False,
+    _summary_response: bool = False,
 ) -> server_common.RequestId[List[responses.StatusResponse]]:
     """Gets cluster statuses.
 
@@ -1514,6 +1515,7 @@ def status(
         refresh=refresh,
         all_users=all_users,
         include_credentials=_include_credentials,
+        summary_response=_summary_response,
     )
     response = server_common.make_authenticated_request(
         'POST', '/status', json=json.loads(body.model_dump_json()))
@@ -2064,6 +2066,12 @@ def stream_and_get(
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None),
         stream=True)
+    stream_request_id: Optional[server_common.RequestId[
+        T]] = server_common.get_stream_request_id(response)
+    if request_id is not None and stream_request_id is not None:
+        assert request_id == stream_request_id
+    if request_id is None:
+        request_id = stream_request_id
     if response.status_code in [404, 400]:
         detail = response.json().get('detail')
         with ux_utils.print_exception_no_traceback():

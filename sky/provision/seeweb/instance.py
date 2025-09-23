@@ -502,9 +502,10 @@ class SeewebNodeProvider:
 # =============================================================================
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: ProvisionConfig) -> ProvisionRecord:
     """Run instances for Seeweb cluster."""
+    del cluster_name  # unused
     provider = SeewebNodeProvider(config, cluster_name_on_cloud)
     provider.run_instances(config.node_config, config.count)
 

@@ -24,6 +24,7 @@ Install SkyPilot using pip:
           pip install "skypilot[gcp]"
           pip install "skypilot[azure]"
           pip install "skypilot[oci]"
+          # Nebius is only supported for Python >= 3.10
           pip install "skypilot[nebius]"
           pip install "skypilot[lambda]"
           pip install "skypilot[runpod]"
@@ -35,7 +36,9 @@ Install SkyPilot using pip:
           # SCP is only supported for Python <= 3.11
           pip install "skypilot[scp]"
           pip install "skypilot[vsphere]"
-          # Nebius is only supported for Python >= 3.10
+          # Seeweb is only supported for Python >= 3.10
+          pip install "skypilot[seeweb]"
+          pip install "skypilot[primeintellect]"
 
           pip install "skypilot[all]"
 
@@ -67,6 +70,8 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[ibm]"
           pip install "skypilot-nightly[scp]"
           pip install "skypilot-nightly[vsphere]"
+          pip install "skypilot-nightly[primeintellect]"
+
           pip install "skypilot-nightly[all]"
 
 
@@ -99,6 +104,8 @@ Install SkyPilot using pip:
           pip install -e ".[ibm]"
           pip install -e ".[scp]"
           pip install -e ".[vsphere]"
+          pip install -e ".[primeintellect]"
+
           pip install -e ".[all]"
 
 To use more than one cloud, combine the pip extras:
@@ -142,17 +149,17 @@ SkyPilot can be installed using `uv <https://github.com/astral-sh/uv>`_, a fast 
           # Create a virtual environment with pip pre-installed (required for SkyPilot)
           uv venv --seed --python 3.10
           source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-          
+
           # Install SkyPilot with your chosen cloud providers
           uv pip install "skypilot[kubernetes,aws,gcp]"
-          
+
           # Azure CLI has an issue with uv, and requires '--prerelease allow'.
           uv pip install --prerelease allow azure-cli
           uv pip install "skypilot[azure]"
 
         .. note::
-          
-          The ``--seed`` flag is **required** as it ensures ``pip`` is installed in the virtual environment. 
+
+          The ``--seed`` flag is **required** as it ensures ``pip`` is installed in the virtual environment.
           SkyPilot needs ``pip`` to build wheels for remote cluster setup.
 
     .. tab-item:: uv tool
@@ -162,16 +169,16 @@ SkyPilot can be installed using `uv <https://github.com/astral-sh/uv>`_, a fast 
 
           # Install as a globally available tool with pip included
           uv tool install --with pip "skypilot[aws,gcp]"
-          
+
           # Or with all cloud providers
           uv tool install --with pip "skypilot[all]"
-          
+
           # Now you can use sky directly
           sky check
 
         .. note::
-          
-          The ``--with pip`` flag is **required** when using ``uv tool install``. 
+
+          The ``--with pip`` flag is **required** when using ``uv tool install``.
           Without it, SkyPilot will fail when building wheels for remote clusters.
 
 
@@ -228,6 +235,7 @@ This will produce a summary like:
     vSphere: enabled
     Cloudflare (for R2 object store): enabled
     Kubernetes: enabled
+    Seeweb: enabled
 
 If any cloud's credentials or dependencies are missing, ``sky check`` will
 output hints on how to resolve them. You can also refer to the cloud setup
@@ -448,7 +456,7 @@ Together AI
 
 .. code-block:: shell
 
-  KUBECONFIG=./together-kubeconfig:~/.kube/config kubectl config view --flatten > /tmp/merged_kubeconfig && mv /tmp/merged_kubeconfig ~/.kube/config    
+  KUBECONFIG=./together-kubeconfig:~/.kube/config kubectl config view --flatten > /tmp/merged_kubeconfig && mv /tmp/merged_kubeconfig ~/.kube/config
 
 
 Paperspace
@@ -643,96 +651,33 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
   Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
 
 
+Prime Intellect
+~~~~~~~~~~~~~~~~~~~
+
+`Prime Intellect <https://primeintellect.ai/>`__ makes it easy to find global compute resources and train state-of-the-art models through distributed training across clusters. To configure Prime Intellect access, install and configure `Prime Intellect CLI <https://docs.primeintellect.ai/cli-reference/introduction>`__:
+
+.. code-block:: shell
+
+  mkdir -p ~/.prime
+  prime login
+  # optional: set team id
+  prime config set-team-id <team_id>
 
 
 Seeweb
 ~~~~~~~~~~~~~~~~~~
 
-`Seeweb <https://www.seeweb.it/>`_ Seeweb is your European Cloud Provider specialized in high-performance Cloud solutions and GPU servers ideal for powering artificial intelligence efficiently and sustainably. With a 100% renewable energy-powered infrastructure and an excellent price-performance ratio, Seeweb enables AI innovation with a responsible environmental impact.
+`Seeweb <https://www.seeweb.it/>`_ is your European GPU Cloud Provider. To access Seeweb:
 
 
-Setup
-======
+1. Log into your `Seeweb dashboard : <https://cloudcenter.seeweb.it/>`__.
+2. Navigate to *Compute → API Token* in the control panel, and create **New TOKEN**.
+3. Create the file :code:`~/.seeweb_cloud/seeweb_keys` with the following contents:
 
-
-Prerequisites
-^^^^^^^^^^^^^^^
-
-* A Seeweb Cloud account.
-* A Seeweb API token with permissions to create servers.
-* (Recommended) An SSH public key added to your Seeweb profile.
-* **ecsapi** 0.2.0 installed <https://pypi.org/project/ecsapi/> :
-
-.. code-block:: bash
-
-   pip install ecsapi
-
-
-Flow to generate an API token for GPU compute access:
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-1. Create a `billing account by registering at <https://aop.seeweb.it/en#>`__.
-2. Log into your `Seeweb dashboard : <https://cloudcenter.seeweb.it/>`__.
-3. Navigate to *Compute → API Token* in the control panel. __.
-4. Click **`"NEW TOKEN"**, assign a name, and confirm.`__.
-5. **Copy the generated token** , it can now be used to authenticate all Seeweb services.
-
-
-Authentication
-^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-SkyPilot reads your credentials from a Seeweb key file.
-Create the file :code:`~/.seeweb_cloud/seeweb_keys` with the following contents:
-
-::
+.. code-block::
 
     [DEFAULT]
     api_key = <your-api-token>
-
-
-
-The directory :code:`~/.seeweb_cloud` must exist and be readable by you.
-
-
-
-Verify credentials:
-^^^^^^^^^^^^^^^^^^^^^
-
-.. code-block:: bash
-
-   sky check seeweb
-
-If successful you will see::
-
-  Seeweb: enabled [compute]
-
-  🎉 Enabled infra 🎉
-  Seeweb [compute]
-
-
-
-Limitations
-^^^^^^^^^^^^^^^^^^^^^^^^
-
-* **No spot instances** – ``use_spot`` is ignored on Seeweb.
-* **No Storage implemented** – ``--storage`` is not supported.
-* **Ports** – ``ports:`` stanza is not implemented; configure firewall rules manually via Seeweb.
-* **Custom Docker images** via ``--image`` are unsupported.
-
-Troubleshooting
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-* **Authentication fails:** ensure ``api_key`` is configured correctly.
-* **SSH access denied:** confirm your public key is added to Seeweb before launching servers; otherwise retrieve the one‑time root password from the Seeweb panel.
-* **Instance type unavailable:** not all plans exist in every region. Either specify a region that supports the plan or let SkyPilot auto‑select.
-
-See also
-^^^^^^^^^^^^^^^^^^^^^
-
-* `Seeweb API docs <https://docs.seeweb.it/>`_
-* `SkyPilot GitHub <https://github.com/skypilot-org/skypilot>`_
-* `Example Seeweb integration <https://github.com/m4oc/skypilot/tree/SeewebSky>`_
-
 
 
 Request quotas for first time users

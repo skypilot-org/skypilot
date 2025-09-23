@@ -1118,6 +1118,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
         config = auth.setup_hyperbolic_authentication(config)
     elif isinstance(cloud, clouds.Shadeform):
         config = auth.setup_shadeform_authentication(config)
+    elif isinstance(cloud, clouds.PrimeIntellect):
+        config = auth.setup_primeintellect_authentication(config)
     elif isinstance(cloud, clouds.Seeweb):
         config = auth.setup_seeweb_authentication(config)
     else:
@@ -2333,11 +2335,13 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             'All nodes up; SkyPilot runtime healthy.',
             global_user_state.ClusterEventType.STATUS_CHANGE,
             nop_if_duplicate=True)
-        global_user_state.add_or_update_cluster(cluster_name,
-                                                handle,
-                                                requested_resources=None,
-                                                ready=True,
-                                                is_launch=False)
+        global_user_state.add_or_update_cluster(
+            cluster_name,
+            handle,
+            requested_resources=None,
+            ready=True,
+            is_launch=False,
+            existing_cluster_hash=record['cluster_hash'])
         return global_user_state.get_cluster_from_name(cluster_name)
 
     # All cases below are transitioning the cluster to non-UP states.
@@ -2543,11 +2547,13 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             global_user_state.ClusterEventType.STATUS_CHANGE,
             nop_if_duplicate=True,
             duplicate_regex=init_reason_regex)
-        global_user_state.add_or_update_cluster(cluster_name,
-                                                handle,
-                                                requested_resources=None,
-                                                ready=False,
-                                                is_launch=False)
+        global_user_state.add_or_update_cluster(
+            cluster_name,
+            handle,
+            requested_resources=None,
+            ready=False,
+            is_launch=False,
+            existing_cluster_hash=record['cluster_hash'])
         return global_user_state.get_cluster_from_name(cluster_name)
     # Now is_abnormal is False: either node_statuses is empty or all nodes are
     # STOPPED.
@@ -3024,6 +3030,7 @@ def get_clusters(
     cluster_names: Optional[Union[str, List[str]]] = None,
     all_users: bool = True,
     include_credentials: bool = False,
+    summary_response: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _include_is_managed: bool = False,
@@ -3051,6 +3058,19 @@ def get_clusters(
         A list of cluster records. If the cluster does not exist or has been
         terminated, the record will be omitted from the returned list.
     """
+    if cluster_names is not None:
+        if isinstance(cluster_names, str):
+            cluster_names = [cluster_names]
+        non_glob_cluster_names = []
+        glob_cluster_names = []
+        for cluster_name in cluster_names:
+            if ux_utils.is_glob_pattern(cluster_name):
+                glob_cluster_names.append(cluster_name)
+            else:
+                non_glob_cluster_names.append(cluster_name)
+        cluster_names = non_glob_cluster_names
+        if glob_cluster_names:
+            cluster_names += _get_glob_clusters(glob_cluster_names, silent=True)
 
     exclude_managed_clusters = False
     if not (_include_is_managed or env_options.Options.SHOW_DEBUG_INFO.get()):
@@ -3059,33 +3079,24 @@ def get_clusters(
     if not all_users:
         user_hashes_filter = {common_utils.get_current_user().id}
     accessible_workspaces = workspaces_core.get_workspaces()
-
     records = global_user_state.get_clusters(
         exclude_managed_clusters=exclude_managed_clusters,
         user_hashes_filter=user_hashes_filter,
-        workspaces_filter=accessible_workspaces)
+        workspaces_filter=accessible_workspaces,
+        cluster_names=cluster_names,
+        summary_response=summary_response)
 
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
 
     if cluster_names is not None:
-        if isinstance(cluster_names, str):
-            cluster_names = [cluster_names]
-        cluster_names = _get_glob_clusters(cluster_names, silent=True)
-        new_records = []
-        not_exist_cluster_names = []
-        for cluster_name in cluster_names:
-            for record in records:
-                if record['name'] == cluster_name:
-                    new_records.append(record)
-                    break
-            else:
-                not_exist_cluster_names.append(cluster_name)
-        if not_exist_cluster_names:
-            clusters_str = ', '.join(not_exist_cluster_names)
+        record_names = {record['name'] for record in records}
+        not_found_clusters = ux_utils.get_non_matched_query(
+            cluster_names, record_names)
+        if not_found_clusters:
+            clusters_str = ', '.join(not_found_clusters)
             logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
-        records = new_records
 
     def _get_records_with_handle(
             records: List[Optional[Dict[str, Any]]]) -> List[Dict[str, Any]]:
@@ -3145,7 +3156,7 @@ def get_clusters(
             record['credentials'] = credential
 
     def _update_records_with_resources(
-            records: List[Optional[Dict[str, Any]]]) -> None:
+        records: List[Optional[Dict[str, Any]]],) -> None:
         """Add the resources to the record."""
         for record in _get_records_with_handle(records):
             handle = record['handle']
@@ -3723,13 +3734,24 @@ def invoke_skylet_with_retries(func: Callable[..., T]) -> T:
             return func()
         except grpc.RpcError as e:
             last_exception = e
-            if e.code() == grpc.StatusCode.INTERNAL:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.SkyletInternalError(e.details())
-            elif e.code() == grpc.StatusCode.UNAVAILABLE:
-                time.sleep(backoff.current_backoff())
-            else:
-                raise e
+            _handle_grpc_error(e, backoff.current_backoff())
+
     raise RuntimeError(
         f'Failed to invoke Skylet after {max_attempts} attempts: {last_exception}'
     ) from last_exception
+
+
+def _handle_grpc_error(e: 'grpc.RpcError', current_backoff: float) -> None:
+    if e.code() == grpc.StatusCode.INTERNAL:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.SkyletInternalError(e.details())
+    elif e.code() == grpc.StatusCode.UNAVAILABLE:
+        time.sleep(current_backoff)
+    elif e.code() == grpc.StatusCode.UNIMPLEMENTED:
+        # Handle backwards compatibility: old server doesn't implement this RPC.
+        # Let the caller fall back to legacy execution.
+        raise exceptions.SkyletMethodNotImplementedError(
+            f'gRPC method not implemented on server, falling back to legacy execution: {e.details()}'
+        )
+    else:
+        raise e
