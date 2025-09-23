@@ -24,7 +24,7 @@ class TestOAuth2ProxyMiddleware:
                 'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED': 'true',
                 'SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL': 'http://oauth2-proxy:4180'
             }):
-            return OAuth2ProxyMiddleware(application=mock.Mock())
+            return OAuth2ProxyMiddleware(app=mock.Mock())
 
     @pytest.fixture
     def middleware_disabled(self):
@@ -32,7 +32,7 @@ class TestOAuth2ProxyMiddleware:
         with mock.patch.dict(os.environ,
                              {'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED': 'false'},
                              clear=True):
-            return OAuth2ProxyMiddleware(application=mock.Mock())
+            return OAuth2ProxyMiddleware(app=mock.Mock())
 
     @pytest.fixture
     def mock_request(self):
@@ -346,7 +346,7 @@ class TestOAuth2ProxyMiddleware:
             with pytest.raises(ValueError,
                                match='OAuth2 Proxy is enabled but base_url is '
                                'not set'):
-                OAuth2ProxyMiddleware(application=mock.Mock())
+                OAuth2ProxyMiddleware(app=mock.Mock())
 
     @pytest.mark.asyncio
     async def test_forward_to_oauth2_proxy_connection_error(

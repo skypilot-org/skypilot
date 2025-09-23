@@ -422,11 +422,12 @@ class ReplicaInfo:
                 based on the cluster name.
         """
         if cluster_record is None:
-            cluster_record = global_user_state.get_cluster_from_name(
+            handle = global_user_state.get_handle_from_cluster_name(
                 self.cluster_name)
-        if cluster_record is None:
+        else:
+            handle = cluster_record['handle']
+        if handle is None:
             return None
-        handle = cluster_record['handle']
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
         return handle
 
@@ -442,6 +443,12 @@ class ReplicaInfo:
     def url(self) -> Optional[str]:
         handle = self.handle()
         if handle is None:
+            return None
+        if self.replica_port == '-':
+            # This is a pool replica so there is no endpoint and it's filled
+            # with this dummy value. We return None here so that we can
+            # get the active ready replicas and perform autoscaling. Otherwise,
+            # would error out when trying to get the endpoint.
             return None
         replica_port_int = int(self.replica_port)
         try:
@@ -956,7 +963,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         # provision) or the cluster is preempted and cleaned up by the status
         # refresh. In this case, we skip spawning a new down process to save
         # controller resources.
-        if global_user_state.get_cluster_from_name(info.cluster_name) is None:
+        if not global_user_state.cluster_with_name_exists(info.cluster_name):
             self._handle_sky_down_finish(info, exitcode=0)
             return
 
