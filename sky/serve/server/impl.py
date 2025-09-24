@@ -12,7 +12,6 @@ import colorama
 import filelock
 
 from sky import backends
-from sky import clouds
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
@@ -22,8 +21,6 @@ from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.catalog import common as service_catalog_common
 from sky.data import storage as storage_lib
-from sky.provision.kubernetes import network_utils as k8s_network_utils
-from sky.provision.kubernetes import utils as k8s_provision_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -90,6 +87,10 @@ def _validate_https_support_on_controller(
         cluster_yaml_dict = (global_user_state.get_cluster_yaml_dict(
             controller_handle.cluster_yaml) or {})
         provider_config = cluster_yaml_dict.get('provider', {})
+
+    from sky import clouds # pylint: disable=import-outside-toplevel
+    from sky.provision.kubernetes import network_utils as k8s_network_utils # pylint: disable=import-outside-toplevel
+    from sky.provision.kubernetes import utils as k8s_provision_utils # pylint: disable=import-outside-toplevel
 
     launched_resources = getattr(controller_handle, 'launched_resources', None)
     if (launched_resources is None or
