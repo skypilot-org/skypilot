@@ -189,7 +189,8 @@ class Kubernetes(clouds.Cloud):
         ]
 
         allow_all_contexts_env = kubernetes_utils.are_all_contexts_allowed()
-        if allowed_contexts == 'all' or allow_all_contexts_env:
+        if allowed_contexts == 'all' or (allowed_contexts is None and
+                                         allow_all_contexts_env):
             allowed_contexts = all_contexts
 
         if allowed_contexts is None:
