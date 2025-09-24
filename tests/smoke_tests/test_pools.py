@@ -176,6 +176,11 @@ def check_for_setup_message(pool_name: str,
         f'echo "$s"; echo; echo; echo "$s" | grep "{setup_message}"')
 
 
+def check_for_recovery_message_on_controller(job_name: str):
+    return (f's=$(sky jobs logs --controller -n {job_name} --no-follow); '
+            f'echo "$s"; echo; echo; echo "$s" | grep "RECOVERING"')
+
+
 def basic_pool_conf(
     num_workers: int,
     infra: str,
@@ -546,6 +551,7 @@ def test_pool_preemption(generic_cloud: str):
                     # # Wait until job is running.
                     wait_until_job_status(job_name, ['RUNNING'],
                                           timeout=timeout),
+                    check_for_recovery_message_on_controller(job_name),
                 ],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud),
                 teardown=
@@ -679,6 +685,7 @@ def test_pool_job_cancel_recovery(generic_cloud: str):
                     wait_until_job_status(job_name, ['RUNNING', 'RECOVERING'],
                                           timeout=timeout,
                                           time_between_checks=1),
+                    check_for_recovery_message_on_controller(job_name),
                     # Cancel the job.
                     cancel_job(job_name),
                     # Ensure the job is cancelled.
