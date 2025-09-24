@@ -685,6 +685,13 @@ def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
         _image_df = common.read_catalog('gcp/images.csv',
                                         pull_frequency_hours=0)
         image_id = common.get_image_id_from_tag_impl(_image_df, tag, region)
+    # Remove this debug lines after catalog PR merged
+    if tag == 'skypilot:custom-cpu-ubuntu-2204-250923':
+        image_id = ('projects/sky-dev-465/global/images/'
+                    'skypilot-gcp-cpu-ubuntu-250923')
+    elif tag == 'skypilot:custom-gpu-ubuntu-2204-250923':
+        image_id = ('projects/sky-dev-465/global/images/'
+                    'skypilot-gcp-gpu-ubuntu-250923')
     return image_id
 
 
