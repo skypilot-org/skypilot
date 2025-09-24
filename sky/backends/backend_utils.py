@@ -3181,7 +3181,7 @@ def get_clusters(
             cluster_names += _get_glob_clusters(
                 glob_cluster_names,
                 silent=True,
-                workspaces_filter=accessible_workspaces)
+                workspaces_filter=set(accessible_workspaces.keys()))
 
     exclude_managed_clusters = False
     if not (_include_is_managed or env_options.Options.SHOW_DEBUG_INFO.get()):
@@ -3192,7 +3192,7 @@ def get_clusters(
     records = global_user_state.get_clusters(
         exclude_managed_clusters=exclude_managed_clusters,
         user_hashes_filter=user_hashes_filter,
-        workspaces_filter=accessible_workspaces,
+        workspaces_filter=set(accessible_workspaces.keys()),
         cluster_names=cluster_names,
         summary_response=summary_response)
 
