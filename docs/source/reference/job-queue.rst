@@ -219,9 +219,11 @@ Thus, we may see the following job statuses on this cluster:
 Using ``workdir`` with multiple jobs
 ------------------------------------
 
-If multiple jobs are submitted to a cluster with the same ``workdir``, all queued jobs share the latest working directory.
-
-If multiple jobs are queued for one cluster, the latest version of the working directory may affect previous queued jobs.
+If multiple jobs are submitted to a cluster and they all upload contents to ``workdir``.
+Each job may or may not see its corresponding local contents,
+depending on its time of execution and when other jobs' workdir uploads are run.
+See :ref:`sync code from a local directory or a git repository <sync-code-and-project-files-git>`
+for more details.
 
 For example, when running the following commands:
 
@@ -246,3 +248,8 @@ To pass information that varies between jobs, use the ``--env`` or ``--env-file`
   ...
 
 The commands above are guaranteed to print "1" for the first job and "2" for the second job.
+
+.. tip::
+
+  If you are changing the workdir per job to ensure different queued jobs use their own versions of code,
+  use Managed Jobs instead, which uploads each job's workdir to a temporary, job-scoped bucket.
