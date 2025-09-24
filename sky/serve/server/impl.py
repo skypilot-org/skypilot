@@ -76,6 +76,41 @@ def _rewrite_tls_credential_paths_and_get_tls_env_vars(
     return tls_template_vars
 
 
+def _validate_https_support_on_controller(
+        task: 'task_lib.Task',
+        controller_handle: backends.ResourceHandle) -> None:
+    service_spec = task.service
+    if service_spec is None or service_spec.tls_credential is None:
+        return
+    if not isinstance(controller_handle, backends.CloudVmRayResourceHandle):
+        return
+
+    provider_config: Dict[str, Any] = {}
+    if controller_handle.cluster_yaml is not None:
+        cluster_yaml_dict = (global_user_state.get_cluster_yaml_dict(
+            controller_handle.cluster_yaml) or {})
+        provider_config = cluster_yaml_dict.get('provider', {})
+
+    launched_resources = getattr(controller_handle, 'launched_resources', None)
+    if (launched_resources is None or
+            not launched_resources.cloud.is_same_cloud(clouds.Kubernetes()) or
+            not provider_config):
+        return
+
+    context = k8s_provision_utils.get_context_from_config(provider_config)
+    port_mode = k8s_network_utils.get_port_mode(
+        provider_config.get('port_mode'), context)
+    if port_mode == kubernetes_enums.KubernetesPortMode.INGRESS:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                'SkyServe HTTPS is not supported when the Kubernetes '
+                'provider exposes ports via Ingress. Configure TLS '
+                'passthrough on the ingress controller or switch the '
+                'provider port_mode to "LoadBalancer" before enabling '
+                'HTTPS.'
+            )
+
+
 def _get_service_record(
         service_name: str, pool: bool,
         handle: backends.CloudVmRayResourceHandle,
@@ -353,35 +388,7 @@ def up(
                 lb_port_payload)
             if not serve_utils.is_consolidation_mode(pool) and not pool:
                 assert task.service is not None
-                if (task.service.tls_credential is not None and
-                        isinstance(controller_handle,
-                                   backends.CloudVmRayResourceHandle)):
-                    provider_config: Dict[str, Any] = {}
-                    if controller_handle.cluster_yaml is not None:
-                        cluster_yaml_dict = global_user_state \
-                            .get_cluster_yaml_dict(
-                                controller_handle.cluster_yaml) or {}
-                        provider_config = cluster_yaml_dict.get('provider', {})
-                    launched_resources = getattr(controller_handle,
-                                                   'launched_resources', None)
-                    if (launched_resources is not None and
-                            launched_resources.cloud.is_same_cloud(
-                                clouds.Kubernetes()) and provider_config):
-                        context = k8s_provision_utils.get_context_from_config(
-                            provider_config)
-                        port_mode = k8s_network_utils.get_port_mode(
-                            provider_config.get('port_mode'), context)
-                        if (port_mode ==
-                                kubernetes_enums.KubernetesPortMode.INGRESS):
-                            with ux_utils.print_exception_no_traceback():
-                                raise RuntimeError(
-                                    'SkyServe HTTPS is not supported when the '
-                                    'Kubernetes provider exposes ports via '
-                                    'Ingress. Configure TLS passthrough on the '
-                                    'ingress controller or switch the provider '
-                                    'port_mode to "LoadBalancer" before '
-                                    'enabling HTTPS.'
-                                )
+                _validate_https_support_on_controller(task, controller_handle)
                 protocol = ('https' if task.service.tls_credential is not None
                             else 'http')
                 endpoint_mapping = backend_utils.get_endpoints(
