@@ -188,9 +188,7 @@ cluster_history_table = sqlalchemy.Table(
     sqlalchemy.Column('last_activity_time',
                       sqlalchemy.Integer,
                       server_default=None),
-    sqlalchemy.Column('launched_at',
-                      sqlalchemy.Integer,
-                      server_default=None),
+    sqlalchemy.Column('launched_at', sqlalchemy.Integer, server_default=None),
 )
 
 
@@ -1375,7 +1373,7 @@ def _set_cluster_usage_intervals(
     # Calculate last_activity_time and launched_at from usage_intervals
     last_activity_time = _get_cluster_last_activity_time(usage_intervals)
     launched_at = _get_cluster_launch_time(usage_intervals)
-    
+
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         count = session.query(cluster_history_table).filter_by(
             cluster_hash=cluster_hash).update({
@@ -1753,8 +1751,8 @@ def get_clusters_from_history(
                 cluster_history_table.c.user_hash,
                 cluster_history_table.c.workspace.label('history_workspace'),
                 cluster_history_table.c.last_activity_time,
-                cluster_history_table.c.launched_at,
-                cluster_table.c.status, cluster_table.c.workspace)
+                cluster_history_table.c.launched_at, cluster_table.c.status,
+                cluster_table.c.workspace)
         else:
             query = session.query(
                 cluster_history_table.c.cluster_hash,
@@ -1766,16 +1764,14 @@ def get_clusters_from_history(
                 cluster_history_table.c.last_creation_command,
                 cluster_history_table.c.workspace.label('history_workspace'),
                 cluster_history_table.c.last_activity_time,
-                cluster_history_table.c.launched_at,
-                cluster_table.c.status, cluster_table.c.workspace)
+                cluster_history_table.c.launched_at, cluster_table.c.status,
+                cluster_table.c.workspace)
 
         query = query.select_from(
             cluster_history_table.join(cluster_table,
                                        cluster_history_table.c.cluster_hash ==
                                        cluster_table.c.cluster_hash,
                                        isouter=True))
-        # new filtering goes here
-
         if cluster_hashes is not None:
             query = query.filter(
                 cluster_history_table.c.cluster_hash.in_(cluster_hashes))
@@ -1827,11 +1823,10 @@ def get_clusters_from_history(
         user_name = user.name if user is not None else None
         if not abbreviate_response:
             last_event = last_cluster_event_dict.get(row.cluster_hash, None)
+        launched_at = row.launched_at
         usage_intervals: Optional[List[Tuple[
             int,
             Optional[int]]]] = usage_intervals_dict.get(row.cluster_hash, None)
-        # Use pre-computed launched_at from database instead of calculating from usage_intervals
-        launched_at = row.launched_at
         duration = _get_cluster_duration(usage_intervals)
 
         # Parse status
