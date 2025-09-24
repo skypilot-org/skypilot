@@ -94,23 +94,27 @@ async def logs(
     request: fastapi.Request, jobs_logs_body: payloads.JobsLogsBody,
     background_tasks: fastapi.BackgroundTasks
 ) -> fastapi.responses.StreamingResponse:
-    executor.schedule_request(
+    schedule_type = api_requests.ScheduleType.SHORT
+    if jobs_logs_body.refresh:
+        # When refresh is specified, the job controller might be restarted,
+        # which takes longer time to finish. We schedule it to long executor.
+        schedule_type = api_requests.ScheduleType.LONG
+    request_task = executor.prepare_request(
         request_id=request.state.request_id,
         request_name='jobs.logs',
         request_body=jobs_logs_body,
         func=core.tail_logs,
-        # TODO(aylei): We have tail logs scheduled as SHORT request, because it
-        # should be responsive. However, it can be long running if the user's
-        # job keeps running, and we should avoid it taking the SHORT worker
-        # indefinitely.
-        # When refresh is True we schedule it as LONG because a controller
-        # restart might be needed.
-        schedule_type=api_requests.ScheduleType.LONG
-        if jobs_logs_body.refresh else api_requests.ScheduleType.SHORT,
+        schedule_type=schedule_type,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
     )
-    request_task = await api_requests.get_request_async(request.state.request_id
-                                                       )
+    if schedule_type == api_requests.ScheduleType.LONG:
+        executor.schedule_prepared_request(request_task)
+    else:
+        # For short request, run in the coroutine to avoid blocking
+        # short workers.
+        task = executor.execute_request_in_coroutine(request_task)
+        # Cancel the coroutine after the request is done or client disconnects
+        background_tasks.add_task(task.cancel)
 
     return stream_utils.stream_response(
         request_id=request_task.request_id,

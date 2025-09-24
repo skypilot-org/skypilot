@@ -52,6 +52,7 @@ from sky.utils import cluster_utils
 from sky.utils import command_runner
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import context as context_lib
 from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import env_options
@@ -1932,6 +1933,7 @@ def tag_filter_for_cluster(cluster_name: str) -> Dict[str, str]:
     }
 
 
+@context_utils.cancellation_guard
 def _query_cluster_status_via_cloud_api(
     handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
 ) -> List[Tuple[status_lib.ClusterStatus, Optional[str]]]:
@@ -2652,6 +2654,7 @@ def refresh_cluster_record(
           the node number larger than expected.
     """
 
+    ctx = context_lib.get()
     record = global_user_state.get_cluster_from_name(
         cluster_name,
         include_user_info=include_user_info,
@@ -2674,6 +2677,9 @@ def refresh_cluster_record(
 
         # Loop until we have an up-to-date status or until we acquire the lock.
         while True:
+            # Check if the context is canceled.
+            if ctx is not None and ctx.is_canceled():
+                raise asyncio.CancelledError()
             # Check to see if we can return the cached status.
             if not _must_refresh_cluster_status(record, force_refresh_statuses):
                 return record
