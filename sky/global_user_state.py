@@ -1355,8 +1355,9 @@ def _get_cluster_last_activity_time(
     if usage_intervals:
         last_interval = usage_intervals[-1]
         last_activity_time = (last_interval[1] if last_interval[1] is not None
-                            else last_interval[0])
+                              else last_interval[0])
     return last_activity_time
+
 
 @_init_db
 @metrics_lib.time_me

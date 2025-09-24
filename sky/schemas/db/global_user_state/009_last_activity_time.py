@@ -6,8 +6,8 @@ Create Date: 2025-09-24
 
 """
 # pylint: disable=invalid-name
-from typing import Sequence, Union
 import pickle
+from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
@@ -29,45 +29,45 @@ def upgrade():
                                              'last_activity_time',
                                              sa.Integer(),
                                              server_default=None)
-        
+
         # Populate the column for existing rows
         _populate_last_activity_time()
 
 
 def _populate_last_activity_time():
-    """Populate last_activity_time for existing rows using usage_intervals logic."""
+    """Populate last_activity_time for existing rows using
+    usage_intervals logic."""
     connection = op.get_bind()
-    
+
     # Get all existing rows with usage_intervals
     result = connection.execute(
-        sa.text("SELECT cluster_hash, usage_intervals FROM cluster_history "
-                "WHERE usage_intervals IS NOT NULL")
-    )
-    
+        sa.text('SELECT cluster_hash, usage_intervals FROM cluster_history '
+                'WHERE usage_intervals IS NOT NULL'))
+
     for row in result:
         cluster_hash = row[0]
         usage_intervals_blob = row[1]
-        
+
         try:
             # Deserialize the usage_intervals
             usage_intervals = pickle.loads(usage_intervals_blob)
-            
+
             if usage_intervals:
                 # Apply the same logic as in the filtering code:
-                # Get the end time of the last interval (or start time if still running)
+                # Get the end time of the last interval (or start time if
+                # still running)
                 last_interval = usage_intervals[-1]
-                last_activity_time = (last_interval[1] if last_interval[1] is not None 
-                                    else last_interval[0])
-                
+                last_activity_time = (last_interval[1] if last_interval[1]
+                                      is not None else last_interval[0])
+
                 # Update the row with the calculated last_activity_time
                 connection.execute(
-                    sa.text("UPDATE cluster_history SET last_activity_time = :last_activity_time "
-                           "WHERE cluster_hash = :cluster_hash"),
-                    {
-                        'last_activity_time': last_activity_time,
-                        'cluster_hash': cluster_hash
-                    }
-                )
+                    sa.text('UPDATE cluster_history '
+                            'SET last_activity_time = :last_activity_time '
+                            'WHERE cluster_hash = :cluster_hash'), {
+                                'last_activity_time': last_activity_time,
+                                'cluster_hash': cluster_hash
+                            })
         except (pickle.PickleError, AttributeError, IndexError):
             # Skip rows with corrupted or invalid usage_intervals
             continue
