@@ -247,8 +247,8 @@ def copy_example_assets(app, exception):
     if exception is not None:
         return
 
-    import shutil
     import glob
+    import shutil
 
     # Only copy assets for HTML builds
     if app.builder.name != 'html':
