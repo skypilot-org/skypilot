@@ -1,5 +1,8 @@
 .. _installation:
 
+.. |community-badge| image:: https://img.shields.io/badge/Community%20Maintained-EAFAFF
+   :alt: Community Maintained
+
 Installation
 ==================
 
@@ -352,37 +355,6 @@ Azure
 Hint: run ``az account subscription list`` to get a list of subscription IDs under your account.
 
 
-OCI
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-To access Oracle Cloud Infrastructure (OCI), setup the credentials by following `this guide <https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm>`__. After completing the steps in the guide, the :code:`~/.oci` folder should contain the following files:
-
-.. code-block:: text
-
-  ~/.oci/config
-  ~/.oci/oci_api_key.pem
-
-The :code:`~/.oci/config` file should contain the following fields:
-
-.. code-block:: text
-
-  [DEFAULT]
-  user=ocid1.user.oc1..aaaaaaaa
-  fingerprint=aa:bb:cc:dd:ee:ff:gg:hh:ii:jj:kk:ll:mm:nn:oo:pp
-  tenancy=ocid1.tenancy.oc1..aaaaaaaa
-  region=us-sanjose-1
-  # Note that we should avoid using full home path for the key_file configuration, e.g. use ~/.oci instead of /home/username/.oci
-  key_file=~/.oci/oci_api_key.pem
-
-By default, the provisioned nodes will be in the root `compartment <https://docs.oracle.com/en/cloud/foundation/cloud_architecture/governance/compartments.html>`__. To specify the `compartment <https://docs.oracle.com/en/cloud/foundation/cloud_architecture/governance/compartments.html>`_ other than root, create/edit the file :code:`~/.sky/config.yaml`, put the compartment's OCID there, as the following:
-
-.. code-block:: text
-
-  oci:
-    region_configs:
-      default:
-        compartment_ocid: ocid1.compartment.oc1..aaaaaaaa......
-
 
 Nebius
 ~~~~~~
@@ -427,12 +399,8 @@ In the prompt, enter your Nebius Access Key ID and Secret Access Key (see `instr
 
 
 
-.. note::
-
-  The following clouds are supported/maintained by community/cloud providers. Please file an issue on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_ if you run into any issues.
-
-RunPod
-~~~~~~~~~~
+RunPod |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 `RunPod <https://runpod.io/>`__ is a specialized AI cloud provider that offers low-cost GPUs. To configure RunPod access, go to the `Settings <https://www.runpod.io/console/user/settings>`_ page on your RunPod console and generate an **API key**. Then, run:
 
@@ -442,8 +410,42 @@ RunPod
   runpod config
 
 
-Lambda Cloud
-~~~~~~~~~~~~~~~~~~
+
+OCI |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To access Oracle Cloud Infrastructure (OCI), setup the credentials by following `this guide <https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm>`__. After completing the steps in the guide, the :code:`~/.oci` folder should contain the following files:
+
+.. code-block:: text
+
+  ~/.oci/config
+  ~/.oci/oci_api_key.pem
+
+The :code:`~/.oci/config` file should contain the following fields:
+
+.. code-block:: text
+
+  [DEFAULT]
+  user=ocid1.user.oc1..aaaaaaaa
+  fingerprint=aa:bb:cc:dd:ee:ff:gg:hh:ii:jj:kk:ll:mm:nn:oo:pp
+  tenancy=ocid1.tenancy.oc1..aaaaaaaa
+  region=us-sanjose-1
+  # Note that we should avoid using full home path for the key_file configuration, e.g. use ~/.oci instead of /home/username/.oci
+  key_file=~/.oci/oci_api_key.pem
+
+By default, the provisioned nodes will be in the root `compartment <https://docs.oracle.com/en/cloud/foundation/cloud_architecture/governance/compartments.html>`__. To specify the `compartment <https://docs.oracle.com/en/cloud/foundation/cloud_architecture/governance/compartments.html>`_ other than root, create/edit the file :code:`~/.sky/config.yaml`, put the compartment's OCID there, as the following:
+
+.. code-block:: text
+
+  oci:
+    region_configs:
+      default:
+        compartment_ocid: ocid1.compartment.oc1..aaaaaaaa......
+
+
+
+Lambda Cloud |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 `Lambda Cloud <https://lambdalabs.com/>`_ is a cloud provider offering low-cost GPUs. To configure Lambda Cloud access, go to the `API Keys <https://cloud.lambdalabs.com/api-keys>`_ page on your Lambda console to generate a key and then add it to :code:`~/.lambda_cloud/lambda_keys`:
 
@@ -453,8 +455,8 @@ Lambda Cloud
   echo "api_key = <your_api_key_here>" > ~/.lambda_cloud/lambda_keys
 
 
-Together AI
-~~~~~~~~~~~~~~~~~~
+Together AI |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 `Together AI <https://together.ai/>`_ offers GPU *instant clusters*. Accessing them is similar to using :ref:`Kubernetes <kubernetes-installation>`:
 
@@ -468,8 +470,8 @@ Together AI
   KUBECONFIG=./together-kubeconfig:~/.kube/config kubectl config view --flatten > /tmp/merged_kubeconfig && mv /tmp/merged_kubeconfig ~/.kube/config
 
 
-Paperspace
-~~~~~~~~~~~~~~~~~~
+Paperspace |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 `Paperspace <https://www.paperspace.com/>`_ is a cloud provider that provides access to GPU accelerated VMs. To configure Paperspace access, go to follow `these instructions to generate an API key <https://docs.digitalocean.com/reference/paperspace/api-keys/>`_. Add the API key with:
 
@@ -478,8 +480,8 @@ Paperspace
   mkdir -p ~/.paperspace
   echo "{'api_key' : <your_api_key_here>}" > ~/.paperspace/config.json
 
-Vast
-~~~~~~~~~~
+Vast |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 `Vast <https://vast.ai/>`__ is a cloud provider that offers low-cost GPUs. To configure Vast access, go to the `Account <https://cloud.vast.ai/account/>`_ page on your Vast console to get your **API key**. Then, run:
 
@@ -491,8 +493,8 @@ Vast
 
 
 
-Fluidstack
-~~~~~~~~~~~~~~~~~~
+Fluidstack |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 `Fluidstack <https://fluidstack.io/>`__ is a cloud provider offering low-cost GPUs. To configure Fluidstack access, go to the `Home <https://dashboard.fluidstack.io/>`__ page on your Fluidstack console to generate an API key and then add the :code:`API key` to :code:`~/.fluidstack/api_key` :
 
@@ -503,8 +505,8 @@ Fluidstack
 
 
 
-Cudo Compute
-~~~~~~~~~~~~~~~~~~
+Cudo Compute |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 `Cudo Compute <https://www.cudocompute.com/>`__ provides low cost GPUs powered by green energy.
 
@@ -530,8 +532,8 @@ If you want to want to use SkyPilot with a different Cudo Compute account or pro
 
 
 
-IBM
-~~~~~~~~~
+IBM |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 To access `IBM's VPC service <https://www.ibm.com/cloud/vpc>`__, store the following fields in ``~/.ibm/credentials.yaml``:
 
@@ -567,8 +569,8 @@ Finally, install `rclone <https://rclone.org/>`_ via: ``curl https://rclone.org/
 
 
 
-SCP (Samsung Cloud Platform)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+SCP (Samsung Cloud Platform) |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Samsung Cloud Platform, or SCP, provides cloud services optimized for enterprise customers. You can learn more about SCP `here <https://cloud.samsungsds.com/>`__.
 
@@ -589,8 +591,8 @@ To configure SCP access, you need access keys and the ID of the project your tas
 
 
 
-VMware vSphere
-~~~~~~~~~~~~~~
+VMware vSphere |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 To configure VMware vSphere access, store the vSphere credentials in :code:`~/.vsphere/credential.yaml`:
 
@@ -626,8 +628,8 @@ After configuring the vSphere credentials, ensure that the necessary preparation
 
 .. _cloudflare-r2-installation:
 
-Cloudflare R2
-~~~~~~~~~~~~~~~~~~
+Cloudflare R2 |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Cloudflare offers `R2 <https://www.cloudflare.com/products/r2>`_, an S3-compatible object storage without any egress charges.
 SkyPilot can download/upload data to R2 buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up R2 support, run:
@@ -660,8 +662,8 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
   Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
 
 
-Prime Intellect
-~~~~~~~~~~~~~~~~~~~
+Prime Intellect |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 `Prime Intellect <https://primeintellect.ai/>`__ makes it easy to find global compute resources and train state-of-the-art models through distributed training across clusters. To configure Prime Intellect access, install and configure `Prime Intellect CLI <https://docs.primeintellect.ai/cli-reference/introduction>`__:
 
@@ -673,8 +675,8 @@ Prime Intellect
   prime config set-team-id <team_id>
 
 
-Seeweb
-~~~~~~~~~~~~~~~~~~
+Seeweb |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 `Seeweb <https://www.seeweb.it/>`_ is your European GPU Cloud Provider. To access Seeweb:
 
