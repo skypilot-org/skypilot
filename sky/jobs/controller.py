@@ -1119,13 +1119,13 @@ class Controller:
             async with self._job_tasks_lock:
                 starting_count = len(self.starting)
 
-            if starting_count >= scheduler.LAUNCHES_PER_WORKER:
+            if starting_count >= controller_utils.LAUNCHES_PER_WORKER:
                 # launching a job takes around 1 minute, so lets wait half that
                 # time
                 await asyncio.sleep(30)
                 continue
 
-            if len(running_tasks) >= scheduler.JOBS_PER_WORKER:
+            if len(running_tasks) >= controller_utils.JOBS_PER_WORKER:
                 await asyncio.sleep(60)
                 continue
 

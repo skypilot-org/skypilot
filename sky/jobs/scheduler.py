@@ -55,13 +55,11 @@ import uuid
 import filelock
 
 from sky import sky_logging
-from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import sdk
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
-from sky.server import config as server_config
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import controller_utils
@@ -84,48 +82,7 @@ JOB_CONTROLLER_PID_LOCK = os.path.expanduser(
 JOB_CONTROLLER_PID_PATH = os.path.expanduser('~/.sky/job_controller_pid')
 JOB_CONTROLLER_ENV_PATH = os.path.expanduser('~/.sky/job_controller_env')
 
-# Based on testing, each worker takes around 200-300MB memory. Keeping it
-# higher to be safe.
-JOB_WORKER_MEMORY_MB = 400
-# this can probably be increased to around 300-400 but keeping it lower to just
-# to be safe
-JOBS_PER_WORKER = 200
-
 CURRENT_HASH = os.path.expanduser('~/.sky/wheels/current_sky_wheel_hash')
-
-
-def get_number_of_controllers() -> int:
-    """Returns the number of controllers that should be running.
-
-    This is the number of controllers that should be running to maximize
-    resource utilization.
-
-    In consolidation mode, we use the existing API server so our resource
-    requirements are just for the job controllers. We try taking up as much
-    much memory as possible left over from the API server.
-
-    In non-consolidation mode, we have to take into account the memory of the
-    API server workers. We limit to only 8 launches per worker, so our logic is
-    each controller will take CONTROLLER_MEMORY_MB + 8 * WORKER_MEMORY_MB. We
-    leave some leftover room for ssh codegen and ray status overhead.
-    """
-    consolidation_mode = skypilot_config.get_nested(
-        ('jobs', 'controller', 'consolidation_mode'), default_value=False)
-
-    # Measure the resources consumption for both managed jobs
-    # and pool/serve in a static ratio.
-    job_and_pool_resources = JOB_WORKER_MEMORY_MB * (
-        1. + controller_utils.POOL_JOBS_RESOURCES_RATIO)
-    total_usable_memory_mb = controller_utils.get_total_usable_memory_mb(
-        consolidation_mode)
-    resources_per_worker = job_and_pool_resources
-    # Local API Server on jobs controller.
-    if not consolidation_mode:
-        launches_per_worker = controller_utils.LAUNCHES_PER_WORKER * (
-            1. + controller_utils.POOL_JOBS_RESOURCES_RATIO)
-        resources_per_worker += (launches_per_worker *
-                                 server_config.LONG_WORKER_MEM_GB) * 1024
-    return max(1, int(total_usable_memory_mb // resources_per_worker))
 
 
 def start_controller() -> None:
@@ -223,7 +180,7 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
             alive = get_alive_controllers()
             if alive is None:
                 return
-            wanted = get_number_of_controllers()
+            wanted = controller_utils.get_number_of_jobs_controllers()
             started = 0
 
             while alive + started < wanted:

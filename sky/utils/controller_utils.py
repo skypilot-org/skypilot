@@ -1211,6 +1211,13 @@ POOL_JOBS_RESOURCES_RATIO = 1
 # increased a bit to around 16 but keeping it lower to just to be safe
 LAUNCHES_PER_WORKER = 8
 
+# Based on testing, each worker takes around 200-300MB memory. Keeping it
+# higher to be safe.
+JOB_WORKER_MEMORY_MB = 400
+# this can probably be increased to around 300-400 but keeping it lower to just
+# to be safe
+JOBS_PER_WORKER = 200
+
 
 def get_total_usable_memory_mb(consolidation_mode: bool) -> float:
     total_memory_mb = common_utils.get_mem_size_gb() * 1024
@@ -1226,6 +1233,39 @@ def get_total_usable_memory_mb(consolidation_mode: bool) -> float:
             server_config.SHORT_WORKER_MEM_GB * 1024
         return total_memory_mb - used
     return total_memory_mb - MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB
+
+
+def get_number_of_jobs_controllers() -> int:
+    """Returns the number of jobs controllers that should be running.
+
+    This is the number of controllers that should be running to maximize
+    resource utilization.
+
+    In consolidation mode, we use the existing API server so our resource
+    requirements are just for the job controllers. We try taking up as much
+    much memory as possible left over from the API server.
+
+    In non-consolidation mode, we have to take into account the memory of the
+    API server workers. We limit to only 8 launches per worker, so our logic is
+    each controller will take CONTROLLER_MEMORY_MB + 8 * WORKER_MEMORY_MB. We
+    leave some leftover room for ssh codegen and ray status overhead.
+    """
+    consolidation_mode = skypilot_config.get_nested(
+        ('jobs', 'controller', 'consolidation_mode'), default_value=False)
+
+    # Measure the resources consumption for both managed jobs
+    # and pool/serve in a static ratio.
+    job_and_pool_resources = JOB_WORKER_MEMORY_MB * (1. +
+                                                     POOL_JOBS_RESOURCES_RATIO)
+    total_usable_memory_mb = get_total_usable_memory_mb(consolidation_mode)
+    resources_per_worker = job_and_pool_resources
+    # Local API Server on jobs controller.
+    if not consolidation_mode:
+        launches_per_worker = LAUNCHES_PER_WORKER * (1. +
+                                                     POOL_JOBS_RESOURCES_RATIO)
+        resources_per_worker += (launches_per_worker *
+                                 server_config.LONG_WORKER_MEM_GB) * 1024
+    return max(1, int(total_usable_memory_mb // resources_per_worker))
 
 
 @annotations.lru_cache(scope='global', maxsize=1)
