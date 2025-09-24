@@ -37,6 +37,9 @@ from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
+from sky.provision.kubernetes import network_utils as k8s_network_utils
+from sky.provision.kubernetes import utils as k8s_provision_utils
+from sky.utils import kubernetes_enums
 
 logger = sky_logging.init_logger(__name__)
 
@@ -350,6 +353,35 @@ def up(
                 lb_port_payload)
             if not serve_utils.is_consolidation_mode(pool) and not pool:
                 assert task.service is not None
+                if (task.service.tls_credential is not None and
+                        isinstance(controller_handle,
+                                   backends.CloudVmRayResourceHandle)):
+                    provider_config: Dict[str, Any] = {}
+                    if controller_handle.cluster_yaml is not None:
+                        cluster_yaml_dict = global_user_state \
+                            .get_cluster_yaml_dict(
+                                controller_handle.cluster_yaml) or {}
+                        provider_config = cluster_yaml_dict.get('provider', {})
+                    launched_resources = getattr(controller_handle,
+                                                   'launched_resources', None)
+                    if (launched_resources is not None and
+                            launched_resources.cloud.is_same_cloud(
+                                clouds.Kubernetes()) and provider_config):
+                        context = k8s_provision_utils.get_context_from_config(
+                            provider_config)
+                        port_mode = k8s_network_utils.get_port_mode(
+                            provider_config.get('port_mode'), context)
+                        if (port_mode ==
+                                kubernetes_enums.KubernetesPortMode.INGRESS):
+                            with ux_utils.print_exception_no_traceback():
+                                raise RuntimeError(
+                                    'SkyServe HTTPS is not supported when the '
+                                    'Kubernetes provider exposes ports via '
+                                    'Ingress. Configure TLS passthrough on the '
+                                    'ingress controller or switch the provider '
+                                    'port_mode to "LoadBalancer" before '
+                                    'enabling HTTPS.'
+                                )
                 protocol = ('https' if task.service.tls_credential is not None
                             else 'http')
                 endpoint_mapping = backend_utils.get_endpoints(
