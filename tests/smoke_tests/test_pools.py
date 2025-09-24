@@ -695,8 +695,9 @@ def test_pool_job_cancel_recovery(generic_cloud: str):
 
 
 def test_pool_job_cancel_running_multiple(generic_cloud: str):
+    num_jobs = 4
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
-    pool_config = basic_pool_conf(num_workers=4, infra=generic_cloud)
+    pool_config = basic_pool_conf(num_workers=num_jobs, infra=generic_cloud)
     job_name = f'{smoke_tests_utils.get_cluster_name()}-job'
     job_config = basic_job_conf(
         job_name=job_name,
@@ -715,50 +716,32 @@ def test_pool_job_cancel_running_multiple(generic_cloud: str):
                 [
                     _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
                         pool_name=pool_name, pool_yaml=pool_yaml.name),
-                    # Immediately attempt to launch the job.
-                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
-                        pool_name=pool_name,
-                        job_yaml=job_yaml.name,
-                        job_name=f'{job_name}-1'),
-                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
-                        pool_name=pool_name,
-                        job_yaml=job_yaml.name,
-                        job_name=f'{job_name}-2'),
-                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
-                        pool_name=pool_name,
-                        job_yaml=job_yaml.name,
-                        job_name=f'{job_name}-3'),
-                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
-                        pool_name=pool_name,
-                        job_yaml=job_yaml.name,
-                        job_name=f'{job_name}-4'),
-                    # Ensure the job is running.
-                    wait_until_job_status(f'{job_name}-1', ['RUNNING'],
-                                          timeout=timeout),
-                    wait_until_job_status(f'{job_name}-2', ['RUNNING'],
-                                          timeout=timeout),
-                    wait_until_job_status(f'{job_name}-3', ['RUNNING'],
-                                          timeout=timeout),
-                    wait_until_job_status(f'{job_name}-4', ['RUNNING'],
-                                          timeout=timeout),
-                    # Cancel the job.
-                    cancel_job(f'{job_name}-1'),
-                    cancel_job(f'{job_name}-2'),
-                    cancel_job(f'{job_name}-3'),
-                    cancel_job(f'{job_name}-4'),
-                    # Ensure the job is cancelled.
-                    wait_until_job_status(f'{job_name}-1', ['CANCELLED'],
-                                          bad_statuses=[],
-                                          timeout=15),
-                    wait_until_job_status(f'{job_name}-2', ['CANCELLED'],
-                                          bad_statuses=[],
-                                          timeout=15),
-                    wait_until_job_status(f'{job_name}-3', ['CANCELLED'],
-                                          bad_statuses=[],
-                                          timeout=15),
-                    wait_until_job_status(f'{job_name}-4', ['CANCELLED'],
-                                          bad_statuses=[],
-                                          timeout=15),
+                    # Immediately attempt to launch the jobs.
+                    *[
+                        _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
+                            pool_name=pool_name,
+                            job_yaml=job_yaml.name,
+                            job_name=f'{job_name}-{i}')
+                        for i in range(1, num_jobs + 1)
+                    ],
+                    # Ensure the jobs are running.
+                    *[
+                        wait_until_job_status(f'{job_name}-{i}', ['RUNNING'],
+                                              timeout=timeout)
+                        for i in range(1, num_jobs + 1)
+                    ],
+                    # Cancel the jobs.
+                    *[
+                        cancel_job(f'{job_name}-{i}')
+                        for i in range(1, num_jobs + 1)
+                    ],
+                    # Ensure the jobs are cancelled.
+                    *[
+                        wait_until_job_status(f'{job_name}-{i}', ['CANCELLED'],
+                                              bad_statuses=[],
+                                              timeout=15)
+                        for i in range(1, num_jobs + 1)
+                    ],
                 ],
                 timeout=timeout,
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
@@ -769,9 +752,9 @@ def test_pool_job_cancel_running_multiple(generic_cloud: str):
 
 def test_pool_job_cancel_running_multiple_simultaneous(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
-    pool_config = basic_pool_conf(num_workers=4, infra=generic_cloud)
+    num_jobs = 4
+    pool_config = basic_pool_conf(num_workers=num_jobs, infra=generic_cloud)
 
-    launch_commands = []
     job_name = f'{smoke_tests_utils.get_cluster_name()}-job'
     job_config = basic_job_conf(
         job_name=job_name,
@@ -790,47 +773,29 @@ def test_pool_job_cancel_running_multiple_simultaneous(generic_cloud: str):
                 [
                     _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
                         pool_name=pool_name, pool_yaml=pool_yaml.name),
-                    # Immediately attempt to launch the job.
-                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
-                        pool_name=pool_name,
-                        job_yaml=job_yaml.name,
-                        job_name=f'{job_name}-1'),
-                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
-                        pool_name=pool_name,
-                        job_yaml=job_yaml.name,
-                        job_name=f'{job_name}-2'),
-                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
-                        pool_name=pool_name,
-                        job_yaml=job_yaml.name,
-                        job_name=f'{job_name}-3'),
-                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
-                        pool_name=pool_name,
-                        job_yaml=job_yaml.name,
-                        job_name=f'{job_name}-4'),
-                    # Ensure the job is running.
-                    wait_until_job_status(f'{job_name}-1', ['RUNNING'],
-                                          timeout=timeout),
-                    wait_until_job_status(f'{job_name}-2', ['RUNNING'],
-                                          timeout=timeout),
-                    wait_until_job_status(f'{job_name}-3', ['RUNNING'],
-                                          timeout=timeout),
-                    wait_until_job_status(f'{job_name}-4', ['RUNNING'],
-                                          timeout=timeout),
+                    # Immediately attempt to launch the jobs.
+                    *[
+                        _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
+                            pool_name=pool_name,
+                            job_yaml=job_yaml.name,
+                            job_name=f'{job_name}-{i}')
+                        for i in range(1, num_jobs + 1)
+                    ],
+                    # Ensure the jobs are running.
+                    *[
+                        wait_until_job_status(f'{job_name}-{i}', ['RUNNING'],
+                                              timeout=timeout)
+                        for i in range(1, num_jobs + 1)
+                    ],
                     # Cancel all jobs at once.
                     _CANCEL_POOL_JOBS.format(pool_name=pool_name),
-                    # Ensure the job is cancelled.
-                    wait_until_job_status(f'{job_name}-1', ['CANCELLED'],
-                                          bad_statuses=[],
-                                          timeout=15),
-                    wait_until_job_status(f'{job_name}-2', ['CANCELLED'],
-                                          bad_statuses=[],
-                                          timeout=15),
-                    wait_until_job_status(f'{job_name}-3', ['CANCELLED'],
-                                          bad_statuses=[],
-                                          timeout=15),
-                    wait_until_job_status(f'{job_name}-4', ['CANCELLED'],
-                                          bad_statuses=[],
-                                          timeout=15),
+                    # Ensure the jobs are cancelled.
+                    *[
+                        wait_until_job_status(f'{job_name}-{i}', ['CANCELLED'],
+                                              bad_statuses=[],
+                                              timeout=15)
+                        for i in range(1, num_jobs + 1)
+                    ],
                 ],
                 timeout=timeout,
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
@@ -841,7 +806,8 @@ def test_pool_job_cancel_running_multiple_simultaneous(generic_cloud: str):
 
 def test_pool_job_cancel_instant_multiple(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
-    pool_config = basic_pool_conf(num_workers=4, infra=generic_cloud)
+    num_jobs = 4
+    pool_config = basic_pool_conf(num_workers=num_jobs, infra=generic_cloud)
     job_name = f'{smoke_tests_utils.get_cluster_name()}-job'
     job_config = basic_job_conf(
         job_name=job_name,
@@ -860,41 +826,26 @@ def test_pool_job_cancel_instant_multiple(generic_cloud: str):
                 [
                     _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
                         pool_name=pool_name, pool_yaml=pool_yaml.name),
-                    # Immediately attempt to launch the job.
-                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
-                        pool_name=pool_name,
-                        job_yaml=job_yaml.name,
-                        job_name=f'{job_name}-1'),
-                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
-                        pool_name=pool_name,
-                        job_yaml=job_yaml.name,
-                        job_name=f'{job_name}-2'),
-                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
-                        pool_name=pool_name,
-                        job_yaml=job_yaml.name,
-                        job_name=f'{job_name}-3'),
-                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
-                        pool_name=pool_name,
-                        job_yaml=job_yaml.name,
-                        job_name=f'{job_name}-4'),
-                    # Cancel the job.
-                    cancel_job(f'{job_name}-1'),
-                    cancel_job(f'{job_name}-2'),
-                    cancel_job(f'{job_name}-3'),
-                    cancel_job(f'{job_name}-4'),
-                    # Ensure the job is cancelled.
-                    wait_until_job_status(f'{job_name}-1', ['CANCELLED'],
-                                          bad_statuses=[],
-                                          timeout=15),
-                    wait_until_job_status(f'{job_name}-2', ['CANCELLED'],
-                                          bad_statuses=[],
-                                          timeout=15),
-                    wait_until_job_status(f'{job_name}-3', ['CANCELLED'],
-                                          bad_statuses=[],
-                                          timeout=15),
-                    wait_until_job_status(f'{job_name}-4', ['CANCELLED'],
-                                          bad_statuses=[],
-                                          timeout=15),
+                    # Immediately attempt to launch the jobs.
+                    *[
+                        _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
+                            pool_name=pool_name,
+                            job_yaml=job_yaml.name,
+                            job_name=f'{job_name}-{i}')
+                        for i in range(1, num_jobs + 1)
+                    ],
+                    # Cancel the jobs immediately.
+                    *[
+                        cancel_job(f'{job_name}-{i}')
+                        for i in range(1, num_jobs + 1)
+                    ],
+                    # Ensure the jobs are cancelled.
+                    *[
+                        wait_until_job_status(f'{job_name}-{i}', ['CANCELLED'],
+                                              bad_statuses=[],
+                                              timeout=15)
+                        for i in range(1, num_jobs + 1)
+                    ],
                 ],
                 timeout=timeout,
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
@@ -905,7 +856,8 @@ def test_pool_job_cancel_instant_multiple(generic_cloud: str):
 
 def test_pool_job_cancel_instant_multiple_simultaneous(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
-    pool_config = basic_pool_conf(num_workers=4, infra=generic_cloud)
+    num_jobs = 4
+    pool_config = basic_pool_conf(num_workers=num_jobs, infra=generic_cloud)
     job_name = f'{smoke_tests_utils.get_cluster_name()}-job'
     job_config = basic_job_conf(
         job_name=job_name,
@@ -924,38 +876,23 @@ def test_pool_job_cancel_instant_multiple_simultaneous(generic_cloud: str):
                 [
                     _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
                         pool_name=pool_name, pool_yaml=pool_yaml.name),
-                    # Immediately attempt to launch the job.
-                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
-                        pool_name=pool_name,
-                        job_yaml=job_yaml.name,
-                        job_name=f'{job_name}-1'),
-                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
-                        pool_name=pool_name,
-                        job_yaml=job_yaml.name,
-                        job_name=f'{job_name}-2'),
-                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
-                        pool_name=pool_name,
-                        job_yaml=job_yaml.name,
-                        job_name=f'{job_name}-3'),
-                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
-                        pool_name=pool_name,
-                        job_yaml=job_yaml.name,
-                        job_name=f'{job_name}-4'),
+                    # Immediately attempt to launch the jobs.
+                    *[
+                        _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
+                            pool_name=pool_name,
+                            job_yaml=job_yaml.name,
+                            job_name=f'{job_name}-{i}')
+                        for i in range(1, num_jobs + 1)
+                    ],
                     # Cancel all jobs at once.
                     _CANCEL_POOL_JOBS.format(pool_name=pool_name),
-                    # Ensure the job is cancelled.
-                    wait_until_job_status(f'{job_name}-1', ['CANCELLED'],
-                                          bad_statuses=[],
-                                          timeout=15),
-                    wait_until_job_status(f'{job_name}-2', ['CANCELLED'],
-                                          bad_statuses=[],
-                                          timeout=15),
-                    wait_until_job_status(f'{job_name}-3', ['CANCELLED'],
-                                          bad_statuses=[],
-                                          timeout=15),
-                    wait_until_job_status(f'{job_name}-4', ['CANCELLED'],
-                                          bad_statuses=[],
-                                          timeout=15),
+                    # Ensure the jobs are cancelled.
+                    *[
+                        wait_until_job_status(f'{job_name}-{i}', ['CANCELLED'],
+                                              bad_statuses=[],
+                                              timeout=15)
+                        for i in range(1, num_jobs + 1)
+                    ],
                 ],
                 timeout=timeout,
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
