@@ -908,8 +908,9 @@ available_node_types:
                   echo "Waiting for patch package to be installed..."
                 done
                 # Apply Ray patches for progress bar fix
+                # ~/.sky/python_path is seeded by conda_installation_commands
                 VIRTUAL_ENV=~/skypilot-runtime UV_SYSTEM_PYTHON=false env -u PYTHONPATH ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
-                  VIRTUAL_ENV=~/skypilot-runtime python -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
+                  $(cat ~/.sky/python_path) -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
                 }
                 touch /tmp/ray_skypilot_installation_complete
                 echo "=== Ray and skypilot installation completed ==="
