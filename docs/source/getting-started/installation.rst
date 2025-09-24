@@ -628,7 +628,7 @@ After configuring the vSphere credentials, ensure that the necessary preparation
 
 .. _cloudflare-r2-installation:
 
-Cloudflare R2 |community-badge|
+Cloudflare R2
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Cloudflare offers `R2 <https://www.cloudflare.com/products/r2>`_, an S3-compatible object storage without any egress charges.
