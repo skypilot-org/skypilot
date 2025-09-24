@@ -188,6 +188,9 @@ cluster_history_table = sqlalchemy.Table(
     sqlalchemy.Column('last_activity_time',
                       sqlalchemy.Integer,
                       server_default=None),
+    sqlalchemy.Column('launched_at',
+                      sqlalchemy.Integer,
+                      server_default=None),
 )
 
 
@@ -723,8 +726,9 @@ def add_or_update_cluster(cluster_name: str,
                     conditional_values.get('last_creation_command'),
             }
 
-        # Calculate last_activity_time from usage_intervals
+        # Calculate last_activity_time and launched_at from usage_intervals
         last_activity_time = _get_cluster_last_activity_time(usage_intervals)
+        launched_at = _get_cluster_launch_time(usage_intervals)
 
         insert_stmnt = insert_func(cluster_history_table).values(
             cluster_hash=cluster_hash,
@@ -737,6 +741,7 @@ def add_or_update_cluster(cluster_name: str,
             workspace=history_workspace,
             provision_log_path=provision_log_path,
             last_activity_time=last_activity_time,
+            launched_at=launched_at,
             **creation_info,
         )
         do_update_stmt = insert_stmnt.on_conflict_do_update(
@@ -754,6 +759,7 @@ def add_or_update_cluster(cluster_name: str,
                 cluster_history_table.c.workspace: history_workspace,
                 cluster_history_table.c.provision_log_path: provision_log_path,
                 cluster_history_table.c.last_activity_time: last_activity_time,
+                cluster_history_table.c.launched_at: launched_at,
                 **creation_info,
             })
         session.execute(do_update_stmt)
@@ -1366,15 +1372,17 @@ def _set_cluster_usage_intervals(
                                                        Optional[int]]]) -> None:
     assert _SQLALCHEMY_ENGINE is not None
 
-    # Calculate last_activity_time from usage_intervals
+    # Calculate last_activity_time and launched_at from usage_intervals
     last_activity_time = _get_cluster_last_activity_time(usage_intervals)
-
+    launched_at = _get_cluster_launch_time(usage_intervals)
+    
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         count = session.query(cluster_history_table).filter_by(
             cluster_hash=cluster_hash).update({
                 cluster_history_table.c.usage_intervals:
                     pickle.dumps(usage_intervals),
-                cluster_history_table.c.last_activity_time: last_activity_time
+                cluster_history_table.c.last_activity_time: last_activity_time,
+                cluster_history_table.c.launched_at: launched_at
             })
         session.commit()
     assert count <= 1, count
@@ -1745,6 +1753,7 @@ def get_clusters_from_history(
                 cluster_history_table.c.user_hash,
                 cluster_history_table.c.workspace.label('history_workspace'),
                 cluster_history_table.c.last_activity_time,
+                cluster_history_table.c.launched_at,
                 cluster_table.c.status, cluster_table.c.workspace)
         else:
             query = session.query(
@@ -1757,6 +1766,7 @@ def get_clusters_from_history(
                 cluster_history_table.c.last_creation_command,
                 cluster_history_table.c.workspace.label('history_workspace'),
                 cluster_history_table.c.last_activity_time,
+                cluster_history_table.c.launched_at,
                 cluster_table.c.status, cluster_table.c.workspace)
 
         query = query.select_from(
@@ -1820,7 +1830,8 @@ def get_clusters_from_history(
         usage_intervals: Optional[List[Tuple[
             int,
             Optional[int]]]] = usage_intervals_dict.get(row.cluster_hash, None)
-        launched_at = _get_cluster_launch_time(usage_intervals)
+        # Use pre-computed launched_at from database instead of calculating from usage_intervals
+        launched_at = row.launched_at
         duration = _get_cluster_duration(usage_intervals)
 
         # Parse status
