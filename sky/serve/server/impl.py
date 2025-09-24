@@ -22,6 +22,8 @@ from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.catalog import common as service_catalog_common
 from sky.data import storage as storage_lib
+from sky.provision.kubernetes import network_utils as k8s_network_utils
+from sky.provision.kubernetes import utils as k8s_provision_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -33,13 +35,11 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import kubernetes_enums
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
-from sky.provision.kubernetes import network_utils as k8s_network_utils
-from sky.provision.kubernetes import utils as k8s_provision_utils
-from sky.utils import kubernetes_enums
 
 logger = sky_logging.init_logger(__name__)
 
@@ -107,8 +107,7 @@ def _validate_https_support_on_controller(
                 'provider exposes ports via Ingress. Configure TLS '
                 'passthrough on the ingress controller or switch the '
                 'provider port_mode to "LoadBalancer" before enabling '
-                'HTTPS.'
-            )
+                'HTTPS.')
 
 
 def _get_service_record(

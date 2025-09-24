@@ -3537,8 +3537,8 @@ def get_endpoints(cluster: str,
                                              provider_config=config['provider'])
 
     def _filter_single_endpoint(
-        details: Dict[int, List['provision_common.Endpoint']]
-    ) -> Dict[int, str]:
+        details: Dict[int,
+                      List['provision_common.Endpoint']]) -> Dict[int, str]:
         result: Dict[int, str] = {}
         for port_num, endpoints in details.items():
             if len(endpoints) > 1:

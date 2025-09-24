@@ -238,7 +238,8 @@ class Endpoint:
 
 @dataclasses.dataclass
 class SocketEndpoint(Endpoint):
-    """Socket endpoint accessible via a host, optional port, and optional path."""
+    """Socket endpoint accessible via a host, optional port, and optional
+    path."""
     port: Optional[int]
     host: str = ''
     path: str = ''
@@ -256,7 +257,7 @@ class SocketEndpoint(Endpoint):
             host = 'host.docker.internal'
         base = f'{host}{":" + str(self.port) if self.port else ""}'
         if self.path:
-            return f"{base}/{self.path.lstrip('/')}"
+            return f'{base}/{self.path.lstrip("/")}'
         return base
 
 
