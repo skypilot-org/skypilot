@@ -35,7 +35,8 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
 
 def launch(name: str, instance_type: str, region: str, disk_size: int,
            image_name: str, ports: Optional[List[int]],
-           preemptible: bool) -> str:
+           preemptible: bool,
+           docker_login: Optional[str] = None) -> str:
     """Launches an instance with the given parameters.
 
     Converts the instance_type to the Vast GPU name, finds the specs for the
@@ -120,6 +121,9 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
         'image': image_name,
         'disk': disk_size
     }
+
+    if docker_login:
+        launch_params['login'] = docker_login
 
     if preemptible:
         launch_params['min_bid'] = instance_touse['min_bid']

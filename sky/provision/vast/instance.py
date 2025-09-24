@@ -89,6 +89,15 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                                           resumed_instance_ids=[],
                                           created_instance_ids=[])
 
+        docker_login_params = None
+        docker_login_config = config.node_config.get('DockerLogin')
+        if docker_login_config:
+            username = docker_login_config.get('username', '').strip()
+            password = docker_login_config.get('password', '').strip()
+            server = docker_login_config.get('server', '').strip()
+            if username and password and server:
+                docker_login_params = f'-u {username} -p {password} {server}'
+
         for _ in range(to_start_count):
             node_type = 'head' if head_instance_id is None else 'worker'
             try:
@@ -99,7 +108,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                     disk_size=config.node_config['DiskSize'],
                     preemptible=config.node_config['Preemptible'],
                     image_name=config.node_config['ImageId'],
-                    ports=config.ports_to_open_on_launch)
+                    ports=config.ports_to_open_on_launch,
+                    docker_login=docker_login_params)
             except Exception as e:  # pylint: disable=broad-except
                 logger.warning(f'run_instances error: {e}')
                 raise
