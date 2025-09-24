@@ -156,7 +156,7 @@ def _validate_consolidation_mode_config(
     if current_is_consolidation_mode:
         controller_cn = (
             controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name)
-        if global_user_state.get_cluster_from_name(controller_cn) is not None:
+        if global_user_state.cluster_with_name_exists(controller_cn):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.InconsistentConsolidationModeError(
                     f'{colorama.Fore.RED}Consolidation mode for jobs is '

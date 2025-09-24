@@ -1,6 +1,4 @@
 """SDK functions for cluster/job management."""
-import os
-import shlex
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -9,7 +7,6 @@ import colorama
 from sky import admin_policy
 from sky import backends
 from sky import catalog
-from sky import check as sky_check
 from sky import clouds
 from sky import dag as dag_lib
 from sky import data
@@ -31,7 +28,6 @@ from sky.schemas.api import responses
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
-from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common
@@ -102,6 +98,7 @@ def status(
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
     include_credentials: bool = False,
+    summary_response: bool = False,
 ) -> List[responses.StatusResponse]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets cluster statuses.
@@ -181,10 +178,18 @@ def status(
         refresh=refresh,
         cluster_names=cluster_names,
         all_users=all_users,
-        include_credentials=include_credentials)
-    return [
-        responses.StatusResponse.model_validate(cluster) for cluster in clusters
-    ]
+        include_credentials=include_credentials,
+        summary_response=summary_response)
+
+    status_responses = []
+    for cluster in clusters:
+        try:
+            status_responses.append(
+                responses.StatusResponse.model_validate(cluster))
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning('Failed to validate status responses for cluster '
+                           f'{cluster.get("name")}: {e}')
+    return status_responses
 
 
 def status_kubernetes(
@@ -293,7 +298,10 @@ def endpoints(cluster: str,
 
 
 @usage_lib.entrypoint
-def cost_report(days: Optional[int] = None) -> List[Dict[str, Any]]:
+def cost_report(
+        days: Optional[int] = None,
+        dashboard_summary_response: bool = False,
+        cluster_hashes: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster cost reports, including those that have been downed.
 
@@ -339,7 +347,12 @@ def cost_report(days: Optional[int] = None) -> List[Dict[str, Any]]:
     if days is None:
         days = constants.COST_REPORT_DEFAULT_DAYS
 
-    cluster_reports = global_user_state.get_clusters_from_history(days=days)
+    abbreviate_response = dashboard_summary_response and cluster_hashes is None
+
+    cluster_reports = global_user_state.get_clusters_from_history(
+        days=days,
+        abbreviate_response=abbreviate_response,
+        cluster_hashes=cluster_hashes)
     logger.debug(
         f'{len(cluster_reports)} clusters found from history with {days} days.')
 
@@ -357,43 +370,6 @@ def cost_report(days: Optional[int] = None) -> List[Dict[str, Any]]:
             cost = (launched_resources.get_cost(duration) * launched_nodes)
             return cost
 
-        def _update_record_with_resources(record: Dict[str, Any]) -> None:
-            """Add resource fields for dashboard compatibility."""
-            if record is None:
-                return
-            resources = record.get('resources')
-            if resources is None:
-                return
-            fields = ['cloud', 'region', 'cpus', 'memory', 'accelerators']
-            for field in fields:
-                try:
-                    record[field] = str(getattr(resources, field))
-                except Exception as e:  # pylint: disable=broad-except
-                    # Ok to skip the fields as this is just for display
-                    # purposes.
-                    logger.debug(f'Failed to get resources.{field} for cluster '
-                                 f'{record["name"]}: {str(e)}')
-                    record[field] = None
-
-            # Add resources_str and resources_str_full for dashboard
-            # compatibility
-            num_nodes = record.get('num_nodes', 1)
-            try:
-                resource_str_simple = resources_utils.format_resource(
-                    resources, simplify=True)
-                resource_str_full = resources_utils.format_resource(
-                    resources, simplify=False)
-                record['resources_str'] = f'{num_nodes}x{resource_str_simple}'
-                record[
-                    'resources_str_full'] = f'{num_nodes}x{resource_str_full}'
-            except Exception as e:  # pylint: disable=broad-except
-                logger.debug(f'Failed to get resources_str for cluster '
-                             f'{record["name"]}: {str(e)}')
-                for field in fields:
-                    record[field] = None
-                record['resources_str'] = '-'
-                record['resources_str_full'] = '-'
-
         try:
             report['total_cost'] = get_total_cost(report)
         except Exception as e:  # pylint: disable=broad-except
@@ -402,17 +378,66 @@ def cost_report(days: Optional[int] = None) -> List[Dict[str, Any]]:
                            f'{report["name"]}: {str(e)}')
             report['total_cost'] = 0.0
 
-        _update_record_with_resources(report)
         return report
 
     # Process clusters in parallel
     if not cluster_reports:
         return []
 
-    processed_reports = subprocess_utils.run_in_parallel(
-        _process_cluster_report, cluster_reports)
+    if not abbreviate_response:
+        cluster_reports = subprocess_utils.run_in_parallel(
+            _process_cluster_report, cluster_reports)
 
-    return processed_reports
+    def _update_record_with_resources(record: Dict[str, Any]) -> None:
+        """Add resource fields for dashboard compatibility."""
+        if record is None:
+            return
+        resources = record.get('resources')
+        if resources is None:
+            return
+        if not dashboard_summary_response:
+            fields = ['cloud', 'region', 'cpus', 'memory', 'accelerators']
+        else:
+            fields = ['cloud']
+        for field in fields:
+            try:
+                record[field] = str(getattr(resources, field))
+            except Exception as e:  # pylint: disable=broad-except
+                # Ok to skip the fields as this is just for display
+                # purposes.
+                logger.debug(f'Failed to get resources.{field} for cluster '
+                             f'{record["name"]}: {str(e)}')
+                record[field] = None
+
+        # Add resources_str and resources_str_full for dashboard
+        # compatibility
+        num_nodes = record.get('num_nodes', 1)
+        try:
+            resource_str_simple = resources_utils.format_resource(resources,
+                                                                  simplify=True)
+            record['resources_str'] = f'{num_nodes}x{resource_str_simple}'
+            if not abbreviate_response:
+                resource_str_full = resources_utils.format_resource(
+                    resources, simplify=False)
+                record[
+                    'resources_str_full'] = f'{num_nodes}x{resource_str_full}'
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to get resources_str for cluster '
+                         f'{record["name"]}: {str(e)}')
+            for field in fields:
+                record[field] = None
+            record['resources_str'] = '-'
+            if not abbreviate_response:
+                record['resources_str_full'] = '-'
+
+    for report in cluster_reports:
+        _update_record_with_resources(report)
+        if dashboard_summary_response:
+            report.pop('usage_intervals')
+            report.pop('user_hash')
+            report.pop('resources')
+
+    return cluster_reports
 
 
 def _start(
@@ -840,8 +865,10 @@ def queue(cluster_name: str,
                     'submitted_at': job_info.submitted_at,
                     'status': job_lib.JobStatus.from_protobuf(job_info.status),
                     'run_timestamp': job_info.run_timestamp,
-                    'start_at': job_info.start_at,
-                    'end_at': job_info.end_at,
+                    'start_at': job_info.start_at
+                                if job_info.HasField('start_at') else None,
+                    'end_at': job_info.end_at
+                              if job_info.HasField('end_at') else None,
                     'resources': job_info.resources,
                     'log_path': job_info.log_path,
                     'user_hash': job_info.username,
@@ -1272,6 +1299,7 @@ def local_up(gpus: bool,
              ssh_key: Optional[str],
              cleanup: bool,
              context_name: Optional[str] = None,
+             name: Optional[str] = None,
              password: Optional[str] = None) -> None:
     """Creates a local or remote cluster."""
 
@@ -1302,57 +1330,12 @@ def local_up(gpus: bool,
                                                       password)
     else:
         # Run local deployment (kind) if no remote args are specified
-        kubernetes_deploy_utils.deploy_local_cluster(gpus)
+        kubernetes_deploy_utils.deploy_local_cluster(name, gpus)
 
 
-def local_down() -> None:
+def local_down(name: Optional[str] = None) -> None:
     """Tears down the Kubernetes cluster started by local_up."""
-    cluster_removed = False
-
-    path_to_package = os.path.dirname(__file__)
-    down_script_path = os.path.join(path_to_package, 'utils/kubernetes',
-                                    'delete_cluster.sh')
-
-    cwd = os.path.dirname(os.path.abspath(down_script_path))
-    run_command = shlex.split(down_script_path)
-
-    # Setup logging paths
-    run_timestamp = sky_logging.get_run_timestamp()
-    log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
-                            'local_down.log')
-
-    with rich_utils.safe_status(
-            ux_utils.spinner_message('Removing local cluster',
-                                     log_path=log_path,
-                                     is_local=True)):
-
-        returncode, stdout, stderr = log_lib.run_with_log(cmd=run_command,
-                                                          log_path=log_path,
-                                                          require_outputs=True,
-                                                          stream_logs=False,
-                                                          cwd=cwd)
-        stderr = stderr.replace('No kind clusters found.\n', '')
-
-        if returncode == 0:
-            cluster_removed = True
-        elif returncode == 100:
-            logger.info(ux_utils.error_message('Local cluster does not exist.'))
-        else:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('Failed to create local cluster. '
-                                   f'Stdout: {stdout}'
-                                   f'\nError: {stderr}')
-    if cluster_removed:
-        # Run sky check
-        with rich_utils.safe_status(
-                ux_utils.spinner_message('Running sky check...')):
-            sky_check.check_capability(sky_cloud.CloudCapability.COMPUTE,
-                                       clouds=['kubernetes'],
-                                       quiet=True)
-        logger.info(
-            ux_utils.finishing_message('Local cluster removed.',
-                                       log_path=log_path,
-                                       is_local=True))
+    kubernetes_deploy_utils.teardown_local_cluster(name)
 
 
 @usage_lib.entrypoint

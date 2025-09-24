@@ -7,8 +7,15 @@ spec:
   type: ClusterIP  # Use clusterIP to allow ingress to authenticate
   ports:
     - port: 80
+      name: http
       targetPort: 46580  # Assuming your container listens on port 46580
       protocol: TCP
+  {{- if .Values.apiService.metrics.enabled }}
+    - port: {{ .Values.apiService.metrics.port }}
+      name: metrics
+      targetPort: {{ .Values.apiService.metrics.port }}
+      protocol: TCP
+  {{- end }}
   selector:
     app: {{ .Release.Name }}-api
     skypilot.co/ready: "true"

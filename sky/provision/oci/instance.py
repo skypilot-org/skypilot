@@ -65,9 +65,10 @@ def query_instances(
 
 
 @query_utils.debug_enabled(logger)
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Start instances with bootstrapped configuration."""
+    del cluster_name  # unused
     tags = dict(sorted(copy.deepcopy(config.tags).items()))
 
     start_time = round(time.time() * 1000)

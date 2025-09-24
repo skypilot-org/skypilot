@@ -49,8 +49,15 @@ install_requires = [
     # <= 3.13 may encounter https://github.com/ultralytics/yolov5/issues/414
     'pyyaml > 3.13, != 5.4.*',
     'requests',
+    # SkyPilot inherits from uvicorn.Server to customize the behavior of
+    # uvicorn, so we need to pin uvicorn version to avoid potential break
+    # changes.
+    # Notes for current version check:
+    # - uvicorn 0.33.0 is the latest version that supports Python 3.8
+    # - uvicorn 0.36.0 removes setup_event_loop thus breaks SkyPilot's custom
+    #   behavior.
+    'uvicorn[standard] >=0.33.0, <0.36.0',
     'fastapi',
-    'uvicorn[standard]',
     # Some pydantic versions are not compatible with ray. Adopted from ray's
     # setup.py:
     # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L254
@@ -105,6 +112,7 @@ server_dependencies = [
     GRPC,
     PROTOBUF,
     'aiosqlite',
+    'greenlet',
 ]
 
 local_ray = [
@@ -185,10 +193,13 @@ extras_require: Dict[str, List[str]] = {
     'remote': remote,
     # For the container registry auth api. Reference:
     # https://github.com/runpod/runpod-python/releases/tag/1.6.1
-    'runpod': ['runpod>=1.6.1'],
+    # RunPod needs a TOML parser to read ~/.runpod/config.toml. On Python 3.11+
+    # stdlib provides tomllib; on lower versions we depend on tomli explicitly.
+    'runpod': ['runpod>=1.6.1', 'tomli; python_version < "3.11"'],
     'fluidstack': [],  # No dependencies needed for fluidstack
     'cudo': ['cudo-compute>=0.1.10'],
     'paperspace': [],  # No dependencies needed for paperspace
+    'primeintellect': [],  # No dependencies needed for primeintellect
     'do': ['pydo>=0.3.0', 'azure-core>=1.24.0', 'azure-common'],
     'vast': ['vastai-sdk>=0.1.12'],
     'vsphere': [
