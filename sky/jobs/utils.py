@@ -1313,11 +1313,12 @@ def dump_managed_job_queue(
     limit: Optional[int] = None,
     user_hashes: Optional[List[Optional[str]]] = None,
     statuses: Optional[List[str]] = None,
+    fields: Optional[List[str]] = None,
 ) -> str:
     return message_utils.encode_payload(
         get_managed_job_queue(skip_finished, accessible_workspaces, job_ids,
                               workspace_match, name_match, pool_match, page,
-                              limit, user_hashes, statuses))
+                              limit, user_hashes, statuses, fields))
 
 
 def get_managed_job_queue(
@@ -1331,6 +1332,7 @@ def get_managed_job_queue(
     limit: Optional[int] = None,
     user_hashes: Optional[List[Optional[str]]] = None,
     statuses: Optional[List[str]] = None,
+    fields: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     # Make sure to get all jobs - some logic below (e.g. high priority job
     # detection) requires a full view of the jobs table.
@@ -1471,6 +1473,18 @@ def get_managed_job_queue(
             job['details'] = f'Failure: {job["failure_reason"]}'
         else:
             job['details'] = None
+
+    # Filter fields
+    if fields:
+        new_jobs = []
+        for job in jobs:
+            new_job = {}
+            for field in fields:
+                if field not in job:
+                    continue
+                new_job[field] = job[field]
+            new_jobs.append(new_job)
+        jobs = new_jobs
 
     return {
         'jobs': jobs,
@@ -2014,6 +2028,7 @@ class ManagedJobCodeGen:
         limit: Optional[int] = None,
         user_hashes: Optional[List[Optional[str]]] = None,
         statuses: Optional[List[str]] = None,
+        fields: Optional[List[str]] = None,
     ) -> str:
         code = textwrap.dedent(f"""\
         if managed_job_version < 9:
@@ -2032,7 +2047,7 @@ class ManagedJobCodeGen:
                                 page={page!r},
                                 limit={limit!r},
                                 user_hashes={user_hashes!r})
-        else:
+        elif managed_job_version < 11:
             job_table = utils.dump_managed_job_queue(
                                 skip_finished={skip_finished},
                                 accessible_workspaces={accessible_workspaces!r},
@@ -2044,6 +2059,19 @@ class ManagedJobCodeGen:
                                 limit={limit!r},
                                 user_hashes={user_hashes!r},
                                 statuses={statuses!r})
+        else:
+            job_table = utils.dump_managed_job_queue(
+                                skip_finished={skip_finished},
+                                accessible_workspaces={accessible_workspaces!r},
+                                job_ids={job_ids!r},
+                                workspace_match={workspace_match!r},
+                                name_match={name_match!r},
+                                pool_match={pool_match!r},
+                                page={page!r},
+                                limit={limit!r},
+                                user_hashes={user_hashes!r},
+                                statuses={statuses!r},
+                                fields={fields!r})
         print(job_table, flush=True)
         """)
         return cls._build(code)

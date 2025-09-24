@@ -541,6 +541,8 @@ class JobsQueueV2Body(RequestBody):
     page: Optional[int] = None
     limit: Optional[int] = None
     statuses: Optional[List[str]] = None
+    # The fields to return in the response.
+    fields: Optional[List[str]] = None
 
 
 class JobsCancelBody(RequestBody):
