@@ -92,7 +92,8 @@ export async function getManagedJobs(options = {}) {
       } catch (parseError) {
         console.error('Error parsing JSON:', parseError);
       }
-      return { jobs: [], total: 0, controllerStopped: false };
+      // For non-CLUSTER_NOT_UP 500 errors, signal cache to skip update
+      return { __skipCache: true, jobs: [], total: 0, controllerStopped: false };
     }
     // print out the response for debugging
     const data = await fetchedData.json();
@@ -207,7 +208,9 @@ export async function getManagedJobs(options = {}) {
     };
   } catch (error) {
     console.error('Error fetching managed job data:', error);
+    // Signal to the cache to not overwrite previously cached data
     return {
+      __skipCache: true,
       jobs: [],
       total: 0,
       totalNoFilter: 0,
@@ -232,7 +235,7 @@ export async function getManagedJobs(options = {}) {
  * @param {Array} options.fields - Fields to return
  * @param {boolean} options.allFields - Whether to return all fields (default: false)
  * @param {boolean} options.useClientPagination - Whether to use client-side pagination (default: true)
- * @returns {Promise<{jobs: Array, total: number, controllerStopped: boolean}>}
+ * @returns {Promise<{jobs: Array, total: number, controllerStopped: boolean, __skipCache?: boolean}>}
  */
 export async function getManagedJobsWithClientPagination(options) {
   const {
@@ -292,7 +295,8 @@ export async function getManagedJobsWithClientPagination(options) {
       'Error fetching managed job data with client pagination:',
       error
     );
-    return { jobs: [], total: 0, controllerStopped: false };
+    // Signal to the cache to not overwrite previously cached data
+    return { __skipCache: true, jobs: [], controllerStopped: false, total: 0 };
   }
 }
 
