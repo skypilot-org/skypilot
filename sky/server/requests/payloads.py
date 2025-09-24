@@ -672,7 +672,13 @@ class LocalUpBody(RequestBody):
     ssh_key: Optional[str] = None
     cleanup: bool = False
     context_name: Optional[str] = None
+    name: Optional[str] = None
     password: Optional[str] = None
+
+
+class LocalDownBody(RequestBody):
+    """The request body for the local down endpoint."""
+    name: Optional[str] = None
 
 
 class SSHUpBody(RequestBody):
