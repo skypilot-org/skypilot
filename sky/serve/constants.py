@@ -84,6 +84,9 @@ CONTROLLER_PORT_START = 20001
 LOAD_BALANCER_PORT_START = 30001
 LOAD_BALANCER_PORT_RANGE = '30001-30020'
 
+# Default starting port for local SSH tunnels to replicas.
+REPLICA_PORT_FORWARD_START = 40001
+
 # Initial version of service.
 INITIAL_VERSION = 1
 

@@ -3715,7 +3715,7 @@ def cluster_tunnel_lock_id(cluster_name: str) -> str:
 
 def open_ssh_tunnel(head_runner: Union[command_runner.SSHCommandRunner,
                                        command_runner.KubernetesCommandRunner],
-                    port_forward: Tuple[int, int]) -> subprocess.Popen:
+                    port_forward: Tuple[int, int]) -> subprocess.Popen[Any]:
     local_port, remote_port = port_forward
     if isinstance(head_runner, command_runner.SSHCommandRunner):
         # Disabling ControlMaster makes things easier to reason about
