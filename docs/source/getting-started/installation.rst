@@ -1,6 +1,6 @@
 .. _installation:
 
-.. |community-badge| image:: https://img.shields.io/badge/Community%20Maintained-EAFAFF
+.. |community-badge| image:: https://img.shields.io/badge/Community%20Maintained-EAFAFF?style=flat
    :alt: Community Maintained
 
 Installation
