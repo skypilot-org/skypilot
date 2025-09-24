@@ -2090,6 +2090,7 @@ def stream_and_get(
     return stream_response(request_id,
                            response,
                            output_stream,
+                           resumable=True,
                            get_result=follow)
 
 
