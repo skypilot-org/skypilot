@@ -30,7 +30,7 @@ RUN cd /skypilot && \
     else \
         echo "Installing NPM and Node.js for dashboard build" && \
         apt-get update -y && \
-        apt-get install --no-install-recommends -y git && \
+        apt-get install --no-install-recommends -y git curl ca-certificates gnupg && \
         curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
         apt-get install -y nodejs && \
         npm install -g npm@latest && \
