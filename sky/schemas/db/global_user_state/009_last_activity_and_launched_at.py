@@ -24,16 +24,18 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade():
     """Add last_activity_time and launched_at columns to cluster history."""
     with op.get_context().autocommit_block():
-        # Add the columns first
+        # Add the columns with indices
         db_utils.add_column_to_table_alembic('cluster_history',
                                              'last_activity_time',
                                              sa.Integer(),
-                                             server_default=None)
+                                             server_default=None,
+                                             index=True)
 
         db_utils.add_column_to_table_alembic('cluster_history',
                                              'launched_at',
                                              sa.Integer(),
-                                             server_default=None)
+                                             server_default=None,
+                                             index=True)
 
         # Populate the columns for existing rows
         _populate_cluster_history_columns()

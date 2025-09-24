@@ -201,6 +201,7 @@ def add_column_to_table_alembic(
     server_default: Optional[str] = None,
     copy_from: Optional[str] = None,
     value_to_replace_existing_entries: Optional[Any] = None,
+    index: Optional[bool] = None,
 ):
     """Add a column to a table using Alembic operations.
 
@@ -215,6 +216,8 @@ def add_column_to_table_alembic(
         copy_from: Column name to copy values from (for existing rows)
         value_to_replace_existing_entries: Default value for existing NULL
             entries
+        index: If True, create an index on this column. If None, no index
+            is created.
     """
     from alembic import op  # pylint: disable=import-outside-toplevel
 
@@ -222,7 +225,8 @@ def add_column_to_table_alembic(
         # Create the column with server_default if provided
         column = sqlalchemy.Column(column_name,
                                    column_type,
-                                   server_default=server_default)
+                                   server_default=server_default,
+                                   index=index)
         op.add_column(table_name, column)
 
         # Handle data migration

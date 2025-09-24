@@ -187,8 +187,12 @@ cluster_history_table = sqlalchemy.Table(
                       server_default=None),
     sqlalchemy.Column('last_activity_time',
                       sqlalchemy.Integer,
-                      server_default=None),
-    sqlalchemy.Column('launched_at', sqlalchemy.Integer, server_default=None),
+                      server_default=None,
+                      index=True),
+    sqlalchemy.Column('launched_at',
+                      sqlalchemy.Integer,
+                      server_default=None,
+                      index=True),
 )
 
 
