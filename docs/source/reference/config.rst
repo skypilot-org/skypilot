@@ -1165,8 +1165,12 @@ Can be one of:
 
 - ``gke``: Google Kubernetes Engine
 - ``karpenter``: Karpenter
+- ``nebius``: `Nebius Kubernetes cluster with autoscaling <https://docs.nebius.com/kubernetes/node-groups/autoscaling>`_ (Works only from 1 to many)
 - ``coreweave``: `CoreWeave autoscaler <https://docs.coreweave.com/docs/products/cks/nodes/autoscaling>`_
 - ``generic``: Generic autoscaler, assumes nodes are labelled with ``skypilot.co/accelerator``.
+
+If you want to use the autoscaler, set :ref:`provision_timeout <config-yaml-kubernetes-provision-timeout>` to at least 600.
+
 
 .. _config-yaml-kubernetes-pod-config:
 

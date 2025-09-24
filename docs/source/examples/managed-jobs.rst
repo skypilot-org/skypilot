@@ -713,6 +713,11 @@ If no such pool exists, it will create a new one; this is equivalent to the beha
 
 Pools will automatically detect changes in the worker configuration. If only the pool configuration (e.g. number of workers) is changed, the pool will be updated in place to reuse the previous workers; otherwise, if the setup, file mounts, workdir, or resources configuration is changed, new worker clusters will be created and the old ones will be terminated gradually.
 
+You can also update the number of workers in a pool without a YAML file by using the :code:`--workers` flag:
+
+.. code-block:: console
+
+  $ sky jobs pool apply -p gpu-pool --workers 10
 
 .. note::
 
@@ -814,6 +819,26 @@ you can still tear it down manually with
   Tearing down the jobs controller loses all logs and status information for the finished managed jobs. It is only allowed when there are no in-progress managed jobs to ensure no resource leakage.
 
 To adjust the size of the jobs controller instance, see :ref:`jobs-controller-custom-resources`.
+
+.. _managed-jobs-high-availability-controller:
+
+High availability controller
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+High availability mode ensures the controller for Managed Jobs remains resilient to failures by running it as a Kubernetes Deployment with automatic restarts and persistent storage. This helps maintain management capabilities even if the controller pod crashes or the node fails.
+
+To enable high availability for Managed Jobs, simply set the ``high_availability`` flag to ``true`` under ``jobs.controller`` in your ``~/.sky/config.yaml``, and ensure the controller runs on Kubernetes:
+
+.. code-block:: yaml
+    :emphasize-lines: 4-5
+
+    jobs:
+      controller:
+        resources:
+          cloud: kubernetes
+        high_availability: true
+
+This will deploy the controller as a Kubernetes Deployment with persistent storage, allowing automatic recovery on failures. For prerequisites, setup steps, and recovery behavior, see the detailed page: :ref:`high-availability-controller`.
 
 
 Setup and best practices

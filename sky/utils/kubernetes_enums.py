@@ -43,4 +43,10 @@ class KubernetesAutoscalerType(enum.Enum):
     GKE = 'gke'
     KARPENTER = 'karpenter'
     COREWEAVE = 'coreweave'
+    NEBIUS = 'nebius'
     GENERIC = 'generic'
+
+    def emits_autoscale_event(self) -> bool:
+        """Returns whether specific autoscaler emits the event reason
+        TriggeredScaleUp."""
+        return self not in {self.KARPENTER}

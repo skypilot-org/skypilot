@@ -6,7 +6,7 @@ import socket
 import subprocess
 import tempfile
 import time
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import filelock
 import pytest
@@ -16,6 +16,7 @@ from smoke_tests.docker import docker_utils
 
 from sky import cloud_stores
 from sky import sky_logging
+from sky.utils import annotations
 from sky.utils import common_utils
 
 # Initialize logger at the top level
@@ -33,7 +34,9 @@ from common_test_fixtures import mock_job_table_one_job
 from common_test_fixtures import mock_queue
 from common_test_fixtures import mock_redirect_log_file
 from common_test_fixtures import mock_services_no_service
+from common_test_fixtures import mock_services_no_service_grpc
 from common_test_fixtures import mock_services_one_service
+from common_test_fixtures import mock_services_one_service_grpc
 from common_test_fixtures import mock_stream_utils
 from common_test_fixtures import reset_global_state
 from common_test_fixtures import skyignore_dir
@@ -59,8 +62,8 @@ from sky.server import common as server_common
 # --managed-jobs.
 all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci', 'do',
-    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod',
-    'vast', 'nebius', 'hyperbolic'
+    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace',
+    'primeintellect', 'runpod', 'vast', 'nebius', 'hyperbolic', 'seeweb'
 ]
 default_clouds_to_run = ['aws', 'azure']
 
@@ -82,11 +85,13 @@ cloud_to_pytest_keyword = {
     'fluidstack': 'fluidstack',
     'cudo': 'cudo',
     'paperspace': 'paperspace',
+    'primeintellect': 'primeintellect',
     'do': 'do',
     'vast': 'vast',
     'runpod': 'runpod',
     'nebius': 'nebius',
-    'hyperbolic': 'hyperbolic'
+    'hyperbolic': 'hyperbolic',
+    'seeweb': 'seeweb'
 }
 
 
@@ -329,6 +334,13 @@ def pytest_collection_modifyitems(config, items):
         # Skip tests marked as no_remote_server if --remote-server is set
         if 'no_remote_server' in marks and config.getoption('--remote-server'):
             item.add_marker(skip_marks['no_remote_server'])
+        # Skip tests marked as no_remote_server if --env-file is set and the env file contains
+        # api_server configuration. (max line length 80)
+        env_file = config.getoption('--env-file')
+        if env_file:
+            has_api_server, _ = _get_and_check_env_file(env_file)
+            if has_api_server and 'no_remote_server' in marks:
+                item.add_marker(skip_marks['no_remote_server'])
 
     # Check if tests need to be run serially for Kubernetes and Lambda Cloud
     # We run Lambda Cloud tests serially because Lambda Cloud rate limits its
@@ -374,6 +386,55 @@ def _generic_cloud(config) -> str:
     if generic_cloud_option is not None:
         return generic_cloud_option
     return _get_cloud_to_run(config)[0]
+
+
+@annotations.lru_cache(scope='session')
+def _get_and_check_env_file(env_file_path: str) -> Tuple[bool, Optional[str]]:
+    """Download/get env file and check if it contains api_server configuration.
+
+    Returns:
+        tuple: (has_api_server_config, local_file_path)
+    """
+    assert isinstance(
+        env_file_path,
+        str), f'env_file_path must be a string, got {type(env_file_path)}'
+
+    # Check if it's a local file or directory (same logic as prepare_env_file)
+    expanded_path = os.path.expanduser(env_file_path)
+    if os.path.exists(expanded_path):
+        # It's a local file
+        local_file_path = expanded_path
+    else:
+        # It's a cloud storage URL - download it (same logic as prepare_env_file)
+        logger.info(
+            f'Downloading env file from cloud storage for collection: {env_file_path}'
+        )
+
+        # Create temporary directory for downloaded files
+        temp_dir = tempfile.mkdtemp(prefix='skypilot_env_collection_')
+
+        # Get the appropriate CloudStorage handler for the URL
+        cloud_storage = cloud_stores.get_storage_from_path(env_file_path)
+
+        # Generate the download command - assert it's a file
+        assert not cloud_storage.is_directory(env_file_path), (
+            f'Expected file but got directory: {env_file_path}')
+        download_cmd = cloud_storage.make_sync_file_command(
+            env_file_path, temp_dir)
+
+        # Execute the download command
+        subprocess.run(download_cmd, shell=True, check=True)
+
+        # Get the filename from the original URL
+        file_name = os.path.basename(env_file_path)
+        local_file_path = os.path.join(temp_dir, file_name)
+
+    # Check if the file contains api_server configuration
+    with open(local_file_path, 'r') as f:
+        content = f.read()
+        has_api_server = 'endpoint' in content and ('api_server' in content)
+
+    return has_api_server, local_file_path
 
 
 @pytest.fixture
@@ -687,46 +748,12 @@ def prepare_env_file(request):
         yield
         return
 
-    # Check if it's a local file or directory
-    expanded_path = os.path.expanduser(env_file_path)
-    if os.path.exists(expanded_path):
-        # It's a local file/directory, use it directly
-        logger.info(f'Using local env file: {expanded_path}')
-        os.environ['PYTEST_SKYPILOT_CONFIG_FILE_OVERRIDE'] = expanded_path
-        yield expanded_path
-        return
+    # Use the cached function to get/download the env file
+    # This avoids duplicate downloads if collection phase already downloaded it
+    has_api_server, local_file_path = _get_and_check_env_file(env_file_path)
 
-    # Not a local file, treat as cloud storage URL (e.g., s3://bucket/path)
-
-    logger.info(
-        f'Attempting to download env file from cloud storage: {env_file_path}')
-
-    # Create temporary directory for downloaded files
-    temp_dir = tempfile.mkdtemp(prefix='skypilot_env_')
-
-    try:
-        # Get the appropriate CloudStorage handler for the URL
-        cloud_storage = cloud_stores.get_storage_from_path(env_file_path)
-
-        # Generate the download command - assert it's a file
-        assert not cloud_storage.is_directory(env_file_path), (
-            f'Expected file but got directory: {env_file_path}')
-        download_cmd = cloud_storage.make_sync_file_command(
-            env_file_path, temp_dir)
-
-        logger.info(f'Executing download command: {download_cmd}')
-
-        # Execute the download command
-        subprocess.run(download_cmd, shell=True, check=True)
-
-        # Get the filename from the original URL
-        file_name = os.path.basename(env_file_path)
-        file_path = os.path.join(temp_dir, file_name)
-
-        logger.info(f'Downloaded env file to: {file_path}')
-        os.environ['PYTEST_SKYPILOT_CONFIG_FILE_OVERRIDE'] = file_path
-        yield file_path
-    finally:
-        # Clean up temporary directory
-        if os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir, ignore_errors=True)
+    logger.info(f'Using env file: {local_file_path}')
+    os.environ['PYTEST_SKYPILOT_CONFIG_FILE_OVERRIDE'] = local_file_path
+    if has_api_server:
+        os.environ['PYTEST_SKYPILOT_REMOTE_SERVER_TEST'] = '1'
+    yield local_file_path

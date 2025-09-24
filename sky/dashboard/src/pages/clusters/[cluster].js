@@ -167,7 +167,9 @@ function ClusterDetails() {
 
       setHistoryLoading(true);
       try {
-        const historyData = await dashboardCache.get(getClusterHistory);
+        const historyData = await dashboardCache.get(getClusterHistory, [
+          cluster,
+        ]);
         const foundHistoryCluster = historyData.find(
           (c) => c.cluster_hash === cluster || c.cluster === cluster
         );
@@ -462,6 +464,14 @@ function ActiveTab({
                 </div>
                 <div className="text-base mt-1">
                   {clusterData.cluster || clusterData.name}
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-600 font-medium text-base">
+                  Cluster Name on Cloud
+                </div>
+                <div className="text-base mt-1">
+                  {clusterData.cluster_name_on_cloud || '-'}
                 </div>
               </div>
               <div>

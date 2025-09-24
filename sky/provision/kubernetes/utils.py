@@ -619,7 +619,9 @@ class GFDLabelFormatter(GPULabelFormatter):
     def get_label_values(cls, accelerator: str) -> List[str]:
         # An accelerator can map to many Nvidia GFD labels
         # (e.g., A100-80GB-PCIE vs. A100-SXM4-80GB).
-        # TODO implement get_label_values for GFDLabelFormatter
+        # TODO: implement get_label_values for GFDLabelFormatter. We need a
+        #  mapping from SkyPilot accelerator names (e.g., l40s) to GFD labels
+        #  (e.g., NVIDIA-L40S)
         raise NotImplementedError
 
     @classmethod
@@ -664,13 +666,58 @@ class KarpenterLabelFormatter(SkyPilotLabelFormatter):
     LABEL_KEY = 'karpenter.k8s.aws/instance-gpu-name'
 
 
+class NebiusLabelFormatter(GPULabelFormatter):
+    """Nebius label formatter
+
+        Uses node.kubernetes.io/instance-type as the key, and the uppercase SkyPilot
+        accelerator str as the value.
+        """
+
+    LABEL_KEY = 'node.kubernetes.io/instance-type'
+    # From https://docs.nebius.com/compute/virtual-machines/types
+    NEBIUS_ACCELERATOR_TO_PLATFORM = {
+        'B200': ['gpu-b200-sxm'],
+        'H200': ['gpu-h200-sxm'],
+        'H100': ['gpu-h100-sxm'],
+        'L40S': ['gpu-l40s-a', 'gpu-l40s-d']
+    }
+
+    @classmethod
+    def get_label_key(cls, accelerator: Optional[str] = None) -> str:
+        return cls.LABEL_KEY
+
+    @classmethod
+    def get_label_keys(cls) -> List[str]:
+        return [cls.LABEL_KEY]
+
+    @classmethod
+    def get_label_values(cls, accelerator: str) -> List[str]:
+        return cls.NEBIUS_ACCELERATOR_TO_PLATFORM.get(accelerator, [])
+
+    @classmethod
+    def match_label_key(cls, label_key: str) -> bool:
+        return label_key == cls.LABEL_KEY
+
+    @classmethod
+    def get_accelerator_from_label_value(cls, value: str) -> str:
+        if value.startswith('gpu-'):
+            # All GPU platforms have format like 'gpu-h200-sxm'
+            # https://docs.nebius.com/compute/virtual-machines/types
+            return value.split('-')[1].upper()
+        elif value.startswith('cpu-'):
+            return ''
+        else:
+            raise ValueError(
+                f'Invalid accelerator name in Nebius cluster: {value}')
+
+
 # LABEL_FORMATTER_REGISTRY stores the label formats SkyPilot will try to
 # discover the accelerator type from. The order of the list is important, as
 # it will be used to determine the priority of the label formats when
 # auto-detecting the GPU label type.
 LABEL_FORMATTER_REGISTRY = [
     SkyPilotLabelFormatter, GKELabelFormatter, KarpenterLabelFormatter,
-    GFDLabelFormatter, CoreWeaveLabelFormatter
+    GFDLabelFormatter, CoreWeaveLabelFormatter, NebiusLabelFormatter
 ]
 
 
@@ -1096,6 +1143,14 @@ class CoreweaveAutoscaler(Autoscaler):
     can_query_backend: bool = False
 
 
+class NebiusAutoscaler(Autoscaler):
+    """Nebius autoscaler.
+    """
+
+    label_formatter: Any = NebiusLabelFormatter
+    can_query_backend: bool = False
+
+
 class GenericAutoscaler(Autoscaler):
     """Generic autoscaler
     """
@@ -1109,6 +1164,7 @@ AUTOSCALER_TYPE_TO_AUTOSCALER = {
     kubernetes_enums.KubernetesAutoscalerType.GKE: GKEAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.KARPENTER: KarpenterAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.COREWEAVE: CoreweaveAutoscaler,
+    kubernetes_enums.KubernetesAutoscalerType.NEBIUS: NebiusAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.GENERIC: GenericAutoscaler,
 }
 
@@ -3550,9 +3606,20 @@ def process_skypilot_pods(
                     f'requesting GPUs: {pod.metadata.name}')
                 gpu_label = label_formatter.get_label_key()
                 # Get GPU name from pod node selector
-                if pod.spec.node_selector is not None:
-                    gpu_name = label_formatter.get_accelerator_from_label_value(
-                        pod.spec.node_selector.get(gpu_label))
+                node_selector_terms = (
+                    pod.spec.affinity.node_affinity.
+                    required_during_scheduling_ignored_during_execution.
+                    node_selector_terms)
+                if node_selector_terms is not None:
+                    expressions = []
+                    for term in node_selector_terms:
+                        if term.match_expressions:
+                            expressions.extend(term.match_expressions)
+                    for expression in expressions:
+                        if expression.key == gpu_label and expression.operator == 'In':
+                            gpu_name = label_formatter.get_accelerator_from_label_value(
+                                expression.values[0])
+                            break
 
             resources = resources_lib.Resources(
                 cloud=clouds.Kubernetes(),
