@@ -176,6 +176,8 @@ auth:
     # If empty/null, the above client-id and client-secret values are used instead
     # See https://docs.skypilot.co/en/latest/reference/auth.html#oauth-client-secret
     client-details-from-secret: ""
+    # Use HTTPS (set to true for production environments)
+    use-https: false
     # Email domains to allow (use "*" for all domains)
     email-domain: "*"
     # Session storage settings ("cookie" or "redis")
