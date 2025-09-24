@@ -357,6 +357,12 @@ class GPULabelFormatter:
         raise NotImplementedError
 
     @classmethod
+    def match_label_key_value(cls, label_key: str, label_value: str) -> bool:
+        """Checks if the given label key and value matches the formatter."""
+        del label_value
+        return cls.match_label_key(label_key)
+
+    @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
         """Given a label value, returns the GPU type"""
         raise NotImplementedError
@@ -696,7 +702,16 @@ class NebiusLabelFormatter(GPULabelFormatter):
 
     @classmethod
     def match_label_key(cls, label_key: str) -> bool:
-        return label_key == cls.LABEL_KEY
+        # Never matches the well-known label key individually to avoid
+        # mismatching. See `match_label_key_value` for more details.
+        return False
+
+    @classmethod
+    def match_label_key_value(cls, label_key: str, label_value: str) -> bool:
+        # TODO(aylei): this is hacky since other clouds may also has kv like
+        # node.kubernetes.io/instance-type=gpu-*. We should find a better way
+        # to match Nebius's unique label key.
+        return cls.LABEL_KEY == label_key and label_value.startswith('gpu-')
 
     @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
@@ -745,7 +760,7 @@ def detect_gpu_label_formatter(
         skip = False
         for _, label_list in node_labels.items():
             for label, value in label_list:
-                if lf.match_label_key(label):
+                if lf.match_label_key_value(label, value):
                     # Skip empty label values
                     if not value or value.strip() == '':
                         continue
@@ -1485,7 +1500,7 @@ def get_accelerator_label_key_values(
             # correctly setup and will behave as expected.
             for node_name, label_list in node_labels.items():
                 for label, value in label_list:
-                    if label_formatter.match_label_key(label):
+                    if label_formatter.match_label_key_value(label, value):
                         is_valid, reason = label_formatter.validate_label_value(
                             value)
                         if not is_valid:
@@ -1509,7 +1524,7 @@ def get_accelerator_label_key_values(
                 if is_multi_host_tpu(node_metadata_labels):
                     continue
                 for label, value in label_list:
-                    if label_formatter.match_label_key(label):
+                    if label_formatter.match_label_key_value(label, value):
                         # match either canonicalized name or raw name
                         accelerator = (label_formatter.
                                        get_accelerator_from_label_value(value))
@@ -1551,8 +1566,9 @@ def get_accelerator_label_key_values(
                     all_labels = []
                     for node_name, label_list in node_labels.items():
                         all_labels.extend(label_list)
-                    acc_available = set(v for k, v in all_labels
-                                        if label_formatter.match_label_key(k))
+                    acc_available = set(
+                        v for k, v in all_labels
+                        if label_formatter.match_label_key_value(k, v))
                     suffix = (' Available GPU/TPUs on the cluster: '
                               f'{acc_available}')
                 # TODO(Doyoung): Update the error message raised with the
