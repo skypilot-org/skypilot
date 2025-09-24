@@ -302,9 +302,9 @@ def _query_ports_for_ingress(
         # this list has no effect anyway. Here only returns the HTTP endpoint to
         # reduce the confusion.
         result[port] = [
-            common.HTTPEndpoint(host=external_ip,
-                                port=chosen_port,
-                                path=path_prefix.lstrip('/')),
+            common.SocketEndpoint(host=external_ip,
+                                  port=chosen_port,
+                                  path=path_prefix.lstrip('/')),
         ]
 
     return result

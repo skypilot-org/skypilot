@@ -12,8 +12,10 @@ import colorama
 import filelock
 
 from sky import backends
+from sky import clouds
 from sky import exceptions
 from sky import execution
+from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
@@ -360,8 +362,7 @@ def up(
                 socket_endpoint = f'localhost:{lb_port}'
             assert socket_endpoint is not None, (
                 'Did not get endpoint for controller.')
-            endpoint = (socket_endpoint if '://' in socket_endpoint else
-                        f'{protocol}://{socket_endpoint}')
+            endpoint = f'{protocol}://{socket_endpoint}'
 
         if pool:
             logger.info(
@@ -712,8 +713,7 @@ def status(
                 pass
             else:
                 if endpoint is not None:
-                    endpoint = (endpoint if '://' in endpoint else
-                                f'{protocol}://{endpoint}')
+                    endpoint = f'{protocol}://{endpoint}'
                 service_record['endpoint'] = endpoint
 
     return service_records
