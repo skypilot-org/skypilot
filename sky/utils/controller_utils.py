@@ -1190,7 +1190,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
 # Monitoring process for service is 1GB. This is based on an old estimation but
 # we keep it here for now.
 # TODO(tian): Remeasure this.
-SERVE_MONITORING_MEMORY_MB = 1024
+SERVE_MONITORING_MEMORY_MB = 512
 # The resource consumption ratio of service launch to serve down.
 SERVE_LAUNCH_RATIO = 2.0
 
