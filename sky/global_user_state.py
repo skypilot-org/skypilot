@@ -1083,21 +1083,27 @@ def get_status_from_cluster_name(
 
 @_init_db
 @metrics_lib.time_me
-def get_glob_cluster_names(cluster_name: str) -> List[str]:
+def get_glob_cluster_names(
+        cluster_name: str,
+        workspaces_filter: Optional[Set[str]] = None) -> List[str]:
     assert _SQLALCHEMY_ENGINE is not None
     assert cluster_name is not None, 'cluster_name cannot be None'
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
-            rows = session.query(cluster_table.c.name).filter(
-                cluster_table.c.name.op('GLOB')(cluster_name)).all()
+            query = session.query(cluster_table.c.name).filter(
+                cluster_table.c.name.op('GLOB')(cluster_name))
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            rows = session.query(cluster_table.c.name).filter(
+            query = session.query(cluster_table.c.name).filter(
                 cluster_table.c.name.op('SIMILAR TO')(
-                    _glob_to_similar(cluster_name))).all()
+                    _glob_to_similar(cluster_name)))
         else:
             raise ValueError('Unsupported database dialect')
+        if workspaces_filter is not None:
+            query = query.filter(
+                cluster_table.c.workspace.in_(workspaces_filter))
+        rows = query.all()
     return [row.name for row in rows]
 
 
@@ -1534,7 +1540,7 @@ def cluster_with_name_exists(cluster_name: str) -> bool:
 def get_clusters(
     *,  # keyword only separator
     exclude_managed_clusters: bool = False,
-    workspaces_filter: Optional[Set[str]] = None,
+    workspaces_filter: Optional[Dict[str, Any]] = None,
     user_hashes_filter: Optional[Set[str]] = None,
     cluster_names: Optional[List[str]] = None,
     summary_response: bool = False,
