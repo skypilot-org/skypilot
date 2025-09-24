@@ -128,12 +128,12 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
 RUN source ~/miniconda3/etc/profile.d/conda.sh && \
     conda activate base && \
     export PATH="$PATH:$HOME/.local/bin" && \
-    uv pip uninstall skypilot && \
-    uv pip install --prerelease=allow "azure-cli>=2.65.0" && \
-    uv pip install -r requirements-dev.txt && \
-    uv pip install -e ".[all]" && \
+    uv pip uninstall skypilot --system && \
+    uv pip install --prerelease=allow "azure-cli>=2.65.0" --system && \
+    uv pip install -r requirements-dev.txt --system && \
+    uv pip install -e ".[all]" --system && \
     # Install httpx with SOCKS support for proxy environments - necessary when system has proxy enabled
-    uv pip install httpx[socks]
+    uv pip install httpx[socks] --system
 
 # Install Helm
 RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
