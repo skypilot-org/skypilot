@@ -108,7 +108,7 @@ async def logs(
         request_cluster_name=common.JOB_CONTROLLER_NAME,
     )
     if schedule_type == api_requests.ScheduleType.LONG:
-        executor.schedule_request_task(request_task)
+        executor.schedule_prepared_request(request_task)
     else:
         # For short request, run in the coroutine to avoid blocking
         # short workers.

@@ -671,19 +671,19 @@ def schedule_request(request_id: str,
     request_task = prepare_request(request_id, request_name, request_body, func,
                                    request_cluster_name, schedule_type,
                                    is_skypilot_system)
-    schedule_request_task(request_task, ignore_return_value, precondition,
-                          retryable)
+    schedule_prepared_request(request_task, ignore_return_value, precondition,
+                              retryable)
 
 
-def schedule_request_task(request_task: api_requests.Request,
-                          ignore_return_value: bool = False,
-                          precondition: Optional[
-                              preconditions.Precondition] = None,
-                          retryable: bool = False) -> None:
+def schedule_prepared_request(request_task: api_requests.Request,
+                              ignore_return_value: bool = False,
+                              precondition: Optional[
+                                  preconditions.Precondition] = None,
+                              retryable: bool = False) -> None:
     """Enqueue a request to the request queue
 
     Args:
-        request_task: The request task to schedule.
+        request_task: The prepared request task to schedule.
         ignore_return_value: If True, the return value of the function will be
             ignored.
         precondition: If a precondition is provided, the request will only be
