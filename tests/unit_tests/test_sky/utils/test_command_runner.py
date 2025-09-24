@@ -20,8 +20,7 @@ def test_rsync_respects_skyignore_negation(tmp_path):
     src.mkdir()
     dst.mkdir()
 
-    (src / '.skyignore').write_text('*.log\n!important.log\n',
-                                    encoding='utf-8')
+    (src / '.skyignore').write_text('*.log\n!important.log\n', encoding='utf-8')
     (src / 'boring.log').write_text('boring', encoding='utf-8')
     (src / 'important.log').write_text('important', encoding='utf-8')
     (src / 'notes.txt').write_text('notes', encoding='utf-8')
