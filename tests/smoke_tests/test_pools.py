@@ -636,7 +636,7 @@ def test_pool_job_cancel_instant(generic_cloud: str):
 
 
 @pytest.mark.aws
-def test_pools_job_cancel_recovery(generic_cloud: str):
+def test_pool_job_cancel_recovery(generic_cloud: str):
     region = 'us-east-2'
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
@@ -657,7 +657,7 @@ def test_pools_job_cancel_recovery(generic_cloud: str):
             write_yaml(pool_yaml, pool_config)
             write_yaml(job_yaml, job_config)
             test = smoke_tests_utils.Test(
-                'test_pools_job_cancel_recovery',
+                'test_pool_job_cancel_recovery',
                 [
                     smoke_tests_utils.launch_cluster_for_cloud_cmd(
                         'aws', name, skip_remote_server_check=True),
@@ -694,7 +694,7 @@ def test_pools_job_cancel_recovery(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-def test_pools_job_cancel_running_multiple(generic_cloud: str):
+def test_pool_job_cancel_running_multiple(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     pool_config = basic_pool_conf(num_workers=4, infra=generic_cloud)
     job_name = f'{smoke_tests_utils.get_cluster_name()}-job'
@@ -711,7 +711,7 @@ def test_pools_job_cancel_running_multiple(generic_cloud: str):
             pool_name = f'{name}-pool'
 
             test = smoke_tests_utils.Test(
-                'test_pools_job_cancel_running_multiple',
+                'test_pool_job_cancel_running_multiple',
                 [
                     _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
                         pool_name=pool_name, pool_yaml=pool_yaml.name),
@@ -767,7 +767,7 @@ def test_pools_job_cancel_running_multiple(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-def test_pools_job_cancel_running_multiple_simultaneous(generic_cloud: str):
+def test_pool_job_cancel_running_multiple_simultaneous(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     pool_config = basic_pool_conf(num_workers=4, infra=generic_cloud)
 
@@ -786,7 +786,7 @@ def test_pools_job_cancel_running_multiple_simultaneous(generic_cloud: str):
             pool_name = f'{name}-pool'
 
             test = smoke_tests_utils.Test(
-                'test_pools_job_cancel_running_multiple_simultaneous',
+                'test_pool_job_cancel_running_multiple_simultaneous',
                 [
                     _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
                         pool_name=pool_name, pool_yaml=pool_yaml.name),
@@ -839,7 +839,7 @@ def test_pools_job_cancel_running_multiple_simultaneous(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-def test_pools_job_cancel_instant_multiple(generic_cloud: str):
+def test_pool_job_cancel_instant_multiple(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     pool_config = basic_pool_conf(num_workers=4, infra=generic_cloud)
     job_name = f'{smoke_tests_utils.get_cluster_name()}-job'
@@ -856,7 +856,7 @@ def test_pools_job_cancel_instant_multiple(generic_cloud: str):
             pool_name = f'{name}-pool'
 
             test = smoke_tests_utils.Test(
-                'test_pools_job_cancel_instant_multiple',
+                'test_pool_job_cancel_instant_multiple',
                 [
                     _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
                         pool_name=pool_name, pool_yaml=pool_yaml.name),
@@ -903,7 +903,7 @@ def test_pools_job_cancel_instant_multiple(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-def test_pools_job_cancel_instant_multiple_simultaneous(generic_cloud: str):
+def test_pool_job_cancel_instant_multiple_simultaneous(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     pool_config = basic_pool_conf(num_workers=4, infra=generic_cloud)
     job_name = f'{smoke_tests_utils.get_cluster_name()}-job'
@@ -920,7 +920,7 @@ def test_pools_job_cancel_instant_multiple_simultaneous(generic_cloud: str):
             pool_name = f'{name}-pool'
 
             test = smoke_tests_utils.Test(
-                'test_pools_job_cancel_instant_multiple_simultaneous',
+                'test_pool_job_cancel_instant_multiple_simultaneous',
                 [
                     _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
                         pool_name=pool_name, pool_yaml=pool_yaml.name),
@@ -962,3 +962,28 @@ def test_pools_job_cancel_instant_multiple_simultaneous(generic_cloud: str):
             )
 
             smoke_tests_utils.run_one_test(test)
+
+
+def test_pools_job_cancel_no_jobs(generic_cloud: str):
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        write_yaml(pool_yaml, pool_config)
+
+        name = smoke_tests_utils.get_cluster_name()
+        pool_name = f'{name}-pool'
+
+        test = smoke_tests_utils.Test(
+            'test_pools_job_cancel_running',
+            [
+                _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
+                                                      pool_yaml=pool_yaml.name),
+                # Cancel the job.
+                f's=$(sky jobs cancel --pool {pool_name} -y 2>&1); echo "$s"; echo; echo; echo "$s" | grep "No running job found in pool"',
+            ],
+            timeout=timeout,
+            teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
+        )
+
+        smoke_tests_utils.run_one_test(test)
