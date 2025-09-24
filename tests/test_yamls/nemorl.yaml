@@ -1,10 +1,9 @@
 # Runs the DPO example from NeMo RL repository
 
 resources:
-  instance_type: p4d.24xlarge
+  instance_type: g6.4xlarge
   infra: aws/ap-northeast-1
   network_tier: best
-  image_id: docker:public.ecr.aws/hpc-cloud/nccl-tests:latest
 
 num_nodes: 2
 
@@ -38,7 +37,8 @@ run: |
       policy.tokenizer.name="Qwen/Qwen3-0.6B" \
       cluster.gpus_per_node=${SKYPILOT_NUM_GPUS_PER_NODE} \
       cluster.num_nodes=${SKYPILOT_NUM_NODES} \
-      dpo.val_global_batch_size=32 \
+      dpo.val_global_batch_size=1 \
+      dpo.max_num_steps=1 \
       checkpointing.checkpoint_dir='results/dpo_qwen3_0.6b'
   else
     sleep 5
