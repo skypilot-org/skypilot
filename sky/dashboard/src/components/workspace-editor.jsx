@@ -45,6 +45,7 @@ import { statusGroups } from './jobs'; // Import statusGroups
 import yaml from 'js-yaml';
 import { CLOUD_CANONICALIZATIONS } from '@/data/connectors/constants';
 import { getUsers } from '@/data/connectors/users';
+import { dashboardCache } from '@/lib/cache';
 
 // Success display component
 const SuccessDisplay = ({ message }) => {
@@ -360,9 +361,9 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     try {
       const [clustersResponse, managedJobsResponse, enabledClouds] =
         await Promise.all([
-          getClusters(),
-          getManagedJobs({ allUsers: true, skipFinished: true }),
-          getEnabledClouds(workspaceName, true),
+          dashboardCache.get(getClusters),
+          dashboardCache.get(getManagedJobs, [{ allUsers: true, skipFinished: true }]),
+          dashboardCache.get(getEnabledClouds, [workspaceName, true]),
         ]);
 
       // Filter clusters for this workspace
