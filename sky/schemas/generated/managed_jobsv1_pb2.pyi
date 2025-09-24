@@ -217,47 +217,23 @@ class GetAllJobIdsByNameResponse(_message.Message):
     job_ids: _containers.RepeatedScalarFieldContainer[int]
     def __init__(self, job_ids: _Optional[_Iterable[int]] = ...) -> None: ...
 
-class CancelJobsByIdRequest(_message.Message):
-    __slots__ = ("job_ids", "user_hash", "all_users", "current_workspace")
-    JOB_IDS_FIELD_NUMBER: _ClassVar[int]
+class CancelJobsRequest(_message.Message):
+    __slots__ = ("current_workspace", "user_hash", "all_users", "job_ids", "job_name", "pool_name")
+    CURRENT_WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     USER_HASH_FIELD_NUMBER: _ClassVar[int]
     ALL_USERS_FIELD_NUMBER: _ClassVar[int]
-    CURRENT_WORKSPACE_FIELD_NUMBER: _ClassVar[int]
-    job_ids: JobIds
+    JOB_IDS_FIELD_NUMBER: _ClassVar[int]
+    JOB_NAME_FIELD_NUMBER: _ClassVar[int]
+    POOL_NAME_FIELD_NUMBER: _ClassVar[int]
+    current_workspace: str
     user_hash: str
     all_users: bool
-    current_workspace: str
-    def __init__(self, job_ids: _Optional[_Union[JobIds, _Mapping]] = ..., user_hash: _Optional[str] = ..., all_users: bool = ..., current_workspace: _Optional[str] = ...) -> None: ...
-
-class CancelJobsByIdResponse(_message.Message):
-    __slots__ = ("message",)
-    MESSAGE_FIELD_NUMBER: _ClassVar[int]
-    message: str
-    def __init__(self, message: _Optional[str] = ...) -> None: ...
-
-class CancelJobByNameRequest(_message.Message):
-    __slots__ = ("job_name", "current_workspace")
-    JOB_NAME_FIELD_NUMBER: _ClassVar[int]
-    CURRENT_WORKSPACE_FIELD_NUMBER: _ClassVar[int]
+    job_ids: JobIds
     job_name: str
-    current_workspace: str
-    def __init__(self, job_name: _Optional[str] = ..., current_workspace: _Optional[str] = ...) -> None: ...
-
-class CancelJobByNameResponse(_message.Message):
-    __slots__ = ("message",)
-    MESSAGE_FIELD_NUMBER: _ClassVar[int]
-    message: str
-    def __init__(self, message: _Optional[str] = ...) -> None: ...
-
-class CancelJobsByPoolRequest(_message.Message):
-    __slots__ = ("pool_name", "current_workspace")
-    POOL_NAME_FIELD_NUMBER: _ClassVar[int]
-    CURRENT_WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     pool_name: str
-    current_workspace: str
-    def __init__(self, pool_name: _Optional[str] = ..., current_workspace: _Optional[str] = ...) -> None: ...
+    def __init__(self, current_workspace: _Optional[str] = ..., user_hash: _Optional[str] = ..., all_users: bool = ..., job_ids: _Optional[_Union[JobIds, _Mapping]] = ..., job_name: _Optional[str] = ..., pool_name: _Optional[str] = ...) -> None: ...
 
-class CancelJobsByPoolResponse(_message.Message):
+class CancelJobsResponse(_message.Message):
     __slots__ = ("message",)
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
     message: str

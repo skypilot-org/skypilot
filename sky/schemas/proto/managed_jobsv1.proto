@@ -9,12 +9,8 @@ service ManagedJobsService {
   rpc GetJobTable(GetJobTableRequest) returns (GetJobTableResponse);
   // Get all job IDs by name.
   rpc GetAllJobIdsByName(GetAllJobIdsByNameRequest) returns (GetAllJobIdsByNameResponse);
-  // Cancel managed jobs by IDs.
-  rpc CancelJobsById(CancelJobsByIdRequest) returns (CancelJobsByIdResponse);
-  // Cancel managed job by name.
-  rpc CancelJobByName(CancelJobByNameRequest) returns (CancelJobByNameResponse);
-  // Cancel managed jobs by pool.
-  rpc CancelJobsByPool(CancelJobsByPoolRequest) returns (CancelJobsByPoolResponse);
+  // Cancel managed jobs.
+  rpc CancelJobs(CancelJobsRequest) returns (CancelJobsResponse);
   // Stream managed job logs.
   rpc StreamLogs(StreamLogsRequest) returns (stream StreamLogsResponse);
 }
@@ -126,32 +122,19 @@ message GetAllJobIdsByNameResponse {
   repeated int64 job_ids = 1;
 }
 
-message CancelJobsByIdRequest {
-  optional JobIds job_ids = 1;
+message CancelJobsRequest {
+  string current_workspace = 1;
   optional string user_hash = 2;
-  bool all_users = 3;
-  string current_workspace = 4;
+
+  oneof cancellation_criteria {
+    bool all_users = 3;
+    JobIds job_ids = 4;
+    string job_name = 5;
+    string pool_name = 6;
+  }
 }
 
-message CancelJobsByIdResponse {
-  string message = 1;
-}
-
-message CancelJobByNameRequest {
-  string job_name = 1;
-  string current_workspace = 2;
-}
-
-message CancelJobByNameResponse {
-  string message = 1;
-}
-
-message CancelJobsByPoolRequest {
-  string pool_name = 1;
-  string current_workspace = 2;
-}
-
-message CancelJobsByPoolResponse {
+message CancelJobsResponse {
   string message = 1;
 }
 

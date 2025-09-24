@@ -871,44 +871,26 @@ def cancel(name: Optional[str] = None,
         if handle.is_grpc_enabled_with_flag:
             current_workspace = skypilot_config.get_active_workspace()
             try:
+                request = managed_jobsv1_pb2.CancelJobsRequest(
+                    current_workspace=current_workspace)
+
                 if all_users or all or job_ids:
-                    cancel_by_id_request = (
-                        managed_jobsv1_pb2.CancelJobsByIdRequest(
-                            job_ids=None if job_ids is None else
-                            managed_jobsv1_pb2.JobIds(ids=job_ids),
-                            all_users=all_users,
-                            user_hash=common_utils.get_user_hash()
-                            if all else None,
-                            current_workspace=current_workspace))
-                    cancel_by_id_response = (
-                        backend_utils.invoke_skylet_with_retries(
-                            lambda: cloud_vm_ray_backend.SkyletClient(
-                                handle.get_grpc_channel()).
-                            cancel_managed_jobs_by_id(cancel_by_id_request)))
-                    stdout = cancel_by_id_response.message
+                    request.all_users = all_users
+                    if all:
+                        request.user_hash = common_utils.get_user_hash()
+                    if job_ids is not None:
+                        request.job_ids.CopyFrom(
+                            managed_jobsv1_pb2.JobIds(ids=job_ids))
                 elif name is not None:
-                    cancel_by_name_request = (
-                        managed_jobsv1_pb2.CancelJobByNameRequest(
-                            job_name=name, current_workspace=current_workspace))
-                    cancel_by_name_response = (
-                        backend_utils.invoke_skylet_with_retries(
-                            lambda: cloud_vm_ray_backend.SkyletClient(
-                                handle.get_grpc_channel()).
-                            cancel_managed_job_by_name(cancel_by_name_request)))
-                    stdout = cancel_by_name_response.message
+                    request.job_name = name
                 else:
                     assert pool is not None, (job_ids, name, pool, all)
-                    cancel_by_pool_request = (
-                        managed_jobsv1_pb2.CancelJobsByPoolRequest(
-                            pool_name=pool,
-                            current_workspace=current_workspace))
-                    cancel_by_pool_response = (
-                        backend_utils.invoke_skylet_with_retries(
-                            lambda: cloud_vm_ray_backend.SkyletClient(
-                                handle.get_grpc_channel()).
-                            cancel_managed_jobs_by_pool(cancel_by_pool_request))
-                    )
-                    stdout = cancel_by_pool_response.message
+                    request.pool_name = pool
+
+                response = backend_utils.invoke_skylet_with_retries(
+                    lambda: cloud_vm_ray_backend.SkyletClient(
+                        handle.get_grpc_channel()).cancel_managed_jobs(request))
+                stdout = response.message
             except exceptions.SkyletMethodNotImplementedError:
                 use_legacy = True
 

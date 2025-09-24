@@ -3227,27 +3227,12 @@ class SkyletClient:
         return self._managed_jobs_stub.GetAllJobIdsByName(request,
                                                           timeout=timeout)
 
-    def cancel_managed_jobs_by_id(
+    def cancel_managed_jobs(
         self,
-        request: 'managed_jobsv1_pb2.CancelJobsByIdRequest',
+        request: 'managed_jobsv1_pb2.CancelJobsRequest',
         timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
-    ) -> 'managed_jobsv1_pb2.CancelJobsByIdResponse':
-        return self._managed_jobs_stub.CancelJobsById(request, timeout=timeout)
-
-    def cancel_managed_job_by_name(
-        self,
-        request: 'managed_jobsv1_pb2.CancelJobByNameRequest',
-        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
-    ) -> 'managed_jobsv1_pb2.CancelJobByNameResponse':
-        return self._managed_jobs_stub.CancelJobByName(request, timeout=timeout)
-
-    def cancel_managed_jobs_by_pool(
-        self,
-        request: 'managed_jobsv1_pb2.CancelJobsByPoolRequest',
-        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
-    ) -> 'managed_jobsv1_pb2.CancelJobsByPoolResponse':
-        return self._managed_jobs_stub.CancelJobsByPool(request,
-                                                        timeout=timeout)
+    ) -> 'managed_jobsv1_pb2.CancelJobsResponse':
+        return self._managed_jobs_stub.CancelJobs(request, timeout=timeout)
 
 
 @registry.BACKEND_REGISTRY.type_register(name='cloudvmray')

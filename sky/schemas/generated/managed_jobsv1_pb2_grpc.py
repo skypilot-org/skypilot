@@ -54,20 +54,10 @@ class ManagedJobsServiceStub(object):
                 request_serializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.GetAllJobIdsByNameRequest.SerializeToString,
                 response_deserializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.GetAllJobIdsByNameResponse.FromString,
                 _registered_method=True)
-        self.CancelJobsById = channel.unary_unary(
-                '/managed_jobs.v1.ManagedJobsService/CancelJobsById',
-                request_serializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobsByIdRequest.SerializeToString,
-                response_deserializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobsByIdResponse.FromString,
-                _registered_method=True)
-        self.CancelJobByName = channel.unary_unary(
-                '/managed_jobs.v1.ManagedJobsService/CancelJobByName',
-                request_serializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobByNameRequest.SerializeToString,
-                response_deserializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobByNameResponse.FromString,
-                _registered_method=True)
-        self.CancelJobsByPool = channel.unary_unary(
-                '/managed_jobs.v1.ManagedJobsService/CancelJobsByPool',
-                request_serializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobsByPoolRequest.SerializeToString,
-                response_deserializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobsByPoolResponse.FromString,
+        self.CancelJobs = channel.unary_unary(
+                '/managed_jobs.v1.ManagedJobsService/CancelJobs',
+                request_serializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobsRequest.SerializeToString,
+                response_deserializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobsResponse.FromString,
                 _registered_method=True)
         self.StreamLogs = channel.unary_stream(
                 '/managed_jobs.v1.ManagedJobsService/StreamLogs',
@@ -100,22 +90,8 @@ class ManagedJobsServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def CancelJobsById(self, request, context):
-        """Cancel managed jobs by IDs.
-        """
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def CancelJobByName(self, request, context):
-        """Cancel managed job by name.
-        """
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def CancelJobsByPool(self, request, context):
-        """Cancel managed jobs by pool.
+    def CancelJobs(self, request, context):
+        """Cancel managed jobs.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -146,20 +122,10 @@ def add_ManagedJobsServiceServicer_to_server(servicer, server):
                     request_deserializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.GetAllJobIdsByNameRequest.FromString,
                     response_serializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.GetAllJobIdsByNameResponse.SerializeToString,
             ),
-            'CancelJobsById': grpc.unary_unary_rpc_method_handler(
-                    servicer.CancelJobsById,
-                    request_deserializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobsByIdRequest.FromString,
-                    response_serializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobsByIdResponse.SerializeToString,
-            ),
-            'CancelJobByName': grpc.unary_unary_rpc_method_handler(
-                    servicer.CancelJobByName,
-                    request_deserializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobByNameRequest.FromString,
-                    response_serializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobByNameResponse.SerializeToString,
-            ),
-            'CancelJobsByPool': grpc.unary_unary_rpc_method_handler(
-                    servicer.CancelJobsByPool,
-                    request_deserializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobsByPoolRequest.FromString,
-                    response_serializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobsByPoolResponse.SerializeToString,
+            'CancelJobs': grpc.unary_unary_rpc_method_handler(
+                    servicer.CancelJobs,
+                    request_deserializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobsRequest.FromString,
+                    response_serializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobsResponse.SerializeToString,
             ),
             'StreamLogs': grpc.unary_stream_rpc_method_handler(
                     servicer.StreamLogs,
@@ -258,7 +224,7 @@ class ManagedJobsService(object):
             _registered_method=True)
 
     @staticmethod
-    def CancelJobsById(request,
+    def CancelJobs(request,
             target,
             options=(),
             channel_credentials=None,
@@ -271,63 +237,9 @@ class ManagedJobsService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/managed_jobs.v1.ManagedJobsService/CancelJobsById',
-            sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobsByIdRequest.SerializeToString,
-            sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobsByIdResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def CancelJobByName(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/managed_jobs.v1.ManagedJobsService/CancelJobByName',
-            sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobByNameRequest.SerializeToString,
-            sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobByNameResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def CancelJobsByPool(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/managed_jobs.v1.ManagedJobsService/CancelJobsByPool',
-            sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobsByPoolRequest.SerializeToString,
-            sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobsByPoolResponse.FromString,
+            '/managed_jobs.v1.ManagedJobsService/CancelJobs',
+            sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobsRequest.SerializeToString,
+            sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobsResponse.FromString,
             options,
             channel_credentials,
             insecure,

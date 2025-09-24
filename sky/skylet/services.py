@@ -459,52 +459,48 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def CancelJobsById(  # type: ignore[return]
-        self, request: managed_jobsv1_pb2.CancelJobsByIdRequest,
-        context: grpc.ServicerContext
-    ) -> managed_jobsv1_pb2.CancelJobsByIdResponse:
+    def CancelJobs(  # type: ignore[return]
+            self, request: managed_jobsv1_pb2.CancelJobsRequest,
+            context: grpc.ServicerContext
+    ) -> managed_jobsv1_pb2.CancelJobsResponse:
         try:
-            job_ids = None
-            if request.HasField('job_ids'):
-                job_ids = list(request.job_ids.ids)
-            user_hash = request.user_hash if request.HasField(
-                'user_hash') else None
-            if job_ids is None and not request.all_users and user_hash is None:
+            cancellation_criteria = request.WhichOneof('cancellation_criteria')
+            if cancellation_criteria is None:
                 context.abort(
                     grpc.StatusCode.INVALID_ARGUMENT,
-                    'user_hash is required when job_ids is None and '
-                    'all_users is False')
+                    'exactly one cancellation criteria must be specified.')
 
-            message = managed_job_utils.cancel_jobs_by_id(
-                job_ids=job_ids,
-                all_users=request.all_users,
-                current_workspace=request.current_workspace,
-                user_hash=user_hash)
-            return managed_jobsv1_pb2.CancelJobsByIdResponse(message=message)
-        except Exception as e:  # pylint: disable=broad-except
-            context.abort(grpc.StatusCode.INTERNAL, str(e))
-
-    def CancelJobByName(  # type: ignore[return]
-        self, request: managed_jobsv1_pb2.CancelJobByNameRequest,
-        context: grpc.ServicerContext
-    ) -> managed_jobsv1_pb2.CancelJobByNameResponse:
-        try:
-            message = managed_job_utils.cancel_job_by_name(
-                job_name=request.job_name,
-                current_workspace=request.current_workspace)
-            return managed_jobsv1_pb2.CancelJobByNameResponse(message=message)
-        except Exception as e:  # pylint: disable=broad-except
-            context.abort(grpc.StatusCode.INTERNAL, str(e))
-
-    def CancelJobsByPool(  # type: ignore[return]
-        self, request: managed_jobsv1_pb2.CancelJobsByPoolRequest,
-        context: grpc.ServicerContext
-    ) -> managed_jobsv1_pb2.CancelJobsByPoolResponse:
-        try:
-            message = managed_job_utils.cancel_jobs_by_pool(
-                pool_name=request.pool_name,
-                current_workspace=request.current_workspace)
-            return managed_jobsv1_pb2.CancelJobsByPoolResponse(message=message)
+            if cancellation_criteria == 'all_users':
+                user_hash = request.user_hash if request.HasField(
+                    'user_hash') else None
+                all_users = request.all_users
+                if not all_users and user_hash is None:
+                    context.abort(
+                        grpc.StatusCode.INVALID_ARGUMENT,
+                        'user_hash is required when all_users is False')
+                message = managed_job_utils.cancel_jobs_by_id(
+                    job_ids=None,
+                    all_users=all_users,
+                    current_workspace=request.current_workspace,
+                    user_hash=user_hash)
+            elif cancellation_criteria == 'job_ids':
+                job_ids = list(request.job_ids.ids)
+                message = managed_job_utils.cancel_jobs_by_id(
+                    job_ids=job_ids,
+                    current_workspace=request.current_workspace)
+            elif cancellation_criteria == 'job_name':
+                message = managed_job_utils.cancel_job_by_name(
+                    job_name=request.job_name,
+                    current_workspace=request.current_workspace)
+            elif cancellation_criteria == 'pool_name':
+                message = managed_job_utils.cancel_jobs_by_pool(
+                    pool_name=request.pool_name,
+                    current_workspace=request.current_workspace)
+            else:
+                context.abort(
+                    grpc.StatusCode.INVALID_ARGUMENT,
+                    f'invalid cancellation criteria: {cancellation_criteria}')
+            return managed_jobsv1_pb2.CancelJobsResponse(message=message)
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 

@@ -367,8 +367,8 @@ class TestGetJobTable:
         assert job_data[self.job_ids['job_id4']].end_at > 0
 
 
-class TestCancelJobsById:
-    """Test class for CancelJobsById RPC method."""
+class TestCancelJobs:
+    """Test class for CancelJobs RPC method."""
 
     @pytest.fixture(autouse=True)
     def setup(self, _seed_test_jobs):
@@ -382,58 +382,52 @@ class TestCancelJobsById:
         job_ids_to_cancel = [self.job_ids['job_id1'], self.job_ids['job_id2']
                             ]  # PENDING and STARTING jobs
 
-        request = managed_jobsv1_pb2.CancelJobsByIdRequest(
+        request = managed_jobsv1_pb2.CancelJobsRequest(
             job_ids=managed_jobsv1_pb2.JobIds(ids=job_ids_to_cancel),
             user_hash=None,
             current_workspace="ws1",
         )
         context_mock = mock.Mock()
 
-        response = self.service.CancelJobsById(request, context_mock)
+        response = self.service.CancelJobs(request, context_mock)
 
-        assert isinstance(response, managed_jobsv1_pb2.CancelJobsByIdResponse)
+        assert isinstance(response, managed_jobsv1_pb2.CancelJobsResponse)
         assert response.message.lower(
         ) == f"jobs with ids {job_ids_to_cancel[0]}, {job_ids_to_cancel[1]} are scheduled to be cancelled."
         context_mock.abort.assert_not_called()
 
-    def test_cancel_jobs_by_id_validation_error(self):
-        """Test validation error when user_hash is missing."""
-        request = managed_jobsv1_pb2.CancelJobsByIdRequest(
-            job_ids=None,
-            all_users=False,
-            user_hash=None,
-            current_workspace="ws1",
-        )
+    def test_cancel_jobs_validation_error_no_criteria(self):
+        """Test validation error when no criteria is specified."""
+        request = managed_jobsv1_pb2.CancelJobsRequest(current_workspace="ws1",)
         context_mock = mock.Mock()
 
-        self.service.CancelJobsById(request, context_mock)
+        # Create custom exception that won't be caught by general except block
+        class GrpcAbortException(BaseException):
+            """Custom exception to simulate gRPC abort behavior."""
+            pass
+
+        # Configure abort to raise exception like the real gRPC context
+        context_mock.abort.side_effect = GrpcAbortException()
+
+        with pytest.raises(GrpcAbortException):
+            self.service.CancelJobs(request, context_mock)
 
         context_mock.abort.assert_called_once_with(
             grpc.StatusCode.INVALID_ARGUMENT,
-            'user_hash is required when job_ids is None and all_users is False')
+            'exactly one cancellation criteria must be specified.')
 
-
-class TestCancelJobByName:
-    """Test class for CancelJobByName RPC method."""
-
-    @pytest.fixture(autouse=True)
-    def setup(self, _seed_test_jobs):
-        """Setup test environment with service instance and job data."""
-        self.service = services.ManagedJobsServiceImpl()
-        self.job_ids = _seed_test_jobs
-
-    def test_cancel_job_by_name_multiple_jobs(self):
+    def test_cancel_jobs_by_name_multiple_jobs(self):
         """Test cancelling jobs by name 'a' which matches multiple jobs."""
         # Name 'a' matches job_id1 (PENDING) and job_id3 (RUNNING)
         job_name = "a"
 
-        request = managed_jobsv1_pb2.CancelJobByNameRequest(
-            job_name=job_name, current_workspace="ws1")
+        request = managed_jobsv1_pb2.CancelJobsRequest(job_name=job_name,
+                                                       current_workspace="ws1")
         context_mock = mock.Mock()
 
-        response = self.service.CancelJobByName(request, context_mock)
+        response = self.service.CancelJobs(request, context_mock)
 
-        assert isinstance(response, managed_jobsv1_pb2.CancelJobByNameResponse)
+        assert isinstance(response, managed_jobsv1_pb2.CancelJobsResponse)
         # Should indicate multiple jobs found (actual message shows job IDs)
         assert "multiple running jobs found with name 'a'" in response.message.lower(
         )
@@ -441,51 +435,41 @@ class TestCancelJobByName:
         )
         context_mock.abort.assert_not_called()
 
-    def test_cancel_job_by_name_single_job(self):
+    def test_cancel_jobs_by_name_single_job(self):
         """Test cancelling job by name 'b' which matches only one job."""
         # Name 'b' matches only job_id2 (STARTING)
         job_name = "b"
 
-        request = managed_jobsv1_pb2.CancelJobByNameRequest(
-            job_name=job_name, current_workspace="ws1")
+        request = managed_jobsv1_pb2.CancelJobsRequest(job_name=job_name,
+                                                       current_workspace="ws1")
         context_mock = mock.Mock()
 
-        response = self.service.CancelJobByName(request, context_mock)
+        response = self.service.CancelJobs(request, context_mock)
 
-        assert isinstance(response, managed_jobsv1_pb2.CancelJobByNameResponse)
+        assert isinstance(response, managed_jobsv1_pb2.CancelJobsResponse)
         # Should indicate job to cancel
         assert response.message.lower(
         ) == f"'b' job with id {self.job_ids['job_id2']} is scheduled to be cancelled."
         context_mock.abort.assert_not_called()
 
-    def test_cancel_job_by_name_wrong_workspace(self):
+    def test_cancel_jobs_by_name_wrong_workspace(self):
         """Test cancelling job by name 'b' which matches only one job."""
         # Name 'b' matches only job_id2 (STARTING), but it's in workspace 'ws1'
         # The cancel will skip it due to workspace mismatch
         job_name = "b"
 
-        request = managed_jobsv1_pb2.CancelJobByNameRequest(
-            job_name=job_name, current_workspace="ws9")
+        request = managed_jobsv1_pb2.CancelJobsRequest(job_name=job_name,
+                                                       current_workspace="ws9")
         context_mock = mock.Mock()
 
-        response = self.service.CancelJobByName(request, context_mock)
+        response = self.service.CancelJobs(request, context_mock)
 
-        assert isinstance(response, managed_jobsv1_pb2.CancelJobByNameResponse)
+        assert isinstance(response, managed_jobsv1_pb2.CancelJobsResponse)
         # Should indicate no job to cancel due to workspace mismatch
         assert "no job to cancel" in response.message.lower()
         assert f"job with id {self.job_ids['job_id2']} is skipped as they are not in the active workspace 'ws9'" in response.message.lower(
         )
         context_mock.abort.assert_not_called()
-
-
-class TestCancelJobsByPool:
-    """Test class for CancelJobsByPool RPC method."""
-
-    @pytest.fixture(autouse=True)
-    def setup(self, _seed_test_jobs):
-        """Setup test environment with service instance and job data."""
-        self.service = services.ManagedJobsServiceImpl()
-        self.job_ids = _seed_test_jobs
 
     def test_cancel_jobs_by_pool_success(self):
         """Test successful job cancellation by pool using real seed data."""
@@ -494,13 +478,13 @@ class TestCancelJobsByPool:
         # job_id4 has pool='test-pool' and is SUCCEEDED
         pool_name = "test-pool"
 
-        request = managed_jobsv1_pb2.CancelJobsByPoolRequest(
-            pool_name=pool_name, current_workspace="ws1")
+        request = managed_jobsv1_pb2.CancelJobsRequest(pool_name=pool_name,
+                                                       current_workspace="ws1")
         context_mock = mock.Mock()
 
-        response = self.service.CancelJobsByPool(request, context_mock)
+        response = self.service.CancelJobs(request, context_mock)
 
-        assert isinstance(response, managed_jobsv1_pb2.CancelJobsByPoolResponse)
+        assert isinstance(response, managed_jobsv1_pb2.CancelJobsResponse)
         # Only job_id1 should be cancelled, as job_id4 is already SUCCEEDED
         assert response.message.lower(
         ) == f"job with id {self.job_ids['job_id1']} is scheduled to be cancelled."
@@ -510,14 +494,67 @@ class TestCancelJobsByPool:
         """Test cancelling jobs by a pool that doesn't exist."""
         pool_name = "nonexistent-pool"
 
-        request = managed_jobsv1_pb2.CancelJobsByPoolRequest(
-            pool_name=pool_name, current_workspace="ws1")
+        request = managed_jobsv1_pb2.CancelJobsRequest(pool_name=pool_name,
+                                                       current_workspace="ws1")
         context_mock = mock.Mock()
 
-        response = self.service.CancelJobsByPool(request, context_mock)
+        response = self.service.CancelJobs(request, context_mock)
 
-        assert isinstance(response, managed_jobsv1_pb2.CancelJobsByPoolResponse)
+        assert isinstance(response, managed_jobsv1_pb2.CancelJobsResponse)
         # Should indicate no jobs found in the pool
         assert response.message.lower(
         ) == f"no running job found in pool '{pool_name}'."
+        context_mock.abort.assert_not_called()
+
+    def test_cancel_jobs_all_users_true(self):
+        """Test cancelling all jobs for all users (--all-users)."""
+        request = managed_jobsv1_pb2.CancelJobsRequest(
+            all_users=True,
+            current_workspace="ws1",
+        )
+        context_mock = mock.Mock()
+
+        response = self.service.CancelJobs(request, context_mock)
+
+        assert isinstance(response, managed_jobsv1_pb2.CancelJobsResponse)
+        # Jobs 1, 2 should be cancelled (in workspace 'ws1', non-terminal states)
+        # Job 3 is in workspace 'ws2' so gets skipped
+        # Job 4 is SUCCEEDED so should not be cancelled
+        expected_jobs = [self.job_ids['job_id1'], self.job_ids['job_id2']]
+        assert response.message.lower(
+        ) == f"jobs with ids {expected_jobs[0]}, {expected_jobs[1]} are scheduled to be cancelled. job with id {self.job_ids['job_id3']} is skipped as they are not in the active workspace 'ws1'. check the workspace of the job with: sky jobs queue"
+        context_mock.abort.assert_not_called()
+
+    def test_cancel_jobs_all_users_false(self):
+        """Test cancelling all jobs for current user (--all)."""
+        request = managed_jobsv1_pb2.CancelJobsRequest(
+            all_users=False,
+            user_hash="test_user_hash",
+            current_workspace="ws1",
+        )
+        context_mock = mock.Mock()
+
+        response = self.service.CancelJobs(request, context_mock)
+
+        assert isinstance(response, managed_jobsv1_pb2.CancelJobsResponse)
+        # Test data doesn't have jobs with specific user_hash, so expect no jobs found
+        assert response.message.lower() == "no job to cancel."
+        context_mock.abort.assert_not_called()
+
+    def test_cancel_jobs_all_users_validation_error(self):
+        """Test validation error when all_users=True but user_hash is provided (removed overly strict validation)."""
+        # This test is now obsolete since we allow user_hash with all_users=True
+        # The validation was removed as it was overly restrictive
+        request = managed_jobsv1_pb2.CancelJobsRequest(
+            all_users=True,
+            user_hash="should_not_error_anymore",
+            current_workspace="ws1",
+        )
+        context_mock = mock.Mock()
+
+        response = self.service.CancelJobs(request, context_mock)
+
+        # Should succeed now, not error
+        assert isinstance(response, managed_jobsv1_pb2.CancelJobsResponse)
+        assert "are scheduled to be cancelled" in response.message.lower()
         context_mock.abort.assert_not_called()
