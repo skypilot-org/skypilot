@@ -50,6 +50,13 @@ else
         script -q /tmp/build_docs.txt bash -c "make html"
     fi
 
+    # Copy example assets to where the HTML files expect them
+    if [ -d "../examples" ] && [ -d "build/html/examples/applications" ]; then
+        for assets_dir in ../examples/*/assets; do
+            [ -d "$assets_dir" ] && cp -r "$assets_dir" "build/html/examples/applications/" 2>/dev/null || true
+        done
+    fi
+
     # Check if the output contains "ERROR:" or "WARNING:"
     if grep -q -E "ERROR:|WARNING:" /tmp/build_docs.txt; then
         echo "Errors or warnings detected, exiting..."
