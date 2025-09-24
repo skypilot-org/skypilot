@@ -1372,7 +1372,6 @@ def _set_cluster_usage_intervals(
 
     # Calculate last_activity_time and launched_at from usage_intervals
     last_activity_time = _get_cluster_last_activity_time(usage_intervals)
-    launched_at = _get_cluster_launch_time(usage_intervals)
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         count = session.query(cluster_history_table).filter_by(
@@ -1380,7 +1379,6 @@ def _set_cluster_usage_intervals(
                 cluster_history_table.c.usage_intervals:
                     pickle.dumps(usage_intervals),
                 cluster_history_table.c.last_activity_time: last_activity_time,
-                cluster_history_table.c.launched_at: launched_at
             })
         session.commit()
     assert count <= 1, count
