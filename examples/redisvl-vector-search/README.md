@@ -73,7 +73,7 @@ curl -X POST "http://$API_ENDPOINT/search" \
 API in action:
 
 <div align="center">
-  <video src="assets/api_service.mp4" width="700" controls></video>
+  <video src="assets/api_service.mp4" width="700" controls autoplay muted></video>
 </div>
 
 - Streamlit UI:
@@ -85,7 +85,7 @@ echo $STREAMLIT_ENDPOINT
 Streamlit app interface:
 
 <div align="center">
-  <video src="assets/streamlit_app.mp4" width="700" controls></video>
+  <video src="assets/streamlit_app.mp4" width="700" controls autoplay muted></video>
 </div>
 
 
