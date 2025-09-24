@@ -57,6 +57,8 @@ def _seed_test_jobs(_mock_managed_jobs_db_conn):
         pass
 
     async def create_job_states():
+        # TODO(kevin): Mock user_name and user_hash too.
+
         # Job 1: PENDING state (just created)
         job_id1 = state.set_job_info_without_job_id(name='a',
                                                     workspace='ws1',
@@ -305,17 +307,15 @@ class TestGetJobTable:
         assert len(target_job.accelerators) == 0
         assert target_job.recovery_count == 0
         assert target_job.metadata == {}
-
-        # Optional fields (from proto)
         assert target_job.workspace == 'ws1'
-        assert target_job.details == ''
-        assert target_job.failure_reason == ''
-        assert target_job.user_name == ''
-        assert target_job.user_hash == ''
-        assert target_job.submitted_at == 0.0
-        assert target_job.start_at == 0.0
-        assert target_job.end_at == 0.0
-        assert target_job.user_yaml == ''
+        assert not target_job.HasField('details')
+        assert not target_job.HasField('failure_reason')
+        assert not target_job.HasField('user_name')
+        assert not target_job.HasField('user_hash')
+        assert not target_job.HasField('submitted_at')
+        assert not target_job.HasField('start_at')
+        assert not target_job.HasField('end_at')
+        assert not target_job.HasField('user_yaml')
         assert target_job.entrypoint == 'ep1'
         assert target_job.pool == 'test-pool'
         assert target_job.pool_hash == 'hash123'
