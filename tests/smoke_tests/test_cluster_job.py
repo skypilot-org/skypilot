@@ -711,6 +711,7 @@ def test_nemorl():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+        timeout=30 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
