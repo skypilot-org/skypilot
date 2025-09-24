@@ -134,9 +134,7 @@ def test_get_excluded_files_from_skyignore(skyignore_dir):
         'remove.a', 'dir/remove.a', 'remove_dir_pattern',
         'remove_dir_pattern/remove.txt', 'remove_dir_pattern/remove.a'
     ]
-    for file_path in expected_excluded_files:
-        assert file_path in excluded_files
-    assert len(excluded_files) == len(expected_excluded_files)
+    assert set(excluded_files) == set(expected_excluded_files)
 
 
 def test_get_excluded_files_from_gitignore(gitignore_dir):
@@ -157,6 +155,33 @@ def test_get_excluded_files_from_gitignore(gitignore_dir):
     for file_path in expected_excluded_files:
         assert file_path in excluded_files
     assert len(excluded_files) == len(expected_excluded_files)
+
+
+def test_skyignore_supports_negation(tmp_path):
+    workdir = tmp_path / 'proj'
+    workdir.mkdir()
+    (workdir / '.skyignore').write_text('*.log\n!keep.log\n', encoding='utf-8')
+    (workdir / 'keep.log').write_text('keep', encoding='utf-8')
+    (workdir / 'drop.log').write_text('drop', encoding='utf-8')
+
+    excluded = storage_utils.get_excluded_files_from_skyignore(str(workdir))
+
+    assert 'drop.log' in excluded
+    assert 'keep.log' not in excluded
+
+
+def test_nested_skyignore_without_root(tmp_path):
+    root = tmp_path / 'project'
+    nested = root / 'sub' / 'module'
+    nested.mkdir(parents=True)
+    (nested / '.skyignore').write_text('*.tmp\n!keep.tmp\n', encoding='utf-8')
+    (nested / 'example.tmp').write_text('tmp', encoding='utf-8')
+    (nested / 'keep.tmp').write_text('keep', encoding='utf-8')
+
+    excluded = storage_utils.get_excluded_files_from_skyignore(str(root))
+
+    assert 'sub/module/example.tmp' in excluded
+    assert 'sub/module/keep.tmp' not in excluded
 
 
 @pytest.mark.parametrize('ignore_dir_name', ['skyignore_dir', 'gitignore_dir'])
