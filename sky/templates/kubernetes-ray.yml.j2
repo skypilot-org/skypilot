@@ -901,7 +901,7 @@ available_node_types:
                 {{ conda_installation_commands }}
                 {{ ray_installation_commands }}
 
-                VIRTUAL_ENV=~/skypilot-runtime ~/.local/bin/uv pip install skypilot[kubernetes,remote]
+                VIRTUAL_ENV=~/skypilot-runtime UV_SYSTEM_PYTHON=false env -u PYTHONPATH ~/.local/bin/uv pip install skypilot[kubernetes,remote]
                 # Wait for `patch` package to be installed before applying ray patches
                 until dpkg -l | grep -q "^ii  patch "; do
                   sleep 0.1
