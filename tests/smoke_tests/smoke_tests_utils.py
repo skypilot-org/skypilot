@@ -963,10 +963,10 @@ def get_avaliabe_gpus_for_k8s_tests(default_gpu: str = 'T4') -> str:
             prefix = f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}={env_file}'
         show_gpus_command = f'{prefix} sky show-gpus --infra kubernetes'
         show_out = subprocess_utils.run(show_gpus_command,
-                                      shell=True,
-                                      check=True,
-                                      capture_output=True,
-                                      text=True)
+                                        shell=True,
+                                        check=True,
+                                        capture_output=True,
+                                        text=True)
         command = f'{prefix} sky show-gpus --infra kubernetes | grep -A1 "^GPU" | tail -1 | awk "{{print \$1}}"'
         Test.echo_without_prefix(command)
         result = subprocess_utils.run(command,
@@ -976,8 +976,9 @@ def get_avaliabe_gpus_for_k8s_tests(default_gpu: str = 'T4') -> str:
                                       text=True)
         gpu_name = result.stdout.strip()
         if gpu_name == '':
-            raise RuntimeError(f'No GPU found for kubernetes, test failing.'
-                            f'Output of {show_gpus_command}: {show_out.stdout}')
+            raise RuntimeError(
+                f'No GPU found for kubernetes, test failing.'
+                f'Output of {show_gpus_command}: {show_out.stdout}')
         return gpu_name
     return default_gpu
 
