@@ -1540,7 +1540,7 @@ def cluster_with_name_exists(cluster_name: str) -> bool:
 def get_clusters(
     *,  # keyword only separator
     exclude_managed_clusters: bool = False,
-    workspaces_filter: Optional[Set[str]] = None,
+    workspaces_filter: Optional[Dict[str, Any]] = None,
     user_hashes_filter: Optional[Set[str]] = None,
     cluster_names: Optional[List[str]] = None,
     summary_response: bool = False,

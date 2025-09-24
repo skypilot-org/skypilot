@@ -3049,7 +3049,7 @@ class CloudFilter(enum.Enum):
 def _get_glob_clusters(
         clusters: List[str],
         silent: bool = False,
-        workspaces_filter: Optional[Set[str]] = None) -> List[str]:
+        workspaces_filter: Optional[Dict[str, Any]] = None) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
     glob_clusters = []
     for cluster in clusters:
@@ -3181,7 +3181,7 @@ def get_clusters(
             cluster_names += _get_glob_clusters(
                 glob_cluster_names,
                 silent=True,
-                workspaces_filter=set(accessible_workspaces.keys()))
+                workspaces_filter=accessible_workspaces)
 
     exclude_managed_clusters = False
     if not (_include_is_managed or env_options.Options.SHOW_DEBUG_INFO.get()):
@@ -3192,7 +3192,7 @@ def get_clusters(
     records = global_user_state.get_clusters(
         exclude_managed_clusters=exclude_managed_clusters,
         user_hashes_filter=user_hashes_filter,
-        workspaces_filter=set(accessible_workspaces.keys()),
+        workspaces_filter=accessible_workspaces,
         cluster_names=cluster_names,
         summary_response=summary_response)
 
