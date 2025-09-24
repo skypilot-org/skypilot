@@ -120,6 +120,10 @@ _DAG_NOT_SUPPORTED_MESSAGE = ('YAML specifies a DAG which is only supported by '
                               '`sky jobs launch`. `{command}` supports a '
                               'single task only.')
 
+_NO_ACTIVE_CONTROLLER_SERVE_STATUS_HINT = (
+    f' (See: {colorama.Style.BRIGHT}sky serve -h'
+    f'{colorama.Style.RESET_ALL})')
+
 T = TypeVar('T')
 
 
@@ -1435,8 +1439,7 @@ def _handle_services_request(
         controller_status = e.cluster_status
         msg = str(e)
         if controller_status is None:
-            msg += (f' (See: {colorama.Style.BRIGHT}sky serve -h'
-                    f'{colorama.Style.RESET_ALL})')
+            msg += _NO_ACTIVE_CONTROLLER_SERVE_STATUS_HINT
     except RuntimeError as e:
         msg = ''
         try:
@@ -5667,16 +5670,23 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
     # This won't pollute the output of --endpoint.
     with rich_utils.client_status('[cyan]Checking services[/]'):
         service_status_request_id = serve_lib.status(service_names_to_query)
-        _, msg = _handle_services_request(service_status_request_id,
-                                          service_names=service_names_to_query,
-                                          show_all=verbose,
-                                          show_endpoint=endpoint,
-                                          is_called_by_user=True)
+        num_services, msg = _handle_services_request(
+            service_status_request_id,
+            service_names=service_names_to_query,
+            show_all=verbose,
+            show_endpoint=endpoint,
+            is_called_by_user=True)
 
     if not endpoint:
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'Services{colorama.Style.RESET_ALL}')
     click.echo(msg)
+    # Exit with nonzero if num_services is None (error), except when
+    # _NO_ACTIVE_CONTROLLER_SERVE_STATUS_HINT is in msg, which means no
+    # active controller and is treated as a normal empty query (success).
+    sys.exit(
+        int(num_services is None and
+            _NO_ACTIVE_CONTROLLER_SERVE_STATUS_HINT not in msg))
 
 
 @serve.command('down', cls=_DocumentedCodeCommand)
