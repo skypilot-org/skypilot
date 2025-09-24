@@ -2,8 +2,6 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
-import { getClusters } from '@/data/connectors/clusters';
-import { getManagedJobs } from '@/data/connectors/jobs';
 import {
   getWorkspaces,
   getEnabledClouds,

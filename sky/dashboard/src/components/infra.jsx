@@ -1770,8 +1770,8 @@ export function GPUs() {
   const fetchManagedJobsData = async (forceRefresh) => {
     try {
       const jobsData = forceRefresh
-        ? await getManagedJobs({ allUsers: true })
-        : await dashboardCache.get(getManagedJobs, [{ allUsers: true }]);
+        ? await getManagedJobs({ allUsers: true, skipFinished: true })
+        : await dashboardCache.get(getManagedJobs, [{ allUsers: true, skipFinished: true }]);
       const jobs = jobsData?.jobs || [];
       setSshAndKubeJobsData(await getContextJobs(jobs));
       setSshAndKubeJobsDataLoading(false);
@@ -1932,7 +1932,7 @@ export function GPUs() {
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getClusters);
-    dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
+    dashboardCache.invalidate(getManagedJobs, [{ allUsers: true, skipFinished: true }]);
     dashboardCache.invalidate(getWorkspaceInfrastructure);
     dashboardCache.invalidate(getCloudInfrastructure, [false]);
     dashboardCache.invalidate(getSSHNodePools);

@@ -26,8 +26,6 @@ import {
 } from '@/components/utils';
 import { UI_CONFIG } from '@/lib/config';
 import {
-  getManagedJobs,
-  getManagedJobsWithClientPagination,
   getPoolStatus,
 } from '@/data/connectors/jobs';
 import jobsCacheManager from '@/lib/jobs-cache-manager';
