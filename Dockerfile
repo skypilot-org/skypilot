@@ -18,6 +18,7 @@ FROM python:3.10.18-slim AS process-source
 
 # Control installation method - default to install from source
 ARG INSTALL_FROM_SOURCE=true
+ARG NEXT_BASE_PATH=/dashboard
 
 COPY . /skypilot
 
@@ -27,11 +28,20 @@ RUN cd /skypilot && \
         # Retain an /skypilot/dist dir to keep the compatibility in stage 3 and reduce the final image size
         mv /skypilot/dist /dist.backup && cd .. && rm -rf /skypilot && mkdir /skypilot && mv /dist.backup /skypilot/dist; \
     else \
+        echo "Installing NPM and Node.js for dashboard build" && \
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+        apt-get install -y nodejs && \
+        npm install -g npm@latest && \
         echo "Keeping source code and record commit sha (editable installation)" && \
         apt-get update -y && \
         apt-get install --no-install-recommends -y git && \
-        apt-get clean && rm -rf /var/lib/apt/lists/* && \
         python -c "import setup; setup.replace_commit_hash()" && \
+        echo "Building dashboard in Stage 2" && \
+        npm --prefix sky/dashboard install && \
+        NEXT_BASE_PATH=${NEXT_BASE_PATH} npm --prefix sky/dashboard run build && \
+        echo "Cleaning up dashboard build-time dependencies" && \
+        rm -rf sky/dashboard/node_modules ~/.npm /root/.npm && \
+        apt-get clean && rm -rf /var/lib/apt/lists/* && \
         # Remove .git dir to reduce the final image size
         rm -rf .git; \
     fi
@@ -78,12 +88,6 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     ~/.local/bin/uv pip install --prerelease allow azure-cli --system && \
     # Upgrade setuptools in base image to mitigate CVE-2024-6345
     ~/.local/bin/uv pip install --system --upgrade setuptools==78.1.1 && \
-    if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
-        echo "Installing NPM and Node.js for dashboard build" && \
-        curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-        apt-get install -y nodejs && \
-        npm install -g npm@latest; \
-    fi && \
     ~/.local/bin/uv cache clean && \
     rm -rf ~/.cache/pip ~/.cache/uv && \
     apt-get clean && \
@@ -97,9 +101,7 @@ RUN cd /skypilot && \
     if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
         echo "Installing from source in editable mode" && \
         ~/.local/bin/uv pip install -e ".[all]" --system && \
-        echo "Building dashboard" && \
-        npm --prefix sky/dashboard install && \
-        NEXT_BASE_PATH=${NEXT_BASE_PATH} npm --prefix sky/dashboard run build; \
+        echo "Using prebuilt dashboard from Stage 2"; \
     else \
         echo "Installing from wheel file" && \
         WHEEL_FILE=$(ls dist/*skypilot*.whl 2>/dev/null | head -1) && \
