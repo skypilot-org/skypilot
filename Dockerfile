@@ -28,20 +28,20 @@ RUN cd /skypilot && \
         # Retain an /skypilot/dist dir to keep the compatibility in stage 3 and reduce the final image size
         mv /skypilot/dist /dist.backup && cd .. && rm -rf /skypilot && mkdir /skypilot && mv /dist.backup /skypilot/dist; \
     else \
-        echo "Keeping source code and record commit sha (editable installation)" && \
-        python -c "import setup; setup.replace_commit_hash()" && \
         echo "Installing NPM and Node.js for dashboard build" && \
+        apt-get update -y && \
+        apt-get install --no-install-recommends -y git && \
         curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
         apt-get install -y nodejs && \
         npm install -g npm@latest && \
-        apt-get update -y && \
-        apt-get install --no-install-recommends -y git && \
         echo "Building dashboard in Stage 2" && \
         npm --prefix sky/dashboard install && \
         NEXT_BASE_PATH=${NEXT_BASE_PATH} npm --prefix sky/dashboard run build && \
         echo "Cleaning up dashboard build-time dependencies" && \
         rm -rf sky/dashboard/node_modules ~/.npm /root/.npm && \
         apt-get clean && rm -rf /var/lib/apt/lists/* && \
+        echo "Keeping source code and record commit sha (editable installation)" && \
+        python -c "import setup; setup.replace_commit_hash()" && \
         # Remove .git dir to reduce the final image size
         rm -rf .git; \
     fi
