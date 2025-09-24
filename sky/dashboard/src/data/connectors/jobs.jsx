@@ -11,7 +11,28 @@ import { apiClient } from './client';
 
 // Configuration
 const DEFAULT_TAIL_LINES = 10000;
-const DEFAULT_FIELDS = ["job_id","_job_id","job_name","user_name","user_hash","workspace","submitted_at","job_duration","status","resources","cloud","region","accelerators","cluster_resources","cluster_resources_full","recovery_count","pool","pool_hash","details","failure_reason"];
+const DEFAULT_FIELDS = [
+  'job_id',
+  '_job_id',
+  'job_name',
+  'user_name',
+  'user_hash',
+  'workspace',
+  'submitted_at',
+  'job_duration',
+  'status',
+  'resources',
+  'cloud',
+  'region',
+  'accelerators',
+  'cluster_resources',
+  'cluster_resources_full',
+  'recovery_count',
+  'pool',
+  'pool_hash',
+  'details',
+  'failure_reason',
+];
 
 export async function getManagedJobs(options = {}) {
   try {
@@ -47,7 +68,7 @@ export async function getManagedJobs(options = {}) {
       if (fields && fields.length > 0) {
         body.fields = fields;
       } else {
-      body.fields = DEFAULT_FIELDS;
+        body.fields = DEFAULT_FIELDS;
       }
     }
 
@@ -309,10 +330,12 @@ export async function getPoolStatus() {
     // Also fetch managed jobs to get job counts by pool
     let jobsData = { jobs: [] };
     try {
-      const jobsResponse = await dashboardCache.get(getManagedJobs, [{
-        allUsers: true,
-        skipFinished: true,
-      }]);
+      const jobsResponse = await dashboardCache.get(getManagedJobs, [
+        {
+          allUsers: true,
+          skipFinished: true,
+        },
+      ]);
       if (!jobsResponse.controllerStopped) {
         jobsData = jobsResponse;
       }
