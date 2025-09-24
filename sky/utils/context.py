@@ -2,7 +2,6 @@
 
 import asyncio
 from collections.abc import Mapping
-from collections.abc import MutableMapping
 import contextvars
 import copy
 import functools
@@ -10,8 +9,8 @@ import os
 import pathlib
 import subprocess
 import sys
-from typing import (Callable, Dict, Iterator, Optional, TextIO, TYPE_CHECKING,
-                    TypeVar)
+from typing import (Callable, Dict, Iterator, MutableMapping, Optional, TextIO,
+                    TYPE_CHECKING, TypeVar)
 
 from typing_extensions import ParamSpec
 
@@ -182,7 +181,7 @@ class ContextualEnviron(MutableMapping[str, str]):
        assert os.environ['FOO'] == 'BAR1'
     """
 
-    def __init__(self, environ: os._Environ[str]) -> None:
+    def __init__(self, environ: 'os._Environ[str]') -> None:
         self._environ = environ
 
     def __getitem__(self, key: str) -> str:
@@ -321,7 +320,7 @@ def contextual(func: Callable[P, T]) -> Callable[P, T]:
 
 def initialize(
     base_context: Optional[Context] = None
-) -> contextvars.Token[Optional[Context]]:
+) -> 'contextvars.Token[Optional[Context]]':
     """Initialize the current SkyPilot context."""
     new_context = base_context.copy() if base_context is not None else Context()
     return _CONTEXT.set(new_context)
