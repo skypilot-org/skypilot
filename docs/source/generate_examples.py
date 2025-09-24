@@ -241,8 +241,10 @@ def _work(example_dir: pathlib.Path):
     globs = [example_dir.glob(pattern) for pattern in _GLOB_PATTERNS]
     for path in itertools.chain(*globs):
         examples.append(Example(path))
-    # Find examples in subdirectories
+    # Find examples in subdirectories (up to 3 levels deep)
     for path in example_dir.glob("*/*.md"):
+        examples.append(Example(path.parent))
+    for path in example_dir.glob("*/*/*.md"):
         examples.append(Example(path.parent))
 
     # Check for stem collisions using full directory names
@@ -264,3 +266,7 @@ def _work(example_dir: pathlib.Path):
         doc_path = EXAMPLE_DOC_DIR / f'{example.path.stem}.md'
         with open(doc_path, 'w+') as f:
             f.write(example.generate())
+
+
+if __name__ == '__main__':
+    generate_examples() 
