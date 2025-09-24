@@ -262,7 +262,8 @@ def copy_example_assets(app, exception):
         for assets_dir in glob.glob(os.path.join(examples_dir, '*/assets')):
             if os.path.exists(assets_dir):
                 # Destination directory in the built HTML
-                dest_dir = os.path.join(app.outdir, 'examples', 'applications', 'assets')
+                dest_dir = os.path.join(app.outdir, 'examples', 'applications',
+                                        'assets')
                 os.makedirs(dest_dir, exist_ok=True)
 
                 # Copy all files from assets directory
