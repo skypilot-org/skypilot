@@ -595,10 +595,10 @@ Test that the configuration is working:
 
 .. code-block:: console
 
-    $ curl -i https://zerotrust.assembletest.org/api/health
+    $ curl -i https://zerotrust.skypilot.org/api/health
     # Should return 200 OK
 
-    $ sky api login -e https://zerotrust.assembletest.org
+    $ sky api login -e https://zerotrust.skypilot.org
     # Should complete login without browser redirect
 
 
