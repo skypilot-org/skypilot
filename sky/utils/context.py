@@ -4,13 +4,19 @@ import asyncio
 from collections.abc import Mapping
 from collections.abc import MutableMapping
 import contextvars
+import copy
 import functools
 import os
 import pathlib
 import subprocess
 import sys
-import typing
-from typing import Any, Callable, Dict, Optional, TextIO, TypeVar
+from typing import (Callable, Dict, Iterator, Optional, TextIO, TYPE_CHECKING,
+                    TypeVar)
+
+from typing_extensions import ParamSpec
+
+if TYPE_CHECKING:
+    from sky.skypilot_config import ConfigContext
 
 
 class Context(object):
@@ -88,7 +94,7 @@ class Context(object):
         else:
             self._log_file_handle = open(log_file, 'a', encoding='utf-8')
         self._log_file = log_file
-        if original_log_file is not None:
+        if original_log_handle is not None:
             original_log_handle.close()
         return original_log_file
 
@@ -102,8 +108,29 @@ class Context(object):
         for k, v in envs.items():
             self.env_overrides[k] = v
 
+    def cleanup(self):
+        """Clean up the context."""
+        if self._log_file_handle is not None:
+            self._log_file_handle.close()
 
-_CONTEXT = contextvars.ContextVar('sky_context', default=None)
+    def copy(self) -> 'Context':
+        """Create a copy of the context.
+
+        Changes to the current context after this call will not affect the copy.
+        The new context will get its own handle/fd for the log file.
+        The new context will get an independent copy of the env var overrides.
+        The new context will get an independent copy of the config context.
+        Cancellation of the current context will not be propagated to the copy.
+        """
+        new_context = Context()
+        new_context.redirect_log(self._log_file)
+        new_context.env_overrides = self.env_overrides.copy()
+        new_context.config_context = copy.deepcopy(self.config_context)
+        return new_context
+
+
+_CONTEXT = contextvars.ContextVar[Optional[Context]]('sky_context',
+                                                     default=None)
 
 
 def get() -> Optional[Context]:
@@ -116,7 +143,7 @@ def get() -> Optional[Context]:
     return _CONTEXT.get()
 
 
-class ContextualEnviron(MutableMapping):
+class ContextualEnviron(MutableMapping[str, str]):
     """Environment variables wrapper with contextual overrides.
 
     An instance of ContextualEnviron will typically be used to replace
@@ -155,10 +182,10 @@ class ContextualEnviron(MutableMapping):
        assert os.environ['FOO'] == 'BAR1'
     """
 
-    def __init__(self, environ):
+    def __init__(self, environ: os._Environ[str]) -> None:
         self._environ = environ
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: str) -> str:
         ctx = get()
         if ctx is not None:
             if key in ctx.env_overrides:
@@ -170,10 +197,10 @@ class ContextualEnviron(MutableMapping):
                 return value
         return self._environ[key]
 
-    def __iter__(self):
-        ctx = get()
-        deleted_keys = set()
-        if ctx is not None:
+    def __iter__(self) -> Iterator[str]:
+
+        def iter_from_context(ctx: Context) -> Iterator[str]:
+            deleted_keys = set()
             for key, value in ctx.env_overrides.items():
                 if value is None:
                     deleted_keys.add(key)
@@ -182,20 +209,24 @@ class ContextualEnviron(MutableMapping):
                 # Deduplicate the keys
                 if key not in ctx.env_overrides and key not in deleted_keys:
                     yield key
+
+        ctx = get()
+        if ctx is not None:
+            return iter_from_context(ctx)
         else:
             return self._environ.__iter__()
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(dict(self))
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key: str, value: str) -> None:
         ctx = get()
         if ctx is not None:
             ctx.env_overrides[key] = value
         else:
             self._environ.__setitem__(key, value)
 
-    def __delitem__(self, key):
+    def __delitem__(self, key: str) -> None:
         ctx = get()
         if ctx is not None:
             if key in ctx.env_overrides:
@@ -211,10 +242,13 @@ class ContextualEnviron(MutableMapping):
         else:
             self._environ.__delitem__(key)
 
-    def __repr__(self):
-        return self._environ.__repr__()
+    def __repr__(self) -> str:
+        # Adapted from os._Environ.__repr__
+        formatted_items = ', '.join(
+            f'{key!r}: {value!r}' for key, value in self.items())
+        return f'ctx_environ({{{formatted_items}}})'
 
-    def copy(self):
+    def copy(self) -> Dict[str, str]:
         copied = self._environ.copy()
         ctx = get()
         if ctx is not None:
@@ -225,7 +259,7 @@ class ContextualEnviron(MutableMapping):
                     copied[key] = ctx.env_overrides[key]
         return copied
 
-    def setdefault(self, key, default=None):
+    def setdefault(self, key: str, default: str) -> str:
         return self._environ.setdefault(key, default)
 
     def __ior__(self, other):
@@ -260,27 +294,37 @@ class Popen(subprocess.Popen):
         super().__init__(*args, env=env, **kwargs)
 
 
-F = TypeVar('F', bound=Callable[..., Any])
+P = ParamSpec('P')
+T = TypeVar('T')
 
 
-def contextual(func: F) -> F:
+def contextual(func: Callable[P, T]) -> Callable[P, T]:
     """Decorator to initialize a context before executing the function.
 
-    If a context is already initialized, this decorator will reset the context,
-    i.e. all contextual variables set previously will be cleared.
+    If a context is already initialized, this decorator will create a new
+    context that inherits the values from the existing context.
     """
 
     @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        initialize()
-        return func(*args, **kwargs)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+        token = initialize(get())
+        try:
+            return func(*args, **kwargs)
+        finally:
+            ctx = get()
+            if ctx is not None:
+                ctx.cleanup()
+            _CONTEXT.reset(token)
 
-    return typing.cast(F, wrapper)
+    return wrapper
 
 
-def initialize():
+def initialize(
+    base_context: Optional[Context] = None
+) -> contextvars.Token[Optional[Context]]:
     """Initialize the current SkyPilot context."""
-    _CONTEXT.set(Context())
+    new_context = base_context.copy() if base_context is not None else Context()
+    return _CONTEXT.set(new_context)
 
 
 class _ContextualStream:
