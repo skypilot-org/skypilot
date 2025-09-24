@@ -26,6 +26,7 @@ Install SkyPilot using pip:
           pip install "skypilot[oci]"
           # Nebius is only supported for Python >= 3.10
           pip install "skypilot[nebius]"
+          # Clouds below are supported/maintained by community/cloud providers.
           pip install "skypilot[lambda]"
           pip install "skypilot[runpod]"
           pip install "skypilot[fluidstack]"
@@ -60,7 +61,9 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[gcp]"
           pip install "skypilot-nightly[azure]"
           pip install "skypilot-nightly[oci]"
+          # Nebius is only supported for Python >= 3.10
           pip install "skypilot-nightly[nebius]"
+          # Clouds below are supported/maintained by community/cloud providers.
           pip install "skypilot-nightly[lambda]"
           pip install "skypilot-nightly[runpod]"
           pip install "skypilot-nightly[fluidstack]"
@@ -95,7 +98,9 @@ Install SkyPilot using pip:
           pip install -e ".[gcp]"
           pip install -e ".[azure]"
           pip install -e ".[oci]"
+          # Nebius is only supported for Python >= 3.10
           pip install -e ".[nebius]"
+          # Clouds below are supported/maintained by community/cloud providers.
           pip install -e ".[lambda]"
           pip install -e ".[runpod]"
           pip install -e ".[fluidstack]"
@@ -267,7 +272,7 @@ Kubernetes
 ~~~~~~~~~~
 
 SkyPilot can run workloads on on-prem or cloud-hosted Kubernetes clusters
-(e.g., EKS, GKE, Nebius Managed Kubernetes). The only requirement is a valid kubeconfig at
+(e.g., EKS, GKE, Nebius Managed Kubernetes, Coreweave). The only requirement is a valid kubeconfig at
 :code:`~/.kube/config`.
 
 .. code-block:: shell
@@ -347,6 +352,38 @@ Azure
 Hint: run ``az account subscription list`` to get a list of subscription IDs under your account.
 
 
+OCI
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To access Oracle Cloud Infrastructure (OCI), setup the credentials by following `this guide <https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm>`__. After completing the steps in the guide, the :code:`~/.oci` folder should contain the following files:
+
+.. code-block:: text
+
+  ~/.oci/config
+  ~/.oci/oci_api_key.pem
+
+The :code:`~/.oci/config` file should contain the following fields:
+
+.. code-block:: text
+
+  [DEFAULT]
+  user=ocid1.user.oc1..aaaaaaaa
+  fingerprint=aa:bb:cc:dd:ee:ff:gg:hh:ii:jj:kk:ll:mm:nn:oo:pp
+  tenancy=ocid1.tenancy.oc1..aaaaaaaa
+  region=us-sanjose-1
+  # Note that we should avoid using full home path for the key_file configuration, e.g. use ~/.oci instead of /home/username/.oci
+  key_file=~/.oci/oci_api_key.pem
+
+By default, the provisioned nodes will be in the root `compartment <https://docs.oracle.com/en/cloud/foundation/cloud_architecture/governance/compartments.html>`__. To specify the `compartment <https://docs.oracle.com/en/cloud/foundation/cloud_architecture/governance/compartments.html>`_ other than root, create/edit the file :code:`~/.sky/config.yaml`, put the compartment's OCID there, as the following:
+
+.. code-block:: text
+
+  oci:
+    region_configs:
+      default:
+        compartment_ocid: ocid1.compartment.oc1..aaaaaaaa......
+
+
 Nebius
 ~~~~~~
 
@@ -389,6 +426,11 @@ In the prompt, enter your Nebius Access Key ID and Secret Access Key (see `instr
   aws configure set endpoint_url <ENDPOINT>  --profile nebius
 
 
+
+.. note::
+
+  The following clouds are supported/maintained by community/cloud providers. Please file an issue on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_ if you run into any issues.
+
 RunPod
 ~~~~~~~~~~
 
@@ -398,39 +440,6 @@ RunPod
 
   pip install "runpod>=1.6.1"
   runpod config
-
-
-
-OCI
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-To access Oracle Cloud Infrastructure (OCI), setup the credentials by following `this guide <https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm>`__. After completing the steps in the guide, the :code:`~/.oci` folder should contain the following files:
-
-.. code-block:: text
-
-  ~/.oci/config
-  ~/.oci/oci_api_key.pem
-
-The :code:`~/.oci/config` file should contain the following fields:
-
-.. code-block:: text
-
-  [DEFAULT]
-  user=ocid1.user.oc1..aaaaaaaa
-  fingerprint=aa:bb:cc:dd:ee:ff:gg:hh:ii:jj:kk:ll:mm:nn:oo:pp
-  tenancy=ocid1.tenancy.oc1..aaaaaaaa
-  region=us-sanjose-1
-  # Note that we should avoid using full home path for the key_file configuration, e.g. use ~/.oci instead of /home/username/.oci
-  key_file=~/.oci/oci_api_key.pem
-
-By default, the provisioned nodes will be in the root `compartment <https://docs.oracle.com/en/cloud/foundation/cloud_architecture/governance/compartments.html>`__. To specify the `compartment <https://docs.oracle.com/en/cloud/foundation/cloud_architecture/governance/compartments.html>`_ other than root, create/edit the file :code:`~/.sky/config.yaml`, put the compartment's OCID there, as the following:
-
-.. code-block:: text
-
-  oci:
-    region_configs:
-      default:
-        compartment_ocid: ocid1.compartment.oc1..aaaaaaaa......
 
 
 Lambda Cloud
