@@ -295,13 +295,16 @@ def _query_ports_for_ingress(
 
         http_port, https_port = (external_ports if external_ports is not None
                                  else (None, None))
+        chosen_port = http_port if http_port is not None else https_port
+        # Ingress also supports HTTPS endpoint at port 443. But we still only
+        # surface the HTTP endpoint. The upper layer, like `get_endpoints()`,
+        # always take the first of that list. So the adding HTTPSEndpoint to
+        # this list has no effect anyway. Here only returns the HTTP endpoint to
+        # reduce the confusion.
         result[port] = [
             common.HTTPEndpoint(host=external_ip,
-                                port=http_port,
+                                port=chosen_port,
                                 path=path_prefix.lstrip('/')),
-            common.HTTPSEndpoint(host=external_ip,
-                                 port=https_port,
-                                 path=path_prefix.lstrip('/')),
         ]
 
     return result

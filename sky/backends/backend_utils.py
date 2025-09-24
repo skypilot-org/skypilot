@@ -3477,14 +3477,6 @@ def get_endpoints(cluster: str,
             controller to query endpoints during cluster launch when multiple
             services may be getting launched in parallel (and as a result,
             the controller may be in INIT status due to a concurrent launch).
-        Note on selection when multiple endpoints exist for the same port:
-            This function makes a deterministic choice based on endpoint type,
-            preferring HTTPS endpoints over HTTP endpoints, and HTTP over other
-            generic endpoint types (e.g., raw sockets). This avoids relying on
-            provider-specific ordering and prevents regressions related to
-            ambiguous scheme handling. Callers remain responsible for adding a
-            scheme if the chosen endpoint string does not include one.
-
     Returns: A dictionary of port numbers to endpoints. If endpoint is None,
         the dictionary will contain all ports:endpoints exposed on the cluster.
         If the endpoint is not exposed yet (e.g., during cluster launch or
@@ -3544,38 +3536,19 @@ def get_endpoints(cluster: str,
                                              head_ip=handle.head_ip,
                                              provider_config=config['provider'])
 
-    def _select_endpoint_string(
-            endpoints: List['provision_common.Endpoint']) -> Optional[str]:
-        if not endpoints:
-            return None
-
-        # Deterministic selection rule (see docstring above):
-        # HTTPS > HTTP > others. Do not add or strip schemes here; just pick.
-        https_candidate = None
-        http_candidate = None
-        other_candidate = None
-        for e in endpoints:
-            if isinstance(e, provision_common.HTTPSEndpoint):
-                https_candidate = https_candidate or e
-            elif isinstance(e, provision_common.HTTPEndpoint):
-                http_candidate = http_candidate or e
-            else:
-                other_candidate = other_candidate or e
-
-        chosen = https_candidate or http_candidate or other_candidate
-        return None if chosen is None else chosen.url()
-
-    def _filter_endpoints(
-        port_details: Dict[int, List['provision_common.Endpoint']]
+    def _filter_single_endpoint(
+        details: Dict[int, List['provision_common.Endpoint']]
     ) -> Dict[int, str]:
         result: Dict[int, str] = {}
-        for port_num, endpoints in port_details.items():
-            endpoint_str = _select_endpoint_string(endpoints)
-            if endpoint_str is not None:
-                result[port_num] = endpoint_str
+        for port_num, endpoints in details.items():
+            if len(endpoints) > 1:
+                logger.warning(f'Multiple endpoints found for port {port_num}. '
+                               'Only the first one is returned.')
+            elif len(endpoints) == 0:
+                raise RuntimeError(f'No endpoints found for port {port_num}.')
+            result[port_num] = endpoints[0].url()
         return result
 
-    launched_resources = handle.launched_resources.assert_launchable()
     # Validation before returning the endpoints
     if port is not None:
         # If the requested endpoint was not to be exposed
@@ -3594,7 +3567,7 @@ def get_endpoints(cluster: str,
                     launched_resources.region)
             logger.warning(error_msg)
             return {}
-        return _filter_endpoints({port: port_details[port]})
+        return _filter_single_endpoint({port: port_details[port]})
     else:
         if not port_details:
             # If cluster had no ports to be exposed
@@ -3613,7 +3586,7 @@ def get_endpoints(cluster: str,
                         launched_resources.region)
                 logger.warning(error_msg)
                 return {}
-        return _filter_endpoints(port_details)
+        return _filter_single_endpoint(port_details)
 
 
 def cluster_status_lock_id(cluster_name: str) -> str:
