@@ -1,5 +1,5 @@
 # Stage 1: Install Google Cloud SDK using APT
-FROM python:3.10-slim AS gcloud-apt-install
+FROM python:3.10.18-slim AS gcloud-apt-install
 
 RUN apt-get update && \
     apt-get install -y curl gnupg lsb-release && \
@@ -14,7 +14,7 @@ RUN apt-get update && \
 
 
 # Stage 2: Process the source code for INSTALL_FROM_SOURCE
-FROM python:3.10-slim AS process-source
+FROM python:3.10.18-slim AS process-source
 
 # Control installation method - default to install from source
 ARG INSTALL_FROM_SOURCE=true
@@ -38,7 +38,7 @@ RUN cd /skypilot && \
 
 
 # Stage 3: Main image
-FROM python:3.10-slim
+FROM python:3.10.18-slim
 
 ARG INSTALL_FROM_SOURCE=true
 
@@ -67,7 +67,7 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
         "aarch64") echo "arm64" ;; \
         *) echo "$(uname -m)" ;; \
     esac)} && \
-    curl -LO "https://dl.k8s.io/release/v1.31.6/bin/linux/$ARCH/kubectl" && \
+    curl -LO "https://dl.k8s.io/release/v1.33.5/bin/linux/$ARCH/kubectl" && \
     install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
     rm kubectl
 
@@ -76,6 +76,8 @@ RUN curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh | NEBIUS_INS
 # Install uv
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     ~/.local/bin/uv pip install --prerelease allow azure-cli --system && \
+    # Upgrade setuptools in base image to mitigate CVE-2024-6345
+    ~/.local/bin/uv pip install --system --upgrade setuptools==78.1.1 && \
     if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
         echo "Installing NPM and Node.js for dashboard build" && \
         curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
