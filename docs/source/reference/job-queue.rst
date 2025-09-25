@@ -219,8 +219,8 @@ Thus, we may see the following job statuses on this cluster:
 Using ``workdir`` with multiple jobs
 ------------------------------------
 
-If multiple jobs are submitted to a cluster and they all upload contents to ``workdir``.
-Each job may or may not see its corresponding local contents,
+If multiple jobs are submitted to a cluster and they all upload contents to ``workdir``,
+each job may or may not see its corresponding local contents
 depending on its time of execution and when other jobs' workdir uploads are run.
 See :ref:`sync code from a local directory or a git repository <sync-code-and-project-files-git>`
 for more details.
@@ -252,4 +252,4 @@ The commands above are guaranteed to print "1" for the first job and "2" for the
 .. tip::
 
   If you are changing the workdir per job to ensure different queued jobs use their own versions of code,
-  use Managed Jobs instead, which uploads each job's workdir to a temporary, job-scoped bucket.
+  use :ref:`Managed Jobs <managed-jobs>` instead, which uploads each job's workdir to a temporary, job-scoped bucket.
