@@ -37,6 +37,9 @@ NODEPORT=30082
 HTTPS_NODEPORT=30099
 RELEASE_NAME=skypilot
 
+# NODEPORT and HOSTPORT are not the same. Endpoint requires HOSTPORT
+HOSTPORT=$(docker port skypilot-control-plane | grep $NODEPORT | sed 's/.*://;s/^[[:space:]]*//;s/[[:space:]]*$//')
+
 # Cleanup function to delete namespace and resources
 cleanup() {
     echo ""
@@ -378,7 +381,7 @@ deploy_and_login() {
 
     # Get the API server URL
     echo "Getting API server URL..."
-    ENDPOINT=http://${CLUSTER_HOST}:${NODEPORT}
+    ENDPOINT=http://${CLUSTER_HOST}:${HOSTPORT}
     echo "API server endpoint: $ENDPOINT"
 
     # Test the API server with retry logic

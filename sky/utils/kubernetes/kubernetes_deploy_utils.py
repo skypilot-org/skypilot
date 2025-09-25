@@ -466,7 +466,8 @@ def deploy_local_cluster(name: Optional[str], gpus: bool):
             ux_utils.finishing_message(
                 message=(
                     f'Local Kubernetes cluster {name} created successfully '
-                    f'with {num_cpus} CPUs{gpu_message}.'),
+                    f'with {num_cpus} CPUs{gpu_message}. Port range '
+                    f'{port_start}-{port_end} allocated.'),
                 log_path=log_path,
                 is_local=True,
                 follow_up_message=(
