@@ -319,7 +319,7 @@ def contextual(func: Callable[P, T]) -> Callable[P, T]:
                     ctx.cleanup()
             finally:
                 # Note: _CONTEXT.reset() is not reliable - may fail with
-                # ValueError: <Token ... at ...> was created in a different 
+                # ValueError: <Token ... at ...> was created in a different
                 # Context
                 # We must make sure this happens because otherwise we may try to
                 # write to the wrong log.
