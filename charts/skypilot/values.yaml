@@ -50,8 +50,8 @@ apiService:
   terminationGracePeriodSeconds: 60
 
   # Set ~/.sky/config.yaml content on the API server
-  # Updating this value will not restart the API server but it will take tens of seconds to take effect on the API server.
-  # You can verify config updates on the server by exec-ing into the pod and running `cat ~/.sky/config.yaml`
+  # This value is IGNORED during an helm upgrade if there is an existing config
+  # due to the potential accidental loss of existing config. Use the SkyPilot dashboard to update the config.
   # If remote database is configured (either via dbConnectionSecretName or dbConnectionString), config must be null.
   # In such case, you can add the config via the dashboard once the API server is deployed.
   # Refer to https://docs.skypilot.co/en/latest/reference/config.html for more details.
