@@ -78,8 +78,8 @@ install_requires = [
     'sqlalchemy_adapter',
     # Required for API server metrics
     'prometheus_client>=0.8.0',
-    'passlib',
-    'bcrypt',
+    'passlib==1.7.4',
+    'bcrypt==4.0.1',
     'pyjwt',
     'gitpython',
     'types-paramiko',
@@ -105,7 +105,7 @@ PROTOBUF = 'protobuf>=5.26.1, < 7.0.0'
 server_dependencies = [
     'casbin',
     'sqlalchemy_adapter',
-    'passlib',
+    'passlib==1.7.4',
     'pyjwt',
     'aiohttp',
     'anyio',
