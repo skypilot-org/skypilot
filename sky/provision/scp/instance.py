@@ -134,7 +134,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     head_instance_id = _get_head_instance_id(running_instances)
     if head_instance_id is None:
-        raise RuntimeError('Head node is not running')
+        raise RuntimeError('Head instance is not running')
 
     resumed_instance_ids = []
     created_instance_ids = []
