@@ -1311,6 +1311,9 @@ def can_provision(pool: bool) -> bool:
 
 
 def can_start_new_process(pool: bool) -> bool:
+    # In test env, we allow unlimited number of services.
+    if env_options.Options.RUNNING_IN_BUILDKITE.get():
+        return True
     return serve_state.get_num_services() < _get_number_of_services(pool)
 
 
