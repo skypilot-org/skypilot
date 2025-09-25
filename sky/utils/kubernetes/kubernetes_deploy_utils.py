@@ -1,6 +1,5 @@
 """Utility functions for deploying Kubernetes clusters."""
 import os
-import random
 import shlex
 import subprocess
 import sys
@@ -345,7 +344,7 @@ def deploy_local_cluster(name: Optional[str], gpus: bool):
         # port_start = random.randint(300, 399) * 100
         # TODO (kyuds): hard coding to pass smoketests. Need to figure out
         # how to deal with this later.
-        port_start = 30000
+        port_start = LOCAL_CLUSTER_INTERNAL_PORT_START
         port_end = port_start + LOCAL_CLUSTER_PORT_RANGE - 1
         logger.debug(f'Using port range {port_start}-{port_end}')
         f.write(generate_kind_config(port_start, gpus=gpus))
