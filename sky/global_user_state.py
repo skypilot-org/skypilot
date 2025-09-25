@@ -1374,7 +1374,7 @@ def _set_cluster_usage_intervals(
                                                        Optional[int]]]) -> None:
     assert _SQLALCHEMY_ENGINE is not None
 
-    # Calculate last_activity_time and launched_at from usage_intervals
+    # Calculate last_activity_time from usage_intervals
     last_activity_time = _get_cluster_last_activity_time(usage_intervals)
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
