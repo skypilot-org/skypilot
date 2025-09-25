@@ -4186,6 +4186,13 @@ def volumes_apply(
 
     logger.debug(f'Volume config: {volume.to_yaml_config()}')
 
+    # TODO(kevin): remove the try block in v0.13.0
+    try:
+        volumes_sdk.validate(volume)
+    except exceptions.APINotSupportedError:
+        # Do best-effort client-side validation.
+        volume.validate(skip_cloud_compatibility=True)
+
     if not yes:
         click.confirm(f'Proceed to create volume {volume.name!r}?',
                       default=True,
@@ -5897,7 +5904,13 @@ def local():
     '--context-name',
     type=str,
     required=False,
-    help='Name to use for the kubeconfig context. Defaults to "default".')
+    help='Name to use for the kubeconfig context. Defaults to "default". '
+    'Used with the ip list.')
+@click.option(
+    '--name',
+    type=str,
+    required=False,
+    help='Name of the cluster. Defaults to "skypilot". Used without ip list.')
 @click.option('--password',
               type=str,
               required=False,
@@ -5908,7 +5921,7 @@ def local():
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
-             cleanup: bool, context_name: Optional[str],
+             cleanup: bool, context_name: Optional[str], name: Optional[str],
              password: Optional[str], async_call: bool):
     """Creates a local or remote cluster."""
 
@@ -5955,17 +5968,26 @@ def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
                 f'Failed to read SSH key file {ssh_key_path}: {str(e)}')
 
     request_id = sdk.local_up(gpus, ip_list, ssh_user, ssh_key, cleanup,
-                              context_name, password)
+                              context_name, name, password)
     _async_call_or_wait(request_id, async_call, request_name='local up')
 
 
+@click.option('--name',
+              type=str,
+              required=False,
+              help='Name of the cluster to down. Defaults to "skypilot".')
 @local.command('down', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
-def local_down(async_call: bool):
-    """Deletes a local cluster."""
-    request_id = sdk.local_down()
+def local_down(name: Optional[str], async_call: bool):
+    """Deletes a local cluster.
+
+    This will only delete a local cluster started without the ip list.
+    To clean up the local cluster started with a ip list, use `sky local up`
+    with the cleanup flag.
+    """
+    request_id = sdk.local_down(name)
     _async_call_or_wait(request_id, async_call, request_name='sky.local.down')
 
 

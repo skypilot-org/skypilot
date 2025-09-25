@@ -595,10 +595,16 @@ Test that the configuration is working:
 
 .. code-block:: console
 
-    $ curl -i https://zerotrust.assembletest.org/api/health
+    # Set your DNS record variables
+    $ DNS_RECORD_NAME=<your_dns_record_name>  # e.g. zerotrust
+    $ DNS_RECORD_DOMAIN=<your_dns_record_domain>  # e.g. skypilot.org
+
+    # Test the API health endpoint
+    $ curl -i https://${DNS_RECORD_NAME}.${DNS_RECORD_DOMAIN}/api/health
     # Should return 200 OK
 
-    $ sky api login -e https://zerotrust.assembletest.org
+    # Test SkyPilot API login
+    $ sky api login -e https://${DNS_RECORD_NAME}.${DNS_RECORD_DOMAIN}
     # Should complete login without browser redirect
 
 

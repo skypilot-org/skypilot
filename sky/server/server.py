@@ -445,6 +445,22 @@ async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
     loop.call_at(target, tick)
 
 
+def schedule_on_boot_check():
+    try:
+        executor.schedule_request(
+            request_id='skypilot-server-on-boot-check',
+            request_name='check',
+            request_body=payloads.CheckBody(),
+            func=sky_check.check,
+            schedule_type=requests_lib.ScheduleType.SHORT,
+            is_skypilot_system=True,
+        )
+    except exceptions.RequestAlreadyExistsError:
+        # Lifespan will be executed in each uvicorn worker process, we
+        # can safely ignore the error if the task is already scheduled.
+        logger.debug('Request skypilot-server-on-boot-check already exists.')
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-name
     """FastAPI lifespan context manager."""
@@ -469,6 +485,7 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
             # Lifespan will be executed in each uvicorn worker process, we
             # can safely ignore the error if the task is already scheduled.
             logger.debug(f'Request {event.id} already exists.')
+    schedule_on_boot_check()
     asyncio.create_task(cleanup_upload_ids())
     if metrics_utils.METRICS_ENABLED:
         # Start monitoring the event loop lag in each server worker
@@ -1216,19 +1233,8 @@ async def logs(
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=cluster_job_body.cluster_name,
     )
-    task = asyncio.create_task(executor.execute_request_coroutine(request_task))
-
-    async def cancel_task():
-        try:
-            logger.info('Client disconnected for request: '
-                        f'{request.state.request_id}')
-            task.cancel()
-            await task
-        except asyncio.CancelledError:
-            pass
-
-    # Cancel the task after the request is done or client disconnects
-    background_tasks.add_task(cancel_task)
+    task = executor.execute_request_in_coroutine(request_task)
+    background_tasks.add_task(task.cancel)
     # TODO(zhwu): This makes viewing logs in browser impossible. We should adopt
     # the same approach as /stream.
     return stream_utils.stream_response(
@@ -1421,12 +1427,13 @@ async def local_up(request: fastapi.Request,
 
 
 @app.post('/local_down')
-async def local_down(request: fastapi.Request) -> None:
+async def local_down(request: fastapi.Request,
+                     local_down_body: payloads.LocalDownBody) -> None:
     """Tears down the Kubernetes cluster started by local_up."""
     await executor.schedule_request(
         request_id=request.state.request_id,
         request_name='local_down',
-        request_body=payloads.RequestBody(),
+        request_body=local_down_body,
         func=core.local_down,
         schedule_type=requests_lib.ScheduleType.LONG,
     )

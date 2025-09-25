@@ -590,6 +590,21 @@ class TestBackwardCompatibility:
         ]
 
         teardown = f'{self.ACTIVATE_BASE} && sky down {cluster_name} -y && sky serve down {cluster_name}* -y'
+
+        if generic_cloud == 'kubernetes':
+            commands.extend([
+                # volume test
+                f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
+                f'sky volumes apply -y -n {cluster_name}-0 --infra {generic_cloud} --type k8s-pvc --size 1Gi',
+                # No restart on switch to current, cli in current, server in bases
+                f'{self.ACTIVATE_CURRENT} && sky volumes apply -y -n {cluster_name}-1 --infra {generic_cloud} --type k8s-pvc --size 1Gi',
+                f'{self.ACTIVATE_CURRENT} && sky volumes ls | grep "{cluster_name}-0"',
+                f'{self.ACTIVATE_CURRENT} && sky volumes ls | grep "{cluster_name}-1"',
+                f'{self.ACTIVATE_CURRENT} && sky volumes delete {cluster_name}-0 -y',
+                f'{self.ACTIVATE_CURRENT} && sky volumes delete {cluster_name}-1 -y',
+            ])
+            teardown += ' && sky volumes delete {cluster_name}* -y'
+
         self.run_compatibility_test(cluster_name, commands, teardown)
 
     def test_client_server_compatibility_new_server(self, generic_cloud: str):
@@ -659,6 +674,21 @@ class TestBackwardCompatibility:
         ]
 
         teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name} -y && sky serve down {cluster_name}* -y'
+
+        if generic_cloud == 'kubernetes':
+            commands.extend([
+                # volume test
+                f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
+                f'sky volumes apply -y -n {cluster_name}-0 --infra {generic_cloud} --type k8s-pvc --size 1Gi',
+                # No restart on switch to base, cli in base, server in current
+                f'{self.ACTIVATE_BASE} && sky volumes apply -y -n {cluster_name}-1 --infra {generic_cloud} --type k8s-pvc --size 1Gi',
+                f'{self.ACTIVATE_BASE} && sky volumes ls | grep "{cluster_name}-0"',
+                f'{self.ACTIVATE_BASE} && sky volumes ls | grep "{cluster_name}-1"',
+                f'{self.ACTIVATE_BASE} && sky volumes delete {cluster_name}-0 -y',
+                f'{self.ACTIVATE_BASE} && sky volumes delete {cluster_name}-1 -y',
+            ])
+            teardown += ' && sky volumes delete {cluster_name}* -y'
+
         self.run_compatibility_test(cluster_name, commands, teardown)
 
     def test_sdk_compatibility(self, generic_cloud: str):

@@ -478,6 +478,17 @@ class VolumeListBody(RequestBody):
     pass
 
 
+class VolumeValidateBody(RequestBody):
+    """The request body for the volume validate endpoint."""
+    name: Optional[str] = None
+    volume_type: Optional[str] = None
+    infra: Optional[str] = None
+    size: Optional[str] = None
+    labels: Optional[Dict[str, str]] = None
+    resource_name: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
+
+
 class EndpointsBody(RequestBody):
     """The request body for the endpoint."""
     cluster: str
@@ -672,7 +683,13 @@ class LocalUpBody(RequestBody):
     ssh_key: Optional[str] = None
     cleanup: bool = False
     context_name: Optional[str] = None
+    name: Optional[str] = None
     password: Optional[str] = None
+
+
+class LocalDownBody(RequestBody):
+    """The request body for the local down endpoint."""
+    name: Optional[str] = None
 
 
 class SSHUpBody(RequestBody):
