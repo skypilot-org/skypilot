@@ -277,13 +277,10 @@ def _filter_instances(cluster_name_on_cloud,
 
 
 def _get_head_instance_id(instances):
-    head_instance_id = None
-    if len(instances) > 0:
-        for instance in instances:
-            if instance['virtualServerName'].endswith('-head'):
-                head_instance_id = instance['virtualServerId']
-                break
-    return head_instance_id
+    for instance in instances:
+        if instance['virtualServerName'].endswith('-head'):
+            return instance['virtualServerId']
+    return None
 
 
 def _create_security_group(zone_id, vpc, cnt):
