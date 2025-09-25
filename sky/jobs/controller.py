@@ -57,6 +57,7 @@ async def create_background_task(coro: typing.Coroutine) -> None:
     async with _background_tasks_lock:
         task = asyncio.create_task(coro)
         _background_tasks.add(task)
+        # TODO(cooperc): Discard needs a lock?
         task.add_done_callback(_background_tasks.discard)
 
 

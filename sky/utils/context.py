@@ -5,6 +5,7 @@ from collections.abc import Mapping
 import contextvars
 import copy
 import functools
+import inspect
 import os
 import pathlib
 import subprocess
@@ -111,6 +112,7 @@ class Context(object):
         """Clean up the context."""
         if self._log_file_handle is not None:
             self._log_file_handle.close()
+            self._log_file_handle = None
 
     def copy(self) -> 'Context':
         """Create a copy of the context.
@@ -306,24 +308,54 @@ def contextual(func: Callable[P, T]) -> Callable[P, T]:
 
     @functools.wraps(func)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-        token = initialize(get())
+        original_ctx = get()
+        initialize(original_ctx)
+        ctx = get()
+        cleanup_after_await = False
+
+        def cleanup():
+            try:
+                if ctx is not None:
+                    ctx.cleanup()
+            finally:
+                # Note: _CONTEXT.reset() is not reliable - may fail with
+                # ValueError: <Token ... at ...> was created in a different 
+                # Context
+                # We must make sure this happens because otherwise we may try to
+                # write to the wrong log.
+                _CONTEXT.set(original_ctx)
+
+        # There are two cases:
+        # 1. The function is synchronous (that is, return type is not awaitable)
+        #    In this case, we use a finally block to cleanup the context.
+        # 2. The function is asynchronous (that is, return type is awaitable)
+        #    In this case, we need to construct an async def wrapper and await
+        #    the value, then call the cleanup function in the finally block.
+
+        async def await_with_cleanup(awaitable):
+            try:
+                return await awaitable
+            finally:
+                cleanup()
+
         try:
-            return func(*args, **kwargs)
+            ret = func(*args, **kwargs)
+            if inspect.isawaitable(ret):
+                cleanup_after_await = True
+                return await_with_cleanup(ret)
+            else:
+                return ret
         finally:
-            ctx = get()
-            if ctx is not None:
-                ctx.cleanup()
-            _CONTEXT.reset(token)
+            if not cleanup_after_await:
+                cleanup()
 
     return wrapper
 
 
-def initialize(
-    base_context: Optional[Context] = None
-) -> 'contextvars.Token[Optional[Context]]':
+def initialize(base_context: Optional[Context] = None) -> None:
     """Initialize the current SkyPilot context."""
     new_context = base_context.copy() if base_context is not None else Context()
-    return _CONTEXT.set(new_context)
+    _CONTEXT.set(new_context)
 
 
 class _ContextualStream:
