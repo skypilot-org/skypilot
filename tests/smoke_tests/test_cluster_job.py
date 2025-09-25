@@ -709,16 +709,10 @@ def test_nemorl():
     with open(original_yaml_path, 'r') as f:
         content = f.read()
 
-    modified_content = content
-    modified_content = re.sub(r'(?m)^\s*accelerators:.*\n?', '',
-                              modified_content)
-    modified_content = re.sub(r'(?m)^\s*memory:.*\n?', '', modified_content)
-    modified_content = re.sub(r'(?m)^\s*infra:.*\n?', '', modified_content)
-    modified_content = re.sub(r'(?m)^\s*cpus:.*\n?', '', modified_content)
     modified_content = re.sub(
         r'(?m)^(\s*)dpo\.val_global_batch_size=.*\\\s*$',
         r'\1dpo.val_global_batch_size=1 \\\n\1dpo.max_num_steps=1 \\\n\1policy.model_name="Qwen/Qwen3-0.6B" \\\n\1policy.tokenizer.name="Qwen/Qwen3-0.6B" \\',
-        modified_content,
+        content,
     )
 
     # Create a temporary YAML file with the modified content
@@ -729,7 +723,7 @@ def test_nemorl():
         test = smoke_tests_utils.Test(
             'nemorl',
             [
-                f'HF_TOKEN="" sky launch -y -c {name} --infra aws/ap-northeast-1 --instance-type g6.4xlarge --secret HF_TOKEN {f.name}',
+                f'HF_TOKEN="" sky launch -y -c {name} --infra aws/ap-northeast-1 --instance-type g6.4xlarge --gpus L4:1 --cpus 10+ --memory 60+ --secret HF_TOKEN {f.name}',
                 f'sky logs {name} 1 --status',
             ],
             f'sky down -y {name}',
