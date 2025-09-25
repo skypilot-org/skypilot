@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import pathlib
 import resource
 import shutil
 import sys
@@ -56,6 +57,7 @@ async def create_background_task(coro: typing.Coroutine) -> None:
     async with _background_tasks_lock:
         task = asyncio.create_task(coro)
         _background_tasks.add(task)
+        # TODO(cooperc): Discard needs a lock?
         task.add_done_callback(_background_tasks.discard)
 
 
@@ -896,6 +898,9 @@ class Controller:
             # some data here.
             raise error
 
+    # Use context.contextual to enable per-job output redirection and env var
+    # isolation.
+    @context.contextual
     async def run_job_loop(self,
                            job_id: int,
                            dag_yaml: str,
@@ -904,13 +909,9 @@ class Controller:
                            env_file_path: Optional[str] = None,
                            pool: Optional[str] = None):
         """Background task that runs the job loop."""
-        # Replace os.environ with ContextualEnviron to enable per-job
-        # environment isolation. This allows each job to have its own
-        # environment variables without affecting other jobs or the main
-        # process.
-        context.initialize()
         ctx = context.get()
-        ctx.redirect_log(log_file)  # type: ignore
+        assert ctx is not None, 'Context is not initialized'
+        ctx.redirect_log(pathlib.Path(log_file))
 
         # Load and apply environment variables from the job's environment file
         if env_file_path and os.path.exists(env_file_path):
@@ -921,7 +922,6 @@ class Controller:
                                 f'{list(env_vars.keys())}')
 
                 # Apply environment variables to the job's context
-                ctx = context.get()
                 if ctx is not None:
                     for key, value in env_vars.items():
                         if value is not None:

@@ -147,6 +147,10 @@ kubectl patch svc ingress-nginx-controller -n ingress-nginx -p '{
         ]
     }
 }'
+if [ $? -ne 0 ]; then
+    echo "Error: Failed to patch nginx ingress controller service"
+    exit 1
+fi
 echo "nginx ingress controller configured for NodePort $NODEPORT ✓"
 
 # Build the Docker image locally
