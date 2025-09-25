@@ -30,16 +30,16 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         raise RuntimeError(
             f'Cluster {cluster_name_on_cloud} already has '
             f'{len(running_instances)} instances, but {config.count} '
-            'are required.')
+            'are required')
 
     if to_start_count == 0:
         head_instance_id = _get_head_instance_id(running_instances)
         if head_instance_id is None:
             raise RuntimeError(
-                f'Cluster {cluster_name_on_cloud} has no head instance.')
+                f'Cluster {cluster_name_on_cloud} has no head instance')
         logger.info(
             f'Cluster {cluster_name_on_cloud} already has '
-            f'{len(running_instances)} instances, no need to start more.')
+            f'{len(running_instances)} instances, no need to start more')
         return common.ProvisionRecord(provider_name='scp',
                                       cluster_name=cluster_name_on_cloud,
                                       region=region,
