@@ -1233,19 +1233,8 @@ async def logs(
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=cluster_job_body.cluster_name,
     )
-    task = asyncio.create_task(executor.execute_request_coroutine(request_task))
-
-    async def cancel_task():
-        try:
-            logger.info('Client disconnected for request: '
-                        f'{request.state.request_id}')
-            task.cancel()
-            await task
-        except asyncio.CancelledError:
-            pass
-
-    # Cancel the task after the request is done or client disconnects
-    background_tasks.add_task(cancel_task)
+    task = executor.execute_request_in_coroutine(request_task)
+    background_tasks.add_task(task.cancel)
     # TODO(zhwu): This makes viewing logs in browser impossible. We should adopt
     # the same approach as /stream.
     return stream_utils.stream_response(

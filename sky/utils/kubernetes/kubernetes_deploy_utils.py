@@ -27,7 +27,7 @@ logger = sky_logging.init_logger(__name__)
 # Default path for Kubernetes configuration file
 DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
 DEFAULT_LOCAL_CLUSTER_NAME = 'skypilot'
-LOCAL_CLUSTER_PORT_RANGE = 100
+LOCAL_CLUSTER_PORT_RANGE = 101
 LOCAL_CLUSTER_INTERNAL_PORT_START = 30000
 
 
@@ -263,7 +263,7 @@ def generate_kind_config(port_start: int,
     """Generate a kind cluster config with ports mapped from host to container
 
     Port range will be [port_start, port_start + LOCAL_CLUSTER_PORT_RANGE)
-    Internally, this will map to ports 30000 - 30099
+    Internally, this will map to ports 30000 - 30100
 
     Args:
         path: Path to generate the config file at
