@@ -26,10 +26,10 @@ Install SkyPilot using pip:
           pip install "skypilot[aws]"
           pip install "skypilot[gcp]"
           pip install "skypilot[azure]"
-          pip install "skypilot[oci]"
           # Nebius is only supported for Python >= 3.10
           pip install "skypilot[nebius]"
           # Clouds below are supported/maintained by community/cloud providers.
+          pip install "skypilot[oci]"
           pip install "skypilot[lambda]"
           pip install "skypilot[runpod]"
           pip install "skypilot[fluidstack]"
@@ -63,10 +63,10 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[aws]"
           pip install "skypilot-nightly[gcp]"
           pip install "skypilot-nightly[azure]"
-          pip install "skypilot-nightly[oci]"
           # Nebius is only supported for Python >= 3.10
           pip install "skypilot-nightly[nebius]"
           # Clouds below are supported/maintained by community/cloud providers.
+          pip install "skypilot-nightly[oci]"
           pip install "skypilot-nightly[lambda]"
           pip install "skypilot-nightly[runpod]"
           pip install "skypilot-nightly[fluidstack]"
@@ -100,10 +100,10 @@ Install SkyPilot using pip:
           pip install -e ".[aws]"
           pip install -e ".[gcp]"
           pip install -e ".[azure]"
-          pip install -e ".[oci]"
           # Nebius is only supported for Python >= 3.10
           pip install -e ".[nebius]"
           # Clouds below are supported/maintained by community/cloud providers.
+          pip install -e ".[oci]"
           pip install -e ".[lambda]"
           pip install -e ".[runpod]"
           pip install -e ".[fluidstack]"
