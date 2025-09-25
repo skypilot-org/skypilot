@@ -16,6 +16,7 @@ from sky.provision.aws import config
 from sky.utils import common_utils
 from sky.utils import config_utils
 
+
 def test_aws_label():
     aws = AWS()
     # Invalid - AWS prefix
