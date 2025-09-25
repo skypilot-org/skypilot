@@ -27,6 +27,7 @@ from sky.serve import service
 from sky.serve import spot_placer
 from sky.skylet import constants
 from sky.skylet import job_lib
+from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import env_options
@@ -109,6 +110,7 @@ def launch_cluster(replica_id: int,
     while True:
         retry_cnt += 1
         try:
+            usage_lib.messages.usage.set_internal()
             request_id = sdk.launch(task,
                                     cluster_name,
                                     retry_until_up=retry_until_up,
@@ -171,6 +173,7 @@ def terminate_cluster(cluster_name: str,
     while True:
         retry_cnt += 1
         try:
+            usage_lib.messages.usage.set_internal()
             request_id = sdk.down(cluster_name)
             with open(log_file, 'a', encoding='utf-8') as f:
                 sdk.stream_and_get(request_id, output_stream=f)
