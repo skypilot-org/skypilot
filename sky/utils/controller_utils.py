@@ -1301,8 +1301,8 @@ def can_terminate(service_name: str) -> bool:
     # TODO(tian): probe API server to see if there is any pending terminate
     # requests.
     num_terminating = (
-        serve_state.total_number_provisioning_replicas(service_name) +
+        serve_state.total_number_provisioning_replicas(service_name) *
+        SERVE_LAUNCH_RATIO +
         # Each terminate process will take roughly same resources as job launch.
-        serve_state.total_number_terminating_replicas(service_name) /
-        SERVE_LAUNCH_RATIO)
+        serve_state.total_number_terminating_replicas(service_name))
     return num_terminating < LAUNCHES_PER_WORKER * POOL_JOBS_RESOURCES_RATIO
