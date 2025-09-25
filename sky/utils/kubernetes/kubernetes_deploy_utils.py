@@ -352,7 +352,8 @@ def deploy_local_cluster(name: Optional[str], gpus: bool):
                                      delete=True) as f:
         # Choose random port range to use on the host machine.
         # Port range is port_start - port_start + 99 (exactly 100 ports).
-        port_start = random.randint(300, 399) * 100
+        # port_start = random.randint(300, 399) * 100
+        port_start = 30000
         port_end = port_start + LOCAL_CLUSTER_PORT_RANGE - 1
         logger.debug(f'Using port range {port_start}-{port_end}')
         f.write(generate_kind_config(port_start, gpus=gpus))
