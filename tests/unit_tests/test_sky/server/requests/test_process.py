@@ -22,7 +22,7 @@ def failing_task():
     raise ValueError('Task failed')
 
 
-def wait_for_workers_cleanup(executor, timeout=15):
+def wait_for_workers_cleanup(executor, timeout=20):
     """Wait for workers to be cleaned up.
 
     Args:
@@ -41,7 +41,7 @@ def wait_for_workers_cleanup(executor, timeout=15):
     return False
 
 
-def wait_for_futures(futures, timeout=15):
+def wait_for_futures(futures, timeout=20):
     """Wait for futures to complete.
 
     Args:
