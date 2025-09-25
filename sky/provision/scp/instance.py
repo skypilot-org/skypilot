@@ -36,7 +36,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         head_instance_id = _get_head_instance_id(running_instances)
         if head_instance_id is None:
             raise RuntimeError(
-                f'Cluster {cluster_name_on_cloud} has no head node.')
+                f'Cluster {cluster_name_on_cloud} has no head instance.')
         logger.info(
             f'Cluster {cluster_name_on_cloud} already has '
             f'{len(running_instances)} instances, no need to start more.')
