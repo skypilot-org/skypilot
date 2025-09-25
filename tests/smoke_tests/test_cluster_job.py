@@ -1031,8 +1031,7 @@ def test_volumes_on_kubernetes():
     test = smoke_tests_utils.Test(
         'volumes_on_kubernetes',
         [
-            # TODO(hailong): cover no `--infra` case after https://github.com/skypilot-org/skypilot/issues/7380 is fixed.
-            f'sky volumes apply -y -n pvc0 --type k8s-pvc --size 2GB --infra kubernetes',
+            f'sky volumes apply -y -n pvc0 --type k8s-pvc --size 2GB',
             f'sky volumes ls | grep "pvc0"',
             f'sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
