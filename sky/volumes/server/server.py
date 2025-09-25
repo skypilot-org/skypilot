@@ -51,17 +51,17 @@ async def volume_delete(request: fastapi.Request,
 @router.post('/validate')
 async def volume_validate(
         _: fastapi.Request,
-        volume_apply_body: payloads.VolumeValidateBody) -> None:
+        volume_validate_body: payloads.VolumeValidateBody) -> None:
     """Validates a volume."""
     try:
         volume_config = {
-            'name': volume_apply_body.name,
-            'type': volume_apply_body.volume_type,
-            'infra': volume_apply_body.infra,
-            'size': volume_apply_body.size,
-            'labels': volume_apply_body.labels,
-            'config': volume_apply_body.config,
-            'resource_name': volume_apply_body.resource_name,
+            'name': volume_validate_body.name,
+            'type': volume_validate_body.volume_type,
+            'infra': volume_validate_body.infra,
+            'size': volume_validate_body.size,
+            'labels': volume_validate_body.labels,
+            'config': volume_validate_body.config,
+            'resource_name': volume_validate_body.resource_name,
         }
         volume = volume_lib.Volume.from_yaml_config(volume_config)
         volume.validate()
