@@ -797,13 +797,25 @@ def write_cluster_config(
             cloud=str(cloud).lower(),
             region=region.name,
             keys=('use_ssm',),
-            default_value=False)
+            default_value=None)
 
         if use_ssm and ssh_proxy_command is not None:
             raise exceptions.InvalidCloudConfigs(
                 'use_ssm is set to true, but ssh_proxy_command '
                 f'is already set to {ssh_proxy_command!r}. Please remove '
                 'ssh_proxy_command or set use_ssm to false.')
+
+        if use_internal_ips and ssh_proxy_command is None:
+            # Only if use_ssm is explicitly not set, we default to using SSM.
+            if use_ssm is None:
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}'
+                    'use_internal_ips is set to true, '
+                    'but ssh_proxy_command is not set. Defaulting to '
+                    'using SSM. Specify ssh_proxy_command to use a different '
+                    'https://docs.skypilot.co/en/latest/reference/config.html#'
+                    f'aws.ssh_proxy_command.{colorama.Style.RESET_ALL}')
+                use_ssm = True
 
         if use_ssm:
             aws_profile = os.environ.get('AWS_PROFILE', None)

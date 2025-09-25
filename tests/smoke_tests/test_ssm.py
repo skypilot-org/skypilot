@@ -64,6 +64,56 @@ def test_ssm_private():
 
 
 @pytest.mark.aws
+def test_ssm_private_no_ssh_proxy_command():
+    """Test that ssm will run by default if use_internal_ips is set.
+
+    This security group does not allow ssh access so if this test passes
+    it means that SkyPilot is using SSM to connect to the cluster.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    vpc = "DO_NOT_DELETE_lloyd-airgapped-plus-gateway"
+    vpc_config = (f'--config aws.vpc_name={vpc} '
+                  f'--config aws.security_group_name=lloyd-airgap-gw-sg '
+                  f'--config aws.use_internal_ips=true')
+
+    warning_message = 'use_internal_ips is set to true, but ' \
+        'ssh_proxy_command is not set. Defaulting to using SSM. ' \
+        'Specify ssh_proxy_command to use a different ' \
+        'https://docs.skypilot.co/en/latest/reference/config.html#aws.ssh_proxy_command.'
+
+    VALIDATE_SSM_OUTPUT = (
+        'echo "$s" && echo "==Validating launching==" && '
+        f'echo "$s" | grep "{warning_message}" && '
+        'echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
+        'echo "$s" && echo "==Validating setup output==" && '
+        'echo "$s" | grep -A 1 "Setup detached" | grep "Job submitted" && '
+        'echo "==Validating running output hints==" && echo "$s" | '
+        'grep -A 1 "Job submitted, ID:" | '
+        'grep "Waiting for task resources on " && '
+        'echo "==Validating task setup/run output starting==" && echo "$s" | '
+        'grep -A 1 "Job started. Streaming logs..." | grep "(setup" | '
+        'grep "running setup" && '
+        'echo "$s" | grep -A 1 "(setup" | grep "(min, pid=" && '
+        'echo "==Validating task output ending==" && '
+        'echo "$s" | grep -A 1 "task run finish" | '
+        'grep "Job finished (status: SUCCEEDED)" && '
+        'echo "==Validating task output ending 2==" && '
+        'echo "$s" | grep -A 5 "Job finished (status: SUCCEEDED)" | '
+        'grep "Job ID:" && '
+        'echo "$s" | grep -A 1 "Useful Commands" | grep "Job ID:"')
+
+    test = smoke_tests_utils.Test(
+        'ssm_private_no_ssh_proxy_command',
+        [
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} {vpc_config} tests/test_yamls/minimal.yaml | tee /dev/stderr) && {VALIDATE_SSM_OUTPUT}',
+        ],
+        teardown=f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout('aws'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.aws
 def test_ssm_private_custom_ami():
     """Test that ssm works with private IP addresses and a custom AMI.
     """
