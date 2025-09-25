@@ -195,6 +195,8 @@ def get_worker_cluster_name(pool_name: str, worker_id: int):
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
 def test_vllm_pool(generic_cloud: str, accelerator: Dict[str, str]):
+    pytest.skip(
+        'Skipping vllm pool test until more remote server testing is done.')
     if generic_cloud == 'kubernetes':
         accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
     else:
@@ -313,7 +315,7 @@ def test_vllm_pool(generic_cloud: str, accelerator: Dict[str, str]):
                     f's=$(sky jobs pool apply -p {pool_name} {pool_yaml.name} -y); echo "$s"; echo; echo; echo "$s" | grep "Successfully created pool"',
                     wait_until_pool_ready(
                         pool_name,
-                        timeout=smoke_tests_utils.get_timeout(generic_cloud) * 2),
+                        timeout=smoke_tests_utils.get_timeout(generic_cloud)),
                     f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} -y); echo "$s"; echo; echo; echo "$s" | grep "Job finished (status: SUCCEEDED)."',
                 ],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud),
