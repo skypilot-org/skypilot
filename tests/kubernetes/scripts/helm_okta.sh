@@ -39,6 +39,7 @@ RELEASE_NAME=skypilot
 
 # NODEPORT and HOSTPORT are not the same. Endpoint requires HOSTPORT
 HOSTPORT=$(docker port skypilot-control-plane | grep $NODEPORT | sed 's/.*://;s/^[[:space:]]*//;s/[[:space:]]*$//')
+echo "Found HOSTPORT: $HOSTPORT"
 
 # Cleanup function to delete namespace and resources
 cleanup() {
