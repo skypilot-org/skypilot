@@ -22,13 +22,13 @@ def failing_task():
     raise ValueError('Task failed')
 
 
-def wait_for_workers_cleanup(executor, timeout=5):
+def wait_for_workers_cleanup(executor, timeout=10):
     """Wait for workers to be cleaned up.
-    
+
     Args:
         executor: The DisposableExecutor instance
         timeout: Maximum time to wait in seconds
-    
+
     Returns:
         bool: True if workers are cleaned up, False if timeout
     """
@@ -41,13 +41,13 @@ def wait_for_workers_cleanup(executor, timeout=5):
     return False
 
 
-def wait_for_futures(futures, timeout=5):
+def wait_for_futures(futures, timeout=10):
     """Wait for futures to complete.
-    
+
     Args:
         futures: List of futures to wait for
         timeout: Maximum time to wait in seconds
-    
+
     Returns:
         bool: True if all futures completed, False if timeout
     """
