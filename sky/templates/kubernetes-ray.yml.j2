@@ -901,6 +901,8 @@ available_node_types:
                 {{ conda_installation_commands }}
                 {{ ray_installation_commands }}
 
+                # set UV_SYSTEM_PYTHON to false in case the user provided docker image set it to true.
+                # unset PYTHONPATH in case the user provided docker image set it.
                 VIRTUAL_ENV=~/skypilot-runtime UV_SYSTEM_PYTHON=false env -u PYTHONPATH ~/.local/bin/uv pip install skypilot[kubernetes,remote]
                 # Wait for `patch` package to be installed before applying ray patches
                 until dpkg -l | grep -q "^ii  patch "; do
@@ -908,6 +910,8 @@ available_node_types:
                   echo "Waiting for patch package to be installed..."
                 done
                 # Apply Ray patches for progress bar fix
+                # set UV_SYSTEM_PYTHON to false in case the user provided docker image set it to true.
+                # unset PYTHONPATH in case the user provided docker image set it.
                 # ~/.sky/python_path is seeded by conda_installation_commands
                 VIRTUAL_ENV=~/skypilot-runtime UV_SYSTEM_PYTHON=false env -u PYTHONPATH ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
                   $(cat ~/.sky/python_path) -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
