@@ -194,9 +194,9 @@ def get_worker_cluster_name(pool_name: str, worker_id: int):
 
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
+@pytest.mark.skip(
+    'Skipping vllm pool test until more remote server testing is done.')
 def test_vllm_pool(generic_cloud: str, accelerator: Dict[str, str]):
-    pytest.skip(
-        'Skipping vllm pool test until more remote server testing is done.')
     if generic_cloud == 'kubernetes':
         accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
     else:
@@ -373,7 +373,7 @@ def test_setup_logs_in_pool_exits(generic_cloud: str):
 
 
 def test_update_workers(generic_cloud: str):
-    """Test that we can update the number of workers in a pool, both 
+    """Test that we can update the number of workers in a pool, both
     up and down.
     """
     pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
