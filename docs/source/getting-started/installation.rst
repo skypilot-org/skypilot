@@ -76,6 +76,8 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[ibm]"
           pip install "skypilot-nightly[scp]"
           pip install "skypilot-nightly[vsphere]"
+          # Seeweb is only supported for Python >= 3.10
+          pip install "skypilot[seeweb]"
           pip install "skypilot-nightly[primeintellect]"
 
           pip install "skypilot-nightly[all]"
@@ -112,6 +114,8 @@ Install SkyPilot using pip:
           pip install -e ".[ibm]"
           pip install -e ".[scp]"
           pip install -e ".[vsphere]"
+          # Seeweb is only supported for Python >= 3.10
+          pip install -e ".[seeweb]"
           pip install -e ".[primeintellect]"
 
           pip install -e ".[all]"
@@ -243,7 +247,6 @@ This will produce a summary like:
     vSphere: enabled
     Cloudflare (for R2 object store): enabled
     Kubernetes: enabled
-    Seeweb: enabled
 
 If any cloud's credentials or dependencies are missing, ``sky check`` will
 output hints on how to resolve them. You can also refer to the cloud setup
