@@ -1,5 +1,6 @@
 import tempfile
 import textwrap
+from typing import Dict
 
 import pytest
 from smoke_tests import smoke_tests_utils
@@ -193,7 +194,7 @@ def get_worker_cluster_name(pool_name: str, worker_id: int):
 
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
-def test_vllm_pool(generic_cloud: str):
+def test_vllm_pool(generic_cloud: str, accelerator: Dict[str, str]):
     if generic_cloud == 'kubernetes':
         accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
     else:
