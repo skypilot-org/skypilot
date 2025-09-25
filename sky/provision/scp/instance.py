@@ -129,7 +129,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     running_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
 
     if len(running_instances) != config.count:
-        raise RuntimeError(f'Expected {config.count} RUNNING instances, '
+        raise RuntimeError(f'Expected {config.count} running instances, '
                            f'but got {len(running_instances)} instances')
 
     head_instance_id = _get_head_instance_id(running_instances)
