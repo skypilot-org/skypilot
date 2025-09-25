@@ -115,9 +115,6 @@ class Volume:
         self.region = infra_info.region
         self.zone = infra_info.zone
 
-        # Validate the volume config
-        self._validate_config()
-
     def _adjust_config(self) -> None:
         """Adjust the volume config (e.g., parse size)."""
         if self.size is None:
@@ -132,8 +129,28 @@ class Volume:
         except ValueError as e:
             raise ValueError(f'Invalid size {self.size}: {e}') from e
 
-    def _validate_config(self) -> None:
-        """Validate the volume config."""
+    def validate(self, skip_cloud_compatibility: bool = False) -> None:
+        """Validates the volume."""
+        self.validate_name()
+        self.validate_size()
+        if not skip_cloud_compatibility:
+            self.validate_cloud_compatibility()
+        # Extra, type-specific validations
+        self._validate_config_extra()
+
+    def validate_name(self) -> None:
+        """Validates if the volume name is set."""
+        assert self.name is not None, 'Volume name must be set'
+
+    def validate_size(self) -> None:
+        """Validates that size is specified for new volumes."""
+        if not self.resource_name and not self.size:
+            raise ValueError('Size is required for new volumes. '
+                             'Please specify the size in the YAML file or '
+                             'use the --size flag.')
+
+    def validate_cloud_compatibility(self) -> None:
+        """Validates that the specified cloud is compatible with volume type."""
         cloud_obj_from_type = VOLUME_TYPE_TO_CLOUD.get(
             volume_lib.VolumeType(self.type))
         if self.cloud:
@@ -150,24 +167,15 @@ class Volume:
         self.region, self.zone = cloud_obj.validate_region_zone(
             self.region, self.zone)
 
-        # Name must be set by factory before validation.
-        assert self.name is not None
         valid, err_msg = cloud_obj.is_volume_name_valid(self.name)
         if not valid:
             raise ValueError(f'Invalid volume name: {err_msg}')
 
-        if not self.resource_name and not self.size:
-            raise ValueError('Size is required for new volumes. '
-                             'Please specify the size in the YAML file or '
-                             'use the --size flag.')
         if self.labels:
             for key, value in self.labels.items():
                 valid, err_msg = cloud_obj.is_label_valid(key, value)
                 if not valid:
                     raise ValueError(f'{err_msg}')
-
-        # Extra, type-specific validations
-        self._validate_config_extra()
 
     # Hook methods for subclasses
     def _validate_config_extra(self) -> None:
