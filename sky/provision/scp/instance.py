@@ -153,10 +153,6 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                                   created_instance_ids=created_instance_ids)
 
 
-def _suffix(name: str, n: int = 5):
-    return hashlib.sha1(name.encode()).hexdigest()[:n]
-
-
 def _head(cluster_name_on_cloud: str):
     return (f'{cluster_name_on_cloud[:8]}-'
             f'{_suffix(cluster_name_on_cloud)}-head')
@@ -165,6 +161,10 @@ def _head(cluster_name_on_cloud: str):
 def _worker(cluster_name_on_cloud: str):
     return (f'{cluster_name_on_cloud[:8]}-'
             f'{_suffix(cluster_name_on_cloud)}-worker')
+
+
+def _suffix(name: str, n: int = 5):
+    return hashlib.sha1(name.encode()).hexdigest()[:n]
 
 
 def _get_instance_id(instance_name, cluster_name_on_cloud):
