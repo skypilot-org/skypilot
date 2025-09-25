@@ -4186,6 +4186,13 @@ def volumes_apply(
 
     logger.debug(f'Volume config: {volume.to_yaml_config()}')
 
+    # TODO(kevin): remove the try block in v0.13.0
+    try:
+        volumes_sdk.validate(volume)
+    except exceptions.APINotSupportedError:
+        # Do best-effort client-side validation.
+        volume.validate(skip_cloud_compatibility=True)
+
     if not yes:
         click.confirm(f'Proceed to create volume {volume.name!r}?',
                       default=True,

@@ -478,6 +478,17 @@ class VolumeListBody(RequestBody):
     pass
 
 
+class VolumeValidateBody(RequestBody):
+    """The request body for the volume validate endpoint."""
+    name: Optional[str] = None
+    volume_type: Optional[str] = None
+    infra: Optional[str] = None
+    size: Optional[str] = None
+    labels: Optional[Dict[str, str]] = None
+    resource_name: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
+
+
 class EndpointsBody(RequestBody):
     """The request body for the endpoint."""
     cluster: str
