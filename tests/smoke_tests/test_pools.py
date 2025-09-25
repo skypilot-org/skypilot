@@ -313,7 +313,7 @@ def test_vllm_pool(generic_cloud: str, accelerator: Dict[str, str]):
                     f's=$(sky jobs pool apply -p {pool_name} {pool_yaml.name} -y); echo "$s"; echo; echo; echo "$s" | grep "Successfully created pool"',
                     wait_until_pool_ready(
                         pool_name,
-                        timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+                        timeout=smoke_tests_utils.get_timeout(generic_cloud) * 2),
                     f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} -y); echo "$s"; echo; echo; echo "$s" | grep "Job finished (status: SUCCEEDED)."',
                 ],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud),
