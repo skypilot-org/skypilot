@@ -2,7 +2,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ .Release.Name }}-grafana-authed
+  name: {{ include "skypilot.fullname" . }}-grafana-authed
   namespace: {{ .Release.Namespace }}
   annotations:
     {{- if or .Values.auth.oauth.enabled (and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled")) }}
@@ -18,7 +18,7 @@ metadata:
     # Basic authentication
     nginx.ingress.kubernetes.io/auth-type: basic
     nginx.ingress.kubernetes.io/auth-realm: "SkyPilot API Server"
-    nginx.ingress.kubernetes.io/auth-secret: {{ .Values.ingress.authSecret | default (printf "%s-basic-auth" .Release.Name) }}
+    nginx.ingress.kubernetes.io/auth-secret: {{ .Values.ingress.authSecret | default (printf "%s-basic-auth" (include "skypilot.fullname" .)) }}
     {{- end }}
     nginx.ingress.kubernetes.io/configuration-snippet: |
       proxy_set_header X-WEBAUTH-USER admin;
@@ -29,7 +29,7 @@ spec:
       paths:
       - backend:
           service:
-            name: {{ .Release.Name }}-grafana
+            name: {{ include "skypilot.fullname" . }}-grafana
             port:
               number: 80
         path: {{ .Values.grafana.ingress.path }}
