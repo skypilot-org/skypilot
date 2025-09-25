@@ -10,7 +10,6 @@ from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.utils import registry
 from sky.utils import volume as volume_utils
-from sky.volumes import volume as volume_lib
 from sky.volumes.server import core
 
 logger = sky_logging.init_logger(__name__)
@@ -53,6 +52,9 @@ async def volume_validate(
         _: fastapi.Request,
         volume_validate_body: payloads.VolumeValidateBody) -> None:
     """Validates a volume."""
+    # pylint: disable=import-outside-toplevel
+    from sky.volumes import volume as volume_lib
+
     try:
         volume_config = {
             'name': volume_validate_body.name,
