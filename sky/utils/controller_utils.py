@@ -1187,7 +1187,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
 
 # ======================= Resources Management Functions =======================
 
-# Monitoring process for service is 1GB. This is based on an old estimation but
+# Monitoring process for service is 512MB. This is based on an old estimation but
 # we keep it here for now.
 # TODO(tian): Remeasure this.
 SERVE_MONITORING_MEMORY_MB = 512
@@ -1199,11 +1199,11 @@ SERVE_LAUNCH_RATIO = 2.0
 # takes this lock must conclude by calling maybe_schedule_next_jobs.
 _RESOURCES_LOCK = '~/.sky/locks/controller_resources.lock'
 
-# keep 1GB reserved after the controllers
+# keep 2GB reserved after the controllers
 MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB = 2048
 
 # NOTE: In the current implementation, we only consider the memory
-# The ratio of resoruces consumption for managed jobs and pool/serve.
+# The ratio of resources consumption for managed jobs and pool/serve.
 # This measures pool_resources / jobs_resources. If 2 GB memory is allocated to
 # jobs, then 2 * POOL_JOBS_RESOURCES_RATIO GB memory is allocated to pool/serve.
 POOL_JOBS_RESOURCES_RATIO = 1
