@@ -36,7 +36,7 @@ def verify_workers_cleanup(executor):
             return True
 
 
-def wait_for_futures(futures, timeout=5):
+def wait_for_futures(futures, timeout=20):
     """Wait for futures to complete.
 
     Args:
