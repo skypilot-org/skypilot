@@ -805,15 +805,6 @@ def write_cluster_config(
                 f'is already set to {ssh_proxy_command!r}. Please remove '
                 'ssh_proxy_command or set use_ssm to false.')
 
-        if not use_ssm and use_internal_ips and ssh_proxy_command is None:
-            logger.warning(
-                f'{colorama.Fore.YELLOW}'
-                'use_internal_ips is set to true, '
-                'but ssh_proxy_command is not set. Defaulting to '
-                'using SSM. Specify ssh_proxy_command to use a different '
-                'https://docs.skypilot.co/en/latest/reference/config.html#'
-                f'aws.ssh_proxy_command.{colorama.Style.RESET_ALL}')
-            use_ssm = True
         if use_ssm:
             aws_profile = os.environ.get('AWS_PROFILE', None)
             profile_str = f'--profile {aws_profile}' if aws_profile else ''
