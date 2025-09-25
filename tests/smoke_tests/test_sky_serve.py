@@ -100,7 +100,7 @@ _TEARDOWN_SERVICE = _SHOW_SERVE_STATUS + (
     '    status_output=$(sky serve status {name} 2>&1); '
     '    echo "Checking service termination status..."; '
     '    echo "$status_output"; '
-    '    echo "$status_output" | grep -q "Service \'{name}\' not found" && echo "Service terminated successfully" && exit 0; '
+    r'    echo "$status_output" | grep -q "Service \'{name}\' not found\|No live services" && echo "Service terminated successfully" && exit 0; '
     '    current_time=$(date +%s); '
     '    elapsed=$((current_time - start_time)); '
     '    if [ "$elapsed" -ge "$timeout" ]; then '
