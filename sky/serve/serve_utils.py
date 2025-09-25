@@ -815,8 +815,10 @@ def load_version_string(payload: str) -> str:
 def get_ready_replicas(
         service_name: str) -> List['replica_managers.ReplicaInfo']:
     logger.info(f'Get number of replicas for pool {service_name!r}')
+    replicas = serve_state.get_replica_infos(service_name)
+    logger.debug(f'Considering replicas: {replicas}')
     return [
-        info for info in serve_state.get_replica_infos(service_name)
+        info for info in replicas
         if info.status == serve_state.ReplicaStatus.READY
     ]
 
