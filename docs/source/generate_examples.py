@@ -269,4 +269,4 @@ def _work(example_dir: pathlib.Path):
 
 
 if __name__ == '__main__':
-    generate_examples() 
+    generate_examples()
