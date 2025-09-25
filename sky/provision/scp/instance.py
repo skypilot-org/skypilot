@@ -17,7 +17,6 @@ from sky.utils import status_lib
 logger = logging.getLogger(__name__)
 
 
-
 def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     del cluster_name  # unused
