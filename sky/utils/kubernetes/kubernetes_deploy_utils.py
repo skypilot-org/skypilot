@@ -27,7 +27,7 @@ logger = sky_logging.init_logger(__name__)
 # Default path for Kubernetes configuration file
 DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
 DEFAULT_LOCAL_CLUSTER_NAME = 'skypilot'
-LOCAL_CLUSTER_PORT_RANGE = 101
+LOCAL_CLUSTER_PORT_RANGE = 100
 LOCAL_CLUSTER_INTERNAL_PORT_START = 30000
 
 
@@ -263,7 +263,7 @@ def generate_kind_config(port_start: int,
     """Generate a kind cluster config with ports mapped from host to container
 
     Port range will be [port_start, port_start + LOCAL_CLUSTER_PORT_RANGE)
-    Internally, this will map to ports 30000 - 30100
+    Internally, this will map to ports 30000 - 30099.
 
     Args:
         path: Path to generate the config file at
@@ -274,6 +274,16 @@ def generate_kind_config(port_start: int,
     Returns:
         The kind cluster config
     """
+    # Why the weird numbers (ie: 30000 - 30099)? The range of ports from
+    # 30000 to 30099 gives us exactly 100 ports allocated to the container.
+    # Each created local up cluster has a 1:1 mapping between ports in the
+    # container and actual ports on the machine. Therefore, it is very
+    # important that these ports do not overlap. However, as local up is
+    # used primarily for development purposes, it makes no sense to have a
+    # state tracking mechanism. The solution, thus is to pick a random number
+    # between 300 and 399. That will be the three leading digits of our port
+    # range. Say, we pick 302, then the port range will be 30200 - 30299,
+    # allowing an easy way to allocate IPs with low likelihoods of collision.
     internal_start = LOCAL_CLUSTER_INTERNAL_PORT_START
     internal_end = internal_start + LOCAL_CLUSTER_PORT_RANGE - 1
 
