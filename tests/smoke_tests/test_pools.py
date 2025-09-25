@@ -192,14 +192,19 @@ def get_worker_cluster_name(pool_name: str, worker_id: int):
 
 
 @pytest.mark.resource_heavy
+@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
 def test_vllm_pool(generic_cloud: str):
+    if generic_cloud == 'kubernetes':
+        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
+    else:
+        accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
     pool_config = textwrap.dedent(f"""
     envs:
         MODEL_NAME: NousResearch/Meta-Llama-3-8B-Instruct
 
     resources:
-        accelerators: {{L4}}
+        accelerators: {{{accelerator}}}
         infra: {generic_cloud}
 
     setup: |
@@ -240,12 +245,6 @@ def test_vllm_pool(generic_cloud: str):
     name: t-test-vllm-pool
 
     resources:
-        cpus: 4
-        accelerators:
-            L4: 1
-        any_of:
-            - use_spot: true
-            - use_spot: false
         infra: {generic_cloud}
 
     envs:
