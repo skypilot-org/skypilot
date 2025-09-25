@@ -168,7 +168,8 @@ def map_all_volumes_usedby(
 
 
 @_route_to_cloud_impl
-def run_instances(provider_name: str, region: str, cluster_name_on_cloud: str,
+def run_instances(provider_name: str, region: str, cluster_name: str,
+                  cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Start instances with bootstrapped configuration."""
     raise NotImplementedError

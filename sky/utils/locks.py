@@ -11,6 +11,7 @@ import time
 from typing import Any, Optional
 
 import filelock
+import psycopg2
 import sqlalchemy
 
 from sky import global_user_state
@@ -197,6 +198,7 @@ class PostgresLock(DistributedLock):
         if engine.dialect.name != db_utils.SQLAlchemyDialect.POSTGRESQL.value:
             raise ValueError('PostgresLock requires PostgreSQL database. '
                              f'Current dialect: {engine.dialect.name}')
+        # Borrow a dedicated connection from the pool.
         return engine.raw_connection()
 
     def acquire(self, blocking: bool = True) -> AcquireReturnProxy:
@@ -233,9 +235,7 @@ class PostgresLock(DistributedLock):
                 time.sleep(self.poll_interval)
 
         except Exception:
-            if self._connection:
-                self._connection.close()
-                self._connection = None
+            self._close_connection()
             raise
 
     def release(self) -> None:
@@ -248,27 +248,58 @@ class PostgresLock(DistributedLock):
             cursor.execute('SELECT pg_advisory_unlock(%s)', (self._lock_key,))
             self._connection.commit()
             self._acquired = False
+        except psycopg2.OperationalError as e:
+            # Lost connection to the database, likely the lock is force unlocked
+            # by other routines.
+            logger.debug(f'Failed to release postgres lock {self.lock_id}: {e}')
         finally:
-            if self._connection:
-                self._connection.close()
-                self._connection = None
+            self._close_connection()
 
     def force_unlock(self) -> None:
         """Force unlock the postgres advisory lock."""
         try:
-            if not self._connection:
+            # The lock is held by current routine, gracefully unlock it
+            if self._acquired:
+                self.release()
+                return
+
+            # The lock is held by another routine, force unlock it.
+            if self._connection is None:
                 self._connection = self._get_connection()
             cursor = self._connection.cursor()
             cursor.execute('SELECT pg_advisory_unlock(%s)', (self._lock_key,))
-            self._connection.commit()
+            result = cursor.fetchone()[0]
+            if result:
+                # The lock is held by current routine and unlock suceed
+                self._connection.commit()
+                self._acquired = False
+                return
+            cursor.execute(
+                ('SELECT pid FROM pg_locks WHERE locktype = \'advisory\' '
+                 'AND ((classid::bigint << 32) | objid::bigint) = %s'),
+                (self._lock_key,))
+            row = cursor.fetchone()
+            if row:
+                # The lock is still held by another routine, false unlock it
+                # by killing the PG connection of that routine.
+                cursor.execute('SELECT pg_terminate_backend(%s)', (row[0],))
+                self._connection.commit()
+                return
         except Exception as e:
             raise RuntimeError(
                 f'Failed to force unlock postgres lock {self.lock_id}: {e}'
             ) from e
         finally:
-            if self._connection:
+            self._close_connection()
+
+    def _close_connection(self) -> None:
+        """Close the postgres connection."""
+        if self._connection:
+            try:
                 self._connection.close()
-                self._connection = None
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Failed to close postgres connection: {e}')
+            self._connection = None
 
     def is_locked(self) -> bool:
         """Check if the postgres advisory lock is acquired."""
