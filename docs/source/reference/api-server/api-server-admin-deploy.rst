@@ -636,6 +636,14 @@ To modify your SkyPilot config, use the SkyPilot dashboard: ``http://<api-server
 
 .. dropdown:: Set the config with helm deployment during the first deployment
 
+    .. warning::
+
+        If remote database is configured (by setting either
+        :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>`
+        or :ref:`apiService.dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>`),
+        no Skypilot configuration cannot be specified in the helm chart.
+        Use the dashboard once the API server is deployed to set the config.
+
     The Helm chart supports setting the global SkyPilot config YAML file on the API server when the API server is deployed for the first time. The config file is mounted as ``~/.sky/config.yaml`` in the API server container.
 
     To set the config file, pass ``--set-file apiService.config=path/to/your/config.yaml`` to the ``helm`` command:
