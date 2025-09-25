@@ -181,16 +181,8 @@ class TestVolume:
         volume.validate_cloud_compatibility()  # Should not raise
         assert volume.cloud == 'kubernetes'
 
-    def test_volume_normalize_config_method(self, monkeypatch):
+    def test_volume_normalize_config_method(self):
         """Test Volume._normalize_config method."""
-        # Mock infra_utils.InfraInfo.from_str
-        mock_infra_info = MagicMock()
-        mock_infra_info.cloud = 'kubernetes'
-        mock_infra_info.region = None
-        mock_infra_info.zone = None
-        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
-                            lambda x: mock_infra_info)
-
         volume = volume_lib.Volume(name='test',
                                    type='k8s-pvc',
                                    size='100Gi',
@@ -281,14 +273,6 @@ class TestVolume:
 
     def test_volume_schema_validation_valid_configs(self, monkeypatch):
         """Test volume schema validation with valid configurations."""
-        # Mock infra_utils.InfraInfo.from_str
-        mock_infra_info = MagicMock()
-        mock_infra_info.cloud = 'kubernetes'
-        mock_infra_info.region = None
-        mock_infra_info.zone = None
-        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
-                            lambda x: mock_infra_info)
-
         valid_configs = [
             {
                 'name': 'test-volume',
@@ -324,14 +308,6 @@ class TestVolume:
         """Test volume schema validation with missing required fields."""
         from sky import exceptions
 
-        # Mock infra_utils.InfraInfo.from_str
-        mock_infra_info = MagicMock()
-        mock_infra_info.cloud = 'kubernetes'
-        mock_infra_info.region = None
-        mock_infra_info.zone = None
-        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
-                            lambda x: mock_infra_info)
-
         invalid_configs = [
             {
                 'type': 'k8s-pvc',
@@ -360,14 +336,6 @@ class TestVolume:
 
     def test_volume_schema_validation_invalid_type(self, monkeypatch):
         """Test volume schema validation with invalid type."""
-        # Mock infra_utils.InfraInfo.from_str
-        mock_infra_info = MagicMock()
-        mock_infra_info.cloud = 'kubernetes'
-        mock_infra_info.region = None
-        mock_infra_info.zone = None
-        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
-                            lambda x: mock_infra_info)
-
         invalid_configs = [
             {
                 'name': 'test-volume',
@@ -392,14 +360,6 @@ class TestVolume:
         """Test volume schema validation with invalid size pattern."""
         from sky import exceptions
 
-        # Mock infra_utils.InfraInfo.from_str
-        mock_infra_info = MagicMock()
-        mock_infra_info.cloud = 'kubernetes'
-        mock_infra_info.region = None
-        mock_infra_info.zone = None
-        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
-                            lambda x: mock_infra_info)
-
         invalid_configs = [
             {
                 'name': 'test-volume',
@@ -419,14 +379,6 @@ class TestVolume:
     def test_volume_schema_validation_invalid_config_object(self, monkeypatch):
         """Test volume schema validation with invalid config object."""
         from sky import exceptions
-
-        # Mock infra_utils.InfraInfo.from_str
-        mock_infra_info = MagicMock()
-        mock_infra_info.cloud = 'kubernetes'
-        mock_infra_info.region = None
-        mock_infra_info.zone = None
-        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
-                            lambda x: mock_infra_info)
 
         invalid_configs = [
             {
@@ -457,14 +409,6 @@ class TestVolume:
         from sky.utils import common_utils
         from sky.utils import schemas
 
-        # Mock infra_utils.InfraInfo.from_str
-        mock_infra_info = MagicMock()
-        mock_infra_info.cloud = 'kubernetes'
-        mock_infra_info.region = None
-        mock_infra_info.zone = None
-        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
-                            lambda x: mock_infra_info)
-
         config_with_extra = {
             'name': 'test-volume',
             'type': 'k8s-pvc',
@@ -481,14 +425,6 @@ class TestVolume:
     def test_volume_schema_validation_case_insensitive_enums(self, monkeypatch):
         """Test volume schema validation with case insensitive enums."""
         from sky import exceptions
-
-        # Mock infra_utils.InfraInfo.from_str
-        mock_infra_info = MagicMock()
-        mock_infra_info.cloud = 'kubernetes'
-        mock_infra_info.region = None
-        mock_infra_info.zone = None
-        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
-                            lambda x: mock_infra_info)
 
         invalid_configs = [
             {
@@ -520,14 +456,6 @@ class TestVolume:
 
     def test_volume_schema_validation_access_modes(self, monkeypatch):
         """Test volume schema validation with different access modes."""
-        # Mock infra_utils.InfraInfo.from_str
-        mock_infra_info = MagicMock()
-        mock_infra_info.cloud = 'kubernetes'
-        mock_infra_info.region = None
-        mock_infra_info.zone = None
-        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
-                            lambda x: mock_infra_info)
-
         valid_access_modes = [
             'ReadWriteOnce', 'ReadWriteOncePod', 'ReadWriteMany', 'ReadOnlyMany'
         ]
@@ -546,14 +474,6 @@ class TestVolume:
 
     def test_validate_with_valid_labels(self, monkeypatch):
         """Test Volume.validate with valid labels."""
-        # Mock infra_utils.InfraInfo.from_str
-        mock_infra_info = MagicMock()
-        mock_infra_info.cloud = 'kubernetes'
-        mock_infra_info.region = None
-        mock_infra_info.zone = None
-        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
-                            lambda x: mock_infra_info)
-
         volume_lib.Volume(name='test',
                           type='k8s-pvc',
                           infra=None,
@@ -580,14 +500,6 @@ class TestVolume:
 
     def test_validate_with_invalid_label_key(self, monkeypatch):
         """Test Volume.validate with invalid label key."""
-        # Mock infra_utils.InfraInfo.from_str
-        mock_infra_info = MagicMock()
-        mock_infra_info.cloud = 'kubernetes'
-        mock_infra_info.region = None
-        mock_infra_info.zone = None
-        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
-                            lambda x: mock_infra_info)
-
         volume = volume_lib.Volume(
             name='test',
             type='k8s-pvc',
@@ -603,14 +515,6 @@ class TestVolume:
 
     def test_validate_with_invalid_label_value(self, monkeypatch):
         """Test Volume.validate with invalid label value."""
-        # Mock infra_utils.InfraInfo.from_str
-        mock_infra_info = MagicMock()
-        mock_infra_info.cloud = 'kubernetes'
-        mock_infra_info.region = None
-        mock_infra_info.zone = None
-        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
-                            lambda x: mock_infra_info)
-
         volume = volume_lib.Volume(
             name='test',
             type='k8s-pvc',
@@ -633,16 +537,8 @@ class TestVolume:
                                    labels={})
         volume.validate()
 
-    def test_validate_with_none_labels(self, monkeypatch):
+    def test_validate_with_none_labels(self):
         """Test Volume.validate with None labels."""
-        # Mock infra_utils.InfraInfo.from_str
-        mock_infra_info = MagicMock()
-        mock_infra_info.cloud = 'kubernetes'
-        mock_infra_info.region = None
-        mock_infra_info.zone = None
-        monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
-                            lambda x: mock_infra_info)
-
         volume = volume_lib.Volume(name='test',
                                    type='k8s-pvc',
                                    infra='k8s',
