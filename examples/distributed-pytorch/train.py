@@ -1,5 +1,12 @@
-import sky
+"""Distributed training example with PyTorch.
+
+Usage:
+    python train.py
+"""
+
 import subprocess
+
+import sky
 
 task = sky.Task(
     name='minGPT-ddp',
@@ -11,10 +18,12 @@ task = sky.Task(
     setup=[
         'git clone --depth 1 https://github.com/pytorch/examples || true',
         'cd examples',
-        'git filter-branch --prune-empty --subdirectory-filter distributed/minGPT-ddp',
+        ('git filter-branch --prune-empty '
+         '--subdirectory-filter distributed/minGPT-ddp'),
         'uv venv --python 3.10',
         'source .venv/bin/activate',
-        'uv pip install -r requirements.txt "numpy<2" "torch==2.7.1+cu118" --extra-index-url https://download.pytorch.org/whl/cu118',
+        ('uv pip install -r requirements.txt "numpy<2" "torch==2.7.1+cu118" '
+         '--extra-index-url https://download.pytorch.org/whl/cu118'),
     ],
     run=[
         'cd examples',
@@ -29,12 +38,12 @@ task = sky.Task(
         'exit 1',
         'fi',
         ('torchrun '
-        '--nnodes=$SKYPILOT_NUM_NODES '
-        '--nproc_per_node=$SKYPILOT_NUM_GPUS_PER_NODE '
-        '--master_addr=$MASTER_ADDR '
-        '--master_port=8008 '
-        '--node_rank=${SKYPILOT_NODE_RANK} '
-        'main.py'),
+         '--nnodes=$SKYPILOT_NUM_NODES '
+         '--nproc_per_node=$SKYPILOT_NUM_GPUS_PER_NODE '
+         '--master_addr=$MASTER_ADDR '
+         '--master_port=8008 '
+         '--node_rank=${SKYPILOT_NODE_RANK} '
+         'main.py'),
     ],
 )
 
@@ -43,9 +52,13 @@ req = sky.launch(task, cluster_name=cluster_name)
 job_id, _ = sky.stream_and_get(req)
 sky.tail_logs(cluster_name, job_id, follow=True)
 
-print(f'Training completed. Downloading checkpoint...')
-subprocess.run(f'scp {cluster_name}:~/sky_workdir/examples/mingpt/gpt_snapshot.pt gpt_snapshot.pt', shell=True)
-print(f'Checkpoint downloaded.')
+print('Training completed. Downloading checkpoint...')
+subprocess.run(
+    (f'scp {cluster_name}:~/sky_workdir/examples/mingpt/gpt_snapshot.pt '
+     'gpt_snapshot.pt'),
+    shell=True,
+    check=True)
+print('Checkpoint downloaded.')
 
 print(f'Tearing down cluster {cluster_name}...')
 req = sky.down(cluster_name)
