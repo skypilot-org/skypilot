@@ -182,9 +182,24 @@ export function Clusters() {
     return false;
   };
 
+  // Initialize historyDays from URL parameter immediately
+  const getInitialHistoryDays = () => {
+    if (typeof window !== 'undefined' && router.isReady) {
+      const daysParam = router.query.historyDays;
+      if (
+        daysParam &&
+        typeof daysParam === 'string' &&
+        ['1', '5', '10', '30'].includes(daysParam)
+      ) {
+        return parseInt(daysParam);
+      }
+    }
+    return 1; // Default to 1 day
+  };
+
   const [showHistory, setShowHistory] = useState(getInitialShowHistory);
   const [shouldAnimate, setShouldAnimate] = useState(true); // Track if toggle should animate
-  const [historyDays, setHistoryDays] = useState(30); // Default to 30 days
+  const [historyDays, setHistoryDays] = useState(getInitialHistoryDays);
   const isMobile = useMobile();
 
   const [filters, setFilters] = useState([]);
@@ -212,9 +227,22 @@ export function Clusters() {
         // Re-enable animation after a short delay
         setTimeout(() => setShouldAnimate(true), 50);
       }
+
+      // Sync historyDays state with URL if it has changed
+      const daysParam = router.query.historyDays;
+      if (
+        daysParam &&
+        typeof daysParam === 'string' &&
+        ['1', '5', '10', '30'].includes(daysParam)
+      ) {
+        const expectedDays = parseInt(daysParam);
+        if (historyDays !== expectedDays) {
+          setHistoryDays(expectedDays);
+        }
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router.isReady, router.query.history]);
+  }, [router.isReady, router.query.history, router.query.historyDays]);
 
   useEffect(() => {
     const fetchFilterData = async () => {
@@ -319,6 +347,22 @@ export function Clusters() {
     query.history = showHistoryValue.toString();
 
     // Use replace to avoid adding to browser history for show history changes
+    router.replace(
+      {
+        pathname: router.pathname,
+        query,
+      },
+      undefined,
+      { shallow: true }
+    );
+  };
+
+  // Helper function to update history days in URL
+  const updateHistoryDaysURL = (historyDaysValue) => {
+    const query = { ...router.query };
+    query.historyDays = historyDaysValue.toString();
+
+    // Use replace to avoid adding to browser history for history days changes
     router.replace(
       {
         pathname: router.pathname,
@@ -437,12 +481,17 @@ export function Clusters() {
                   }`}
                 />
               </div>
-              <span className="ml-2 text-sm text-gray-700">
-                Show history
-              </span>
+              <span className="ml-2 text-sm text-gray-700">Show history</span>
             </label>
             {showHistory && (
-              <Select value={historyDays.toString()} onValueChange={(value) => setHistoryDays(parseInt(value))}>
+              <Select
+                value={historyDays.toString()}
+                onValueChange={(value) => {
+                  const newDays = parseInt(value);
+                  setHistoryDays(newDays);
+                  updateHistoryDaysURL(newDays);
+                }}
+              >
                 <SelectTrigger className="w-24 h-8 text-xs">
                   <SelectValue />
                 </SelectTrigger>
@@ -570,7 +619,10 @@ export function ClusterTable({
       const activeClusters = await dashboardCache.get(getClusters);
 
       if (showHistory) {
-        const historyClusters = await dashboardCache.get(getClusterHistory, [null, historyDays]);
+        const historyClusters = await dashboardCache.get(getClusterHistory, [
+          null,
+          historyDays,
+        ]);
         // Mark clusters as active or historical for UI distinction
         const markedActiveClusters = activeClusters.map((cluster) => ({
           ...cluster,
