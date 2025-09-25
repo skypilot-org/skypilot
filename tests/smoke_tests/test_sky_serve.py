@@ -923,6 +923,9 @@ def test_skyserve_update_autoscale(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+# NOTE(dev): This depends on controller_utils.py::_get_request_parallelism to
+# limit the number of concurrent launches. This is to avoid any resource
+# management changes to break this test.
 @pytest.mark.no_fluidstack  # Spot instances are not supported by Fluidstack
 @pytest.mark.serve
 @pytest.mark.no_kubernetes  # Spot instances are not supported in Kubernetes

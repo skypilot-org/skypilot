@@ -1219,7 +1219,7 @@ JOB_WORKER_MEMORY_MB = 400
 JOBS_PER_WORKER = 200
 
 
-def get_total_usable_memory_mb(consolidation_mode: bool) -> float:
+def _get_total_usable_memory_mb(consolidation_mode: bool) -> float:
     total_memory_mb = common_utils.get_mem_size_gb() * 1024
     if consolidation_mode:
         config = server_config.compute_server_config(deploy=True, quiet=True)
@@ -1235,15 +1235,16 @@ def get_total_usable_memory_mb(consolidation_mode: bool) -> float:
     return total_memory_mb - MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB
 
 
-def get_number_of_jobs_controllers() -> int:
-    """Returns the number of jobs controllers that should be running.
+@annotations.lru_cache(scope='request')
+def _get_parallelism(pool: bool, raw_resource_per_unit: float) -> int:
+    """Returns the number of jobs controllers / services that should be running.
 
-    This is the number of controllers that should be running to maximize
-    resource utilization.
+    This is the number of controllers / services that should be running
+    to maximize resource utilization.
 
     In consolidation mode, we use the existing API server so our resource
-    requirements are just for the job controllers. We try taking up as much
-    much memory as possible left over from the API server.
+    requirements are just for the job controllers / services. We try taking
+    up as much memory as possible left over from the API server.
 
     In non-consolidation mode, we have to take into account the memory of the
     API server workers. We limit to only 8 launches per worker, so our logic is
@@ -1251,21 +1252,33 @@ def get_number_of_jobs_controllers() -> int:
     leave some leftover room for ssh codegen and ray status overhead.
     """
     consolidation_mode = skypilot_config.get_nested(
-        ('jobs', 'controller', 'consolidation_mode'), default_value=False)
+        ('jobs' if pool else 'serve', 'controller', 'consolidation_mode'),
+        default_value=False)
 
-    # Measure the resources consumption for both managed jobs
-    # and pool/serve in a static ratio.
-    job_and_pool_resources = JOB_WORKER_MEMORY_MB * (1. +
-                                                     POOL_JOBS_RESOURCES_RATIO)
-    total_usable_memory_mb = get_total_usable_memory_mb(consolidation_mode)
-    resources_per_worker = job_and_pool_resources
-    # Local API Server on jobs controller.
+    # If running pool on jobs controller, we need to account for the resources
+    # consumed by the jobs.
+    ratio = (1. + POOL_JOBS_RESOURCES_RATIO) if pool else 1.
+    resource_per_unit_no_worker = raw_resource_per_unit * ratio
+
+    total_memory_mb = _get_total_usable_memory_mb(consolidation_mode)
+
+    # In consolidation mode, we assume the API server is running in deployment
+    # mode, hence resource management (i.e. how many requests are allowed) is
+    # done by the API server.
+    resource_per_unit_worker = 0.
+    # Otherwise, it runs a local API server on the jobs/serve controller.
+    # We need to do the resource management ourselves.
     if not consolidation_mode:
-        launches_per_worker = LAUNCHES_PER_WORKER * (1. +
-                                                     POOL_JOBS_RESOURCES_RATIO)
-        resources_per_worker += (launches_per_worker *
-                                 server_config.LONG_WORKER_MEM_GB) * 1024
-    return max(1, int(total_usable_memory_mb // resources_per_worker))
+        resource_per_unit_worker = (LAUNCHES_PER_WORKER * JOB_WORKER_MEMORY_MB *
+                                    ratio)
+
+    resource_per_unit = (resource_per_unit_no_worker + resource_per_unit_worker)
+    return max(int(total_memory_mb / resource_per_unit), 1)
+
+
+def get_number_of_jobs_controllers() -> int:
+    return _get_parallelism(pool=True,
+                            raw_resource_per_unit=JOB_WORKER_MEMORY_MB)
 
 
 @annotations.lru_cache(scope='global', maxsize=1)
@@ -1275,34 +1288,39 @@ def get_resources_lock_path() -> str:
     return path
 
 
+def _get_number_of_services(pool: bool) -> int:
+    return _get_parallelism(pool=pool,
+                            raw_resource_per_unit=SERVE_MONITORING_MEMORY_MB)
+
+
 @annotations.lru_cache(scope='request')
-def _get_proc_parallelism(pool: bool) -> int:
-    consolidation_mode = skypilot_config.get_nested(
-        ('jobs' if pool else 'serve', 'controller', 'consolidation_mode'),
-        default_value=False)
-    total_memory_mb = get_total_usable_memory_mb(consolidation_mode)
-    return max(int(total_memory_mb / SERVE_MONITORING_MEMORY_MB), 1)
+def _get_request_parallelism(pool: bool) -> int:
+    # tests/smoke_tests/test_sky_serve.py::test_skyserve_new_autoscaler_update
+    # assumes 4 concurrent launches. We force this patch here.
+    if env_options.Options.RUNNING_IN_BUILDKITE.get():
+        return 4
+    # Limitation per service x number of services
+    return (LAUNCHES_PER_WORKER * POOL_JOBS_RESOURCES_RATIO *
+            _get_number_of_services(pool))
 
 
-def can_provision(service_name: str) -> bool:
+def can_provision(pool: bool) -> bool:
     # TODO(tian): probe API server to see if there is any pending provision
     # requests.
-    return can_terminate(service_name)
+    return can_terminate(pool)
 
 
 def can_start_new_process(pool: bool) -> bool:
-    return serve_state.get_num_services() < _get_proc_parallelism(pool)
+    return serve_state.get_num_services() < _get_number_of_services(pool)
 
 
 # We limit the number of terminating replicas to the number of CPUs. This is
 # just a temporary solution to avoid overwhelming the controller. After one job
 # controller PR, we should use API server to handle resources management.
-def can_terminate(service_name: str) -> bool:
+def can_terminate(pool: bool) -> bool:
     # TODO(tian): probe API server to see if there is any pending terminate
     # requests.
     num_terminating = (
-        serve_state.total_number_provisioning_replicas(service_name) *
-        SERVE_LAUNCH_RATIO +
-        # Each terminate process will take roughly same resources as job launch.
-        serve_state.total_number_terminating_replicas(service_name))
-    return num_terminating < LAUNCHES_PER_WORKER * POOL_JOBS_RESOURCES_RATIO
+        serve_state.total_number_provisioning_replicas() +
+        serve_state.total_number_terminating_replicas() / SERVE_LAUNCH_RATIO)
+    return num_terminating < _get_request_parallelism(pool)

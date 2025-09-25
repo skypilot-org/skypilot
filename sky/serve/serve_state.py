@@ -656,13 +656,12 @@ def get_replica_infos(
 
 
 @init_db
-def total_number_provisioning_replicas(service_name: str) -> int:
+def total_number_provisioning_replicas() -> int:
     """Returns the total number of provisioning replicas."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.execute(
-            sqlalchemy.select(replicas_table.c.replica_info).where(
-                replicas_table.c.service_name == service_name)).fetchall()
+        rows = session.execute(sqlalchemy.select(
+            replicas_table.c.replica_info)).fetchall()
     provisioning_count = 0
     for row in rows:
         replica_info: 'replica_managers.ReplicaInfo' = pickle.loads(row[0])
@@ -672,13 +671,12 @@ def total_number_provisioning_replicas(service_name: str) -> int:
 
 
 @init_db
-def total_number_terminating_replicas(service_name: str) -> int:
+def total_number_terminating_replicas() -> int:
     """Returns the total number of terminating replicas."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.execute(
-            sqlalchemy.select(replicas_table.c.replica_info).where(
-                replicas_table.c.service_name == service_name)).fetchall()
+        rows = session.execute(sqlalchemy.select(
+            replicas_table.c.replica_info)).fetchall()
     terminating_count = 0
     for row in rows:
         replica_info: 'replica_managers.ReplicaInfo' = pickle.loads(row[0])

@@ -1092,7 +1092,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 error_in_sky_launch = False
                 if info.status == serve_state.ReplicaStatus.PENDING:
                     # sky.launch not started yet
-                    if controller_utils.can_provision(self._service_name):
+                    if controller_utils.can_provision(self._is_pool):
                         t.start()
                         info.status_property.sky_launch_status = (
                             common_utils.ProcessStatus.RUNNING)
@@ -1154,7 +1154,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             if (info.status_property.sky_down_status ==
                     common_utils.ProcessStatus.SCHEDULED):
                 # sky.down not started yet
-                if controller_utils.can_terminate(self._service_name):
+                if controller_utils.can_terminate(self._is_pool):
                     t.start()
                     info.status_property.sky_down_status = (
                         common_utils.ProcessStatus.RUNNING)

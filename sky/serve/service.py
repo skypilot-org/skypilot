@@ -116,7 +116,7 @@ def cleanup_storage(task_yaml: str) -> bool:
 # NOTE(dev): We don't need to acquire the `with_lock` in replica manager here
 # because we killed all the processes (controller & replica manager) before
 # calling this function.
-def _cleanup(service_name: str) -> bool:
+def _cleanup(service_name: str, pool: bool) -> bool:
     """Clean up all service related resources, i.e. replicas and storage."""
     # Cleanup the HA recovery script first as it is possible that some error
     # was raised when we construct the task object (e.g.,
@@ -165,7 +165,7 @@ def _cleanup(service_name: str) -> bool:
                 continue
             if (info.status_property.sky_down_status ==
                     replica_managers.common_utils.ProcessStatus.SCHEDULED):
-                if controller_utils.can_terminate(service_name):
+                if controller_utils.can_terminate(pool):
                     try:
                         t.start()
                     except Exception as e:  # pylint: disable=broad-except
@@ -385,7 +385,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
         for process in process_to_kill:
             process.join()
 
-        failed = _cleanup(service_name)
+        failed = _cleanup(service_name, service_spec.pool)
         if failed:
             serve_state.set_service_status_and_active_versions(
                 service_name, serve_state.ServiceStatus.FAILED_CLEANUP)
