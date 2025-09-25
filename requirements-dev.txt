@@ -62,7 +62,7 @@ webdriver-manager==4.0.2
 # 3. 1.63.0 is the oldest version of grpc that supports protobuf >= 5.x.y.
 # TODO(kevin): Have this value be maintained by the CI pipeline,
 # to make sure it's always up to date.
-grpcio-tools==1.63.0
-grpcio==1.63.0
+grpcio-tools>=1.63.0
+# grpcio==1.63.0
 # The oldest version of protobuf that grpcio 1.63.0 supports.
-protobuf==5.26.1
+# protobuf==5.26.1
