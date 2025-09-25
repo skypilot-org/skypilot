@@ -594,8 +594,8 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && sky volumes apply -y -n {cluster_name}-1 --infra {generic_cloud} --type k8s-pvc --size 1Gi',
             f'{self.ACTIVATE_CURRENT} && sky volumes ls | grep "{cluster_name}-0"',
             f'{self.ACTIVATE_CURRENT} && sky volumes ls | grep "{cluster_name}-1"',
-            f'{self.ACTIVATE_CURRENT} && sky volumes down {cluster_name}-0 -y',
-            f'{self.ACTIVATE_CURRENT} && sky volumes down {cluster_name}-1 -y',
+            f'{self.ACTIVATE_CURRENT} && sky volumes delete {cluster_name}-0 -y',
+            f'{self.ACTIVATE_CURRENT} && sky volumes delete {cluster_name}-1 -y',
         ]
 
         teardown = f'{self.ACTIVATE_BASE} && sky down {cluster_name} -y && sky serve down {cluster_name}* -y'
@@ -672,8 +672,8 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && sky volumes apply -y -n {cluster_name}-1 --infra {generic_cloud} --type k8s-pvc --size 1Gi',
             f'{self.ACTIVATE_BASE} && sky volumes ls | grep "{cluster_name}-0"',
             f'{self.ACTIVATE_BASE} && sky volumes ls | grep "{cluster_name}-1"',
-            f'{self.ACTIVATE_BASE} && sky volumes down {cluster_name}-0 -y',
-            f'{self.ACTIVATE_BASE} && sky volumes down {cluster_name}-1 -y',
+            f'{self.ACTIVATE_BASE} && sky volumes delete {cluster_name}-0 -y',
+            f'{self.ACTIVATE_BASE} && sky volumes delete {cluster_name}-1 -y',
         ]
 
         teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name} -y && sky serve down {cluster_name}* -y'
