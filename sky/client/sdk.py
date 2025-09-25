@@ -1429,6 +1429,7 @@ def status(
     all_users: bool = False,
     *,
     _include_credentials: bool = False,
+    _summary_response: bool = False,
 ) -> server_common.RequestId[List[responses.StatusResponse]]:
     """Gets cluster statuses.
 
@@ -1514,6 +1515,7 @@ def status(
         refresh=refresh,
         all_users=all_users,
         include_credentials=_include_credentials,
+        summary_response=_summary_response,
     )
     response = server_common.make_authenticated_request(
         'POST', '/status', json=json.loads(body.model_dump_json()))
@@ -1675,6 +1677,7 @@ def local_up(gpus: bool,
              ssh_key: Optional[str],
              cleanup: bool,
              context_name: Optional[str] = None,
+             name: Optional[str] = None,
              password: Optional[str] = None) -> server_common.RequestId[None]:
     """Launches a Kubernetes cluster on local machines.
 
@@ -1686,8 +1689,8 @@ def local_up(gpus: bool,
     # TODO: move this check to server.
     if not server_common.is_api_server_local():
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'sky local up is only supported when running SkyPilot locally.')
+            raise ValueError('`sky local up` is only supported when '
+                             'running SkyPilot locally.')
 
     body = payloads.LocalUpBody(gpus=gpus,
                                 ips=ips,
@@ -1695,6 +1698,7 @@ def local_up(gpus: bool,
                                 ssh_key=ssh_key,
                                 cleanup=cleanup,
                                 context_name=context_name,
+                                name=name,
                                 password=password)
     response = server_common.make_authenticated_request(
         'POST', '/local_up', json=json.loads(body.model_dump_json()))
@@ -1704,16 +1708,19 @@ def local_up(gpus: bool,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def local_down() -> server_common.RequestId[None]:
+def local_down(name: Optional[str]) -> server_common.RequestId[None]:
     """Tears down the Kubernetes cluster started by local_up."""
     # We do not allow local up when the API server is running remotely since it
     # will modify the kubeconfig.
     # TODO: move this check to remote server.
     if not server_common.is_api_server_local():
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('sky local down is only supported when running '
+            raise ValueError('`sky local down` is only supported when running '
                              'SkyPilot locally.')
-    response = server_common.make_authenticated_request('POST', '/local_down')
+
+    body = payloads.LocalDownBody(name=name)
+    response = server_common.make_authenticated_request(
+        'POST', '/local_down', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -2083,6 +2090,7 @@ def stream_and_get(
     return stream_response(request_id,
                            response,
                            output_stream,
+                           resumable=True,
                            get_result=follow)
 
 

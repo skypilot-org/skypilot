@@ -52,6 +52,7 @@ from sky.utils import cluster_utils
 from sky.utils import command_runner
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import context as context_lib
 from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import env_options
@@ -1842,7 +1843,9 @@ def check_owner_identity(cluster_name: str) -> None:
     """
     if env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.get():
         return
-    record = global_user_state.get_cluster_from_name(cluster_name)
+    record = global_user_state.get_cluster_from_name(cluster_name,
+                                                     include_user_info=False,
+                                                     summary_response=True)
     if record is None:
         return
     handle = record['handle']
@@ -1929,6 +1932,7 @@ def tag_filter_for_cluster(cluster_name: str) -> Dict[str, str]:
     }
 
 
+@context_utils.cancellation_guard
 def _query_cluster_status_via_cloud_api(
     handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
 ) -> List[Tuple[status_lib.ClusterStatus, Optional[str]]]:
@@ -2136,7 +2140,10 @@ def check_can_clone_disk_and_override_task(
     return task, handle
 
 
-def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
+def _update_cluster_status(
+        cluster_name: str,
+        include_user_info: bool = True,
+        summary_response: bool = False) -> Optional[Dict[str, Any]]:
     """Update the cluster status.
 
     The cluster status is updated by checking ray cluster and real status from
@@ -2163,7 +2170,10 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
           fetched from the cloud provider or there are leaked nodes causing
           the node number larger than expected.
     """
-    record = global_user_state.get_cluster_from_name(cluster_name)
+    record = global_user_state.get_cluster_from_name(
+        cluster_name,
+        include_user_info=include_user_info,
+        summary_response=summary_response)
     if record is None:
         return None
     handle = record['handle']
@@ -2339,7 +2349,10 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             ready=True,
             is_launch=False,
             existing_cluster_hash=record['cluster_hash'])
-        return global_user_state.get_cluster_from_name(cluster_name)
+        return global_user_state.get_cluster_from_name(
+            cluster_name,
+            include_user_info=include_user_info,
+            summary_response=summary_response)
 
     # All cases below are transitioning the cluster to non-UP states.
     launched_resources = handle.launched_resources.assert_launchable()
@@ -2551,7 +2564,10 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
             ready=False,
             is_launch=False,
             existing_cluster_hash=record['cluster_hash'])
-        return global_user_state.get_cluster_from_name(cluster_name)
+        return global_user_state.get_cluster_from_name(
+            cluster_name,
+            include_user_info=include_user_info,
+            summary_response=summary_response)
     # Now is_abnormal is False: either node_statuses is empty or all nodes are
     # STOPPED.
     verb = 'terminated' if to_terminate else 'stopped'
@@ -2566,7 +2582,10 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         nop_if_duplicate=True,
     )
     backend.post_teardown_cleanup(handle, terminate=to_terminate, purge=False)
-    return global_user_state.get_cluster_from_name(cluster_name)
+    return global_user_state.get_cluster_from_name(
+        cluster_name,
+        include_user_info=include_user_info,
+        summary_response=summary_response)
 
 
 def _must_refresh_cluster_status(
@@ -2588,12 +2607,13 @@ def _must_refresh_cluster_status(
 
 
 def refresh_cluster_record(
-    cluster_name: str,
-    *,
-    force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]] = None,
-    acquire_per_cluster_status_lock: bool = True,
-    cluster_status_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS
-) -> Optional[Dict[str, Any]]:
+        cluster_name: str,
+        *,
+        force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]] = None,
+        acquire_per_cluster_status_lock: bool = True,
+        cluster_status_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS,
+        include_user_info: bool = True,
+        summary_response: bool = False) -> Optional[Dict[str, Any]]:
     """Refresh the cluster, and return the possibly updated record.
 
     The function will update the cached cluster status in the global state. For
@@ -2633,7 +2653,11 @@ def refresh_cluster_record(
           the node number larger than expected.
     """
 
-    record = global_user_state.get_cluster_from_name(cluster_name)
+    ctx = context_lib.get()
+    record = global_user_state.get_cluster_from_name(
+        cluster_name,
+        include_user_info=include_user_info,
+        summary_response=summary_response)
     if record is None:
         return None
     # TODO(zhwu, 05/20): switch to the specific workspace to make sure we are
@@ -2652,12 +2676,16 @@ def refresh_cluster_record(
 
         # Loop until we have an up-to-date status or until we acquire the lock.
         while True:
+            # Check if the context is canceled.
+            if ctx is not None and ctx.is_canceled():
+                raise asyncio.CancelledError()
             # Check to see if we can return the cached status.
             if not _must_refresh_cluster_status(record, force_refresh_statuses):
                 return record
 
             if not acquire_per_cluster_status_lock:
-                return _update_cluster_status(cluster_name)
+                return _update_cluster_status(cluster_name, include_user_info,
+                                              summary_response)
 
             # Try to acquire the lock so we can fetch the status.
             try:
@@ -2665,12 +2693,16 @@ def refresh_cluster_record(
                     # Check the cluster status again, since it could have been
                     # updated between our last check and acquiring the lock.
                     record = global_user_state.get_cluster_from_name(
-                        cluster_name)
+                        cluster_name,
+                        include_user_info=include_user_info,
+                        summary_response=summary_response)
                     if record is None or not _must_refresh_cluster_status(
                             record, force_refresh_statuses):
                         return record
                     # Update and return the cluster status.
-                    return _update_cluster_status(cluster_name)
+                    return _update_cluster_status(cluster_name,
+                                                  include_user_info,
+                                                  summary_response)
 
             except locks.LockTimeout:
                 # lock.acquire() will throw a Timeout exception if the lock is not
@@ -2691,7 +2723,10 @@ def refresh_cluster_record(
             time.sleep(lock.poll_interval)
 
             # Refresh for next loop iteration.
-            record = global_user_state.get_cluster_from_name(cluster_name)
+            record = global_user_state.get_cluster_from_name(
+                cluster_name,
+                include_user_info=include_user_info,
+                summary_response=summary_response)
             if record is None:
                 return None
 
@@ -2716,7 +2751,9 @@ def refresh_cluster_status_handle(
         cluster_name,
         force_refresh_statuses=force_refresh_statuses,
         acquire_per_cluster_status_lock=acquire_per_cluster_status_lock,
-        cluster_status_lock_timeout=cluster_status_lock_timeout)
+        cluster_status_lock_timeout=cluster_status_lock_timeout,
+        include_user_info=False,
+        summary_response=True)
     if record is None:
         return None, None
     return record['status'], record['handle']
@@ -2767,7 +2804,9 @@ def check_cluster_available(
         exceptions.CloudUserIdentityError: if we fail to get the current user
           identity.
     """
-    record = global_user_state.get_cluster_from_name(cluster_name)
+    record = global_user_state.get_cluster_from_name(cluster_name,
+                                                     include_user_info=False,
+                                                     summary_response=True)
     if dryrun:
         assert record is not None, cluster_name
         return record['handle']
@@ -2954,7 +2993,8 @@ def is_controller_accessible(
             f'fatal, but {controller_name} commands/calls may hang or return '
             'stale information, when the controller is not up.\n'
             f'  Details: {common_utils.format_exception(e, use_bracket=True)}')
-        record = global_user_state.get_cluster_from_name(cluster_name)
+        record = global_user_state.get_cluster_from_name(
+            cluster_name, include_user_info=False, summary_response=True)
         if record is not None:
             controller_status, handle = record['status'], record['handle']
             # We check the connection even if the cluster has a cached status UP
@@ -3011,15 +3051,90 @@ class CloudFilter(enum.Enum):
     LOCAL = 'local'
 
 
-def _get_glob_clusters(clusters: List[str], silent: bool = False) -> List[str]:
+def _get_glob_clusters(
+        clusters: List[str],
+        silent: bool = False,
+        workspaces_filter: Optional[Dict[str, Any]] = None) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
     glob_clusters = []
     for cluster in clusters:
-        glob_cluster = global_user_state.get_glob_cluster_names(cluster)
+        glob_cluster = global_user_state.get_glob_cluster_names(
+            cluster, workspaces_filter=workspaces_filter)
         if len(glob_cluster) == 0 and not silent:
             logger.info(f'Cluster {cluster} not found.')
         glob_clusters.extend(glob_cluster)
     return list(set(glob_clusters))
+
+
+def _refresh_cluster(
+        cluster_name: str,
+        force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]],
+        include_user_info: bool = True,
+        summary_response: bool = False) -> Optional[Dict[str, Any]]:
+    try:
+        record = refresh_cluster_record(
+            cluster_name,
+            force_refresh_statuses=force_refresh_statuses,
+            acquire_per_cluster_status_lock=True,
+            include_user_info=include_user_info,
+            summary_response=summary_response)
+    except (exceptions.ClusterStatusFetchingError,
+            exceptions.CloudUserIdentityError,
+            exceptions.ClusterOwnerIdentityMismatchError) as e:
+        # Do not fail the entire refresh process. The caller will
+        # handle the 'UNKNOWN' status, and collect the errors into
+        # a table.
+        record = {'status': 'UNKNOWN', 'error': e}
+    return record
+
+
+def refresh_cluster_records() -> None:
+    """Refreshes the status of all clusters, except managed clusters.
+
+    Used by the background status refresh daemon.
+    This function is a stripped-down version of get_clusters, with only the
+    bare bones refresh logic.
+
+    Returns:
+        None
+
+    Raises:
+        None
+    """
+    exclude_managed_clusters = True
+    if env_options.Options.SHOW_DEBUG_INFO.get():
+        exclude_managed_clusters = False
+    cluster_names = global_user_state.get_cluster_names(
+        exclude_managed_clusters=exclude_managed_clusters,)
+
+    # TODO(syang): we should try not to leak
+    # request info in backend_utils.py.
+    # Refactor this to use some other info to
+    # determine if a launch is in progress.
+    request = requests_lib.get_request_tasks(
+        req_filter=requests_lib.RequestTaskFilter(
+            status=[requests_lib.RequestStatus.RUNNING],
+            cluster_names=cluster_names,
+            include_request_names=['sky.launch']))
+    cluster_names_with_launch_request = {
+        request.cluster_name for request in request
+    }
+    cluster_names_without_launch_request = [
+        cluster_name for cluster_name in cluster_names
+        if cluster_name not in cluster_names_with_launch_request
+    ]
+
+    def _refresh_cluster_record(cluster_name):
+        return _refresh_cluster(cluster_name,
+                                force_refresh_statuses=set(
+                                    status_lib.ClusterStatus),
+                                include_user_info=False,
+                                summary_response=True)
+
+    if len(cluster_names) > 0:
+        # Do not refresh the clusters that have an active launch request.
+        subprocess_utils.run_in_parallel(_refresh_cluster_record,
+                                         cluster_names_without_launch_request)
 
 
 def get_clusters(
@@ -3027,6 +3142,7 @@ def get_clusters(
     cluster_names: Optional[Union[str, List[str]]] = None,
     all_users: bool = True,
     include_credentials: bool = False,
+    summary_response: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _include_is_managed: bool = False,
@@ -3054,10 +3170,23 @@ def get_clusters(
         A list of cluster records. If the cluster does not exist or has been
         terminated, the record will be omitted from the returned list.
     """
+    accessible_workspaces = workspaces_core.get_workspaces()
     if cluster_names is not None:
         if isinstance(cluster_names, str):
             cluster_names = [cluster_names]
-        cluster_names = _get_glob_clusters(cluster_names, silent=True)
+        non_glob_cluster_names = []
+        glob_cluster_names = []
+        for cluster_name in cluster_names:
+            if ux_utils.is_glob_pattern(cluster_name):
+                glob_cluster_names.append(cluster_name)
+            else:
+                non_glob_cluster_names.append(cluster_name)
+        cluster_names = non_glob_cluster_names
+        if glob_cluster_names:
+            cluster_names += _get_glob_clusters(
+                glob_cluster_names,
+                silent=True,
+                workspaces_filter=accessible_workspaces)
 
     exclude_managed_clusters = False
     if not (_include_is_managed or env_options.Options.SHOW_DEBUG_INFO.get()):
@@ -3065,13 +3194,12 @@ def get_clusters(
     user_hashes_filter = None
     if not all_users:
         user_hashes_filter = {common_utils.get_current_user().id}
-    accessible_workspaces = workspaces_core.get_workspaces()
     records = global_user_state.get_clusters(
         exclude_managed_clusters=exclude_managed_clusters,
         user_hashes_filter=user_hashes_filter,
         workspaces_filter=accessible_workspaces,
         cluster_names=cluster_names,
-    )
+        summary_response=summary_response)
 
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT
@@ -3079,12 +3207,10 @@ def get_clusters(
 
     if cluster_names is not None:
         record_names = {record['name'] for record in records}
-        not_exist_cluster_names = [
-            cluster_name for cluster_name in cluster_names
-            if cluster_name not in record_names
-        ]
-        if not_exist_cluster_names:
-            clusters_str = ', '.join(not_exist_cluster_names)
+        not_found_clusters = ux_utils.get_non_matched_query(
+            cluster_names, record_names)
+        if not_found_clusters:
+            clusters_str = ', '.join(not_found_clusters)
             logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
 
     def _get_records_with_handle(
@@ -3095,7 +3221,7 @@ def get_clusters(
             if record is not None and record['handle'] is not None
         ]
 
-    def _update_records_with_resources_str(
+    def _update_records_with_handle_info(
             records: List[Optional[Dict[str, Any]]]) -> None:
         """Add resource str to record"""
         for record in _get_records_with_handle(records):
@@ -3106,6 +3232,8 @@ def get_clusters(
             record[
                 'resources_str_full'] = resources_utils.get_readable_resources_repr(
                     handle, simplify=False)
+            if not summary_response:
+                record['cluster_name_on_cloud'] = handle.cluster_name_on_cloud
 
     def _update_records_with_credentials(
             records: List[Optional[Dict[str, Any]]]) -> None:
@@ -3145,7 +3273,7 @@ def get_clusters(
             record['credentials'] = credential
 
     def _update_records_with_resources(
-            records: List[Optional[Dict[str, Any]]]) -> None:
+        records: List[Optional[Dict[str, Any]]],) -> None:
         """Add the resources to the record."""
         for record in _get_records_with_handle(records):
             handle = record['handle']
@@ -3164,8 +3292,8 @@ def get_clusters(
                 f'{handle.launched_resources.accelerators}'
                 if handle.launched_resources.accelerators else None)
 
-    # Add auth_config to the records
-    _update_records_with_resources_str(records)
+    # Add handle info to the records
+    _update_records_with_handle_info(records)
     if include_credentials:
         _update_records_with_credentials(records)
     if refresh == common.StatusRefreshMode.NONE:
@@ -3186,47 +3314,44 @@ def get_clusters(
     else:
         force_refresh_statuses = None
 
-    def _refresh_cluster(cluster_name):
-        # TODO(syang): we should try not to leak
-        # request info in backend_utils.py.
-        # Refactor this to use some other info to
-        # determine if a launch is in progress.
-        request = requests_lib.get_request_tasks(
-            req_filter=requests_lib.RequestTaskFilter(
-                status=[requests_lib.RequestStatus.RUNNING],
-                cluster_names=[cluster_name],
-                include_request_names=['sky.launch']))
-        if len(request) > 0:
-            # There is an active launch request on the cluster,
-            # so we don't want to update the cluster status until
-            # the request is completed.
-            logger.debug(f'skipping refresh for cluster {cluster_name} '
-                         'as there is an active launch request')
-            return global_user_state.get_cluster_from_name(cluster_name)
-        try:
-            record = refresh_cluster_record(
-                cluster_name,
-                force_refresh_statuses=force_refresh_statuses,
-                acquire_per_cluster_status_lock=True)
-            _update_records_with_resources_str([record])
+    def _refresh_cluster_record(cluster_name):
+        record = _refresh_cluster(cluster_name,
+                                  force_refresh_statuses=force_refresh_statuses,
+                                  include_user_info=True,
+                                  summary_response=summary_response)
+        if 'error' not in record:
+            _update_records_with_handle_info([record])
             if include_credentials:
                 _update_records_with_credentials([record])
-        except (exceptions.ClusterStatusFetchingError,
-                exceptions.CloudUserIdentityError,
-                exceptions.ClusterOwnerIdentityMismatchError) as e:
-            # Do not fail the entire refresh process. The caller will
-            # handle the 'UNKNOWN' status, and collect the errors into
-            # a table.
-            record = {'status': 'UNKNOWN', 'error': e}
-        progress.update(task, advance=1)
+            progress.update(task, advance=1)
         return record
 
     cluster_names = [record['name'] for record in records]
-    updated_records = []
-    if len(cluster_names) > 0:
+    # TODO(syang): we should try not to leak
+    # request info in backend_utils.py.
+    # Refactor this to use some other info to
+    # determine if a launch is in progress.
+    request = requests_lib.get_request_tasks(
+        req_filter=requests_lib.RequestTaskFilter(
+            status=[requests_lib.RequestStatus.RUNNING],
+            cluster_names=cluster_names,
+            include_request_names=['sky.launch']))
+    cluster_names_with_launch_request = {
+        request.cluster_name for request in request
+    }
+    cluster_names_without_launch_request = [
+        cluster_name for cluster_name in cluster_names
+        if cluster_name not in cluster_names_with_launch_request
+    ]
+    # for clusters that have an active launch request, we do not refresh the status
+    updated_records = [
+        record for record in records
+        if record['name'] in cluster_names_with_launch_request
+    ]
+    if len(cluster_names_without_launch_request) > 0:
         with progress:
             updated_records = subprocess_utils.run_in_parallel(
-                _refresh_cluster, cluster_names)
+                _refresh_cluster_record, cluster_names_without_launch_request)
 
     # Show information for removed clusters.
     kept_records = []

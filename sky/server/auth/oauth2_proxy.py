@@ -37,8 +37,8 @@ OAUTH2_PROXY_ENABLED_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED'
 class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle authentication by delegating to OAuth2 Proxy."""
 
-    def __init__(self, application: fastapi.FastAPI):
-        super().__init__(application)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.enabled: bool = (os.getenv(OAUTH2_PROXY_ENABLED_ENV_VAR,
                                         'false') == 'true')
         self.proxy_base: str = ''
