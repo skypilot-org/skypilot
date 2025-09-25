@@ -3,6 +3,7 @@
 from concurrent.futures import as_completed
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+import hashlib
 import logging
 import random
 import string
@@ -20,21 +21,25 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     del cluster_name  # unused
     zone_id = config.node_config['zone_id']
+
     running_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
-    head_instance_id = _get_head_instance_id(running_instances)
 
     to_start_count = config.count - len(running_instances)
+
     if to_start_count < 0:
         raise RuntimeError(
             f'Cluster {cluster_name_on_cloud} already has '
-            f'{len(running_instances)} nodes, but {config.count} are required.')
+            f'{len(running_instances)} instances, but {config.count} '
+            'are required.')
 
     if to_start_count == 0:
+        head_instance_id = _get_head_instance_id(running_instances)
         if head_instance_id is None:
             raise RuntimeError(
                 f'Cluster {cluster_name_on_cloud} has no head node.')
-        logger.info(f'Cluster {cluster_name_on_cloud} already has '
-                    f'{len(running_instances)} nodes, no need to start more.')
+        logger.info(
+            f'Cluster {cluster_name_on_cloud} already has '
+            f'{len(running_instances)} instances, no need to start more.')
         return common.ProvisionRecord(provider_name='scp',
                                       cluster_name=cluster_name_on_cloud,
                                       region=region,
@@ -43,43 +48,42 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                                       resumed_instance_ids=[],
                                       created_instance_ids=[])
 
+    instance_names = [_head(cluster_name_on_cloud)] + [
+        f'{_worker(cluster_name_on_cloud)}-{i:02d}'
+        for i in range(1, config.count)
+    ]
+
+    running_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
     stopped_instances = _filter_instances(cluster_name_on_cloud, ['STOPPED'])
-    if to_start_count <= len(stopped_instances):
 
-        def _start(instance):
-            instance_id = instance['virtualServerId']
-            scp_utils.SCPClient().start_instance(instance_id)
-            while True:
-                info = scp_utils.SCPClient().get_instance_info(instance_id)
-                if info['virtualServerState'] == 'RUNNING':
-                    return instance_id
-                time.sleep(2)
+    running_instance_names = [
+        instance['virtualServerName'] for instance in running_instances
+    ]
+    resume_instance_names = [
+        instance['virtualServerName'] for instance in stopped_instances
+    ]
 
-        with ThreadPoolExecutor(
-                max_workers=min(len(stopped_instances), 32)) as ex:
-            execution = [
-                ex.submit(_start, instance) for instance in stopped_instances
-            ]
-            resumed_instance_ids = [e.result() for e in execution]
-
-        resumed_instances = _filter_instances(cluster_name_on_cloud,
-                                              ['RUNNING'])
-        head_instance_id = _get_head_instance_id(resumed_instances)
-
-        return common.ProvisionRecord(provider_name='scp',
-                                      cluster_name=cluster_name_on_cloud,
-                                      region=region,
-                                      zone=None,
-                                      head_instance_id=head_instance_id,
-                                      resumed_instance_ids=resumed_instance_ids,
-                                      created_instance_ids=[])
+    create_instance_names = [
+        instance_name for instance_name in instance_names
+        if instance_name not in running_instance_names and
+        instance_name not in resume_instance_names
+    ]
 
     vpc_subnets = _get_or_create_vpc_subnets(zone_id)
 
-    def _create(name):
+    def _resume(instance_name):
+        instance_id = _get_instance_id(instance_name, cluster_name_on_cloud)
+        scp_utils.SCPClient().start_instance(instance_id)
+        while True:
+            info = scp_utils.SCPClient().get_instance_info(instance_id)
+            if info['virtualServerState'] == 'RUNNING':
+                return instance_id, 'resumed'
+            time.sleep(2)
+
+    def _create(instance_name):
         instance_config = deepcopy(config.docker_config)
-        instance_config['virtualServerName'] = name
-        cnt = to_start_count
+        instance_config['virtualServerName'] = instance_name
+        cnt = config.count
 
         for vpc, subnets in vpc_subnets.items():
             sg_id = _create_security_group(zone_id, vpc, cnt)
@@ -94,9 +98,9 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                     instance_id = _create_instance(vpc, instance_config, cnt)
                     if instance_id:
                         created_in_this_vpc = True
-                        return instance_id
+                        return instance_id, 'created'
             except Exception as e:  # pylint: disable=broad-except
-                logger.error(f'run_instances error ({name}): {e}')
+                logger.error(f'run_instances error ({instance_name}): {e}')
             finally:
                 if not created_in_this_vpc:
                     try:
@@ -104,35 +108,71 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                     except Exception:  # pylint: disable=broad-except
                         pass
 
-        raise RuntimeError(f'instance creation error: {name}')
+        raise RuntimeError(f'instance creation error: {instance_name}')
 
-    names = [_head(cluster_name_on_cloud)] + [
-        f'{_worker(cluster_name_on_cloud)}-{i:02d}'
-        for i in range(1, to_start_count)
-    ]
+    tasks = (
+        [(_resume, instance_name) for instance_name in resume_instance_names] +
+        [(_create, instance_name) for instance_name in create_instance_names])
 
-    with ThreadPoolExecutor(max_workers=min(to_start_count, 32)) as ex:
-        execution = [ex.submit(_create, name) for name in names]
-        instance_ids = [e.result() for e in execution]
+    instance_ids_statuses = []
+    with ThreadPoolExecutor(max_workers=min(len(tasks), 32)) as ex:
+        execution = [
+            ex.submit(function, instance_name)
+            for function, instance_name in tasks
+        ]
+        for e in as_completed(execution):
+            try:
+                instance_ids_statuses.append(e.result())
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'run_instances error: {e}')
 
-    head_instance_id = instance_ids[0]
-    created_instance_ids = instance_ids
+    running_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
+
+    if len(running_instances) != config.count:
+        raise RuntimeError(f'Expected {config.count} RUNNING instances, '
+                           f'but got {len(running_instances)} instances')
+
+    head_instance_id = _get_head_instance_id(running_instances)
+    if head_instance_id is None:
+        raise RuntimeError('Head node is not running')
+
+    resumed_instance_ids = []
+    created_instance_ids = []
+    for instance_id, status in instance_ids_statuses:
+        if status == 'resumed':
+            resumed_instance_ids.append(instance_id)
+        elif status == 'created':
+            created_instance_ids.append(instance_id)
 
     return common.ProvisionRecord(provider_name='scp',
                                   cluster_name=cluster_name_on_cloud,
                                   region=region,
                                   zone=None,
                                   head_instance_id=head_instance_id,
-                                  resumed_instance_ids=[],
+                                  resumed_instance_ids=resumed_instance_ids,
                                   created_instance_ids=created_instance_ids)
 
 
-def _head(cluster_name_on_cloud):
-    return cluster_name_on_cloud[:14] + '-head'
+def _suffix(name: str, n: int = 5):
+    return hashlib.sha1(name.encode()).hexdigest()[:n]
 
 
-def _worker(cluster_name_on_cloud):
-    return cluster_name_on_cloud[:14] + '-worker'
+def _head(cluster_name_on_cloud: str):
+    return (f'{cluster_name_on_cloud[:8]}-'
+            f'{_suffix(cluster_name_on_cloud)}-head')
+
+
+def _worker(cluster_name_on_cloud: str):
+    return (f'{cluster_name_on_cloud[:8]}-'
+            f'{_suffix(cluster_name_on_cloud)}-worker')
+
+
+def _get_instance_id(instance_name, cluster_name_on_cloud):
+    instances = _filter_instances(cluster_name_on_cloud, None)
+    for instance in instances:
+        if instance_name == instance['virtualServerName']:
+            return instance['virtualServerId']
+    return None
 
 
 def _get_or_create_vpc_subnets(zone_id):
@@ -219,18 +259,21 @@ def _get_vcp_subnets(zone_id):
 def _filter_instances(cluster_name_on_cloud,
                       status_filter: Optional[List[str]]):
     instances = scp_utils.SCPClient().get_instances()
-    filtered_instances = []
-    if status_filter is not None:
-        head_name = _head(cluster_name_on_cloud)
-        worker_prefix = _worker(cluster_name_on_cloud)
-        for instance in instances:
-            name = instance['virtualServerName']
-            if (name == head_name) or name.startswith(worker_prefix):
-                if instance['virtualServerState'] in status_filter:
-                    filtered_instances.append(instance)
-        return filtered_instances
-    else:
-        return instances
+    head_instance_name = _head(cluster_name_on_cloud)
+    worker_prefix = _worker(cluster_name_on_cloud)
+
+    cluster_instances = [
+        instance for instance in instances
+        if instance['virtualServerName'] == head_instance_name or
+        instance['virtualServerName'].startswith(worker_prefix)
+    ]
+
+    if status_filter is None:
+        return cluster_instances
+    return [
+        instance for instance in cluster_instances
+        if instance['virtualServerState'] in status_filter
+    ]
 
 
 def _get_head_instance_id(instances):
@@ -433,10 +476,10 @@ def stop_instances(
     instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
 
     if worker_only:
-        head_name = _head(cluster_name_on_cloud)
+        head_instance_name = _head(cluster_name_on_cloud)
         instances = [
             instance for instance in instances
-            if instance['virtualServerName'] != head_name
+            if instance['virtualServerName'] != head_instance_name
         ]
 
     def _stop(instance):
@@ -462,8 +505,15 @@ def terminate_instances(
     provider_config: Optional[Dict[str, Any]] = None,
     worker_only: bool = False,
 ) -> None:
-    del provider_config, worker_only
-    instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
+    del provider_config
+    instances = _filter_instances(cluster_name_on_cloud, ['RUNNING', 'STOPPED'])
+
+    if worker_only:
+        head_instance_name = _head(cluster_name_on_cloud)
+        instances = [
+            instance for instance in instances
+            if instance['virtualServerName'] != head_instance_name
+        ]
 
     def _terminate(instance):
         try:
