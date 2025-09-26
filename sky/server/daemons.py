@@ -112,7 +112,7 @@ def refresh_cluster_status_event():
 # as they have their own logic to cleanup the cluster records. This refresh
 # will break existing workflows.
 def should_skip_refresh_cluster_status() -> bool:
-    return os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is None
+    return os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None
 
 
 def refresh_volume_status_event():
