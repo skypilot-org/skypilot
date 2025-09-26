@@ -24,7 +24,7 @@ spec:
       containers:
       - name: server
         # TODO(aylei): version strategy of our addon images
-        image: berkeleyskypilot/fusermount-server:latest
+        image: aylei/fusermount-server:20250926
         securityContext:
           privileged: true
         volumeMounts:
