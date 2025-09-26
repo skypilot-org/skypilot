@@ -77,8 +77,6 @@ async def volume_apply(request: fastapi.Request,
                        volume_apply_body: payloads.VolumeApplyBody) -> None:
     """Creates or registers a volume."""
     volume_cloud = volume_apply_body.cloud
-    volume_region = volume_apply_body.region
-    volume_zone = volume_apply_body.zone
     volume_type = volume_apply_body.volume_type
     volume_config = volume_apply_body.config
 
@@ -92,8 +90,6 @@ async def volume_apply(request: fastapi.Request,
     if cloud is None:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Invalid cloud: {volume_cloud}')
-    volume_apply_body.region, volume_apply_body.zone = (
-        cloud.validate_region_zone(volume_region, volume_zone))
     if volume_type == volume_utils.VolumeType.PVC.value:
         if not cloud.is_same_cloud(clouds.Kubernetes()):
             raise fastapi.HTTPException(

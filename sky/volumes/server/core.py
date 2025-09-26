@@ -213,6 +213,7 @@ def volume_apply(
         # generate the storage name on cloud.
         cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud)
         assert cloud_obj is not None
+        region, zone = cloud_obj.validate_region_zone(region, zone)
         name_uuid = str(uuid.uuid4())[:6]
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, max_length=cloud_obj.max_cluster_name_length())
