@@ -1220,19 +1220,19 @@ JOBS_PER_WORKER = 200
 
 
 def _get_total_usable_memory_mb(consolidation_mode: bool) -> float:
-    total_memory_mb = common_utils.get_mem_size_gb() * 1024
-    if consolidation_mode:
-        config = server_config.compute_server_config(deploy=True, quiet=True)
-        used = 0.0
-        used += MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB
-        used += (config.long_worker_config.garanteed_parallelism +
-                    config.long_worker_config.burstable_parallelism) * \
-            server_config.LONG_WORKER_MEM_GB * 1024
-        used += (config.short_worker_config.garanteed_parallelism +
-                    config.short_worker_config.burstable_parallelism) * \
-            server_config.SHORT_WORKER_MEM_GB * 1024
-        return total_memory_mb - used
-    return total_memory_mb - MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB
+    total_memory_mb = (common_utils.get_mem_size_gb() * 1024 -
+                       MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB)
+    if not consolidation_mode:
+        return total_memory_mb
+    config = server_config.compute_server_config(deploy=True, quiet=True)
+    used = 0.0
+    used += ((config.long_worker_config.garanteed_parallelism +
+              config.long_worker_config.burstable_parallelism) *
+             server_config.LONG_WORKER_MEM_GB * 1024)
+    used += ((config.short_worker_config.garanteed_parallelism +
+              config.short_worker_config.burstable_parallelism) *
+             server_config.SHORT_WORKER_MEM_GB * 1024)
+    return total_memory_mb - used
 
 
 @annotations.lru_cache(scope='request')
@@ -1255,11 +1255,6 @@ def _get_parallelism(pool: bool, raw_resource_per_unit: float) -> int:
         ('jobs' if pool else 'serve', 'controller', 'consolidation_mode'),
         default_value=False)
 
-    # If running pool on jobs controller, we need to account for the resources
-    # consumed by the jobs.
-    ratio = (1. + POOL_JOBS_RESOURCES_RATIO) if pool else 1.
-    resource_per_unit_no_worker = raw_resource_per_unit * ratio
-
     total_memory_mb = _get_total_usable_memory_mb(consolidation_mode)
 
     # In consolidation mode, we assume the API server is running in deployment
@@ -1269,10 +1264,15 @@ def _get_parallelism(pool: bool, raw_resource_per_unit: float) -> int:
     # Otherwise, it runs a local API server on the jobs/serve controller.
     # We need to do the resource management ourselves.
     if not consolidation_mode:
-        resource_per_unit_worker = (LAUNCHES_PER_WORKER * JOB_WORKER_MEMORY_MB *
-                                    ratio)
+        resource_per_unit_worker = (LAUNCHES_PER_WORKER *
+                                    server_config.LONG_WORKER_MEM_GB * 1024)
 
-    resource_per_unit = (resource_per_unit_no_worker + resource_per_unit_worker)
+    # If running pool on jobs controller, we need to account for the resources
+    # consumed by the jobs.
+    ratio = (1. + POOL_JOBS_RESOURCES_RATIO) if pool else 1.
+    resource_per_unit = ratio * (raw_resource_per_unit +
+                                 resource_per_unit_worker)
+
     return max(int(total_memory_mb / resource_per_unit), 1)
 
 
@@ -1317,9 +1317,6 @@ def can_start_new_process(pool: bool) -> bool:
     return serve_state.get_num_services() < _get_number_of_services(pool)
 
 
-# We limit the number of terminating replicas to the number of CPUs. This is
-# just a temporary solution to avoid overwhelming the controller. After one job
-# controller PR, we should use API server to handle resources management.
 def can_terminate(pool: bool) -> bool:
     # TODO(tian): probe API server to see if there is any pending terminate
     # requests.
