@@ -454,8 +454,14 @@ To submit the pipeline, the same command :code:`sky jobs launch` is used. The pi
 
 .. _pool:
 
-Using pools
------------
+Using pools [EXPERIMENTAL]
+--------------------------
+
+.. warning::
+
+  Pools are currently in alpha so some features are not currently supported:
+  * Pools does not currently support heterogeneous clusters (e.g., mixed H100 and H200 workers)
+  * Pools does not currently support multiple jobs running concurrently on the same worker
 
 SkyPilot supports spawning a **pool** for launching many jobs that share the same environment — for example, batch inference or large-scale data processing.
 
@@ -482,8 +488,8 @@ Here is a simple example of creating a pool:
     workers: 3
 
   resources:
-    # Specify the resources for each worker, e.g. use either H100 or H200.
-    accelerators: {H100:1, H200:1}
+    # Specify the resources for each worker.
+    accelerators: {H100:1}
 
   file_mounts:
     /my-data:
