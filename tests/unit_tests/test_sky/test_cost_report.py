@@ -449,6 +449,57 @@ class TestHistoricalClusterRobustness(unittest.TestCase):
                 pass
 
 
+class TestCostReportMissingInstanceType(unittest.TestCase):
+    """Test cost report graceful handling of missing instance types."""
+
+    def test_cost_report_resources_with_missing_instance_type(self):
+        """Test _get_resources_for_cost_report handles missing instance types gracefully."""
+        # Create mock resources that throw ValueError on str()
+        mock_resources = mock.Mock()
+        mock_resources.__repr__ = mock.Mock(
+            side_effect=ValueError("No instance type m6i.large found."))
+        mock_resources.cloud = "AWS"
+        mock_resources.instance_type = "m6i.large"
+
+        mock_record = {
+            'status': None,
+            'num_nodes': 2,
+            'resources': mock_resources,
+            'total_cost': 0.0
+        }
+
+        # This should not raise an exception
+        resources_str = status_utils._get_resources_for_cost_report(
+            mock_record, truncate=True)
+
+        self.assertEqual(resources_str, "2x AWS(m6i.large)")
+        mock_resources.__repr__.assert_called_once()
+
+    def test_cost_report_price_with_missing_instance_type(self):
+        """Test _get_price_for_cost_report handles missing instance types gracefully."""
+        # Create mock resources that throw ValueError on get_cost
+        mock_resources = mock.Mock()
+        mock_resources.get_cost.side_effect = ValueError(
+            "Instance type 'm6i.large' not found in zone 'us-east-2a'.")
+
+        mock_record = {
+            'status': None,
+            'num_nodes': 1,
+            'resources': mock_resources,
+            'total_cost': 0.0
+        }
+
+        # This should not raise an exception
+        price_str = status_utils._get_price_for_cost_report(mock_record,
+                                                            truncate=True)
+
+        # Should return the fallback price string
+        self.assertEqual(price_str, '[Price unavailable]')
+
+        # Verify get_cost was called
+        mock_resources.get_cost.assert_called_once_with(3600)
+
+
 class TestCostReportCLI(unittest.TestCase):
     """Test cost-report CLI functionality."""
 
