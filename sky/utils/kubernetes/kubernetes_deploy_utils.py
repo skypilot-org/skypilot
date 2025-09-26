@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import colorama
 
@@ -317,31 +317,33 @@ def generate_kind_config(port_start: int,
     return config
 
 
+def _get_port_range(name: str, port_start: Optional[int]) -> Tuple[int, int]:
+    is_default = name == DEFAULT_LOCAL_CLUSTER_NAME
+    if port_start is None:
+        if is_default:
+            port_start = LOCAL_CLUSTER_INTERNAL_PORT_START
+        else:
+            port_start = random.randint(301, 399) * 100
+    port_end = port_start + LOCAL_CLUSTER_PORT_RANGE - 1
+
+    port_range = f'Current port range: {port_start}-{port_end}'
+    if is_default and port_start != LOCAL_CLUSTER_INTERNAL_PORT_START:
+        raise ValueError('Default local cluster `skypilot` should have '
+                         f'port range from 30000 to 30099. {port_range}.')
+    if not is_default and port_start == LOCAL_CLUSTER_INTERNAL_PORT_START:
+        raise ValueError('Port range 30000 to 30099 is reserved for '
+                         f'default local cluster `skypilot`. {port_range}.')
+    if port_start % 100 != 0:
+        raise ValueError('Local cluster port start must be a multiple of 100. '
+                         f'{port_range}.')
+
+    return port_start, port_end
+
+
 def deploy_local_cluster(name: Optional[str], port_start: Optional[int],
                          gpus: bool):
     name = name or DEFAULT_LOCAL_CLUSTER_NAME
-
-    if name == DEFAULT_LOCAL_CLUSTER_NAME:
-        if port_start is None:
-            port_start = LOCAL_CLUSTER_INTERNAL_PORT_START
-        if port_start != LOCAL_CLUSTER_INTERNAL_PORT_START:
-            port_end = port_start + LOCAL_CLUSTER_PORT_RANGE - 1
-            raise ValueError('Default local cluster `skypilot` should have '
-                             'port range from 30000 to 30099. Current '
-                             f'port range: {port_start}-{port_end}.')
-        port_end = LOCAL_CLUSTER_INTERNAL_PORT_END
-    else:
-        if port_start is None:
-            port_start = random.randint(301, 399) * 100
-        port_end = port_start + LOCAL_CLUSTER_PORT_RANGE - 1
-        if port_start == LOCAL_CLUSTER_INTERNAL_PORT_START:
-            raise ValueError('Port range 30000 to 30099 is reserved for '
-                             'default local cluster `skypilot`. Current '
-                             f'port range: {port_start}-{port_end}.')
-    if port_start % 100 != 0:
-        raise ValueError('Local cluster port start must be a multiple of 100. '
-                         f'Current port range: {port_start}-{port_end}.')
-
+    port_start, port_end = _get_port_range(name, port_start)
     context_name = f'kind-{name}'
     cluster_created = False
 
