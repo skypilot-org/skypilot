@@ -683,6 +683,14 @@ To modify your SkyPilot config, use the SkyPilot dashboard: ``http://<api-server
 
         ``apiService.config`` will be IGNORED during an ``helm upgrade`` if there is an existing config, due to the potential accidental loss of existing config. Use the SkyPilot dashboard instead.
 
+    .. note::
+
+        If remote database is configured (by setting either
+        :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>`
+        or :ref:`apiService.dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>`),
+        Skypilot configuration cannot be specified in the helm chart.
+        Use the dashboard once the API server is deployed to set the config.
+
 Optional: Set up GPU monitoring and metrics
 -------------------------------------------
 
