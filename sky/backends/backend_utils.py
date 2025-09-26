@@ -16,8 +16,8 @@ import tempfile
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, List, Optional, Sequence, Set, Tuple,
-                    TypeVar, Union)
+from typing import (Any, Callable, Dict, Iterator, List, Optional, Sequence,
+                    Set, Tuple, TypeVar, Union)
 import uuid
 
 import aiohttp
@@ -1226,7 +1226,6 @@ def _deterministic_cluster_yaml_hash(tmp_yaml_path: str) -> str:
     Rather than constructing the whole byte sequence, which may be quite large,
     we construct it incrementally by using hash.update() to add new bytes.
     """
-
     # Load the yaml contents so that we can directly remove keys.
     yaml_config = yaml_utils.read_yaml(tmp_yaml_path)
     for key_list in _RAY_YAML_KEYS_TO_REMOVE_FOR_HASH:
@@ -3859,13 +3858,35 @@ def invoke_skylet_with_retries(func: Callable[..., T]) -> T:
     ) from last_exception
 
 
+def invoke_skylet_streaming_with_retries(
+        stream_func: Callable[..., Iterator[T]]) -> Iterator[T]:
+    """Generic helper for making Skylet streaming gRPC requests."""
+    max_attempts = 3
+    backoff = common_utils.Backoff(initial_backoff=0.5)
+    last_exception: Optional[Exception] = None
+
+    for _ in range(max_attempts):
+        try:
+            for response in stream_func():
+                yield response
+            return
+        except grpc.RpcError as e:
+            last_exception = e
+            _handle_grpc_error(e, backoff.current_backoff())
+
+    raise RuntimeError(
+        f'Failed to stream Skylet response after {max_attempts} attempts'
+    ) from last_exception
+
+
 def _handle_grpc_error(e: 'grpc.RpcError', current_backoff: float) -> None:
     if e.code() == grpc.StatusCode.INTERNAL:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.SkyletInternalError(e.details())
     elif e.code() == grpc.StatusCode.UNAVAILABLE:
         time.sleep(current_backoff)
-    elif e.code() == grpc.StatusCode.UNIMPLEMENTED:
+    elif e.code() == grpc.StatusCode.UNIMPLEMENTED or e.code(
+    ) == grpc.StatusCode.UNKNOWN:
         # Handle backwards compatibility: old server doesn't implement this RPC.
         # Let the caller fall back to legacy execution.
         raise exceptions.SkyletMethodNotImplementedError(
