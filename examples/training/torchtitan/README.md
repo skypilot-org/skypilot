@@ -1,13 +1,18 @@
 # TorchTitan: Large-Scale LLM Training with SkyPilot
 
-This example shows how to train [TorchTitan](https://github.com/pytorch/torchtitan) models using SkyPilot's multi-node capabilities.
+This example demonstrates how [SkyPilot](https://skypilot.co) makes distributed training with [TorchTitan](https://github.com/pytorch/torchtitan) simple and scalable across any cloud.
 
-TorchTitan is a PyTorch native platform designed for rapid experimentation and large-scale training of generative AI models, featuring:
-- Multi-dimensional composable parallelisms (FSDP2, Tensor Parallel, Pipeline Parallel, Context Parallel)
-- Distributed checkpointing
-- torch.compile support
-- Float8 support
-- And many more optimizations for training LLMs at scale
+## Why SkyPilot for Distributed Training?
+
+**Simple multi-node setup**: SkyPilot automatically provides [environment variables](https://docs.skypilot.co/en/latest/running-jobs/environment-variables.html) (`SKYPILOT_NODE_RANK`, `SKYPILOT_NODE_IPS`, etc.) that integrate seamlessly with PyTorch distributed training - no manual networking configuration needed.
+
+**Auto-recovery**: Built-in fault tolerance automatically recovers from node failures and spot preemptions, resuming from checkpoints.
+
+**Easy scaling**: Launch many parallel experiments for hyperparameter tuning with [Managed Jobs](https://docs.skypilot.co/en/latest/running-jobs/many-jobs.html).
+
+## About TorchTitan
+
+[TorchTitan](https://github.com/pytorch/torchtitan) is a PyTorch native platform for large-scale LLM training, featuring multi-dimensional parallelisms (FSDP2, Tensor/Pipeline/Context Parallel), distributed checkpointing, torch.compile, and Float8 support.
 
 ## Quick start
 
