@@ -489,7 +489,7 @@ Here is a simple example of creating a pool:
 
   resources:
     # Specify the resources for each worker.
-    accelerators: {H100:1}
+    accelerators: H100
 
   file_mounts:
     /my-data:
