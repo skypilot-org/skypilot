@@ -849,8 +849,6 @@ def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
         for replica_info in ready_replicas:
             jobs_on_replica = managed_job_state.get_nonterminal_job_ids_by_pool(
                 service_name, replica_info.cluster_name)
-            logger.debug(f'Replica {replica_info.cluster_name!r} has '
-                         f'the following jobs: {jobs_on_replica}')
             # TODO(tian): Make it resources aware. Currently we allow and only
             # allow one job per replica. In the following PR, we should:
             #  i) When the replica is launched with `any_of` resources (
@@ -864,15 +862,6 @@ def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
             #     pool, it should be able to run 4 jobs at the same time.
             if not jobs_on_replica:
                 idle_replicas.append(replica_info)
-            else:
-                if len(jobs_on_replica) == 1 and jobs_on_replica[0] == job_id:
-                    logger.debug(f'Replica {replica_info.cluster_name!r} '
-                                 f'is already assigned to this job. This '
-                                 'should not happen.')
-                    idle_replicas.append(replica_info)
-                else:
-                    logger.debug(f'Replica {replica_info.cluster_name!r} is '
-                                 f'not idle.')
         if not idle_replicas:
             logger.info(f'No idle replicas found for pool {service_name!r}')
             return None
@@ -883,9 +872,6 @@ def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
         logger.info(f'Selected replica {replica_info.replica_id} with cluster '
                     f'{replica_info.cluster_name!r} for job {job_id!r} in pool '
                     f'{service_name!r}')
-        # Flush logger.
-        for handler in logger.handlers:
-            handler.flush()
         managed_job_state.set_current_cluster_name(job_id,
                                                    replica_info.cluster_name)
         return replica_info.cluster_name

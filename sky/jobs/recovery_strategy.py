@@ -420,7 +420,6 @@ class StrategyExecutor:
                             if self.cluster_name is None:
                                 raise exceptions.NoClusterLaunchedError(
                                     'No cluster name found in the pool.')
-                            self._logger.debug(f'Got replica {self.cluster_name} for job {self.job_id}')
                             request_id = None
                             try:
                                 request_id = await context_utils.to_thread(
