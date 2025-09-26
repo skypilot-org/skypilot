@@ -1677,8 +1677,9 @@ def local_up(gpus: bool,
              ssh_key: Optional[str],
              cleanup: bool,
              context_name: Optional[str] = None,
+             password: Optional[str] = None,
              name: Optional[str] = None,
-             password: Optional[str] = None) -> server_common.RequestId[None]:
+             port_start: Optional[int] = None) -> server_common.RequestId[None]:
     """Launches a Kubernetes cluster on local machines.
 
     Returns:
@@ -1698,8 +1699,9 @@ def local_up(gpus: bool,
                                 ssh_key=ssh_key,
                                 cleanup=cleanup,
                                 context_name=context_name,
+                                password=password,
                                 name=name,
-                                password=password)
+                                port_start=port_start)
     response = server_common.make_authenticated_request(
         'POST', '/local_up', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)

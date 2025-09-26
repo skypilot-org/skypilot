@@ -487,15 +487,13 @@ class TestVolume:
 
     def test_validate_with_invalid_cloud(self):
         """Test Volume.validate with invalid cloud."""
-        volume = volume_lib.Volume(
-            name='test',
-            type='k8s-pvc',
-            infra='runpod',
-            size='100Gi',
-        )
-
         with pytest.raises(ValueError) as exc_info:
-            volume.validate()
+            volume_lib.Volume(
+                name='test',
+                type='k8s-pvc',
+                infra='runpod',
+                size='100Gi',
+            )
         assert 'Invalid cloud' in str(exc_info.value)
 
     def test_validate_with_invalid_label_key(self, monkeypatch):
@@ -620,6 +618,15 @@ class TestVolume:
             volume.validate()
         assert 'RunPod network volume size must be at least' in str(
             exc_info.value)
+
+    def test_volume_infers_cloud_from_type_when_infra_none(self):
+        """Test that volume infers cloud from type when infra is None."""
+        volume = volume_lib.Volume(name='test',
+                                   type='k8s-pvc',
+                                   infra=None,
+                                   size='100Gi')
+        # Cloud should be inferred from volume type
+        assert volume.cloud == 'Kubernetes'
 
 
 class TestVolumeConfigModel:
