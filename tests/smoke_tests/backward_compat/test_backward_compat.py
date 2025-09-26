@@ -600,7 +600,7 @@ class TestBackwardCompatibility:
                 f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
                 f'sky volumes apply -y -n {cluster_name}-0 --infra {generic_cloud} --type k8s-pvc --size 1Gi',
                 # No restart on switch to current, cli in current, server in bases
-                f'{self.ACTIVATE_CURRENT} && sky volumes apply -y -n {cluster_name}-1 --infra {generic_cloud} --type k8s-pvc --size 1Gi',
+                f'{self.ACTIVATE_CURRENT} && sky volumes apply -y -n {cluster_name}-1 --type k8s-pvc --size 1Gi',
                 f'{self.ACTIVATE_CURRENT} && sky volumes ls | grep "{cluster_name}-0"',
                 f'{self.ACTIVATE_CURRENT} && sky volumes ls | grep "{cluster_name}-1"',
                 f'{self.ACTIVATE_CURRENT} && sky volumes delete {cluster_name}-0 -y',
@@ -684,6 +684,7 @@ class TestBackwardCompatibility:
                 f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
                 f'sky volumes apply -y -n {cluster_name}-0 --infra {generic_cloud} --type k8s-pvc --size 1Gi',
                 # No restart on switch to base, cli in base, server in current
+                # Base version might contain the bug in https://github.com/skypilot-org/skypilot/issues/7380, so we need to specify --infra
                 f'{self.ACTIVATE_BASE} && sky volumes apply -y -n {cluster_name}-1 --infra {generic_cloud} --type k8s-pvc --size 1Gi',
                 f'{self.ACTIVATE_BASE} && sky volumes ls | grep "{cluster_name}-0"',
                 f'{self.ACTIVATE_BASE} && sky volumes ls | grep "{cluster_name}-1"',
@@ -770,6 +771,7 @@ class TestBackwardCompatibility:
             commands = [
                 # Create volume in base version
                 f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
+                # Base version might contain the bug in https://github.com/skypilot-org/skypilot/issues/7380, so we need to specify --infra
                 f'sky volumes apply -y -n {volume_name} --infra k8s --type k8s-pvc --size 1Gi',
                 f'{self.ACTIVATE_BASE} && sky volumes ls | grep "{volume_name}"',
 
