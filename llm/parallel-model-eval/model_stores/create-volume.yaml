@@ -1,0 +1,9 @@
+# Creates a Kubernetes persistent volume for model storage
+name: model-checkpoints
+type: k8s-pvc
+infra: kubernetes
+size: 50Gi
+config:
+  namespace: default
+  storage_class_name: premium-rwo  # GKE default storage class
+  access_mode: ReadWriteOnce   # Standard GKE persistent disks
