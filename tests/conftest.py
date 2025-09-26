@@ -221,7 +221,10 @@ def pytest_addoption(parser):
         type=str,
         default='all',
         help=
-        'Dependency for package install, for example, --dependency=aws will run pip install "skypilot[aws]", --dependency=aws,azure will run pip install "skypilot[aws,azure]", and this parameter only works in buildkite CI env, will be ignored if you run locally',
+        'Dependency for package install. For example, --dependency=aws will run '
+        'pip install "skypilot[aws]". --dependency=aws,azure will run '
+        'pip install "skypilot[aws,azure]". This parameter only works in the '
+        'Buildkite CI environment and will be ignored if run locally.',
     )
 
 
