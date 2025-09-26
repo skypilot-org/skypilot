@@ -5928,7 +5928,7 @@ def local():
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
-             cleanup: bool, context_name: Optional[str], 
+             cleanup: bool, context_name: Optional[str],
              password: Optional[str], name: Optional[str],
              port_start: Optional[int], async_call: bool):
     """Creates a local or remote cluster."""

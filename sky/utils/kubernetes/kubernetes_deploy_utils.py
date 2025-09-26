@@ -317,13 +317,15 @@ def generate_kind_config(port_start: int,
     return config
 
 
-def deploy_local_cluster(name: Optional[str], port_start: Optional[int], gpus: bool):
+def deploy_local_cluster(name: Optional[str], port_start: Optional[int],
+                         gpus: bool):
     name = name or DEFAULT_LOCAL_CLUSTER_NAME
 
     if name == DEFAULT_LOCAL_CLUSTER_NAME:
         if port_start is None:
             port_start = LOCAL_CLUSTER_INTERNAL_PORT_START
         if port_start != LOCAL_CLUSTER_INTERNAL_PORT_START:
+            port_end = port_start + LOCAL_CLUSTER_PORT_RANGE - 1
             raise ValueError('Default local cluster `skypilot` should have '
                              'port range from 30000 to 30099. Current '
                              f'port range: {port_start}-{port_end}.')
@@ -331,11 +333,11 @@ def deploy_local_cluster(name: Optional[str], port_start: Optional[int], gpus: b
     else:
         if port_start is None:
             port_start = random.randint(301, 399) * 100
+        port_end = port_start + LOCAL_CLUSTER_PORT_RANGE - 1
         if port_start == LOCAL_CLUSTER_INTERNAL_PORT_START:
             raise ValueError('Port range 30000 to 30099 is reserved for '
                              'default local cluster `skypilot`. Current '
                              f'port range: {port_start}-{port_end}.')
-        port_end = port_start + LOCAL_CLUSTER_PORT_RANGE - 1
     if port_start % 100 != 0:
         raise ValueError('Local cluster port start must be a multiple of 100. '
                          f'Current port range: {port_start}-{port_end}.')
