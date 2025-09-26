@@ -25,6 +25,7 @@ from sqlalchemy.ext import declarative
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import context_utils
@@ -33,6 +34,11 @@ from sky.utils.db import migration_utils
 
 if typing.TYPE_CHECKING:
     from sqlalchemy.engine import row
+
+    from sky.schemas.generated import managed_jobsv1_pb2
+else:
+    managed_jobsv1_pb2 = adaptors_common.LazyImport(
+        'sky.schemas.generated.managed_jobsv1_pb2')
 
 # Separate callback types for sync and async contexts
 SyncCallbackType = Callable[[str], None]
@@ -448,6 +454,75 @@ class ManagedJobStatus(enum.Enum):
             cls.RECOVERING,
         ]
 
+    @classmethod
+    def from_protobuf(
+        cls, protobuf_value: 'managed_jobsv1_pb2.ManagedJobStatus'
+    ) -> Optional['ManagedJobStatus']:
+        """Convert protobuf ManagedJobStatus enum to Python enum value."""
+        protobuf_to_enum = {
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_UNSPECIFIED: None,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_PENDING: cls.PENDING,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_SUBMITTED:
+                cls.DEPRECATED_SUBMITTED,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_STARTING: cls.STARTING,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_RUNNING: cls.RUNNING,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_SUCCEEDED: cls.SUCCEEDED,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED: cls.FAILED,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_CONTROLLER:
+                cls.FAILED_CONTROLLER,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_SETUP:
+                cls.FAILED_SETUP,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_CANCELLED: cls.CANCELLED,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_RECOVERING: cls.RECOVERING,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_CANCELLING: cls.CANCELLING,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_PRECHECKS:
+                cls.FAILED_PRECHECKS,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_NO_RESOURCE:
+                cls.FAILED_NO_RESOURCE,
+        }
+
+        if protobuf_value not in protobuf_to_enum:
+            raise ValueError(
+                f'Unknown protobuf ManagedJobStatus value: {protobuf_value}')
+
+        return protobuf_to_enum[protobuf_value]
+
+    def to_protobuf(self) -> 'managed_jobsv1_pb2.ManagedJobStatus':
+        """Convert this Python enum value to protobuf enum value."""
+        enum_to_protobuf = {
+            ManagedJobStatus.PENDING:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_PENDING,
+            ManagedJobStatus.DEPRECATED_SUBMITTED:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_SUBMITTED,
+            ManagedJobStatus.STARTING:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_STARTING,
+            ManagedJobStatus.RUNNING:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_RUNNING,
+            ManagedJobStatus.SUCCEEDED:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_SUCCEEDED,
+            ManagedJobStatus.FAILED:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED,
+            ManagedJobStatus.FAILED_CONTROLLER:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_CONTROLLER,
+            ManagedJobStatus.FAILED_SETUP:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_SETUP,
+            ManagedJobStatus.CANCELLED:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_CANCELLED,
+            ManagedJobStatus.RECOVERING:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_RECOVERING,
+            ManagedJobStatus.CANCELLING:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_CANCELLING,
+            ManagedJobStatus.FAILED_PRECHECKS:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_PRECHECKS,
+            ManagedJobStatus.FAILED_NO_RESOURCE:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_NO_RESOURCE,
+        }
+
+        if self not in enum_to_protobuf:
+            raise ValueError(f'Unknown ManagedJobStatus value: {self}')
+
+        return enum_to_protobuf[self]
+
 
 _SPOT_STATUS_TO_COLOR = {
     ManagedJobStatus.PENDING: colorama.Fore.BLUE,
@@ -536,6 +611,60 @@ class ManagedJobScheduleState(enum.Enum):
     ALIVE = 'ALIVE'
     # The job is in a terminal state. (Not necessarily SUCCEEDED.)
     DONE = 'DONE'
+
+    @classmethod
+    def from_protobuf(
+        cls, protobuf_value: 'managed_jobsv1_pb2.ManagedJobScheduleState'
+    ) -> Optional['ManagedJobScheduleState']:
+        """Convert protobuf ManagedJobScheduleState enum to Python enum value.
+        """
+        protobuf_to_enum = {
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_UNSPECIFIED: None,
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_INVALID: cls.INVALID,
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_INACTIVE:
+                cls.INACTIVE,
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_WAITING: cls.WAITING,
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_ALIVE_WAITING:
+                cls.ALIVE_WAITING,
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_LAUNCHING:
+                cls.LAUNCHING,
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_ALIVE_BACKOFF:
+                cls.ALIVE_BACKOFF,
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_ALIVE: cls.ALIVE,
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_DONE: cls.DONE,
+        }
+
+        if protobuf_value not in protobuf_to_enum:
+            raise ValueError('Unknown protobuf ManagedJobScheduleState value: '
+                             f'{protobuf_value}')
+
+        return protobuf_to_enum[protobuf_value]
+
+    def to_protobuf(self) -> 'managed_jobsv1_pb2.ManagedJobScheduleState':
+        """Convert this Python enum value to protobuf enum value."""
+        enum_to_protobuf = {
+            ManagedJobScheduleState.INVALID:
+                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_INVALID,
+            ManagedJobScheduleState.INACTIVE:
+                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_INACTIVE,
+            ManagedJobScheduleState.WAITING:
+                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_WAITING,
+            ManagedJobScheduleState.ALIVE_WAITING:
+                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_ALIVE_WAITING,
+            ManagedJobScheduleState.LAUNCHING:
+                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_LAUNCHING,
+            ManagedJobScheduleState.ALIVE_BACKOFF:
+                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_ALIVE_BACKOFF,
+            ManagedJobScheduleState.ALIVE:
+                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_ALIVE,
+            ManagedJobScheduleState.DONE:
+                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_DONE,
+        }
+
+        if self not in enum_to_protobuf:
+            raise ValueError(f'Unknown ManagedJobScheduleState value: {self}')
+
+        return enum_to_protobuf[self]
 
 
 # === Status transition functions ===
@@ -792,8 +921,14 @@ def set_local_log_file(job_id: int, task_id: Optional[int],
 # ======== utility functions ========
 @_init_db
 def get_nonterminal_job_ids_by_name(name: Optional[str],
+                                    user_hash: Optional[str] = None,
                                     all_users: bool = False) -> List[int]:
-    """Get non-terminal job ids by name."""
+    """Get non-terminal job ids by name.
+
+    If name is None:
+    1. if all_users is False, get for the given user_hash
+    2. otherwise, get for all users
+    """
     assert _SQLALCHEMY_ENGINE is not None
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -810,8 +945,15 @@ def get_nonterminal_job_ids_by_name(name: Optional[str],
             ])
         ]
         if name is None and not all_users:
-            where_conditions.append(
-                job_info_table.c.user_hash == common_utils.get_user_hash())
+            if user_hash is None:
+                # For backwards compatibility. With codegen, USER_ID_ENV_VAR
+                # was set to the correct value by the jobs controller, as
+                # part of ManagedJobCodeGen._build(). This is no longer the
+                # case for the Skylet gRPC server, which is why we need to
+                # pass it explicitly through the request body.
+                logger.debug('user_hash is None, using current user hash')
+                user_hash = common_utils.get_user_hash()
+            where_conditions.append(job_info_table.c.user_hash == user_hash)
         if name is not None:
             # We match the job name from `job_info` for the jobs submitted after
             # #1982, and from `spot` for the jobs submitted before #1982, whose

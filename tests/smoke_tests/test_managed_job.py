@@ -1152,8 +1152,8 @@ def test_managed_jobs_inline_env(generic_cloud: str):
                 job_name=name,
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
                 timeout=55),
-            f'JOB_ROW=$(sky jobs queue | grep {name} | head -n1) && '
-            f'echo "$JOB_ROW" && echo "$JOB_ROW" | grep "SUCCEEDED" && '
+            f'JOB_ROW=$(sky jobs queue -v | grep {name} | head -n1) && '
+            f'echo "$JOB_ROW" && echo "$JOB_ROW" | grep -E "DONE|ALIVE" | grep "SUCCEEDED" && '
             f'JOB_ID=$(echo "$JOB_ROW" | awk \'{{print $1}}\') && '
             f'echo "JOB_ID=$JOB_ID" && '
             # Test that logs are still available after the job finishes.
