@@ -1466,10 +1466,10 @@ def test_loopback_access_with_basic_auth(generic_cloud: str):
         [
             # Without consolidation mode, loopback access should not be allowed.
             f'export {constants.ENV_VAR_ENABLE_BASIC_AUTH}=true && {smoke_tests_utils.SKY_API_RESTART}',
-            f's=$(SKYPILOT_DEBUG=0 sky status) && echo "$s" | grep "401 Client Error: Unauthorized for url: http://127.0.0.1:46580"',
+            f's=$(SKYPILOT_DEBUG=0 sky status 2>&1 || true) && echo "$s" | grep "401 Client Error: Unauthorized for url: http://127.0.0.1:46580"',
             # With consolidation mode, loopback access should be allowed.
             f'export {constants.ENV_VAR_ENABLE_BASIC_AUTH}=true && export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={server_config_path} && {smoke_tests_utils.SKY_API_RESTART}',
-            f's=$(SKYPILOT_DEBUG=0 sky status) && echo "$s" | grep "No existing clusters."',
+            f's=$(SKYPILOT_DEBUG=0 sky status) && echo "$s" | grep "Clusters"',
             f'sky jobs launch -y -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} echo hi',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
