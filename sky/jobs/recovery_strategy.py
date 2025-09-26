@@ -414,12 +414,16 @@ class StrategyExecutor:
                                 raise
                             self._logger.info('Managed job cluster launched.')
                         else:
-                            self.cluster_name = await (context_utils.to_thread(
-                                serve_utils.get_next_cluster_name, self.pool,
+                            cluster_info = await (context_utils.to_thread(
+                                serve_utils.get_next_cluster_info, self.pool,
                                 self.job_id))
-                            if self.cluster_name is None:
+                            if cluster_info is None:
                                 raise exceptions.NoClusterLaunchedError(
                                     'No cluster name found in the pool.')
+                            self.cluster_name = cluster_info.cluster_name
+                            self._logger.info(f'Job {self.job_id} running on '
+                                f'pool worker {self.cluster_name}-'
+                                f'v{cluster_info.version}')
                             request_id = None
                             try:
                                 request_id = await context_utils.to_thread(
