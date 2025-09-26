@@ -547,8 +547,6 @@ def test_heterogeneous_pool(generic_cloud: str):
     pool_config = basic_pool_conf(num_workers=1,
                                   infra=generic_cloud,
                                   resource_string='{"L4", "A10G"}')
-    print(pool_config)
-    print("eee")
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
         write_yaml(pool_yaml, pool_config)
         test = smoke_tests_utils.Test(
@@ -570,8 +568,6 @@ def test_heterogeneous_pool_counts(generic_cloud: str):
     pool_config = basic_pool_conf(num_workers=1,
                                   infra=generic_cloud,
                                   resource_string='{"H100":1, "L40S":1}')
-    print(pool_config)
-    print("eee")
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
         write_yaml(pool_yaml, pool_config)
         test = smoke_tests_utils.Test(
