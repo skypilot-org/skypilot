@@ -1244,6 +1244,7 @@ def dump_managed_job_queue(
     # Make sure to get all jobs - some logic below (e.g. high priority job
     # detection) requires a full view of the jobs table.
     jobs = managed_job_state.get_managed_jobs()
+    cluster_name_to_handle = global_user_state.get_cluster_name_to_handle_map()
 
     # Figure out what the highest priority blocking job is. We need to know in
     # order to determine if other jobs are blocked by a higher priority job, or
@@ -1317,15 +1318,12 @@ def dump_managed_job_queue(
         job['status'] = job['status'].value
         job['schedule_state'] = job['schedule_state'].value
 
-        pool = managed_job_state.get_pool_from_job_id(job['job_id'])
-        if pool is not None:
-            cluster_name, _ = managed_job_state.get_pool_submit_info(
-                job['job_id'])
-        else:
+        cluster_name = job.get('current_cluster_name', None)
+        if cluster_name is None:
             cluster_name = generate_managed_job_cluster_name(
                 job['task_name'], job['job_id'])
-        handle = global_user_state.get_handle_from_cluster_name(
-            cluster_name) if cluster_name is not None else None
+        handle = cluster_name_to_handle.get(
+            cluster_name, None) if cluster_name is not None else None
         if isinstance(handle, backends.CloudVmRayResourceHandle):
             resources_str = resources_utils.get_readable_resources_repr(
                 handle, simplify=True)

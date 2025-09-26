@@ -1065,6 +1065,22 @@ def get_handle_from_cluster_name(
     return pickle.loads(row.handle)
 
 
+@_init_db
+@metrics_lib.time_me
+def get_cluster_name_to_handle_map(
+) -> Dict[str, Optional['backends.ResourceHandle']]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(cluster_table.c.name, cluster_table.c.handle).all()
+    name_to_handle = {}
+    for row in rows:
+        if row.handle and len(row.handle) > 0:
+            name_to_handle[row.name] = pickle.loads(row.handle)
+        else:
+            name_to_handle[row.name] = None
+    return name_to_handle
+
+
 @_init_db_async
 @metrics_lib.time_me
 async def get_status_from_cluster_name_async(
