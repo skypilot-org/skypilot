@@ -7,6 +7,7 @@ from typing import Callable
 from sky import sky_logging
 from sky import skypilot_config
 from sky.server import constants as server_constants
+from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import env_options
@@ -106,6 +107,14 @@ def refresh_cluster_status_event():
     time.sleep(server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS)
 
 
+# After #7332, we start a local API server for pool/serve controller.
+# We should skip the status refresh event on the pool/serve controller,
+# as they have their own logic to cleanup the cluster records. This refresh
+# will break existing workflows.
+def should_skip_refresh_cluster_status() -> bool:
+    return os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is None
+
+
 def refresh_volume_status_event():
     """Periodically refresh the volume status."""
     # pylint: disable=import-outside-toplevel
@@ -196,6 +205,7 @@ INTERNAL_REQUEST_DAEMONS = [
     InternalRequestDaemon(id='skypilot-status-refresh-daemon',
                           name='status-refresh',
                           event_fn=refresh_cluster_status_event,
+                          should_skip=should_skip_refresh_cluster_status,
                           default_log_level='DEBUG'),
     # Volume status refresh daemon to update the volume status periodically.
     InternalRequestDaemon(id='skypilot-volume-status-refresh-daemon',
