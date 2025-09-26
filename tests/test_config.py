@@ -560,9 +560,11 @@ def test_get_override_skypilot_config_from_client_get_latest_config(tmp_path):
             ports: ingress
         """))
     with mock.patch('os.environ.get', return_value=old_path):
+        skypilot_config.reload_config()
         result_old = payloads.get_override_skypilot_config_from_client()
         assert result_old['kubernetes']['ports'] == 'loadbalancer'
     with mock.patch('os.environ.get', return_value=new_path):
+        skypilot_config.reload_config()
         result_new = payloads.get_override_skypilot_config_from_client()
         assert result_new['kubernetes']['ports'] == 'ingress'
 
