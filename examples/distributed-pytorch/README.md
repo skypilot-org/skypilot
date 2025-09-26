@@ -39,6 +39,10 @@ run: |
     main.py
 ```
 
+To run the equivalent code using python SDK, simply run
+```
+python sdk_scripts/train.py
+```
 
 
 ### Using `rdzv` backend
@@ -66,6 +70,10 @@ run: |
     main.py
 ```
 
+To run the equivalent code using python SDK, simply run
+```
+python sdk_scripts/train_rdzv.py
+```
 
 ## Scale up
 
