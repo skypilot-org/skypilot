@@ -33,6 +33,7 @@ from sky.backends import cloud_vm_ray_backend
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
+from sky.schemas.api import responses
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -1517,7 +1518,7 @@ def load_managed_job_queue(
 
 
 def _get_job_status_from_tasks(
-    job_tasks: List[Dict[str, Any]]
+    job_tasks: Union[List[responses.ManagedJobRecord], List[Dict[str, Any]]]
 ) -> Tuple[managed_job_state.ManagedJobStatus, int]:
     """Get the current task status and the current task id for a job."""
     managed_task_status = managed_job_state.ManagedJobStatus.SUCCEEDED
@@ -1537,7 +1538,8 @@ def _get_job_status_from_tasks(
 
 
 @typing.overload
-def format_job_table(tasks: List[Dict[str, Any]],
+def format_job_table(tasks: Union[List[responses.ManagedJobRecord],
+                                  List[Dict[str, Any]]],
                      show_all: bool,
                      show_user: bool,
                      return_rows: Literal[False] = False,
@@ -1546,7 +1548,8 @@ def format_job_table(tasks: List[Dict[str, Any]],
 
 
 @typing.overload
-def format_job_table(tasks: List[Dict[str, Any]],
+def format_job_table(tasks: Union[List[responses.ManagedJobRecord],
+                                  List[Dict[str, Any]]],
                      show_all: bool,
                      show_user: bool,
                      return_rows: Literal[True],
@@ -1555,7 +1558,7 @@ def format_job_table(tasks: List[Dict[str, Any]],
 
 
 def format_job_table(
-        tasks: List[Dict[str, Any]],
+        tasks: Union[List[responses.ManagedJobRecord], List[Dict[str, Any]]],
         show_all: bool,
         show_user: bool,
         return_rows: bool = False,

@@ -1322,7 +1322,7 @@ def exec(
 
 
 def _handle_jobs_queue_request(
-        request_id: server_common.RequestId[List[Dict[str, Any]]],
+        request_id: server_common.RequestId[List[responses.ManagedJobRecord]],
         show_all: bool,
         show_user: bool,
         max_num_jobs_to_show: Optional[int],
