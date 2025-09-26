@@ -333,14 +333,14 @@ class TestRunPodVolumeTable:
         assert 'p1' in out
 
     def test_get_infra_str(self):
-        from sky.volumes.utils import _get_infra_str
+        from sky.client.cli.table_utils import _get_infra_str
         assert _get_infra_str(None, None, None) == ''
         assert _get_infra_str('runpod', None, None) == 'runpod'
         assert _get_infra_str('runpod', 'us', None) == 'runpod/us'
         assert _get_infra_str('runpod', 'us', 'iad-1') == 'runpod/us/iad-1'
 
     def test_format_volume_table_mixed_types_and_separator(self):
-        from sky.volumes import utils as vutils
+        from sky.client.cli.table_utils import format_volume_table
         volumes = [{
             'name': 'p1',
             'type': 'k8s-pvc',
@@ -356,7 +356,7 @@ class TestRunPodVolumeTable:
             'zone': 'iad-1',
             'size': '20'
         }]
-        out = vutils.format_volume_table(volumes, show_all=False)
+        out = format_volume_table(volumes, show_all=False)
         # Both headers present and separated by blank line
         assert 'Kubernetes PVCs:' in out
         assert 'RunPod Network Volumes:' in out
