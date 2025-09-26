@@ -90,7 +90,6 @@ from sky.utils import ux_utils
 from sky.utils import volume as volume_utils
 from sky.utils import yaml_utils
 from sky.utils.cli_utils import status_utils
-from sky.volumes import utils as volumes_utils
 from sky.volumes.client import sdk as volumes_sdk
 
 if typing.TYPE_CHECKING:
@@ -4240,8 +4239,8 @@ def volumes_ls(verbose: bool):
     """List volumes managed by SkyPilot."""
     request_id = volumes_sdk.ls()
     all_volumes = sdk.stream_and_get(request_id)
-    volume_table = volumes_utils.format_volume_table(all_volumes,
-                                                     show_all=verbose)
+    volume_table = table_utils.format_volume_table(all_volumes,
+                                                   show_all=verbose)
     click.echo(volume_table)
 
 
