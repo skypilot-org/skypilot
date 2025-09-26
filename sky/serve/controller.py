@@ -128,7 +128,7 @@ class SkyServeController:
             ready_replica_urls = self._replica_manager.get_active_replica_urls()
 
             # Use URL-to-info mapping to avoid duplication
-            replica_info = {}
+            replica_info: Dict[str, Dict[str, str]] = {}
             for info in replica_infos:
                 if info.url in ready_replica_urls:
                     # Get GPU type from handle.launched_resources.accelerators
@@ -145,7 +145,7 @@ class SkyServeController:
             # Check that all ready replica URLs are included in replica_info
             missing_urls = set(ready_replica_urls) - set(replica_info.keys())
             if missing_urls:
-                logger.warning(f'Ready replica URLs missing from replica_info: '
+                logger.warning('Ready replica URLs missing from replica_info: '
                                f'{missing_urls}')
                 # fallback: add missing URLs with unknown GPU type
                 for url in missing_urls:
