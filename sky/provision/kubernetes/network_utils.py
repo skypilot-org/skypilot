@@ -9,6 +9,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes
+from sky.provision.kubernetes import constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import directory_utils
 from sky.utils import kubernetes_enums
@@ -245,15 +246,15 @@ def ingress_controller_exists(context: Optional[str],
 
 
 def get_ingress_external_ip_and_ports(
-    context: Optional[str],
-    namespace: str = 'ingress-nginx'
+        context: Optional[str]
 ) -> Tuple[Optional[str], Optional[Tuple[int, int]]]:
     """Returns external ip and ports for the ingress controller."""
     core_api = kubernetes.core_api(context)
     ingress_services = [
-        item for item in core_api.list_namespaced_service(
-            namespace, _request_timeout=kubernetes.API_TIMEOUT).items
-        if item.metadata.name == 'ingress-nginx-controller'
+        item for item in core_api.list_service_for_all_namespaces(
+            label_selector=constants.INGRESS_SERVICE_LABEL_SELECTOR,
+            _request_timeout=kubernetes.API_TIMEOUT).items
+        if item.spec.type == 'LoadBalancer'
     ]
     if not ingress_services:
         return (None, None)
