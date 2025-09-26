@@ -22,6 +22,7 @@ if typing.TYPE_CHECKING:
 
 COMMAND_TRUNC_LENGTH = 25
 NUM_COST_REPORT_LINES = 5
+PRICE_UNAVAILABLE = '[Price unavailable]'
 
 # A record in global_user_state's 'clusters' table.
 _ClusterRecord = Dict[str, Any]
@@ -204,6 +205,9 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
         cluster_table.add_row(row)
 
     if cluster_records:
+        has_missing_instance_types = any(
+            _get_price_for_cost_report(record) == PRICE_UNAVAILABLE
+            for record in cluster_records[:num_lines_to_display])
         controller_record = cluster_records[0]
         if controller_name is not None:
             autostop = controller_record.get('autostop', None)
@@ -220,6 +224,13 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Clusters{days_str}'
                        f'{colorama.Style.RESET_ALL}')
+
+        if has_missing_instance_types:
+            click.echo(f'{colorama.Fore.YELLOW}WARNING: Pricing is not '
+                       f'available for some clusters. Some instance '
+                       f'types may be missing from the catalog.'
+                       f'{colorama.Style.RESET_ALL}')
+
         click.echo(cluster_table)
 
 
@@ -405,7 +416,7 @@ def _get_price_for_cost_report(
         price_str = f'$ {hourly_cost:.2f}'
     except ValueError as e:
         logger.debug(f'Failed to get price: {e}')
-        price_str = '[Price unavailable]'
+        price_str = PRICE_UNAVAILABLE
     return price_str
 
 

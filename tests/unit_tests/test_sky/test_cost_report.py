@@ -494,7 +494,7 @@ class TestCostReportMissingInstanceType(unittest.TestCase):
                                                             truncate=True)
 
         # Should return the fallback price string
-        self.assertEqual(price_str, '[Price unavailable]')
+        self.assertEqual(price_str, status_utils.PRICE_UNAVAILABLE)
 
         # Verify get_cost was called
         mock_resources.get_cost.assert_called_once_with(3600)
