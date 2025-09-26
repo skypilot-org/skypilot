@@ -28,6 +28,7 @@ from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.provision import common as provision_common
+from sky.schemas.api import responses
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.serve.server import impl
@@ -643,6 +644,28 @@ def queue(refresh: bool,
 
 
 @usage_lib.entrypoint
+def queue_v2_api(
+    refresh: bool,
+    skip_finished: bool = False,
+    all_users: bool = False,
+    job_ids: Optional[List[int]] = None,
+    user_match: Optional[str] = None,
+    workspace_match: Optional[str] = None,
+    name_match: Optional[str] = None,
+    pool_match: Optional[str] = None,
+    page: Optional[int] = None,
+    limit: Optional[int] = None,
+    statuses: Optional[List[str]] = None,
+) -> Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int]:
+    """Gets statuses of managed jobs and parse the
+    jobs to responses.ManagedJobRecord."""
+    jobs, total, status_counts, total_no_filter = queue_v2(
+        refresh, skip_finished, all_users, job_ids, user_match, workspace_match,
+        name_match, pool_match, page, limit, statuses)
+    return [responses.ManagedJobRecord(**job) for job in jobs
+           ], total, status_counts, total_no_filter
+
+
 def queue_v2(
     refresh: bool,
     skip_finished: bool = False,

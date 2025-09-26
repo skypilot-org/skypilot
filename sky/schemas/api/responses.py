@@ -7,6 +7,7 @@ import pydantic
 
 from sky import data
 from sky import models
+from sky.jobs import state as job_state
 from sky.server import common
 from sky.skylet import job_lib
 from sky.utils import status_lib
@@ -153,3 +154,40 @@ class StorageRecord(ResponseBaseModel):
     store: List[data.StoreType]
     last_use: str
     status: status_lib.StorageStatus
+
+
+class ManagedJobRecord(ResponseBaseModel):
+    """Response for the managed job queue endpoint.
+    {
+        'job_id': int,
+        'job_name': str,
+        'resources': str,
+        'submitted_at': (float) timestamp of submission,
+        'end_at': (float) timestamp of end,
+        'job_duration': (float) duration in seconds,
+        'recovery_count': (int) Number of retries,
+        'status': (sky.jobs.ManagedJobStatus) of the job,
+        'cluster_resources': (str) resources of the cluster,
+        'region': (str) region of the cluster,
+        'user_name': (Optional[str]) job creator's user name,
+        'user_hash': (str) job creator's user hash,
+        'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+        'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+    }
+    """
+    job_id: Optional[int] = None
+    job_name: Optional[str] = None
+    resources: Optional[str] = None
+    # None if the job has not been submitted yet.
+    submitted_at: Optional[float] = None
+    # None if the job has not ended yet.
+    end_at: Optional[float] = None
+    job_duration: Optional[float] = None
+    recovery_count: Optional[int] = None
+    status: Optional[job_state.ManagedJobStatus] = None
+    cluster_resources: Optional[str] = None
+    region: Optional[str] = None
+    user_name: Optional[str] = None
+    user_hash: Optional[str] = None
+    task_id: Optional[int] = None
+    task_name: Optional[str] = None
