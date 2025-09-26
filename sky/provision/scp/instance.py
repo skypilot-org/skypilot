@@ -72,7 +72,6 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     def _resume(instance_name):
         instance_id = _get_instance_id(instance_name, cluster_name_on_cloud)
-
         while True:
             state = scp_utils.SCPClient().get_instance_info(
                 instance_id)['virtualServerState']
@@ -83,7 +82,6 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             time.sleep(2)
 
         scp_utils.SCPClient().start_instance(instance_id)
-
         while True:
             info = scp_utils.SCPClient().get_instance_info(instance_id)
             if info['virtualServerState'] == 'RUNNING':
