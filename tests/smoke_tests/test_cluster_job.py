@@ -2157,7 +2157,6 @@ def test_remote_server_api_login():
 
 # ---------- Testing Autostopping ----------
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_nebius  # Nebius does not support autodown
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
@@ -2197,7 +2196,6 @@ def test_autostop_with_unhealthy_ray_cluster(generic_cloud: str):
 
 # ---------- Testing Autodowning ----------
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_nebius  # Nebius does not support autodown
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
