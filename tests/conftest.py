@@ -216,6 +216,13 @@ def pytest_addoption(parser):
         help=
         'Use existing cluster for backend integration tests instead of creating a new one',
     )
+    parser.addoption(
+        '--dependency',
+        type=str,
+        default='all',
+        help=
+        'Dependency for package install, for example, --dependency=aws will run pip install "skypilot[aws]", --dependency=aws,azure will run pip install "skypilot[aws,azure]", and this parameter only works in buildkite CI env, will be ignored if you run locally',
+    )
 
 
 def pytest_configure(config):
