@@ -12,6 +12,7 @@ This flag is intended for testing and debugging individual GPU configurations.
 """
 
 import argparse
+import json
 import os
 import sys
 import traceback
@@ -32,135 +33,183 @@ DEFAULT_MAX_GPUS = 8
 DEFAULT_GPU_INFO: Dict[str, Dict[str, Union[int, float]]] = {
     'A100-80GB': {
         'vcpus': 8.0,
+        'memory': 117.0,
         'max_count': 8
     },
     'A100-80GB-SXM': {
         'vcpus': 16.0,
+        'memory': 117.0,
         'max_count': 8
     },
     'A30': {
-        'vcpus': 8.0,
+        'vcpus': 12.0,
+        'memory': 39.0,
         'max_count': 8
     },
     'A40': {
         'vcpus': 9.0,
+        'memory': 48.0,
         'max_count': 10
     },
     'B200': {
-        'vcpus': 36.0,
+        'vcpus': 28.0,
+        'memory': 180.0,
         'max_count': 8
     },
     'H100': {
         'vcpus': 16.0,
+        'memory': 176.0,
         'max_count': 8
     },
     'H100-NVL': {
         'vcpus': 16.0,
-        'max_count': 8
+        'memory': 94.0,
+        'max_count': 10
     },
     'H100-SXM': {
         'vcpus': 20.0,
+        'memory': 125.0,
         'max_count': 8
     },
     'H200-SXM': {
-        'vcpus': 20.0,
+        'vcpus': 12.0,
+        'memory': 188.0,
         'max_count': 8
     },
     'L4': {
-        'vcpus': 4.0,
-        'max_count': 8
+        'vcpus': 8.0,
+        'memory': 45.0,
+        'max_count': 10
     },
     'L40': {
-        'vcpus': 16.0,
-        'max_count': 8
+        'vcpus': 9.0,
+        'memory': 125.0,
+        'max_count': 10
     },
     'L40S': {
-        'vcpus': 16,
+        'vcpus': 12.0,
+        'memory': 62.0,
         'max_count': 8
     },
     'MI300X': {
         'vcpus': 24.0,
+        'memory': 283.0,
         'max_count': 8
     },
     'RTX2000-Ada': {
         'vcpus': 6.0,
+        'memory': 31.0,
         'max_count': 8
     },
     'RTX3070': {
         'vcpus': 8.0,
+        'memory': 30.0,
         'max_count': 8
     },
     'RTX3080': {
         'vcpus': 8.0,
-        'max_count': 8
+        'memory': 14.0,
+        'max_count': 4
     },
     'RTX3080-Ti': {
         'vcpus': 8.0,
-        'max_count': 8
+        'memory': 18.0,
+        'max_count': 5
     },
     'RTX3090': {
-        'vcpus': 16.0,
+        'vcpus': 4.0,
+        'memory': 25.0,
         'max_count': 8
     },
     'RTX3090-Ti': {
-        'vcpus': 12.0,
-        'max_count': 8
+        'vcpus': 8.0,
+        'memory': 24.0,
+        'max_count': 9
     },
     'RTX4000-Ada': {
-        'vcpus': 9.0,
+        'vcpus': 8.0,
+        'memory': 47.0,
         'max_count': 8
     },
+    'RTX4080': {
+        'vcpus': 8.0,
+        'memory': 22.0,
+        'max_count': 5
+    },
+    'RTX4080-SUPER': {
+        'vcpus': 12.0,
+        'memory': 62.0,
+        'max_count': 6
+    },
     'RTX4090': {
-        'vcpus': 16.0,
+        'vcpus': 5.0,
+        'memory': 29.0,
         'max_count': 8
     },
     'RTX5000-Ada': {
         'vcpus': 6.0,
+        'memory': 62.0,
         'max_count': 8
     },
     'RTX5080': {
         'vcpus': 5.0,
+        'memory': 30.0,
         'max_count': 8
     },
     'RTX5090': {
-        'vcpus': 5.0,
+        'vcpus': 6.0,
+        'memory': 46.0,
         'max_count': 8
     },
     'RTX6000-Ada': {
-        'vcpus': 14.0,
+        'vcpus': 10.0,
+        'memory': 62.0,
         'max_count': 8
     },
     'RTXA4000': {
         'vcpus': 6.0,
-        'max_count': 8
+        'memory': 35.0,
+        'max_count': 12
     },
     'RTXA4500': {
-        'vcpus': 12.0,
-        'max_count': 8
+        'vcpus': 7.0,
+        'memory': 30.0,
+        'max_count': 4
     },
     'RTXA5000': {
-        'vcpus': 6.0,
-        'max_count': 8
+        'vcpus': 3.0,
+        'memory': 25.0,
+        'max_count': 10
     },
     'RTXA6000': {
-        'vcpus': 4.0,
-        'max_count': 8
+        'vcpus': 8.0,
+        'memory': 50.0,
+        'max_count': 10
     },
     'RTXPRO6000': {
         'vcpus': 14.0,
-        'max_count': 8
+        'memory': 125.0,
+        'max_count': 9
     },
     'RTXPRO6000-MaxQ': {
         'vcpus': 18.0,
-        'max_count': 8
+        'memory': 215.0,
+        'max_count': 7
     },
     'RTXPRO6000-WK': {
-        'vcpus': 32.0,
+        'vcpus': 12.0,
+        'memory': 186.0,
+        'max_count': 4
+    },
+    'V100-SXM2': {
+        'vcpus': 10.0,
+        'memory': 62.0,
         'max_count': 8
     },
     'V100-SXM2-32GB': {
         'vcpus': 20.0,
-        'max_count': 8
+        'memory': 93.0,
+        'max_count': 4
     }
 }
 
@@ -179,11 +228,11 @@ USEFUL_COLUMNS = [
     'AcceleratorCount',
     'vCPUs',
     'MemoryGiB',
-    'GpuInfo',
     'Region',
     'SpotPrice',
     'Price',
     'AvailabilityZone',
+    'GpuInfo',
 ]
 
 # Mapping of regions to their availability zones
@@ -295,41 +344,55 @@ def format_gpu_name(gpu_type: Dict[str, Any]) -> str:
     return base_name
 
 
-def get_gpu_info(gpu_type: Dict[str, Any],
+def get_gpu_info(base_gpu_name: str, gpu_type: Dict[str, Any],
                  gpu_count: int) -> Optional[Dict[str, Any]]:
     """Extract relevant GPU information from RunPod GPU type data."""
-    gpu_name = format_gpu_name(gpu_type)
-    vcpus = DEFAULT_GPU_INFO.get(gpu_name, {}).get('vcpus')
 
-    # Use minVcpu lowestPrice if defaults not available
+    # Use minVcpu & minMemory in the lowestPrice info if defaults not available
     # Don't use this value by default as it is dynamic and changes often
+    vcpus = DEFAULT_GPU_INFO.get(base_gpu_name, {}).get('vcpus')
     if vcpus is None:
-        # Returns vcpus already scaled by the GPU count
         vcpus = gpu_type.get('lowestPrice', {}).get('minVcpu')
     else:
         vcpus = vcpus * gpu_count
 
-    # This is the VRAM memory per GPU, not the CPU memory
-    memory = gpu_type.get('memoryInGb')
+    # This is the (minimum) pod RAM memory (scaled to count)
+    memory = DEFAULT_GPU_INFO.get(base_gpu_name, {}).get('memory')
+    if memory is None:
+        memory = gpu_type.get('lowestPrice', {}).get('minMemory')
+
+    # This is the VRAM memory per GPU (not scaled to count)
+    gpu_memory = gpu_type.get('memoryInGb', 0)
 
     # Return None if memory or vcpus not valid
     if not isinstance(vcpus, (float, int)) or vcpus <= 0:
-        print(f'Skipping GPU {gpu_name}:'
+        print(f'Skipping GPU {base_gpu_name}:'
               ' vCPUs must be a positive number, not {vcpus}')
         return None
     if not isinstance(memory, (float, int)) or memory <= 0:
-        print(f'Skipping GPU {gpu_name}:'
+        print(f'Skipping GPU {base_gpu_name}:'
               ' Memory must be a positive number, not {memory}')
         return None
+
+    gpu_info_dict = {
+        'Gpus': [{
+            'Name': gpu_type['displayName'],
+            'Manufacturer': gpu_type['manufacturer'],
+            'Count': gpu_count,
+            'MemoryInfo': {
+                'SizeInMiB': gpu_memory
+            },
+        }],
+        'TotalGpuMemoryInMiB': gpu_memory * gpu_count,
+    }
+    gpu_info = json.dumps(gpu_info_dict).replace('"', '\'')
 
     # Convert the counts, vCPUs, and memory to float
     # for consistency with skypilot's catalog format
     return {
-        'AcceleratorName': gpu_name,
-        'AcceleratorCount': float(gpu_count),
         'vCPUs': float(vcpus),
         'MemoryGiB': float(memory * gpu_count),
-        'GpuInfo': gpu_name,
+        'GpuInfo': gpu_info,
     }
 
 
@@ -341,7 +404,7 @@ def get_instance_configurations(gpu_id: str) -> List[Dict]:
 
     # If the GPU isn't in DEFAULT_GPU_INFO we default to a max of 8 GPUs
     if base_gpu_name in DEFAULT_GPU_INFO:
-        max_gpu_count = DEFAULT_GPU_INFO['base_gpu_name'].get(
+        max_gpu_count = DEFAULT_GPU_INFO[base_gpu_name].get(
             'max_count', DEFAULT_MAX_GPUS)
     else:
         max_gpu_count = DEFAULT_MAX_GPUS
@@ -353,13 +416,13 @@ def get_instance_configurations(gpu_id: str) -> List[Dict]:
         else:
             detailed_gpu = get_gpu_details(gpu_id, gpu_count)
 
-        # only add secure clouds. skipping community cloud instances.
+        # Only add secure clouds skipping community cloud instances.
         if not detailed_gpu['secureCloud']:
             continue
 
         # Get basic info including memory & vcpu from the returned data
         # If memory or vpcu is not available, skip this gpu count
-        gpu_info = get_gpu_info(detailed_gpu, gpu_count)
+        gpu_info = get_gpu_info(base_gpu_name, detailed_gpu, gpu_count)
         if gpu_info is None:
             continue
 
@@ -373,12 +436,14 @@ def get_instance_configurations(gpu_id: str) -> List[Dict]:
         for region, zones in REGION_ZONES.items():
             for zone in zones:
                 instances.append({
-                    **gpu_info,
                     'InstanceType': f'{gpu_count}x_{base_gpu_name}_SECURE',
+                    'AcceleratorName': base_gpu_name,
+                    'AcceleratorCount': float(gpu_count),
                     'SpotPrice': spot_price,
                     'Price': base_price,
                     'Region': region,
                     'AvailabilityZone': zone,
+                    **gpu_info
                 })
 
     return instances
