@@ -1140,7 +1140,7 @@ If you want all available contexts to be allowed, set it to 'all' like this:
     allowed_contexts: all
 
 
-You can also set ``SKYPILOT_ALLOW_ALL_CONTEXTS`` environment variable to ``"true"``
+You can also set ``SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS`` environment variable to ``"true"``
 for the same effect. Configuration option overrides the environment variable if set.
 
 .. _config-yaml-kubernetes-custom-metadata:
