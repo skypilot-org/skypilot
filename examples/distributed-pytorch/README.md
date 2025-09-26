@@ -39,7 +39,7 @@ run: |
     main.py
 ```
 
-To run the equivalent code using python SDK, simply run
+To run the equivalent code using python SDK, run
 ```
 python sdk_scripts/train.py
 ```
@@ -70,7 +70,7 @@ run: |
     main.py
 ```
 
-To run the equivalent code using python SDK, simply run
+To run the equivalent code using python SDK, run
 ```
 python sdk_scripts/train_rdzv.py
 ```
