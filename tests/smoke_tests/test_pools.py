@@ -1,6 +1,6 @@
 import tempfile
 import textwrap
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import pytest
 from smoke_tests import smoke_tests_utils
@@ -184,8 +184,10 @@ def check_for_recovery_message_on_controller(job_name: str):
 def basic_pool_conf(
     num_workers: int,
     infra: str,
+    resource_string: Optional[str] = None,
     setup_cmd: str = 'echo "setup message"',
 ):
+    resource_string = '    accelerators: ' + resource_string if resource_string else ''
     return textwrap.dedent(f"""
     pool:
         workers: {num_workers}
@@ -194,6 +196,7 @@ def basic_pool_conf(
         cpus: 2+
         memory: 4GB+
         infra: {infra}
+    {resource_string}
 
     setup: |
         {setup_cmd}
@@ -930,5 +933,46 @@ def test_pools_job_cancel_no_jobs(generic_cloud: str):
             timeout=timeout,
             teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
         )
+        smoke_tests_utils.run_one_test(test)
 
+
+# TODO(Lloyd): Remove once heterogeneous pools are supported.
+def test_heterogeneous_pool(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+    pool_name = common_utils.make_cluster_name_on_cloud(
+        pool_name, sky.AWS.max_cluster_name_length())
+    pool_config = basic_pool_conf(num_workers=1,
+                                  infra=generic_cloud,
+                                  resource_string='{"L4", "A10G"}')
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        write_yaml(pool_yaml, pool_config)
+        test = smoke_tests_utils.Test(
+            'test_heterogeneous_pool_counts',
+            [
+                f's=$(sky jobs pool apply -p {pool_name} {pool_yaml.name} -y 2>&1); echo "$s"; echo; echo; echo "$s" | grep "Heterogeneous clusters are not supported"',
+            ],
+            timeout=smoke_tests_utils.get_timeout(generic_cloud),
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+#(TODO): Remove once heterogeneous pools are supported.
+def test_heterogeneous_pool_counts(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+    pool_name = common_utils.make_cluster_name_on_cloud(
+        pool_name, sky.AWS.max_cluster_name_length())
+    pool_config = basic_pool_conf(num_workers=1,
+                                  infra=generic_cloud,
+                                  resource_string='{"H100":1, "L40S":1}')
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        write_yaml(pool_yaml, pool_config)
+        test = smoke_tests_utils.Test(
+            'test_heterogeneous_pool_counts',
+            [
+                f's=$(sky jobs pool apply -p {pool_name} {pool_yaml.name} -y 2>&1); echo "$s"; echo; echo; echo "$s" | grep "Heterogeneous clusters are not supported"',
+            ],
+            timeout=smoke_tests_utils.get_timeout(generic_cloud),
+        )
         smoke_tests_utils.run_one_test(test)

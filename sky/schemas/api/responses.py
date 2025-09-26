@@ -7,6 +7,7 @@ import pydantic
 
 from sky import models
 from sky.server import common
+from sky.skylet import job_lib
 from sky.utils import status_lib
 
 
@@ -119,6 +120,23 @@ class StatusResponse(ResponseBaseModel):
     memory: Optional[str] = None
     accelerators: Optional[str] = None
     cluster_name_on_cloud: Optional[str] = None
+
+
+class ClusterJobRecord(ResponseBaseModel):
+    """Response for the cluster job queue endpoint."""
+    job_id: int
+    job_name: str
+    username: str
+    user_hash: str
+    submitted_at: float
+    # None if the job has not started yet.
+    start_at: Optional[float] = None
+    # None if the job has not ended yet.
+    end_at: Optional[float] = None
+    resources: str
+    status: job_lib.JobStatus
+    log_path: str
+    metadata: Dict[str, Any] = {}
 
 
 class UploadStatus(enum.Enum):

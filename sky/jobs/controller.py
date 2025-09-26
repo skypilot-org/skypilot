@@ -18,6 +18,7 @@ import sky
 from sky import core
 from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.data import data_utils
@@ -928,6 +929,9 @@ class Controller:
                             ctx.override_envs({key: value})
                             job_logger.debug(
                                 f'Set environment variable: {key}={value}')
+                    # Reload the skypilot config for this context to make sure
+                    # the latest config is used.
+                    skypilot_config.reload_config()
                 else:
                     job_logger.error(
                         'Context is None, cannot set environment variables')
