@@ -1476,7 +1476,7 @@ def test_loopback_access_with_basic_auth(generic_cloud: str):
                 job_name=f'{name}',
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
                 timeout=120),
-            f'sky jobs logs {name} --no-follow | grep "hi"',
+            f'sky jobs logs -n {name} --no-follow | grep "hi"',
         ],
         teardown=f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout(generic_cloud),
