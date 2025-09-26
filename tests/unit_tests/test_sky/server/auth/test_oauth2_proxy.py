@@ -407,6 +407,8 @@ class TestOAuth2ProxyMiddlewareLoopback:
         request.client = mock.Mock()
         request.client.host = '127.0.0.1'
         request.headers = Headers({})
+        request.cookies = {}
+        request.query_params = {}
         request.state = mock.Mock()
         request.state.auth_user = None
         request.body = mock.AsyncMock(return_value=b'{}')
@@ -452,7 +454,7 @@ class TestOAuth2ProxyMiddlewareLoopback:
                 request, mock_call_next)
 
             # Should NOT bypass due to proxy headers - proceed to normal OAuth2 flow
-            assert response.status_code == http.HTTPStatus.TEMPORARY_REDIRECT
+            assert response.status_code == http.HTTPStatus.TEMPORARY_REDIRECT.value
 
     @pytest.mark.asyncio
     async def test_loopback_disabled_in_non_consolidation_mode(
@@ -481,4 +483,4 @@ class TestOAuth2ProxyMiddlewareLoopback:
                 request, mock_call_next)
 
             # Should NOT bypass when consolidation mode is disabled - uses normal OAuth2 flow
-            assert response.status_code == http.HTTPStatus.TEMPORARY_REDIRECT
+            assert response.status_code == http.HTTPStatus.TEMPORARY_REDIRECT.value

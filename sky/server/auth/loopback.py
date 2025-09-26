@@ -32,6 +32,7 @@ def is_loopback_request(request: fastapi.Request) -> bool:
     if client_host == 'localhost' or _is_loopback_ip(client_host):
         # Additional checks: ensure no forwarding headers are present.
         # If there are any, assume this traffic went through a proxy.
-        return any(
+        return not any(
             request.headers.get(header) for header in COMMON_PROXY_HEADERS)
+
     return False
