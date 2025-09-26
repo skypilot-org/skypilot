@@ -53,27 +53,37 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         for i in range(1, config.count)
     ]
 
-    running_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
-    stopped_instances = _filter_instances(cluster_name_on_cloud, ['STOPPED'])
+    existing_instances = _filter_instances(cluster_name_on_cloud, None)
+    stopped_instances = _filter_instances(cluster_name_on_cloud,
+                                          ['STOPPED', 'STOPPING'])
 
-    running_instance_names = [
-        instance['virtualServerName'] for instance in running_instances
+    existing_instance_names = [
+        instance['virtualServerName'] for instance in existing_instances
     ]
     resume_instance_names = [
         instance['virtualServerName'] for instance in stopped_instances
     ]
-
     create_instance_names = [
         instance_name for instance_name in instance_names
-        if instance_name not in running_instance_names and
-        instance_name not in resume_instance_names
+        if instance_name not in existing_instance_names
     ]
 
     vpc_subnets = _get_or_create_vpc_subnets(zone_id)
 
     def _resume(instance_name):
         instance_id = _get_instance_id(instance_name, cluster_name_on_cloud)
+
+        while True:
+            state = scp_utils.SCPClient().get_instance_info(
+                instance_id)['virtualServerState']
+            if state == 'RUNNING':
+                return instance_id, 'resumed'
+            if state == 'STOPPED':
+                break
+            time.sleep(2)
+
         scp_utils.SCPClient().start_instance(instance_id)
+
         while True:
             info = scp_utils.SCPClient().get_instance_info(instance_id)
             if info['virtualServerState'] == 'RUNNING':
@@ -115,16 +125,30 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         [(_create, instance_name) for instance_name in create_instance_names])
 
     instance_ids_statuses = []
-    with ThreadPoolExecutor(max_workers=min(len(tasks), 32)) as ex:
-        execution = [
-            ex.submit(function, instance_name)
-            for function, instance_name in tasks
-        ]
-        for e in as_completed(execution):
-            try:
-                instance_ids_statuses.append(e.result())
-            except Exception as e:  # pylint: disable=broad-except
-                logger.error(f'run_instances error: {e}')
+    if tasks:
+        with ThreadPoolExecutor(max_workers=min(len(tasks), 32)) as ex:
+            execution = [
+                ex.submit(function, instance_name)
+                for function, instance_name in tasks
+            ]
+            for e in as_completed(execution):
+                try:
+                    instance_ids_statuses.append(e.result())
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.error(f'run_instances error: {e}')
+
+    wait_time = time.time() + 600
+    while time.time() < wait_time:
+        running_instances = _filter_instances(cluster_name_on_cloud,
+                                              ['RUNNING'])
+        if len(running_instances) == config.count:
+            break
+        pending = _filter_instances(
+            cluster_name_on_cloud,
+            ['CREATING', 'EDITING', 'STARTING', 'RESTARTING', 'STOPPING'])
+        if not pending:
+            break
+        time.sleep(3)
 
     running_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
 
@@ -479,6 +503,9 @@ def stop_instances(
             if instance['virtualServerName'] != head_instance_name
         ]
 
+    if not instances:
+        return
+
     def _stop(instance):
         try:
             instance_id = instance['virtualServerId']
@@ -511,6 +538,9 @@ def terminate_instances(
             instance for instance in instances
             if instance['virtualServerName'] != head_instance_name
         ]
+
+    if not instances:
+        return
 
     def _terminate(instance):
         try:
