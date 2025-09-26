@@ -538,7 +538,7 @@ def test_pool_preemption(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-#(TODO): Remove once heterogeneous pools are supported.
+# TODO(Lloyd): Remove once heterogeneous pools are supported.
 def test_heterogeneous_pool(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
