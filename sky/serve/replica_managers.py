@@ -1272,6 +1272,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 future_result: Tuple[ReplicaInfo, bool, float] = future.get()
                 info, probe_succeeded, probe_time = future_result
                 info.status_property.service_ready_now = probe_succeeded
+                logger.debug(f'Replica {info.cluster_name!r} probed: {probe_succeeded}')
                 should_teardown = False
                 if probe_succeeded:
                     if self._uptime is None:
