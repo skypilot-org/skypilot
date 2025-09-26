@@ -852,7 +852,7 @@ def queue(cluster_name: str,
 
     use_legacy = not handle.is_grpc_enabled_with_flag
 
-    if handle.is_grpc_enabled_with_flag:
+    if not use_legacy:
         try:
             request = jobsv1_pb2.GetJobQueueRequest(user_hash=user_hash,
                                                     all_jobs=all_jobs)

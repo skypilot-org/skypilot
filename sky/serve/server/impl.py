@@ -89,7 +89,7 @@ def _get_service_record(
     assert isinstance(handle, backends.CloudVmRayResourceHandle)
     use_legacy = not handle.is_grpc_enabled_with_flag
 
-    if handle.is_grpc_enabled_with_flag:
+    if not use_legacy:
         try:
             service_statuses = serve_rpc_utils.RpcRunner.get_service_status(
                 handle, [service_name], pool)
@@ -537,7 +537,7 @@ def update(
 
     use_legacy = not handle.is_grpc_enabled_with_flag
 
-    if handle.is_grpc_enabled_with_flag:
+    if not use_legacy:
         try:
             current_version = serve_rpc_utils.RpcRunner.add_version(
                 handle, service_name)
@@ -584,7 +584,7 @@ def update(
 
         use_legacy = not handle.is_grpc_enabled_with_flag
 
-        if handle.is_grpc_enabled_with_flag:
+        if not use_legacy:
             try:
                 serve_rpc_utils.RpcRunner.update_service(
                     handle, service_name, current_version, mode, pool)
@@ -677,7 +677,7 @@ def down(
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
         use_legacy = not handle.is_grpc_enabled_with_flag
 
-        if handle.is_grpc_enabled_with_flag:
+        if not use_legacy:
             try:
                 stdout = serve_rpc_utils.RpcRunner.terminate_services(
                     handle, service_names, purge, pool)
@@ -739,7 +739,7 @@ def status(
     assert isinstance(handle, backends.CloudVmRayResourceHandle)
     use_legacy = not handle.is_grpc_enabled_with_flag
 
-    if handle.is_grpc_enabled_with_flag:
+    if not use_legacy:
         try:
             service_records = serve_rpc_utils.RpcRunner.get_service_status(
                 handle, service_names, pool)
@@ -875,7 +875,7 @@ def _get_all_replica_targets(
     assert isinstance(handle, backends.CloudVmRayResourceHandle)
     use_legacy = not handle.is_grpc_enabled_with_flag
 
-    if handle.is_grpc_enabled_with_flag:
+    if not use_legacy:
         try:
             service_records = serve_rpc_utils.RpcRunner.get_service_status(
                 handle, [service_name], pool)

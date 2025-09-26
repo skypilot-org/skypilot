@@ -3745,7 +3745,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     ux_utils.spinner_message('Preparing SkyPilot runtime')):
                 use_legacy = not handle.is_grpc_enabled_with_flag
 
-                if handle.is_grpc_enabled_with_flag:
+                if not use_legacy:
                     try:
                         request = jobsv1_pb2.UpdateStatusRequest()
                         backend_utils.invoke_skylet_with_retries(
@@ -3769,7 +3769,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # 2. On next `sky start`, it gets reset to FAILED.
             use_legacy = not handle.is_grpc_enabled_with_flag
 
-            if handle.is_grpc_enabled_with_flag:
+            if not use_legacy:
                 try:
                     fail_request = jobsv1_pb2.FailAllInProgressJobsRequest()
                     backend_utils.invoke_skylet_with_retries(
@@ -4189,7 +4189,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             _dump_code_to_file(job_submit_cmd,
                                constants.PERSISTENT_RUN_SCRIPT_DIR)
 
-        if handle.is_grpc_enabled_with_flag:
+        if not use_legacy:
             try:
                 managed_job_info: Optional[jobsv1_pb2.ManagedJobInfo] = None
                 if managed_job_dag is not None:
@@ -4321,7 +4321,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                  metadata: str) -> Tuple[int, str]:
         use_legacy = not handle.is_grpc_enabled_with_flag
 
-        if handle.is_grpc_enabled_with_flag:
+        if not use_legacy:
             try:
                 request = jobsv1_pb2.AddJobRequest(
                     job_name=job_name,
@@ -4591,7 +4591,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """
         use_legacy = not handle.is_grpc_enabled_with_flag
 
-        if handle.is_grpc_enabled_with_flag:
+        if not use_legacy:
             try:
                 request = jobsv1_pb2.CancelJobsRequest(job_ids=jobs,
                                                        cancel_all=cancel_all,
@@ -4634,7 +4634,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         job_to_dir: Dict[str, str] = {}
         use_legacy = not handle.is_grpc_enabled_with_flag
 
-        if handle.is_grpc_enabled_with_flag:
+        if not use_legacy:
             try:
                 int_job_ids = []
                 if job_ids:
@@ -4838,7 +4838,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             use_legacy = not handle.is_grpc_enabled_with_flag
             logger.info(f'handle.is_grpc_enabled_with_flag: '
                         f'{handle.is_grpc_enabled_with_flag}')
-            if handle.is_grpc_enabled_with_flag:
+            if not use_legacy:
                 try:
                     request = managed_jobsv1_pb2.GetAllJobIdsByNameRequest(
                         job_name=job_name)
@@ -4890,7 +4890,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # get the run_timestamp
             # the function takes in [job_id]
             use_legacy = not handle.is_grpc_enabled_with_flag
-            if handle.is_grpc_enabled_with_flag:
+            if not use_legacy:
                 try:
                     log_dirs_request = jobsv1_pb2.GetLogDirsForJobsRequest(
                         job_ids=[job_id])

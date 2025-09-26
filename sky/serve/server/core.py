@@ -114,7 +114,7 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
     assert isinstance(handle, backends.CloudVmRayResourceHandle)
     use_legacy = not handle.is_grpc_enabled_with_flag
 
-    if handle.is_grpc_enabled_with_flag:
+    if not use_legacy:
         try:
             stdout = serve_rpc_utils.RpcRunner.terminate_replica(
                 handle, service_name, replica_id, purge)

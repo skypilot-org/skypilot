@@ -868,7 +868,7 @@ def cancel(name: Optional[str] = None,
 
         use_legacy = not handle.is_grpc_enabled_with_flag
 
-        if handle.is_grpc_enabled_with_flag:
+        if not use_legacy:
             current_workspace = skypilot_config.get_active_workspace()
             try:
                 request = managed_jobsv1_pb2.CancelJobsRequest(

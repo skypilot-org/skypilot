@@ -41,7 +41,7 @@ def check_version_mismatch_and_non_terminal_jobs() -> None:
 
     use_legacy = not handle.is_grpc_enabled_with_flag
 
-    if handle.is_grpc_enabled_with_flag:
+    if not use_legacy:
         try:
             version_request = managed_jobsv1_pb2.GetVersionRequest()
             version_response = backend_utils.invoke_skylet_with_retries(
