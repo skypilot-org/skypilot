@@ -48,7 +48,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                                       resumed_instance_ids=[],
                                       created_instance_ids=[])
 
-    instance_names = [_head(cluster_name_on_cloud)] + [
+    cluster_instance_names = [_head(cluster_name_on_cloud)] + [
         f'{_worker(cluster_name_on_cloud)}-{i:02d}'
         for i in range(1, config.count)
     ]
@@ -64,7 +64,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         instance['virtualServerName'] for instance in stopped_instances
     ]
     create_instance_names = [
-        instance_name for instance_name in instance_names
+        instance_name for instance_name in cluster_instance_names
         if instance_name not in existing_instance_names
     ]
 
