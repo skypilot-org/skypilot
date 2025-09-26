@@ -143,10 +143,10 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                                               ['RUNNING'])
         if len(running_instances) == config.count:
             break
-        pending = _filter_instances(
+        pending_instances = _filter_instances(
             cluster_name_on_cloud,
             ['CREATING', 'EDITING', 'STARTING', 'RESTARTING', 'STOPPING'])
-        if not pending:
+        if not pending_instances:
             break
         time.sleep(3)
 
