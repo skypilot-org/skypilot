@@ -57,6 +57,9 @@ SKY_REMOTE_PYTHON_ENV: str = f'~/{SKY_REMOTE_PYTHON_ENV_NAME}'
 ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
 # uv is used for venv and pip, much faster than python implementations.
 SKY_UV_INSTALL_DIR = '"$HOME/.local/bin"'
+# set UV_SYSTEM_PYTHON to false in case the
+# user provided docker image set it to true.
+# unset PYTHONPATH in case the user provided docker image set it.
 SKY_UV_CMD = ('UV_SYSTEM_PYTHON=false '
               f'{SKY_UNSET_PYTHONPATH} {SKY_UV_INSTALL_DIR}/uv')
 # This won't reinstall uv if it's already installed, so it's safe to re-run.

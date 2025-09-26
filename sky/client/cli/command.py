@@ -127,6 +127,7 @@ def _get_cluster_records_and_set_ssh_config(
     clusters: Optional[List[str]],
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
+    verbose: bool = False,
 ) -> List[responses.StatusResponse]:
     """Returns a list of clusters that match the glob pattern.
 
@@ -144,7 +145,8 @@ def _get_cluster_records_and_set_ssh_config(
     request_id = sdk.status(clusters,
                             refresh=refresh,
                             all_users=all_users,
-                            _include_credentials=True)
+                            _include_credentials=True,
+                            _summary_response=not verbose)
     cluster_records = sdk.stream_and_get(request_id)
     # Update the SSH config for all clusters
     for record in cluster_records:
@@ -1858,7 +1860,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
 
     # Phase 3: Get cluster records and handle special cases
     cluster_records = _get_cluster_records_and_set_ssh_config(
-        query_clusters, refresh_mode, all_users)
+        query_clusters, refresh_mode, all_users, verbose)
 
     # TOOD(zhwu): setup the ssh config for status
     if ip or show_endpoints:
@@ -4184,6 +4186,13 @@ def volumes_apply(
 
     logger.debug(f'Volume config: {volume.to_yaml_config()}')
 
+    # TODO(kevin): remove the try block in v0.13.0
+    try:
+        volumes_sdk.validate(volume)
+    except exceptions.APINotSupportedError:
+        # Do best-effort client-side validation.
+        volume.validate(skip_cloud_compatibility=True)
+
     if not yes:
         click.confirm(f'Proceed to create volume {volume.name!r}?',
                       default=True,
@@ -4780,7 +4789,7 @@ def pool():
 @pool.command('apply', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @click.argument('pool_yaml',
-                required=True,
+                required=False,
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
@@ -4799,13 +4808,18 @@ def pool():
                     'with rolling update. If "blue_green", cluster pool will '
                     'be updated with blue-green update. This option is only '
                     'valid when the pool is already running.'))
+@click.option('--workers',
+              default=None,
+              type=int,
+              required=False,
+              help='Can be used to update the number of workers in the pool.')
 @_add_click_options(flags.TASK_OPTIONS + flags.EXTRA_RESOURCES_OPTIONS +
                     flags.COMMON_OPTIONS)
 @flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
 def jobs_pool_apply(
-    pool_yaml: Tuple[str, ...],
+    pool_yaml: Optional[Tuple[str, ...]],
     pool: Optional[str],  # pylint: disable=redefined-outer-name
     workdir: Optional[str],
     infra: Optional[str],
@@ -4827,60 +4841,80 @@ def jobs_pool_apply(
     disk_tier: Optional[str],
     network_tier: Optional[str],
     mode: str,
+    workers: Optional[int],
     yes: bool,
     async_call: bool,
 ):
-    """Apply a config to a cluster pool for managed jobs submission.
-
-    If the pool is already running, the config will be applied to the pool.
-    Otherwise, a new pool will be created.
-
-    POOL_YAML must point to a valid YAML file.
+    """Either apply a config to a cluster pool for managed jobs submission
+    or update the number of workers in the pool. One of POOL_YAML or --workers
+    must be provided.
+    Config:
+        If the pool is already running, the config will be applied to the pool.
+        Otherwise, a new pool will be created.
+    Workers:
+        The --workers option can be used to override the number of workers
+        specified in the YAML file, or to update workers without a YAML file.
+        Example:
+            sky jobs pool apply -p my-pool --workers 5
     """
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
-    if pool is None:
-        pool = serve_lib.generate_service_name(pool=True)
+    if workers is not None and pool_yaml is not None and len(pool_yaml) > 0:
+        raise click.UsageError(
+            'Cannot specify both --workers and POOL_YAML. Please use one of '
+            'them.')
 
-    task = _generate_task_with_service(
-        service_name=pool,
-        service_yaml_args=pool_yaml,
-        workdir=workdir,
-        cloud=cloud,
-        region=region,
-        zone=zone,
-        gpus=gpus,
-        cpus=cpus,
-        memory=memory,
-        instance_type=instance_type,
-        num_nodes=num_nodes,
-        use_spot=use_spot,
-        image_id=image_id,
-        env_file=env_file,
-        env=env,
-        secret=secret,
-        disk_size=disk_size,
-        disk_tier=disk_tier,
-        network_tier=network_tier,
-        ports=ports,
-        not_supported_cmd='sky jobs pool up',
-        pool=True,
-    )
-    assert task.service is not None
-    if not task.service.pool:
-        raise click.UsageError('The YAML file needs a `pool` section.')
-    click.secho('Pool spec:', fg='cyan')
-    click.echo(task.service)
-    serve_lib.validate_service_task(task, pool=True)
+    if pool_yaml is None or len(pool_yaml) == 0:
+        if pool is None:
+            raise click.UsageError(
+                'A pool name must be provided to update the number of workers.')
+        task = None
+        click.secho(f'Attempting to update {pool} to have {workers} workers',
+                    fg='cyan')
+    else:
+        if pool is None:
+            pool = serve_lib.generate_service_name(pool=True)
 
-    click.secho(
-        'Each pool worker will use the following resources (estimated):',
-        fg='cyan')
-    with dag_lib.Dag() as dag:
-        dag.add(task)
+        task = _generate_task_with_service(
+            service_name=pool,
+            service_yaml_args=pool_yaml,
+            workdir=workdir,
+            cloud=cloud,
+            region=region,
+            zone=zone,
+            gpus=gpus,
+            cpus=cpus,
+            memory=memory,
+            instance_type=instance_type,
+            num_nodes=num_nodes,
+            use_spot=use_spot,
+            image_id=image_id,
+            env_file=env_file,
+            env=env,
+            secret=secret,
+            disk_size=disk_size,
+            disk_tier=disk_tier,
+            network_tier=network_tier,
+            ports=ports,
+            not_supported_cmd='sky jobs pool up',
+            pool=True,
+        )
+        assert task.service is not None
+        if not task.service.pool:
+            raise click.UsageError('The YAML file needs a `pool` section.')
+        click.secho('Pool spec:', fg='cyan')
+        click.echo(task.service)
+        serve_lib.validate_service_task(task, pool=True)
+
+        click.secho(
+            'Each pool worker will use the following resources (estimated):',
+            fg='cyan')
+        with dag_lib.Dag() as dag:
+            dag.add(task)
 
     request_id = managed_jobs.pool_apply(task,
                                          pool,
+                                         workers=workers,
                                          mode=serve_lib.UpdateMode(mode),
                                          _need_confirmation=not yes)
     _async_call_or_wait(request_id, async_call, 'sky.jobs.pool_apply')
@@ -5487,6 +5521,8 @@ def serve_update(
         sky serve update --mode blue_green sky-service-16aa new_service.yaml
 
     """
+    # TODO(lloyd-brown): Add a way to update number of replicas for serve
+    # the way we did for pools.
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
     task = _generate_task_with_service(
@@ -5868,19 +5904,33 @@ def local():
     '--context-name',
     type=str,
     required=False,
-    help='Name to use for the kubeconfig context. Defaults to "default".')
+    help='Name to use for the kubeconfig context. Defaults to "default". '
+    'Used with the ip list.')
 @click.option('--password',
               type=str,
               required=False,
               help='Password for the ssh-user to execute sudo commands. '
               'Required only if passwordless sudo is not setup.')
+@click.option(
+    '--name',
+    type=str,
+    required=False,
+    help='Name of the cluster. Defaults to "skypilot". Used without ip list.')
+@click.option(
+    '--port-start',
+    type=int,
+    required=False,
+    help='Starting port range for the local kind cluster. Needs to be a '
+    'multiple of 100. If not given, a random range will be used. '
+    'Used without ip list.')
 @local.command('up', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
              cleanup: bool, context_name: Optional[str],
-             password: Optional[str], async_call: bool):
+             password: Optional[str], name: Optional[str],
+             port_start: Optional[int], async_call: bool):
     """Creates a local or remote cluster."""
 
     def _validate_args(ips, ssh_user, ssh_key_path, cleanup):
@@ -5926,17 +5976,26 @@ def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
                 f'Failed to read SSH key file {ssh_key_path}: {str(e)}')
 
     request_id = sdk.local_up(gpus, ip_list, ssh_user, ssh_key, cleanup,
-                              context_name, password)
+                              context_name, password, name, port_start)
     _async_call_or_wait(request_id, async_call, request_name='local up')
 
 
+@click.option('--name',
+              type=str,
+              required=False,
+              help='Name of the cluster to down. Defaults to "skypilot".')
 @local.command('down', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
-def local_down(async_call: bool):
-    """Deletes a local cluster."""
-    request_id = sdk.local_down()
+def local_down(name: Optional[str], async_call: bool):
+    """Deletes a local cluster.
+
+    This will only delete a local cluster started without the ip list.
+    To clean up the local cluster started with a ip list, use `sky local up`
+    with the cleanup flag.
+    """
+    request_id = sdk.local_down(name)
     _async_call_or_wait(request_id, async_call, request_name='sky.local.down')
 
 

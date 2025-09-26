@@ -3,7 +3,7 @@ import { CLOUDS_LIST, COMMON_GPUS } from '@/data/connectors/constants';
 // Importing from the same directory
 import { apiClient } from '@/data/connectors/client';
 
-export async function getCloudInfrastructure(forceRefresh = true) {
+export async function getCloudInfrastructure(forceRefresh = false) {
   const dashboardCache = (await import('@/lib/cache')).default;
   const { getClusters } = await import('@/data/connectors/clusters');
   const { getManagedJobs } = await import('@/data/connectors/jobs');

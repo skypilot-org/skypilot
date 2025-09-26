@@ -411,6 +411,9 @@ def up(
                 f'\n{ux_utils.INDENT_LAST_SYMBOL}To terminate the pool:\t'
                 f'{ux_utils.BOLD}sky jobs pool down {service_name}'
                 f'{ux_utils.RESET_BOLD}'
+                f'\n{ux_utils.INDENT_SYMBOL}To update the number of workers:\t'
+                f'{ux_utils.BOLD}sky jobs pool apply --pool {service_name} '
+                f'--workers 5{ux_utils.RESET_BOLD}'
                 '\n\n' + ux_utils.finishing_message('Successfully created pool '
                                                     f'{service_name!r}.'))
         else:
@@ -448,37 +451,15 @@ def up(
 
 
 def update(
-    task: 'task_lib.Task',
+    task: Optional['task_lib.Task'],
     service_name: str,
     mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
     pool: bool = False,
+    workers: Optional[int] = None,
 ) -> None:
     """Updates an existing service or pool."""
     noun = 'pool' if pool else 'service'
     capnoun = noun.capitalize()
-    task.validate()
-    serve_utils.validate_service_task(task, pool=pool)
-
-    # Always apply the policy again here, even though it might have been applied
-    # in the CLI. This is to ensure that we apply the policy to the final DAG
-    # and get the mutated config.
-    # TODO(cblmemo,zhwu): If a user sets a new skypilot_config, the update
-    # will not apply the config.
-    dag, _ = admin_policy_utils.apply(task)
-    task = dag.tasks[0]
-    if pool:
-        if task.run is not None:
-            logger.warning(f'{colorama.Fore.YELLOW}The `run` section will be '
-                           f'ignored for pool.{colorama.Style.RESET_ALL}')
-        # Use dummy run script for cluster pool.
-        task.run = serve_constants.POOL_DUMMY_RUN_COMMAND
-
-    assert task.service is not None
-    if not pool and task.service.tls_credential is not None:
-        logger.warning('Updating TLS keyfile and certfile is not supported. '
-                       'Any updates to the keyfile and certfile will not take '
-                       'effect. To update TLS keyfile and certfile, please '
-                       'tear down the service and spin up a new one.')
 
     controller_type = controller_utils.get_controller_for_pool(pool)
     handle = backend_utils.is_controller_accessible(
@@ -504,6 +485,77 @@ def update(
             raise RuntimeError(f'Cannot find {noun} {service_name!r}.'
                                f'To spin up a {noun}, use {ux_utils.BOLD}'
                                f'{cmd}{ux_utils.RESET_BOLD}')
+
+    # If task is None and workers is specified, load existing configuration
+    # and update replica count.
+    if task is None:
+        if workers is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cannot update {noun} without specifying '
+                    f'task or workers. Please provide either a task '
+                    f'or specify the number of workers.')
+
+        if not pool:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Non-pool service, trying to update replicas to '
+                    f'{workers} is not supported. Ignoring the update.')
+
+        # Load the existing task configuration from the service's YAML file
+        latest_yaml_path = serve_utils.generate_task_yaml_file_name(
+            service_name, service_record['version'], expand_user=False)
+
+        logger.debug('Loading existing task configuration from '
+                     f'{latest_yaml_path} to create a new modified task.')
+
+        # Get the path locally.
+        with tempfile.NamedTemporaryFile(
+                prefix=f'service-task-{service_name}-',
+                mode='w',
+        ) as service_file:
+            try:
+                backend.download_file(handle, latest_yaml_path,
+                                      service_file.name)
+            except exceptions.CommandError as e:
+                raise RuntimeError(
+                    f'Failed to download the old task configuration from '
+                    f'{latest_yaml_path}: {e.error_msg}') from e
+
+            # Load the existing task configuration
+            existing_config = yaml_utils.read_yaml(service_file.name)
+            task = task_lib.Task.from_yaml_config(existing_config)
+
+        if task.service is None:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('No service configuration found in '
+                                   f'existing {noun} {service_name!r}')
+        task.set_service(task.service.copy(min_replicas=workers))
+
+    task.validate()
+    serve_utils.validate_service_task(task, pool=pool)
+
+    # Now apply the policy and handle task-specific logic
+    # Always apply the policy again here, even though it might have been applied
+    # in the CLI. This is to ensure that we apply the policy to the final DAG
+    # and get the mutated config.
+    # TODO(cblmemo,zhwu): If a user sets a new skypilot_config, the update
+    # will not apply the config.
+    dag, _ = admin_policy_utils.apply(task)
+    task = dag.tasks[0]
+    if pool:
+        if task.run is not None:
+            logger.warning(f'{colorama.Fore.YELLOW}The `run` section will be '
+                           f'ignored for pool.{colorama.Style.RESET_ALL}')
+        # Use dummy run script for cluster pool.
+        task.run = serve_constants.POOL_DUMMY_RUN_COMMAND
+
+    assert task.service is not None
+    if not pool and task.service.tls_credential is not None:
+        logger.warning('Updating TLS keyfile and certfile is not supported. '
+                       'Any updates to the keyfile and certfile will not take '
+                       'effect. To update TLS keyfile and certfile, please '
+                       'tear down the service and spin up a new one.')
 
     prompt = None
     if (service_record['status'] == serve_state.ServiceStatus.CONTROLLER_FAILED
@@ -625,6 +677,7 @@ def update(
 
 def apply(
     task: 'task_lib.Task',
+    workers: Optional[int],
     service_name: str,
     mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
     pool: bool = False,
@@ -640,7 +693,7 @@ def apply(
             service_record = _get_service_record(service_name, pool, handle,
                                                  backend)
             if service_record is not None:
-                return update(task, service_name, mode, pool)
+                return update(task, service_name, mode, pool, workers)
         except exceptions.ClusterNotUpError:
             pass
         up(task, service_name, pool)
