@@ -191,3 +191,4 @@ class ManagedJobRecord(ResponseBaseModel):
     user_hash: Optional[str] = None
     task_id: Optional[int] = None
     task_name: Optional[str] = None
+    schedule_state: Optional[str] = None
