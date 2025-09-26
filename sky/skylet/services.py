@@ -4,6 +4,7 @@ import os
 
 import grpc
 
+from sky import exceptions
 from sky import sky_logging
 from sky.jobs import state as managed_job_state
 from sky.schemas.generated import autostopv1_pb2
@@ -18,8 +19,13 @@ from sky.serve import serve_utils
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
+from sky.skylet import log_lib
 
 logger = sky_logging.init_logger(__name__)
+
+# In the worst case, flush the log buffer every 50ms,
+# to ensure responsiveness.
+DEFAULT_LOG_CHUNK_FLUSH_INTERVAL = 0.05
 
 
 class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
@@ -275,8 +281,39 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
             self,
             request: jobsv1_pb2.TailLogsRequest,  # type: ignore[return]
             context: grpc.ServicerContext):
-        # TODO(kevin): implement this
-        raise NotImplementedError('TailLogs is not implemented')
+        buffer = log_lib.LogBuffer()
+        try:
+            job_id = request.job_id if request.HasField(
+                'job_id') else job_lib.get_latest_job_id()
+            managed_job_id = request.managed_job_id if request.HasField(
+                'managed_job_id') else None
+            log_dir = job_lib.get_log_dir_for_job(job_id)
+            if log_dir is None:
+                run_timestamp = job_lib.get_run_timestamp(job_id)
+                log_dir = None if run_timestamp is None else os.path.join(
+                    constants.SKY_LOGS_DIRECTORY, run_timestamp)
+
+            for line in log_lib.buffered_iter_with_timeout(
+                    buffer,
+                    log_lib.tail_logs_iter(job_id, log_dir, managed_job_id,
+                                           request.follow, request.tail),
+                    DEFAULT_LOG_CHUNK_FLUSH_INTERVAL):
+                yield jobsv1_pb2.TailLogsResponse(log_line=line)
+
+            job_status = job_lib.get_status(job_id)
+            exit_code = exceptions.JobExitCode.from_job_status(job_status)
+            # Fix for dashboard: When follow=False and job is still running
+            # (NOT_FINISHED=101), exit with success (0) since fetching current
+            # logs is a successful operation.
+            # This prevents shell wrappers from printing "command terminated
+            # with exit code 101".
+            exit_code_int = 0 if not request.follow and int(
+                exit_code) == 101 else int(exit_code)
+            yield jobsv1_pb2.TailLogsResponse(exit_code=exit_code_int)
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+        finally:
+            buffer.close()
 
     def GetJobStatus(  # type: ignore[return]
             self, request: jobsv1_pb2.GetJobStatusRequest,
