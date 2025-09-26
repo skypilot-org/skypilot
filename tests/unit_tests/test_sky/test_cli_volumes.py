@@ -1,16 +1,13 @@
 """Unit tests for CLI volumes commands."""
+from datetime import datetime
 from unittest import mock
 
 from click import testing as cli_testing
 import pytest
 
 from sky.client.cli import command
-from datetime import datetime
-from unittest import mock
-
-import pytest
-
 from sky.client.cli import table_utils
+
 
 class TestVolumeCommands:
 
