@@ -100,7 +100,7 @@ class Volume:
         }
 
     def _normalize_config(self) -> None:
-        """Adjust and validate the config."""
+        """Normalize and validate the config."""
         # Validate schema
         common_utils.validate_schema(self.to_yaml_config(),
                                      schemas.get_volume_schema(),
@@ -114,6 +114,18 @@ class Volume:
         self.cloud = infra_info.cloud
         self.region = infra_info.region
         self.zone = infra_info.zone
+
+        # Set cloud from volume type if not specified
+        cloud_obj_from_type = VOLUME_TYPE_TO_CLOUD.get(
+            volume_lib.VolumeType(self.type))
+        if self.cloud:
+            cloud_obj = registry.CLOUD_REGISTRY.from_str(self.cloud)
+            assert cloud_obj is not None
+            if not cloud_obj.is_same_cloud(cloud_obj_from_type):
+                raise ValueError(
+                    f'Invalid cloud {self.cloud} for volume type {self.type}')
+        else:
+            self.cloud = str(cloud_obj_from_type)
 
     def _adjust_config(self) -> None:
         """Adjust the volume config (e.g., parse size)."""
@@ -150,22 +162,9 @@ class Volume:
                              'use the --size flag.')
 
     def validate_cloud_compatibility(self) -> None:
-        """Validates that the specified cloud is compatible with volume type."""
-        cloud_obj_from_type = VOLUME_TYPE_TO_CLOUD.get(
-            volume_lib.VolumeType(self.type))
-        if self.cloud:
-            cloud_obj = registry.CLOUD_REGISTRY.from_str(self.cloud)
-            assert cloud_obj is not None
-            if not cloud_obj.is_same_cloud(cloud_obj_from_type):
-                raise ValueError(
-                    f'Invalid cloud {self.cloud} for volume type {self.type}')
-        else:
-            self.cloud = str(cloud_obj_from_type)
-            cloud_obj = cloud_obj_from_type
-            assert cloud_obj is not None
-
-        self.region, self.zone = cloud_obj.validate_region_zone(
-            self.region, self.zone)
+        """Validates region, zone, name, labels with the cloud."""
+        cloud_obj = registry.CLOUD_REGISTRY.from_str(self.cloud)
+        assert cloud_obj is not None
 
         valid, err_msg = cloud_obj.is_volume_name_valid(self.name)
         if not valid:
