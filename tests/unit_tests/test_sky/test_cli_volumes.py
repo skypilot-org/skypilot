@@ -182,7 +182,7 @@ class TestVolumeCommands:
 
         # Mock the volume table formatting
         mock_table = "Volume Table Output"
-        monkeypatch.setattr('sky.volumes.utils.format_volume_table',
+        monkeypatch.setattr('sky.client.cli.table_utils.format_volume_table',
                             lambda *args, **kwargs: mock_table)
 
         # Test basic ls command
@@ -219,7 +219,7 @@ class TestVolumeCommands:
         # Mock the volume table formatting
         mock_table = "Verbose Volume Table Output"
         mock_format_table = mock.MagicMock(return_value=mock_table)
-        monkeypatch.setattr('sky.volumes.utils.format_volume_table',
+        monkeypatch.setattr('sky.client.cli.table_utils.format_volume_table',
                             mock_format_table)
 
         # Test verbose ls command
