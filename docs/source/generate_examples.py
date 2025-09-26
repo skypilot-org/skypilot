@@ -268,5 +268,6 @@ def _work(example_dir: pathlib.Path):
         with open(doc_path, 'w+') as f:
             f.write(example.generate())
 
+
 if __name__ == '__main__':
     generate_examples()
