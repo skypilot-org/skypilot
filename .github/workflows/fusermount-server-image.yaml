@@ -27,5 +27,6 @@ jobs:
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/fusermount-server:latest
             ${{ secrets.DOCKER_USERNAME }}/fusermount-server:${{ format('{0}.{1}', github.event.repository.pushed_at, github.sha) }}
+            ${{ secrets.DOCKER_USERNAME }}/fusermount-server:0.2.0
           cache-from: type=gha
           cache-to: type=gha,mode=max
