@@ -166,9 +166,6 @@ class Volume:
         cloud_obj = registry.CLOUD_REGISTRY.from_str(self.cloud)
         assert cloud_obj is not None
 
-        self.region, self.zone = cloud_obj.validate_region_zone(
-            self.region, self.zone)
-
         valid, err_msg = cloud_obj.is_volume_name_valid(self.name)
         if not valid:
             raise ValueError(f'Invalid volume name: {err_msg}')
