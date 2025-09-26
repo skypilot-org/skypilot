@@ -335,6 +335,8 @@ class Test(NamedTuple):
     timeout: int = DEFAULT_CMD_TIMEOUT
     # Environment variables to set for each command.
     env: Optional[Dict[str, str]] = None
+    # Config dictionary to override the skypilot config.
+    config_dict: Optional[Dict[str, Any]] = None
 
     def echo(self, message: str):
         # pytest's xdist plugin captures stdout; print to stderr so that the
@@ -508,7 +510,7 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
     if test.env:
         env_dict.update(test.env)
 
-    with override_sky_config(test, env_dict):
+    with override_sky_config(test, env_dict, config_dict=test.config_dict):
         for command in test.commands:
             write(f'+ {command}\n')
             flush()

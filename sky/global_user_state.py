@@ -185,6 +185,14 @@ cluster_history_table = sqlalchemy.Table(
     sqlalchemy.Column('provision_log_path',
                       sqlalchemy.Text,
                       server_default=None),
+    sqlalchemy.Column('last_activity_time',
+                      sqlalchemy.Integer,
+                      server_default=None,
+                      index=True),
+    sqlalchemy.Column('launched_at',
+                      sqlalchemy.Integer,
+                      server_default=None,
+                      index=True),
 )
 
 
@@ -720,6 +728,10 @@ def add_or_update_cluster(cluster_name: str,
                     conditional_values.get('last_creation_command'),
             }
 
+        # Calculate last_activity_time and launched_at from usage_intervals
+        last_activity_time = _get_cluster_last_activity_time(usage_intervals)
+        launched_at = _get_cluster_launch_time(usage_intervals)
+
         insert_stmnt = insert_func(cluster_history_table).values(
             cluster_hash=cluster_hash,
             name=cluster_name,
@@ -730,6 +742,8 @@ def add_or_update_cluster(cluster_name: str,
             user_hash=user_hash,
             workspace=history_workspace,
             provision_log_path=provision_log_path,
+            last_activity_time=last_activity_time,
+            launched_at=launched_at,
             **creation_info,
         )
         do_update_stmt = insert_stmnt.on_conflict_do_update(
@@ -746,6 +760,8 @@ def add_or_update_cluster(cluster_name: str,
                 cluster_history_table.c.user_hash: history_hash,
                 cluster_history_table.c.workspace: history_workspace,
                 cluster_history_table.c.provision_log_path: provision_log_path,
+                cluster_history_table.c.last_activity_time: last_activity_time,
+                cluster_history_table.c.launched_at: launched_at,
                 **creation_info,
             })
         session.execute(do_update_stmt)
@@ -1340,17 +1356,33 @@ def _get_cluster_duration(
     return total_duration
 
 
+def _get_cluster_last_activity_time(
+    usage_intervals: Optional[List[Tuple[int,
+                                         Optional[int]]]]) -> Optional[int]:
+    last_activity_time = None
+    if usage_intervals:
+        last_interval = usage_intervals[-1]
+        last_activity_time = (last_interval[1] if last_interval[1] is not None
+                              else last_interval[0])
+    return last_activity_time
+
+
 @_init_db
 @metrics_lib.time_me
 def _set_cluster_usage_intervals(
         cluster_hash: str, usage_intervals: List[Tuple[int,
                                                        Optional[int]]]) -> None:
     assert _SQLALCHEMY_ENGINE is not None
+
+    # Calculate last_activity_time from usage_intervals
+    last_activity_time = _get_cluster_last_activity_time(usage_intervals)
+
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         count = session.query(cluster_history_table).filter_by(
             cluster_hash=cluster_hash).update({
                 cluster_history_table.c.usage_intervals:
-                    pickle.dumps(usage_intervals)
+                    pickle.dumps(usage_intervals),
+                cluster_history_table.c.last_activity_time: last_activity_time,
             })
         session.commit()
     assert count <= 1, count
@@ -1706,7 +1738,7 @@ def get_clusters_from_history(
     current_user_hash = common_utils.get_user_hash()
 
     # Prepare filtering parameters
-    cutoff_time = None
+    cutoff_time = 0
     if days is not None:
         cutoff_time = int(time.time()) - (days * 24 * 60 * 60)
 
@@ -1720,7 +1752,9 @@ def get_clusters_from_history(
                 cluster_history_table.c.usage_intervals,
                 cluster_history_table.c.user_hash,
                 cluster_history_table.c.workspace.label('history_workspace'),
-                cluster_table.c.status, cluster_table.c.workspace)
+                cluster_history_table.c.last_activity_time,
+                cluster_history_table.c.launched_at, cluster_table.c.status,
+                cluster_table.c.workspace)
         else:
             query = session.query(
                 cluster_history_table.c.cluster_hash,
@@ -1731,19 +1765,33 @@ def get_clusters_from_history(
                 cluster_history_table.c.last_creation_yaml,
                 cluster_history_table.c.last_creation_command,
                 cluster_history_table.c.workspace.label('history_workspace'),
-                cluster_table.c.status, cluster_table.c.workspace)
+                cluster_history_table.c.last_activity_time,
+                cluster_history_table.c.launched_at, cluster_table.c.status,
+                cluster_table.c.workspace)
 
         query = query.select_from(
             cluster_history_table.join(cluster_table,
                                        cluster_history_table.c.cluster_hash ==
                                        cluster_table.c.cluster_hash,
                                        isouter=True))
+
+        # Only include clusters that are either active (status is not None)
+        # or are within the cutoff time (cutoff_time <= last_activity_time).
+        # If days is not specified, we include all clusters by setting
+        # cutoff_time to 0.
+        query = query.filter(
+            (cluster_table.c.status.isnot(None) |
+             (cluster_history_table.c.last_activity_time >= cutoff_time)))
+
+        # Order by launched_at descending (most recent first)
+        query = query.order_by(
+            sqlalchemy.desc(cluster_history_table.c.launched_at))
+
         if cluster_hashes is not None:
             query = query.filter(
                 cluster_history_table.c.cluster_hash.in_(cluster_hashes))
         rows = query.all()
 
-    filtered_rows = []
     usage_intervals_dict = {}
     row_to_user_hash = {}
     for row in rows:
@@ -1753,36 +1801,11 @@ def get_clusters_from_history(
                 row_usage_intervals = pickle.loads(row.usage_intervals)
             except (pickle.PickleError, AttributeError):
                 pass
-        # Parse status
-        status = None
-        if row.status:
-            status = status_lib.ClusterStatus[row.status]
-        # Apply filtering: always include active clusters, filter historical
-        # ones by time
-        if cutoff_time is not None and status is None:  # Historical cluster
-            # For historical clusters, check if they were used recently
-            # Use the most recent activity from usage_intervals to determine
-            # last use
-            # Find the most recent activity time from usage_intervals
-            last_activity_time = None
-            if row_usage_intervals:
-                # Get the end time of the last interval (or start time if
-                # still running)
-                last_interval = row_usage_intervals[-1]
-                last_activity_time = (last_interval[1] if last_interval[1]
-                                      is not None else last_interval[0])
-
-            # Skip historical clusters that haven't been used recently
-            if last_activity_time is None or last_activity_time < cutoff_time:
-                continue
-
-        filtered_rows.append(row)
         usage_intervals_dict[row.cluster_hash] = row_usage_intervals
         user_hash = (row.user_hash
                      if row.user_hash is not None else current_user_hash)
         row_to_user_hash[row.cluster_hash] = user_hash
 
-    rows = filtered_rows
     user_hashes = set(row_to_user_hash.values())
     user_hash_to_user = _get_users(user_hashes)
     cluster_hashes = set(row_to_user_hash.keys())
@@ -1797,10 +1820,10 @@ def get_clusters_from_history(
         user_name = user.name if user is not None else None
         if not abbreviate_response:
             last_event = last_cluster_event_dict.get(row.cluster_hash, None)
+        launched_at = row.launched_at
         usage_intervals: Optional[List[Tuple[
             int,
             Optional[int]]]] = usage_intervals_dict.get(row.cluster_hash, None)
-        launched_at = _get_cluster_launch_time(usage_intervals)
         duration = _get_cluster_duration(usage_intervals)
 
         # Parse status
