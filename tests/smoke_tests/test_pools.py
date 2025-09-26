@@ -557,7 +557,6 @@ def test_heterogeneous_pool(generic_cloud: str):
                 f's=$(sky jobs pool apply -p {pool_name} {pool_yaml.name} -y 2>&1); echo "$s"; echo; echo; echo "$s" | grep "Heterogeneous clusters are not supported"',
             ],
             timeout=smoke_tests_utils.get_timeout(generic_cloud),
-            teardown=_TEARDOWN_POOL.format(pool_name=pool_name),
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -581,6 +580,5 @@ def test_heterogeneous_pool_counts(generic_cloud: str):
                 f's=$(sky jobs pool apply -p {pool_name} {pool_yaml.name} -y 2>&1); echo "$s"; echo; echo; echo "$s" | grep "Heterogeneous clusters are not supported"',
             ],
             timeout=smoke_tests_utils.get_timeout(generic_cloud),
-            teardown=_TEARDOWN_POOL.format(pool_name=pool_name),
         )
         smoke_tests_utils.run_one_test(test)
