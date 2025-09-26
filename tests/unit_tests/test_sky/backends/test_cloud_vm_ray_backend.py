@@ -346,7 +346,7 @@ class TestCloudVmRayBackendGetGrpcChannel:
 
             with patch.object(handle, '_get_skylet_ssh_tunnel', side_effect=mock_get_tunnel_side_effect), \
                 patch.object(handle, '_open_and_update_skylet_tunnel', side_effect=mock_open_tunnel), \
-                patch('grpc.insecure_channel', side_effect=lambda addr: addr), \
+                patch('grpc.insecure_channel', side_effect=lambda addr, options: addr), \
                 patch('socket.socket') as mock_socket:
 
                 mock_socket.return_value.__enter__.return_value.connect.side_effect = socket_connect_side_effect
@@ -398,7 +398,7 @@ class TestCloudVmRayBackendGetGrpcChannel:
         ) == num_processes, f"Expected {num_processes} results, got {len(results)}"
         # All processes should get the same channel (localhost:10000).
         for item in results:
-            assert item == f'localhost:{self.INITIAL_TUNNEL_PORT}', f"Process {i} failed: {item}"
+            assert item == f'localhost:{self.INITIAL_TUNNEL_PORT}', f"Failed: {item}"
 
         assert tunnel_creation_count.value == 1, f"Expected tunnel to be created exactly once, but was created {tunnel_creation_count.value} times"
 
