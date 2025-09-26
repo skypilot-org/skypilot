@@ -199,6 +199,12 @@ class JobsCacheManager {
       filterOptions,
     ]);
 
+    // If upstream indicates to skip cache (e.g., transient error), do not
+    // update the full dataset cache and propagate the response upward.
+    if (fullDataResponse && fullDataResponse.__skipCache) {
+      return fullDataResponse;
+    }
+
     if (fullDataResponse.controllerStopped || !fullDataResponse.jobs) {
       return fullDataResponse;
     }
