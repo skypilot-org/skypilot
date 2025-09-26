@@ -1901,10 +1901,10 @@ def kubernetes_node_info(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def status_kubernetes() -> server_common.RequestId[Tuple[
-    List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
-    List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'], List[Dict[
-        str, Any]], Optional[str]]]:
+def status_kubernetes() -> server_common.RequestId[
+    Tuple[List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
+          List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
+          List[responses.ManagedJobRecord], Optional[str]]]:
     """Gets all SkyPilot clusters and jobs in the Kubernetes cluster.
 
     Managed jobs and services are also included in the clusters returned.

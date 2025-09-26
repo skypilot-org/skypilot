@@ -1538,8 +1538,7 @@ def _get_job_status_from_tasks(
 
 
 @typing.overload
-def format_job_table(tasks: Union[List[responses.ManagedJobRecord],
-                                  List[Dict[str, Any]]],
+def format_job_table(tasks: List[Dict[str, Any]],
                      show_all: bool,
                      show_user: bool,
                      return_rows: Literal[False] = False,
@@ -1548,8 +1547,7 @@ def format_job_table(tasks: Union[List[responses.ManagedJobRecord],
 
 
 @typing.overload
-def format_job_table(tasks: Union[List[responses.ManagedJobRecord],
-                                  List[Dict[str, Any]]],
+def format_job_table(tasks: List[Dict[str, Any]],
                      show_all: bool,
                      show_user: bool,
                      return_rows: Literal[True],
@@ -1558,7 +1556,7 @@ def format_job_table(tasks: Union[List[responses.ManagedJobRecord],
 
 
 def format_job_table(
-        tasks: Union[List[responses.ManagedJobRecord], List[Dict[str, Any]]],
+        tasks: List[Dict[str, Any]],
         show_all: bool,
         show_user: bool,
         return_rows: bool = False,

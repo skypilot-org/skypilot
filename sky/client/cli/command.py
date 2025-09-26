@@ -1395,10 +1395,10 @@ def _handle_jobs_queue_request(
         msg += ('Failed to query managed jobs: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
     else:
-        msg = managed_jobs.format_job_table(managed_jobs_,
-                                            show_all=show_all,
-                                            show_user=show_user,
-                                            max_jobs=max_num_jobs_to_show)
+        msg = table_utils.format_job_table(managed_jobs_,
+                                           show_all=show_all,
+                                           show_user=show_user,
+                                           max_jobs=max_num_jobs_to_show)
     return num_in_progress_jobs, msg
 
 
@@ -1513,9 +1513,9 @@ def _status_kubernetes(show_all: bool):
         click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'Managed jobs'
                    f'{colorama.Style.RESET_ALL}')
-        msg = managed_jobs.format_job_table(all_jobs,
-                                            show_all=show_all,
-                                            show_user=False)
+        msg = table_utils.format_job_table(all_jobs,
+                                           show_all=show_all,
+                                           show_user=False)
         click.echo(msg)
     if any(['sky-serve-controller' in c.cluster_name for c in all_clusters]):
         # TODO: Parse serve controllers and show services separately.
@@ -2963,9 +2963,9 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
            'jobs (output of `sky jobs queue`) will be lost.')
     click.echo(msg)
     if managed_jobs_:
-        job_table = managed_jobs.format_job_table(managed_jobs_,
-                                                  show_all=False,
-                                                  show_user=True)
+        job_table = table_utils.format_job_table(managed_jobs_,
+                                                 show_all=False,
+                                                 show_user=True)
         msg = controller.value.decline_down_for_dirty_controller_hint
         # Add prefix to each line to align with the bullet point.
         msg += '\n'.join(
