@@ -176,19 +176,39 @@ class ManagedJobRecord(ResponseBaseModel):
     }
     """
     job_id: Optional[int] = None
+    task_id: Optional[int] = None
     job_name: Optional[str] = None
-    resources: Optional[str] = None
-    # None if the job has not been submitted yet.
-    submitted_at: Optional[float] = None
-    # None if the job has not ended yet.
-    end_at: Optional[float] = None
+    task_name: Optional[str] = None
     job_duration: Optional[float] = None
-    recovery_count: Optional[int] = None
+    workspace: Optional[str] = None
     status: Optional[job_state.ManagedJobStatus] = None
+    schedule_state: Optional[str] = None
+    resources: Optional[str] = None
     cluster_resources: Optional[str] = None
+    cluster_resources_full: Optional[str] = None
+    cloud: Optional[str] = None
     region: Optional[str] = None
+    zone: Optional[str] = None
+    infra: Optional[str] = None
+    recovery_count: Optional[int] = None
+    details: Optional[str] = None
+    failure_reason: Optional[str] = None
     user_name: Optional[str] = None
     user_hash: Optional[str] = None
-    task_id: Optional[int] = None
-    task_name: Optional[str] = None
-    schedule_state: Optional[str] = None
+    submitted_at: Optional[float] = None
+    start_at: Optional[float] = None
+    end_at: Optional[float] = None
+    user_yaml: Optional[str] = None
+    entrypoint: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    controller_pid: Optional[int] = None
+    dag_yaml_path: Optional[str] = None
+    env_file_path: Optional[str] = None
+    last_recovered_at: Optional[float] = None
+    run_timestamp: Optional[str] = None
+    priority: Optional[int] = None
+    original_user_yaml_path: Optional[str] = None
+    pool: Optional[str] = None
+    pool_hash: Optional[str] = None
+    current_cluster_name: Optional[str] = None
+    job_id_on_pool_cluster: Optional[int] = None
