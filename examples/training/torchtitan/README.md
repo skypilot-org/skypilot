@@ -17,7 +17,7 @@ This example demonstrates how to run [TorchTitan](https://github.com/pytorch/tor
 
 
 ## Quick start
-
+Here is how to finetune Llama 3.1 on 2 nodes with 8 H100 (or 8 H200):
 ```bash
 # Install SkyPilot (if not already installed)
 pip install "skypilot[kubernetes,aws]"  # or your cloud: [gcp], [azure], etc.
