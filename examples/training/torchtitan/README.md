@@ -31,7 +31,7 @@ sky launch -c torchtitan-multinode torchtitan.yaml --env HF_TOKEN
 # Tail logs
 sky logs torchtitan-multinode
 
-# Stop the cluster when done
+# Terminate the cluster when done
 sky down torchtitan-multinode
 ```
 
