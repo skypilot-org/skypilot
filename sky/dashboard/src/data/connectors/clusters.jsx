@@ -114,10 +114,10 @@ export async function getClusters({ clusterNames = null } = {}) {
   }
 }
 
-export async function getClusterHistory(clusterHash = null) {
+export async function getClusterHistory(clusterHash = null, days = 30) {
   try {
     const requestBody = {
-      days: 30,
+      days: days,
       dashboard_summary_response: true,
     };
 

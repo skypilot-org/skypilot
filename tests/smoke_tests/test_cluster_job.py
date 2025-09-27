@@ -1031,8 +1031,7 @@ def test_volumes_on_kubernetes():
     test = smoke_tests_utils.Test(
         'volumes_on_kubernetes',
         [
-            # TODO(hailong): cover no `--infra` case after https://github.com/skypilot-org/skypilot/issues/7380 is fixed.
-            f'sky volumes apply -y -n pvc0 --type k8s-pvc --size 2GB --infra kubernetes',
+            f'sky volumes apply -y -n pvc0 --type k8s-pvc --size 2GB',
             f'sky volumes ls | grep "pvc0"',
             f'sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
@@ -2397,3 +2396,41 @@ def test_kubernetes_pod_config_change_detection():
         smoke_tests_utils.run_one_test(test)
         os.unlink(task_yaml_1_path)
         os.unlink(task_yaml_2_path)
+
+
+# ---------- SSH Proxy Performance Test ----------
+@pytest.mark.kubernetes
+@pytest.mark.no_remote_server
+def test_kubernetes_ssh_proxy_performance():
+    """Test Kubernetes SSH proxy performance with high load.
+
+    This test launches a Kubernetes cluster and runs the SSH proxy benchmark
+    to ensure that SSH latency remains low (< 0.01s) under high load conditions.
+    """
+    cluster_name = smoke_tests_utils.get_cluster_name()
+
+    test = smoke_tests_utils.Test(
+        'kubernetes_ssh_proxy_performance',
+        [
+            # Launch a minimal Kubernetes cluster for SSH proxy testing
+            f'sky launch -y -c {cluster_name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} echo "SSH proxy test cluster ready"',
+            # Run the SSH proxy benchmark test and validate results using pipes
+            f'python tests/load_tests/test_ssh_proxy.py -c {cluster_name} -p 20 -n 100 --size 1024 2>&1 | tee /dev/stderr | ( '
+            f'OUTPUT=$(cat) && '
+            f'echo "$OUTPUT" && '
+            f'echo "Validating performance metrics..." && '
+            f'MEAN=$(echo "$OUTPUT" | grep "Mean:" | awk \'{{print $2}}\' | sed \'s/s$//\') && '
+            f'MEDIAN=$(echo "$OUTPUT" | grep "Median:" | awk \'{{print $2}}\' | sed \'s/s$//\') && '
+            f'STDDEV=$(echo "$OUTPUT" | grep "Std Dev:" | awk \'{{print $3}}\' | sed \'s/s$//\') && '
+            f'SUCCESS=$(echo "$OUTPUT" | grep "Success rate:" | awk \'{{print $3}}\' | sed \'s/%$//\') && '
+            f'echo "Mean: $MEAN, Median: $MEDIAN, Std Dev: $STDDEV, Success: $SUCCESS%" && '
+            f'if [ "$(echo "$MEAN < 0.01" | bc -l)" -eq 1 ]; then echo "Mean latency OK: ${{MEAN}}s"; else echo "Mean latency too high: ${{MEAN}}s"; exit 1; fi && '
+            f'if [ "$(echo "$MEDIAN < 0.01" | bc -l)" -eq 1 ]; then echo "Median latency OK: ${{MEDIAN}}s"; else echo "Median latency too high: ${{MEDIAN}}s"; exit 1; fi && '
+            f'if [ "$(echo "$STDDEV < 0.02" | bc -l)" -eq 1 ]; then echo "Std Dev OK: ${{STDDEV}}s"; else echo "Std Dev too high: ${{STDDEV}}s"; exit 1; fi && '
+            f'if [ "$SUCCESS" = "100.00" ] || [ "$SUCCESS" = "100" ]; then echo "Success rate OK: ${{SUCCESS}}%"; else echo "Success rate too low: ${{SUCCESS}}%"; exit 1; fi '
+            f')',
+        ],
+        f'sky down -y {cluster_name}',
+        timeout=15 * 60,  # 15 minutes timeout
+    )
+    smoke_tests_utils.run_one_test(test)

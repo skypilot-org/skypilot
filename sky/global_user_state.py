@@ -483,7 +483,7 @@ def get_user(user_id: str) -> Optional[models.User]:
 
 @_init_db
 @metrics_lib.time_me
-def _get_users(user_ids: Set[str]) -> Dict[str, models.User]:
+def get_users(user_ids: Set[str]) -> Dict[str, models.User]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(user_table).filter(
@@ -1659,7 +1659,7 @@ def get_clusters(
 
     # get all users needed for the rows at once
     user_hashes = set(row_to_user_hash.values())
-    user_hash_to_user = _get_users(user_hashes)
+    user_hash_to_user = get_users(user_hashes)
 
     # get last cluster event for each row
     cluster_hashes = set(row_to_user_hash.keys())
@@ -1738,7 +1738,7 @@ def get_clusters_from_history(
     current_user_hash = common_utils.get_user_hash()
 
     # Prepare filtering parameters
-    cutoff_time = None
+    cutoff_time = 0
     if days is not None:
         cutoff_time = int(time.time()) - (days * 24 * 60 * 60)
 
@@ -1774,12 +1774,24 @@ def get_clusters_from_history(
                                        cluster_history_table.c.cluster_hash ==
                                        cluster_table.c.cluster_hash,
                                        isouter=True))
+
+        # Only include clusters that are either active (status is not None)
+        # or are within the cutoff time (cutoff_time <= last_activity_time).
+        # If days is not specified, we include all clusters by setting
+        # cutoff_time to 0.
+        query = query.filter(
+            (cluster_table.c.status.isnot(None) |
+             (cluster_history_table.c.last_activity_time >= cutoff_time)))
+
+        # Order by launched_at descending (most recent first)
+        query = query.order_by(
+            sqlalchemy.desc(cluster_history_table.c.launched_at))
+
         if cluster_hashes is not None:
             query = query.filter(
                 cluster_history_table.c.cluster_hash.in_(cluster_hashes))
         rows = query.all()
 
-    filtered_rows = []
     usage_intervals_dict = {}
     row_to_user_hash = {}
     for row in rows:
@@ -1789,30 +1801,13 @@ def get_clusters_from_history(
                 row_usage_intervals = pickle.loads(row.usage_intervals)
             except (pickle.PickleError, AttributeError):
                 pass
-        # Parse status
-        status = None
-        if row.status:
-            status = status_lib.ClusterStatus[row.status]
-        # Apply filtering: always include active clusters, filter historical
-        # ones by time
-        if cutoff_time is not None and status is None:  # Historical cluster
-            # For historical clusters, check if they were used recently
-            # Use the pre-computed last_activity_time from the database
-            last_activity_time = row.last_activity_time
-
-            # Skip historical clusters that haven't been used recently
-            if last_activity_time is None or last_activity_time < cutoff_time:
-                continue
-
-        filtered_rows.append(row)
         usage_intervals_dict[row.cluster_hash] = row_usage_intervals
         user_hash = (row.user_hash
                      if row.user_hash is not None else current_user_hash)
         row_to_user_hash[row.cluster_hash] = user_hash
 
-    rows = filtered_rows
     user_hashes = set(row_to_user_hash.values())
-    user_hash_to_user = _get_users(user_hashes)
+    user_hash_to_user = get_users(user_hashes)
     cluster_hashes = set(row_to_user_hash.keys())
     if not abbreviate_response:
         last_cluster_event_dict = _get_last_cluster_event_multiple(

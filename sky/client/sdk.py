@@ -1267,9 +1267,11 @@ def autostop(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def queue(cluster_name: str,
-          skip_finished: bool = False,
-          all_users: bool = False) -> server_common.RequestId[List[dict]]:
+def queue(
+    cluster_name: str,
+    skip_finished: bool = False,
+    all_users: bool = False
+) -> server_common.RequestId[List[responses.ClusterJobRecord]]:
     """Gets the job queue of a cluster.
 
     Args:
@@ -1282,8 +1284,8 @@ def queue(cluster_name: str,
         The request ID of the queue request.
 
     Request Returns:
-        job_records (List[Dict[str, Any]]): A list of dicts for each job in the
-            queue.
+        job_records (List[responses.ClusterJobRecord]): A list of job records
+            for each job in the queue.
 
             .. code-block:: python
 
@@ -1677,8 +1679,9 @@ def local_up(gpus: bool,
              ssh_key: Optional[str],
              cleanup: bool,
              context_name: Optional[str] = None,
+             password: Optional[str] = None,
              name: Optional[str] = None,
-             password: Optional[str] = None) -> server_common.RequestId[None]:
+             port_start: Optional[int] = None) -> server_common.RequestId[None]:
     """Launches a Kubernetes cluster on local machines.
 
     Returns:
@@ -1698,8 +1701,9 @@ def local_up(gpus: bool,
                                 ssh_key=ssh_key,
                                 cleanup=cleanup,
                                 context_name=context_name,
+                                password=password,
                                 name=name,
-                                password=password)
+                                port_start=port_start)
     response = server_common.make_authenticated_request(
         'POST', '/local_up', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)

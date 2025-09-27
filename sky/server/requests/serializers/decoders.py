@@ -101,11 +101,11 @@ def decode_start(return_value: str) -> 'backends.CloudVmRayResourceHandle':
 
 
 @register_decoders('queue')
-def decode_queue(return_value: List[dict],) -> List[Dict[str, Any]]:
+def decode_queue(return_value: List[dict],) -> List[responses.ClusterJobRecord]:
     jobs = return_value
     for job in jobs:
         job['status'] = job_lib.JobStatus(job['status'])
-    return jobs
+    return [responses.ClusterJobRecord.model_validate(job) for job in jobs]
 
 
 @register_decoders('jobs.queue')

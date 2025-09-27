@@ -673,7 +673,6 @@ def launch(
     # see the setup logs when inspecting the launch process to know
     # excatly what the job is waiting for.
     detach_setup = controller_utils.Controllers.from_name(cluster_name) is None
-
     return _execute(
         entrypoint=entrypoint,
         dryrun=dryrun,
