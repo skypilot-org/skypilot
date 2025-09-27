@@ -212,3 +212,4 @@ class ManagedJobRecord(ResponseBaseModel):
     pool_hash: Optional[str] = None
     current_cluster_name: Optional[str] = None
     job_id_on_pool_cluster: Optional[int] = None
+    accelerators: Optional[Dict[str, float]] = None
