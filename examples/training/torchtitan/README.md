@@ -15,9 +15,6 @@ This example demonstrates how to run [TorchTitan](https://github.com/pytorch/tor
 * **Auto-recovery**: Built-in fault tolerance automatically recovers from node failures and spot preemptions, resuming from checkpoints.
 * **Easy scaling**: Launch many parallel experiments for hyperparameter tuning with [Managed Jobs](https://docs.skypilot.co/en/latest/running-jobs/many-jobs.html).
 
-## About TorchTitan
-
-[TorchTitan](https://github.com/pytorch/torchtitan) is a PyTorch native platform for large-scale LLM training, featuring multi-dimensional parallelisms (FSDP2, Tensor/Pipeline/Context Parallel), distributed checkpointing, torch.compile, and Float8 support.
 
 ## Quick start
 
