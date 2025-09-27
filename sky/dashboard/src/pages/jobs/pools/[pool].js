@@ -556,6 +556,12 @@ export default function PoolDetailPage() {
                     </TableHead>
                     <TableHead
                       className="sortable whitespace-nowrap"
+                      onClick={() => requestSort('version')}
+                    >
+                      Pool Version{getSortDirection('version')}
+                    </TableHead>
+                    <TableHead
+                      className="sortable whitespace-nowrap"
                       onClick={() => requestSort('used_by')}
                     >
                       Used By{getSortDirection('used_by')}
@@ -680,6 +686,9 @@ export default function PoolDetailPage() {
                           <StatusBadge status={worker.status} />
                         </TableCell>
                         <TableCell>
+                          {worker.version || '-'}
+                        </TableCell>
+                        <TableCell>
                           {worker.used_by ? (
                             <Link
                               href={`/jobs/${worker.used_by}`}
@@ -696,7 +705,7 @@ export default function PoolDetailPage() {
                   ) : (
                     <TableRow>
                       <TableCell
-                        colSpan={6}
+                        colSpan={7}
                         className="text-center py-8 text-gray-500"
                       >
                         {showFailedWorkers
