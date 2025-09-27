@@ -2265,7 +2265,11 @@ def api_start(
     if host not in server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS:
         raise ValueError(f'Invalid host: {host}. Should be one of: '
                          f'{server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS}')
-    is_local_api_server = server_common.is_api_server_local()
+    # Check if we can start a local server on the intended host
+    # This ensures --host flag is respected even when remote endpoint
+    # is configured
+    intended_local_url = f'http://{host}:46580'
+    is_local_api_server = server_common.is_api_server_local(intended_local_url)
     if not is_local_api_server:
         server_url = server_common.get_server_url()
         with ux_utils.print_exception_no_traceback():
@@ -2275,13 +2279,20 @@ def api_start(
                              'from the config file and/or unset the '
                              'SKYPILOT_API_SERVER_ENDPOINT environment '
                              'variable.')
-    server_common.check_server_healthy_or_start_fn(deploy, host, foreground,
-                                                   metrics, metrics_port,
-                                                   enable_basic_auth)
+    # Always pass intended local URL as override - function handles gracefully
+    server_common.check_server_healthy_or_start_fn(
+        deploy,
+        host,
+        foreground,
+        metrics,
+        metrics_port,
+        enable_basic_auth,
+        endpoint_override=intended_local_url)
     if foreground:
         # Explain why current process exited
         logger.info('API server is already running:')
-    api_server_url = server_common.get_server_url(host)
+    # Use the local server URL for display when starting locally
+    api_server_url = f'http://{host}:46580'
     logger.info(f'{ux_utils.INDENT_SYMBOL}SkyPilot API server and dashboard: '
                 f'{api_server_url}\n'
                 f'{ux_utils.INDENT_LAST_SYMBOL}'

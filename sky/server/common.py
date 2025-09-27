@@ -535,7 +535,7 @@ def _start_api_server(deploy: bool = False,
                       metrics_port: Optional[int] = None,
                       enable_basic_auth: bool = False):
     """Starts a SkyPilot API server locally."""
-    server_url = get_server_url(host)
+    server_url = f'http://{host}:46580'
     assert server_url in AVAILABLE_LOCAL_API_SERVER_URLS, (
         f'server url {server_url} is not a local url')
 
@@ -545,8 +545,8 @@ def _start_api_server(deploy: bool = False,
                     f'SkyPilot API server at {server_url}. '
                     'Starting a local server.'
                     f'{colorama.Style.RESET_ALL}')
-        if not is_api_server_local():
-            raise RuntimeError(f'Cannot start API server: {get_server_url()} '
+        if not is_api_server_local(server_url):
+            raise RuntimeError(f'Cannot start API server: {server_url} '
                                'is not a local URL')
 
         # Check available memory before starting the server.
@@ -619,7 +619,7 @@ def _start_api_server(deploy: bool = False,
             try:
                 # Clear the cache to ensure fresh checks during startup
                 get_api_server_status.cache_clear()  # type: ignore
-                check_server_healthy()
+                check_server_healthy(server_url)
             except exceptions.APIVersionMismatchError:
                 raise
             except Exception as e:  # pylint: disable=broad-except
@@ -627,14 +627,13 @@ def _start_api_server(deploy: bool = False,
                     with ux_utils.print_exception_no_traceback():
                         raise RuntimeError(
                             'Failed to start SkyPilot API server at '
-                            f'{get_server_url(host)}'
+                            f'{server_url}'
                             '\nView logs at: '
                             f'{constants.API_SERVER_LOGS}') from e
                 time.sleep(0.5)
             else:
                 break
 
-        server_url = get_server_url(host)
         dashboard_msg = ''
         api_server_info = get_api_server_status(server_url)
         if api_server_info.version == versions.DEV_VERSION:
@@ -761,17 +760,20 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
                                      foreground: bool = False,
                                      metrics: bool = False,
                                      metrics_port: Optional[int] = None,
-                                     enable_basic_auth: bool = False):
+                                     enable_basic_auth: bool = False,
+                                     endpoint_override: Optional[str] = None):
     api_server_status = None
+    # Use endpoint override if provided, otherwise use configured endpoint
+    endpoint = endpoint_override or get_server_url()
     try:
-        api_server_status, _ = check_server_healthy()
+        api_server_status, _ = check_server_healthy(endpoint)
         if api_server_status == ApiServerStatus.NEEDS_AUTH:
-            endpoint = get_server_url()
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ApiServerAuthenticationError(endpoint)
     except exceptions.ApiServerConnectionError as exc:
-        endpoint = get_server_url()
-        if not is_api_server_local():
+        # For local server startup, check if the target endpoint is local
+        is_local = is_api_server_local(endpoint)
+        if not is_local:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ApiServerConnectionError(endpoint) from exc
         # Lock to prevent multiple processes from starting the server at the
