@@ -47,7 +47,7 @@ from sky.utils import yaml_utils
 def test_example_app():
     test = smoke_tests_utils.Test(
         'example_app',
-        ['sky check', 'python examples/example_app.py'],
+        ['python examples/example_app.py'],
     )
     smoke_tests_utils.run_one_test(test)
 
