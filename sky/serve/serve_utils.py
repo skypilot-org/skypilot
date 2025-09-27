@@ -837,9 +837,7 @@ def get_ready_replicas(
     ]
 
 
-def get_next_cluster_info(
-        service_name: str,
-        job_id: int) -> Optional['replica_managers.ReplicaInfo']:
+def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
     """Get the next available cluster name from idle replicas.
 
     Args:
@@ -892,7 +890,7 @@ def get_next_cluster_info(
                     f'{service_name!r}')
         managed_job_state.set_current_cluster_name(job_id,
                                                    replica_info.cluster_name)
-        return replica_info
+        return replica_info.cluster_name
 
 
 def _terminate_failed_services(
