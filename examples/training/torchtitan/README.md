@@ -10,7 +10,10 @@ This example demonstrates how to run [TorchTitan](https://github.com/pytorch/tor
 
 **Auto-recovery**: Built-in fault tolerance automatically recovers from node failures and spot preemptions, resuming from checkpoints.
 
-**Easy scaling**: Launch many parallel experiments for hyperparameter tuning with [Managed Jobs](https://docs.skypilot.co/en/latest/running-jobs/many-jobs.html).
+* *Easily run on Kubernetes or clouds without code changes*: SkyPilot offers a simple interface to run TorchTitan on any infrastructure: `sky launch --infra k8s torchtitan.yaml`
+* **Launch distributed training with a single command**: SkyPilot automatically provides [environment variables](https://docs.skypilot.co/en/latest/running-jobs/environment-variables.html)(`SKYPILOT_NODE_RANK`, `SKYPILOT_NODE_IPS`, etc.) that integrate seamlessly with PyTorch distributed training - no manual networking configuration needed.
+* **Auto-recovery**: Built-in fault tolerance automatically recovers from node failures and spot preemptions, resuming from checkpoints.
+* **Easy scaling**: Launch many parallel experiments for hyperparameter tuning with [Managed Jobs](https://docs.skypilot.co/en/latest/running-jobs/many-jobs.html).
 
 ## About TorchTitan
 
