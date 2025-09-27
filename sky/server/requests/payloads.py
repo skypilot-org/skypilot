@@ -27,7 +27,6 @@ import os
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from sky import admin_policy
 from sky import serve
 from sky import sky_logging
 from sky import skypilot_config
@@ -44,8 +43,11 @@ from sky.utils import registry
 
 if typing.TYPE_CHECKING:
     import pydantic
+
+    from sky import admin_policy
 else:
     pydantic = adaptors_common.LazyImport('pydantic')
+    admin_policy = adaptors_common.LazyImport('sky.admin_policy')
 
 logger = sky_logging.init_logger(__name__)
 
