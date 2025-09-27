@@ -157,24 +157,7 @@ class StorageRecord(ResponseBaseModel):
 
 
 class ManagedJobRecord(ResponseBaseModel):
-    """Response for the managed job queue endpoint.
-    {
-        'job_id': int,
-        'job_name': str,
-        'resources': str,
-        'submitted_at': (float) timestamp of submission,
-        'end_at': (float) timestamp of end,
-        'job_duration': (float) duration in seconds,
-        'recovery_count': (int) Number of retries,
-        'status': (sky.jobs.ManagedJobStatus) of the job,
-        'cluster_resources': (str) resources of the cluster,
-        'region': (str) region of the cluster,
-        'user_name': (Optional[str]) job creator's user name,
-        'user_hash': (str) job creator's user hash,
-        'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
-        'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
-    }
-    """
+    """A single managed job record."""
     job_id: Optional[int] = None
     task_id: Optional[int] = None
     job_name: Optional[str] = None
@@ -212,4 +195,4 @@ class ManagedJobRecord(ResponseBaseModel):
     pool_hash: Optional[str] = None
     current_cluster_name: Optional[str] = None
     job_id_on_pool_cluster: Optional[int] = None
-    accelerators: Optional[Dict[str, float]] = None
+    accelerators: Optional[Dict[str, int]] = None
