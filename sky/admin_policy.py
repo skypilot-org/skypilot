@@ -14,7 +14,6 @@ from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
-from sky import task as task_lib
 
 if typing.TYPE_CHECKING:
     import requests
