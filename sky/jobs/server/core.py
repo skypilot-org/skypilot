@@ -296,8 +296,7 @@ def launch(
                 # TODO: do something with returned status?
                 _, _ = backend_utils.refresh_cluster_status_handle(
                     cluster_name=cluster_name,
-                    force_refresh_statuses=set(status_lib.ClusterStatus),
-                    acquire_per_cluster_status_lock=False)
+                    force_refresh_statuses=set(status_lib.ClusterStatus))
             except (exceptions.ClusterOwnerIdentityMismatchError,
                     exceptions.CloudUserIdentityError,
                     exceptions.ClusterStatusFetchingError) as e:
