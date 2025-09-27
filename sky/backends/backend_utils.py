@@ -2613,7 +2613,7 @@ def refresh_cluster_record(
         cluster_name: str,
         *,
         force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]] = None,
-        acquire_per_cluster_status_lock: bool = True,
+        dangerous_already_holding_cluster_lock: bool = True,
         cluster_status_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS,
         include_user_info: bool = True,
         summary_response: bool = False) -> Optional[Dict[str, Any]]:
@@ -2633,8 +2633,10 @@ def refresh_cluster_record(
               _CLUSTER_STATUS_CACHE_DURATION_SECONDS old, and one of:
                 1. the cluster is a spot cluster, or
                 2. cluster autostop is set and the cluster is not STOPPED.
-        acquire_per_cluster_status_lock: Whether to acquire the per-cluster lock
-          before updating the status. Even if this is True, the lock may not be
+        dangerous_already_holding_cluster_lock: Whether we already are holding
+          the per-cluster lock. You must not set this to True if the caller does
+          not already hold the lock. If True, we will not acquire the lock
+          before updating the status. Even if this is False, the lock may not be
           acquired if the status does not need to be refreshed.
         cluster_status_lock_timeout: The timeout to acquire the per-cluster
           lock. If timeout, the function will use the cached status. If the
@@ -2686,7 +2688,7 @@ def refresh_cluster_record(
             if not _must_refresh_cluster_status(record, force_refresh_statuses):
                 return record
 
-            if not acquire_per_cluster_status_lock:
+            if dangerous_already_holding_cluster_lock:
                 return _update_cluster_status(cluster_name, include_user_info,
                                               summary_response)
 
@@ -2740,7 +2742,7 @@ def refresh_cluster_status_handle(
     cluster_name: str,
     *,
     force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]] = None,
-    acquire_per_cluster_status_lock: bool = True,
+    dangerous_already_holding_cluster_lock: bool = False,
     cluster_status_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS
 ) -> Tuple[Optional[status_lib.ClusterStatus],
            Optional[backends.ResourceHandle]]:
@@ -2753,7 +2755,8 @@ def refresh_cluster_status_handle(
     record = refresh_cluster_record(
         cluster_name,
         force_refresh_statuses=force_refresh_statuses,
-        acquire_per_cluster_status_lock=acquire_per_cluster_status_lock,
+        dangerous_already_holding_cluster_lock=
+        dangerous_already_holding_cluster_lock,
         cluster_status_lock_timeout=cluster_status_lock_timeout,
         include_user_info=False,
         summary_response=True)
@@ -3078,7 +3081,7 @@ def _refresh_cluster(
         record = refresh_cluster_record(
             cluster_name,
             force_refresh_statuses=force_refresh_statuses,
-            acquire_per_cluster_status_lock=True,
+            dangerous_already_holding_cluster_lock=False,
             include_user_info=include_user_info,
             summary_response=summary_response)
     except (exceptions.ClusterStatusFetchingError,
