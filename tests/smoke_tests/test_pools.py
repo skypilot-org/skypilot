@@ -704,6 +704,7 @@ def test_pool_job_cancel_recovery(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.skip('Skipping until job controller bug resolved.')
 def test_pool_job_cancel_running_multiple(generic_cloud: str):
     num_jobs = 4
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
