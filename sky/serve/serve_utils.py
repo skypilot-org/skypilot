@@ -15,7 +15,7 @@ import time
 import traceback
 import typing
 from typing import (Any, Callable, DefaultDict, Deque, Dict, Generic, Iterator,
-                    List, Optional, TextIO, Type, TypeVar, Union, Tuple)
+                    List, Optional, TextIO, Type, TypeVar, Union)
 import uuid
 
 import colorama
@@ -837,8 +837,9 @@ def get_ready_replicas(
     ]
 
 
-def get_next_cluster_info(service_name: str, job_id: int) -> Optional[
-        'replica_managers.ReplicaInfo']:
+def get_next_cluster_info(
+        service_name: str,
+        job_id: int) -> Optional['replica_managers.ReplicaInfo']:
     """Get the next available cluster name from idle replicas.
 
     Args:
