@@ -2613,7 +2613,7 @@ def refresh_cluster_record(
         cluster_name: str,
         *,
         force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]] = None,
-        cluster_lock_already_held: bool = True,
+        cluster_lock_already_held: bool = False,
         cluster_status_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS,
         include_user_info: bool = True,
         summary_response: bool = False) -> Optional[Dict[str, Any]]:
