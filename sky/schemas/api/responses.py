@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 import pydantic
 
+from sky import data
 from sky import models
 from sky.server import common
 from sky.skylet import job_lib
@@ -143,3 +144,12 @@ class UploadStatus(enum.Enum):
     """Status of the upload."""
     UPLOADING = 'uploading'
     COMPLETED = 'completed'
+
+
+class StorageRecord(ResponseBaseModel):
+    """Response for the storage list endpoint."""
+    name: str
+    launched_at: int
+    store: List[data.StoreType]
+    last_use: str
+    status: status_lib.StorageStatus

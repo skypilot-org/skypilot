@@ -181,14 +181,16 @@ def decode_list_accelerators(
 
 @register_decoders('storage_ls')
 def decode_storage_ls(
-        return_value: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return_value: List[Dict[str, Any]]) -> List[responses.StorageRecord]:
     for storage_info in return_value:
         storage_info['status'] = status_lib.StorageStatus(
             storage_info['status'])
         storage_info['store'] = [
             storage.StoreType(store) for store in storage_info['store']
         ]
-    return return_value
+    return [
+        responses.StorageRecord(**storage_info) for storage_info in return_value
+    ]
 
 
 @register_decoders('job_status')
