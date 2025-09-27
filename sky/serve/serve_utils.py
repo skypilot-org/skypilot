@@ -27,6 +27,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.backends import backend_utils
 from sky.jobs import state as managed_job_state
 from sky.serve import constants
 from sky.serve import serve_state
@@ -50,10 +51,12 @@ if typing.TYPE_CHECKING:
     import requests
 
     import sky
+    from sky.schemas.generated import jobsv1_pb2
     from sky.serve import replica_managers
 else:
     psutil = adaptors_common.LazyImport('psutil')
     requests = adaptors_common.LazyImport('requests')
+    jobsv1_pb2 = adaptors_common.LazyImport('sky.schemas.generated.jobsv1_pb2')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -1268,6 +1271,17 @@ def _capped_follow_logs_with_provision_expanding(
     yield from all_lines
 
 
+def _get_replica_status(service_name: str,
+                        replica_id: int) -> serve_state.ReplicaStatus:
+    replica_info = serve_state.get_replica_infos(service_name)
+    for info in replica_info:
+        if info.replica_id == replica_id:
+            return info.status
+    with ux_utils.print_exception_no_traceback():
+        raise ValueError(
+            _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id))
+
+
 def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
                         tail: Optional[int], pool: bool) -> str:
     msg = _check_service_status_healthy(service_name, pool=pool)
@@ -1299,17 +1313,8 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
     replica_cluster_name = generate_replica_cluster_name(
         service_name, replica_id)
 
-    def _get_replica_status() -> serve_state.ReplicaStatus:
-        replica_info = serve_state.get_replica_infos(service_name)
-        for info in replica_info:
-            if info.replica_id == replica_id:
-                return info.status
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id))
-
-    replica_provisioned = (
-        lambda: _get_replica_status() != serve_state.ReplicaStatus.PROVISIONING)
+    replica_provisioned = (lambda: _get_replica_status(service_name, replica_id)
+                           != serve_state.ReplicaStatus.PROVISIONING)
 
     # Handle launch logs based on number parameter
     final_lines_to_print = []
@@ -1333,8 +1338,8 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
             ):
                 print(line, end='', flush=True)
 
-    if (not follow and
-            _get_replica_status() == serve_state.ReplicaStatus.PROVISIONING):
+    if (not follow and _get_replica_status(service_name, replica_id)
+            == serve_state.ReplicaStatus.PROVISIONING):
         # Early exit if not following the logs.
         if tail is not None:
             for line in final_lines_to_print:
@@ -1389,12 +1394,153 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
     return ''
 
 
+def stream_replica_logs_iter(service_name: str, replica_id: int, follow: bool,
+                             tail: Optional[int], pool: bool) -> Iterator[str]:
+    # This function will only work when the replica also has grpc enabled.
+    # We assume that replica gRPC server is going to have the TailLogs endpoint
+    # implemented. Otherwise, an exception will trigger a fallback to CodeGen.
+    replica_cluster_name = generate_replica_cluster_name(
+        service_name, replica_id)
+    handle = global_user_state.get_handle_from_cluster_name(
+        replica_cluster_name)
+    if handle is not None:
+        assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
+        assert handle.is_grpc_enabled_with_flag
+
+    msg = _check_service_status_healthy(service_name, pool=pool)
+    if msg is not None:
+        yield msg + '\n'
+        return
+    repnoun = 'worker' if pool else 'replica'
+    caprepnoun = repnoun.capitalize()
+    yield (f'{colorama.Fore.YELLOW}Start streaming logs for launching process '
+           f'of {repnoun} {replica_id}.{colorama.Style.RESET_ALL}\n')
+    log_file_name = generate_replica_log_file_name(service_name, replica_id)
+    if os.path.exists(log_file_name):
+        if tail is not None:
+            lines = common_utils.read_last_n_lines(log_file_name, tail)
+            for line in lines:
+                if not line.endswith('\n'):
+                    line += '\n'
+                yield line
+        else:
+            with open(log_file_name, 'r', encoding='utf-8') as f:
+                yield f.read() + '\n'
+        return
+
+    launch_log_file_name = generate_replica_launch_log_file_name(
+        service_name, replica_id)
+    if not os.path.exists(launch_log_file_name):
+        yield (f'{colorama.Fore.RED}{caprepnoun} {replica_id} doesn\'t exist.'
+               f'{colorama.Style.RESET_ALL}\n')
+        return
+
+    replica_provisioned = (lambda: _get_replica_status(service_name, replica_id)
+                           != serve_state.ReplicaStatus.PROVISIONING)
+
+    # Handle launch logs based on number parameter
+    final_lines_to_print = []
+    if tail is not None:
+        static_lines = common_utils.read_last_n_lines(launch_log_file_name,
+                                                      tail)
+        lines = list(
+            _capped_follow_logs_with_provision_expanding(
+                log_list=static_lines,
+                cluster_name=replica_cluster_name,
+                line_cap=tail,
+            ))
+        final_lines_to_print += lines
+    else:
+        with open(launch_log_file_name, 'r', newline='', encoding='utf-8') as f:
+            for line in _follow_logs_with_provision_expanding(
+                    f,
+                    replica_cluster_name,
+                    should_stop=replica_provisioned,
+                    stop_on_eof=not follow,
+            ):
+                yield line
+
+    if (not follow and _get_replica_status(service_name, replica_id)
+            == serve_state.ReplicaStatus.PROVISIONING):
+        # Early exit if not following the logs.
+        if tail is not None:
+            for line in final_lines_to_print:
+                if not line.endswith('\n'):
+                    line += '\n'
+                yield line
+        return
+
+    if handle is None:
+        if tail is not None:
+            for line in final_lines_to_print:
+                if not line.endswith('\n'):
+                    line += '\n'
+                yield line
+        yield _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id) + '\n'
+        return
+
+    # Notify user here to make sure user won't think the log is finished.
+    yield (f'{colorama.Fore.YELLOW}Start streaming logs for task job '
+           f'of {repnoun} {replica_id}...{colorama.Style.RESET_ALL}\n')
+
+    # Always tail the latest logs, which represent user setup & run.
+    # We check for grpc enabled at the very start.
+    def _tail_logs_stream(tail):
+        request = jobsv1_pb2.TailLogsRequest(job_id=None,
+                                             managed_job_id=None,
+                                             follow=follow,
+                                             tail=tail)
+        yield from backend_utils.invoke_skylet_streaming_with_retries(
+            lambda: backends.SkyletClient(handle.get_grpc_channel()).tail_logs(
+                request, timeout=None))
+
+    if tail is None:
+        returncode = 0
+        for resp in _tail_logs_stream(None):
+            if resp.log_line:
+                yield resp.log_line
+            returncode = resp.exit_code
+        if returncode != 0:
+            yield (f'{colorama.Fore.RED}Failed to stream logs for {repnoun} '
+                   f'{replica_id}.{colorama.Style.RESET_ALL}\n')
+    elif not follow and tail > 0:
+        returncode = 0
+        stream_lines = ''
+        for resp in _tail_logs_stream(tail):
+            if resp.log_line:
+                stream_lines += resp.log_line
+            returncode = resp.exit_code
+        if returncode != 0 or returncode != 101:
+            for line in final_lines_to_print:
+                if not line.endswith('\n'):
+                    line += '\n'
+                yield line
+            yield (f'{colorama.Fore.RED}Failed to stream logs for replica '
+                   f'{replica_id}.{colorama.Style.RESET_ALL}\n')
+        else:
+            final_lines_to_print += stream_lines.splitlines()
+            for line in final_lines_to_print[-tail:]:
+                if not line.endswith('\n'):
+                    line += '\n'
+                yield line
+
+
 def stream_serve_process_logs(service_name: str, stream_controller: bool,
                               follow: bool, tail: Optional[int],
                               pool: bool) -> str:
+    for line in stream_serve_process_logs_iter(service_name, stream_controller,
+                                               follow, tail, pool):
+        print(line, end='', flush=True)
+    return ''
+
+
+def stream_serve_process_logs_iter(service_name: str, stream_controller: bool,
+                                   follow: bool, tail: Optional[int],
+                                   pool: bool) -> Iterator[str]:
     msg = _check_service_status_healthy(service_name, pool)
     if msg is not None:
-        return msg
+        yield msg + '\n'
+        return
     if stream_controller:
         log_file = generate_remote_controller_log_file_name(service_name)
     else:
@@ -1414,7 +1560,7 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
         for line in lines:
             if not line.endswith('\n'):
                 line += '\n'
-            print(line, end='', flush=True)
+            yield line
     else:
         with open(os.path.expanduser(log_file),
                   'r',
@@ -1425,8 +1571,8 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
                     should_stop=_service_is_terminal,
                     stop_on_eof=not follow,
             ):
-                print(line, end='', flush=True)
-    return ''
+                yield line
+        yield '\n'
 
 
 # ================== Table Formatter for `sky serve status` ==================

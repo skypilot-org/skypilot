@@ -1,7 +1,7 @@
 """Rpc Utilities for SkyServe"""
 
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from sky import backends
 from sky.adaptors import common as adaptors_common
@@ -177,3 +177,37 @@ class RpcRunner:
                                                    pool=pool)
         backend_utils.invoke_skylet_with_retries(lambda: backends.SkyletClient(
             handle.get_grpc_channel()).update_service(request))
+
+    @classmethod
+    def stream_replica_logs(cls, handle: backends.CloudVmRayResourceHandle,
+                            service_name: str, replica_id: int, follow: bool,
+                            tail: Optional[int], pool: bool) -> Iterator[str]:
+        assert handle.is_grpc_enabled_with_flag
+        request = servev1_pb2.StreamReplicaLogsRequest(
+            service_name=service_name,
+            replica_id=replica_id,
+            follow=follow,
+            tail=tail,
+            pool=pool)
+        for response in backend_utils.invoke_skylet_streaming_with_retries(
+                lambda: backends.SkyletClient(handle.get_grpc_channel()
+                                             ).stream_replica_logs(request)):
+            yield response.log_line
+
+    @classmethod
+    def stream_serve_process_logs(cls,
+                                  handle: backends.CloudVmRayResourceHandle,
+                                  service_name: str, stream_controller: bool,
+                                  follow: bool, tail: Optional[int],
+                                  pool: bool) -> Iterator[str]:
+        assert handle.is_grpc_enabled_with_flag
+        request = servev1_pb2.StreamServeProcessLogsRequest(
+            service_name=service_name,
+            stream_controller=stream_controller,
+            follow=follow,
+            tail=tail,
+            pool=pool)
+        for response in backend_utils.invoke_skylet_streaming_with_retries(
+                lambda: backends.SkyletClient(handle.get_grpc_channel(
+                )).stream_serve_process_logs(request)):
+            yield response.log_line

@@ -3218,6 +3218,20 @@ class SkyletClient:
     ) -> 'servev1_pb2.UpdateServiceResponse':
         return self._serve_stub.UpdateService(request, timeout=timeout)
 
+    def stream_replica_logs(
+        self,
+        request: 'servev1_pb2.StreamReplicaLogsRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> Iterator['servev1_pb2.StreamReplicaLogsResponse']:
+        return self._serve_stub.StreamReplicaLogs(request, timeout=timeout)
+
+    def stream_serve_process_logs(
+        self,
+        request: 'servev1_pb2.StreamServeProcessLogsRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> Iterator['servev1_pb2.StreamServeProcessLogsResponse']:
+        return self._serve_stub.StreamServeProcessLogs(request, timeout=timeout)
+
     def get_managed_job_controller_version(
         self,
         request: 'managed_jobsv1_pb2.GetVersionRequest',
