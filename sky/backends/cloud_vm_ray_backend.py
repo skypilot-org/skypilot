@@ -5121,7 +5121,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         # observed in AWS. See also
                         # _LAUNCH_DOUBLE_CHECK_WINDOW in backend_utils.py.
                         force_refresh_statuses={status_lib.ClusterStatus.INIT},
-                        dangerous_already_holding_cluster_lock=True))
+                        cluster_lock_already_held=True))
                 cluster_status_fetched = True
             except exceptions.ClusterStatusFetchingError:
                 logger.warning(
@@ -5725,7 +5725,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             record = backend_utils.refresh_cluster_record(
                 cluster_name,
                 force_refresh_statuses={status_lib.ClusterStatus.INIT},
-                dangerous_already_holding_cluster_lock=True,
+                cluster_lock_already_held=True,
                 include_user_info=False,
                 summary_response=True,
             )
