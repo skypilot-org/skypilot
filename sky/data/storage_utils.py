@@ -1,7 +1,7 @@
 """Utility functions for the storage module."""
-import glob
 import os
 import pathlib
+from pathlib import PurePosixPath
 import shlex
 import stat
 import subprocess
@@ -10,6 +10,7 @@ import warnings
 import zipfile
 
 import colorama
+from pathspec.gitignore import GitIgnoreSpec
 
 from sky import exceptions
 from sky import sky_logging
@@ -66,40 +67,94 @@ def format_storage_table(storages: List[Dict[str, Any]],
         return 'No existing storage.'
 
 
-def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
-    """List files and patterns ignored by the .skyignore file
-    in the given source directory.
-    """
-    excluded_list: Set[str] = set()
+def _relativize_pattern(pattern: str, rel_dir: str) -> Optional[str]:
+    """Convert a .skyignore pattern to be relative to repository root."""
+    if not pattern:
+        return None
+    stripped = pattern.lstrip()
+    if not stripped or stripped.startswith('#'):
+        return None
+
+    negated = pattern.startswith('!')
+    body = pattern[1:] if negated else pattern
+
+    rel_dir = rel_dir.strip('/')
+    if not rel_dir or rel_dir == '.':
+        normalized = body
+    else:
+        prefix_path = PurePosixPath(rel_dir)
+        if body.startswith('/'):
+            combined = prefix_path.joinpath(body.lstrip('/'))
+        else:
+            if '/' in body:
+                combined = prefix_path.joinpath(body)
+            else:
+                combined = prefix_path.joinpath('**', body)
+        normalized = combined.as_posix()
+    if negated:
+        normalized = '!' + normalized
+    return normalized
+
+
+def _build_skyignore_spec(src_dir_path: str) -> Optional[GitIgnoreSpec]:
     expand_src_dir_path = os.path.expanduser(src_dir_path)
-    skyignore_path = os.path.join(expand_src_dir_path,
-                                  constants.SKY_IGNORE_FILE)
+    if not os.path.isdir(expand_src_dir_path):
+        return None
 
-    try:
-        with open(skyignore_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#'):
-                    # Make parsing consistent with rsync.
-                    # Rsync uses '/' as current directory.
-                    if line.startswith('/'):
-                        line = '.' + line
-                    else:
-                        line = '**/' + line
-                    # Find all files matching the pattern.
-                    matching_files = glob.glob(os.path.join(
-                        expand_src_dir_path, line),
-                                               recursive=True)
-                    # Process filenames to comply with cloud rsync format.
-                    for i in range(len(matching_files)):
-                        matching_files[i] = os.path.relpath(
-                            matching_files[i], expand_src_dir_path)
-                    excluded_list.update(matching_files)
-    except IOError as e:
-        logger.warning(f'Error reading {skyignore_path}: '
-                       f'{common_utils.format_exception(e, use_bracket=True)}')
+    patterns: List[str] = []
+    for dirpath, dirnames, filenames in os.walk(expand_src_dir_path,
+                                                topdown=True):
+        dirnames.sort()
+        filenames.sort()
+        if constants.SKY_IGNORE_FILE not in filenames:
+            continue
+        rel_dir = os.path.relpath(dirpath, expand_src_dir_path)
+        skyignore_path = os.path.join(dirpath, constants.SKY_IGNORE_FILE)
+        try:
+            with open(skyignore_path, 'r', encoding='utf-8') as f:
+                for raw_line in f:
+                    line = raw_line.rstrip('\n')
+                    normalized = _relativize_pattern(line, rel_dir)
+                    if normalized:
+                        patterns.append(normalized)
+        except IOError as e:
+            logger.warning(
+                f'Error reading {skyignore_path}: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
 
-    return list(excluded_list)
+    if not patterns:
+        return None
+    return GitIgnoreSpec.from_lines(patterns)
+
+
+def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
+    """List files and directories ignored by .skyignore files under src."""
+    expand_src_dir_path = os.path.expanduser(src_dir_path)
+    if not os.path.isdir(expand_src_dir_path):
+        return []
+
+    spec = _build_skyignore_spec(src_dir_path)
+    if spec is None:
+        return []
+
+    excluded: Set[str] = set()
+    for dirpath, dirnames, filenames in os.walk(expand_src_dir_path,
+                                                topdown=True):
+        rel_dir = os.path.relpath(dirpath, expand_src_dir_path)
+        rel_dir_posix = '' if rel_dir in (
+            '.', '') else PurePosixPath(rel_dir).as_posix()
+
+        for name in filenames:
+            rel_path = name if not rel_dir_posix else f'{rel_dir_posix}/{name}'
+            if spec.match_file(rel_path):
+                excluded.add(rel_path)
+
+        for name in dirnames:
+            rel_path = name if not rel_dir_posix else f'{rel_dir_posix}/{name}'
+            if spec.match_file(f'{rel_path}/'):
+                excluded.add(rel_path)
+
+    return sorted(excluded)
 
 
 def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:

@@ -42,6 +42,7 @@ install_requires = [
     # filelock 3.15.0 or higher is required for async file locking.
     'filelock >= 3.15.0',
     'packaging',
+    'pathspec',
     'psutil',
     'pulp',
     # Cython 3.0 release breaks PyYAML 5.4.*
