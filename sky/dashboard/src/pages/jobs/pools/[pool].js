@@ -685,9 +685,7 @@ export default function PoolDetailPage() {
                         <TableCell>
                           <StatusBadge status={worker.status} />
                         </TableCell>
-                        <TableCell>
-                          {worker.version || '-'}
-                        </TableCell>
+                        <TableCell>{worker.version || '-'}</TableCell>
                         <TableCell>
                           {worker.used_by ? (
                             <Link
