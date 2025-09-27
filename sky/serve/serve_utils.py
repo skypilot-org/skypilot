@@ -1485,8 +1485,8 @@ def stream_replica_logs_iter(service_name: str, replica_id: int, follow: bool,
     # Always tail the latest logs, which represent user setup & run.
     # We check for grpc enabled at the very start.
     def _tail_logs_stream(tail):
-        from sky.backends import (
-            backend_utils)  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from sky.backends import backend_utils
         request = jobsv1_pb2.TailLogsRequest(job_id=None,
                                              managed_job_id=None,
                                              follow=follow,
