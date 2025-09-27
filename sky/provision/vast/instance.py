@@ -89,7 +89,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                                           resumed_instance_ids=[],
                                           created_instance_ids=[])
 
-        docker_login_params = None
+        docker_login_params: Optional[str] = None
         docker_login_config = config.node_config.get('DockerLogin')
         if docker_login_config:
             username = docker_login_config.get('username', '').strip()
