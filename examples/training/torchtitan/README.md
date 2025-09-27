@@ -45,7 +45,7 @@ The provided `torchtitan.yaml` configuration:
 
 ### Customizing the configuration
 
-You can override various parameters without editing the YAML file:
+You can also change the configurations by changing the flags. The following trains a Llama 3 70B model on 4 nodes:
 
 ```bash
 # Use 4 nodes and train a larger model
