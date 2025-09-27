@@ -4497,10 +4497,27 @@ def jobs_launch(
     job_id_handle = _async_call_or_wait(request_id, async_call,
                                         'sky.jobs.launch')
 
+    job_ids = [job_id_handle[0]] if isinstance(job_id_handle[0],
+                                               int) else job_id_handle[0]
+    if pool:
+        # Display the worker assignment for the jobs.
+        logger.debug(f'Getting service records for pool: {pool}')
+        records_request_id = managed_jobs.pool_status(pool_names=pool)
+        service_records = _async_call_or_wait(records_request_id, async_call,
+                                              'sky.jobs.pool_status')
+        logger.debug(f'Pool status: {service_records}')
+        replica_infos = service_records[0]['replica_info']
+        for replica_info in replica_infos:
+            job_id = replica_info.get('used_by', None)
+            if job_id in job_ids:
+                worker_id = replica_info['replica_id']
+                version = replica_info['version']
+                logger.info(f'Job ID: {job_id} assigned to pool {pool} '
+                            f'(worker: {worker_id}, version: {version})')
+
     if not async_call and not detach_run:
-        job_ids = job_id_handle[0]
-        if isinstance(job_ids, int) or len(job_ids) == 1:
-            job_id = job_ids if isinstance(job_ids, int) else job_ids[0]
+        if len(job_ids) == 1:
+            job_id = job_ids[0]
             returncode = managed_jobs.tail_logs(name=None,
                                                 job_id=job_id,
                                                 follow=True,
