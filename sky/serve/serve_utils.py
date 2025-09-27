@@ -27,7 +27,6 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
-from sky.backends import backend_utils
 from sky.jobs import state as managed_job_state
 from sky.serve import constants
 from sky.serve import serve_state
@@ -1486,6 +1485,8 @@ def stream_replica_logs_iter(service_name: str, replica_id: int, follow: bool,
     # Always tail the latest logs, which represent user setup & run.
     # We check for grpc enabled at the very start.
     def _tail_logs_stream(tail):
+        from sky.backends import (
+            backend_utils)  # pylint: disable=import-outside-toplevel
         request = jobsv1_pb2.TailLogsRequest(job_id=None,
                                              managed_job_id=None,
                                              follow=follow,
