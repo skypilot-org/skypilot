@@ -1,6 +1,8 @@
 # TorchTitan: Large-Scale LLM Training with SkyPilot
 
-This example demonstrates how [SkyPilot](https://skypilot.co) makes distributed training with [TorchTitan](https://github.com/pytorch/torchtitan) simple and scalable across any cloud.
+[TorchTitan](https://github.com/pytorch/torchtitan) is a PyTorch native platform for large-scale LLM training, featuring multi-dimensional parallelisms (FSDP2, Tensor/Pipeline/Context Parallel), distributed checkpointing, torch.compile, and Float8 support.
+
+This example demonstrates how to run [TorchTitan](https://github.com/pytorch/torchtitan) on your Kubernetes clusters, or any hypersclaers, neoclouds using SkyPilot, in addition to the instructions for runnning on [Slurm](https://github.com/pytorch/torchtitan?tab=readme-ov-file#multi-node-training).
 
 ## Why SkyPilot for Distributed Training?
 
