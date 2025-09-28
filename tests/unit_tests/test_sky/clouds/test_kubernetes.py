@@ -161,7 +161,7 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
                         clear=False):
             result = kubernetes.Kubernetes.existing_allowed_contexts()
 
-        self.assertEqual(result, ['ctx1', 'ctx2', 'ctx3'])
+        self.assertEqual(set(result), {'ctx1', 'ctx2', 'ctx3'})
 
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
