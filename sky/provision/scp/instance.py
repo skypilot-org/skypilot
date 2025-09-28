@@ -297,13 +297,6 @@ def _filter_instances(cluster_name_on_cloud,
     ]
 
 
-def _get_head_instance(instances):
-    for instance in instances:
-        if instance['virtualServerName'].endswith('-head'):
-            return instance
-    return None
-
-
 def _get_head_instance_id(instances):
     for instance in instances:
         if instance['virtualServerName'].endswith('-head'):
@@ -646,9 +639,8 @@ def open_ports(
 ) -> None:
     del provider_config
     instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
-    instance = _get_head_instance(instances)
-    instance_info = scp_utils.SCPClient().get_instance_info(
-        instance['virtualServerId'])
+    head_instance_id = _get_head_instance_id(instances)
+    instance_info = scp_utils.SCPClient().get_instance_info(head_instance_id)
     sg_id = instance_info['securityGroupIds'][0]['securityGroupId']
     scp_utils.SCPClient().add_security_group_rule(sg_id, 'IN', ports, None)
     vpc_id = instance_info['vpcId']
@@ -664,9 +656,8 @@ def cleanup_ports(
 ) -> None:
     del provider_config
     instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
-    instance = _get_head_instance(instances)
-    instance_info = scp_utils.SCPClient().get_instance_info(
-        instance['virtualServerId'])
+    head_instance_id = _get_head_instance_id(instances)
+    instance_info = scp_utils.SCPClient().get_instance_info(head_instance_id)
     vpc_id = instance_info['vpcId']
     firewall_id = _get_firewall_id(vpc_id)
     rule_ids = _get_firewall_rule_ids(instance_info, firewall_id, ports)
