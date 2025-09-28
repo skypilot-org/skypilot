@@ -64,7 +64,7 @@ jobs:
           # Use -e to include examples and tests folder in the path for unit
           # tests to access them.
           uv pip install -e ".[all]"
-          uv pip install pytest pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0
+          uv pip install pytest pytest-cov pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0
       - name: Run tests with pytest
         env:
           TEST_PATH: ${{ matrix.test-path }}
@@ -72,9 +72,9 @@ jobs:
         run: |
           source ~/test-env/bin/activate
           if [[ "$TEST_NAME" == "No Parallel Tests" || "$TEST_NAME" == "Event Loop Lag Tests" ]]; then
-            SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 eval "pytest -n 0 --dist no $TEST_PATH"
+            SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 eval "pytest --cov=sky -n 0 --dist no $TEST_PATH"
           else
-            SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 eval "pytest -n 4 --dist worksteal $TEST_PATH"
+            SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 eval "pytest --cov=sky -n 4 --dist worksteal $TEST_PATH"
           fi
 
   limited-deps-test:
@@ -105,13 +105,13 @@ jobs:
           uv pip install --prerelease=allow "azure-cli>=2.65.0"
           # Install limited dependencies only
           uv pip install -e ".[kubernetes,aws,gcp,azure]"
-          uv pip install pytest pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0
+          uv pip install pytest pytest-cov pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0
       - name: Run tests with pytest
         env:
           TEST_PATH: ${{ matrix.test-path }}
         run: |
           source ~/test-env/bin/activate
-          SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 eval "pytest -n 0 --dist no $TEST_PATH"
+          SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 eval "pytest --cov=sky -n 0 --dist no $TEST_PATH"
 
   failover-test:
     # Test failover functionality
@@ -142,8 +142,8 @@ jobs:
           # Use -e to include examples and tests folder in the path for unit
           # tests to access them.
           uv pip install -e ".[all]"
-          uv pip install pytest pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0 moto==5.1.2
+          uv pip install pytest pytest-cov pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0 moto==5.1.2
       - name: Run tests with pytest
         run: |
           source ~/test-env/bin/activate
-          SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 4 --dist worksteal ${{ matrix.test-path }}
+          SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest --cov=sky -n 4 --dist worksteal ${{ matrix.test-path }}
