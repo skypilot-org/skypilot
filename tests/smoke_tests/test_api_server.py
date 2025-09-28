@@ -311,7 +311,7 @@ def test_recent_request_tracking(generic_cloud: str):
             sky.get(sky.down(name))
 
 
-def test_remote_server_metrics_endpoint(generic_cloud: str):
+def test_big_file_upload_memory_usage(generic_cloud: str):
     if not smoke_tests_utils.is_remote_server_test():
         pytest.skip('This test is only for remote server')
 
