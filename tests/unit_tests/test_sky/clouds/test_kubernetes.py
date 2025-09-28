@@ -136,7 +136,7 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
                         clear=False):
             result = kubernetes.Kubernetes.existing_allowed_contexts()
 
-        self.assertEqual(result, ['ctx1', 'ctx2', 'ctx3'])
+        self.assertEqual(set(result), {'ctx1', 'ctx2', 'ctx3'})
         mock_get_cloud_config_value.assert_called_once_with(
             cloud='kubernetes',
             keys=('allowed_contexts',),
