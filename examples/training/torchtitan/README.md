@@ -43,21 +43,9 @@ The provided `torchtitan.yaml` configuration:
 - Downloads the Llama 3.1 tokenizer
 - Runs distributed training using torchrun
 
-### Customizing the configuration
-
-You can also change the configurations by changing the flags. The following trains a Llama 3 70B model on 4 nodes:
-
-```bash
-# Use 4 nodes and train a larger model
-sky launch -c torchtitan-multinode torchtitan.yaml \
-   --num-nodes 4 \
-   --env HF_TOKEN \
-   --env CONFIG_FILE=./torchtitan/models/llama3/train_configs/llama3_70b.toml # relative to the torchtitan's repo
-```
-
 ## Available model configurations
 
-TorchTitan includes pre-configured training recipes for:
+TorchTitan includes [pre-configured training recipes](https://github.com/pytorch/torchtitan/tree/main/torchtitan/models/llama3/train_configs) for:
 - Llama 3.1 8B: `llama3_8b.toml`
 - Llama 3.1 70B: `llama3_70b.toml`
 - Llama 3.1 405B: `llama3_405b.toml`
@@ -69,11 +57,9 @@ Each configuration file specifies model architecture, parallelism strategies, an
 The configuration automatically:
 - Detects the head node IP and sets it as the master address
 - Configures the correct node rank for each node
-- Sets up the distributed environment for PyTorch's torchrun
-
-## Cost optimization
-
-To reduce costs:
-- Use spot instances: Add `use_spot: true` to the resources section
-- Use smaller GPU types for experimentation (e.g., A100 instead of H100)
-- Adjust the number of nodes based on your training requirements
+- Sets up the distributed environment for PyTorch's torchrun with key settings:
+  - `--nnodes`: Uses `$SKYPILOT_NUM_NODES` to specify total number of nodes
+  - `--nproc_per_node`: Uses `$SKYPILOT_NUM_GPUS_PER_NODE` for GPUs per node
+  - `--node_rank`: Uses `$SKYPILOT_NODE_RANK` to identify each node's position
+  - `--master_addr`: Extracts head node IP from `$SKYPILOT_NODE_IPS`
+  - `--master_port`: Sets communication port to 8008 for distributed coordination
