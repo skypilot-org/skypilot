@@ -40,7 +40,6 @@ The provided `torchtitan.yaml` configuration:
 - Sets up a 2-node cluster with 8 H100 (or H200) GPUs per node
 - Installs PyTorch nightly and TorchTitan requirements
 - Downloads the Llama 3.1 tokenizer
-- Runs distributed training using torchrun
 
 ## Available model configurations
 
