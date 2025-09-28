@@ -10,3 +10,4 @@ GPU_IMAGES = {
     'gpu-a100x1-80gb': 'gpu-a100x1-base',
     'gpu-a100x8-640gb': 'gpu-a100x8-base',
 }
+SERVER_ADDRESS = 'https://api.cloudrift.ai'
