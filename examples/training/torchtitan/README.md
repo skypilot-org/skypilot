@@ -13,7 +13,6 @@ This example demonstrates how to run [TorchTitan](https://github.com/pytorch/tor
 * *Easily run on Kubernetes or clouds without code changes*: SkyPilot offers a simple interface to run TorchTitan on any infrastructure: `sky launch --infra k8s torchtitan.yaml`
 * **Launch distributed training with a single command**: SkyPilot automatically provides [environment variables](https://docs.skypilot.co/en/latest/running-jobs/environment-variables.html)(`SKYPILOT_NODE_RANK`, `SKYPILOT_NODE_IPS`, etc.) that integrate seamlessly with PyTorch distributed training - no manual networking configuration needed.
 * **Auto-recovery**: Built-in fault tolerance automatically recovers from node failures and spot preemptions, resuming from checkpoints.
-* **Easy scaling**: Launch many parallel experiments for hyperparameter tuning with [Managed Jobs](https://docs.skypilot.co/en/latest/running-jobs/many-jobs.html).
 
 
 ## Quick start
@@ -51,6 +50,18 @@ TorchTitan includes [pre-configured training recipes](https://github.com/pytorch
 - Llama 3.1 405B: `llama3_405b.toml`
 
 Each configuration file specifies model architecture, parallelism strategies, and training hyperparameters optimized for different scales.
+
+## Scaling Up
+
+Launch parallel experiments with [Managed Jobs](https://docs.skypilot.co/en/latest/running-jobs/many-jobs.html):
+
+```bash
+# Scale to more nodes
+sky launch -c torchtitan-8node torchtitan.yaml --num-nodes 8
+
+# Try different model sizes (update CONFIG_FILE in torchtitan.yaml)
+sky launch -c torchtitan-8node torchtitan.yaml --env CONFIG_FILE=./torchtitan/models/llama3/train_configs/llama3_70b.toml
+```
 
 ## Multi-node training details
 
