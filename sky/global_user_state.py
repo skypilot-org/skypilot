@@ -483,7 +483,7 @@ def get_user(user_id: str) -> Optional[models.User]:
 
 @_init_db
 @metrics_lib.time_me
-def _get_users(user_ids: Set[str]) -> Dict[str, models.User]:
+def get_users(user_ids: Set[str]) -> Dict[str, models.User]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(user_table).filter(
@@ -1659,7 +1659,7 @@ def get_clusters(
 
     # get all users needed for the rows at once
     user_hashes = set(row_to_user_hash.values())
-    user_hash_to_user = _get_users(user_hashes)
+    user_hash_to_user = get_users(user_hashes)
 
     # get last cluster event for each row
     cluster_hashes = set(row_to_user_hash.keys())
@@ -1807,7 +1807,7 @@ def get_clusters_from_history(
         row_to_user_hash[row.cluster_hash] = user_hash
 
     user_hashes = set(row_to_user_hash.values())
-    user_hash_to_user = _get_users(user_hashes)
+    user_hash_to_user = get_users(user_hashes)
     cluster_hashes = set(row_to_user_hash.keys())
     if not abbreviate_response:
         last_cluster_event_dict = _get_last_cluster_event_multiple(
