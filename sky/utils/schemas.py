@@ -1661,10 +1661,15 @@ def get_config_schema():
                     'required': [],
                     'properties': {
                         'allowed_contexts': {
-                            'type': 'array',
-                            'items': {
+                            'oneOf': [{
+                                'type': 'array',
+                                'items': {
+                                    'type': 'string',
+                                },
+                            }, {
                                 'type': 'string',
-                            },
+                                'pattern': '^all$'
+                            }]
                         },
                         'disabled': {
                             'type': 'boolean'

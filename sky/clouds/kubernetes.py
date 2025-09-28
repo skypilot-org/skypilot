@@ -25,6 +25,7 @@ from sky.provision.kubernetes.utils import normalize_tpu_accelerator_name
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import env_options
 from sky.utils import kubernetes_enums
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -188,9 +189,10 @@ class Kubernetes(clouds.Cloud):
             ctx for ctx in all_contexts if not ctx.startswith('ssh-')
         ]
 
-        allow_all_contexts_env = kubernetes_utils.are_all_contexts_allowed()
-        if allowed_contexts == 'all' or (allowed_contexts is None and
-                                         allow_all_contexts_env):
+        allow_all_contexts = allowed_contexts is not None and (
+            allowed_contexts == 'all' or
+            env_options.Options.ALLOW_ALL_KUBERNETES_CONTEXTS.get())
+        if allow_all_contexts:
             allowed_contexts = all_contexts
 
         if allowed_contexts is None:

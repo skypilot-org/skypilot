@@ -6,7 +6,6 @@ NO_GPU_HELP_MESSAGE = ('If your cluster contains GPUs, make sure '
                        '(e.g., skypilot.co/accelerator) are setup correctly. ')
 
 KUBERNETES_IN_CLUSTER_NAMESPACE_ENV_VAR = 'SKYPILOT_IN_CLUSTER_NAMESPACE'
-KUBERNETES_ALLOW_ALL_CONTEXTS_ENV_VAR = 'SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS'
 
 # Name of kubernetes exec auth wrapper script
 SKY_K8S_EXEC_AUTH_WRAPPER = 'sky-kube-exec-wrapper'
