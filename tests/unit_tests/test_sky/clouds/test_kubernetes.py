@@ -1,6 +1,7 @@
 """Tests for Kubernetes cloud implementation."""
 
 import copy
+import os
 import unittest
 from unittest import mock
 from unittest.mock import patch
@@ -94,20 +95,23 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
             region=None,
             default_value=None)
 
-    @patch('sky.provision.kubernetes.utils.are_all_contexts_allowed')
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.skypilot_config.get_effective_region_config')
     def test_global_allowed_all_contexts_in_env_when_no_workspace_config(
             self, mock_get_cloud_config_value, mock_get_workspace_cloud,
-            mock_get_all_contexts, mock_are_all_contexts_allowed):
-        """Test using env variable to allow all context when all configs are None."""
+            mock_get_all_contexts):
+        """Allow all contexts via env when no workspace config, global set (empty)."""
         mock_get_all_contexts.return_value = ['ctx1', 'ctx2', 'ctx3']
         mock_get_workspace_cloud.return_value.get.return_value = None
-        mock_get_cloud_config_value.return_value = None
-        mock_are_all_contexts_allowed.return_value = True
+        # With recent behavior, env var applies only if allowed_contexts is set.
+        # Simulate global config present (empty list) to trigger env override.
+        mock_get_cloud_config_value.return_value = []
 
-        result = kubernetes.Kubernetes.existing_allowed_contexts()
+        with patch.dict(os.environ,
+                        {'SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS': 'true'},
+                        clear=False):
+            result = kubernetes.Kubernetes.existing_allowed_contexts()
 
         self.assertEqual(set(result), {'ctx1', 'ctx2', 'ctx3'})
         mock_get_cloud_config_value.assert_called_once_with(
@@ -116,44 +120,48 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
             region=None,
             default_value=None)
 
-    @patch('sky.provision.kubernetes.utils.are_all_contexts_allowed')
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.skypilot_config.get_effective_region_config')
-    def test_global_allowed_all_contexts_config_precedence_when_no_workspace_config(
+    def test_env_allow_all_overrides_global_when_present(
             self, mock_get_cloud_config_value, mock_get_workspace_cloud,
-            mock_get_all_contexts, mock_are_all_contexts_allowed):
-        """Test global allowed_contexts in config taking precedence when workspace config is None and env variable is set."""
+            mock_get_all_contexts):
+        """Env flag allows all contexts when only global config is present."""
         mock_get_all_contexts.return_value = ['ctx1', 'ctx2', 'ctx3']
         mock_get_workspace_cloud.return_value.get.return_value = None
         mock_get_cloud_config_value.return_value = ['ctx1']
-        mock_are_all_contexts_allowed.return_value = True
 
-        result = kubernetes.Kubernetes.existing_allowed_contexts()
+        with patch.dict(os.environ,
+                        {'SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS': 'true'},
+                        clear=False):
+            result = kubernetes.Kubernetes.existing_allowed_contexts()
 
-        self.assertEqual(result, ['ctx1'])
+        self.assertEqual(result, ['ctx1', 'ctx2', 'ctx3'])
         mock_get_cloud_config_value.assert_called_once_with(
             cloud='kubernetes',
             keys=('allowed_contexts',),
             region=None,
             default_value=None)
 
-    @patch('sky.provision.kubernetes.utils.are_all_contexts_allowed')
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.skypilot_config.get_effective_region_config')
-    def test_global_allowed_all_contexts_config_precedence_when_no_workspace_config(
+    def test_env_allow_all_overrides_when_config_present(
             self, mock_get_cloud_config_value, mock_get_workspace_cloud,
-            mock_get_all_contexts, mock_are_all_contexts_allowed):
-        """Test allowed_contexts in workspace config taking precedence when env variable is set."""
+            mock_get_all_contexts):
+        """Env flag overrides and allows all contexts when config present."""
         mock_get_all_contexts.return_value = ['ctx1', 'ctx2', 'ctx3']
+        # Workspace config present
         mock_get_workspace_cloud.return_value.get.return_value = ['ctx1']
+        # Global config also present but should be ignored due to env override
         mock_get_cloud_config_value.return_value = ['ctx1', 'ctx2']
-        mock_are_all_contexts_allowed.return_value = True
 
-        result = kubernetes.Kubernetes.existing_allowed_contexts()
+        with patch.dict(os.environ,
+                        {'SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS': 'true'},
+                        clear=False):
+            result = kubernetes.Kubernetes.existing_allowed_contexts()
 
-        self.assertEqual(result, ['ctx1'])
+        self.assertEqual(result, ['ctx1', 'ctx2', 'ctx3'])
 
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
