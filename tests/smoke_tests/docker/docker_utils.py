@@ -44,6 +44,13 @@ def get_api_server_endpoint_inside_docker() -> str:
     return f'http://{host}:{get_host_port()}'
 
 
+def get_metrics_endpoint_inside_docker() -> str:
+    """Get the metrics server endpoint inside a Docker container."""
+    host = 'host.docker.internal' if is_inside_docker() else '0.0.0.0'
+    metrics_port = get_host_port() + 1  # Metrics port is host_port + 1
+    return f'http://{host}:{metrics_port}'
+
+
 def create_and_setup_new_container(target_container_name: str, host_port: int,
                                    container_port: int, username: str) -> str:
     """Create a new Docker container and copy files/directories from current container.
@@ -78,13 +85,17 @@ def create_and_setup_new_container(target_container_name: str, host_port: int,
 
     if is_inside_docker():
         # Run the new container directly
+        # Also expose metrics port (9090 -> host_port + 1)
+        metrics_host_port = host_port + 1
         run_cmd = (f'docker run -d '
                    f'--name {target_container_name} '
                    f'-p {host_port}:{container_port} '
+                   f'-p {metrics_host_port}:9090 '
                    f'--add-host=host.docker.internal:host-gateway '
                    f'-e USERNAME={username} '
                    f'-e LAUNCHED_BY_DOCKER_CONTAINER=1 '
                    f'-e SKYPILOT_DISABLE_USAGE_COLLECTION=1 '
+                   f'-e SKY_API_SERVER_METRICS_ENABLED=true '
                    f'{IMAGE_NAME}')
 
         subprocess.check_call(run_cmd, shell=True)
@@ -130,10 +141,14 @@ def create_and_setup_new_container(target_container_name: str, host_port: int,
             target_container_name,
         ]
 
+        # Also expose metrics port (9090 -> host_port + 1)
+        metrics_host_port = host_port + 1
         docker_cmd.extend([
             *[f'-v={v}' for v in volumes], '-e', f'USERNAME={username}', '-e',
-            'SKYPILOT_DISABLE_USAGE_COLLECTION=1', '-p',
-            f'{host_port}:{container_port}', IMAGE_NAME
+            'SKYPILOT_DISABLE_USAGE_COLLECTION=1', '-e',
+            'SKY_API_SERVER_METRICS_ENABLED=true', '-p',
+            f'{host_port}:{container_port}', '-p', f'{metrics_host_port}:9090',
+            IMAGE_NAME
         ])
 
         subprocess.check_call(docker_cmd)
