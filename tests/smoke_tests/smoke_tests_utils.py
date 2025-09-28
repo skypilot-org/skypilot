@@ -433,6 +433,8 @@ def override_sky_config(
         env_dict[constants.SKY_API_SERVER_URL_ENV_VAR] = endpoint
         # Clear the get_server_url cache
         server_common.get_server_url.cache_clear()
+        # Clear the is_api_server_local cache
+        server_common.is_api_server_local.cache_clear()
         echo(
             f'Overriding API server endpoint: '
             f'{override_sky_config_dict.get_nested(("api_server", "endpoint"), "UNKNOWN")}'
@@ -1019,3 +1021,4 @@ def write_blob(file: BinaryIO, total_size: int):
     remaining_size = total_size % chunk_size
     if remaining_size > 0:
         file.write(os.urandom(remaining_size))
+    file.flush()
