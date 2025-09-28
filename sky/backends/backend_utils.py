@@ -723,11 +723,15 @@ def write_cluster_config(
                 'is not supported by this cloud. Remove the config or set: '
                 '`remote_identity: LOCAL_CREDENTIALS`.')
         if isinstance(cloud, clouds.Kubernetes):
-            if skypilot_config.get_effective_region_config(
+            allowed_contexts = skypilot_config.get_workspace_cloud(
+                'kubernetes').get('allowed_contexts', None)
+            if allowed_contexts is None:
+                allowed_contexts = skypilot_config.get_effective_region_config(
                     cloud='kubernetes',
                     region=None,
                     keys=('allowed_contexts',),
-                    default_value=None) is None:
+                    default_value=None)
+            if allowed_contexts is None:
                 excluded_clouds.add(cloud)
         else:
             excluded_clouds.add(cloud)

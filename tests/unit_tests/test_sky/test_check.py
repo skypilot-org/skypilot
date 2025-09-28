@@ -1,13 +1,13 @@
 """Unit tests for `sky check` output formatting from sky/check.py."""
 import re
 
-import pytest
 from click import testing as cli_testing
+import pytest
 
 from sky import clouds as sky_clouds
-from sky.clouds.cloud import CloudCapability
 import sky.check as sky_check
 from sky.client.cli import command
+from sky.clouds.cloud import CloudCapability
 
 
 def strip_ansi(s: str) -> str:
@@ -18,8 +18,12 @@ def test_summary_message_enabled_infra_with_k8s_contexts(monkeypatch):
     """Validate the summary block formatting produced by sky.check._summary_message."""
     # Prepare enabled clouds and capabilities.
     enabled_clouds = {
-        repr(sky_clouds.AWS()): [CloudCapability.COMPUTE, CloudCapability.STORAGE],
-        repr(sky_clouds.Azure()): [CloudCapability.COMPUTE, CloudCapability.STORAGE],
+        repr(sky_clouds.AWS()): [
+            CloudCapability.COMPUTE, CloudCapability.STORAGE
+        ],
+        repr(sky_clouds.Azure()): [
+            CloudCapability.COMPUTE, CloudCapability.STORAGE
+        ],
         repr(sky_clouds.Kubernetes()): [CloudCapability.COMPUTE],
         repr(sky_clouds.Lambda()): [CloudCapability.COMPUTE],
         repr(sky_clouds.Nebius()): [CloudCapability.COMPUTE],
@@ -39,7 +43,8 @@ def test_summary_message_enabled_infra_with_k8s_contexts(monkeypatch):
     }
 
     # Render the summary (hide workspace name; no disallowed cloud hint).
-    summary = sky_check._summary_message(enabled_clouds, cloud2ctx2text,
+    summary = sky_check._summary_message(enabled_clouds,
+                                         cloud2ctx2text,
                                          current_workspace_name='default',
                                          hide_workspace_str=True,
                                          disallowed_cloud_names=[])
@@ -99,10 +104,11 @@ def test_k8s_summary_allowed_contexts_default_config(monkeypatch):
         repr(sky_clouds.Kubernetes()): [CloudCapability.COMPUTE],
     }
 
-    summary = sky_check._summary_message(enabled_clouds, {repr(sky_clouds.Kubernetes()): ctx2text},
-                                         current_workspace_name='default',
-                                         hide_workspace_str=True,
-                                         disallowed_cloud_names=[])
+    summary = sky_check._summary_message(
+        enabled_clouds, {repr(sky_clouds.Kubernetes()): ctx2text},
+        current_workspace_name='default',
+        hide_workspace_str=True,
+        disallowed_cloud_names=[])
     s = strip_ansi(summary)
 
     assert 'Kubernetes [compute]' in s
@@ -124,6 +130,7 @@ def test_k8s_summary_allowed_contexts_workspace_override(monkeypatch):
     # Global default allows a and b
     monkeypatch.setattr('sky.skypilot_config.get_effective_region_config',
                         lambda **kwargs: ['ctx-a', 'ctx-b'])
+
     # Workspace-specific allows only c
     def mock_get_workspace_cloud(cloud: str, workspace=None):
         if workspace is None:
@@ -131,7 +138,9 @@ def test_k8s_summary_allowed_contexts_workspace_override(monkeypatch):
             # so we return based on the active workspace, which tests set via context
             pass
         # Return a dict-like object
-        return {'allowed_contexts': ['ctx-c']} if sky_check.skypilot_config.get_active_workspace() == 'ws1' else {}
+        return {
+            'allowed_contexts': ['ctx-c']
+        } if sky_check.skypilot_config.get_active_workspace() == 'ws1' else {}
 
     monkeypatch.setattr('sky.skypilot_config.get_workspace_cloud',
                         mock_get_workspace_cloud)
@@ -141,7 +150,11 @@ def test_k8s_summary_allowed_contexts_workspace_override(monkeypatch):
     }
 
     # Provide ctx2text for all contexts; only allowed ones (per workspace) will show
-    ctx2text_all = {'ctx-a': 'enabled.', 'ctx-b': 'enabled.', 'ctx-c': 'enabled.'}
+    ctx2text_all = {
+        'ctx-a': 'enabled.',
+        'ctx-b': 'enabled.',
+        'ctx-c': 'enabled.'
+    }
 
     # In default workspace: should show a, b (global default)
     with sky_check.skypilot_config.local_active_workspace_ctx('default'):
@@ -167,11 +180,13 @@ def test_k8s_summary_allowed_contexts_workspace_override(monkeypatch):
         assert 'ctx-a' not in s_ws1
         assert 'ctx-b' not in s_ws1
 
+
 def test_cli_check_prints_server_url(monkeypatch):
     """`sky check` should print the API server URL at the end (smoke check)."""
     # Mock the SDK call chain used by the CLI entrypoint.
     monkeypatch.setattr('sky.client.sdk.check', lambda *args, **kwargs: 'req-1')
-    monkeypatch.setattr('sky.client.sdk.stream_and_get', lambda *args, **kwargs: None)
+    monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                        lambda *args, **kwargs: None)
 
     # Mock the server URL to a deterministic value.
     server_url = 'http://localhost:12345'
@@ -244,8 +259,10 @@ def _mock_k8s_env(monkeypatch,
                             lambda **kwargs: list(global_allowed_contexts))
 
     # Workspaces
-    monkeypatch.setattr('sky.workspaces.core.get_workspaces',
-                        lambda: {'default': {}, 'ws1': {}})
+    monkeypatch.setattr('sky.workspaces.core.get_workspaces', lambda: {
+        'default': {},
+        'ws1': {}
+    })
 
     # Avoid touching real user state
     monkeypatch.setattr('sky.global_user_state.get_cached_enabled_clouds',
