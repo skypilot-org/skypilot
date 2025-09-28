@@ -15,6 +15,7 @@ from sky.clouds.cloud import Zone
 # isort: split
 from sky.clouds.aws import AWS
 from sky.clouds.azure import Azure
+from sky.clouds.cloudrift import CloudRift
 from sky.clouds.cudo import Cudo
 from sky.clouds.do import DO
 from sky.clouds.fluidstack import Fluidstack
@@ -39,6 +40,7 @@ __all__ = [
     'AWS',
     'Azure',
     'Cloud',
+    'CloudRift',
     'Cudo',
     'DummyCloud',
     'GCP',
