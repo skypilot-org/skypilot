@@ -64,7 +64,7 @@ To scale up your training, you can increase the number of nodes or try larger mo
 sky launch -c torchtitan-8node torchtitan.yaml --num-nodes 8
 
 # Try different model sizes (update CONFIG_FILE in torchtitan.yaml)
-sky launch -c torchtitan-8node torchtitan.yaml --env CONFIG_FILE=./torchtitan/models/llama3/train_configs/llama3_70b.toml
+sky launch -c torchtitan-llama3-70b torchtitan.yaml --env CONFIG_FILE=./torchtitan/models/llama3/train_configs/llama3_70b.toml
 ```
 
 ## Multi-node training details
