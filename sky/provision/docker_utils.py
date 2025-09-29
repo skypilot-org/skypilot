@@ -64,6 +64,29 @@ DEFAULT_OBJECT_STORE_MAX_MEMORY_BYTES = 200 * 10**9
 DEFAULT_OBJECT_STORE_MEMORY_PROPORTION = 0.3
 
 
+def _dedupe_network_host(opts: List[str]) -> List[str]:
+    """Removing any user-supplied host networking flags.
+
+    We keep none here because docker_start_cmds always adds '--net=host'.
+    This prevents: 'docker: network "host" is specified multiple times.'
+    """
+    out: List[str] = []
+    i = 0
+    while i < len(opts):
+        o = opts[i]
+        if o in ('--net=host', '--network=host', '--network host',
+                 '--net host'):
+            i += 1
+            continue
+        if (o == '--network' or
+                o == '--net') and i + 1 < len(opts) and opts[i + 1] == 'host':
+            i += 2
+            continue
+        out.append(o)
+        i += 1
+    return out
+
+
 def _check_helper(cname, template, docker_cmd):
     return ' '.join([
         docker_cmd, 'inspect', '-f', '"{{' + template + '}}"', cname, '||',
@@ -118,7 +141,8 @@ def docker_start_cmds(
     env_flags = ' '.join(
         ['-e {name}={val}'.format(name=k, val=v) for k, v in env_vars.items()])
 
-    user_options_str = ' '.join(user_options)
+    sanitized_user_options = _dedupe_network_host(user_options)
+    user_options_str = ' '.join(sanitized_user_options)
     docker_run = [
         docker_cmd,
         'run',
@@ -137,7 +161,7 @@ def docker_start_cmds(
         '--entrypoint=/bin/bash',
         image,
     ]
-    return ' '.join(docker_run)
+    return ' '.join(part for part in docker_run if part)
 
 
 def _with_interactive(cmd):
