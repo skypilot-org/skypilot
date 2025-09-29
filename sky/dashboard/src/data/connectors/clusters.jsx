@@ -53,6 +53,7 @@ export async function getClusters({ clusterNames = null } = {}) {
       cluster_names: clusterNames,
       all_users: true,
       include_credentials: false,
+      summary_response: clusterNames == null,
     });
 
     const clusterData = clusters.map((cluster) => {
@@ -94,6 +95,7 @@ export async function getClusters({ clusterNames = null } = {}) {
         autostop: cluster.autostop,
         last_event: cluster.last_event,
         to_down: cluster.to_down,
+        cluster_name_on_cloud: cluster.cluster_name_on_cloud,
         jobs: [],
         command: cluster.last_creation_command || cluster.last_use,
         task_yaml: cluster.last_creation_yaml || '{}',
@@ -112,10 +114,10 @@ export async function getClusters({ clusterNames = null } = {}) {
   }
 }
 
-export async function getClusterHistory(clusterHash = null) {
+export async function getClusterHistory(clusterHash = null, days = 30) {
   try {
     const requestBody = {
-      days: 30,
+      days: days,
       dashboard_summary_response: true,
     };
 
@@ -164,6 +166,7 @@ export async function getClusterHistory(clusterHash = null) {
         autostop: -1,
         last_event: cluster.last_event,
         to_down: false,
+        cluster_name_on_cloud: null,
         usage_intervals: cluster.usage_intervals,
         command: cluster.last_creation_command || '',
         task_yaml: cluster.last_creation_yaml || '{}',

@@ -1,6 +1,4 @@
 """SDK functions for cluster/job management."""
-import os
-import shlex
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -9,7 +7,6 @@ import colorama
 from sky import admin_policy
 from sky import backends
 from sky import catalog
-from sky import check as sky_check
 from sky import clouds
 from sky import dag as dag_lib
 from sky import data
@@ -31,7 +28,6 @@ from sky.schemas.api import responses
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
-from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common
@@ -102,6 +98,7 @@ def status(
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
     include_credentials: bool = False,
+    summary_response: bool = False,
 ) -> List[responses.StatusResponse]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets cluster statuses.
@@ -181,7 +178,8 @@ def status(
         refresh=refresh,
         cluster_names=cluster_names,
         all_users=all_users,
-        include_credentials=include_credentials)
+        include_credentials=include_credentials,
+        summary_response=summary_response)
 
     status_responses = []
     for cluster in clusters:
@@ -805,7 +803,7 @@ def autostop(
 @usage_lib.entrypoint
 def queue(cluster_name: str,
           skip_finished: bool = False,
-          all_users: bool = False) -> List[dict]:
+          all_users: bool = False) -> List[responses.ClusterJobRecord]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets the job queue of a cluster.
 
@@ -852,7 +850,7 @@ def queue(cluster_name: str,
 
     use_legacy = not handle.is_grpc_enabled_with_flag
 
-    if handle.is_grpc_enabled_with_flag:
+    if not use_legacy:
         try:
             request = jobsv1_pb2.GetJobQueueRequest(user_hash=user_hash,
                                                     all_jobs=all_jobs)
@@ -881,7 +879,6 @@ def queue(cluster_name: str,
                 jobs.append(job_dict)
         except exceptions.SkyletMethodNotImplementedError:
             use_legacy = True
-
     if use_legacy:
         code = job_lib.JobLibCodeGen.get_job_queue(user_hash, all_jobs)
         returncode, jobs_payload, stderr = backend.run_on_head(
@@ -893,7 +890,7 @@ def queue(cluster_name: str,
             stderr=f'{jobs_payload + stderr}',
             stream_logs=True)
         jobs = job_lib.load_job_queue(jobs_payload)
-    return jobs
+    return [responses.ClusterJobRecord.model_validate(job) for job in jobs]
 
 
 @usage_lib.entrypoint
@@ -1299,7 +1296,9 @@ def local_up(gpus: bool,
              ssh_key: Optional[str],
              cleanup: bool,
              context_name: Optional[str] = None,
-             password: Optional[str] = None) -> None:
+             password: Optional[str] = None,
+             name: Optional[str] = None,
+             port_start: Optional[int] = None) -> None:
     """Creates a local or remote cluster."""
 
     def _validate_args(ips, ssh_user, ssh_key, cleanup):
@@ -1329,57 +1328,12 @@ def local_up(gpus: bool,
                                                       password)
     else:
         # Run local deployment (kind) if no remote args are specified
-        kubernetes_deploy_utils.deploy_local_cluster(gpus)
+        kubernetes_deploy_utils.deploy_local_cluster(name, port_start, gpus)
 
 
-def local_down() -> None:
+def local_down(name: Optional[str] = None) -> None:
     """Tears down the Kubernetes cluster started by local_up."""
-    cluster_removed = False
-
-    path_to_package = os.path.dirname(__file__)
-    down_script_path = os.path.join(path_to_package, 'utils/kubernetes',
-                                    'delete_cluster.sh')
-
-    cwd = os.path.dirname(os.path.abspath(down_script_path))
-    run_command = shlex.split(down_script_path)
-
-    # Setup logging paths
-    run_timestamp = sky_logging.get_run_timestamp()
-    log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
-                            'local_down.log')
-
-    with rich_utils.safe_status(
-            ux_utils.spinner_message('Removing local cluster',
-                                     log_path=log_path,
-                                     is_local=True)):
-
-        returncode, stdout, stderr = log_lib.run_with_log(cmd=run_command,
-                                                          log_path=log_path,
-                                                          require_outputs=True,
-                                                          stream_logs=False,
-                                                          cwd=cwd)
-        stderr = stderr.replace('No kind clusters found.\n', '')
-
-        if returncode == 0:
-            cluster_removed = True
-        elif returncode == 100:
-            logger.info(ux_utils.error_message('Local cluster does not exist.'))
-        else:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('Failed to create local cluster. '
-                                   f'Stdout: {stdout}'
-                                   f'\nError: {stderr}')
-    if cluster_removed:
-        # Run sky check
-        with rich_utils.safe_status(
-                ux_utils.spinner_message('Running sky check...')):
-            sky_check.check_capability(sky_cloud.CloudCapability.COMPUTE,
-                                       clouds=['kubernetes'],
-                                       quiet=True)
-        logger.info(
-            ux_utils.finishing_message('Local cluster removed.',
-                                       log_path=log_path,
-                                       is_local=True))
+    kubernetes_deploy_utils.teardown_local_cluster(name)
 
 
 @usage_lib.entrypoint

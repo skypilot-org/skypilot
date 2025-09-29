@@ -116,6 +116,12 @@ WAIT_FOR_API = (
 
 SKY_API_RESTART = f'sky api stop || true && sky api start && {WAIT_FOR_API}'
 
+AWS_GET_INSTANCE_ID = (
+    '`aws ec2 describe-instances --region {region} --filters '
+    'Name=tag:ray-cluster-name,Values={name_on_cloud} '
+    '--query Reservations[].Instances[].InstanceId '
+    '--output text`')
+
 # Cluster functions
 _ALL_JOB_STATUSES = "|".join([status.value for status in sky.JobStatus])
 _ALL_CLUSTER_STATUSES = "|".join([status.value for status in sky.ClusterStatus])
@@ -329,6 +335,8 @@ class Test(NamedTuple):
     timeout: int = DEFAULT_CMD_TIMEOUT
     # Environment variables to set for each command.
     env: Optional[Dict[str, str]] = None
+    # Config dictionary to override the skypilot config.
+    config_dict: Optional[Dict[str, Any]] = None
 
     def echo(self, message: str):
         # pytest's xdist plugin captures stdout; print to stderr so that the
@@ -502,7 +510,7 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
     if test.env:
         env_dict.update(test.env)
 
-    with override_sky_config(test, env_dict):
+    with override_sky_config(test, env_dict, config_dict=test.config_dict):
         for command in test.commands:
             write(f'+ {command}\n')
             flush()

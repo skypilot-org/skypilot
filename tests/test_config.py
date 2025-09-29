@@ -544,6 +544,31 @@ def test_get_override_skypilot_config_from_client(mock_to_dict, mock_logger,
         assert result['aws']['security_group'] == 'test-sg'
 
 
+@annotations.client_api
+def test_get_override_skypilot_config_from_client_get_latest_config(tmp_path):
+    """Test that get_override_skypilot_config_from_client returns the loaded config path."""
+    old_path = tmp_path / 'old_config.yaml'
+    old_path.write_text(
+        textwrap.dedent(f"""\
+        kubernetes:
+            ports: loadbalancer
+        """))
+    new_path = tmp_path / 'new_config.yaml'
+    new_path.write_text(
+        textwrap.dedent(f"""\
+        kubernetes:
+            ports: ingress
+        """))
+    with mock.patch('os.environ.get', return_value=old_path):
+        skypilot_config.reload_config()
+        result_old = payloads.get_override_skypilot_config_from_client()
+        assert result_old['kubernetes']['ports'] == 'loadbalancer'
+    with mock.patch('os.environ.get', return_value=new_path):
+        skypilot_config.reload_config()
+        result_new = payloads.get_override_skypilot_config_from_client()
+        assert result_new['kubernetes']['ports'] == 'ingress'
+
+
 def test_override_skypilot_config(monkeypatch, tmp_path):
     """Test that override_skypilot_config properly restores config and cleans up."""
     os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)

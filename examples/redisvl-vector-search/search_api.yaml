@@ -1,0 +1,29 @@
+name: redisvl-search-api
+
+resources:
+  infra: gcp
+  cpus: 4+
+  memory: 8+
+  ports:
+    - 8001  # FastAPI
+    - 8501  # Streamlit
+
+envs:
+  REDIS_HOST: 
+  REDIS_PORT: 
+  REDIS_USER: 
+  REDIS_PASSWORD: 
+  MODEL_NAME: "nomic-ai/nomic-embed-text-v2-moe"
+
+workdir: .
+
+setup: |
+  uv pip install -r requirements.txt
+  # Pre-download the embedding model
+  python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${MODEL_NAME}', trust_remote_code=True)"
+
+run: |
+  # Start both FastAPI and Streamlit in background
+  uvicorn app:app --host 0.0.0.0 --port 8001 --log-level info &
+  streamlit run streamlit_app.py --server.port 8501 --server.address 0.0.0.0 &
+  wait

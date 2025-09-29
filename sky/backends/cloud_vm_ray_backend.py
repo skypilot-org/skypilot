@@ -19,8 +19,8 @@ import textwrap
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
-                    Union)
+from typing import (Any, Callable, Dict, Iterable, Iterator, List, Optional,
+                    Set, Tuple, Union)
 
 import colorama
 import psutil
@@ -91,6 +91,8 @@ if typing.TYPE_CHECKING:
     from sky.schemas.generated import autostopv1_pb2_grpc
     from sky.schemas.generated import jobsv1_pb2
     from sky.schemas.generated import jobsv1_pb2_grpc
+    from sky.schemas.generated import managed_jobsv1_pb2
+    from sky.schemas.generated import managed_jobsv1_pb2_grpc
     from sky.schemas.generated import servev1_pb2
     from sky.schemas.generated import servev1_pb2_grpc
 else:
@@ -111,11 +113,18 @@ else:
         'sky.schemas.generated.servev1_pb2')
     servev1_pb2_grpc = adaptors_common.LazyImport(
         'sky.schemas.generated.servev1_pb2_grpc')
+    managed_jobsv1_pb2 = adaptors_common.LazyImport(
+        'sky.schemas.generated.managed_jobsv1_pb2')
+    managed_jobsv1_pb2_grpc = adaptors_common.LazyImport(
+        'sky.schemas.generated.managed_jobsv1_pb2_grpc')
 
 Path = str
 
 SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
 SKY_REMOTE_WORKDIR = constants.SKY_REMOTE_WORKDIR
+# Unset RAY_RAYLET_PID to prevent the Ray cluster in the SkyPilot runtime
+# from interfering with the Ray cluster in the user's task (if any).
+UNSET_RAY_ENV_VARS = ['RAY_RAYLET_PID']
 
 logger = sky_logging.init_logger(__name__)
 
@@ -712,6 +721,8 @@ class RayCodeGen:
             done
             echo "skypilot: cached mount uploaded complete"
         fi""")
+        unset_ray_env_vars = ' && '.join(
+            [f'unset {var}' for var in UNSET_RAY_ENV_VARS])
         self._code += [
             sky_env_vars_dict_str,
             textwrap.dedent(f"""\
@@ -721,6 +732,7 @@ class RayCodeGen:
             script = run_fn({gang_scheduling_id}, gang_scheduling_id_to_ip)
 
         if script is not None:
+            script=f'{unset_ray_env_vars}; {{script}}'
             script += rclone_flush_script
             sky_env_vars_dict['{constants.SKYPILOT_NUM_GPUS_PER_NODE}'] = {int(math.ceil(num_gpus))!r}
 
@@ -2731,6 +2743,11 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             (tunnel.port, tunnel.pid) if tunnel is not None else None)
 
     def get_grpc_channel(self) -> 'grpc.Channel':
+        grpc_options = [
+            # The task YAMLs can be large, so the default
+            # max_receive_message_length of 4MB might not be enough.
+            ('grpc.max_receive_message_length', -1),
+        ]
         # It's fine to not grab the lock here, as we're only reading,
         # and writes are very rare.
         # It's acceptable to read while another process is opening a tunnel,
@@ -2747,7 +2764,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                     s.settimeout(0.5)
                     s.connect(('localhost', tunnel.port))
-                return grpc.insecure_channel(f'localhost:{tunnel.port}')
+                return grpc.insecure_channel(f'localhost:{tunnel.port}',
+                                             options=grpc_options)
             except socket.error as e:
                 logger.warning(
                     'Failed to connect to SSH tunnel for cluster '
@@ -2766,19 +2784,22 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                                  f'{self.cluster_name!r}, '
                                  'opening the tunnel')
                     tunnel = self._open_and_update_skylet_tunnel()
-                    return grpc.insecure_channel(f'localhost:{tunnel.port}')
+                    return grpc.insecure_channel(f'localhost:{tunnel.port}',
+                                                 options=grpc_options)
                 try:
                     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                         s.settimeout(0.5)
                         s.connect(('localhost', tunnel.port))
-                        return grpc.insecure_channel(f'localhost:{tunnel.port}')
+                        return grpc.insecure_channel(f'localhost:{tunnel.port}',
+                                                     options=grpc_options)
                 except socket.error as e:
                     logger.warning(
                         'Failed to connect to SSH tunnel for cluster '
                         f'{self.cluster_name!r} on port {tunnel.port} ({e}), '
                         'opening new tunnel')
                     tunnel = self._open_and_update_skylet_tunnel()
-                    return grpc.insecure_channel(f'localhost:{tunnel.port}')
+                    return grpc.insecure_channel(f'localhost:{tunnel.port}',
+                                                 options=grpc_options)
         except locks.LockTimeout as e:
             raise RuntimeError(
                 'Failed to get gRPC channel for cluster '
@@ -3054,6 +3075,8 @@ class SkyletClient:
         self._autostop_stub = autostopv1_pb2_grpc.AutostopServiceStub(channel)
         self._jobs_stub = jobsv1_pb2_grpc.JobsServiceStub(channel)
         self._serve_stub = servev1_pb2_grpc.ServeServiceStub(channel)
+        self._managed_jobs_stub = (
+            managed_jobsv1_pb2_grpc.ManagedJobsServiceStub(channel))
 
     def set_autostop(
         self,
@@ -3140,6 +3163,13 @@ class SkyletClient:
     ) -> 'jobsv1_pb2.GetLogDirsForJobsResponse':
         return self._jobs_stub.GetLogDirsForJobs(request, timeout=timeout)
 
+    def tail_logs(
+        self,
+        request: 'jobsv1_pb2.TailLogsRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> Iterator['jobsv1_pb2.TailLogsResponse']:
+        return self._jobs_stub.TailLogs(request, timeout=timeout)
+
     def get_service_status(
         self,
         request: 'servev1_pb2.GetServiceStatusRequest',
@@ -3187,6 +3217,35 @@ class SkyletClient:
         timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
     ) -> 'servev1_pb2.UpdateServiceResponse':
         return self._serve_stub.UpdateService(request, timeout=timeout)
+
+    def get_managed_job_controller_version(
+        self,
+        request: 'managed_jobsv1_pb2.GetVersionRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'managed_jobsv1_pb2.GetVersionResponse':
+        return self._managed_jobs_stub.GetVersion(request, timeout=timeout)
+
+    def get_managed_job_table(
+        self,
+        request: 'managed_jobsv1_pb2.GetJobTableRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'managed_jobsv1_pb2.GetJobTableResponse':
+        return self._managed_jobs_stub.GetJobTable(request, timeout=timeout)
+
+    def get_all_managed_job_ids_by_name(
+        self,
+        request: 'managed_jobsv1_pb2.GetAllJobIdsByNameRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'managed_jobsv1_pb2.GetAllJobIdsByNameResponse':
+        return self._managed_jobs_stub.GetAllJobIdsByName(request,
+                                                          timeout=timeout)
+
+    def cancel_managed_jobs(
+        self,
+        request: 'managed_jobsv1_pb2.CancelJobsRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'managed_jobsv1_pb2.CancelJobsResponse':
+        return self._managed_jobs_stub.CancelJobs(request, timeout=timeout)
 
 
 @registry.BACKEND_REGISTRY.type_register(name='cloudvmray')
@@ -3261,9 +3320,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Usage Collection:
         usage_lib.messages.usage.update_cluster_resources(
             handle.launched_nodes, launched_resources)
-        record = global_user_state.get_cluster_from_name(cluster_name)
-        if record is not None:
-            usage_lib.messages.usage.update_cluster_status(record['status'])
+        status = global_user_state.get_status_from_cluster_name(cluster_name)
+        if status is not None:
+            usage_lib.messages.usage.update_cluster_status(status)
 
         assert launched_resources.region is not None, handle
 
@@ -3532,8 +3591,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             error_message + '\n' + str(e),
                             failover_history=e.failover_history) from None
             if dryrun:
-                record = global_user_state.get_cluster_from_name(cluster_name)
-                return record['handle'] if record is not None else None, False
+                handle = global_user_state.get_handle_from_cluster_name(
+                    cluster_name)
+                return handle if handle is not None else None, False
 
             if config_dict['provisioning_skipped']:
                 # Skip further provisioning.
@@ -3541,10 +3601,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # ('handle', 'provision_record', 'resources_vars')
                 # We need to return the handle - but it should be the existing
                 # handle for the cluster.
-                record = global_user_state.get_cluster_from_name(cluster_name)
-                assert record is not None and record['handle'] is not None, (
-                    cluster_name, record)
-                return record['handle'], True
+                handle = global_user_state.get_handle_from_cluster_name(
+                    cluster_name)
+                assert handle is not None, (cluster_name, handle)
+                return handle, True
 
             if 'provision_record' in config_dict:
                 # New provisioner is used here.
@@ -3699,7 +3759,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     ux_utils.spinner_message('Preparing SkyPilot runtime')):
                 use_legacy = not handle.is_grpc_enabled_with_flag
 
-                if handle.is_grpc_enabled_with_flag:
+                if not use_legacy:
                     try:
                         request = jobsv1_pb2.UpdateStatusRequest()
                         backend_utils.invoke_skylet_with_retries(
@@ -3723,7 +3783,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # 2. On next `sky start`, it gets reset to FAILED.
             use_legacy = not handle.is_grpc_enabled_with_flag
 
-            if handle.is_grpc_enabled_with_flag:
+            if not use_legacy:
                 try:
                     fail_request = jobsv1_pb2.FailAllInProgressJobsRequest()
                     backend_utils.invoke_skylet_with_retries(
@@ -3939,6 +3999,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         remote_setup_file_name = f'/tmp/sky_setup_{self.run_timestamp}'
         # Need this `-i` option to make sure `source ~/.bashrc` work
         setup_cmd = f'/bin/bash -i {remote_setup_file_name} 2>&1'
+        unset_ray_env_vars = ' && '.join(
+            [f'unset {var}' for var in UNSET_RAY_ENV_VARS])
+        setup_cmd = f'{unset_ray_env_vars}; {setup_cmd}'
         runners = handle.get_command_runners(avoid_ssh_control=True)
 
         def _setup_node(node_id: int) -> None:
@@ -4088,6 +4151,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         logger.info(
             ux_utils.finishing_message('Setup completed.', setup_log_path))
 
+    def _download_file(self, handle: CloudVmRayResourceHandle,
+                       local_file_path: str, remote_file_path: str) -> None:
+        """Syncs file from remote to local."""
+        runners = handle.get_command_runners()
+        head_runner = runners[0]
+        head_runner.rsync(
+            source=local_file_path,
+            target=remote_file_path,
+            up=False,
+            stream_logs=False,
+        )
+
     def _exec_code_on_head(
         self,
         handle: CloudVmRayResourceHandle,
@@ -4143,7 +4218,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             _dump_code_to_file(job_submit_cmd,
                                constants.PERSISTENT_RUN_SCRIPT_DIR)
 
-        if handle.is_grpc_enabled_with_flag:
+        if not use_legacy:
             try:
                 managed_job_info: Optional[jobsv1_pb2.ManagedJobInfo] = None
                 if managed_job_dag is not None:
@@ -4275,7 +4350,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                  metadata: str) -> Tuple[int, str]:
         use_legacy = not handle.is_grpc_enabled_with_flag
 
-        if handle.is_grpc_enabled_with_flag:
+        if not use_legacy:
             try:
                 request = jobsv1_pb2.AddJobRequest(
                     job_name=job_name,
@@ -4545,7 +4620,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """
         use_legacy = not handle.is_grpc_enabled_with_flag
 
-        if handle.is_grpc_enabled_with_flag:
+        if not use_legacy:
             try:
                 request = jobsv1_pb2.CancelJobsRequest(job_ids=jobs,
                                                        cancel_all=cancel_all,
@@ -4588,7 +4663,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         job_to_dir: Dict[str, str] = {}
         use_legacy = not handle.is_grpc_enabled_with_flag
 
-        if handle.is_grpc_enabled_with_flag:
+        if not use_legacy:
             try:
                 int_job_ids = []
                 if job_ids:
@@ -4702,6 +4777,28 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             The exit code of the tail command. Returns code 100 if the job has
             failed. See exceptions.JobExitCode for possible return codes.
         """
+        if handle.is_grpc_enabled_with_flag:
+            last_exit_code = 0
+            try:
+                request = jobsv1_pb2.TailLogsRequest(
+                    job_id=job_id,
+                    managed_job_id=managed_job_id,
+                    follow=follow,
+                    tail=tail)
+                for resp in backend_utils.invoke_skylet_streaming_with_retries(
+                        lambda: SkyletClient(handle.get_grpc_channel()
+                                            ).tail_logs(request, timeout=None)):
+                    if resp.log_line:
+                        print(resp.log_line, end='', flush=True)
+                    last_exit_code = resp.exit_code
+                return last_exit_code
+            except exceptions.SkyletMethodNotImplementedError:
+                pass
+            except grpc.RpcError as e:
+                if e.code() == grpc.StatusCode.CANCELLED:
+                    return last_exit_code
+                raise e
+
         code = job_lib.JobLibCodeGen.tail_logs(job_id,
                                                managed_job_id=managed_job_id,
                                                follow=follow,
@@ -4739,6 +4836,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                               tail: Optional[int] = None) -> int:
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
+        # TODO(kevin): Migrate stream_logs to gRPC
         code = managed_jobs.ManagedJobCodeGen.stream_logs(
             job_name, job_id, follow, controller, tail)
 
@@ -4784,20 +4882,37 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         assert job_name is None or job_id is None, (job_name, job_id)
 
         if job_id is None:
-            # generate code to get the job_id
+            # get the job_id
             # if job_name is None, get all job_ids
             # TODO: Only get the latest job_id, since that's the only one we use
-            code = managed_jobs.ManagedJobCodeGen.get_all_job_ids_by_name(
-                job_name=job_name)
-            returncode, job_ids, stderr = self.run_on_head(handle,
-                                                           code,
-                                                           stream_logs=False,
-                                                           require_outputs=True,
-                                                           separate_stderr=True)
-            subprocess_utils.handle_returncode(returncode, code,
-                                               'Failed to sync down logs.',
-                                               stderr)
-            job_ids = message_utils.decode_payload(job_ids)
+
+            use_legacy = not handle.is_grpc_enabled_with_flag
+            logger.info(f'handle.is_grpc_enabled_with_flag: '
+                        f'{handle.is_grpc_enabled_with_flag}')
+            if not use_legacy:
+                try:
+                    request = managed_jobsv1_pb2.GetAllJobIdsByNameRequest(
+                        job_name=job_name)
+                    response = backend_utils.invoke_skylet_with_retries(
+                        lambda: SkyletClient(handle.get_grpc_channel(
+                        )).get_all_managed_job_ids_by_name(request))
+                    job_ids = list(response.job_ids)
+                except exceptions.SkyletMethodNotImplementedError:
+                    use_legacy = True
+
+            if use_legacy:
+                code = managed_jobs.ManagedJobCodeGen.get_all_job_ids_by_name(
+                    job_name=job_name)
+                returncode, job_ids_payload, stderr = self.run_on_head(
+                    handle,
+                    code,
+                    stream_logs=False,
+                    require_outputs=True,
+                    separate_stderr=True)
+                subprocess_utils.handle_returncode(returncode, code,
+                                                   'Failed to sync down logs.',
+                                                   stderr)
+                job_ids = message_utils.decode_payload(job_ids_payload)
             if not job_ids:
                 logger.info(f'{colorama.Fore.YELLOW}'
                             'No matching job found'
@@ -4825,18 +4940,39 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         else:
             # get the run_timestamp
             # the function takes in [job_id]
-            code = job_lib.JobLibCodeGen.get_log_dirs_for_jobs([str(job_id)])
-            returncode, run_timestamps_payload, stderr = self.run_on_head(
-                handle,
-                code,
-                stream_logs=False,
-                require_outputs=True,
-                separate_stderr=True)
-            subprocess_utils.handle_returncode(returncode, code,
-                                               'Failed to sync logs.', stderr)
-            # returns with a dict of {job_id: run_timestamp}
-            run_timestamps = message_utils.decode_payload(
-                run_timestamps_payload)
+            use_legacy = not handle.is_grpc_enabled_with_flag
+            if not use_legacy:
+                try:
+                    log_dirs_request = jobsv1_pb2.GetLogDirsForJobsRequest(
+                        job_ids=[job_id])
+                    log_dirs_response = (
+                        backend_utils.invoke_skylet_with_retries(
+                            lambda: SkyletClient(handle.get_grpc_channel(
+                            )).get_log_dirs_for_jobs(log_dirs_request)))
+                    job_log_dirs = log_dirs_response.job_log_dirs
+                    # Convert back to the expected format
+                    # {job_id: run_timestamp}
+                    run_timestamps = {}
+                    for jid, log_dir in job_log_dirs.items():
+                        run_timestamps[int(jid)] = log_dir
+                except exceptions.SkyletMethodNotImplementedError:
+                    use_legacy = True
+
+            if use_legacy:
+                code = job_lib.JobLibCodeGen.get_log_dirs_for_jobs(
+                    [str(job_id)])
+                returncode, run_timestamps_payload, stderr = self.run_on_head(
+                    handle,
+                    code,
+                    stream_logs=False,
+                    require_outputs=True,
+                    separate_stderr=True)
+                subprocess_utils.handle_returncode(returncode, code,
+                                                   'Failed to sync logs.',
+                                                   stderr)
+                # returns with a dict of {job_id: run_timestamp}
+                run_timestamps = message_utils.decode_payload(
+                    run_timestamps_payload)
         if not run_timestamps:
             logger.info(f'{colorama.Fore.YELLOW}'
                         'No matching log directories found'
@@ -4903,6 +5039,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         exist_ok=True)
             log_file = os.path.join(local_log_dir, 'run.log')
 
+            # TODO(kevin): Migrate stream_logs to gRPC
             code = managed_jobs.ManagedJobCodeGen.stream_logs(
                 job_name=None,
                 job_id=int(job_id),
@@ -4992,10 +5129,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'{handle.cluster_name!r}. Assuming the cluster is still '
                     'up.')
         if not cluster_status_fetched:
-            record = global_user_state.get_cluster_from_name(
+            status = global_user_state.get_status_from_cluster_name(
                 handle.cluster_name)
-            prev_cluster_status = record[
-                'status'] if record is not None else None
+            prev_cluster_status = status if status is not None else None
         if prev_cluster_status is None:
             # When the cluster is not in the cluster table, we guarantee that
             # all related resources / cache / config are cleaned up, i.e. it
@@ -5568,7 +5704,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             exceptions.InvalidClusterNameError: If the cluster name is invalid.
             # TODO(zhwu): complete the list of exceptions.
         """
-        record = global_user_state.get_cluster_from_name(cluster_name)
+        record = global_user_state.get_cluster_from_name(
+            cluster_name, include_user_info=False, summary_response=True)
         if record is None:
             handle_before_refresh = None
             status_before_refresh = None
@@ -5589,6 +5726,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 cluster_name,
                 force_refresh_statuses={status_lib.ClusterStatus.INIT},
                 acquire_per_cluster_status_lock=False,
+                include_user_info=False,
+                summary_response=True,
             )
             if record is not None:
                 prev_cluster_status = record['status']
