@@ -261,7 +261,7 @@ The SkyPilot helm chart automatically configures the ingress resource to achieve
 
 .. _sky-api-server-api-compatibility:
 
-API compatbility
+API compatibility
 ----------------
 
 SkyPilot maintain an internal API version which will be bumped when an incompatible API change is introduced. Client and server can only communicate when they run on the same API version.
