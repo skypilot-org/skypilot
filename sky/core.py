@@ -803,7 +803,7 @@ def autostop(
 @usage_lib.entrypoint
 def queue(cluster_name: str,
           skip_finished: bool = False,
-          all_users: bool = False) -> List[dict]:
+          all_users: bool = False) -> List[responses.ClusterJobRecord]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets the job queue of a cluster.
 
@@ -879,7 +879,6 @@ def queue(cluster_name: str,
                 jobs.append(job_dict)
         except exceptions.SkyletMethodNotImplementedError:
             use_legacy = True
-
     if use_legacy:
         code = job_lib.JobLibCodeGen.get_job_queue(user_hash, all_jobs)
         returncode, jobs_payload, stderr = backend.run_on_head(
@@ -891,7 +890,7 @@ def queue(cluster_name: str,
             stderr=f'{jobs_payload + stderr}',
             stream_logs=True)
         jobs = job_lib.load_job_queue(jobs_payload)
-    return jobs
+    return [responses.ClusterJobRecord.model_validate(job) for job in jobs]
 
 
 @usage_lib.entrypoint

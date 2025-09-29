@@ -407,6 +407,22 @@ def validate_service_task(task: 'sky.Task', pool: bool) -> None:
                                  f'{sys_name} will replenish preempted spot '
                                  f'with {policy_description} instances.')
 
+    if pool:
+        accelerators = set()
+        for resource in task.resources:
+            if resource.accelerators is not None:
+                if isinstance(resource.accelerators, str):
+                    accelerators.add(resource.accelerators)
+                elif isinstance(resource.accelerators, dict):
+                    accelerators.update(resource.accelerators.keys())
+                elif isinstance(resource.accelerators, list):
+                    accelerators.update(resource.accelerators)
+        if len(accelerators) > 1:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Heterogeneous clusters are not supported for '
+                                 'cluster pools please specify one accelerator '
+                                 'for all workers.')
+
     # Try to create a spot placer from the task yaml. Check if the task yaml
     # is valid for spot placer.
     spot_placer.SpotPlacer.from_task(task.service, task)
