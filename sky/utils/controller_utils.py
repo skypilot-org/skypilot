@@ -1219,9 +1219,12 @@ JOB_WORKER_MEMORY_MB = 400
 JOBS_PER_WORKER = 200
 
 
-def _get_total_usable_memory_mb(consolidation_mode: bool) -> float:
+def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
+    controller_reserved = float(MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB)
+    if pool:
+        controller_reserved *= (1. + POOL_JOBS_RESOURCES_RATIO)
     total_memory_mb = (common_utils.get_mem_size_gb() * 1024 -
-                       MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB)
+                       controller_reserved)
     if not consolidation_mode:
         return total_memory_mb
     config = server_config.compute_server_config(deploy=True, quiet=True)
@@ -1255,7 +1258,7 @@ def _get_parallelism(pool: bool, raw_resource_per_unit: float) -> int:
         ('jobs' if pool else 'serve', 'controller', 'consolidation_mode'),
         default_value=False)
 
-    total_memory_mb = _get_total_usable_memory_mb(consolidation_mode)
+    total_memory_mb = _get_total_usable_memory_mb(pool, consolidation_mode)
 
     # In consolidation mode, we assume the API server is running in deployment
     # mode, hence resource management (i.e. how many requests are allowed) is

@@ -136,8 +136,11 @@ def _cleanup(service_name: str, pool: bool) -> bool:
                         f'{info.replica_id} not found. Might be a failed '
                         'cluster. Skipping.')
             continue
+
+        log_file_name = serve_utils.generate_replica_log_file_name(
+            service_name, info.replica_id)
         t = thread_utils.SafeThread(target=replica_managers.terminate_cluster,
-                                    args=(info.cluster_name,))
+                                    args=(info.cluster_name, log_file_name))
         info2thr[info] = t
         # Set replica status to `SHUTTING_DOWN`
         info.status_property.sky_launch_status = (
@@ -189,6 +192,7 @@ def _cleanup(service_name: str, pool: bool) -> bool:
                         f'Replica {info.replica_id} terminated successfully.')
                 else:
                     _set_to_failed_cleanup(info)
+                    failed = True
         time.sleep(3)
 
     versions = serve_state.get_service_versions(service_name)
