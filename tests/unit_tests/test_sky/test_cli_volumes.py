@@ -9,6 +9,7 @@ import requests
 from sky import clouds
 from sky import server
 from sky.client.cli import command
+from sky.utils import volume as volume_utils
 
 
 class TestVolumeCommands:
@@ -120,7 +121,9 @@ class TestVolumeCommands:
         ])
         assert result.exit_code != 0
         # Check that click.Choice rejected the invalid value
-        assert 'Invalid value for \'--type\': \'pvc\'' in result.output
+        types_str = ', '.join(
+            f"'{t}'" for t in volume_utils.VolumeType.supported_types())
+        assert f"Error: Invalid value for '--type': 'pvc' is not one of {types_str}." in result.output
 
     def test_volumes_apply_no_yaml_or_options(self, monkeypatch):
         """Test `sky volumes apply` with no YAML or options."""
