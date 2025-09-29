@@ -23,5 +23,4 @@ run: |
   for (( i=1; i<=10; i++ )); do
     ls -l /mount_private_mount_cached/10mb_${i} | grep "10485760"
   done
-  wait
   {% endif %}
