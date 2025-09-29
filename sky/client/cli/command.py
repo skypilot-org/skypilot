@@ -88,6 +88,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import volume as volume_utils
 from sky.utils import yaml_utils
 from sky.utils.cli_utils import status_utils
 from sky.volumes import utils as volumes_utils
@@ -4123,13 +4124,15 @@ def volumes():
 @click.option('--infra',
               required=False,
               type=str,
-              help='Infra. Format: k8s, k8s/context-name. '
+              help='Infrastructure to use. '
+              'Format: cloud, cloud/region, cloud/region/zone, or '
+              'k8s/context-name.'
+              'Examples: k8s, k8s/my-context, runpod/US/US-CA-2. '
               'Override the infra defined in the YAML.')
-@click.option(
-    '--type',
-    required=False,
-    type=str,
-    help='Volume type. Format: pvc. Override the type defined in the YAML.')
+@click.option('--type',
+              required=False,
+              type=click.Choice(volume_utils.VolumeType.supported_types()),
+              help='Volume type. Override the type defined in the YAML.')
 @click.option('--size',
               required=False,
               type=str,
@@ -4160,7 +4163,7 @@ def volumes_apply(
         sky volumes apply volume.yaml
         \b
         # Apply a volume from a command.
-        sky volumes apply --name pvc1 --infra k8s --type pvc --size 100Gi
+        sky volumes apply --name pvc1 --infra k8s --type k8s-pvc --size 100Gi
     """
     # pylint: disable=import-outside-toplevel
     from sky.volumes import volume as volume_lib

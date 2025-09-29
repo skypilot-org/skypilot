@@ -105,6 +105,23 @@ class TestVolumeCommands:
         # Check for the error message in the output instead of exception
         assert 'looks like a yaml path but invalid format' in result.output
 
+    def test_volumes_apply_invalid_type_cli(self, monkeypatch):
+        """Test `sky volumes apply` with invalid type via CLI."""
+        cli_runner = cli_testing.CliRunner()
+
+        # Mock the YAML check function to return no YAML
+        monkeypatch.setattr('sky.client.cli.command._check_yaml_only', lambda x:
+                            (False, None, False, ''))
+
+        # Test with invalid type value
+        result = cli_runner.invoke(command.volumes_apply, [
+            '--name', 'test-volume', '--infra', 'k8s', '--type', 'pvc',
+            '--size', '100Gi'
+        ])
+        assert result.exit_code != 0
+        # Check that click.Choice rejected the invalid value
+        assert 'Invalid value for \'--type\': \'pvc\'' in result.output
+
     def test_volumes_apply_no_yaml_or_options(self, monkeypatch):
         """Test `sky volumes apply` with no YAML or options."""
         cli_runner = cli_testing.CliRunner()
