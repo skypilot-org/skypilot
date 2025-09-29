@@ -305,3 +305,41 @@ def test_recent_request_tracking(generic_cloud: str):
             assert req_id_exec == stream_request_id
         finally:
             sky.get(sky.down(name))
+
+
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support managed jobs
+@pytest.mark.no_seeweb  # Seeweb does not support managed jobs
+def test_managed_jobs_force_disable_cloud_bucket(generic_cloud: str):
+    """Test jobs with force_disable_cloud_bucket config.
+
+    This tests the "two-hop" scenario where:
+    1. Client submits job to remote API server (first translation with file_mounts_mapping)
+    2. Jobs controller submits task back to API server (second translation)
+
+    This is a regression test for a bug where file_mounts_mapping would persist
+    in the task config after the first translation, causing KeyError on the
+    second translation when the jobs controller calls back to the API server.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+
+    test = smoke_tests_utils.Test(
+        'test_managed_jobs_force_disable_cloud_bucket',
+        [
+            # Launch a managed job with force_disable_cloud_bucket config.
+            # This forces the "two-hop" scenario where the task is submitted
+            # twice to API servers, which would trigger the bug.
+            f'sky jobs launch -n {name} --cloud {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--config jobs.force_disable_cloud_bucket=true '
+            f'tests/test_yamls/minimal.yaml -y -d',
+            # Wait for the job to complete successfully.
+            # If the bug exists, this would fail with KeyError.
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=300),
+        ],
+        f'sky jobs cancel -y -n {name} || true',
+    )
+    smoke_tests_utils.run_one_test(test)
