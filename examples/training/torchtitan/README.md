@@ -48,6 +48,13 @@ TorchTitan includes [pre-configured training recipes](https://github.com/pytorch
 
 Each configuration file specifies model architecture, parallelism strategies, and training hyperparameters optimized for different scales.
 
+To use a specific training recipe, you can set it through the `CONFIG_FILE` env var:
+```
+sky launch -c torchtitan-multinode torchtitan.yaml \
+   --env HF_TOKEN \
+   --env CONFIG_FILE=./torchtitan/models/llama3/train_configs/llama3_70b.toml # relative to the torchtitan's repo
+```
+
 ## Scaling Up
 
 Launch parallel experiments with [Managed Jobs](https://docs.skypilot.co/en/latest/running-jobs/many-jobs.html):
