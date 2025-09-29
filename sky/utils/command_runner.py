@@ -652,15 +652,31 @@ class SSHCommandRunner(CommandRunner):
         if docker_user is not None:
             assert port is None or port == 22, (
                 f'port must be None or 22 for docker_user, got {port}.')
-            # Already checked in resources
-            assert ssh_proxy_command is None, (
-                'ssh_proxy_command is not supported when using docker.')
+            # When connecting via docker, the outer SSH hop points to the
+            # container's sshd (localhost). Preserve the user proxy for the
+            # inner hop that reaches the host VM, and clear the outer proxy to
+            # avoid forwarding localhost through the jump host.
+            inner_proxy_command = ssh_proxy_command
+            inner_proxy_port = port or 22
+            self._ssh_proxy_command = None
             self.ip = 'localhost'
             self.ssh_user = docker_user
             self.port = constants.DEFAULT_DOCKER_PORT
+            if inner_proxy_command is not None:
+                # Replace %h/%p placeholders with actual host values, since the
+                # final destination from the perspective of the user proxy is
+                # the host VM (ip, inner_proxy_port).
+                inner_proxy_command = inner_proxy_command.replace('%h', ip)
+                inner_proxy_command = inner_proxy_command.replace(
+                    '%p', str(inner_proxy_port))
             self._docker_ssh_proxy_command = lambda ssh: ' '.join(
-                ssh + ssh_options_list(ssh_private_key, None
-                                      ) + ['-W', '%h:%p', f'{ssh_user}@{ip}'])
+                ssh + ssh_options_list(
+                    ssh_private_key,
+                    None,
+                    ssh_proxy_command=inner_proxy_command,
+                    port=inner_proxy_port,
+                    disable_control_master=self.disable_control_master) +
+                ['-W', '%h:%p', f'{ssh_user}@{ip}'])
         else:
             self.ip = ip
             self.ssh_user = ssh_user
