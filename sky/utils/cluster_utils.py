@@ -195,6 +195,7 @@ class SSHConfigHelper(object):
         docker_proxy_command_generator = None
         proxy_command_for_nodes = proxy_command
         if docker_user is not None:
+
             def _docker_proxy_cmd(ip: str, port: int) -> str:
                 inner_proxy = proxy_command
                 inner_port = port or 22

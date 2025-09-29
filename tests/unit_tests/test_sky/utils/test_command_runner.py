@@ -19,7 +19,8 @@ def test_docker_runner_passes_proxy_command_to_inner_hop() -> None:
     assert runner._ssh_proxy_command is None  # type: ignore[attr-defined]
 
     # Inner hop must include the user proxy command before targeting the host VM.
-    inner_cmd = runner._docker_ssh_proxy_command(['ssh', '-T'])  # type: ignore[attr-defined]
+    inner_cmd = runner._docker_ssh_proxy_command(
+        ['ssh', '-T'])  # type: ignore[attr-defined]
     assert "ProxyCommand='ssh -W 10.0.0.5:22 jump@host'" in inner_cmd
     assert inner_cmd.endswith('ubuntu@10.0.0.5')
 

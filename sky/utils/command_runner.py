@@ -670,12 +670,12 @@ class SSHCommandRunner(CommandRunner):
                 inner_proxy_command = inner_proxy_command.replace(
                     '%p', str(inner_proxy_port))
             self._docker_ssh_proxy_command = lambda ssh: ' '.join(
-                ssh + ssh_options_list(
-                    ssh_private_key,
-                    None,
-                    ssh_proxy_command=inner_proxy_command,
-                    port=inner_proxy_port,
-                    disable_control_master=self.disable_control_master) +
+                ssh + ssh_options_list(ssh_private_key,
+                                       None,
+                                       ssh_proxy_command=inner_proxy_command,
+                                       port=inner_proxy_port,
+                                       disable_control_master=self.
+                                       disable_control_master) +
                 ['-W', '%h:%p', f'{ssh_user}@{ip}'])
         else:
             self.ip = ip
