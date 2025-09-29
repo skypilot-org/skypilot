@@ -28,7 +28,7 @@ def get_container_name() -> str:
     return container_name
 
 
-def get_host_port() -> int:
+def get_api_server_host_port() -> int:
     """Get the host port that will be listened by the test container."""
     container_name = get_container_name()
     # Create a deterministic hash using MD5
@@ -38,28 +38,39 @@ def get_host_port() -> int:
     return port
 
 
+def get_metrics_host_port() -> int:
+    """Get the host port that will be mapped to the metrics server inside the test container."""
+    return get_api_server_host_port() + 1
+
+
 def get_api_server_endpoint_inside_docker() -> str:
     """Get the API server endpoint inside a Docker container."""
     host = 'host.docker.internal' if is_inside_docker() else '0.0.0.0'
-    return f'http://{host}:{get_host_port()}'
+    return f'http://{host}:{get_api_server_host_port()}'
 
 
 def get_metrics_endpoint_inside_docker() -> str:
     """Get the metrics server endpoint inside a Docker container."""
     host = 'host.docker.internal' if is_inside_docker() else '0.0.0.0'
-    metrics_port = get_host_port() + 1  # Metrics port is host_port + 1
+    metrics_port = get_metrics_host_port()
     return f'http://{host}:{metrics_port}'
 
 
-def create_and_setup_new_container(target_container_name: str, host_port: int,
-                                   container_port: int, username: str) -> str:
+def create_and_setup_new_container(target_container_name: str,
+                                   api_server_host_port: int,
+                                   api_server_container_port: int,
+                                   metrics_host_port: int,
+                                   metrics_container_port: int,
+                                   username: str) -> str:
     """Create a new Docker container and copy files/directories from current container.
 
     Args:
-        target_container_name: Name for the new container (default: sky-remote-test-buildkite-generic5)
-        host_port: Port on host machine to bind (default: 46581)
-        container_port: Port in container to expose (default: 46580)
-        username: Username in the container (default: buildkite)
+        target_container_name: Name for the new container
+        api_server_host_port: Port on host machine to bind
+        api_server_container_port: Port in container to expose
+        metrics_host_port: Port on host machine to bind
+        metrics_container_port: Port in container to expose
+        username: Username in the container
 
     Returns:
         ID of the newly created container
@@ -85,12 +96,10 @@ def create_and_setup_new_container(target_container_name: str, host_port: int,
 
     if is_inside_docker():
         # Run the new container directly
-        # Also expose metrics port (9090 -> host_port + 1)
-        metrics_host_port = host_port + 1
         run_cmd = (f'docker run -d '
                    f'--name {target_container_name} '
-                   f'-p {host_port}:{container_port} '
-                   f'-p {metrics_host_port}:9090 '
+                   f'-p {api_server_host_port}:{api_server_container_port} '
+                   f'-p {metrics_host_port}:{metrics_container_port} '
                    f'--add-host=host.docker.internal:host-gateway '
                    f'-e USERNAME={username} '
                    f'-e LAUNCHED_BY_DOCKER_CONTAINER=1 '
@@ -141,14 +150,12 @@ def create_and_setup_new_container(target_container_name: str, host_port: int,
             target_container_name,
         ]
 
-        # Also expose metrics port (9090 -> host_port + 1)
-        metrics_host_port = host_port + 1
         docker_cmd.extend([
             *[f'-v={v}' for v in volumes], '-e', f'USERNAME={username}', '-e',
             'SKYPILOT_DISABLE_USAGE_COLLECTION=1', '-e',
             'SKY_API_SERVER_METRICS_ENABLED=true', '-p',
-            f'{host_port}:{container_port}', '-p', f'{metrics_host_port}:9090',
-            IMAGE_NAME
+            f'{api_server_host_port}:{api_server_container_port}', '-p',
+            f'{metrics_host_port}:{metrics_container_port}', IMAGE_NAME
         ])
 
         subprocess.check_call(docker_cmd)
