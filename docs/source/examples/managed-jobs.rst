@@ -454,7 +454,7 @@ To submit the pipeline, the same command :code:`sky jobs launch` is used. The pi
 
 .. _pool:
 
-Using pools (Experimental)
+Using pools (experimental)
 --------------------------
 
 .. warning::
