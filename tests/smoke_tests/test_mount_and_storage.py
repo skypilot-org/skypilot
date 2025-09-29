@@ -215,6 +215,47 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
     return test_commands, clean_command
 
 
+def _storage_mount_cached_test_command_generator(f1: TextIO, f2: TextIO,
+                                                 cluster_name: str,
+                                                 storage_name: str, cloud: str):
+    assert cloud in ['aws', 'gcp', 'azure', 'kubernetes']
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_storage_mount_cached.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+
+    write_content = template.render(
+        storage_name=storage_name,
+        write_files=True,
+        check_files=False,
+    )
+    check_content = template.render(
+        storage_name=storage_name,
+        write_files=False,
+        check_files=True,
+    )
+    f1.write(write_content)
+    f2.write(check_content)
+    f1.flush()
+    f2.flush()
+    write_file_path = f1.name
+    check_file_path = f2.name
+
+    test_commands = [
+        smoke_tests_utils.launch_cluster_for_cloud_cmd(cloud, cluster_name),
+        *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+        f'sky launch -y -c {cluster_name} --infra {cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {write_file_path}',
+        f'sky logs {cluster_name} 1 --status',  # Ensure job succeeded.
+        f'sky stop -y {cluster_name}',
+        f'sky start -y {cluster_name}',
+        f'sky exec {cluster_name} {check_file_path}',
+    ]
+    clean_command = (
+        f'sky down -y {cluster_name} && '
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(cluster_name)} && '
+        f'sky storage delete -y {storage_name}')
+    return test_commands, clean_command
+
+
 @pytest.mark.aws
 def test_aws_storage_mounts_arm64():
     """Test S3 storage mounting on ARM64 architecture using rclone."""
@@ -385,6 +426,25 @@ def test_kubernetes_storage_mounts(storage_name_prefix: str):
             timeout=20 * 60,  # 20 mins
         )
         smoke_tests_utils.run_one_test(test)
+
+
+# @pytest.mark.kubernetes
+# def test_kubernetes_storage_mounts_cached():
+#     name = smoke_tests_utils.get_cluster_name()
+#     cloud = 'kubernetes'
+#     storage_name = f'sky-test-{int(time.time())}'
+#     with (
+#         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f1,
+#         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f2
+#     ):
+#         test_commands, clean_command = _storage_mount_cached_test_command_generator(f1, f2, name, storage_name, cloud)
+#         test = smoke_tests_utils.Test(
+#             'kubernetes_storage_mount_cached',
+#             test_commands,
+#             clean_command,
+#             timeout=20 * 60,  # 20 mins
+#         )
+#         smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.kubernetes
