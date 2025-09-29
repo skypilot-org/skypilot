@@ -57,7 +57,7 @@ sky launch -c torchtitan-multinode torchtitan.yaml \
 
 ## Scaling Up
 
-Launch parallel experiments with [Managed Jobs](https://docs.skypilot.co/en/latest/running-jobs/many-jobs.html):
+To scale up your training, you can increase the number of nodes or try larger models:
 
 ```bash
 # Scale to more nodes
