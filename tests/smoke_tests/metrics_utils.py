@@ -1,12 +1,18 @@
 import sys
 import threading
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple, TypedDict
 
 from prometheus_client import parser
 import requests
 
 from sky.utils import log_utils
+
+
+class AggregatedMetric(TypedDict):
+    baseline: float
+    actual: float
+    unit: str
 
 
 def collect_metrics(
@@ -68,86 +74,102 @@ def parse_metrics(
     return metrics_dict
 
 
-def compare_rss_metrics(baseline: Dict[Tuple[str, ...], List[Tuple[float,
-                                                                   float]]],
-                        test: Dict[Tuple[str, ...], List[Tuple[float, float]]]):
+def compare_metrics(
+    baseline: Dict[Tuple[str, ...], List[Tuple[float, float]]],
+    actual: Dict[Tuple[str, ...], List[Tuple[float, float]]],
+    aggregator_fn: Callable[
+        [List[Tuple[float, float]], List[Tuple[float,
+                                               float]]], AggregatedMetric],
+    per_key_threshold_fn: Optional[Callable[[str, float, float, float, float],
+                                            List[str]]] = None,
+    aggregate_threshold_fn: Optional[Callable[[float, float, float, float],
+                                              List[str]]] = None):
+    """
+    General function to compare baseline and actual metrics.
+
+    Args:
+        baseline: Baseline metrics dict mapping label tuples to (timestamp, value) lists
+        actual: Actual metrics dict mapping label tuples to (timestamp, value) lists
+        aggregator_fn: Function(baseline_values, actual_values) -> AggregatedMetric
+            Aggregates time-series values into a single scalar per metric.
+            Examples: peak RSS, p95 latency, mean CPU usage
+        per_key_threshold_fn: Optional function(key_label, baseline, actual, increase, increase_pct)
+                             -> list of failure messages
+        aggregate_threshold_fn: Optional function(total_baseline, total_actual, total_increase, total_increase_pct)
+                               -> list of failure messages
+    """
     comparison = {}
-    all_keys = set(baseline.keys()) | set(test.keys())
+    all_keys = set(baseline.keys()) | set(actual.keys())
+
     for key in all_keys:
         key_label = ':'.join(key)
         baseline_values = baseline.get(key, [])
-        test_values = test.get(key, [])
+        actual_values = actual.get(key, [])
 
-        baseline_peak = max([v for _, v in baseline_values
-                            ]) if baseline_values else 0
-        test_peak = max([v for _, v in test_values]) if test_values else 0
-
-        increase_bytes = test_peak - baseline_peak
-        increase_pct = (increase_bytes / baseline_peak *
-                        100) if baseline_peak > 0 else (
-                            float('inf') if test_peak > 0 else 0)
-
-        comparison[key_label] = {
-            'baseline_peak_rss': baseline_peak,
-            'test_peak_rss': test_peak,
-            'increase_bytes': increase_bytes,
-            'increase_percent': increase_pct,
-        }
-
-    print(f"SUMMARY", file=sys.stderr, flush=True)
+        comparison[key_label] = aggregator_fn(baseline_values, actual_values)
 
     table = log_utils.create_table(
-        ['PROCESS', 'BASELINE RSS', 'TEST RSS', 'INCREASE', '%'])
+        ['KEY', 'BASELINE', 'ACTUAL', 'INCREASE', '%'])
     table.align = 'r'
-    table.align['PROCESS'] = 'l'
+    table.align['KEY'] = 'l'
 
     failed_checks = []
-    total_baseline = total_test = 0
+    total_baseline = 0
+    total_actual = 0
 
     for key_label, data in comparison.items():
-        baseline_peak = data['baseline_peak_rss']
-        test_peak = data['test_peak_rss']
-        increase_bytes = data['increase_bytes']
-        increase_pct = data['increase_percent']
+        baseline_val = data['baseline']
+        actual_val = data['actual']
+        unit = data['unit']
 
-        baseline_mb = baseline_peak / (1024 * 1024)
-        test_mb = test_peak / (1024 * 1024)
-        increase_mb = increase_bytes / (1024 * 1024)
-        is_new_process = baseline_peak == 0
+        baseline_fmt = f"{baseline_val:.1f} {unit}"
+        actual_fmt = f"{actual_val:.1f} {unit}"
 
-        # Add to table
+        increase = actual_val - baseline_val
+        increase_pct = (increase / baseline_val *
+                        100) if baseline_val > 0 else (
+                            float('inf') if actual_val > 0 else 0)
+
+        increase_fmt = f"{increase:+.1f} {unit}"
+        increase_pct_fmt = f"{increase_pct:+.1f}%" if increase_pct != float(
+            'inf') else "+inf%"
+
         table.add_row([
-            key_label, f"{baseline_mb:.1f} MB", f"{test_mb:.1f} MB",
-            f"{increase_mb:+.1f} MB",
-            f"{increase_pct:+.1f}%" if increase_pct != float('inf') else "+inf%"
+            key_label, baseline_fmt, actual_fmt, increase_fmt, increase_pct_fmt
         ])
 
-        if test_mb > 300:
-            failed_checks.append(
-                f"Process {key_label} exceeded 300 MB: {test_mb:.1f} MB")
-        if increase_pct > 50 and baseline_peak > 0:
-            failed_checks.append(
-                f"Process {key_label} increased by {increase_pct:.1f}% (limit: 50%)"
-            )
-        total_baseline += baseline_peak
-        total_test += test_peak
+        if per_key_threshold_fn:
+            key_failures = per_key_threshold_fn(key_label, baseline_val,
+                                                actual_val, increase,
+                                                increase_pct)
+            for failure in key_failures:
+                failed_checks.append(f"{key_label}: {failure}")
 
-    total_baseline_mb = total_baseline / (1024 * 1024)
-    total_test_mb = total_test / (1024 * 1024)
-    total_increase_mb = (total_test - total_baseline) / (1024 * 1024)
-    total_increase_pct = (total_test - total_baseline
-                         ) / total_baseline * 100 if total_baseline > 0 else 0
-    if total_increase_pct > 20:
-        failed_checks.append(
-            f"Average memory increase too high: {total_increase_pct:.1f}% (limit: 20%)"
-        )
+        total_baseline += baseline_val
+        total_actual += actual_val
+
+    total_increase = total_actual - total_baseline
+    total_increase_pct = ((total_actual - total_baseline) / total_baseline *
+                          100 if total_baseline > 0 else 0)
+
+    total_baseline_fmt = f"{total_baseline:.1f} {unit}"
+    total_actual_fmt = f"{total_actual:.1f} {unit}"
+    total_increase_fmt = f"{total_increase:+.1f} {unit}"
+    total_increase_pct_fmt = f"{total_increase_pct:+.1f}%"
+
     table.add_row([
-        "TOTAL", f"{total_baseline_mb:.1f} MB", f"{total_test_mb:.1f} MB",
-        f"{total_increase_mb:+.1f} MB", f"{total_increase_pct:+.1f}%"
+        "TOTAL", total_baseline_fmt, total_actual_fmt, total_increase_fmt,
+        total_increase_pct_fmt
     ])
+
+    if aggregate_threshold_fn:
+        aggregate_failures = aggregate_threshold_fn(total_baseline,
+                                                    total_actual,
+                                                    total_increase,
+                                                    total_increase_pct)
+        failed_checks.extend(aggregate_failures)
 
     print(table.get_string(), file=sys.stderr, flush=True)
 
-    # Print regression check results
     if failed_checks:
         raise Exception(f"Performance regression detected: {failed_checks}")
