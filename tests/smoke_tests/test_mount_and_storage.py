@@ -428,23 +428,22 @@ def test_kubernetes_storage_mounts(storage_name_prefix: str):
         smoke_tests_utils.run_one_test(test)
 
 
-# @pytest.mark.kubernetes
-# def test_kubernetes_storage_mounts_cached():
-#     name = smoke_tests_utils.get_cluster_name()
-#     cloud = 'kubernetes'
-#     storage_name = f'sky-test-{int(time.time())}'
-#     with (
-#         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f1,
-#         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f2
-#     ):
-#         test_commands, clean_command = _storage_mount_cached_test_command_generator(f1, f2, name, storage_name, cloud)
-#         test = smoke_tests_utils.Test(
-#             'kubernetes_storage_mount_cached',
-#             test_commands,
-#             clean_command,
-#             timeout=20 * 60,  # 20 mins
-#         )
-#         smoke_tests_utils.run_one_test(test)
+@pytest.mark.kubernetes
+def test_kubernetes_storage_mounts_cached():
+    name = smoke_tests_utils.get_cluster_name()
+    cloud = 'kubernetes'
+    storage_name = f'sky-test-{int(time.time())}'
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f1:
+        with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f2:
+            test_commands, clean_command = _storage_mount_cached_test_command_generator(
+                f1, f2, name, storage_name, cloud)
+            test = smoke_tests_utils.Test(
+                'kubernetes_storage_mount_cached',
+                test_commands,
+                clean_command,
+                timeout=20 * 60,  # 20 mins
+            )
+            smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.kubernetes
