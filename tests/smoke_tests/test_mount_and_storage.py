@@ -340,11 +340,13 @@ def test_azure_storage_mounts_with_stop():
 @pytest.mark.kubernetes
 @pytest.mark.parametrize(
     'storage_name_prefix',
-    ['sky-test',
-    # split the alphabet into 2 parts
-    # to avoid the storage name being too long.
-    '0-a-b-c-d-e-f-g-h-i-j-k-l-m',
-    '0-n-o-p-q-r-s-t-u-v-w-x-y-z',])
+    [
+        'sky-test',
+        # split the alphabet into 2 parts
+        # to avoid the storage name being too long.
+        '0-a-b-c-d-e-f-g-h-i-j-k-l-m',
+        '0-n-o-p-q-r-s-t-u-v-w-x-y-z',
+    ])
 def test_kubernetes_storage_mounts(storage_name_prefix: str):
     # Tests bucket mounting on k8s, assuming S3 is configured.
     # S3 mounting now works on all architectures including ARM64
