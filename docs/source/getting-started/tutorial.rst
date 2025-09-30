@@ -146,8 +146,9 @@ as logs and checkpoints using familiar tools.
   Feel free to copy-paste the YAML or Python code above and customize it for
   your own project.
 
-Going distributed
------------------
+Scale up the training with multiple nodes
+------------------------------------------
 
-Ready to move on to multi-node training?
-See `Distributed Training with PyTorch <https://docs.skypilot.co/en/latest/examples/training/distributed-pytorch.html>`_.
+<YAML snippets (partial would be fine if it is easier to read) for how to go multi-node for the example above>
+
+More details in: `Distributed Training with PyTorch <https://docs.skypilot.co/en/latest/examples/training/distributed-pytorch.html>`_.
