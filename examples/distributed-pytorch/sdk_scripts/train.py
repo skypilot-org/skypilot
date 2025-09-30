@@ -47,9 +47,11 @@ task = sky.Task(
     ],
 )
 
+# Alternatively, load in the cluster YAML from a file
+# task = sky.Task.from_yaml_config('../train.yaml')
+
 cluster_name = 'train'
-req = sky.launch(task, cluster_name=cluster_name)
-job_id, _ = sky.stream_and_get(req)
+job_id, _ = sky.stream_and_get(sky.launch(task, cluster_name=cluster_name))
 sky.tail_logs(cluster_name, job_id, follow=True)
 
 print('Training completed. Downloading checkpoint...')
@@ -61,6 +63,5 @@ subprocess.run(
 print('Checkpoint downloaded.')
 
 print(f'Tearing down cluster {cluster_name}...')
-req = sky.down(cluster_name)
-sky.stream_and_get(req)
+sky.stream_and_get(sky.down(cluster_name))
 print(f'Cluster {cluster_name} torn down.')

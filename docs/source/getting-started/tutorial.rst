@@ -147,7 +147,7 @@ as logs and checkpoints using familiar tools.
   your own project.
 
 Scale up the training with multiple nodes
-------------------------------------------
+-----------------------------------------
 
 <YAML snippets (partial would be fine if it is easier to read) for how to go multi-node for the example above>
 
