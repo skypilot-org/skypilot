@@ -16,8 +16,8 @@ import tempfile
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, List, Optional, Sequence, Set, Tuple,
-                    TypeVar, Union)
+from typing import (Any, Callable, Dict, Iterator, List, Optional, Sequence,
+                    Set, Tuple, TypeVar, Union)
 import uuid
 
 import aiohttp
@@ -723,11 +723,15 @@ def write_cluster_config(
                 'is not supported by this cloud. Remove the config or set: '
                 '`remote_identity: LOCAL_CREDENTIALS`.')
         if isinstance(cloud, clouds.Kubernetes):
-            if skypilot_config.get_effective_region_config(
+            allowed_contexts = skypilot_config.get_workspace_cloud(
+                'kubernetes').get('allowed_contexts', None)
+            if allowed_contexts is None:
+                allowed_contexts = skypilot_config.get_effective_region_config(
                     cloud='kubernetes',
                     region=None,
                     keys=('allowed_contexts',),
-                    default_value=None) is None:
+                    default_value=None)
+            if allowed_contexts is None:
                 excluded_clouds.add(cloud)
         else:
             excluded_clouds.add(cloud)
@@ -1226,7 +1230,6 @@ def _deterministic_cluster_yaml_hash(tmp_yaml_path: str) -> str:
     Rather than constructing the whole byte sequence, which may be quite large,
     we construct it incrementally by using hash.update() to add new bytes.
     """
-
     # Load the yaml contents so that we can directly remove keys.
     yaml_config = yaml_utils.read_yaml(tmp_yaml_path)
     for key_list in _RAY_YAML_KEYS_TO_REMOVE_FOR_HASH:
@@ -2614,7 +2617,7 @@ def refresh_cluster_record(
         cluster_name: str,
         *,
         force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]] = None,
-        acquire_per_cluster_status_lock: bool = True,
+        cluster_lock_already_held: bool = False,
         cluster_status_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS,
         include_user_info: bool = True,
         summary_response: bool = False) -> Optional[Dict[str, Any]]:
@@ -2634,9 +2637,13 @@ def refresh_cluster_record(
               _CLUSTER_STATUS_CACHE_DURATION_SECONDS old, and one of:
                 1. the cluster is a spot cluster, or
                 2. cluster autostop is set and the cluster is not STOPPED.
-        acquire_per_cluster_status_lock: Whether to acquire the per-cluster lock
-          before updating the status. Even if this is True, the lock may not be
-          acquired if the status does not need to be refreshed.
+        cluster_lock_already_held: Whether the caller is already holding the
+          per-cluster lock. You MUST NOT set this to True if the caller does not
+          already hold the lock. If True, we will not acquire the lock before
+          updating the status. Failing to hold the lock while updating the
+          status can lead to correctness issues - e.g. an launch in-progress may
+          appear to be DOWN incorrectly. Even if this is set to False, the lock
+          may not be acquired if the status does not need to be refreshed.
         cluster_status_lock_timeout: The timeout to acquire the per-cluster
           lock. If timeout, the function will use the cached status. If the
           value is <0, do not timeout (wait for the lock indefinitely). By
@@ -2687,7 +2694,7 @@ def refresh_cluster_record(
             if not _must_refresh_cluster_status(record, force_refresh_statuses):
                 return record
 
-            if not acquire_per_cluster_status_lock:
+            if cluster_lock_already_held:
                 return _update_cluster_status(cluster_name, include_user_info,
                                               summary_response)
 
@@ -2741,7 +2748,7 @@ def refresh_cluster_status_handle(
     cluster_name: str,
     *,
     force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]] = None,
-    acquire_per_cluster_status_lock: bool = True,
+    cluster_lock_already_held: bool = False,
     cluster_status_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS
 ) -> Tuple[Optional[status_lib.ClusterStatus],
            Optional[backends.ResourceHandle]]:
@@ -2754,7 +2761,7 @@ def refresh_cluster_status_handle(
     record = refresh_cluster_record(
         cluster_name,
         force_refresh_statuses=force_refresh_statuses,
-        acquire_per_cluster_status_lock=acquire_per_cluster_status_lock,
+        cluster_lock_already_held=cluster_lock_already_held,
         cluster_status_lock_timeout=cluster_status_lock_timeout,
         include_user_info=False,
         summary_response=True)
@@ -3079,7 +3086,7 @@ def _refresh_cluster(
         record = refresh_cluster_record(
             cluster_name,
             force_refresh_statuses=force_refresh_statuses,
-            acquire_per_cluster_status_lock=True,
+            cluster_lock_already_held=False,
             include_user_info=include_user_info,
             summary_response=summary_response)
     except (exceptions.ClusterStatusFetchingError,
@@ -3859,13 +3866,35 @@ def invoke_skylet_with_retries(func: Callable[..., T]) -> T:
     ) from last_exception
 
 
+def invoke_skylet_streaming_with_retries(
+        stream_func: Callable[..., Iterator[T]]) -> Iterator[T]:
+    """Generic helper for making Skylet streaming gRPC requests."""
+    max_attempts = 3
+    backoff = common_utils.Backoff(initial_backoff=0.5)
+    last_exception: Optional[Exception] = None
+
+    for _ in range(max_attempts):
+        try:
+            for response in stream_func():
+                yield response
+            return
+        except grpc.RpcError as e:
+            last_exception = e
+            _handle_grpc_error(e, backoff.current_backoff())
+
+    raise RuntimeError(
+        f'Failed to stream Skylet response after {max_attempts} attempts'
+    ) from last_exception
+
+
 def _handle_grpc_error(e: 'grpc.RpcError', current_backoff: float) -> None:
     if e.code() == grpc.StatusCode.INTERNAL:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.SkyletInternalError(e.details())
     elif e.code() == grpc.StatusCode.UNAVAILABLE:
         time.sleep(current_backoff)
-    elif e.code() == grpc.StatusCode.UNIMPLEMENTED:
+    elif e.code() == grpc.StatusCode.UNIMPLEMENTED or e.code(
+    ) == grpc.StatusCode.UNKNOWN:
         # Handle backwards compatibility: old server doesn't implement this RPC.
         # Let the caller fall back to legacy execution.
         raise exceptions.SkyletMethodNotImplementedError(

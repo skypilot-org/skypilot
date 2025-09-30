@@ -1,7 +1,7 @@
 .. _ai-training:
 
 Quickstart: PyTorch
-======================
+===================
 This example uses SkyPilot to train a GPT-like model (inspired by Karpathy's `minGPT <https://github.com/karpathy/minGPT>`_) with Distributed Data Parallel (DDP) in PyTorch.
 
 .. tab-set::
@@ -145,3 +145,10 @@ as logs and checkpoints using familiar tools.
 
   Feel free to copy-paste the YAML or Python code above and customize it for
   your own project.
+
+Scale up the training with multiple nodes
+-----------------------------------------
+
+<YAML snippets (partial would be fine if it is easier to read) for how to go multi-node for the example above>
+
+More details in: `Distributed Training with PyTorch <https://docs.skypilot.co/en/latest/examples/training/distributed-pytorch.html>`_.
