@@ -88,6 +88,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import volume as volume_utils
 from sky.utils import yaml_utils
 from sky.utils.cli_utils import status_utils
 from sky.volumes import utils as volumes_utils
@@ -4123,13 +4124,15 @@ def volumes():
 @click.option('--infra',
               required=False,
               type=str,
-              help='Infra. Format: k8s, k8s/context-name. '
+              help='Infrastructure to use. '
+              'Format: cloud, cloud/region, cloud/region/zone, or '
+              'k8s/context-name.'
+              'Examples: k8s, k8s/my-context, runpod/US/US-CA-2. '
               'Override the infra defined in the YAML.')
-@click.option(
-    '--type',
-    required=False,
-    type=str,
-    help='Volume type. Format: pvc. Override the type defined in the YAML.')
+@click.option('--type',
+              required=False,
+              type=click.Choice(volume_utils.VolumeType.supported_types()),
+              help='Volume type. Override the type defined in the YAML.')
 @click.option('--size',
               required=False,
               type=str,
@@ -4160,7 +4163,7 @@ def volumes_apply(
         sky volumes apply volume.yaml
         \b
         # Apply a volume from a command.
-        sky volumes apply --name pvc1 --infra k8s --type pvc --size 100Gi
+        sky volumes apply --name pvc1 --infra k8s --type k8s-pvc --size 100Gi
     """
     # pylint: disable=import-outside-toplevel
     from sky.volumes import volume as volume_lib
@@ -4497,10 +4500,27 @@ def jobs_launch(
     job_id_handle = _async_call_or_wait(request_id, async_call,
                                         'sky.jobs.launch')
 
+    job_ids = [job_id_handle[0]] if isinstance(job_id_handle[0],
+                                               int) else job_id_handle[0]
+    if pool:
+        # Display the worker assignment for the jobs.
+        logger.debug(f'Getting service records for pool: {pool}')
+        records_request_id = managed_jobs.pool_status(pool_names=pool)
+        service_records = _async_call_or_wait(records_request_id, async_call,
+                                              'sky.jobs.pool_status')
+        logger.debug(f'Pool status: {service_records}')
+        replica_infos = service_records[0]['replica_info']
+        for replica_info in replica_infos:
+            job_id = replica_info.get('used_by', None)
+            if job_id in job_ids:
+                worker_id = replica_info['replica_id']
+                version = replica_info['version']
+                logger.info(f'Job ID: {job_id} assigned to pool {pool} '
+                            f'(worker: {worker_id}, version: {version})')
+
     if not async_call and not detach_run:
-        job_ids = job_id_handle[0]
-        if isinstance(job_ids, int) or len(job_ids) == 1:
-            job_id = job_ids if isinstance(job_ids, int) else job_ids[0]
+        if len(job_ids) == 1:
+            job_id = job_ids[0]
             returncode = managed_jobs.tail_logs(name=None,
                                                 job_id=job_id,
                                                 follow=True,

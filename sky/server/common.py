@@ -841,7 +841,7 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
     for task_config in task_configs:
         if task_config is None:
             continue
-        file_mounts_mapping = task_config.get('file_mounts_mapping', {})
+        file_mounts_mapping = task_config.pop('file_mounts_mapping', {})
         if not file_mounts_mapping:
             # We did not mount any files to new paths on the remote server
             # so no need to resolve filepaths.
