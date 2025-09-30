@@ -202,18 +202,17 @@ class SSHConfigHelper(object):
                 if inner_proxy is not None:
                     inner_proxy = inner_proxy.replace('%h', ip)
                     inner_proxy = inner_proxy.replace('%p', str(inner_port))
-                return ' '.join(
-                    ['ssh'] + command_runner.ssh_options_list(
-                        key_path,
-                        ssh_control_name=None,
-                        ssh_proxy_command=inner_proxy,
-                        port=inner_port,
-                        # ProxyCommand (ssh -W) is a forwarding tunnel, not an
-                        # interactive session. ControlMaster would cache these
-                        # processes, causing them to hang and block subsequent
-                        # connections. Each ProxyCommand should be ephemeral.
-                        disable_control_master=True) +
-                    ['-W', '%h:%p', f'{auth_config["ssh_user"]}@{ip}'])
+                return ' '.join(['ssh'] + command_runner.ssh_options_list(
+                    key_path,
+                    ssh_control_name=None,
+                    ssh_proxy_command=inner_proxy,
+                    port=inner_port,
+                    # ProxyCommand (ssh -W) is a forwarding tunnel, not an
+                    # interactive session. ControlMaster would cache these
+                    # processes, causing them to hang and block subsequent
+                    # connections. Each ProxyCommand should be ephemeral.
+                    disable_control_master=True
+                ) + ['-W', '%h:%p', f'{auth_config["ssh_user"]}@{ip}'])
 
             docker_proxy_command_generator = _docker_proxy_cmd
             proxy_command_for_nodes = None
