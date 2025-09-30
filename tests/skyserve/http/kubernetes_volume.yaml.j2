@@ -5,7 +5,11 @@ service:
   readiness_probe:
     path: /health
     initial_delay_seconds: 180  # Use a large delay for EKS LB to be ready
-  replicas: 2
+  replica_policy:
+    min_replicas: 1
+    max_replicas: 2
+    target_qps_per_replica: 1
+    upscale_delay_seconds: 5
 
 resources:
   ports: 8080

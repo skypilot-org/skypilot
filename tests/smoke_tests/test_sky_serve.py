@@ -331,7 +331,7 @@ def test_skyserve_kubernetes_http():
 @pytest.mark.kubernetes
 @pytest.mark.serve
 @pytest.mark.no_remote_server
-def test_skyserve_kubernetes_http_with_volume():
+def test_skyserve_kubernetes_http_autoscaling_with_volume():
     """Test skyserve on Kubernetes with PVC volume"""
     name = _get_service_name()
     pvc_name = f'{name}-pvc'
@@ -362,13 +362,18 @@ def test_skyserve_kubernetes_http_with_volume():
             'test-skyserve-kubernetes-volume',
             [
                 f'sky volumes apply {volume_yaml_path} -y',
-                f'sky volumes ls | grep "{pvc_name}"',
+                f'sky volumes ls -v | grep "{pvc_name}" | grep ReadWriteMany',
                 f'sky serve up -n {name} -y {smoke_tests_utils.LOW_RESOURCE_ARG} {service_yaml_path}',
-                _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+                _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
                 f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-                'curl $endpoint | grep "Hi, SkyPilot here"',
+                'curl $endpoint | grep "Hi, SkyPilot here"; '
+                # Trigger autoscaling
+                'for i in `seq 1 100`; do curl $endpoint; done',
+                _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
                 f'sky serve logs {name} 1 --no-follow | grep "Hello from volume!"',
+                f'sky serve logs {name} 2 --no-follow | grep "Hello from volume!"',
             ],
+            'echo done',
             f'{_TEARDOWN_SERVICE.format(name=name)}; '
             f'sky volumes delete {pvc_name} -y',
             env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
