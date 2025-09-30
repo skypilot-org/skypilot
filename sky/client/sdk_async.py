@@ -456,6 +456,7 @@ async def download_logs(cluster_name: str,
 async def start(
     cluster_name: str,
     idle_minutes_to_autostop: Optional[int] = None,
+    wait_for: Optional['autostop_lib.AutostopWaitFor'] = None,
     retry_until_up: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     force: bool = False,
@@ -464,7 +465,8 @@ async def start(
     """Async version of start() that restarts a cluster."""
     request_id = await context_utils.to_thread(sdk.start, cluster_name,
                                                idle_minutes_to_autostop,
-                                               retry_until_up, down, force)
+                                               wait_for, retry_until_up, down,
+                                               force)
     if stream_logs is not None:
         return await _stream_and_get(request_id, stream_logs)
     else:
@@ -504,13 +506,14 @@ async def stop(
 async def autostop(
     cluster_name: str,
     idle_minutes: int,
+    wait_for: Optional['autostop_lib.AutostopWaitFor'] = None,
     down: bool = False,  # pylint: disable=redefined-outer-name
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
 ) -> None:
     """Async version of autostop() that schedules an autostop/autodown for a
       cluster."""
     request_id = await context_utils.to_thread(sdk.autostop, cluster_name,
-                                               idle_minutes, down)
+                                               idle_minutes, wait_for, down)
     if stream_logs is not None:
         return await _stream_and_get(request_id, stream_logs)
     else:
@@ -520,11 +523,11 @@ async def autostop(
 @usage_lib.entrypoint
 @annotations.client_api
 async def queue(
-        cluster_name: str,
-        skip_finished: bool = False,
-        all_users: bool = False,
-        stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
-) -> List[dict]:
+    cluster_name: str,
+    skip_finished: bool = False,
+    all_users: bool = False,
+    stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
+) -> List[responses.ClusterJobRecord]:
     """Async version of queue() that gets the job queue of a cluster."""
     request_id = await context_utils.to_thread(sdk.queue, cluster_name,
                                                skip_finished, all_users)
@@ -658,13 +661,14 @@ async def local_up(
         ssh_key: Optional[str],
         cleanup: bool,
         context_name: Optional[str] = None,
+        name: Optional[str] = None,
         password: Optional[str] = None,
         stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG) -> None:
     """Async version of local_up() that launches a Kubernetes cluster on
     local machines."""
     request_id = await context_utils.to_thread(sdk.local_up, gpus, ips,
                                                ssh_user, ssh_key, cleanup,
-                                               context_name, password)
+                                               context_name, name, password)
     if stream_logs is not None:
         return await _stream_and_get(request_id, stream_logs)
     else:
@@ -674,10 +678,11 @@ async def local_up(
 @usage_lib.entrypoint
 @annotations.client_api
 async def local_down(
+        name: Optional[str] = None,
         stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG) -> None:
     """Async version of local_down() that tears down the Kubernetes cluster
     started by local_up."""
-    request_id = await context_utils.to_thread(sdk.local_down)
+    request_id = await context_utils.to_thread(sdk.local_down, name)
     if stream_logs is not None:
         return await _stream_and_get(request_id, stream_logs)
     else:

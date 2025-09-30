@@ -152,7 +152,8 @@ func (s *Server) handleFusermount(req *common.Request, nsFd int) (int, error) {
 		return 0, fmt.Errorf("fusermount failed: %w, output: %s", err, string(output))
 	}
 	// For mount operations, we need to transfer the fd back to the caller
-	if !strings.Contains(strings.Join(req.Args, " "), "-u") {
+	isUmount := isUmount(req.Args)
+	if !isUmount {
 		fd, _, err := mfcputil.RecvMsg(socks[0])
 		if err != nil {
 			return 0, fmt.Errorf("failed to receive FD: %w", err)

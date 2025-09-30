@@ -16,8 +16,8 @@ import textwrap
 import time
 import traceback
 import typing
-from typing import (Any, Deque, Dict, List, Literal, Optional, Set, TextIO,
-                    Tuple, Union)
+from typing import (Any, Deque, Dict, Iterable, List, Literal, Optional, Set,
+                    TextIO, Tuple, Union)
 
 import colorama
 import filelock
@@ -29,6 +29,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
+from sky.backends import cloud_vm_ray_backend
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
@@ -50,12 +51,23 @@ from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    from google.protobuf import descriptor
+    from google.protobuf import json_format
+    import grpc
     import psutil
 
     import sky
     from sky import dag as dag_lib
+    from sky.schemas.generated import jobsv1_pb2
+    from sky.schemas.generated import managed_jobsv1_pb2
 else:
+    json_format = adaptors_common.LazyImport('google.protobuf.json_format')
+    descriptor = adaptors_common.LazyImport('google.protobuf.descriptor')
     psutil = adaptors_common.LazyImport('psutil')
+    grpc = adaptors_common.LazyImport('grpc')
+    jobsv1_pb2 = adaptors_common.LazyImport('sky.schemas.generated.jobsv1_pb2')
+    managed_jobsv1_pb2 = adaptors_common.LazyImport(
+        'sky.schemas.generated.managed_jobsv1_pb2')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -151,7 +163,7 @@ def _validate_consolidation_mode_config(
     if current_is_consolidation_mode:
         controller_cn = (
             controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name)
-        if global_user_state.get_cluster_from_name(controller_cn) is not None:
+        if global_user_state.cluster_with_name_exists(controller_cn):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.InconsistentConsolidationModeError(
                     f'{colorama.Fore.RED}Consolidation mode for jobs is '
@@ -164,7 +176,7 @@ def _validate_consolidation_mode_config(
         if all_jobs:
             nonterminal_jobs = (
                 managed_job_state.get_nonterminal_job_ids_by_name(
-                    None, all_users=True))
+                    None, None, all_users=True))
             if nonterminal_jobs:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.InconsistentConsolidationModeError(
@@ -286,19 +298,34 @@ async def get_job_status(
                 job_logger.info(f'Job status: {status}')
             job_logger.info('=' * 34)
             return status
-        except exceptions.CommandError as e:
+        except (exceptions.CommandError, grpc.RpcError,
+                grpc.FutureTimeoutError) as e:
             # Retry on k8s transient network errors. This is useful when using
             # coreweave which may have transient network issue sometimes.
-            if (e.detailed_reason is not None and
-                    _JOB_K8S_TRANSIENT_NW_MSG in e.detailed_reason):
-                job_logger.info('Failed to connect to the cluster. Retrying '
-                                f'({i + 1}/{_JOB_STATUS_FETCH_MAX_RETRIES})...')
-                job_logger.info('=' * 34)
+            is_transient_error = False
+            detailed_reason = None
+            if isinstance(e, exceptions.CommandError):
+                detailed_reason = e.detailed_reason
+                if (detailed_reason is not None and
+                        _JOB_K8S_TRANSIENT_NW_MSG in detailed_reason):
+                    is_transient_error = True
+            elif isinstance(e, grpc.RpcError):
+                detailed_reason = e.details()
+                if e.code() in [
+                        grpc.StatusCode.UNAVAILABLE,
+                        grpc.StatusCode.DEADLINE_EXCEEDED
+                ]:
+                    is_transient_error = True
+            elif isinstance(e, grpc.FutureTimeoutError):
+                detailed_reason = 'Timeout'
+            if is_transient_error:
+                logger.info('Failed to connect to the cluster. Retrying '
+                            f'({i + 1}/{_JOB_STATUS_FETCH_MAX_RETRIES})...')
+                logger.info('=' * 34)
                 await asyncio.sleep(1)
             else:
-                job_logger.info(
-                    f'Failed to get job status: {e.detailed_reason}')
-                job_logger.info('=' * 34)
+                logger.info(f'Failed to get job status: {detailed_reason}')
+                logger.info('=' * 34)
                 return None
     return None
 
@@ -547,9 +574,32 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
 def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
                       job_id: Optional[int], get_end_time: bool) -> float:
     """Get the submitted/ended time of the job."""
-    code = job_lib.JobLibCodeGen.get_job_submitted_or_ended_timestamp_payload(
-        job_id=job_id, get_ended_time=get_end_time)
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    assert handle is not None, (
+        f'handle for cluster {cluster_name!r} should not be None')
+    if handle.is_grpc_enabled_with_flag:
+        try:
+            if get_end_time:
+                end_ts_request = jobsv1_pb2.GetJobEndedTimestampRequest(
+                    job_id=job_id)
+                end_ts_response = backend_utils.invoke_skylet_with_retries(
+                    lambda: cloud_vm_ray_backend.SkyletClient(
+                        handle.get_grpc_channel()).get_job_ended_timestamp(
+                            end_ts_request))
+                return end_ts_response.timestamp
+            else:
+                submit_ts_request = jobsv1_pb2.GetJobSubmittedTimestampRequest(
+                    job_id=job_id)
+                submit_ts_response = backend_utils.invoke_skylet_with_retries(
+                    lambda: cloud_vm_ray_backend.SkyletClient(
+                        handle.get_grpc_channel()).get_job_submitted_timestamp(
+                            submit_ts_request))
+                return submit_ts_response.timestamp
+        except exceptions.SkyletMethodNotImplementedError:
+            pass
+
+    code = (job_lib.JobLibCodeGen.get_job_submitted_or_ended_timestamp_payload(
+        job_id=job_id, get_ended_time=get_end_time))
     returncode, stdout, stderr = backend.run_on_head(handle,
                                                      code,
                                                      stream_logs=False,
@@ -573,8 +623,13 @@ def try_to_get_job_end_time(backend: 'backends.CloudVmRayBackend',
                                  cluster_name,
                                  job_id=job_id,
                                  get_end_time=True)
-    except exceptions.CommandError as e:
-        if e.returncode == 255:
+    except (exceptions.CommandError, grpc.RpcError,
+            grpc.FutureTimeoutError) as e:
+        if isinstance(e, exceptions.CommandError) and e.returncode == 255 or \
+                (isinstance(e, grpc.RpcError) and e.code() in [
+                    grpc.StatusCode.UNAVAILABLE,
+                    grpc.StatusCode.DEADLINE_EXCEEDED,
+                ]) or isinstance(e, grpc.FutureTimeoutError):
             # Failed to connect - probably the instance was preempted since the
             # job completed. We shouldn't crash here, so just log and use the
             # current time.
@@ -586,7 +641,9 @@ def try_to_get_job_end_time(backend: 'backends.CloudVmRayBackend',
             raise
 
 
-def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
+def event_callback_func(
+        job_id: int, task_id: Optional[int],
+        task: Optional['sky.Task']) -> managed_job_state.AsyncCallbackType:
     """Run event callback for the task."""
 
     def callback_func(status: str):
@@ -625,17 +682,10 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
             f'Bash:{event_callback},log_path:{log_path},result:{result}')
         logger.info(f'=== END: event callback for {status!r} ===')
 
-    try:
-        asyncio.get_running_loop()
+    async def async_callback_func(status: str):
+        return await context_utils.to_thread(callback_func, status)
 
-        # In async context
-        async def async_callback_func(status: str):
-            return await context_utils.to_thread(callback_func, status)
-
-        return async_callback_func
-    except RuntimeError:
-        # Not in async context
-        return callback_func
+    return async_callback_func
 
 
 # ======== user functions ========
@@ -655,14 +705,15 @@ def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
 
 def cancel_jobs_by_id(job_ids: Optional[List[int]],
                       all_users: bool = False,
-                      current_workspace: Optional[str] = None) -> str:
+                      current_workspace: Optional[str] = None,
+                      user_hash: Optional[str] = None) -> str:
     """Cancel jobs by id.
 
     If job_ids is None, cancel all jobs.
     """
     if job_ids is None:
         job_ids = managed_job_state.get_nonterminal_job_ids_by_name(
-            None, all_users)
+            None, user_hash, all_users)
     job_ids = list(set(job_ids))
     if not job_ids:
         return 'No job to cancel.'
@@ -1198,6 +1249,24 @@ def dump_managed_job_queue(
     user_hashes: Optional[List[Optional[str]]] = None,
     statuses: Optional[List[str]] = None,
 ) -> str:
+    return message_utils.encode_payload(
+        get_managed_job_queue(skip_finished, accessible_workspaces, job_ids,
+                              workspace_match, name_match, pool_match, page,
+                              limit, user_hashes, statuses))
+
+
+def get_managed_job_queue(
+    skip_finished: bool = False,
+    accessible_workspaces: Optional[List[str]] = None,
+    job_ids: Optional[List[int]] = None,
+    workspace_match: Optional[str] = None,
+    name_match: Optional[str] = None,
+    pool_match: Optional[str] = None,
+    page: Optional[int] = None,
+    limit: Optional[int] = None,
+    user_hashes: Optional[List[Optional[str]]] = None,
+    statuses: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     # Make sure to get all jobs - some logic below (e.g. high priority job
     # detection) requires a full view of the jobs table.
     jobs = managed_job_state.get_managed_jobs()
@@ -1328,12 +1397,12 @@ def dump_managed_job_queue(
         else:
             job['details'] = None
 
-    return message_utils.encode_payload({
+    return {
         'jobs': jobs,
         'total': total,
         'total_no_filter': total_no_filter,
         'status_counts': status_counts
-    })
+    }
 
 
 def filter_jobs(
@@ -1779,6 +1848,58 @@ def format_job_table(
     if return_rows:
         return job_table.rows
     return output
+
+
+def decode_managed_job_protos(
+    job_protos: Iterable['managed_jobsv1_pb2.ManagedJobInfo']
+) -> List[Dict[str, Any]]:
+    """Decode job protos to dicts. Similar to load_managed_job_queue."""
+    user_hash_to_user = global_user_state.get_users(
+        set(job.user_hash for job in job_protos if job.user_hash))
+
+    jobs = []
+    for job_proto in job_protos:
+        job_dict = _job_proto_to_dict(job_proto)
+        user_hash = job_dict.get('user_hash', None)
+        if user_hash is not None:
+            # Skip jobs that do not have user_hash info.
+            # TODO(cooperc): Remove check before 0.12.0.
+            user = user_hash_to_user.get(user_hash, None)
+            job_dict['user_name'] = user.name if user is not None else None
+        jobs.append(job_dict)
+    return jobs
+
+
+def _job_proto_to_dict(
+        job_proto: 'managed_jobsv1_pb2.ManagedJobInfo') -> Dict[str, Any]:
+    job_dict = json_format.MessageToDict(
+        job_proto,
+        always_print_fields_with_no_presence=True,
+        # Our API returns fields in snake_case.
+        preserving_proto_field_name=True,
+        use_integers_for_enums=True)
+    for field in job_proto.DESCRIPTOR.fields:
+        # Ensure optional fields are present with None values for
+        # backwards compatibility with older clients.
+        if field.has_presence and field.name not in job_dict:
+            job_dict[field.name] = None
+        # json_format.MessageToDict is meant for encoding to JSON,
+        # and Protobuf encodes int64 as decimal strings in JSON,
+        # so we need to convert them back to ints.
+        # https://protobuf.dev/programming-guides/json/#field-representation
+        if field.type == descriptor.FieldDescriptor.TYPE_INT64:
+            job_dict[field.name] = int(job_dict[field.name])
+    job_dict['status'] = managed_job_state.ManagedJobStatus.from_protobuf(
+        job_dict['status'])
+    # For backwards compatibility, convert schedule_state to a string,
+    # as we don't have the logic to handle it in our request
+    # encoder/decoder, unlike status.
+    schedule_state_enum = (
+        managed_job_state.ManagedJobScheduleState.from_protobuf(
+            job_dict['schedule_state']))
+    job_dict['schedule_state'] = (schedule_state_enum.value
+                                  if schedule_state_enum is not None else None)
+    return job_dict
 
 
 class ManagedJobCodeGen:

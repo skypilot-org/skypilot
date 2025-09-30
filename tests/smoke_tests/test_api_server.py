@@ -1,10 +1,14 @@
-from typing import List
+from typing import List, Optional, TypeVar
 
 import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
+from sky.client import common as client_common
+from sky.server import common as server_common
 from sky.skylet import constants
+
+T = TypeVar('T')
 
 
 def set_user(user_id: str, user_name: str, commands: List[str]) -> List[str]:
@@ -17,6 +21,7 @@ def set_user(user_id: str, user_name: str, commands: List[str]) -> List[str]:
 
 # ---------- Test multi-tenant ----------
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support multi-tenant jobs
+@pytest.mark.no_seeweb  # Seeweb does not support multi-tenant jobs
 def test_multi_tenant(generic_cloud: str):
     if smoke_tests_utils.services_account_token_configured_in_env_file():
         pytest.skip(
@@ -106,6 +111,7 @@ def test_multi_tenant(generic_cloud: str):
 
 
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support multi-tenant jobs
+@pytest.mark.no_seeweb  # Seeweb does not support multi-tenant jobs
 def test_multi_tenant_managed_jobs(generic_cloud: str):
     if smoke_tests_utils.services_account_token_configured_in_env_file():
         pytest.skip(
@@ -163,6 +169,54 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
                 f's=$(sky jobs queue) && echo "$s" && echo "$s" | grep {name}-2 | grep SUCCEEDED',
                 f's=$(sky jobs queue -u) && echo "$s" && echo "$s" | grep {user_2_name} | grep {name}-2 | grep SUCCEEDED',
             ]),
+            'echo "==== Test cancellation ===="',
+            *set_user(user_1, user_1_name, [
+                f'sky jobs launch --async -n {name}-cancel-1 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} sleep 300 -y',
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=f'{name}-cancel-1',
+                    job_status=[
+                        sky.ManagedJobStatus.STARTING,
+                        sky.ManagedJobStatus.RUNNING
+                    ],
+                    timeout=60),
+            ]),
+            *set_user(
+                user_2,
+                user_2_name,
+                [
+                    f'sky jobs launch --async -n {name}-cancel-2 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} sleep 300 -y',
+                    smoke_tests_utils.
+                    get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                        job_name=f'{name}-cancel-2',
+                        job_status=[
+                            sky.ManagedJobStatus.STARTING,
+                            sky.ManagedJobStatus.RUNNING
+                        ],
+                        timeout=60),
+                    # Should only cancel user_2's job.
+                    'sky jobs cancel -y --all',
+                    smoke_tests_utils.
+                    get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                        job_name=f'{name}-cancel-2',
+                        job_status=[
+                            sky.ManagedJobStatus.CANCELLED,
+                            sky.ManagedJobStatus.CANCELLING
+                        ],
+                        timeout=60),
+                    # Should cancel user_1's job.
+                    'sky jobs cancel -y --all-users'
+                ]),
+            *set_user(user_1, user_1_name, [
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=f'{name}-cancel-1',
+                    job_status=[
+                        sky.ManagedJobStatus.CANCELLED,
+                        sky.ManagedJobStatus.CANCELLING
+                    ],
+                    timeout=60),
+            ]),
             *controller_related_test_cmds,
         ],
         f'sky jobs cancel -y -n {name}-1; sky jobs cancel -y -n {name}-2; sky jobs cancel -y -n {name}-3',
@@ -211,3 +265,43 @@ def test_requests_scheduling(generic_cloud: str):
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+# ---- Test recent request tracking -----
+def test_recent_request_tracking(generic_cloud: str):
+    with smoke_tests_utils.override_sky_config():
+        # We need to override the sky api endpoint env if --remote-server is
+        # specified, so we can run the test on the remote server.
+        name = smoke_tests_utils.get_cluster_name()
+        task = sky.Task(run="whoami")
+        task.set_resources(
+            sky.Resources(infra=generic_cloud,
+                          **smoke_tests_utils.LOW_RESOURCE_PARAM))
+        try:
+            # launch two jobs
+            req_id = sky.launch(task, cluster_name=name)
+            sky.get(req_id)
+            req_id_exec = sky.exec(task, cluster_name=name)
+            sky.get(req_id_exec)
+
+            params = {
+                'request_id': None,
+                'log_path': None,
+                'tail': None,
+                'follow': True,
+                'format': 'console',
+            }
+            response = server_common.make_authenticated_request(
+                'GET',
+                '/api/stream',
+                params=params,
+                retry=False,
+                timeout=(
+                    client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
+                    None),
+                stream=True)
+            stream_request_id: Optional[server_common.RequestId[
+                T]] = server_common.get_stream_request_id(response)
+            assert req_id_exec == stream_request_id
+        finally:
+            sky.get(sky.down(name))

@@ -1267,9 +1267,11 @@ def autostop(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def queue(cluster_name: str,
-          skip_finished: bool = False,
-          all_users: bool = False) -> server_common.RequestId[List[dict]]:
+def queue(
+    cluster_name: str,
+    skip_finished: bool = False,
+    all_users: bool = False
+) -> server_common.RequestId[List[responses.ClusterJobRecord]]:
     """Gets the job queue of a cluster.
 
     Args:
@@ -1282,8 +1284,8 @@ def queue(cluster_name: str,
         The request ID of the queue request.
 
     Request Returns:
-        job_records (List[Dict[str, Any]]): A list of dicts for each job in the
-            queue.
+        job_records (List[responses.ClusterJobRecord]): A list of job records
+            for each job in the queue.
 
             .. code-block:: python
 
@@ -1429,6 +1431,7 @@ def status(
     all_users: bool = False,
     *,
     _include_credentials: bool = False,
+    _summary_response: bool = False,
 ) -> server_common.RequestId[List[responses.StatusResponse]]:
     """Gets cluster statuses.
 
@@ -1514,6 +1517,7 @@ def status(
         refresh=refresh,
         all_users=all_users,
         include_credentials=_include_credentials,
+        summary_response=_summary_response,
     )
     response = server_common.make_authenticated_request(
         'POST', '/status', json=json.loads(body.model_dump_json()))
@@ -1675,7 +1679,9 @@ def local_up(gpus: bool,
              ssh_key: Optional[str],
              cleanup: bool,
              context_name: Optional[str] = None,
-             password: Optional[str] = None) -> server_common.RequestId[None]:
+             password: Optional[str] = None,
+             name: Optional[str] = None,
+             port_start: Optional[int] = None) -> server_common.RequestId[None]:
     """Launches a Kubernetes cluster on local machines.
 
     Returns:
@@ -1686,8 +1692,8 @@ def local_up(gpus: bool,
     # TODO: move this check to server.
     if not server_common.is_api_server_local():
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'sky local up is only supported when running SkyPilot locally.')
+            raise ValueError('`sky local up` is only supported when '
+                             'running SkyPilot locally.')
 
     body = payloads.LocalUpBody(gpus=gpus,
                                 ips=ips,
@@ -1695,7 +1701,9 @@ def local_up(gpus: bool,
                                 ssh_key=ssh_key,
                                 cleanup=cleanup,
                                 context_name=context_name,
-                                password=password)
+                                password=password,
+                                name=name,
+                                port_start=port_start)
     response = server_common.make_authenticated_request(
         'POST', '/local_up', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
@@ -1704,16 +1712,19 @@ def local_up(gpus: bool,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def local_down() -> server_common.RequestId[None]:
+def local_down(name: Optional[str]) -> server_common.RequestId[None]:
     """Tears down the Kubernetes cluster started by local_up."""
     # We do not allow local up when the API server is running remotely since it
     # will modify the kubeconfig.
     # TODO: move this check to remote server.
     if not server_common.is_api_server_local():
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('sky local down is only supported when running '
+            raise ValueError('`sky local down` is only supported when running '
                              'SkyPilot locally.')
-    response = server_common.make_authenticated_request('POST', '/local_down')
+
+    body = payloads.LocalDownBody(name=name)
+    response = server_common.make_authenticated_request(
+        'POST', '/local_down', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -2064,6 +2075,12 @@ def stream_and_get(
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None),
         stream=True)
+    stream_request_id: Optional[server_common.RequestId[
+        T]] = server_common.get_stream_request_id(response)
+    if request_id is not None and stream_request_id is not None:
+        assert request_id == stream_request_id
+    if request_id is None:
+        request_id = stream_request_id
     if response.status_code in [404, 400]:
         detail = response.json().get('detail')
         with ux_utils.print_exception_no_traceback():
@@ -2077,6 +2094,7 @@ def stream_and_get(
     return stream_response(request_id,
                            response,
                            output_stream,
+                           resumable=True,
                            get_result=follow)
 
 

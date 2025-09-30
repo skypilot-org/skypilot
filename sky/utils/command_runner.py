@@ -3,6 +3,7 @@ import enum
 import hashlib
 import os
 import pathlib
+import re
 import shlex
 import sys
 import time
@@ -21,6 +22,9 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 
 logger = sky_logging.init_logger(__name__)
+
+# Pattern to extract home directory from command output
+_HOME_DIR_PATTERN = re.compile(r'SKYPILOT_HOME_DIR: ([^\s\n]+)')
 
 # Rsync options
 # TODO(zhwu): This will print a per-file progress bar (with -P),
@@ -183,17 +187,25 @@ class CommandRunner:
         return '-'.join(str(x) for x in self.node)
 
     def _get_remote_home_dir(self) -> str:
-        # Use `echo ~` to get the remote home directory, instead of pwd or
-        # echo $HOME, because pwd can be `/` when the remote user is root
-        # and $HOME is not always set.
-        rc, remote_home_dir, stderr = self.run('echo ~',
-                                               require_outputs=True,
-                                               separate_stderr=True,
-                                               stream_logs=False)
+        # Use pattern matching to extract home directory.
+        # Some container images print MOTD when login shells start, which can
+        # contaminate command output. We use a unique pattern to extract the
+        # actual home directory reliably.
+        rc, output, stderr = self.run('echo "SKYPILOT_HOME_DIR: $(echo ~)"',
+                                      require_outputs=True,
+                                      separate_stderr=True,
+                                      stream_logs=False)
         if rc != 0:
             raise ValueError('Failed to get remote home directory: '
-                             f'{remote_home_dir + stderr}')
-        remote_home_dir = remote_home_dir.strip()
+                             f'{output + stderr}')
+
+        # Extract home directory using pattern matching
+        home_dir_match = _HOME_DIR_PATTERN.search(output)
+        if home_dir_match:
+            remote_home_dir = home_dir_match.group(1)
+        else:
+            raise ValueError('Failed to find remote home directory identifier: '
+                             f'{output + stderr}')
         return remote_home_dir
 
     def _get_command_to_run(
@@ -414,7 +426,6 @@ class CommandRunner:
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
 
-
         Returns:
             returncode
             or
@@ -469,15 +480,19 @@ class CommandRunner:
         """Close the cached connection to the remote machine."""
         pass
 
-    def port_forward_command(self,
-                             port_forward: List[Tuple[int, int]],
-                             connect_timeout: int = 1) -> List[str]:
+    def port_forward_command(
+            self,
+            port_forward: List[Tuple[int, int]],
+            connect_timeout: int = 1,
+            ssh_mode: SshMode = SshMode.INTERACTIVE) -> List[str]:
         """Command for forwarding ports from localhost to the remote machine.
 
         Args:
             port_forward: A list of ports to forward from the localhost to the
                 remote host.
             connect_timeout: The timeout for the connection.
+            ssh_mode: The mode to use for ssh.
+                See SSHMode for more details.
         """
         raise NotImplementedError
 
@@ -592,6 +607,7 @@ class SSHCommandRunner(CommandRunner):
         ssh_proxy_command: Optional[str] = None,
         docker_user: Optional[str] = None,
         disable_control_master: Optional[bool] = False,
+        port_forward_execute_remote_command: Optional[bool] = False,
     ):
         """Initialize SSHCommandRunner.
 
@@ -618,6 +634,10 @@ class SSHCommandRunner(CommandRunner):
             disable_control_master: bool; specifies either or not the ssh
                 command will utilize ControlMaster. We currently disable
                 it for k8s instance.
+            port_forward_execute_remote_command: bool; specifies whether to
+                add -N to the port forwarding command. This is useful if you
+                want to run a command on the remote machine to make sure the
+                SSH tunnel is established.
         """
         super().__init__(node)
         ip, port = node
@@ -646,22 +666,28 @@ class SSHCommandRunner(CommandRunner):
             self.ssh_user = ssh_user
             self.port = port
             self._docker_ssh_proxy_command = None
+        self.port_forward_execute_remote_command = (
+            port_forward_execute_remote_command)
 
-    def port_forward_command(self,
-                             port_forward: List[Tuple[int, int]],
-                             connect_timeout: int = 1) -> List[str]:
+    def port_forward_command(
+            self,
+            port_forward: List[Tuple[int, int]],
+            connect_timeout: int = 1,
+            ssh_mode: SshMode = SshMode.INTERACTIVE) -> List[str]:
         """Command for forwarding ports from localhost to the remote machine.
 
         Args:
             port_forward: A list of ports to forward from the local port to the
                 remote port.
             connect_timeout: The timeout for the ssh connection.
+            ssh_mode: The mode to use for ssh.
+                See SSHMode for more details.
 
         Returns:
             The command for forwarding ports from localhost to the remote
             machine.
         """
-        return self.ssh_base_command(ssh_mode=SshMode.INTERACTIVE,
+        return self.ssh_base_command(ssh_mode=ssh_mode,
                                      port_forward=port_forward,
                                      connect_timeout=connect_timeout)
 
@@ -680,7 +706,11 @@ class SSHCommandRunner(CommandRunner):
             for local, remote in port_forward:
                 logger.debug(
                     f'Forwarding local port {local} to remote port {remote}.')
-                ssh += ['-NL', f'{local}:localhost:{remote}']
+                if self.port_forward_execute_remote_command:
+                    ssh += ['-L']
+                else:
+                    ssh += ['-NL']
+                ssh += [f'{local}:localhost:{remote}']
         if self._docker_ssh_proxy_command is not None:
             docker_ssh_proxy_command = self._docker_ssh_proxy_command(ssh)
         else:
@@ -894,9 +924,11 @@ class KubernetesCommandRunner(CommandRunner):
         else:
             return f'pod/{self.pod_name}'
 
-    def port_forward_command(self,
-                             port_forward: List[Tuple[int, int]],
-                             connect_timeout: int = 1) -> List[str]:
+    def port_forward_command(
+            self,
+            port_forward: List[Tuple[int, int]],
+            connect_timeout: int = 1,
+            ssh_mode: SshMode = SshMode.INTERACTIVE) -> List[str]:
         """Command for forwarding ports from localhost to the remote machine.
 
         Args:
@@ -904,7 +936,10 @@ class KubernetesCommandRunner(CommandRunner):
                 remote port. Currently, only one port is supported, i.e. the
                 list should have only one element.
             connect_timeout: The timeout for the ssh connection.
+            ssh_mode: The mode to use for ssh.
+                See SSHMode for more details.
         """
+        del ssh_mode  # unused
         assert port_forward and len(port_forward) == 1, (
             'Only one port is supported for Kubernetes port-forward.')
         kubectl_args = [
@@ -966,7 +1001,6 @@ class KubernetesCommandRunner(CommandRunner):
                 output. This is used when the output is not processed by
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
-
 
         Returns:
             returncode
