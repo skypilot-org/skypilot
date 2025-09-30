@@ -1,4 +1,4 @@
-# Connect Spyder IDE to a SkyPilot Cluster and develop your R program
+# Connect Spyder IDE to a SkyPilot Cluster and develop your R/Python program
 
 SkyPilot supports interactive development on any infra, including cloud VMs, and even Kubernetes. You can SSH into the SkyPilot cluster or connect your IDE with it, e.g., VSCode, or Spyder.
 
