@@ -4500,49 +4500,51 @@ def jobs_launch(
     job_id_handle = _async_call_or_wait(request_id, async_call,
                                         'sky.jobs.launch')
 
-    job_ids = [job_id_handle[0]] if isinstance(job_id_handle[0],
-                                               int) else job_id_handle[0]
-    if pool:
-        # Display the worker assignment for the jobs.
-        logger.debug(f'Getting service records for pool: {pool}')
-        records_request_id = managed_jobs.pool_status(pool_names=pool)
-        service_records = _async_call_or_wait(records_request_id, async_call,
-                                              'sky.jobs.pool_status')
-        logger.debug(f'Pool status: {service_records}')
-        replica_infos = service_records[0]['replica_info']
-        for replica_info in replica_infos:
-            job_id = replica_info.get('used_by', None)
-            if job_id in job_ids:
-                worker_id = replica_info['replica_id']
-                version = replica_info['version']
-                logger.info(f'Job ID: {job_id} assigned to pool {pool} '
-                            f'(worker: {worker_id}, version: {version})')
+    if not async_call:
+        job_ids = [job_id_handle[0]] if isinstance(job_id_handle[0],
+                                                   int) else job_id_handle[0]
+        if pool:
+            # Display the worker assignment for the jobs.
+            logger.debug(f'Getting service records for pool: {pool}')
+            records_request_id = managed_jobs.pool_status(pool_names=pool)
+            service_records = _async_call_or_wait(records_request_id,
+                                                  async_call,
+                                                  'sky.jobs.pool_status')
+            logger.debug(f'Pool status: {service_records}')
+            replica_infos = service_records[0]['replica_info']
+            for replica_info in replica_infos:
+                job_id = replica_info.get('used_by', None)
+                if job_id in job_ids:
+                    worker_id = replica_info['replica_id']
+                    version = replica_info['version']
+                    logger.info(f'Job ID: {job_id} assigned to pool {pool} '
+                                f'(worker: {worker_id}, version: {version})')
 
-    if not async_call and not detach_run:
-        if len(job_ids) == 1:
-            job_id = job_ids[0]
-            returncode = managed_jobs.tail_logs(name=None,
-                                                job_id=job_id,
-                                                follow=True,
-                                                controller=False)
-            sys.exit(returncode)
-        else:
-            # TODO(tian): This can be very long. Considering have a "group id"
-            # and query all job ids with the same group id.
-            job_ids_str = ','.join(map(str, job_ids))
-            click.secho(
-                f'Jobs submitted with IDs: {colorama.Fore.CYAN}'
-                f'{job_ids_str}{colorama.Style.RESET_ALL}.'
-                f'\n📋 Useful Commands'
-                f'\n{ux_utils.INDENT_SYMBOL}To stream job logs:\t\t\t'
-                f'{ux_utils.BOLD}sky jobs logs <job-id>'
-                f'{ux_utils.RESET_BOLD}'
-                f'\n{ux_utils.INDENT_SYMBOL}To stream controller logs:\t\t'
-                f'{ux_utils.BOLD}sky jobs logs --controller <job-id>'
-                f'{ux_utils.RESET_BOLD}'
-                f'\n{ux_utils.INDENT_LAST_SYMBOL}To cancel all jobs on the '
-                f'pool:\t{ux_utils.BOLD}sky jobs cancel --pool {pool}'
-                f'{ux_utils.RESET_BOLD}')
+        if not detach_run:
+            if len(job_ids) == 1:
+                job_id = job_ids[0]
+                returncode = managed_jobs.tail_logs(name=None,
+                                                    job_id=job_id,
+                                                    follow=True,
+                                                    controller=False)
+                sys.exit(returncode)
+            else:
+                # TODO(tian): This can be very long. Considering have a
+                # "group id" and query all job ids with the same group id.
+                job_ids_str = ','.join(map(str, job_ids))
+                click.secho(
+                    f'Jobs submitted with IDs: {colorama.Fore.CYAN}'
+                    f'{job_ids_str}{colorama.Style.RESET_ALL}.'
+                    f'\n📋 Useful Commands'
+                    f'\n{ux_utils.INDENT_SYMBOL}To stream job logs:\t\t\t'
+                    f'{ux_utils.BOLD}sky jobs logs <job-id>'
+                    f'{ux_utils.RESET_BOLD}'
+                    f'\n{ux_utils.INDENT_SYMBOL}To stream controller logs:\t\t'
+                    f'{ux_utils.BOLD}sky jobs logs --controller <job-id>'
+                    f'{ux_utils.RESET_BOLD}'
+                    f'\n{ux_utils.INDENT_LAST_SYMBOL}To cancel all jobs on the '
+                    f'pool:\t{ux_utils.BOLD}sky jobs cancel --pool {pool}'
+                    f'{ux_utils.RESET_BOLD}')
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
