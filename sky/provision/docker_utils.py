@@ -3,7 +3,7 @@
 import dataclasses
 import shlex
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple, Optional, Set
 
 from sky import sky_logging
 from sky.skylet import constants
@@ -73,7 +73,7 @@ def _normalize_run_options(opts: List[str]) -> List[str]:
 
     Redundant user copies are removed; contradictions are warned and overridden.
     """
-    kv: List[tuple[str, str | None]] = []
+    kv: List[Tuple[str, Optional[str]]] = []
     i, n = 0, len(opts)
     while i < n:
         t = opts[i]
@@ -97,11 +97,11 @@ def _normalize_run_options(opts: List[str]) -> List[str]:
         ('--entrypoint', '/bin/bash'),
     }
 
-    kept: List[tuple[str, str | None]] = []
-    user_network: str | None = None
-    user_cap_drop: set[str] = set()
-    user_entrypoint: str | None = None
-    user_secopts: list[str] = []
+    kept: List[Tuple[str, Optional[str]]] = []
+    user_network: Optional[str] = None
+    user_cap_drop: Set[str] = set()
+    user_entrypoint: Optional[str] = None
+    user_secopts: List[str] = []
 
     for k, v in kv:
         if (k, v) in enforced_single:
