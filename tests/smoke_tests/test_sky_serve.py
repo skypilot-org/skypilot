@@ -361,7 +361,7 @@ def test_skyserve_kubernetes_http_with_volume():
         test = smoke_tests_utils.Test(
             'test-skyserve-kubernetes-volume',
             [
-                f'sky volumes apply {volume_yaml_path}',
+                f'sky volumes apply {volume_yaml_path} -y',
                 f'sky volumes ls | grep "{pvc_name}"',
                 f'sky serve up -n {name} -y {smoke_tests_utils.LOW_RESOURCE_ARG} {service_yaml_path}',
                 _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
