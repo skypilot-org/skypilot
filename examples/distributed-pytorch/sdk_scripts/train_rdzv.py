@@ -43,7 +43,7 @@ task = sky.Task(
 )
 
 # Alternatively, load in the cluster YAML from a file
-# task = sky.Task.from_yaml_config('../train_rdzv.yaml')
+# task = sky.Task.from_yaml('../train_rdzv.yaml')
 
 cluster_name = 'train-rdzv'
 job_id, _ = sky.stream_and_get(sky.launch(task, cluster_name=cluster_name))

@@ -48,7 +48,7 @@ task = sky.Task(
 )
 
 # Alternatively, load in the cluster YAML from a file
-# task = sky.Task.from_yaml_config('../train.yaml')
+# task = sky.Task.from_yaml('../train.yaml')
 
 cluster_name = 'train'
 job_id, _ = sky.stream_and_get(sky.launch(task, cluster_name=cluster_name))
