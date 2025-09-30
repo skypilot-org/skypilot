@@ -1,0 +1,28 @@
+volumes:
+  /mnt/data: my-pvc
+
+service:
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 180  # Use a large delay for EKS LB to be ready
+  replica_policy:
+    min_replicas: 1
+    max_replicas: 1
+
+resources:
+  ports: 8080
+  infra: kubernetes
+
+workdir: examples/serve/http_server
+
+# Use 8080 to test jupyter service is terminated
+run: |
+  # Test volume mount by checking if we can access the mounted directory
+  echo "Testing volume mount at /mnt/data"
+  ls -la /mnt/data || (echo "Volume mount failed" && exit 1)
+  # Create a test file to verify write access
+  echo "Hello from skyserve volume test" > /mnt/data/skyserve_test.txt || (echo "Cannot write to volume" && exit 1)
+  cat /mnt/data/skyserve_test.txt || (echo "Cannot read from volume" && exit 1)
+  echo "Volume test successful"
+  # Start the HTTP server
+  python3 server.py --port 8080

@@ -326,6 +326,30 @@ def test_skyserve_kubernetes_http():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.kubernetes
+@pytest.mark.serve
+@pytest.mark.no_remote_server
+def test_skyserve_kubernetes_volumes():
+    """Test skyserve on Kubernetes with PVC volumes"""
+    name = _get_service_name()
+    test = smoke_tests_utils.Test(
+        f'test-skyserve-kubernetes-volumes',
+        [
+            f'sky serve up -n {name} -y {smoke_tests_utils.LOW_RESOURCE_ARG} tests/skyserve/http/kubernetes_volumes.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'curl $endpoint | grep "Hi, SkyPilot here"',
+            # Additional check to verify the volume test passed by checking logs
+            f'logs=$(sky serve logs {name} 1 --no-follow); '
+            'echo "$logs" | grep "Volume test successful" || (echo "Volume test not found in logs" && exit 1)',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.oci
 @pytest.mark.serve
 def test_skyserve_oci_http():
