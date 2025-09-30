@@ -3,7 +3,7 @@
 import dataclasses
 import shlex
 import time
-from typing import Any, Dict, List, Tuple, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sky import sky_logging
 from sky.skylet import constants
@@ -78,8 +78,8 @@ def _normalize_run_options(opts: List[str]) -> List[str]:
     while i < n:
         t = opts[i]
         if t.startswith('--') and '=' in t:
-            k, v = t.split('=', 1)
-            kv.append((k, v))
+            k, val = t.split('=', 1)
+            kv.append((k, val))
             i += 1
         elif t.startswith('--') and i + 1 < n and not opts[i +
                                                            1].startswith('--'):
@@ -98,9 +98,11 @@ def _normalize_run_options(opts: List[str]) -> List[str]:
     }
 
     kept: List[Tuple[str, Optional[str]]] = []
-    user_network: Optional[str] = None
+    user_network: str = ''
+    user_network_set: bool = False
     user_cap_drop: Set[str] = set()
-    user_entrypoint: Optional[str] = None
+    user_entrypoint: str = ''
+    user_entrypoint_set: bool = False
     user_secopts: List[str] = []
 
     for k, v in kv:
@@ -108,7 +110,9 @@ def _normalize_run_options(opts: List[str]) -> List[str]:
             continue
 
         if k in ('--network', '--net'):
-            user_network = v
+            if v is not None:
+                user_network = v
+                user_network_set = True
             continue
 
         if k == '--cap-drop' and v:
@@ -131,13 +135,15 @@ def _normalize_run_options(opts: List[str]) -> List[str]:
             kept.append((k, v))
             continue
 
-        if k == '--entrypoint' and v:
-            user_entrypoint = v
+        if k == '--entrypoint':
+            if v is not None:
+                user_entrypoint = v
+                user_entrypoint_set = True
             continue
 
         kept.append((k, v))
 
-    if user_network is not None and user_network != 'host':
+    if user_network_set and user_network != 'host':
         logger.warning(
             'Overriding user network "%s" to host '
             '(SkyPilot requires host networking during initialization).',
@@ -147,7 +153,7 @@ def _normalize_run_options(opts: List[str]) -> List[str]:
         logger.warning('Overriding: user requested "--cap-drop SYS_ADMIN"; '
                        'SkyPilot requires "--cap-add SYS_ADMIN".')
 
-    if user_entrypoint is not None and user_entrypoint != '/bin/bash':
+    if user_entrypoint_set and user_entrypoint != '/bin/bash':
         logger.warning(
             'Overriding user entrypoint "%s" to "/bin/bash" '
             '(required during initialization).', user_entrypoint)
