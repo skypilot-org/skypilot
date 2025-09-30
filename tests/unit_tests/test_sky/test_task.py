@@ -820,32 +820,58 @@ def test_resolve_volumes_override_topology():
 
 
 def test_resolve_volumes_with_envs():
-    t = task.Task()
-    t._volumes = {'/mnt': '${VOLUME_NAME}'}
-    t._envs = {'VOLUME_NAME': 'vol1'}
-    t._resolve_volume_paths_with_envs()
+
+    config = {
+        'volumes': {
+            '/mnt': '${VOLUME_NAME}'
+        },
+        'envs': {
+            'VOLUME_NAME': 'vol1'
+        }
+    }
+    t = task.Task.from_yaml_config(config)
     assert t._volumes == {'/mnt': 'vol1'}
 
 
 def test_resolve_volumes_with_envs_two():
-    t = task.Task()
-    t._volumes = {'/mnt': '${VOLUME_NAME}_${VOLUME_SUFFIX}'}
-    t._envs = {'VOLUME_NAME': 'vol1', 'VOLUME_SUFFIX': 'suffix'}
-    t._resolve_volume_paths_with_envs()
+    config = {
+        'volumes': {
+            '/mnt': '${VOLUME_NAME}_${VOLUME_SUFFIX}'
+        },
+        'envs': {
+            'VOLUME_NAME': 'vol1',
+            'VOLUME_SUFFIX': 'suffix'
+        }
+    }
+    t = task.Task.from_yaml_config(config)
     assert t._volumes == {'/mnt': 'vol1_suffix'}
 
 
 def test_resolve_volumes_with_envs_none():
-    t = task.Task()
-    t._volumes = {'/mnt': 'vol_test'}
-    t._envs = {'VOLUME_NAME': 'vol1', 'VOLUME_SUFFIX': 'suffix'}
-    t._resolve_volume_paths_with_envs()
+    config = {
+        'volumes': {
+            '/mnt': 'vol_test'
+        },
+        'envs': {
+            'VOLUME_NAME': 'vol1',
+            'VOLUME_SUFFIX': 'suffix'
+        }
+    }
+    t = task.Task.from_yaml_config(config)
     assert t._volumes == {'/mnt': 'vol_test'}
 
 
 def test_resolve_volumes_with_envs_dict():
-    t = task.Task()
-    t._volumes = {'/mnt': {'name': '${VOLUME_NAME}_${VOLUME_SUFFIX}'}}
-    t._envs = {'VOLUME_NAME': 'vol1', 'VOLUME_SUFFIX': 'suffix'}
-    t._resolve_volume_paths_with_envs()
+    config = {
+        'volumes': {
+            '/mnt': {
+                'name': '${VOLUME_NAME}_${VOLUME_SUFFIX}'
+            }
+        },
+        'envs': {
+            'VOLUME_NAME': 'vol1',
+            'VOLUME_SUFFIX': 'suffix'
+        }
+    }
+    t = task.Task.from_yaml_config(config)
     assert t._volumes == {'/mnt': {'name': 'vol1_suffix'}}

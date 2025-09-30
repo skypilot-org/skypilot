@@ -649,6 +649,10 @@ class Task:
             config['workdir'] = _fill_in_env_vars(config['workdir'],
                                                   env_and_secrets)
 
+        if config.get('volumes') is not None:
+            config['volumes'] = _fill_in_env_vars(config['volumes'],
+                                                  env_and_secrets)
+
         task = Task(
             config.pop('name', None),
             run=config.pop('run', None),
@@ -843,27 +847,6 @@ class Task:
         config['_user_specified_yaml'] = user_specified_yaml
         return Task.from_yaml_config(config)
 
-    def _replace_env_vars_in_volume_paths(self, vol_str: str) -> str:
-        """Replace environment variables in the volume path."""
-        return re.sub(
-            r'\$\{(\w+)\}',
-            lambda match: self._envs.get(match.group(1), match.group(0)),
-            vol_str)
-
-    def _resolve_volume_paths_with_envs(self) -> None:
-        """If the user has specified a volume path with an environment variable,
-        resolve the path to the actual volume name.
-        """
-        for dst_path, vol in self._volumes.items():
-            if isinstance(vol, str):
-                vol = self._replace_env_vars_in_volume_paths(vol)
-                self._volumes[dst_path] = vol
-            elif isinstance(vol, dict):
-                vol = self._replace_env_vars_in_volume_paths(vol['name'])
-                self._volumes[dst_path]['name'] = vol
-            else:
-                raise ValueError(f'Invalid volume config: {dst_path}: {vol}')
-
     def resolve_and_validate_volumes(self) -> None:
         """Resolve volumes config to volume mounts and validate them.
 
@@ -879,7 +862,6 @@ class Task:
             return None
         if not self._volumes:
             return None
-        self._resolve_volume_paths_with_envs()
         volume_mounts: List[volume_lib.VolumeMount] = []
         for dst_path, vol in self._volumes.items():
             self._validate_mount_path(dst_path, location='volumes')
