@@ -25,10 +25,12 @@
 import inspect
 import json
 import os
+import pathlib
 import shlex
 import tempfile
 from typing import Dict, List, Tuple
 
+import jinja2
 import pytest
 from smoke_tests import smoke_tests_utils
 
@@ -324,6 +326,55 @@ def test_skyserve_kubernetes_http():
     name = _get_service_name()
     test = _get_skyserve_http_test(name, 'kubernetes', 30)
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.serve
+@pytest.mark.no_remote_server
+def test_skyserve_kubernetes_http_with_volume():
+    """Test skyserve on Kubernetes with PVC volume"""
+    name = _get_service_name()
+    pvc_name = f'{name}-pvc'
+
+    volume_template_str = pathlib.Path(
+        'tests/test_yamls/rwmany_volume.yaml.j2').read_text()
+    volume_template = jinja2.Template(volume_template_str)
+    volume_yaml_content = volume_template.render(volume_name=pvc_name)
+
+    service_template_str = pathlib.Path(
+        'tests/skyserve/http/kubernetes_volume.yaml.j2').read_text()
+    service_template = jinja2.Template(service_template_str)
+    service_yaml_content = service_template.render(pvc_name=pvc_name)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as volume_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as service_f:
+        volume_f.write(volume_yaml_content)
+        volume_f.flush()
+        volume_yaml_path = volume_f.name
+
+        service_f.write(service_yaml_content)
+        service_f.flush()
+        service_yaml_path = service_f.name
+
+        test = smoke_tests_utils.Test(
+            'test-skyserve-kubernetes-volume',
+            [
+                f'sky volumes apply {volume_yaml_path}',
+                f'sky volumes ls | grep "{pvc_name}"',
+                f'sky serve up -n {name} -y {smoke_tests_utils.LOW_RESOURCE_ARG} {service_yaml_path}',
+                _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+                'curl $endpoint | grep "Hi, SkyPilot here"',
+                f'sky serve logs {name} 1 --no-follow | grep "Hello from volume!"',
+            ],
+            f'{_TEARDOWN_SERVICE.format(name=name)}; '
+            f'sky volumes delete {pvc_name} -y',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=30 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.oci
