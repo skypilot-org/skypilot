@@ -360,6 +360,44 @@ class TestWithNoCloudEnabled:
         assert output[4] == f'└── Endpoint set to default local API server.'
         assert len(output) == 6
 
+    def test_jobs_launch_async(self, monkeypatch):
+        """Make sure we don't try to parse the output of launch when 
+        --async is used.
+        """
+        # mock_api_server_calls(monkeypatch)
+        monkeypatch.setattr(
+            'sky.client.cli.command._handle_infra_cloud_region_zone_options',
+            lambda *args, **kwargs: (None, None, None))
+        # Mock _make_task_or_dag_from_entrypoint_with_overrides.
+        monkeypatch.setattr(
+            'sky.client.cli.command._make_task_or_dag_from_entrypoint_with_overrides',
+            lambda *args, **kwargs: mock.MagicMock())
+        # Mock sky.utils.dag_utils.maybe_infer_and_fill_dag_and_task_names.
+        monkeypatch.setattr(
+            'sky.utils.dag_utils.maybe_infer_and_fill_dag_and_task_names',
+            lambda *args, **kwargs: None)
+        # Mock sky.utils.common_utils.check_cluster_name_is_valid.
+        monkeypatch.setattr(
+            'sky.utils.common_utils.check_cluster_name_is_valid',
+            lambda *args, **kwargs: None)
+        # Mock managed_jobs.launch.
+        monkeypatch.setattr(
+            'sky.jobs.client.sdk.launch',
+            lambda *args, **kwargs: 'request-id')
+        monkeypatch.setattr('sky.client.cli.command._async_call_or_wait',
+                            lambda *args, **kwargs: None)
+        
+        cli_runner = cli_testing.CliRunner()
+        result = cli_runner.invoke(command.jobs_launch, [
+            'echo', 'hello',
+            '--name', 'test-job',
+            '--detach-run',
+            '--async'
+        ])
+        output = result.stdout.split('\n')
+        print(output)
+        assert not result.exit_code
+
 
 class TestHelperFunctions:
 
