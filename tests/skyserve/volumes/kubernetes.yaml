@@ -1,0 +1,28 @@
+volumes:
+  /mnt/data: my-pvc
+
+service:
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 180  # Use a large delay for EKS LB to be ready
+  replica_policy:
+    min_replicas: 1
+    max_replicas: 1
+
+resources:
+  ports: 8080
+  infra: kubernetes
+
+workdir: examples/serve/http_server
+
+# Use 8080 to test jupyter service is terminated
+run: |
+  # Test that the volume is mounted and accessible
+  if [ -f /mnt/data/hello.txt ]; then
+    echo "Volume mounted successfully"
+    cat /mnt/data/hello.txt
+  else
+    echo "Volume not mounted or hello.txt not found"
+    ls -la /mnt/data/ || echo "Directory /mnt/data not found"
+  fi
+  python3 server.py --port 8080
