@@ -1,6 +1,10 @@
-from typing import List, Optional, TypeVar
+import sys
+import tempfile
+import threading
+from typing import Dict, List, Optional, Tuple, TypeVar
 
 import pytest
+from smoke_tests import metrics_utils
 from smoke_tests import smoke_tests_utils
 
 import sky
@@ -305,3 +309,122 @@ def test_recent_request_tracking(generic_cloud: str):
             assert req_id_exec == stream_request_id
         finally:
             sky.get(sky.down(name))
+
+
+def test_big_file_upload_memory_usage(generic_cloud: str):
+    if not smoke_tests_utils.is_remote_server_test():
+        pytest.skip('This test is only for remote server')
+
+    def compare_rss_metrics(baseline: Dict[Tuple[str, ...], List[Tuple[float,
+                                                                       float]]],
+                            actual: Dict[Tuple[str, ...], List[Tuple[float,
+                                                                     float]]]):
+
+        def _rss_peak_aggregator(
+            baseline_values: List[Tuple[float, float]],
+            actual_values: List[Tuple[float, float]]
+        ) -> metrics_utils.AggregatedMetric:
+            """Aggregator for RSS (memory) metrics - computes peak values."""
+            baseline_peak_bytes = max([v for _, v in baseline_values
+                                      ]) if baseline_values else 0
+            actual_peak_bytes = max([v for _, v in actual_values
+                                    ]) if actual_values else 0
+
+            baseline_mb = baseline_peak_bytes / (1024 * 1024)
+            actual_mb = actual_peak_bytes / (1024 * 1024)
+
+            return metrics_utils.AggregatedMetric(baseline=baseline_mb,
+                                                  actual=actual_mb,
+                                                  unit='MB')
+
+        def _rss_per_key_threshold_checker(key_label: str, baseline: float,
+                                           actual: float, increase: float,
+                                           increase_pct: float) -> List[str]:
+            """Per-key threshold checker for RSS metrics."""
+            failures = []
+            if actual > 300:
+                failures.append(f"exceeded 300 MB: {actual:.1f} MB")
+            if increase_pct > 50 and increase_pct != float('inf'):
+                failures.append(
+                    f"increased by {increase_pct:.1f}% (limit: 50%)")
+            return failures
+
+        def _rss_aggregate_threshold_checker(
+                total_baseline: float, total_actual: float,
+                total_increase: float, total_increase_pct: float) -> List[str]:
+            """Aggregate threshold checker for RSS metrics."""
+            failures = []
+            if total_increase_pct > 20:
+                failures.append(
+                    f"Average memory increase too high: {total_increase_pct:.1f}% (limit: 20%)"
+                )
+            return failures
+
+        metrics_utils.compare_metrics(
+            baseline,
+            actual,
+            aggregator_fn=_rss_peak_aggregator,
+            per_key_threshold_fn=_rss_per_key_threshold_checker,
+            aggregate_threshold_fn=_rss_aggregate_threshold_checker)
+
+    with smoke_tests_utils.override_sky_config():
+        name = smoke_tests_utils.get_cluster_name()
+
+        metrics_server_url = smoke_tests_utils.get_metrics_server_url()
+        metrics_url = f'{metrics_server_url}/metrics'
+
+        print("Collecting baseline RSS measurements...",
+              file=sys.stderr,
+              flush=True)
+        baseline_metrics = metrics_utils.collect_metrics(
+            metrics_url, 'sky_apiserver_process_peak_rss', duration_seconds=30)
+
+        # Create large files and launch task.
+        with tempfile.NamedTemporaryFile(mode='wb') as large_file1, \
+            tempfile.NamedTemporaryFile(mode='wb') as large_file2, \
+            tempfile.NamedTemporaryFile(mode='wb') as large_file3:
+            smoke_tests_utils.write_blob(large_file1, 1024 * 1024 * 1024)
+            smoke_tests_utils.write_blob(large_file2, 1024 * 1024 * 1024)
+            smoke_tests_utils.write_blob(large_file3, 1024 * 1024 * 1024)
+
+            req_id = sky.launch(task=sky.Task(
+                run='ls -l /large_file1 /large_file2 /large_file3',
+                resources=sky.Resources(infra=generic_cloud,
+                                        **smoke_tests_utils.LOW_RESOURCE_PARAM),
+                file_mounts={
+                    '/large_file1': large_file1.name,
+                    '/large_file2': large_file2.name,
+                    '/large_file3': large_file3.name,
+                }),
+                                cluster_name=name)
+
+            # Start metrics collection in background thread.
+            actual_metrics = {}
+            stop_metrics = threading.Event()
+
+            def collect_actual_metrics():
+                nonlocal actual_metrics
+                actual_metrics = metrics_utils.collect_metrics(
+                    metrics_url,
+                    'sky_apiserver_process_peak_rss',
+                    stop_event=stop_metrics)
+
+            print("Starting actual RSS measurement...",
+                  file=sys.stderr,
+                  flush=True)
+            metrics_thread = threading.Thread(target=collect_actual_metrics)
+            metrics_thread.start()
+
+            sky.stream_and_get(req_id, output_stream=sys.stderr)
+
+            # Cleanup the cluster.
+            req_id = sky.down(name)
+            sky.stream_and_get(req_id, output_stream=sys.stderr)
+
+            stop_metrics.set()
+            metrics_thread.join(timeout=10)
+
+            assert len(baseline_metrics) > 0, "No baseline metrics collected"
+            assert len(actual_metrics) > 0, "No actual metrics collected"
+
+            compare_rss_metrics(baseline_metrics, actual_metrics)
