@@ -9,6 +9,7 @@ import json
 import math
 import os
 import re
+import requests
 import shutil
 import subprocess
 import time
@@ -1152,9 +1153,37 @@ def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[Any]:
     if context is None:
         context = get_current_kube_config_context_name()
 
-    nodes = kubernetes.core_api(context).list_node(
-        _request_timeout=kubernetes.API_TIMEOUT).items
-    return nodes
+    # nodes = kubernetes.core_api(context).list_node(
+    #     _request_timeout=kubernetes.API_TIMEOUT).items
+    # return nodes
+
+    # Make a rest call and only get the metadata.
+    from kubernetes import config
+    from kubernetes import client
+    config.load_kube_config(context=context)
+    cfg = client.Configuration().get_default_copy()
+    print("Host:", cfg.host)
+    print("Auth header present:", 'authorization' in cfg.api_key)
+
+    headers = {"Authorization": f"Bearer {cfg.api_key['authorization']}"}
+    logger.info(f'Headers: {headers}')
+
+    # Use the CA cert from kubeconfig
+    verify = cfg.ssl_ca_cert
+
+    resp = requests.get(
+        f"{cfg.host}/api/v1/nodes",
+        headers=headers,
+        params={"fields": "metadata"},
+        verify=verify,  # <-- important!
+    )
+    data = resp.json()
+
+    logger.info(f'Data: {data}')
+    for node in data["items"]:
+        print(node["metadata"]["name"])
+    logger.info(f'Data: {data}')
+    return data['items']
 
 
 @_retry_on_error(resource_type='pod')
