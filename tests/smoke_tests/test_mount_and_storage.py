@@ -245,9 +245,9 @@ def _storage_mount_cached_test_command_generator(f1: TextIO, f2: TextIO,
         *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
         f'sky launch -y -c {cluster_name} --infra {cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {write_file_path}',
         f'sky logs {cluster_name} 1 --status',  # Ensure job succeeded.
-        f'sky stop -y {cluster_name}',
-        f'sky start -y {cluster_name}',
-        f'sky exec {cluster_name} {check_file_path}',
+        f'sky down -y {cluster_name}',
+        f'sky launch -y -c {cluster_name} --infra {cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {check_file_path}',
+        f'sky logs {cluster_name} 1 --status',  # Ensure job succeeded.
     ]
     clean_command = (
         f'sky down -y {cluster_name} && '
