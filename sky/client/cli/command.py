@@ -59,6 +59,7 @@ from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.client import sdk
 from sky.client.cli import flags
+from sky.client.cli import table_utils
 from sky.data import storage_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -2125,7 +2126,7 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
                        f'cluster {cluster!r}.{colorama.Style.RESET_ALL}\n'
                        f'  {common_utils.format_exception(e)}')
             return
-        job_tables[cluster] = job_lib.format_job_queue(job_table)
+        job_tables[cluster] = table_utils.format_job_queue(job_table)
 
     subprocess_utils.run_in_parallel(_get_job_queue, clusters)
     user_str = 'all users' if all_users else 'current user'
@@ -4186,6 +4187,13 @@ def volumes_apply(
 
     logger.debug(f'Volume config: {volume.to_yaml_config()}')
 
+    # TODO(kevin): remove the try block in v0.13.0
+    try:
+        volumes_sdk.validate(volume)
+    except exceptions.APINotSupportedError:
+        # Do best-effort client-side validation.
+        volume.validate(skip_cloud_compatibility=True)
+
     if not yes:
         click.confirm(f'Proceed to create volume {volume.name!r}?',
                       default=True,
@@ -4489,10 +4497,27 @@ def jobs_launch(
     job_id_handle = _async_call_or_wait(request_id, async_call,
                                         'sky.jobs.launch')
 
+    job_ids = [job_id_handle[0]] if isinstance(job_id_handle[0],
+                                               int) else job_id_handle[0]
+    if pool:
+        # Display the worker assignment for the jobs.
+        logger.debug(f'Getting service records for pool: {pool}')
+        records_request_id = managed_jobs.pool_status(pool_names=pool)
+        service_records = _async_call_or_wait(records_request_id, async_call,
+                                              'sky.jobs.pool_status')
+        logger.debug(f'Pool status: {service_records}')
+        replica_infos = service_records[0]['replica_info']
+        for replica_info in replica_infos:
+            job_id = replica_info.get('used_by', None)
+            if job_id in job_ids:
+                worker_id = replica_info['replica_id']
+                version = replica_info['version']
+                logger.info(f'Job ID: {job_id} assigned to pool {pool} '
+                            f'(worker: {worker_id}, version: {version})')
+
     if not async_call and not detach_run:
-        job_ids = job_id_handle[0]
-        if isinstance(job_ids, int) or len(job_ids) == 1:
-            job_id = job_ids if isinstance(job_ids, int) else job_ids[0]
+        if len(job_ids) == 1:
+            job_id = job_ids[0]
             returncode = managed_jobs.tail_logs(name=None,
                                                 job_id=job_id,
                                                 follow=True,
@@ -5899,23 +5924,31 @@ def local():
     required=False,
     help='Name to use for the kubeconfig context. Defaults to "default". '
     'Used with the ip list.')
-@click.option(
-    '--name',
-    type=str,
-    required=False,
-    help='Name of the cluster. Defaults to "skypilot". Used without ip list.')
 @click.option('--password',
               type=str,
               required=False,
               help='Password for the ssh-user to execute sudo commands. '
               'Required only if passwordless sudo is not setup.')
+@click.option(
+    '--name',
+    type=str,
+    required=False,
+    help='Name of the cluster. Defaults to "skypilot". Used without ip list.')
+@click.option(
+    '--port-start',
+    type=int,
+    required=False,
+    help='Starting port range for the local kind cluster. Needs to be a '
+    'multiple of 100. If not given, a random range will be used. '
+    'Used without ip list.')
 @local.command('up', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
-             cleanup: bool, context_name: Optional[str], name: Optional[str],
-             password: Optional[str], async_call: bool):
+             cleanup: bool, context_name: Optional[str],
+             password: Optional[str], name: Optional[str],
+             port_start: Optional[int], async_call: bool):
     """Creates a local or remote cluster."""
 
     def _validate_args(ips, ssh_user, ssh_key_path, cleanup):
@@ -5961,7 +5994,7 @@ def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
                 f'Failed to read SSH key file {ssh_key_path}: {str(e)}')
 
     request_id = sdk.local_up(gpus, ip_list, ssh_user, ssh_key, cleanup,
-                              context_name, name, password)
+                              context_name, password, name, port_start)
     _async_call_or_wait(request_id, async_call, request_name='local up')
 
 

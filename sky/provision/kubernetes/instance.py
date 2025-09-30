@@ -847,7 +847,7 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
 def _wait_for_deployment_pod(context,
                              namespace,
                              deployment,
-                             timeout=60) -> List:
+                             timeout=300) -> List:
     label_selector = ','.join([
         f'{key}={value}'
         for key, value in deployment.spec.selector.match_labels.items()

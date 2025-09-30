@@ -241,9 +241,11 @@ def _work(example_dir: pathlib.Path):
     globs = [example_dir.glob(pattern) for pattern in _GLOB_PATTERNS]
     for path in itertools.chain(*globs):
         examples.append(Example(path))
+
     # Find examples in subdirectories (up to 3 levels deep)
     for path in example_dir.glob("*/*.md"):
         examples.append(Example(path.parent))
+
     for path in example_dir.glob("*/*/*.md"):
         examples.append(Example(path.parent))
 

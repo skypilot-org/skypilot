@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import colorama
 
@@ -29,6 +29,7 @@ DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
 DEFAULT_LOCAL_CLUSTER_NAME = 'skypilot'
 LOCAL_CLUSTER_PORT_RANGE = 100
 LOCAL_CLUSTER_INTERNAL_PORT_START = 30000
+LOCAL_CLUSTER_INTERNAL_PORT_END = 30099
 
 
 def check_ssh_cluster_dependencies(
@@ -275,7 +276,7 @@ def generate_kind_config(port_start: int,
         The kind cluster config
     """
     internal_start = LOCAL_CLUSTER_INTERNAL_PORT_START
-    internal_end = internal_start + LOCAL_CLUSTER_PORT_RANGE - 1
+    internal_end = LOCAL_CLUSTER_INTERNAL_PORT_END
 
     config = textwrap.dedent(f"""
     apiVersion: kind.x-k8s.io/v1alpha4
@@ -316,8 +317,33 @@ def generate_kind_config(port_start: int,
     return config
 
 
-def deploy_local_cluster(name: Optional[str], gpus: bool):
+def _get_port_range(name: str, port_start: Optional[int]) -> Tuple[int, int]:
+    is_default = name == DEFAULT_LOCAL_CLUSTER_NAME
+    if port_start is None:
+        if is_default:
+            port_start = LOCAL_CLUSTER_INTERNAL_PORT_START
+        else:
+            port_start = random.randint(301, 399) * 100
+    port_end = port_start + LOCAL_CLUSTER_PORT_RANGE - 1
+
+    port_range = f'Current port range: {port_start}-{port_end}'
+    if is_default and port_start != LOCAL_CLUSTER_INTERNAL_PORT_START:
+        raise ValueError('Default local cluster `skypilot` should have '
+                         f'port range from 30000 to 30099. {port_range}.')
+    if not is_default and port_start == LOCAL_CLUSTER_INTERNAL_PORT_START:
+        raise ValueError('Port range 30000 to 30099 is reserved for '
+                         f'default local cluster `skypilot`. {port_range}.')
+    if port_start % 100 != 0:
+        raise ValueError('Local cluster port start must be a multiple of 100. '
+                         f'{port_range}.')
+
+    return port_start, port_end
+
+
+def deploy_local_cluster(name: Optional[str], port_start: Optional[int],
+                         gpus: bool):
     name = name or DEFAULT_LOCAL_CLUSTER_NAME
+    port_start, port_end = _get_port_range(name, port_start)
     context_name = f'kind-{name}'
     cluster_created = False
 
@@ -342,9 +368,7 @@ def deploy_local_cluster(name: Optional[str], gpus: bool):
                                      delete=True) as f:
         # Choose random port range to use on the host machine.
         # Port range is port_start - port_start + 99 (exactly 100 ports).
-        port_start = random.randint(300, 399) * 100
-        port_end = port_start + LOCAL_CLUSTER_PORT_RANGE - 1
-        logger.debug(f'Using port range {port_start}-{port_end}')
+        logger.debug(f'Using host port range {port_start}-{port_end}')
         f.write(generate_kind_config(port_start, gpus=gpus))
         f.flush()
 
@@ -456,7 +480,8 @@ def deploy_local_cluster(name: Optional[str], gpus: bool):
             ux_utils.finishing_message(
                 message=(
                     f'Local Kubernetes cluster {name} created successfully '
-                    f'with {num_cpus} CPUs{gpu_message}.'),
+                    f'with {num_cpus} CPUs{gpu_message} on host port range '
+                    f'{port_start}-{port_end}.'),
                 log_path=log_path,
                 is_local=True,
                 follow_up_message=(

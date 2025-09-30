@@ -79,7 +79,7 @@ install_requires = [
     # Required for API server metrics
     'prometheus_client>=0.8.0',
     'passlib',
-    'bcrypt',
+    'bcrypt==4.0.1',
     'pyjwt',
     'gitpython',
     'types-paramiko',
