@@ -1041,6 +1041,32 @@ def test_volumes_on_kubernetes():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.kubernetes
+def test_volume_env_mount_kubernetes():
+    name = smoke_tests_utils.get_cluster_name()
+    pvc_name = f'{name}-pvc'
+    mount_job_conf = textwrap.dedent(f"""
+        name: {name}-job
+        volumes:
+          /mnt/test-data: ${{USERNAME}}-{pvc_name}
+        run: |
+          echo "Mounted volume"
+    """)
+    full_pvc_name = f'user-{pvc_name}'
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(mount_job_conf)
+        f.flush()
+        test = smoke_tests_utils.Test(
+            'volume_env_mount_kubernetes',
+            [
+                f'sky volumes apply -y -n {full_pvc_name} --type k8s-pvc --size 2GB',
+                f's=$(sky jobs launch -y --infra kubernetes {f.name} --env USERNAME=user); echo "$s"; echo "$s" | grep "Job finished (status: SUCCEEDED)"',
+            ],
+            f'sky jobs cancel -a || true && sleep 5 && sky volumes delete {full_pvc_name} -y && (vol=$(sky volumes ls | grep "{full_pvc_name}"); if [ -n "$vol" ]; then echo "{full_pvc_name} not deleted" && exit 1; else echo "{full_pvc_name} deleted"; fi)',
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Container logs from task on Kubernetes ----------
 @pytest.mark.kubernetes
 def test_container_logs_multinode_kubernetes():

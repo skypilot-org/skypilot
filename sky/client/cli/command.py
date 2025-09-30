@@ -4500,6 +4500,9 @@ def jobs_launch(
     job_id_handle = _async_call_or_wait(request_id, async_call,
                                         'sky.jobs.launch')
 
+    if async_call:
+        return
+
     job_ids = [job_id_handle[0]] if isinstance(job_id_handle[0],
                                                int) else job_id_handle[0]
     if pool:
@@ -4518,7 +4521,7 @@ def jobs_launch(
                 logger.info(f'Job ID: {job_id} assigned to pool {pool} '
                             f'(worker: {worker_id}, version: {version})')
 
-    if not async_call and not detach_run:
+    if not detach_run:
         if len(job_ids) == 1:
             job_id = job_ids[0]
             returncode = managed_jobs.tail_logs(name=None,
