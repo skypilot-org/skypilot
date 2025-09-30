@@ -1041,6 +1041,22 @@ def test_volumes_on_kubernetes():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.kubernetes
+def test_volume_env_mount_kubernetes():
+    name = smoke_tests_utils.get_cluster_name()
+    pvc_name = f'{name}-pvc'
+    test = smoke_tests_utils.Test(
+        'volume_env_mount_kubernetes',
+        [
+            f'sky volumes apply -y -n user-pvc --type k8s-pvc --size 2GB',
+            f'sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name} && sky volumes delete user-pvc -y && (vol=$(sky volumes ls | grep "user-pvc"); if [ -n "$vol" ]; then echo "user-pvc not deleted" && exit 1; else echo "user-pvc deleted"; fi)',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Container logs from task on Kubernetes ----------
 @pytest.mark.kubernetes
 def test_container_logs_multinode_kubernetes():

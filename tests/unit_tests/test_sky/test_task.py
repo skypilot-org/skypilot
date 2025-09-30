@@ -817,3 +817,35 @@ def test_resolve_volumes_override_topology():
             assert r.cloud == registry.CLOUD_REGISTRY.from_str('aws')
             assert r.region == 'us-west1'
             assert r.zone == 'a'
+
+
+def test_resolve_volumes_with_envs():
+    t = task.Task()
+    t._volumes = {'/mnt': '${VOLUME_NAME}'}
+    t._envs = {'VOLUME_NAME': 'vol1'}
+    t._resolve_volume_paths_with_envs()
+    assert t._volumes == {'/mnt': 'vol1'}
+
+
+def test_resolve_volumes_with_envs_two():
+    t = task.Task()
+    t._volumes = {'/mnt': '${VOLUME_NAME}_${VOLUME_SUFFIX}'}
+    t._envs = {'VOLUME_NAME': 'vol1', 'VOLUME_SUFFIX': 'suffix'}
+    t._resolve_volume_paths_with_envs()
+    assert t._volumes == {'/mnt': 'vol1_suffix'}
+
+
+def test_resolve_volumes_with_envs_none():
+    t = task.Task()
+    t._volumes = {'/mnt': 'vol_test'}
+    t._envs = {'VOLUME_NAME': 'vol1', 'VOLUME_SUFFIX': 'suffix'}
+    t._resolve_volume_paths_with_envs()
+    assert t._volumes == {'/mnt': 'vol_test'}
+
+
+def test_resolve_volumes_with_envs_dict():
+    t = task.Task()
+    t._volumes = {'/mnt': {'name': '${VOLUME_NAME}_${VOLUME_SUFFIX}'}}
+    t._envs = {'VOLUME_NAME': 'vol1', 'VOLUME_SUFFIX': 'suffix'}
+    t._resolve_volume_paths_with_envs()
+    assert t._volumes == {'/mnt': {'name': 'vol1_suffix'}}
