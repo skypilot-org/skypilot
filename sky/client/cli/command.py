@@ -50,6 +50,7 @@ from sky import clouds
 from sky import dag as dag_lib
 from sky import exceptions
 from sky import jobs as managed_jobs
+from sky import global_user_state
 from sky import models
 from sky import resources as resources_lib
 from sky import serve as serve_lib
@@ -61,6 +62,7 @@ from sky.client import sdk
 from sky.client.cli import flags
 from sky.client.cli import table_utils
 from sky.data import storage_utils
+from sky.backends import backend_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
@@ -5808,6 +5810,110 @@ def serve_down(
                                     all=all,
                                     purge=purge)
     _async_call_or_wait(request_id, async_call, 'sky.serve.down')
+
+
+def _parse_port_mapping(port_mapping: str) -> Tuple[int, int]:
+    parts = port_mapping.split(':')
+    if len(parts) != 2:
+        raise click.UsageError(
+            'PORT must be in the format <local_port>:<remote_port>.')
+    local_part, remote_part = parts
+    try:
+        local_port = int(local_part)
+        remote_port = int(remote_part)
+    except ValueError as exc:
+        raise click.UsageError(
+            'PORT must be two integers separated by a colon.') from exc
+    for port, label in ((local_port, 'local'), (remote_port, 'remote')):
+        if port <= 0 or port >= 65536:
+            raise click.UsageError(
+                f'{label.capitalize()} port must be between 1 and 65535.')
+    return local_port, remote_port
+
+
+@serve.command('forward', cls=_DocumentedCodeCommand)
+@flags.config_option(expose_value=False)
+@click.argument('service_name', required=True, type=str)
+@click.argument('replica_id', required=True, type=int)
+@click.argument('port', required=True, type=str)
+@usage_lib.entrypoint
+def serve_forward(service_name: str, replica_id: int, port: str) -> None:
+    """Forward a local port to a service replica.
+
+    Example:
+
+    .. code-block:: bash
+
+        sky serve forward my-service 1 9000:8080
+
+    This listens on ``localhost:9000`` and forwards traffic to port 8080 on
+    replica 1. Press ``Ctrl+C`` to stop the session.
+    """
+
+    local_port, remote_port = _parse_port_mapping(port)
+    replica_cluster = serve_lib.generate_replica_cluster_name(
+        service_name, replica_id)
+
+    handle = global_user_state.get_handle_from_cluster_name(replica_cluster)
+    if handle is None:
+        raise click.UsageError(
+            f'Cluster {replica_cluster!r} not found. '
+            f'Use `sky serve status {service_name}` to verify the replica id.')
+    if not isinstance(handle, backends.CloudVmRayResourceHandle):
+        raise click.ClickException(
+            f'Unsupported handle type for cluster {replica_cluster!r}.')
+
+    try:
+        runners = handle.get_command_runners(force_cached=True)
+    except Exception as exc:  # pylint: disable=broad-except
+        raise click.ClickException(
+            f'Failed to fetch command runners for {replica_cluster!r}: '
+            f'{common_utils.format_exception(exc)}') from exc
+
+    if not runners:
+        raise click.ClickException(
+            f'No command runners available for cluster {replica_cluster!r}.')
+
+    if len(runners) > 1:
+        logger.warning(
+            f'Multiple command runners found for cluster '
+            f'{replica_cluster!r}. Using the first one.')
+    runner = runners[0]
+    try:
+        tunnel_process = backend_utils.open_ssh_tunnel(
+            runner, (local_port, remote_port))
+    except exceptions.CommandError as exc:
+        raise click.ClickException(
+            f'Failed to establish port forward: {exc.error_msg}') from exc
+    except Exception as exc:  # pylint: disable=broad-except
+        raise click.ClickException(
+            'Failed to establish port forward: '
+            f'{common_utils.format_exception(exc)}') from exc
+
+    click.echo(
+        f'Forwarding localhost:{local_port} -> '
+        f'{replica_cluster}:localhost:{remote_port}')
+    click.echo('Press Ctrl+C to stop forwarding.')
+
+    try:
+        tunnel_process.wait()
+    except KeyboardInterrupt:
+        click.echo('\nStopping port forward...')
+    finally:
+        if tunnel_process.poll() is None:
+            tunnel_process.terminate()
+            try:
+                tunnel_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                tunnel_process.kill()
+                tunnel_process.wait()
+        for stream in (tunnel_process.stdout, tunnel_process.stderr,
+                       tunnel_process.stdin):
+            if stream:
+                try:
+                    stream.close()
+                except Exception:  # pylint: disable=broad-except
+                    pass
 
 
 @serve.command('logs', cls=_DocumentedCodeCommand)
