@@ -92,10 +92,14 @@ def encode_start(resource_handle: 'backends.CloudVmRayResourceHandle') -> str:
 
 
 @register_encoder('queue')
-def encode_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
+def encode_queue(
+    jobs: List[responses.ClusterJobRecord],) -> List[Dict[str, Any]]:
+    response = []
     for job in jobs:
-        job['status'] = job['status'].value
-    return jobs
+        response_job = job.model_dump()
+        response_job['status'] = job['status'].value
+        response.append(response_job)
+    return response
 
 
 @register_encoder('status_kubernetes')
@@ -185,8 +189,9 @@ def encode_cost_report(
     for cluster_report in cost_report:
         if cluster_report['status'] is not None:
             cluster_report['status'] = cluster_report['status'].value
-        cluster_report['resources'] = pickle_and_encode(
-            cluster_report['resources'])
+        if 'resources' in cluster_report:
+            cluster_report['resources'] = pickle_and_encode(
+                cluster_report['resources'])
     return cost_report
 
 

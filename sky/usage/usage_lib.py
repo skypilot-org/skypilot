@@ -14,6 +14,7 @@ from typing_extensions import ParamSpec
 
 import sky
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.usage import constants
 from sky.utils import common_utils
@@ -167,6 +168,7 @@ class UsageMessageToReport(MessageToReport):
         self.runtimes: Dict[str, float] = {}  # update_runtime
         self.exception: Optional[str] = None  # entrypoint_context
         self.stacktrace: Optional[str] = None  # entrypoint_context
+        self.skypilot_config: Optional[Dict[str, Any]] = None
 
         # Whether API server is deployed remotely.
         self.using_remote_api_server: bool = (
@@ -177,6 +179,7 @@ class UsageMessageToReport(MessageToReport):
             self.client_entrypoint = common_utils.get_current_client_entrypoint(
                 msg)
         self.entrypoint = msg
+        self.skypilot_config = dict(skypilot_config.to_dict())
 
     def set_internal(self):
         self.internal = True

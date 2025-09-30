@@ -25,6 +25,7 @@ from sqlalchemy.ext import declarative
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import context_utils
@@ -33,6 +34,11 @@ from sky.utils.db import migration_utils
 
 if typing.TYPE_CHECKING:
     from sqlalchemy.engine import row
+
+    from sky.schemas.generated import managed_jobsv1_pb2
+else:
+    managed_jobsv1_pb2 = adaptors_common.LazyImport(
+        'sky.schemas.generated.managed_jobsv1_pb2')
 
 # Separate callback types for sync and async contexts
 SyncCallbackType = Callable[[str], None]
@@ -238,6 +244,7 @@ def _init_db_async(func):
                 last_exc = e
             logger.debug(f'DB error: {last_exc}')
             await asyncio.sleep(backoff.current_backoff())
+        assert last_exc is not None
         raise last_exc
 
     return wrapper
@@ -266,6 +273,7 @@ def _init_db(func):
                 last_exc = e
             logger.debug(f'DB error: {last_exc}')
             time.sleep(backoff.current_backoff())
+        assert last_exc is not None
         raise last_exc
 
     return wrapper
@@ -446,6 +454,75 @@ class ManagedJobStatus(enum.Enum):
             cls.RECOVERING,
         ]
 
+    @classmethod
+    def from_protobuf(
+        cls, protobuf_value: 'managed_jobsv1_pb2.ManagedJobStatus'
+    ) -> Optional['ManagedJobStatus']:
+        """Convert protobuf ManagedJobStatus enum to Python enum value."""
+        protobuf_to_enum = {
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_UNSPECIFIED: None,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_PENDING: cls.PENDING,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_SUBMITTED:
+                cls.DEPRECATED_SUBMITTED,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_STARTING: cls.STARTING,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_RUNNING: cls.RUNNING,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_SUCCEEDED: cls.SUCCEEDED,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED: cls.FAILED,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_CONTROLLER:
+                cls.FAILED_CONTROLLER,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_SETUP:
+                cls.FAILED_SETUP,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_CANCELLED: cls.CANCELLED,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_RECOVERING: cls.RECOVERING,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_CANCELLING: cls.CANCELLING,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_PRECHECKS:
+                cls.FAILED_PRECHECKS,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_NO_RESOURCE:
+                cls.FAILED_NO_RESOURCE,
+        }
+
+        if protobuf_value not in protobuf_to_enum:
+            raise ValueError(
+                f'Unknown protobuf ManagedJobStatus value: {protobuf_value}')
+
+        return protobuf_to_enum[protobuf_value]
+
+    def to_protobuf(self) -> 'managed_jobsv1_pb2.ManagedJobStatus':
+        """Convert this Python enum value to protobuf enum value."""
+        enum_to_protobuf = {
+            ManagedJobStatus.PENDING:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_PENDING,
+            ManagedJobStatus.DEPRECATED_SUBMITTED:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_SUBMITTED,
+            ManagedJobStatus.STARTING:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_STARTING,
+            ManagedJobStatus.RUNNING:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_RUNNING,
+            ManagedJobStatus.SUCCEEDED:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_SUCCEEDED,
+            ManagedJobStatus.FAILED:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED,
+            ManagedJobStatus.FAILED_CONTROLLER:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_CONTROLLER,
+            ManagedJobStatus.FAILED_SETUP:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_SETUP,
+            ManagedJobStatus.CANCELLED:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_CANCELLED,
+            ManagedJobStatus.RECOVERING:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_RECOVERING,
+            ManagedJobStatus.CANCELLING:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_CANCELLING,
+            ManagedJobStatus.FAILED_PRECHECKS:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_PRECHECKS,
+            ManagedJobStatus.FAILED_NO_RESOURCE:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_NO_RESOURCE,
+        }
+
+        if self not in enum_to_protobuf:
+            raise ValueError(f'Unknown ManagedJobStatus value: {self}')
+
+        return enum_to_protobuf[self]
+
 
 _SPOT_STATUS_TO_COLOR = {
     ManagedJobStatus.PENDING: colorama.Fore.BLUE,
@@ -535,6 +612,60 @@ class ManagedJobScheduleState(enum.Enum):
     # The job is in a terminal state. (Not necessarily SUCCEEDED.)
     DONE = 'DONE'
 
+    @classmethod
+    def from_protobuf(
+        cls, protobuf_value: 'managed_jobsv1_pb2.ManagedJobScheduleState'
+    ) -> Optional['ManagedJobScheduleState']:
+        """Convert protobuf ManagedJobScheduleState enum to Python enum value.
+        """
+        protobuf_to_enum = {
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_UNSPECIFIED: None,
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_INVALID: cls.INVALID,
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_INACTIVE:
+                cls.INACTIVE,
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_WAITING: cls.WAITING,
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_ALIVE_WAITING:
+                cls.ALIVE_WAITING,
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_LAUNCHING:
+                cls.LAUNCHING,
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_ALIVE_BACKOFF:
+                cls.ALIVE_BACKOFF,
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_ALIVE: cls.ALIVE,
+            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_DONE: cls.DONE,
+        }
+
+        if protobuf_value not in protobuf_to_enum:
+            raise ValueError('Unknown protobuf ManagedJobScheduleState value: '
+                             f'{protobuf_value}')
+
+        return protobuf_to_enum[protobuf_value]
+
+    def to_protobuf(self) -> 'managed_jobsv1_pb2.ManagedJobScheduleState':
+        """Convert this Python enum value to protobuf enum value."""
+        enum_to_protobuf = {
+            ManagedJobScheduleState.INVALID:
+                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_INVALID,
+            ManagedJobScheduleState.INACTIVE:
+                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_INACTIVE,
+            ManagedJobScheduleState.WAITING:
+                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_WAITING,
+            ManagedJobScheduleState.ALIVE_WAITING:
+                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_ALIVE_WAITING,
+            ManagedJobScheduleState.LAUNCHING:
+                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_LAUNCHING,
+            ManagedJobScheduleState.ALIVE_BACKOFF:
+                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_ALIVE_BACKOFF,
+            ManagedJobScheduleState.ALIVE:
+                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_ALIVE,
+            ManagedJobScheduleState.DONE:
+                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_DONE,
+        }
+
+        if self not in enum_to_protobuf:
+            raise ValueError(f'Unknown ManagedJobScheduleState value: {self}')
+
+        return enum_to_protobuf[self]
+
 
 # === Status transition functions ===
 @_init_db
@@ -611,7 +742,7 @@ async def set_backoff_pending_async(job_id: int, task_id: int):
     """
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
-        count = await session.execute(
+        result = await session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(
                     spot_table.c.spot_job_id == job_id,
@@ -623,6 +754,7 @@ async def set_backoff_pending_async(job_id: int, task_id: int):
                     spot_table.c.end_at.is_(None),
                 )).values({spot_table.c.status: ManagedJobStatus.PENDING.value})
         )
+        count = result.rowcount
         await session.commit()
         if count != 1:
             raise exceptions.ManagedJobStatusError(
@@ -710,7 +842,19 @@ def set_failed(
         where_conditions = [spot_table.c.spot_job_id == job_id]
         if task_id is not None:
             where_conditions.append(spot_table.c.task_id == task_id)
+
+        # Handle failure_reason prepending when override_terminal is True
         if override_terminal:
+            # Get existing failure_reason with row lock to prevent race
+            # conditions
+            existing_reason_result = session.execute(
+                sqlalchemy.select(spot_table.c.failure_reason).where(
+                    sqlalchemy.and_(*where_conditions)).with_for_update())
+            existing_reason_row = existing_reason_result.fetchone()
+            if existing_reason_row and existing_reason_row[0]:
+                # Prepend new failure reason to existing one
+                fields_to_set[spot_table.c.failure_reason] = (
+                    failure_reason + '. Previously: ' + existing_reason_row[0])
             # Use COALESCE for end_at to avoid overriding the existing end_at if
             # it's already set.
             fields_to_set[spot_table.c.end_at] = sqlalchemy.func.coalesce(
@@ -735,16 +879,21 @@ def set_pending_cancelled(job_id: int):
         # Subquery to get the spot_job_ids that match the joined condition
         subquery = session.query(spot_table.c.job_id).join(
             job_info_table,
-            spot_table.c.spot_job_id == job_info_table.c.spot_job_id).filter(
-                spot_table.c.spot_job_id == job_id,
-                spot_table.c.status == ManagedJobStatus.PENDING.value,
-                sqlalchemy.or_(
-                    job_info_table.c.schedule_state ==
-                    ManagedJobScheduleState.WAITING.value,
-                    job_info_table.c.schedule_state ==
-                    ManagedJobScheduleState.INACTIVE.value,
-                ),
-            ).subquery()
+            spot_table.c.spot_job_id == job_info_table.c.spot_job_id
+        ).filter(
+            spot_table.c.spot_job_id == job_id,
+            spot_table.c.status == ManagedJobStatus.PENDING.value,
+            # Note: it's possible that a WAITING job actually needs to be
+            # cleaned up, if we are in the middle of an upgrade/recovery and
+            # the job is waiting to be reclaimed by a new controller. But,
+            # in this case the status will not be PENDING.
+            sqlalchemy.or_(
+                job_info_table.c.schedule_state ==
+                ManagedJobScheduleState.WAITING.value,
+                job_info_table.c.schedule_state ==
+                ManagedJobScheduleState.INACTIVE.value,
+            ),
+        ).subquery()
 
         count = session.query(spot_table).filter(
             spot_table.c.job_id.in_(subquery)).update(
@@ -772,8 +921,14 @@ def set_local_log_file(job_id: int, task_id: Optional[int],
 # ======== utility functions ========
 @_init_db
 def get_nonterminal_job_ids_by_name(name: Optional[str],
+                                    user_hash: Optional[str] = None,
                                     all_users: bool = False) -> List[int]:
-    """Get non-terminal job ids by name."""
+    """Get non-terminal job ids by name.
+
+    If name is None:
+    1. if all_users is False, get for the given user_hash
+    2. otherwise, get for all users
+    """
     assert _SQLALCHEMY_ENGINE is not None
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -790,8 +945,15 @@ def get_nonterminal_job_ids_by_name(name: Optional[str],
             ])
         ]
         if name is None and not all_users:
-            where_conditions.append(
-                job_info_table.c.user_hash == common_utils.get_user_hash())
+            if user_hash is None:
+                # For backwards compatibility. With codegen, USER_ID_ENV_VAR
+                # was set to the correct value by the jobs controller, as
+                # part of ManagedJobCodeGen._build(). This is no longer the
+                # case for the Skylet gRPC server, which is why we need to
+                # pass it explicitly through the request body.
+                logger.debug('user_hash is None, using current user hash')
+                user_hash = common_utils.get_user_hash()
+            where_conditions.append(job_info_table.c.user_hash == user_hash)
         if name is not None:
             # We match the job name from `job_info` for the jobs submitted after
             # #1982, and from `spot` for the jobs submitted before #1982, whose
@@ -1105,8 +1267,11 @@ async def set_job_id_on_pool_cluster_async(job_id: int,
     """Set the job id on the pool cluster for a job."""
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
-        await session.execute(job_info_table.c.spot_job_id == job_id).update(
-            {job_info_table.c.job_id_on_pool_cluster: job_id_on_pool_cluster})
+        await session.execute(
+            sqlalchemy.update(job_info_table).
+            where(job_info_table.c.spot_job_id == job_id).values({
+                job_info_table.c.job_id_on_pool_cluster: job_id_on_pool_cluster
+            }))
         await session.commit()
 
 
@@ -1130,12 +1295,12 @@ async def get_pool_submit_info_async(
         job_id: int) -> Tuple[Optional[str], Optional[int]]:
     """Get the cluster name and job id on the pool from the managed job id."""
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
-    async with orm.Session(_SQLALCHEMY_ENGINE_ASYNC) as session:
-        info = await session.execute(
+    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        result = await session.execute(
             sqlalchemy.select(job_info_table.c.current_cluster_name,
                               job_info_table.c.job_id_on_pool_cluster).where(
-                                  job_info_table.c.spot_job_id == job_id)
-        ).fetchone()
+                                  job_info_table.c.spot_job_id == job_id))
+        info = result.fetchone()
         if info is None:
             return None, None
         return info[0], info[1]
@@ -1641,7 +1806,19 @@ async def set_failed_async(
         where_conditions = [spot_table.c.spot_job_id == job_id]
         if task_id is not None:
             where_conditions.append(spot_table.c.task_id == task_id)
+
+        # Handle failure_reason prepending when override_terminal is True
         if override_terminal:
+            # Get existing failure_reason with row lock to prevent race
+            # conditions
+            existing_reason_result = await session.execute(
+                sqlalchemy.select(spot_table.c.failure_reason).where(
+                    sqlalchemy.and_(*where_conditions)).with_for_update())
+            existing_reason_row = existing_reason_result.fetchone()
+            if existing_reason_row and existing_reason_row[0]:
+                # Prepend new failure reason to existing one
+                fields_to_set[spot_table.c.failure_reason] = (
+                    failure_reason + '. Previously: ' + existing_reason_row[0])
             fields_to_set[spot_table.c.end_at] = sqlalchemy.func.coalesce(
                 spot_table.c.end_at, end_time)
         else:

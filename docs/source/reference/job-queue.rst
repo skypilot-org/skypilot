@@ -1,14 +1,14 @@
 .. _job-queue:
 
 Cluster Jobs
-=============
+============
 
 You can run jobs on an existing cluster, which are automatically queued and scheduled.
 
 This is ideal for interactive development on an existing cluster and reusing its setup.
 
 Getting started
---------------------------------
+---------------
 
 Use :code:`sky exec` to submit jobs to an existing cluster:
 
@@ -53,7 +53,7 @@ To cancel a job:
    submitting jobs to an either existing or newly provisioned cluster. See :ref:`here <hello-skypilot>`.
 
 Multi-node jobs
---------------------------------
+---------------
 
 Jobs that run on multiple nodes are also supported.
 
@@ -91,7 +91,7 @@ You can then use :code:`sky exec mycluster job.yaml` to submit this job.
 See :ref:`dist-jobs` for more details.
 
 Using ``CUDA_VISIBLE_DEVICES``
---------------------------------
+------------------------------
 
 The environment variable ``CUDA_VISIBLE_DEVICES`` will be automatically set to
 the devices allocated to each job on each node. This variable is set
@@ -106,7 +106,7 @@ the correct environment variable would be set inside the container (only the
 allocated device IDs will be set).
 
 Example: Grid search
-----------------------
+--------------------
 
 To submit multiple trials with different hyperparameters to a cluster:
 
@@ -150,7 +150,7 @@ When sharing a GPU, ensure that the GPU's memory is not oversubscribed
 .. _scheduling-behavior:
 
 Scheduling behavior
---------------------------------
+-------------------
 
 SkyPilot's scheduler serves two goals:
 
@@ -212,3 +212,44 @@ Thus, we may see the following job statuses on this cluster:
    3   job3         user  10 mins ago  9 mins ago  RUNNING
    2   job2         user  10 mins ago  9 mins ago  RUNNING
    1   huggingface  user  10 mins ago  1 min ago   SUCCEEDED
+
+
+.. _job-queueing-workdir:
+
+Using ``workdir`` with multiple jobs
+------------------------------------
+
+If multiple jobs are submitted to a cluster and they all upload contents to ``workdir``,
+each job may or may not see its corresponding local contents
+depending on its time of execution and when other jobs' workdir uploads are run.
+See :ref:`sync code from a local directory or a git repository <sync-code-and-project-files-git>`
+for more details.
+
+For example, when running the following commands:
+
+.. code-block:: bash
+
+  $ echo "version 1" > version.txt
+  $ sky exec mycluster --async --workdir . "cat version.txt"
+  $ echo "version 2" > version.txt
+  $ sky exec mycluster --async --workdir . "cat version.txt"
+  ...
+
+The first ``exec`` prints "version 1" if the job starts running before the second ``exec`` command is executed. Otherwise, it prints "version 2".
+
+To pass information that varies between jobs, use the ``--env`` or ``--env-file`` field to pass job-specific information.
+
+.. code-block:: bash
+
+  $ cat script.sh
+  echo $VERSION
+  $ sky exec mycluster --async --workdir . --env VERSION=1 "bash script.sh"
+  $ sky exec mycluster --async --workdir . --env VERSION=2 "bash script.sh"
+  ...
+
+The commands above are guaranteed to print "1" for the first job and "2" for the second job.
+
+.. tip::
+
+  If you are changing the workdir per job to ensure different queued jobs use their own versions of code,
+  use :ref:`Managed Jobs <managed-jobs>` instead, which uploads each job's workdir to a temporary, job-scoped bucket.

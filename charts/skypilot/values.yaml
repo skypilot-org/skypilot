@@ -50,8 +50,10 @@ apiService:
   terminationGracePeriodSeconds: 60
 
   # Set ~/.sky/config.yaml content on the API server
-  # Updating this value will not restart the API server but it will take tens of seconds to take effect on the API server.
-  # You can verify config updates on the server by exec-ing into the pod and running `cat ~/.sky/config.yaml`
+  # This value is IGNORED during an helm upgrade if there is an existing config
+  # due to the potential accidental loss of existing config. Use the SkyPilot dashboard to update the config.
+  # If remote database is configured (either via dbConnectionSecretName or dbConnectionString), config must be null.
+  # In such case, you can add the config via the dashboard once the API server is deployed.
   # Refer to https://docs.skypilot.co/en/latest/reference/config.html for more details.
   # @schema type: [string, null]
   config: null
@@ -76,6 +78,7 @@ apiService:
   # If configured, SkyPilot uses the external database to store states instead of the SQLite database.
   # Refer to https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html#optional-back-the-api-server-with-a-persistent-database and https://docs.skypilot.co/en/latest/reference/architecture/state.html for more details.
   # If either this field or dbConnectionString is set, config must be null.
+  # To specify a config, use the dashboard once the API server is deployed.
   # @schema type: [string, null]
   dbConnectionSecretName: null
   # Set the DB connection string directly. This is a shortcut for setting the DB connection string in a secret.
@@ -505,9 +508,10 @@ securityContext:
 runtimeClassName:
 
 # Set configuration for Prometheus helm chart
+# Refer to https://github.com/prometheus-community/helm-charts/blob/main/charts/prometheus/values.yaml for available values.
+# @schema skipProperties:true
 prometheus:
   enabled: false
-  # Refer to https://github.com/prometheus-community/helm-charts/blob/main/charts/prometheus/values.yaml for available values.
   # Keep the installation minimal by default. If you want to monitor more resources other than the API server,
   # it is recommended to install and manage prometheus separately.
   # SkyPilot API server will be automatically discovered by the prometheus if it runs with the default kubernetes discovery configuration.
@@ -521,11 +525,17 @@ prometheus:
     - job_name: 'skypilot-api-server-gpu-metrics'
       static_configs:
         # Use the API service created by this Helm chart
-        - targets: ['{{ .Release.Name }}-api-service.{{ .Release.Namespace }}.svc.cluster.local:80']
+        - targets: ['{{ .Release.Name }}-api-service.{{ .Release.Namespace }}.svc.cluster.local:9090']
       metrics_path: '/gpu-metrics'
       scrape_interval: 15s
       scrape_timeout: 10s
       # Add labels to identify these metrics
+      metric_relabel_configs:
+      - action: replace
+        source_labels: [node, Hostname]
+        regex: ;(.+)
+        target_label: node
+        replacement: $1
   kube-state-metrics:
     enabled: true
     metricLabelsAllowlist:
@@ -538,9 +548,10 @@ prometheus:
     enabled: false
 
 # Set configuration for Grafana helm chart
+# Refer to https://github.com/grafana/helm-charts/blob/main/charts/grafana/README.md for available values.
+# @schema skipProperties:true
 grafana:
   enabled: false
-  # Refer to https://github.com/grafana/helm-charts/blob/main/charts/grafana/README.md for available values.
   persistence:
     enabled: true
     size: 10Gi
@@ -559,7 +570,6 @@ grafana:
     enableAuthedIngress: true
     path: "/grafana"
     ingressClassName: nginx
-    # @schema type: [string, null]
     hosts: null
   grafana.ini:
     server:
@@ -590,7 +600,6 @@ grafana:
       enabled: true
   # Add dashboard provider configuration to load dashboards from default directory
   dashboardProviders:
-    # @schema skipProperties:true
     dashboardproviders.yaml:
       apiVersion: 1
       providers:

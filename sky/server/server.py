@@ -437,12 +437,28 @@ async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
         if lag_threshold is not None and lag > lag_threshold:
             logger.warning(f'Event loop lag {lag} seconds exceeds threshold '
                            f'{lag_threshold} seconds.')
-        metrics.SKY_APISERVER_EVENT_LOOP_LAG_SECONDS.labels(
+        metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_SECONDS.labels(
             pid=pid).observe(lag)
         target = now + interval
         loop.call_at(target, tick)
 
     loop.call_at(target, tick)
+
+
+def schedule_on_boot_check():
+    try:
+        executor.schedule_request(
+            request_id='skypilot-server-on-boot-check',
+            request_name='check',
+            request_body=payloads.CheckBody(),
+            func=sky_check.check,
+            schedule_type=requests_lib.ScheduleType.SHORT,
+            is_skypilot_system=True,
+        )
+    except exceptions.RequestAlreadyExistsError:
+        # Lifespan will be executed in each uvicorn worker process, we
+        # can safely ignore the error if the task is already scheduled.
+        logger.debug('Request skypilot-server-on-boot-check already exists.')
 
 
 @contextlib.asynccontextmanager
@@ -469,8 +485,9 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
             # Lifespan will be executed in each uvicorn worker process, we
             # can safely ignore the error if the task is already scheduled.
             logger.debug(f'Request {event.id} already exists.')
+    schedule_on_boot_check()
     asyncio.create_task(cleanup_upload_ids())
-    if metrics.METRICS_ENABLED:
+    if metrics_utils.METRICS_ENABLED:
         # Start monitoring the event loop lag in each server worker
         # event loop (process).
         asyncio.create_task(loop_lag_monitor(asyncio.get_event_loop()))
@@ -1214,20 +1231,10 @@ async def logs(
         request_body=cluster_job_body,
         func=core.tail_logs,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        request_cluster_name=cluster_job_body.cluster_name,
     )
-    task = asyncio.create_task(executor.execute_request_coroutine(request_task))
-
-    async def cancel_task():
-        try:
-            logger.info('Client disconnected for request: '
-                        f'{request.state.request_id}')
-            task.cancel()
-            await task
-        except asyncio.CancelledError:
-            pass
-
-    # Cancel the task after the request is done or client disconnects
-    background_tasks.add_task(cancel_task)
+    task = executor.execute_request_in_coroutine(request_task)
+    background_tasks.add_task(task.cancel)
     # TODO(zhwu): This makes viewing logs in browser impossible. We should adopt
     # the same approach as /stream.
     return stream_utils.stream_response(
@@ -1353,10 +1360,12 @@ def provision_logs(cluster_body: payloads.ClusterNameBody,
     effective_tail = None if tail is None or tail <= 0 else tail
 
     return fastapi.responses.StreamingResponse(
-        content=stream_utils.log_streamer(None,
-                                          log_path,
-                                          tail=effective_tail,
-                                          follow=follow),
+        content=stream_utils.log_streamer(
+            None,
+            log_path,
+            tail=effective_tail,
+            follow=follow,
+            cluster_name=cluster_body.cluster_name),
         media_type='text/plain',
         headers={
             'Cache-Control': 'no-cache, no-transform',
@@ -1418,12 +1427,13 @@ async def local_up(request: fastapi.Request,
 
 
 @app.post('/local_down')
-async def local_down(request: fastapi.Request) -> None:
+async def local_down(request: fastapi.Request,
+                     local_down_body: payloads.LocalDownBody) -> None:
     """Tears down the Kubernetes cluster started by local_up."""
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='local_down',
-        request_body=payloads.RequestBody(),
+        request_body=local_down_body,
         func=core.local_down,
         schedule_type=requests_lib.ScheduleType.LONG,
     )
@@ -1570,6 +1580,15 @@ async def stream(
                     detail=f'Log path {log_path!r} does not exist')
 
         log_path_to_stream = resolved_log_path
+
+    headers = {
+        'Cache-Control': 'no-cache, no-transform',
+        'X-Accel-Buffering': 'no',
+        'Transfer-Encoding': 'chunked'
+    }
+    if request_id is not None:
+        headers[server_constants.STREAM_REQUEST_HEADER] = request_id
+
     return fastapi.responses.StreamingResponse(
         content=stream_utils.log_streamer(request_id,
                                           log_path_to_stream,
@@ -1577,11 +1596,7 @@ async def stream(
                                           tail=tail,
                                           follow=follow),
         media_type='text/plain',
-        headers={
-            'Cache-Control': 'no-cache, no-transform',
-            'X-Accel-Buffering': 'no',
-            'Transfer-Encoding': 'chunked'
-        },
+        headers=headers,
     )
 
 
@@ -1737,7 +1752,7 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
             return
 
     logger.info(f'Starting port-forward to local port: {local_port}')
-    conn_gauge = metrics.SKY_APISERVER_WEBSOCKET_CONNECTIONS.labels(
+    conn_gauge = metrics_utils.SKY_APISERVER_WEBSOCKET_CONNECTIONS.labels(
         pid=os.getpid())
     ssh_failed = False
     websocket_closed = False
@@ -1801,14 +1816,14 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
                          'ssh websocket connection was closed. Remaining '
                          f'output: {str(stdout)}')
             reason = 'KubectlPortForwardExit'
-            metrics.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
+            metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
                 pid=os.getpid(), reason='KubectlPortForwardExit').inc()
         else:
             if ssh_failed:
                 reason = 'SSHToPodDisconnected'
             else:
                 reason = 'ClientClosed'
-        metrics.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
+        metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
             pid=os.getpid(), reason=reason).inc()
 
 
@@ -1823,42 +1838,6 @@ async def all_contexts(request: fastapi.Request) -> None:
         func=core.get_all_contexts,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
-
-
-@app.get('/gpu-metrics')
-async def gpu_metrics() -> fastapi.Response:
-    """Gets the GPU metrics from multiple external k8s clusters"""
-    contexts = core.get_all_contexts()
-    all_metrics: List[str] = []
-    successful_contexts = 0
-
-    tasks = [
-        asyncio.create_task(metrics_utils.get_metrics_for_context(context))
-        for context in contexts
-        if context != 'in-cluster'
-    ]
-
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    for i, result in enumerate(results):
-        if isinstance(result, Exception):
-            logger.error(
-                f'Failed to get metrics for context {contexts[i]}: {result}')
-        elif isinstance(result, BaseException):
-            # Avoid changing behavior for non-Exception BaseExceptions
-            # like KeyboardInterrupt/SystemExit: re-raise them.
-            raise result
-        else:
-            metrics_text = result
-            all_metrics.append(metrics_text)
-            successful_contexts += 1
-
-    combined_metrics = '\n\n'.join(all_metrics)
-
-    # Return as plain text for Prometheus compatibility
-    return fastapi.Response(
-        content=combined_metrics,
-        media_type='text/plain; version=0.0.4; charset=utf-8')
 
 
 # === Internal APIs ===

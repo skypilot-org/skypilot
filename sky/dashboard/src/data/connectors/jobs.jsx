@@ -16,6 +16,7 @@ export async function getManagedJobs(options = {}) {
   try {
     const {
       allUsers = true,
+      skipFinished = false,
       nameMatch,
       userMatch,
       workspaceMatch,
@@ -28,6 +29,7 @@ export async function getManagedJobs(options = {}) {
     const body = {
       all_users: allUsers,
       verbose: true,
+      skip_finished: skipFinished,
     };
     if (nameMatch !== undefined) body.name_match = nameMatch;
     if (userMatch !== undefined) body.user_match = userMatch;
@@ -196,7 +198,7 @@ export async function getManagedJobs(options = {}) {
  * @param {boolean} options.useClientPagination - Whether to use client-side pagination (default: true)
  * @returns {Promise<{jobs: Array, total: number, controllerStopped: boolean}>}
  */
-export async function getManagedJobsWithClientPagination(options = {}) {
+export async function getManagedJobsWithClientPagination(options) {
   const {
     allUsers = true,
     nameMatch,
@@ -206,7 +208,7 @@ export async function getManagedJobsWithClientPagination(options = {}) {
     page = 1,
     limit = 10,
     useClientPagination = true,
-  } = options;
+  } = options || {};
 
   try {
     // If client pagination is disabled, fall back to server-side pagination
@@ -286,7 +288,10 @@ export async function getPoolStatus() {
     // Also fetch managed jobs to get job counts by pool
     let jobsData = { jobs: [] };
     try {
-      const jobsResponse = await getManagedJobs({ allUsers: true });
+      const jobsResponse = await getManagedJobs({
+        allUsers: true,
+        skipFinished: true,
+      });
       if (!jobsResponse.controllerStopped) {
         jobsData = jobsResponse;
       }
