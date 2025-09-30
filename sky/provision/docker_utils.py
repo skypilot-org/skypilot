@@ -64,26 +64,103 @@ DEFAULT_OBJECT_STORE_MAX_MEMORY_BYTES = 200 * 10**9
 DEFAULT_OBJECT_STORE_MEMORY_PROPORTION = 0.3
 
 
-def _dedupe_network_host(opts: List[str]) -> List[str]:
-    """Removing any user-supplied host networking flags.
+def _normalize_run_options(opts: List[str]) -> List[str]:
+    """Normalize docker run options vs SkyPilot enforced defaults.
 
-    We keep none here because docker_start_cmds always adds '--net=host'.
-    This prevents: 'docker: network "host" is specified multiple times.'
+    Enforced (appended later once):
+      --network=host, --cap-add=SYS_ADMIN, --device=/dev/fuse,
+      --security-opt=apparmor:unconfined, --entrypoint=/bin/bash
+
+    Redundant user copies are removed; contradictions are warned and overridden.
     """
-    out: List[str] = []
-    i = 0
-    while i < len(opts):
-        o = opts[i]
-        if o in ('--net=host', '--network=host', '--network host',
-                 '--net host'):
+    kv: List[tuple[str, str | None]] = []
+    i, n = 0, len(opts)
+    while i < n:
+        t = opts[i]
+        if t.startswith('--') and '=' in t:
+            k, v = t.split('=', 1)
+            kv.append((k, v))
             i += 1
-            continue
-        if (o == '--network' or
-                o == '--net') and i + 1 < len(opts) and opts[i + 1] == 'host':
+        elif t.startswith('--') and i + 1 < n and not opts[i +
+                                                           1].startswith('--'):
+            kv.append((t, opts[i + 1]))
             i += 2
+        else:
+            kv.append((t, None))
+            i += 1
+
+    enforced_single = {
+        ('--network', 'host'),
+        ('--cap-add', 'SYS_ADMIN'),
+        ('--device', '/dev/fuse'),
+        ('--security-opt', 'apparmor:unconfined'),
+        ('--entrypoint', '/bin/bash'),
+    }
+
+    kept: List[tuple[str, str | None]] = []
+    user_network: str | None = None
+    user_cap_drop: set[str] = set()
+    user_entrypoint: str | None = None
+    user_secopts: list[str] = []
+
+    for k, v in kv:
+        if (k, v) in enforced_single:
             continue
-        out.append(o)
-        i += 1
+
+        if k in ('--network', '--net'):
+            user_network = v
+            continue
+
+        if k == '--cap-drop' and v:
+            user_cap_drop.add(v)
+            continue
+
+        if k == '--cap-add' and v == 'SYS_ADMIN':
+            continue
+
+        if k == '--device':
+            if v == '/dev/fuse':
+                continue
+            kept.append((k, v))
+            continue
+
+        if k == '--security-opt' and v:
+            user_secopts.append(v)
+            if v.startswith('apparmor:'):
+                continue
+            kept.append((k, v))
+            continue
+
+        if k == '--entrypoint' and v:
+            user_entrypoint = v
+            continue
+
+        kept.append((k, v))
+
+    if user_network is not None and user_network != 'host':
+        logger.warning(
+            'Overriding user network "%s" to host '
+            '(SkyPilot requires host networking during initialization).',
+            user_network)
+
+    if 'SYS_ADMIN' in user_cap_drop:
+        logger.warning('Overriding: user requested "--cap-drop SYS_ADMIN"; '
+                       'SkyPilot requires "--cap-add SYS_ADMIN".')
+
+    if user_entrypoint is not None and user_entrypoint != '/bin/bash':
+        logger.warning(
+            'Overriding user entrypoint "%s" to "/bin/bash" '
+            '(required during initialization).', user_entrypoint)
+
+    for s in user_secopts:
+        if s.startswith('apparmor:') and s != 'apparmor:unconfined':
+            logger.warning(
+                'Overriding user AppArmor profile "%s" to '
+                '"apparmor:unconfined" for initialization.', s)
+
+    out: List[str] = []
+    for k, v in kept:
+        out.append(k if v is None else f'{k}={v}')
     return out
 
 
@@ -141,8 +218,8 @@ def docker_start_cmds(
     env_flags = ' '.join(
         ['-e {name}={val}'.format(name=k, val=v) for k, v in env_vars.items()])
 
-    sanitized_user_options = _dedupe_network_host(user_options)
-    user_options_str = ' '.join(sanitized_user_options)
+    sanitized_user_options = _normalize_run_options(user_options)
+    # user_options_str = ' '.join(sanitized_user_options)
     docker_run = [
         docker_cmd,
         'run',
@@ -152,7 +229,7 @@ def docker_start_cmds(
         '-d',
         '-it',
         env_flags,
-        user_options_str,
+        *sanitized_user_options,
         '--net=host',
         # SkyPilot: Add following options to enable fuse.
         '--cap-add=SYS_ADMIN',
@@ -161,7 +238,7 @@ def docker_start_cmds(
         '--entrypoint=/bin/bash',
         image,
     ]
-    return ' '.join(part for part in docker_run if part)
+    return ' '.join(docker_run)
 
 
 def _with_interactive(cmd):
