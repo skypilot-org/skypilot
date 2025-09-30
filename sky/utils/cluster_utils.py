@@ -208,6 +208,10 @@ class SSHConfigHelper(object):
                         ssh_control_name=None,
                         ssh_proxy_command=inner_proxy,
                         port=inner_port,
+                        # ProxyCommand (ssh -W) is a forwarding tunnel, not an
+                        # interactive session. ControlMaster would cache these
+                        # processes, causing them to hang and block subsequent
+                        # connections. Each ProxyCommand should be ephemeral.
                         disable_control_master=True) +
                     ['-W', '%h:%p', f'{auth_config["ssh_user"]}@{ip}'])
 
