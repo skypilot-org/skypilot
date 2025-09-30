@@ -22,6 +22,7 @@ from sky.clouds import cloud as sky_cloud
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
+from sky.data import storage_utils
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
 from sky.provision.kubernetes import constants as kubernetes_constants
@@ -65,6 +66,122 @@ CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
 # cloud as controller.
 _LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX = (
     '__skypilot:local_skypilot_config_path.yaml')
+
+
+def _getenv_int(name: str, default: int = 0) -> int:
+    val = os.getenv(name)
+    try:
+        return int(val) if val is not None else default
+    except ValueError:
+        return default
+
+
+# Configuration for file mount compression
+_COMPRESSION_THRESHOLD_FILE_COUNT = _getenv_int(
+    'SKYPILOT_COMPRESSION_THRESHOLD_FILE_COUNT',
+    0)  # Compress if more or equal to X files. Defaults to 0.
+_COMPRESSION_THRESHOLD_TOTAL_SIZE_MB = _getenv_int(
+    'SKYPILOT_COMPRESSION_THRESHOLD_TOTAL_SIZE_MB',
+    0)  # Compress if total size > X MB. Defaults to 0.
+_COMPRESSED_FILE_SUFFIX = '.skypilot.tar.gz'
+
+
+def _should_compress_path(path: str) -> bool:
+    """Determine if a path should be compressed based on file count and size."""
+    expanded_path = os.path.abspath(os.path.expanduser(path))
+    if os.path.isfile(expanded_path):
+        return False  # Single files are handled separately
+
+    if not os.path.isdir(expanded_path):
+        return False
+
+    file_count = 0
+    total_size = 0
+
+    try:
+        for root, _, files in os.walk(expanded_path):
+            file_count += len(files)
+            for file in files:
+                file_path = os.path.join(root, file)
+                if os.path.isfile(file_path):
+                    total_size += os.path.getsize(file_path)
+
+            # Early exit if we exceed thresholds
+            if (file_count >= _COMPRESSION_THRESHOLD_FILE_COUNT or total_size >=
+                    _COMPRESSION_THRESHOLD_TOTAL_SIZE_MB * 1024 * 1024):
+                return True
+
+    except (OSError, IOError):
+        # If we can't access files, don't compress
+        return False
+
+    return False
+
+
+def _create_compressed_archive(source_path: str, output_path: str) -> None:
+    """Create a compressed tar.gz archive from a source path."""
+    source_path = os.path.abspath(os.path.expanduser(source_path))
+    if not os.path.exists(source_path):
+        raise FileNotFoundError(f'Source path does not exist: {source_path}')
+    excluded_files = set()
+    if os.path.isdir(source_path):
+        items = []
+        excluded_files = set([
+            os.path.join(source_path, f.rstrip('/'))
+            for f in storage_utils.get_excluded_files(source_path)
+        ])
+        for root, dirs, files in os.walk(source_path, followlinks=False):
+            # Filter dirs in-place to avoid descending into excluded dirs
+            dirs[:] = [
+                d for d in dirs if os.path.join(root, d) not in excluded_files
+            ]
+
+            # Add dirs (to preserve empty dirs & symlinks)
+            for dir_name in dirs:
+                dir_path = os.path.join(root, dir_name)
+                if dir_path in excluded_files:
+                    continue
+                items.append(dir_path)
+
+            # Add files
+            for file in files:
+                file_path = os.path.join(root, file)
+                if file_path in excluded_files:
+                    continue
+                items.append(file_path)
+    else:
+        items = [source_path]
+    storage_utils.tar_gz_files_and_folders(items,
+                                           output_path,
+                                           excluded_files=excluded_files)
+
+
+def _get_decompression_commands(compressed_filename: str,
+                                current_dir: str) -> List[str]:
+    """ Generate shell commands to:
+    - extract the compressed file (assumed to be in the current directory)
+      into a temporary subdirectory under $PWD,
+    - move its contents back to $PWD (flattened),
+    - and clean up the archive and temporary directory.
+    """
+    output_path = '.'
+    archive_base = os.path.splitext(
+        os.path.splitext(compressed_filename)[0])[0]  # strip .tar.gz
+    temp_extract_dir = f'tmp_extract_{archive_base}'
+
+    return [
+        'ORIGINAL_PWD="$PWD"', f'cd "{current_dir}"',
+        'echo "Now in working directory for decompression:"', 'pwd',
+        f'if [ ! -f "{compressed_filename}" ]; then',
+        f'  echo "Error: {compressed_filename} not found in {current_dir}!"',
+        '  cd "$ORIGINAL_PWD"', '  exit 1', 'fi',
+        f'mkdir -p "{temp_extract_dir}"',
+        f'tar -xzf "{compressed_filename}" -C "{temp_extract_dir}"',
+        f'rm -f "{compressed_filename}"', 'shopt -s dotglob',
+        f'cp -a "{temp_extract_dir}/." "{output_path}/"', 'shopt -u dotglob',
+        f'rm -rf "{temp_extract_dir}"', 'echo "Decompression complete"',
+        'cd "$ORIGINAL_PWD"', 'echo "Returned to original directory: $PWD"'
+    ]
 
 
 @dataclasses.dataclass
@@ -958,230 +1075,432 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             store_kwargs['storage_account_name'] = storage_account_name
         if region is not None:
             store_kwargs['region'] = region
-
-    # Step 1: Translate the workdir to SkyPilot storage.
-    new_storage_mounts = {}
-    if task.workdir is not None and isinstance(task.workdir, str):
-        workdir = task.workdir
-        task.workdir = None
-        if (constants.SKY_REMOTE_WORKDIR in original_file_mounts or
-                constants.SKY_REMOTE_WORKDIR in original_storage_mounts):
-            raise ValueError(
-                f'Cannot mount {constants.SKY_REMOTE_WORKDIR} as both the '
-                'workdir and file_mounts contains it as the target.')
-        bucket_sub_path = _sub_path_join(
-            sub_path,
-            constants.FILE_MOUNTS_WORKDIR_SUBPATH.format(run_id=run_id))
-        stores = None
-        if store_type is not None:
-            stores = [store_type]
-
-        storage_obj = storage_lib.Storage(
-            name=bucket_name,
-            source=workdir,
-            persistent=False,
-            mode=storage_lib.StorageMode.COPY,
-            stores=stores,
-            # Set `_is_sky_managed` to False when `bucket_with_prefix` is
-            # specified, so that the storage is not deleted when job finishes,
-            # but only the sub path is deleted.
-            _is_sky_managed=bucket_wth_prefix is None,
-            _bucket_sub_path=bucket_sub_path)
-        new_storage_mounts[constants.SKY_REMOTE_WORKDIR] = storage_obj
-        # Check of the existence of the workdir in file_mounts is done in
-        # the task construction.
-        logger.info(f'  {colorama.Style.DIM}Workdir: {workdir!r} '
-                    f'-> storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
-
-    # Step 2: Translate the local file mounts with folder in src to SkyPilot
-    # storage.
-    # TODO(zhwu): Optimize this by:
-    # 1. Use the same bucket for all the mounts.
-    # 2. When the src is the same, use the same bucket.
-    copy_mounts_with_file_in_src = {}
-    for i, (dst, src) in enumerate(copy_mounts.items()):
-        assert task.file_mounts is not None
-        task.file_mounts.pop(dst)
-        if os.path.isfile(os.path.abspath(os.path.expanduser(src))):
-            copy_mounts_with_file_in_src[dst] = src
-            continue
-        bucket_sub_path = _sub_path_join(
-            sub_path, constants.FILE_MOUNTS_SUBPATH.format(i=i, run_id=run_id))
-        stores = None
-        if store_type is not None:
-            stores = [store_type]
-        storage_obj = storage_lib.Storage(name=bucket_name,
-                                          source=src,
-                                          persistent=False,
-                                          mode=storage_lib.StorageMode.COPY,
-                                          stores=stores,
-                                          _is_sky_managed=not bucket_wth_prefix,
-                                          _bucket_sub_path=bucket_sub_path)
-        new_storage_mounts[dst] = storage_obj
-        logger.info(f'  {colorama.Style.DIM}Folder : {src!r} '
-                    f'-> storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
-
-    # Step 3: Translate local file mounts with file in src to SkyPilot storage.
-    # Hard link the files in src to a temporary directory, and upload folder.
-    file_mounts_tmp_subpath = _sub_path_join(
-        sub_path, constants.FILE_MOUNTS_TMP_SUBPATH.format(run_id=run_id))
-    base_tmp_dir = os.path.expanduser(constants.FILE_MOUNTS_LOCAL_TMP_BASE_PATH)
-    os.makedirs(base_tmp_dir, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=base_tmp_dir) as temp_path:
-        local_fm_path = os.path.join(
-            temp_path, constants.FILE_MOUNTS_LOCAL_TMP_DIR.format(id=run_id))
-        os.makedirs(local_fm_path, exist_ok=True)
-        file_mount_remote_tmp_dir = constants.FILE_MOUNTS_REMOTE_TMP_DIR.format(
-            task_type)
-        if copy_mounts_with_file_in_src:
-            src_to_file_id = {}
-            for i, src in enumerate(set(copy_mounts_with_file_in_src.values())):
-                src_to_file_id[src] = i
-                os.link(os.path.abspath(os.path.expanduser(src)),
-                        os.path.join(local_fm_path, f'file-{i}'))
+    try:
+        # Step 1: Translate the workdir to SkyPilot storage.
+        new_storage_mounts = {}
+        decompression_commands = [
+        ]  # Commands to run on remote to decompress files
+        temp_files_to_cleanup = []  # Track temporary files for cleanup
+        temp_folders_to_cleanup = []  # Track temporary folders for cleanup
+        workdir = None
+        if task.workdir is not None and isinstance(task.workdir, str):
+            workdir = task.workdir
+            task.workdir = None
+            if (constants.SKY_REMOTE_WORKDIR in original_file_mounts or
+                    constants.SKY_REMOTE_WORKDIR in original_storage_mounts):
+                raise ValueError(
+                    f'Cannot mount {constants.SKY_REMOTE_WORKDIR} as both the '
+                    'workdir and file_mounts contains it as the target.')
+            bucket_sub_path = _sub_path_join(
+                sub_path,
+                constants.FILE_MOUNTS_WORKDIR_SUBPATH.format(run_id=run_id))
             stores = None
             if store_type is not None:
                 stores = [store_type]
+
+            should_compress_workdir = _should_compress_path(workdir)
+            # Check if workdir should be compressed
+            source_to_use = workdir
+            if should_compress_workdir:
+                # Create compressed archive with proper cleanup
+                temp_archive_folder = tempfile.mkdtemp()
+                temp_folders_to_cleanup.append(temp_archive_folder)
+                temp_archive_fd, temp_archive_path = tempfile.mkstemp(
+                    suffix=_COMPRESSED_FILE_SUFFIX, dir=temp_archive_folder)
+                temp_files_to_cleanup.append(temp_archive_path)
+                os.close(temp_archive_fd)  # Close file descriptor, keep file
+                try:
+                    _create_compressed_archive(workdir, temp_archive_path)
+                    # Add decompression commands
+                    decompression_commands.extend(
+                        _get_decompression_commands(
+                            os.path.basename(temp_archive_path),
+                            constants.SKY_REMOTE_WORKDIR))
+                    source_to_use = temp_archive_folder
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.warning(
+                        f'Failed to compress workdir {workdir}: {e}. '
+                        'Falling back to uncompressed upload.')
+                    should_compress_workdir = False
+                    source_to_use = workdir
+
             storage_obj = storage_lib.Storage(
                 name=bucket_name,
-                source=local_fm_path,
+                source=source_to_use,
                 persistent=False,
-                mode=storage_lib.DEFAULT_STORAGE_MODE,
+                mode=storage_lib.StorageMode.COPY,
+                stores=stores,
+                # Set `_is_sky_managed` to False when `bucket_with_prefix` is
+                # specified, so that the storage is not deleted when job ends,
+                # but only the sub path is deleted.
+                _is_sky_managed=bucket_wth_prefix is None,
+                _bucket_sub_path=bucket_sub_path)
+            new_storage_mounts[constants.SKY_REMOTE_WORKDIR] = storage_obj
+            # Check of the existence of the workdir in file_mounts is done in
+            # the task construction.
+            if should_compress_workdir:
+                logger.info(
+                    f'  {colorama.Style.DIM}Workdir (compressed): {workdir!r} '
+                    f'-> storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
+            else:
+                logger.info(
+                    f'  {colorama.Style.DIM}Workdir: {workdir!r} '
+                    f'-> storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
+        # Step 2: Translate the local file mounts with folder in src to SkyPilot
+        # storage.
+        # TODO(zhwu): Optimize this by:
+        # 1. Use the same bucket for all the mounts.
+        # 2. When the src is the same, use the same bucket.
+        copy_mounts_with_file_in_src = {}
+
+        for i, (dst, src) in enumerate(copy_mounts.items()):
+            assert task.file_mounts is not None
+            task.file_mounts.pop(dst)
+            if os.path.isfile(os.path.abspath(os.path.expanduser(src))):
+                copy_mounts_with_file_in_src[dst] = src
+                continue
+
+            bucket_sub_path = _sub_path_join(
+                sub_path,
+                constants.FILE_MOUNTS_SUBPATH.format(i=i, run_id=run_id))
+            stores = None
+            if store_type is not None:
+                stores = [store_type]
+
+            # Check if folder should be compressed
+            should_compress_src = _should_compress_path(src)
+            source_to_use = src
+            if should_compress_src:
+                # Create compressed archive with proper cleanup
+                temp_archive_folder = tempfile.mkdtemp()
+                temp_folders_to_cleanup.append(temp_archive_folder)
+                temp_archive_fd, temp_archive_path = tempfile.mkstemp(
+                    suffix=_COMPRESSED_FILE_SUFFIX, dir=temp_archive_folder)
+                temp_files_to_cleanup.append(temp_archive_path)
+                os.close(temp_archive_fd)  # Close file descriptor, keep file
+                try:
+                    _create_compressed_archive(src, temp_archive_path)
+
+                    # Add decompression commands
+                    decompression_commands.extend(
+                        _get_decompression_commands(
+                            os.path.basename(temp_archive_path), dst))
+                    source_to_use = temp_archive_folder
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.warning(f'Failed to compress folder {src}: {e}. '
+                                   'Falling back to uncompressed upload.')
+                    should_compress_src = False
+                    source_to_use = src
+            storage_obj = storage_lib.Storage(
+                name=bucket_name,
+                source=source_to_use,
+                persistent=False,
+                mode=storage_lib.StorageMode.COPY,
                 stores=stores,
                 _is_sky_managed=not bucket_wth_prefix,
-                _bucket_sub_path=file_mounts_tmp_subpath)
+                _bucket_sub_path=bucket_sub_path)
+            new_storage_mounts[dst] = storage_obj
+            if should_compress_src:
+                logger.info(
+                    f'  {colorama.Style.DIM}Folder (compressed): {src!r} '
+                    f'-> storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
+            else:
+                logger.info(
+                    f'  {colorama.Style.DIM}Folder : {src!r} '
+                    f'-> storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
 
-            new_storage_mounts[file_mount_remote_tmp_dir] = storage_obj
-            if file_mount_remote_tmp_dir in original_storage_mounts:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Failed to translate file mounts, due to the default '
-                        f'destination {file_mount_remote_tmp_dir} '
-                        'being taken.')
-            sources = list(src_to_file_id.keys())
-            sources_str = '\n    '.join(sources)
-            logger.info(f'  {colorama.Style.DIM}Files (listed below) '
-                        f' -> storage: {bucket_name}:'
-                        f'\n    {sources_str}{colorama.Style.RESET_ALL}')
+        # Step 3: Translate local file mounts to SkyPilot storage.
+        # For files, we'll also use compression if there are many files.
+        file_mounts_tmp_subpath = _sub_path_join(
+            sub_path, constants.FILE_MOUNTS_TMP_SUBPATH.format(run_id=run_id))
+        base_tmp_dir = os.path.expanduser(
+            constants.FILE_MOUNTS_LOCAL_TMP_BASE_PATH)
+        os.makedirs(base_tmp_dir, exist_ok=True)
+        compressed_archive_filename = ''
+        with tempfile.TemporaryDirectory(dir=base_tmp_dir) as temp_path:
+            local_fm_path = os.path.join(
+                temp_path,
+                constants.FILE_MOUNTS_LOCAL_TMP_DIR.format(id=run_id))
+            os.makedirs(local_fm_path, exist_ok=True)
+            file_mount_remote_tmp_dir = (
+                constants.FILE_MOUNTS_REMOTE_TMP_DIR.format(task_type))
 
-        rich_utils.force_update_status(
-            ux_utils.spinner_message(
-                'Uploading translated local files/folders'))
-        task.update_storage_mounts(new_storage_mounts)
+            if copy_mounts_with_file_in_src:
+                src_to_file_id = {}
 
-        # Step 4: Upload storage from sources
-        # Upload the local source to a bucket. The task will not be executed
-        # locally, so we need to upload the files/folders to the bucket manually
-        # here before sending the task to the remote jobs controller.  This will
-        # also upload any storage mounts that are not translated.  After
-        # sync_storage_mounts, we will also have file_mounts in the task, but
-        # these aren't used since the storage_mounts for the same paths take
-        # precedence.
-        if task.storage_mounts:
-            # There may be existing (non-translated) storage mounts, so log this
-            # whenever task.storage_mounts is non-empty.
+                for i, src in enumerate(
+                        set(copy_mounts_with_file_in_src.values())):
+                    src_to_file_id[src] = i
+                    os.link(os.path.abspath(os.path.expanduser(src)),
+                            os.path.join(local_fm_path, f'file-{i}'))
+                # Check if we should compress the files
+                should_compress_files = _should_compress_path(local_fm_path)
+                source_to_use = local_fm_path
+                if should_compress_files:
+                    # Create a compressed archive of all files
+                    temp_archive_folder = tempfile.mkdtemp()
+                    temp_folders_to_cleanup.append(temp_archive_folder)
+                    temp_archive_fd, temp_archive_path = tempfile.mkstemp(
+                        suffix=_COMPRESSED_FILE_SUFFIX, dir=temp_archive_folder)
+                    temp_files_to_cleanup.append(temp_archive_path)
+                    os.close(
+                        temp_archive_fd)  # Close file descriptor, keep file
+                    try:
+                        _create_compressed_archive(local_fm_path,
+                                                   temp_archive_path)
+
+                        source_to_use = temp_archive_folder
+                        compressed_archive_filename = os.path.basename(
+                            temp_archive_path)
+                    except Exception as e:  # pylint: disable=broad-except
+                        logger.warning(f'Failed to compress files: {e}. '
+                                       'Falling back to uncompressed upload.')
+                        should_compress_files = False
+                        source_to_use = local_fm_path
+
+                stores = None
+                if store_type is not None:
+                    stores = [store_type]
+
+                storage_obj = storage_lib.Storage(
+                    name=bucket_name,
+                    source=source_to_use,
+                    persistent=False,
+                    mode=(storage_lib.StorageMode.COPY if should_compress_files
+                          else storage_lib.DEFAULT_STORAGE_MODE),
+                    stores=stores,
+                    _is_sky_managed=not bucket_wth_prefix,
+                    _bucket_sub_path=file_mounts_tmp_subpath)
+
+                new_storage_mounts[file_mount_remote_tmp_dir] = storage_obj
+
+                if file_mount_remote_tmp_dir in original_storage_mounts:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            'Failed to translate file mounts, as the default '
+                            f'destination {file_mount_remote_tmp_dir} '
+                            'is already taken.')
+
+                sources = list(src_to_file_id.keys())
+                sources_str = '\n    '.join(sources)
+                compression_note = ''
+                if should_compress_files:
+                    compression_note = ' (compressed)'
+                logger.info(f'  {colorama.Style.DIM}Files{compression_note}'
+                            '(listed below) '
+                            f' -> storage: {bucket_name}:'
+                            f'\n    {sources_str}{colorama.Style.RESET_ALL}')
+
             rich_utils.force_update_status(
                 ux_utils.spinner_message(
-                    'Uploading local sources to storage[/]  '
-                    '[dim]View storages: sky storage ls'))
-        try:
-            task.sync_storage_mounts()
-        except (ValueError, exceptions.NoCloudAccessError) as e:
-            if 'No enabled cloud for storage' in str(e) or isinstance(
-                    e, exceptions.NoCloudAccessError):
-                data_src = None
-                if has_local_source_paths_file_mounts:
-                    data_src = 'file_mounts'
-                if has_local_source_paths_workdir:
-                    if data_src:
-                        data_src += ' and workdir'
-                    else:
-                        data_src = 'workdir'
-                store_enabled_clouds = ', '.join(
-                    storage_lib.STORE_ENABLED_CLOUDS)
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.NotSupportedError(
-                        f'Unable to use {data_src} - no cloud with object '
-                        'store support is enabled. Please enable at least one '
-                        'cloud with object store support '
-                        f'({store_enabled_clouds}) by running `sky check`, or '
-                        f'remove {data_src} from your task.'
-                        '\nHint: If you do not have any cloud access, you may '
-                        'still download data and code over the network using '
-                        'curl or other tools in the `setup` section of the '
-                        'task.') from None
+                    'Uploading translated local files/dirs'))
+            task.update_storage_mounts(new_storage_mounts)
 
-    # Step 5: Add the file download into the file mounts, such as
-    #  /original-dst: s3://spot-fm-file-only-bucket-name/file-0
-    new_file_mounts = {}
-    if copy_mounts_with_file_in_src:
-        # file_mount_remote_tmp_dir will only exist when there are files in
-        # the src for copy mounts.
-        storage_obj = task.storage_mounts[file_mount_remote_tmp_dir]
-        assert storage_obj.stores, (storage_obj.__dict__, task.to_yaml_config())
-        curr_store_type = list(storage_obj.stores.keys())[0]
-        store_object = storage_obj.stores[curr_store_type]
-        assert store_object is not None, (storage_obj.__dict__,
-                                          task.to_yaml_config())
-        bucket_url = storage_lib.StoreType.get_endpoint_url(
-            store_object, bucket_name)
-        bucket_url += f'/{file_mounts_tmp_subpath}'
-        for dst, src in copy_mounts_with_file_in_src.items():
-            file_id = src_to_file_id[src]
-            new_file_mounts[dst] = bucket_url + f'/file-{file_id}'
-    task.update_file_mounts(new_file_mounts)
+            # Step 4: Upload storage from sources
+            # Upload the local source to a bucket. The task will not be executed
+            # locally, so we need to upload files/dirs to the bucket manually
+            # here before sending the task to the remote jobs controller. This
+            # will also upload any storage mounts that are not translated. After
+            # sync_storage_mounts, we will have file_mounts in the task, which
+            # are not used since the storage_mounts for the same paths take
+            # precedence.
+            if task.storage_mounts:
+                # There may be existing (non-translated) storage mounts, so log
+                # this whenever task.storage_mounts is non-empty.
+                rich_utils.force_update_status(
+                    ux_utils.spinner_message(
+                        'Uploading local sources to storage[/]  '
+                        '[dim]View storages: sky storage ls'))
+            try:
+                task.sync_storage_mounts()
+            except (ValueError, exceptions.NoCloudAccessError) as e:
+                if 'No enabled cloud for storage' in str(e) or isinstance(
+                        e, exceptions.NoCloudAccessError):
+                    data_src = None
+                    if has_local_source_paths_file_mounts:
+                        data_src = 'file_mounts'
+                    if has_local_source_paths_workdir:
+                        if data_src:
+                            data_src += ' and workdir'
+                        else:
+                            data_src = 'workdir'
+                    store_enabled_clouds = ', '.join(
+                        storage_lib.STORE_ENABLED_CLOUDS)
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.NotSupportedError(
+                            f'Unable to use {data_src} - no cloud with object '
+                            'store support is enabled. Please enable at least '
+                            f'one cloud with object store support '
+                            f'({store_enabled_clouds}) by running `sky check`, '
+                            f'or remove {data_src} from your task.'
+                            '\nHint: If you do not have any cloud access, you '
+                            'may still download data and code over the network '
+                            'using curl or other tools in the `setup` section '
+                            'of the task.') from None
 
-    # Step 6: Replace the source field that is local path in all storage_mounts
-    # with bucket URI and remove the name field.
-    for storage_obj in task.storage_mounts.values():
-        if (storage_obj.source is not None and
-                not data_utils.is_cloud_store_url(storage_obj.source)):
-            # Need to replace the local path with bucket URI, and remove the
-            # name field, so that the storage mount can work on the jobs
-            # controller.
-            store_types = list(storage_obj.stores.keys())
-            assert len(store_types) == 1, (
-                'We only support one store type for now.', storage_obj.stores)
-            curr_store_type = store_types[0]
+        # Step 5: Add the file download into the file mounts, such as
+        #  /original-dst: s3://spot-fm-file-only-bucket-name/file-0
+        new_file_mounts = {}
+        if copy_mounts_with_file_in_src:
+            # file_mount_remote_tmp_dir will only exist when there are files in
+            # the src for copy mounts.
+            storage_obj = task.storage_mounts[file_mount_remote_tmp_dir]
+            assert storage_obj.stores, (storage_obj.__dict__,
+                                        task.to_yaml_config())
+            curr_store_type = list(storage_obj.stores.keys())[0]
             store_object = storage_obj.stores[curr_store_type]
-            assert store_object is not None and storage_obj.name is not None, (
-                store_object, storage_obj.name)
-            storage_obj.source = storage_lib.StoreType.get_endpoint_url(
-                store_object, storage_obj.name)
-            storage_obj.force_delete = True
+            assert store_object is not None, (storage_obj.__dict__,
+                                              task.to_yaml_config())
+            bucket_url = storage_lib.StoreType.get_endpoint_url(
+                store_object, bucket_name)
+            bucket_url += f'/{file_mounts_tmp_subpath}'
+            if should_compress_files:
+                # Mount the compressed archive file to the remote tmp directory
+                compressed_archive_remote_path = os.path.join(
+                    file_mount_remote_tmp_dir, compressed_archive_filename)
+                new_file_mounts[compressed_archive_remote_path] = (
+                    bucket_url + f'/{compressed_archive_filename}')
 
-    # Step 7: Convert all `MOUNT` mode storages which don't specify a source
-    # to specifying a source. If the source is specified with a local path,
-    # it was handled in step 6.
-    updated_mount_storages = {}
-    for storage_path, storage_obj in task.storage_mounts.items():
-        if (storage_obj.mode in storage_lib.MOUNTABLE_STORAGE_MODES and
-                not storage_obj.source):
-            # Construct source URL with first store type and storage name
-            # E.g., s3://my-storage-name
-            store_types = list(storage_obj.stores.keys())
-            assert len(store_types) == 1, (
-                'We only support one store type for now.', storage_obj.stores)
-            curr_store_type = store_types[0]
-            store_object = storage_obj.stores[curr_store_type]
-            assert store_object is not None and storage_obj.name is not None, (
-                store_object, storage_obj.name)
-            source = storage_lib.StoreType.get_endpoint_url(
-                store_object, storage_obj.name)
-            assert store_object is not None and storage_obj.name is not None, (
-                store_object, storage_obj.name)
-            new_storage = storage_lib.Storage.from_yaml_config({
-                'source': source,
-                'persistent': storage_obj.persistent,
-                'mode': storage_obj.mode.value,
-                # We enable force delete to allow the controller to delete
-                # the object store in case persistent is set to False.
-                '_force_delete': True
-            })
-            updated_mount_storages[storage_path] = new_storage
-    task.update_storage_mounts(updated_mount_storages)
-    if msg:
-        logger.info(ux_utils.finishing_message('Uploaded local files/folders.'))
+                # Add decompression commands that will extract the archive and
+                # move files to their destinations
+                decompression_commands.extend(
+                    _get_decompression_commands(compressed_archive_filename,
+                                                file_mount_remote_tmp_dir))
+
+                # Add individual file move commands after decompression
+                for dst, src in copy_mounts_with_file_in_src.items():
+                    file_id = src_to_file_id[src]
+                    # After decompression, files will be in
+                    # file_mount_remote_tmp_dir/file-{file_id}
+                    # We need to move them to their final destinations
+                    if dst.startswith('~/'):
+                        dst = f'$HOME/{dst[2:]}'
+
+                    dst_dir = dst if os.path.isdir(dst) else os.path.dirname(
+                        dst)
+                    check_dir = dst_dir
+                    par_dir = ''
+                    while not os.path.exists(check_dir):
+                        if check_dir == os.path.dirname(
+                                check_dir):  # Reached root "/"
+                            break
+                        par_dir = check_dir
+                        check_dir = os.path.dirname(check_dir)
+
+                    decompression_commands.append(f'sudo mkdir -p "{dst_dir}"')
+
+                    if not dst.startswith('$HOME/'):
+                        dst = f'"{dst}"'
+
+                    # Copy the file
+                    decompression_commands.append(
+                        f'sudo cp "{file_mount_remote_tmp_dir}/file-{file_id}" '
+                        f'{dst}')
+                    if (par_dir and not os.path.exists(par_dir)):
+                        decompression_commands.append(
+                            f'sudo chown -R $USER:$USER "{par_dir}"')
+                        decompression_commands.append(
+                            f'sudo chmod -R u+rwX "{par_dir}"')
+
+            else:
+                for dst, src in copy_mounts_with_file_in_src.items():
+                    file_id = src_to_file_id[src]
+                    new_file_mounts[dst] = bucket_url + f'/file-{file_id}'
+        task.update_file_mounts(new_file_mounts)
+        # Step 6: Replace the source field that is local path in all
+        # storage_mounts with bucket URI and remove the name field.
+        for storage_obj in task.storage_mounts.values():
+            if (storage_obj.source is not None and
+                    not data_utils.is_cloud_store_url(storage_obj.source)):
+                # Need to replace the local path with bucket URI, and remove the
+                # name field, so that the storage mount can work on the jobs
+                # controller.
+                store_types = list(storage_obj.stores.keys())
+                assert len(store_types) == 1, (
+                    'We only support one store type for now.',
+                    storage_obj.stores)
+                curr_store_type = store_types[0]
+                store_object = storage_obj.stores[curr_store_type]
+                assert (store_object is not None and
+                        storage_obj.name is not None), (store_object,
+                                                        storage_obj.name)
+                storage_obj.source = storage_lib.StoreType.get_endpoint_url(
+                    store_object, storage_obj.name)
+                storage_obj.force_delete = True
+
+        # Step 7: Convert all `MOUNT` mode storages which don't specify a source
+        # to specifying a source. If the source is specified with a local path,
+        # it was handled in step 6.
+        updated_mount_storages = {}
+        for storage_path, storage_obj in task.storage_mounts.items():
+            if (storage_obj.mode in storage_lib.MOUNTABLE_STORAGE_MODES and
+                    not storage_obj.source):
+                # Construct source URL with first store type and storage name
+                # E.g., s3://my-storage-name
+                store_types = list(storage_obj.stores.keys())
+                assert len(store_types) == 1, (
+                    'We only support one store type for now.',
+                    storage_obj.stores)
+                curr_store_type = store_types[0]
+                store_object = storage_obj.stores[curr_store_type]
+                assert (store_object is not None and
+                        storage_obj.name is not None), (store_object,
+                                                        storage_obj.name)
+                source = storage_lib.StoreType.get_endpoint_url(
+                    store_object, storage_obj.name)
+                assert (store_object is not None and
+                        storage_obj.name is not None), (store_object,
+                                                        storage_obj.name)
+                new_storage = storage_lib.Storage.from_yaml_config({
+                    'source': source,
+                    'persistent': storage_obj.persistent,
+                    'mode': storage_obj.mode.value,
+                    # We enable force delete to allow the controller to delete
+                    # the object store in case persistent is set to False.
+                    '_force_delete': True
+                })
+                updated_mount_storages[storage_path] = new_storage
+        task.update_storage_mounts(updated_mount_storages)
+        # Step 8: Add decompression commands to the task setup
+        if decompression_commands:
+            current_setup = task.setup or ''
+            if current_setup:
+                current_setup += '\n'
+
+            # Add a comment and the decompression commands
+            decompression_setup = '# SkyPilot: Decompress file mounts\n'
+            decompression_setup += '\n'.join(decompression_commands)
+
+            task.setup = current_setup + decompression_setup
+
+            logger.info(
+                f'  {colorama.Style.DIM}Added decompression commands to setup'
+                f'{colorama.Style.RESET_ALL}')
+
+        if msg:
+            logger.info(
+                ux_utils.finishing_message('Uploaded local files/folders.'))
+    except Exception as e:
+        logger.error(f'Failed to upload local files/folders: {e}')
+        raise e
+    finally:
+        # CRITICAL: Always cleanup temporary files
+        for temp_file in temp_files_to_cleanup:
+            try:
+                if os.path.exists(temp_file):
+                    os.unlink(temp_file)
+                    logger.debug(f'Cleaned up temporary file: {temp_file}')
+            except (FileNotFoundError, PermissionError, OSError) as e:
+                logger.warning(
+                    f'Failed to cleanup temporary file {temp_file}: {e}')
+        for temp_folder in temp_folders_to_cleanup:
+            try:
+                if os.path.exists(temp_folder):
+                    os.rmdir(temp_folder)
+                    logger.debug(f'Cleaned up temporary folder: {temp_folder}')
+            except (FileNotFoundError, PermissionError, OSError) as e:
+                logger.warning(
+                    f'Failed to cleanup temporary folder {temp_folder}: {e}')
 
 
 # ======================= Resources Management Functions =======================
