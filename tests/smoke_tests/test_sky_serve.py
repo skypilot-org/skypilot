@@ -331,6 +331,7 @@ def test_skyserve_kubernetes_http():
 @pytest.mark.kubernetes
 @pytest.mark.serve
 @pytest.mark.no_remote_server
+@pytest.mark.resource_heavy  # kind local-path-provisioner only supports ReadWriteOnce access mode
 def test_skyserve_kubernetes_http_autoscaling_with_volume():
     """Test skyserve on Kubernetes with PVC volume"""
     name = _get_service_name()
