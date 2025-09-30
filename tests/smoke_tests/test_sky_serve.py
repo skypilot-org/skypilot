@@ -373,7 +373,6 @@ def test_skyserve_kubernetes_http_autoscaling_with_volume():
                 f'sky serve logs {name} 1 --no-follow | grep "Hello from volume!"',
                 f'sky serve logs {name} 2 --no-follow | grep "Hello from volume!"',
             ],
-            'echo done',
             f'{_TEARDOWN_SERVICE.format(name=name)}; '
             f'sky volumes delete {pvc_name} -y',
             env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
