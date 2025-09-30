@@ -1227,7 +1227,8 @@ def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
                        controller_reserved)
     if not consolidation_mode:
         return total_memory_mb
-    config = server_config.compute_server_config(deploy=True, quiet=True)
+    config = server_config.compute_server_config(
+        deploy=True, quiet=True, reserved_memory_mb=controller_reserved)
     used = 0.0
     used += ((config.long_worker_config.garanteed_parallelism +
               config.long_worker_config.burstable_parallelism) *

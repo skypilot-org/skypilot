@@ -75,9 +75,11 @@ class ServerConfig:
     queue_backend: QueueBackend
 
 
-def compute_server_config(deploy: bool,
-                          max_db_connections: Optional[int] = None,
-                          quiet: bool = False) -> ServerConfig:
+def compute_server_config(
+        deploy: bool,
+        max_db_connections: Optional[int] = None,
+        quiet: bool = False,
+        reserved_memory_mb: Optional[float] = None) -> ServerConfig:
     """Compute the server config based on environment.
 
     We have different assumptions for the resources in different deployment
@@ -112,6 +114,8 @@ def compute_server_config(deploy: bool,
     """
     cpu_count = common_utils.get_cpu_count()
     mem_size_gb = common_utils.get_mem_size_gb()
+    if reserved_memory_mb is not None:
+        mem_size_gb -= (reserved_memory_mb / 1024)
     max_parallel_for_long = _max_long_worker_parallism(cpu_count,
                                                        mem_size_gb,
                                                        local=not deploy)
