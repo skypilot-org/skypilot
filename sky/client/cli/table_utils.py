@@ -1,9 +1,4 @@
 """Utilities for formatting tables for CLI output."""
-<<<<<<< HEAD
-from typing import List, Optional
-
-from sky.jobs import utils as managed_jobs
-=======
 import abc
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -11,7 +6,7 @@ from typing import Dict, List, Optional
 import prettytable
 
 from sky import sky_logging
->>>>>>> ccf1c01c2 (move table formatting to table_utils)
+from sky.jobs import utils as managed_jobs
 from sky.schemas.api import responses
 from sky.skylet import constants
 from sky.utils import common_utils
