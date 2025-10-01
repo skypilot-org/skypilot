@@ -306,6 +306,15 @@ class CommandRunner:
         # --filter
         # The source is a local path, so we need to resolve it.
         resolved_source = pathlib.Path(source).expanduser().resolve()
+        
+        # Check if source is an empty directory and add --dirs option to sync it.
+        # This is required as the API server will raise an error if the
+        # directory is not present on the cluster, even if it is empty.
+        if (resolved_source.is_dir() and 
+            not any(resolved_source.iterdir())):
+            # Source is an empty directory, add --dirs to ensure it gets synced
+            rsync_command.append('--dirs')
+
         if (resolved_source / constants.SKY_IGNORE_FILE).exists():
             rsync_command.append(RSYNC_FILTER_SKYIGNORE)
         else:
