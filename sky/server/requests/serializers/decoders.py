@@ -195,6 +195,14 @@ def decode_storage_ls(
     ]
 
 
+@register_decoders('volumes_ls')
+def decode_volumes_ls(
+        return_value: List[Dict[str, Any]]) -> List[responses.VolumeRecord]:
+    return [
+        responses.VolumeRecord(**volume_info) for volume_info in return_value
+    ]
+
+
 @register_decoders('job_status')
 def decode_job_status(
     return_value: Dict[str, Optional[str]]
