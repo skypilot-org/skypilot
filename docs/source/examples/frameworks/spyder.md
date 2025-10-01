@@ -1,1 +1,1 @@
-../../../../examples/spyder/README.md
+../../generated-examples/spyder.md

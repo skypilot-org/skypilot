@@ -29,4 +29,17 @@ uv pip install -r requirements-docs.txt
 python3 -m http.server 8000 --directory build/html
 ```
 
+
+## Add new examples
+
+To add new examples in docs, you can follow the steps below:
+1. Build the docs once with the instructions above
+2. Go to the appropriate subdir under `docs/source/examples`, e.g., `docs/source/examples/training`
+3. Soft link the example from `docs/source/generated-examples/` to the folder
+  ```bash
+  ln -s ../../generated-examples/gpt-oss-finetuning.md gpt-oss-finetuning.md
+  ```
+4. Add it to the TOC by editing the `index.rst` file in the same folder, e.g., `docs/source/examples/training/index.rst`
+
+
 The documentation will be available at http://127.0.0.1:8000
