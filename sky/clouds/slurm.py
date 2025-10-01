@@ -277,6 +277,7 @@ class Slurm(clouds.Cloud):
         ssh_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
         # existing_allowed_clusters = list(ssh_config.get_hostnames())
         existing_allowed_clusters = ['localcluster']
+        partition = 'debug'
 
         for cluster in existing_allowed_clusters:
             # Retrieve the config options for a given SlurmctldHost name alias.
@@ -288,6 +289,7 @@ class Slurm(clouds.Cloud):
                     ssh_config_dict['user'],
                     ssh_config_dict['identityfile'][0],
                     cluster,
+                    partition=partition,
                     disable_control_master=True)
                 returncode, stdout, stderr = runner.run('sinfo',
                                                         require_outputs=True)

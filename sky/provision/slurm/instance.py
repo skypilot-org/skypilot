@@ -227,7 +227,7 @@ def _create_jobs(region: str, cluster_name_on_cloud: str,
                                   created_instance_ids=created_instance_ids)
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Run instances for the given cluster (Slurm in this case)."""
     try:
