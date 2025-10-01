@@ -3117,14 +3117,6 @@ def get_kubernetes_node_info(
             information.
     """
     nodes = get_kubernetes_nodes(context=context)
-    # Get the pods to get the real-time resource usage
-    try:
-        pods = get_all_pods_in_kubernetes_cluster(context=context)
-    except kubernetes.api_exception() as e:
-        if e.status == 403:
-            pods = None
-        else:
-            raise
 
     lf, _ = detect_gpu_label_formatter(context)
     if not lf:
@@ -3161,10 +3153,27 @@ def get_kubernetes_node_info(
                         node_ip = address.address
                         break
 
-        allocated_qty = 0
         accelerator_count = get_node_accelerator_count(context,
                                                        node.status.allocatable)
+        if accelerator_count == 0:
+            # There's no need to get all pods for nodes with no accelerators
+            node_info_dict[node.metadata.name] = models.KubernetesNodeInfo(
+                name=node.metadata.name,
+                accelerator_type=accelerator_name,
+                total={'accelerator_count': 0},
+                free={'accelerators_available': 0},
+                ip_address=node_ip)
+            continue
 
+        allocated_qty = 0
+        # Get the pods to get the real-time resource usage
+        try:
+            pods = get_all_pods_in_kubernetes_cluster(context=context)
+        except kubernetes.api_exception() as e:
+            if e.status == 403:
+                pods = None
+            else:
+                raise
         if pods is None:
             accelerators_available = -1
 
