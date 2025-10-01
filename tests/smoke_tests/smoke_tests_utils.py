@@ -51,10 +51,9 @@ SCP_TYPE = '--infra scp'
 SCP_GPU_V100 = '--gpus V100-32GB'
 
 STORAGE_SETUP_COMMANDS = [
-    'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir',
-    'rm -rf ~/empty-workdir', 'mkdir -p ~/empty-workdir',
-    r'touch ~/tmp-workdir/tmp\ file', r'touch ~/tmp-workdir/tmp\ file2',
-    'touch ~/tmp-workdir/foo',
+    'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir', 'rm -rf ~/empty-workdir',
+    'mkdir -p ~/empty-workdir', r'touch ~/tmp-workdir/tmp\ file',
+    r'touch ~/tmp-workdir/tmp\ file2', 'touch ~/tmp-workdir/foo',
     '[ ! -e ~/tmp-workdir/circle-link ] && ln -s ~/tmp-workdir/ ~/tmp-workdir/circle-link || true',
     'touch ~/.ssh/id_rsa.pub'
 ]
