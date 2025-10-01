@@ -9,6 +9,7 @@ import requests
 from sky import clouds
 from sky import server
 from sky.client.cli import command
+from sky.utils import volume as volume_utils
 
 
 class TestVolumeCommands:
@@ -104,6 +105,25 @@ class TestVolumeCommands:
         assert result.exit_code != 0
         # Check for the error message in the output instead of exception
         assert 'looks like a yaml path but invalid format' in result.output
+
+    def test_volumes_apply_invalid_type_cli(self, monkeypatch):
+        """Test `sky volumes apply` with invalid type via CLI."""
+        cli_runner = cli_testing.CliRunner()
+
+        # Mock the YAML check function to return no YAML
+        monkeypatch.setattr('sky.client.cli.command._check_yaml_only', lambda x:
+                            (False, None, False, ''))
+
+        # Test with invalid type value
+        result = cli_runner.invoke(command.volumes_apply, [
+            '--name', 'test-volume', '--infra', 'k8s', '--type', 'pvc',
+            '--size', '100Gi'
+        ])
+        assert result.exit_code != 0
+        # Check that click.Choice rejected the invalid value
+        types_str = ', '.join(
+            f"'{t}'" for t in volume_utils.VolumeType.supported_types())
+        assert f"Error: Invalid value for '--type': 'pvc' is not one of {types_str}." in result.output
 
     def test_volumes_apply_no_yaml_or_options(self, monkeypatch):
         """Test `sky volumes apply` with no YAML or options."""

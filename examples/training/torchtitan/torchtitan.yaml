@@ -25,6 +25,8 @@ envs:
   HF_TOKEN: ""
 
 setup: |
+  git clone https://github.com/pytorch/torchtitan.git
+  cd torchtitan
   pip3 install --pre torch --index-url https://download.pytorch.org/whl/nightly/cu126 --force-reinstall
   pip install -r requirements.txt
   python scripts/download_hf_assets.py --repo_id meta-llama/Llama-3.1-8B --assets tokenizer --hf_token=$HF_TOKEN

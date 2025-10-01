@@ -69,6 +69,7 @@ def _bulk_provision(
 
     provision_record = provision.run_instances(provider_name,
                                                region_name,
+                                               str(cluster_name),
                                                cluster_name.name_on_cloud,
                                                config=config)
 

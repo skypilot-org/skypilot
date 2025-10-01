@@ -1152,8 +1152,8 @@ def test_managed_jobs_inline_env(generic_cloud: str):
                 job_name=name,
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
                 timeout=55),
-            f'JOB_ROW=$(sky jobs queue | grep {name} | head -n1) && '
-            f'echo "$JOB_ROW" && echo "$JOB_ROW" | grep "SUCCEEDED" && '
+            f'JOB_ROW=$(sky jobs queue -v | grep {name} | head -n1) && '
+            f'echo "$JOB_ROW" && echo "$JOB_ROW" | grep -E "DONE|ALIVE" | grep "SUCCEEDED" && '
             f'JOB_ID=$(echo "$JOB_ROW" | awk \'{{print $1}}\') && '
             f'echo "JOB_ID=$JOB_ID" && '
             # Test that logs are still available after the job finishes.
@@ -1216,6 +1216,55 @@ def test_managed_jobs_logs_sync_down(generic_cloud: str):
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+# Only run this test on Kubernetes since this test relies on kubernetes.pod_config
+@pytest.mark.kubernetes
+@pytest.mark.managed_jobs
+def test_managed_jobs_env_isolation(generic_cloud: str):
+    """Test that the job controller execution env of jobs are isolated."""
+    base_name = smoke_tests_utils.get_cluster_name()
+    for i in range(2):
+        name = f'{base_name}-{i}'
+        # We want to verify job controller isolates the skypilot config for each job,
+        # kubernetes.pod_config is the easiest way to verify the correct skypilot config
+        # is used in job controller. We assume the job controller is cloud agnostic, thus
+        # this case will also cover the same case for other clouds.
+        test = smoke_tests_utils.Test(
+            'test-managed-jobs-env-isolation',
+            [
+                # Sleep 60 to workaround the issue that SUCCEED job cannot be tailed by name
+                f'sky jobs launch -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y -d \'echo "$TEST_POD_ENV"; sleep 60\'',
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=f'{name}',
+                    job_status=[sky.ManagedJobStatus.RUNNING],
+                    timeout=80),
+                f'sky jobs logs -n {name} --no-follow | grep "my name is {name}"',
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=f'{name}',
+                    job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                    timeout=80),
+            ],
+            f'sky jobs cancel -y -n {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=20 * 60,
+            config_dict={
+                'kubernetes': {
+                    'pod_config': {
+                        'spec': {
+                            'containers': [{
+                                'env': [{
+                                    'name': 'TEST_POD_ENV',
+                                    'value': f'my name is {name}'
+                                }]
+                            }]
+                        }
+                    }
+                }
+            })
+        smoke_tests_utils.run_one_test(test)
 
 
 def _get_ha_kill_test(name: str, generic_cloud: str,

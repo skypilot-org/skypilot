@@ -16,8 +16,8 @@ import textwrap
 import time
 import traceback
 import typing
-from typing import (Any, Deque, Dict, List, Literal, Optional, Set, TextIO,
-                    Tuple, Union)
+from typing import (Any, Deque, Dict, Iterable, List, Literal, Optional, Set,
+                    TextIO, Tuple, Union)
 
 import colorama
 import filelock
@@ -33,6 +33,7 @@ from sky.backends import cloud_vm_ray_backend
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
+from sky.schemas.api import responses
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -51,16 +52,23 @@ from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    from google.protobuf import descriptor
+    from google.protobuf import json_format
     import grpc
     import psutil
 
     import sky
     from sky import dag as dag_lib
     from sky.schemas.generated import jobsv1_pb2
+    from sky.schemas.generated import managed_jobsv1_pb2
 else:
+    json_format = adaptors_common.LazyImport('google.protobuf.json_format')
+    descriptor = adaptors_common.LazyImport('google.protobuf.descriptor')
     psutil = adaptors_common.LazyImport('psutil')
     grpc = adaptors_common.LazyImport('grpc')
     jobsv1_pb2 = adaptors_common.LazyImport('sky.schemas.generated.jobsv1_pb2')
+    managed_jobsv1_pb2 = adaptors_common.LazyImport(
+        'sky.schemas.generated.managed_jobsv1_pb2')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -156,7 +164,7 @@ def _validate_consolidation_mode_config(
     if current_is_consolidation_mode:
         controller_cn = (
             controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name)
-        if global_user_state.get_cluster_from_name(controller_cn) is not None:
+        if global_user_state.cluster_with_name_exists(controller_cn):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.InconsistentConsolidationModeError(
                     f'{colorama.Fore.RED}Consolidation mode for jobs is '
@@ -169,7 +177,7 @@ def _validate_consolidation_mode_config(
         if all_jobs:
             nonterminal_jobs = (
                 managed_job_state.get_nonterminal_job_ids_by_name(
-                    None, all_users=True))
+                    None, None, all_users=True))
             if nonterminal_jobs:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.InconsistentConsolidationModeError(
@@ -698,14 +706,15 @@ def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
 
 def cancel_jobs_by_id(job_ids: Optional[List[int]],
                       all_users: bool = False,
-                      current_workspace: Optional[str] = None) -> str:
+                      current_workspace: Optional[str] = None,
+                      user_hash: Optional[str] = None) -> str:
     """Cancel jobs by id.
 
     If job_ids is None, cancel all jobs.
     """
     if job_ids is None:
         job_ids = managed_job_state.get_nonterminal_job_ids_by_name(
-            None, all_users)
+            None, user_hash, all_users)
     job_ids = list(set(job_ids))
     if not job_ids:
         return 'No job to cancel.'
@@ -1241,6 +1250,24 @@ def dump_managed_job_queue(
     user_hashes: Optional[List[Optional[str]]] = None,
     statuses: Optional[List[str]] = None,
 ) -> str:
+    return message_utils.encode_payload(
+        get_managed_job_queue(skip_finished, accessible_workspaces, job_ids,
+                              workspace_match, name_match, pool_match, page,
+                              limit, user_hashes, statuses))
+
+
+def get_managed_job_queue(
+    skip_finished: bool = False,
+    accessible_workspaces: Optional[List[str]] = None,
+    job_ids: Optional[List[int]] = None,
+    workspace_match: Optional[str] = None,
+    name_match: Optional[str] = None,
+    pool_match: Optional[str] = None,
+    page: Optional[int] = None,
+    limit: Optional[int] = None,
+    user_hashes: Optional[List[Optional[str]]] = None,
+    statuses: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     # Make sure to get all jobs - some logic below (e.g. high priority job
     # detection) requires a full view of the jobs table.
     jobs = managed_job_state.get_managed_jobs()
@@ -1371,12 +1398,12 @@ def dump_managed_job_queue(
         else:
             job['details'] = None
 
-    return message_utils.encode_payload({
+    return {
         'jobs': jobs,
         'total': total,
         'total_no_filter': total_no_filter,
         'status_counts': status_counts
-    })
+    }
 
 
 def filter_jobs(
@@ -1491,7 +1518,7 @@ def load_managed_job_queue(
 
 
 def _get_job_status_from_tasks(
-    job_tasks: List[Dict[str, Any]]
+    job_tasks: Union[List[responses.ManagedJobRecord], List[Dict[str, Any]]]
 ) -> Tuple[managed_job_state.ManagedJobStatus, int]:
     """Get the current task status and the current task id for a job."""
     managed_task_status = managed_job_state.ManagedJobStatus.SUCCEEDED
@@ -1822,6 +1849,58 @@ def format_job_table(
     if return_rows:
         return job_table.rows
     return output
+
+
+def decode_managed_job_protos(
+    job_protos: Iterable['managed_jobsv1_pb2.ManagedJobInfo']
+) -> List[Dict[str, Any]]:
+    """Decode job protos to dicts. Similar to load_managed_job_queue."""
+    user_hash_to_user = global_user_state.get_users(
+        set(job.user_hash for job in job_protos if job.user_hash))
+
+    jobs = []
+    for job_proto in job_protos:
+        job_dict = _job_proto_to_dict(job_proto)
+        user_hash = job_dict.get('user_hash', None)
+        if user_hash is not None:
+            # Skip jobs that do not have user_hash info.
+            # TODO(cooperc): Remove check before 0.12.0.
+            user = user_hash_to_user.get(user_hash, None)
+            job_dict['user_name'] = user.name if user is not None else None
+        jobs.append(job_dict)
+    return jobs
+
+
+def _job_proto_to_dict(
+        job_proto: 'managed_jobsv1_pb2.ManagedJobInfo') -> Dict[str, Any]:
+    job_dict = json_format.MessageToDict(
+        job_proto,
+        always_print_fields_with_no_presence=True,
+        # Our API returns fields in snake_case.
+        preserving_proto_field_name=True,
+        use_integers_for_enums=True)
+    for field in job_proto.DESCRIPTOR.fields:
+        # Ensure optional fields are present with None values for
+        # backwards compatibility with older clients.
+        if field.has_presence and field.name not in job_dict:
+            job_dict[field.name] = None
+        # json_format.MessageToDict is meant for encoding to JSON,
+        # and Protobuf encodes int64 as decimal strings in JSON,
+        # so we need to convert them back to ints.
+        # https://protobuf.dev/programming-guides/json/#field-representation
+        if field.type == descriptor.FieldDescriptor.TYPE_INT64:
+            job_dict[field.name] = int(job_dict[field.name])
+    job_dict['status'] = managed_job_state.ManagedJobStatus.from_protobuf(
+        job_dict['status'])
+    # For backwards compatibility, convert schedule_state to a string,
+    # as we don't have the logic to handle it in our request
+    # encoder/decoder, unlike status.
+    schedule_state_enum = (
+        managed_job_state.ManagedJobScheduleState.from_protobuf(
+            job_dict['schedule_state']))
+    job_dict['schedule_state'] = (schedule_state_enum.value
+                                  if schedule_state_enum is not None else None)
+    return job_dict
 
 
 class ManagedJobCodeGen:

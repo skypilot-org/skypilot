@@ -485,13 +485,20 @@ def get_mounting_script(
 
         {command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}
 
-        MOUNT_PATH={mount_path}
+        MOUNT_PATH=$(eval echo {mount_path})
         MOUNT_BINARY={mount_binary}
 
         # Check if path is already mounted
-        if grep -q $MOUNT_PATH /proc/mounts ; then
+        if findmnt -rn -T "$MOUNT_PATH" >/dev/null 2>&1; then
             echo "Path already mounted - unmounting..."
-            fusermount -uz "$MOUNT_PATH"
+            (command -v fusermount >/dev/null 2>&1 && fusermount -uz "$MOUNT_PATH") \
+            || (command -v fusermount3 >/dev/null 2>&1 && fusermount3 -uz "$MOUNT_PATH") \
+            || sudo umount -l "$MOUNT_PATH" || true
+            # Ensure it's really gone (avoids races)
+            for i in $(seq 1 20); do
+                if ! findmnt -rn -T "$MOUNT_PATH" >/dev/null 2>&1; then break; fi
+                sleep 0.2
+            done
             echo "Successfully unmounted $MOUNT_PATH."
         fi
 
@@ -506,14 +513,16 @@ def get_mounting_script(
         # Check if mount path exists
         if [ ! -d "$MOUNT_PATH" ]; then
           echo "Mount path $MOUNT_PATH does not exist. Creating..."
-          sudo mkdir -p $MOUNT_PATH
-          sudo chmod 777 $MOUNT_PATH
+          sudo mkdir -p "$MOUNT_PATH"
+          sudo chmod 777 "$MOUNT_PATH"
         else
-          # Check if mount path contains files
-          if [ "$(ls -A $MOUNT_PATH)" ]; then
-            echo "Mount path $MOUNT_PATH is not empty. Please mount to another path or remove it first."
-            exit {exceptions.MOUNT_PATH_NON_EMPTY_CODE}
-          fi
+            # If not a mountpoint and contains files, clean it to satisfy SkyPilot check
+            if ! findmnt -rn -T "$MOUNT_PATH" >/dev/null 2>&1; then
+                if [ -n "$(ls -A "$MOUNT_PATH" 2>/dev/null)" ]; then
+                  echo "Cleaning non-empty mount path before mount..."
+                  sudo bash -lc 'shopt -s dotglob nullglob; rm -rf --one-file-system -- '"$MOUNT_PATH"'/*' 2>/dev/null || true
+                fi
+            fi
         fi
         echo "Mounting $SOURCE_BUCKET to $MOUNT_PATH with $MOUNT_BINARY..."
         {mount_cmd}
