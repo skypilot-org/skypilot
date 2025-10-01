@@ -80,7 +80,7 @@ def create_catalog(api_key: str, output_path: str) -> None:
             if gpu_type.endswith('G'):
                 gpu_type += 'B'
 
-            # Replace "GBx" with "Gx" (case sensitive)
+            # Replace "Gx" with "GBx" (case sensitive)
             if 'Gx' in instance_type:
                 instance_type = instance_type.replace('Gx', 'GBx')
 
