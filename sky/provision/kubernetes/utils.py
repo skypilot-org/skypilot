@@ -3140,7 +3140,7 @@ def get_kubernetes_node_info(
             pods = get_all_pods_in_kubernetes_cluster(context=context)
         except kubernetes.api_exception() as e:
             if e.status == 403:
-                pods = None
+                pass
             else:
                 raise
 
