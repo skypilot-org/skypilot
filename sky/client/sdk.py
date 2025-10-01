@@ -513,8 +513,9 @@ def launch(
           different availability zone or region.
         fast: [Experimental] If the cluster is already up and available,
           skip provisioning and setup steps.
-        skip_unnecessary_provision: Do not re-provision the cluster if it is already up
-          and available. Does not skip setup even if provisioning is skipped.
+        skip_unnecessary_provision: Do not re-provision the cluster if it is
+          already up and available. Does not skip setup even if provisioning
+          is skipped.
         _need_confirmation: (Internal only) If True, show the confirmation
             prompt.
 
