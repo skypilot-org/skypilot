@@ -257,6 +257,7 @@ def test_launch_fast(generic_cloud: str):
     )
     smoke_tests_utils.run_one_test(test)
 
+
 # ---------- Test skip unnecessary provision ----------
 def test_launch_skip_unnecessary_provision(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -284,6 +285,7 @@ def test_launch_skip_unnecessary_provision(generic_cloud: str):
         timeout=smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)
+
 
 # See cloud exclusion explanations in test_autostop
 @pytest.mark.no_fluidstack
