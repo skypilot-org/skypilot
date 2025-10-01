@@ -3124,6 +3124,26 @@ def get_kubernetes_node_info(
     else:
         label_keys = lf.get_label_keys()
 
+    # Check if all nodes have no accelerators to avoid fetching pods
+    any_node_has_accelerators = False
+    for node in nodes:
+        accelerator_count = get_node_accelerator_count(context,
+                                                       node.status.allocatable)
+        if accelerator_count > 0:
+            any_node_has_accelerators = True
+            break
+
+    # Get the pods to get the real-time resource usage
+    pods = None
+    if any_node_has_accelerators:
+        try:
+            pods = get_all_pods_in_kubernetes_cluster(context=context)
+        except kubernetes.api_exception() as e:
+            if e.status == 403:
+                pods = None
+            else:
+                raise
+
     node_info_dict: Dict[str, models.KubernetesNodeInfo] = {}
     has_multi_host_tpu = False
 
@@ -3156,7 +3176,6 @@ def get_kubernetes_node_info(
         accelerator_count = get_node_accelerator_count(context,
                                                        node.status.allocatable)
         if accelerator_count == 0:
-            # There's no need to get all pods for nodes with no accelerators
             node_info_dict[node.metadata.name] = models.KubernetesNodeInfo(
                 name=node.metadata.name,
                 accelerator_type=accelerator_name,
@@ -3166,14 +3185,6 @@ def get_kubernetes_node_info(
             continue
 
         allocated_qty = 0
-        # Get the pods to get the real-time resource usage
-        try:
-            pods = get_all_pods_in_kubernetes_cluster(context=context)
-        except kubernetes.api_exception() as e:
-            if e.status == 403:
-                pods = None
-            else:
-                raise
         if pods is None:
             accelerators_available = -1
 
