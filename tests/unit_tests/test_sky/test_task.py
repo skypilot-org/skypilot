@@ -924,5 +924,30 @@ def test_update_resources():
         cpus=6,
         memory=8)])
 
+    # make sure the examples in the docstring are working
+    t.update_resources(use_spot=True)
+    assert repr(t.resources) == repr([resources_lib.Resources(
+        cloud=registry.CLOUD_REGISTRY.from_str('aws'),
+        cpus=6,
+        memory=8,
+        use_spot=True),
+        resources_lib.Resources(cloud=registry.CLOUD_REGISTRY.from_str('gcp'),
+        cpus=6,
+        memory=8,
+        use_spot=True)])
+    
+    t.update_resources(autostop={'timeout': 3600})
+    assert repr(t.resources) == repr([resources_lib.Resources(
+        cloud=registry.CLOUD_REGISTRY.from_str('aws'),
+        cpus=6,
+        memory=8,
+        use_spot=True,
+        autostop={'timeout': 3600}),
+        resources_lib.Resources(cloud=registry.CLOUD_REGISTRY.from_str('gcp'),
+        cpus=6,
+        memory=8,
+        use_spot=True,
+        autostop={'timeout': 3600})])
+
     with pytest.raises(AssertionError):
         t.update_resources(invalid_field=1)
