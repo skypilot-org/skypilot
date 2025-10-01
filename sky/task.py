@@ -1079,6 +1079,27 @@ class Task:
             self.resources, self._envs, self._secrets)
         return self
 
+    def update_resources(self, **update_params: Any) -> 'Task':
+        """Updates the resources for this task.
+
+        Example:
+            .. code-block:: python
+
+                task.update_resources(use_spot=True)
+                task.update_resources(autostop={'timeout': 3600})
+
+        Args:
+          update_params: A dictionary of parameters to update the resources.
+
+        Returns:
+          self: The current task, with resources updated.
+        """
+        updated_resources = []
+        for resource in self.resources:
+            updated_resources.append(resource.copy(**update_params))
+        self.set_resources(updated_resources)
+        return self
+
     @property
     def use_spot(self) -> bool:
         return any(r.use_spot for r in self.resources)
