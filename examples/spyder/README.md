@@ -36,7 +36,7 @@ a. Click on `Consoles` on the top bar, and select `Connect to an existing kernel
   ![](https://i.imgur.com/nUCwxxK.png)
 b. In the window, select the connection file downloaded, and specify the cluster name, `my-spyder` in the Hostname field, and Username as `sky` (required by Spyder).
   ![](https://i.imgur.com/83Q0PYR.png)
-c. Click on OK, and you will be connected to the SkyPilot cluster, and you can run your script through the console
+c. Click on `OK`, and you will be connected to the SkyPilot cluster, and you can run your script through the console
   ![](https://i.imgur.com/2lePAxj.png)
 
 Note: username need to be specified explicitly as `sky` due to the limitation of Spyder.
