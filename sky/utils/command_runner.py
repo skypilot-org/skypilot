@@ -32,6 +32,11 @@ _HOME_DIR_PATTERN = re.compile(r'SKYPILOT_HOME_DIR: ([^\s\n]+)')
 # to get a total progress bar, but it requires rsync>=3.1.0 and Mac
 # OS has a default rsync==2.6.9 (16 years old).
 RSYNC_DISPLAY_OPTION = '-Pavz'
+# Include directories option to sync empty directories.
+# While the man page suggests -a above (--archive) implies -r (--recursive),
+# and -r takes precedence over --dirs, in practice --dirs is needed
+# to sync empty directories.
+RSYNC_INCLUDE_DIRECTORIES_OPTION = '--dirs'
 # Legend
 #   dir-merge: ignore file can appear in any subdir, applies to that
 #     subdir downwards
@@ -299,21 +304,15 @@ class CommandRunner:
         rsync_command = []
         if prefix_command is not None:
             rsync_command.append(prefix_command)
-        rsync_command += ['rsync', RSYNC_DISPLAY_OPTION]
+        rsync_command += [
+            'rsync', RSYNC_DISPLAY_OPTION, RSYNC_INCLUDE_DIRECTORIES_OPTION
+        ]
         if not up:
             rsync_command.append(RSYNC_NO_OWNER_NO_GROUP_OPTION)
 
         # --filter
         # The source is a local path, so we need to resolve it.
         resolved_source = pathlib.Path(source).expanduser().resolve()
-
-        # Check if source is an empty directory and add --dirs option
-        # to sync it.
-        # This is required as the API server will raise an error if the
-        # directory is not present on the cluster, even if it is empty.
-        if (resolved_source.is_dir() and not any(resolved_source.iterdir())):
-            # Source is an empty directory, add --dirs to ensure it gets synced
-            rsync_command.append('--dirs')
 
         if (resolved_source / constants.SKY_IGNORE_FILE).exists():
             rsync_command.append(RSYNC_FILTER_SKYIGNORE)
