@@ -12,7 +12,7 @@ import time
 # Add SkyPilot to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from test_scale import TestScale
+from scale_test_utils import TestScale
 
 from sky import global_user_state
 from sky.jobs import state as job_state
@@ -219,9 +219,9 @@ def main():
 
     # Create test instance
     test = TestScale()
-    test.setup_method(active_cluster_name=args.active_cluster,
-                      terminated_cluster_name=args.terminated_cluster,
-                      managed_job_id=args.managed_job_id)
+    test.initialize(active_cluster_name=args.active_cluster,
+                    terminated_cluster_name=args.terminated_cluster,
+                    managed_job_id=args.managed_job_id)
 
     results = {}
 

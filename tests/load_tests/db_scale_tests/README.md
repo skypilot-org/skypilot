@@ -86,14 +86,14 @@ cp ~/.sky/state.db ~/.sky/state.db.backup
 cp ~/.sky/spot_jobs.db ~/.sky/spot_jobs.db.backup
 ```
 
-### Option 1: Quick Performance Benchmark (Recommended)
+### Performance Benchmark
 
 For a quick performance overview with detailed timing information:
 
 ```bash
 # Run the standalone benchmark script with your sample data
 # Note: Replace '1' with the actual job ID from your 'sky jobs launch' output
-python tests/scale_tests/run_scale_test.py \
+python tests/load_tests/db_scale_tests/run_scale_test.py \
   --active-cluster scale-test-active \
   --terminated-cluster scale-test-terminated \
   --managed-job-id 1
@@ -139,7 +139,7 @@ python tests/scale_tests/run_scale_test.py \
 # Test cluster history with custom template and larger dataset
 python tests/scale_tests/run_scale_test.py \
   --test history \
-  --terminated-cluster my-cluster \
+  --terminated-cluster scale-test-terminated \
   --history-recent 5000 \
   --history-old 15000
 
@@ -149,26 +149,6 @@ python tests/scale_tests/run_scale_test.py \
   --managed-job-id 5 \
   --job-count 20000
 ```
-
-### Option 2: Full Test Suite with Assertions
-
-For comprehensive testing with performance assertions and regression detection:
-
-```bash
-# Run pytest with verbose output and performance logging
-# Note: Replace '1' with the actual job ID from your 'sky jobs launch' output
-pytest tests/scale_tests/test_scale.py -n 1 -v -s --tb=short \
-  --active-cluster scale-test-active \
-  --terminated-cluster scale-test-terminated \
-  --managed-job-id 1
-```
-
-This will:
-- Use your sample entries as templates
-- Run all scale tests with performance assertions
-- Ensure operations complete within acceptable time limits
-- Detect performance regressions
-- Show detailed test results and performance summary
 
 ## Performance Monitoring
 

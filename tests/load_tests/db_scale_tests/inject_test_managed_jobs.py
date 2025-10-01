@@ -9,7 +9,7 @@ import sys
 # Add SkyPilot to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from test_scale import TestScale
+from scale_test_utils import TestScale
 
 
 def main():
@@ -21,7 +21,7 @@ def main():
 
     # Create test instance
     test = TestScale()
-    test.setup_method(
+    test.initialize(
         active_cluster_name='scale-test-active',
         terminated_cluster_name='scale-test-terminated',
         managed_job_id=1  # Required - must exist
