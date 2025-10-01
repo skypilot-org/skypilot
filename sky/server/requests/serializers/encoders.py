@@ -211,8 +211,8 @@ def encode_storage_ls(
     return [storage_info.model_dump() for storage_info in return_value]
 
 
-@register_encoder('volumes_ls')
-def encode_volumes_ls(
+@register_encoder('volume_list')
+def encode_volume_list(
         return_value: List[responses.VolumeRecord]) -> List[Dict[str, Any]]:
     return [volume_info.model_dump() for volume_info in return_value]
 
