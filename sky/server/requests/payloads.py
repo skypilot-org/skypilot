@@ -252,7 +252,6 @@ class LaunchBody(RequestBody):
     down: bool = False
     backend: Optional[str] = None
     optimize_target: common_lib.OptimizeTarget = common_lib.OptimizeTarget.COST
-    skip_unnecessary_provision: bool = False
     no_setup: bool = False
     clone_disk_from: Optional[str] = None
     fast: bool = False

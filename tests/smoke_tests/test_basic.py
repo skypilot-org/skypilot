@@ -245,37 +245,8 @@ def test_launch_fast(generic_cloud: str):
             ' echo "$s" && '
             # Validate that cluster was not re-launched.
             '! echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
-            # Validate that setup was not re-run.
-            '! echo "$s" | grep -A 1 "Running setup on" | grep "running setup" && '
-            # Validate that the task ran and finished.
-            'echo "$s" | grep -A 1 "task run finish" | grep "Job finished (status: SUCCEEDED)"',
-            f'sky logs {name} 2 --status',
-            f'sky status -r {name} | grep UP',
-        ],
-        f'sky down -y {name}',
-        timeout=smoke_tests_utils.get_timeout(generic_cloud),
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-# ---------- Test skip unnecessary provision ----------
-def test_launch_skip_unnecessary_provision(generic_cloud: str):
-    name = smoke_tests_utils.get_cluster_name()
-
-    test = smoke_tests_utils.Test(
-        'test_launch_skip_unnecessary_provision',
-        [
-            # First launch to create the cluster
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} --skip-unnecessary-provision {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-            f'sky logs {name} 1 --status',
-
-            # Second launch to test fast launch - should not reprovision
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --skip-unnecessary-provision tests/test_yamls/minimal.yaml) && '
-            ' echo "$s" && '
-            # Validate that cluster was not re-launched.
-            '! echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
             # Validate that setup was re-run.
-            'echo "$s" | grep -A 1 "Job started. Streaming logs..." | grep "(setup" | grep "running setup" '
+            'echo "$s" | grep -A 1 "Job started. Streaming logs..." | grep "(setup" | grep "running setup" && '
             # Validate that the task ran and finished.
             'echo "$s" | grep -A 1 "task run finish" | grep "Job finished (status: SUCCEEDED)"',
             f'sky logs {name} 2 --status',
@@ -345,8 +316,8 @@ def test_launch_fast_with_cluster_changes(generic_cloud: str, tmp_path):
             ' echo "$s" && '
             # Validate that cluster was not re-launched.
             '! echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
-            # Validate that setup was not re-run.
-            '! echo "$s" | grep -A 1 "Running setup on" | grep "running setup" && '
+            # Validate that setup was re-run.
+            'echo "$s" | grep -A 1 "Job started. Streaming logs..." | grep "(setup" | grep "running setup" && '
             f'sky logs {name} 2 --status',
 
             # Copy current config as a base.
