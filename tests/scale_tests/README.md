@@ -106,6 +106,50 @@ This will:
 - Show performance metrics (duration, rate) for each operation
 - Automatically clean up test data
 
+#### Configurable Options
+
+The `run_scale_test.py` script supports several command-line arguments to customize your test:
+
+**Sample Data Configuration:**
+- `--active-cluster CLUSTER_NAME` - Name of active cluster to use as template (default: `scale-test-active`)
+- `--terminated-cluster CLUSTER_NAME` - Name of terminated cluster to use as template (default: `scale-test-terminated`)
+- `--managed-job-id JOB_ID` - Job ID of managed job to use as template (default: `1`)
+
+**Test Selection:**
+- `--test {all,clusters,history,jobs}` - Which test to run (default: `all`)
+  - `all` - Run all tests (clusters + history + jobs)
+  - `clusters` - Only test active clusters
+  - `history` - Only test cluster history
+  - `jobs` - Only test managed jobs
+
+**Dataset Sizes:**
+- `--cluster-count N` - Number of active clusters to inject (default: `2000`)
+- `--history-recent N` - Number of recent terminated clusters to inject (default: `2000`)
+- `--history-old N` - Number of old terminated clusters to inject (default: `8000`)
+- `--job-count N` - Number of managed jobs to inject (default: `10000`)
+
+**Example Usage:**
+
+```bash
+# Test only active clusters with a smaller dataset
+python tests/scale_tests/run_scale_test.py \
+  --test clusters \
+  --cluster-count 500
+
+# Test cluster history with custom template and larger dataset
+python tests/scale_tests/run_scale_test.py \
+  --test history \
+  --terminated-cluster my-cluster \
+  --history-recent 5000 \
+  --history-old 15000
+
+# Test managed jobs with custom job template
+python tests/scale_tests/run_scale_test.py \
+  --test jobs \
+  --managed-job-id 5 \
+  --job-count 20000
+```
+
 ### Option 2: Full Test Suite with Assertions
 
 For comprehensive testing with performance assertions and regression detection:
