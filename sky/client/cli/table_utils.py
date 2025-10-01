@@ -1,6 +1,7 @@
 """Utilities for formatting tables for CLI output."""
-from typing import List
+from typing import List, Optional
 
+from sky.jobs import utils as managed_jobs
 from sky.schemas.api import responses
 from sky.skylet import constants
 from sky.utils import common_utils
@@ -77,3 +78,14 @@ def format_storage_table(storages: List[responses.StorageRecord],
         return str(storage_table)
     else:
         return 'No existing storage.'
+
+
+def format_job_table(jobs: List[responses.ManagedJobRecord],
+                     show_all: bool,
+                     show_user: bool,
+                     max_jobs: Optional[int] = None):
+    jobs = [job.model_dump() for job in jobs]
+    return managed_jobs.format_job_table(jobs,
+                                         show_all=show_all,
+                                         show_user=show_user,
+                                         max_jobs=max_jobs)

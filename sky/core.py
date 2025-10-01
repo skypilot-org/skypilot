@@ -195,7 +195,7 @@ def status(
 def status_kubernetes(
 ) -> Tuple[List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
            List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
-           List[Dict[str, Any]], Optional[str]]:
+           List[responses.ManagedJobRecord], Optional[str]]:
     """Gets all SkyPilot clusters and jobs in the Kubernetes cluster.
 
     Managed jobs and services are also included in the clusters returned.
@@ -270,6 +270,7 @@ all_clusters, unmanaged_clusters, all_jobs, context
         kubernetes_utils.KubernetesSkyPilotClusterInfoPayload.from_cluster(c)
         for c in unmanaged_clusters
     ]
+    all_jobs = [responses.ManagedJobRecord(**job) for job in all_jobs]
     return all_clusters, unmanaged_clusters, all_jobs, context
 
 

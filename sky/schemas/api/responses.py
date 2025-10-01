@@ -7,6 +7,7 @@ import pydantic
 
 from sky import data
 from sky import models
+from sky.jobs import state as job_state
 from sky.server import common
 from sky.skylet import job_lib
 from sky.utils import status_lib
@@ -153,3 +154,47 @@ class StorageRecord(ResponseBaseModel):
     store: List[data.StoreType]
     last_use: str
     status: status_lib.StorageStatus
+
+
+# TODO (syang) figure out which fields are always present
+# and therefore can be non-optional.
+class ManagedJobRecord(ResponseBaseModel):
+    """A single managed job record."""
+    job_id: Optional[int] = None
+    task_id: Optional[int] = None
+    job_name: Optional[str] = None
+    task_name: Optional[str] = None
+    job_duration: Optional[float] = None
+    workspace: Optional[str] = None
+    status: Optional[job_state.ManagedJobStatus] = None
+    schedule_state: Optional[str] = None
+    resources: Optional[str] = None
+    cluster_resources: Optional[str] = None
+    cluster_resources_full: Optional[str] = None
+    cloud: Optional[str] = None
+    region: Optional[str] = None
+    zone: Optional[str] = None
+    infra: Optional[str] = None
+    recovery_count: Optional[int] = None
+    details: Optional[str] = None
+    failure_reason: Optional[str] = None
+    user_name: Optional[str] = None
+    user_hash: Optional[str] = None
+    submitted_at: Optional[float] = None
+    start_at: Optional[float] = None
+    end_at: Optional[float] = None
+    user_yaml: Optional[str] = None
+    entrypoint: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    controller_pid: Optional[int] = None
+    dag_yaml_path: Optional[str] = None
+    env_file_path: Optional[str] = None
+    last_recovered_at: Optional[float] = None
+    run_timestamp: Optional[str] = None
+    priority: Optional[int] = None
+    original_user_yaml_path: Optional[str] = None
+    pool: Optional[str] = None
+    pool_hash: Optional[str] = None
+    current_cluster_name: Optional[str] = None
+    job_id_on_pool_cluster: Optional[int] = None
+    accelerators: Optional[Dict[str, int]] = None
