@@ -12,13 +12,36 @@ import pytest
 # Add SkyPilot to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from schema_generator import SchemaBasedGenerator
+
+def pytest_addoption(parser):
+    """Add custom command-line options for scale tests."""
+    parser.addoption("--active-cluster",
+                     action="store",
+                     default="scale-test-active",
+                     help="Name of the active cluster to use as template")
+    parser.addoption("--terminated-cluster",
+                     action="store",
+                     default="scale-test-terminated",
+                     help="Name of the terminated cluster to use as template")
+    parser.addoption("--managed-job-id",
+                     action="store",
+                     type=int,
+                     default=1,
+                     help="Job ID of the managed job to use as template")
 
 
-@pytest.fixture(scope="session")
-def generator():
-    """Create a shared schema generator for all tests."""
-    return SchemaBasedGenerator()
+@pytest.fixture(scope="function", autouse=True)
+def setup_test_class(request):
+    """Automatically setup test class with sample data parameters."""
+    if hasattr(request.instance, 'setup_method'):
+        active_cluster = request.config.getoption("--active-cluster")
+        terminated_cluster = request.config.getoption("--terminated-cluster")
+        managed_job_id = request.config.getoption("--managed-job-id")
+
+        request.instance.setup_method(
+            active_cluster_name=active_cluster,
+            terminated_cluster_name=terminated_cluster,
+            managed_job_id=managed_job_id)
 
 
 @pytest.fixture(scope="function")
