@@ -107,7 +107,7 @@ def encode_status_kubernetes(
     return_value: Tuple[
         List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
         List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
-        List[Dict[str, Any]], Optional[str]]
+        List[responses.ManagedJobRecord], Optional[str]]
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]],
            Optional[str]]:
     all_clusters, unmanaged_clusters, all_jobs, context = return_value
@@ -121,6 +121,7 @@ def encode_status_kubernetes(
         encoded_cluster = dataclasses.asdict(cluster)
         encoded_cluster['status'] = encoded_cluster['status'].value
         encoded_unmanaged_clusters.append(encoded_cluster)
+    all_jobs = [job.model_dump() for job in all_jobs]
     return encoded_all_clusters, encoded_unmanaged_clusters, all_jobs, context
 
 
@@ -150,9 +151,9 @@ def encode_jobs_queue_v2(
     for job in jobs:
         job['status'] = job['status'].value
     if total is None:
-        return jobs
+        return [job.model_dump() for job in jobs]
     return {
-        'jobs': jobs,
+        'jobs': [job.model_dump() for job in jobs],
         'total': total,
         'total_no_filter': total_no_filter,
         'status_counts': status_counts
@@ -203,11 +204,11 @@ def encode_enabled_clouds(clouds: List['clouds.Cloud']) -> List[str]:
 
 @register_encoder('storage_ls')
 def encode_storage_ls(
-        return_value: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return_value: List[responses.StorageRecord]) -> List[Dict[str, Any]]:
     for storage_info in return_value:
         storage_info['status'] = storage_info['status'].value
         storage_info['store'] = [store.value for store in storage_info['store']]
-    return return_value
+    return [storage_info.model_dump() for storage_info in return_value]
 
 
 @register_encoder('job_status')

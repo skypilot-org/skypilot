@@ -363,6 +363,21 @@ class JobsController:
             cluster_name, job_id_on_pool_cluster = (
                 await
                 managed_job_state.get_pool_submit_info_async(self._job_id))
+        if cluster_name is None:
+            # Check if we have been cancelled here, in the case where a user
+            # quickly cancels the job we want to gracefully handle it here,
+            # otherwise we will end up in the FAILED_CONTROLLER state.
+            self._logger.info(f'Cluster name is None for job {self._job_id}, '
+                              f'task {task_id}. Checking if we have been '
+                              'cancelled.')
+            status = await (managed_job_state.get_job_status_with_task_id_async(
+                job_id=self._job_id, task_id=task_id))
+            self._logger.debug(f'Status for job {self._job_id}, task {task_id}:'
+                               f'{status}')
+            if status == managed_job_state.ManagedJobStatus.CANCELLED:
+                self._logger.info(f'Job {self._job_id}, task {task_id} has '
+                                  'been quickly cancelled.')
+                raise asyncio.CancelledError()
         assert cluster_name is not None, (cluster_name, job_id_on_pool_cluster)
 
         if not is_resume:

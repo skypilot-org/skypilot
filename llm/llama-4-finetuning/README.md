@@ -7,7 +7,7 @@
 
 Meta's Llama 4 represents the next generation of open-source large language models, featuring advanced capabilities with the **Llama-4-Maverick-17B-128E model** - a 400B  parameter (17B active) Mixture of Experts (MoE) architecture with 128 experts.
 
-This guide shows how to use [SkyPilot](https://github.com/skypilot-org/skypilot) with torchtune and Llama Factory to **finetune Llama 4 on your own infra**. Everything is packaged in simple [SkyPilot YAMLs](https://docs.skypilot.co/en/latest/getting-started/quickstart.html), that can be launched with one command on your infra: 
+This guide shows how to use [SkyPilot](https://github.com/skypilot-org/skypilot) with torchtune and Llama Factory to **finetune Llama 4 on your own infra**. Everything is packaged in simple [SkyPilot YAMLs](https://docs.skypilot.co/en/latest/getting-started/quickstart.html), that can be launched with one command on your infra:
 - Kubernetes cluster
 - Cloud accounts ([16+ clouds supported](https://docs.skypilot.co/en/latest/getting-started/installation.html))
 
@@ -33,7 +33,7 @@ Run the following on your local machine:
     <summary>
         SkyPilot YAML for finetuning Llama 4: <code>llama-4-maverick-sft.yaml</code>
     </summary>
-    
+
 ```yaml
 # Full finetuning of Llama-4 Maverick 17B MoE model with 128 experts.
 #
@@ -44,7 +44,7 @@ Run the following on your local machine:
 # This config requires at least 4 nodes with 8x H200 GPUs each.
 
 envs:
-  HF_TOKEN: 
+  HF_TOKEN:
 
 resources:
   cpus: 100+
@@ -54,7 +54,11 @@ resources:
 
 num_nodes: 4
 
-# Optional: configure buckets for dataset and checkpoints. You can then use the /outputs directory to write checkpoints.
+# Optional: configure buckets for dataset and checkpoints. You can then use the
+# /checkpoints directory to write checkpoints, which writes to local disk first
+# and asynchronously uploads to the cloud bucket. Pass /checkpoints to the main
+# training script.
+# file_mounts:
 # file_mounts:
 #  /dataset:
 #    source: s3://my-dataset-bucket
@@ -100,7 +104,7 @@ run: |
   keep_last_n_checkpoints=1 \
   fsdp_cpu_offload=True
 ```
-    
+
 </details>
 
 Run the following on your local machine:
@@ -140,7 +144,7 @@ export HF_TOKEN="xxxx"
 
 4. Install SkyPilot for launching the finetuning:
 ```bash
-pip install skypilot-nightly[aws,gcp,kubernetes] 
+pip install skypilot-nightly[aws,gcp,kubernetes]
 # or other clouds (16 clouds + kubernetes supported) you have setup
 # See: https://docs.skypilot.co/en/latest/getting-started/installation.html
 ```
@@ -167,7 +171,7 @@ sky check
 ```
 
 ## What's next
-    
+
 * [AI on Kubernetes Without the Pain](https://blog.skypilot.co/ai-on-kubernetes/)
 * [SkyPilot AI Gallery](https://docs.skypilot.co/en/latest/gallery/index.html)
 * [SkyPilot Docs](https://docs.skypilot.co)

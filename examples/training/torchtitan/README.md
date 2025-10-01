@@ -4,19 +4,9 @@
 
 This example demonstrates how to run [TorchTitan](https://github.com/pytorch/torchtitan) on your Kubernetes clusters, or any hypersclaers, neoclouds using SkyPilot, in addition to the instructions for runnning on [Slurm](https://github.com/pytorch/torchtitan?tab=readme-ov-file#multi-node-training).
 
-## Why SkyPilot for Distributed Training?
-
-* **Simple multi-node setup**: SkyPilot automatically provides [environment variables](https://docs.skypilot.co/en/latest/running-jobs/environment-variables.html) (`SKYPILOT_NODE_RANK`, `SKYPILOT_NODE_IPS`, etc.) that integrate seamlessly with PyTorch distributed training - no manual networking configuration needed.
-* **Auto-recovery**: Built-in fault tolerance automatically recovers from node failures and spot preemptions, resuming from checkpoints.
-* **Easily run on Kubernetes or clouds without code changes**: SkyPilot offers a simple interface to run TorchTitan on any infrastructure: `sky launch --infra k8s torchtitan.yaml`
-* **Launch distributed training with a single command**: SkyPilot automatically provides [environment variables](https://docs.skypilot.co/en/latest/running-jobs/environment-variables.html)(`SKYPILOT_NODE_RANK`, `SKYPILOT_NODE_IPS`, etc.) that integrate seamlessly with PyTorch distributed training - no manual networking configuration needed.
-* **Auto-recovery**: Built-in fault tolerance automatically recovers from node failures and spot preemptions, resuming from checkpoints.
-
-
 ## Quick start
 Here is how to finetune Llama 3.1 on 2 nodes with 8 H100 (or 8 H200):
 ```bash
-# Install SkyPilot (if not already installed)
 # Install SkyPilot (if not already installed)
 # More cloud setup instructions in: https://docs.skypilot.co/en/latest/getting-started/installation.html
 pip install "skypilot[kubernetes,aws]"  # or your cloud: [gcp], [azure], etc.
@@ -66,6 +56,14 @@ sky launch -c torchtitan-8node torchtitan.yaml --num-nodes 8
 # Try different model sizes (update CONFIG_FILE in torchtitan.yaml)
 sky launch -c torchtitan-llama3-70b torchtitan.yaml --env CONFIG_FILE=./torchtitan/models/llama3/train_configs/llama3_70b.toml
 ```
+
+## Why SkyPilot for Distributed Training?
+
+* **Simple multi-node setup**: SkyPilot automatically provides [environment variables](https://docs.skypilot.co/en/latest/running-jobs/environment-variables.html) (`SKYPILOT_NODE_RANK`, `SKYPILOT_NODE_IPS`, etc.) that integrate seamlessly with PyTorch distributed training - no manual networking configuration needed.
+* **Auto-recovery**: Built-in fault tolerance automatically recovers from node failures and spot preemptions, resuming from checkpoints.
+* **Easily run on Kubernetes or clouds without code changes**: SkyPilot offers a simple interface to run TorchTitan on any infrastructure: `sky launch --infra k8s torchtitan.yaml`
+* **Launch distributed training with a single command**: SkyPilot automatically provides [environment variables](https://docs.skypilot.co/en/latest/running-jobs/environment-variables.html)(`SKYPILOT_NODE_RANK`, `SKYPILOT_NODE_IPS`, etc.) that integrate seamlessly with PyTorch distributed training - no manual networking configuration needed.
+* **Auto-recovery**: Built-in fault tolerance automatically recovers from node failures and spot preemptions, resuming from checkpoints.
 
 ## Multi-node training details
 

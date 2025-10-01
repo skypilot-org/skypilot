@@ -72,7 +72,7 @@ def decode_status_kubernetes(
                         List[Dict[str, Any]], Optional[str]]
 ) -> Tuple[List[kubernetes_utils.KubernetesSkyPilotClusterInfoPayload],
            List[kubernetes_utils.KubernetesSkyPilotClusterInfoPayload],
-           List[Dict[str, Any]], Optional[str]]:
+           List[responses.ManagedJobRecord], Optional[str]]:
     (encoded_all_clusters, encoded_unmanaged_clusters, all_jobs,
      context) = return_value
     all_clusters = []
@@ -85,6 +85,7 @@ def decode_status_kubernetes(
         cluster['status'] = status_lib.ClusterStatus(cluster['status'])
         unmanaged_clusters.append(
             kubernetes_utils.KubernetesSkyPilotClusterInfoPayload(**cluster))
+    all_jobs = [responses.ManagedJobRecord(**job) for job in all_jobs]
     return all_clusters, unmanaged_clusters, all_jobs, context
 
 
@@ -115,7 +116,7 @@ def decode_jobs_queue(return_value: List[dict],) -> List[Dict[str, Any]]:
 
 
 @register_decoders('jobs.queue_v2')
-def decode_jobs_queue_v2(return_value) -> List[Dict[str, Any]]:
+def decode_jobs_queue_v2(return_value) -> List[responses.ManagedJobRecord]:
     """Decode jobs queue response.
 
     Supports legacy list, or a dict {jobs, total}.
@@ -129,6 +130,7 @@ def decode_jobs_queue_v2(return_value) -> List[Dict[str, Any]]:
         jobs = return_value
     for job in jobs:
         job['status'] = managed_jobs.ManagedJobStatus(job['status'])
+    jobs = [responses.ManagedJobRecord(**job) for job in jobs]
     return jobs
 
 
@@ -181,14 +183,16 @@ def decode_list_accelerators(
 
 @register_decoders('storage_ls')
 def decode_storage_ls(
-        return_value: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return_value: List[Dict[str, Any]]) -> List[responses.StorageRecord]:
     for storage_info in return_value:
         storage_info['status'] = status_lib.StorageStatus(
             storage_info['status'])
         storage_info['store'] = [
             storage.StoreType(store) for store in storage_info['store']
         ]
-    return return_value
+    return [
+        responses.StorageRecord(**storage_info) for storage_info in return_value
+    ]
 
 
 @register_decoders('job_status')

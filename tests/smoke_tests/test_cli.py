@@ -21,6 +21,10 @@ from sky.server import common as server_common
 from sky.skylet import constants
 from sky.utils import common_utils
 
+_CHECK_AWS_BUCKET_DOESNT_EXIST = (
+    'aws s3api head-bucket --bucket {bucket_name} 2>/dev/null && exit 1 || exit 0'
+)
+
 
 @pytest.mark.no_remote_server
 def test_endpoint_output_basic(generic_cloud: str):
@@ -132,3 +136,44 @@ def test_cli_auto_retry(generic_cloud: str):
         teardown=f'sky down -y {name}; kill $(cat /tmp/{name}-chaos.pid) || true'
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.aws
+def test_storage_delete(generic_cloud: str):
+    """Test that storage delete works."""
+    name = smoke_tests_utils.get_cluster_name()
+    bucket_name = f'{name}-bucket'
+    bucket_job_yaml = textwrap.dedent(f"""
+    name: {name}-job
+    resources:
+        cpus: 2
+        infra: aws
+    file_mounts:
+        /output:
+            name: {bucket_name}
+            mode: MOUNT
+            store: s3
+    run: |
+        echo "Data" > /output/data.txt 
+    """)
+    with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
+        job_yaml.write(bucket_job_yaml.encode('utf-8'))
+        job_yaml.flush()
+
+        test = smoke_tests_utils.Test('storage_delete', [
+            f'echo "bucket name: {bucket_name}"',
+            smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                'aws', name, skip_remote_server_check=True),
+            f's=$(SKYPILOT_DEBUG=0 sky jobs launch -y {job_yaml.name}) && echo "$s" | grep "Job finished (status: SUCCEEDED)."',
+            f's=$(SKYPILOT_DEBUG=0 sky storage delete -y {bucket_name}) && echo "$s" && echo "$s" | grep "Deleted S3 bucket {bucket_name}"',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=_CHECK_AWS_BUCKET_DOESNT_EXIST.format(
+                    bucket_name=bucket_name)),
+        ],
+                                      teardown=smoke_tests_utils.
+                                      down_cluster_for_cloud_cmd(
+                                          name, skip_remote_server_check=True),
+                                      timeout=smoke_tests_utils.get_timeout(
+                                          generic_cloud))
+        smoke_tests_utils.run_one_test(test, check_sky_status=False)

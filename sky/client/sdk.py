@@ -1618,26 +1618,15 @@ def cost_report(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def storage_ls() -> server_common.RequestId[List[Dict[str, Any]]]:
+def storage_ls() -> server_common.RequestId[List[responses.StorageRecord]]:
     """Gets the storages.
 
     Returns:
         The request ID of the storage list request.
 
     Request Returns:
-        storage_records (List[Dict[str, Any]]): A list of dicts, with each dict
-            containing the information of a storage.
-
-            .. code-block:: python
-
-                {
-                    'name': (str) storage name,
-                    'launched_at': (int) timestamp of creation,
-                    'store': (List[sky.StoreType]) storage type,
-                    'last_use': (int) timestamp of last use,
-                    'status': (sky.StorageStatus) storage status,
-                }
-        ]
+        storage_records (List[responses.StorageRecord]):
+            A list of storage records.
     """
     response = server_common.make_authenticated_request('GET', '/storage/ls')
     return server_common.get_request_id(response)
@@ -1912,10 +1901,10 @@ def kubernetes_node_info(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def status_kubernetes() -> server_common.RequestId[Tuple[
-    List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
-    List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'], List[Dict[
-        str, Any]], Optional[str]]]:
+def status_kubernetes() -> server_common.RequestId[
+    Tuple[List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
+          List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
+          List[responses.ManagedJobRecord], Optional[str]]]:
     """Gets all SkyPilot clusters and jobs in the Kubernetes cluster.
 
     Managed jobs and services are also included in the clusters returned.

@@ -26,6 +26,11 @@ class VolumeType(enum.Enum):
     PVC = 'k8s-pvc'
     RUNPOD_NETWORK_VOLUME = 'runpod-network-volume'
 
+    @classmethod
+    def supported_types(cls) -> list:
+        """Return list of supported volume type values."""
+        return [vt.value for vt in cls]
+
 
 class VolumeMount:
     """Volume mount specification."""
