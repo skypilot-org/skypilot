@@ -201,26 +201,7 @@ class ManagedJobRecord(ResponseBaseModel):
 
 
 class VolumeRecord(ResponseBaseModel):
-    """Response for the volume list endpoint.
-    {
-        'name': str,
-        'type': str,
-        'launched_at': int timestamp of creation,
-        'cloud': str,
-        'region': str,
-        'zone': str,
-        'size': str,
-        'config': Dict[str, Any],
-        'name_on_cloud': str,
-        'user_hash': str,
-        'workspace': str,
-        'last_attached_at': int timestamp of last attachment,
-        'last_use': last command,
-        'status': str,
-        'usedby_pods': List[str],
-        'usedby_clusters': List[str],
-    }
-    """
+    """A single volume record."""
     name: str
     type: str
     launched_at: int
