@@ -282,12 +282,10 @@ class Shadeform(clouds.Cloud):
         except (OSError, IOError) as e:
             return False, f'Error checking Shadeform credentials: {str(e)}'
 
-    def get_feasible_launchable_resources(
-            self,
-            resources: 'resources_lib.Resources',
-            num_nodes: int = 1) -> 'resources_utils.FeasibleResources':
+    def _get_feasible_launchable_resources(
+        self, resources: 'resources_lib.Resources'
+    ) -> 'resources_utils.FeasibleResources':
         """Get feasible launchable resources."""
-        del num_nodes  # unused for now
         if resources.use_spot:
             return resources_utils.FeasibleResources(
                 [], [], 'Spot instances are not supported on Shadeform.')
