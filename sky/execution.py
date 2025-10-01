@@ -116,6 +116,7 @@ def _execute(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     skip_unnecessary_provisioning: bool = False,
+    skip_unnecessary_setup: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _quiet_optimizer: bool = False,
@@ -220,6 +221,7 @@ def _execute(
             no_setup=no_setup,
             clone_disk_from=clone_disk_from,
             skip_unnecessary_provisioning=skip_unnecessary_provisioning,
+            skip_unnecessary_setup=skip_unnecessary_setup,
             _quiet_optimizer=_quiet_optimizer,
             _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller=
@@ -242,6 +244,7 @@ def _execute_dag(
     no_setup: bool,
     clone_disk_from: Optional[str],
     skip_unnecessary_provisioning: bool,
+    skip_unnecessary_setup: bool,
     # pylint: disable=invalid-name
     _quiet_optimizer: bool,
     _is_launched_by_jobs_controller: bool,
@@ -464,7 +467,7 @@ def _execute_dag(
         if no_setup:
             job_logger.info('Setup commands skipped.')
         elif Stage.SETUP in stages and not dryrun:
-            if skip_unnecessary_provisioning and provisioning_skipped:
+            if provisioning_skipped and skip_unnecessary_setup:
                 job_logger.debug('Unnecessary provisioning was skipped, so '
                                  'skipping setup as well.')
             else:
@@ -521,6 +524,7 @@ def launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
+    skip_unnecessary_provision: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _quiet_optimizer: bool = False,
@@ -623,8 +627,9 @@ def launch(
     handle = None
     stages = None
     skip_unnecessary_provisioning = False
+    skip_unnecessary_setup = False
     # Check if cluster exists and we are doing fast provisioning
-    if fast and cluster_name is not None:
+    if cluster_name is not None and (fast or skip_unnecessary_provision):
         cluster_status, maybe_handle = (
             backend_utils.refresh_cluster_status_handle(cluster_name))
         if cluster_status == status_lib.ClusterStatus.INIT:
@@ -668,6 +673,8 @@ def launch(
                 Stage.DOWN,
             ]
             skip_unnecessary_provisioning = True
+            if fast:
+                skip_unnecessary_setup = True
 
     # Attach to setup if the cluster is a controller, so that user can
     # see the setup logs when inspecting the launch process to know
@@ -690,6 +697,7 @@ def launch(
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
         skip_unnecessary_provisioning=skip_unnecessary_provisioning,
+        skip_unnecessary_setup=skip_unnecessary_setup,
         _quiet_optimizer=_quiet_optimizer,
         _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=
