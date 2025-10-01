@@ -2,6 +2,11 @@ name: fusermount-server-image
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Docker image tag'
+        required: false
+        default: '0.2.1'
 
 jobs:
   build:
@@ -26,6 +31,6 @@ jobs:
           push: true
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/fusermount-server:latest
-            ${{ secrets.DOCKER_USERNAME }}/fusermount-server:0.2.0
+            ${{ secrets.DOCKER_USERNAME }}/fusermount-server:${{ github.event.inputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
