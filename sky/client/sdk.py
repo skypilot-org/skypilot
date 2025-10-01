@@ -442,6 +442,7 @@ def launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
+    skip_unnecessary_provision: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -512,6 +513,8 @@ def launch(
           different availability zone or region.
         fast: [Experimental] If the cluster is already up and available,
           skip provisioning and setup steps.
+        skip_unnecessary_provision: Do not re-provision the cluster if it is already up
+          and available. Does not skip setup even if provisioning is skipped.
         _need_confirmation: (Internal only) If True, show the confirmation
             prompt.
 
@@ -605,6 +608,7 @@ def launch(
             no_setup,
             clone_disk_from,
             fast,
+            skip_unnecessary_provision,
             _need_confirmation,
             _is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller,
@@ -625,6 +629,7 @@ def _launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
+    skip_unnecessary_provision: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -710,6 +715,7 @@ def _launch(
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
         fast=fast,
+        skip_unnecessary_provision=skip_unnecessary_provision,
         # For internal use
         quiet_optimizer=_need_confirmation,
         is_launched_by_jobs_controller=_is_launched_by_jobs_controller,

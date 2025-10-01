@@ -957,6 +957,13 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
     # which incorrectly recognizes the help string as a docstring.
     # pylint: disable=bad-docstring-quotes
     help='Skip confirmation prompt.')
+@click.option('--skip-unnecessary-provision',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Do not re-provision the cluster if it is already up '
+              'and available. Does not skip setup even if provisioning '
+              'is skipped.')
 @click.option('--no-setup',
               is_flag=True,
               default=False,
@@ -1017,6 +1024,7 @@ def launch(
     no_setup: bool,
     clone_disk_from: Optional[str],
     fast: bool,
+    skip_unnecessary_provision: bool,
     async_call: bool,
     config_override: Optional[Dict[str, Any]] = None,
     git_url: Optional[str] = None,
@@ -1116,6 +1124,7 @@ def launch(
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
         fast=fast,
+        skip_unnecessary_provision=skip_unnecessary_provision,
         _need_confirmation=not yes,
     )
     job_id_handle = _async_call_or_wait(request_id, async_call, 'sky.launch')
