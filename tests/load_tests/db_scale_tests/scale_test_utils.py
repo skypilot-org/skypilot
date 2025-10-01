@@ -259,4 +259,3 @@ class TestScale:
         except Exception as e:
             print(f"Failed to inject managed jobs: {e}")
             return 0
-
