@@ -299,12 +299,9 @@ def zip_files_and_folders(items: List[str],
                     archive_name = _get_archive_name(item, item)
                     # If it's a symlink, store it as a symlink
                     if os.path.islink(item):
-                        _store_symlink(zipf,
-                                       dir_path,
-                                       archive_name,
-                                       is_dir=True)
+                        _store_symlink(zipf, item, archive_name, is_dir=True)
                     else:
-                        zipf.write(dir_path, archive_name)
+                        zipf.write(item, archive_name)
 
                     # Include dir contents recursively
                     excluded_files = set([
