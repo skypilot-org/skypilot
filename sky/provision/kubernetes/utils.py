@@ -1,4 +1,5 @@
 """Kubernetes utilities for SkyPilot."""
+import collections
 import copy
 import dataclasses
 import datetime
@@ -3135,9 +3136,29 @@ def get_kubernetes_node_info(
 
     # Get the pods to get the real-time resource usage
     pods = None
+    allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
     if any_node_has_accelerators:
         try:
             pods = get_all_pods_in_kubernetes_cluster(context=context)
+            # Pre-compute allocated accelerator count per node
+            for pod in pods:
+                if pod.status.phase in ['Running', 'Pending']:
+                    # Skip pods that should not count against GPU count
+                    if should_exclude_pod_from_gpu_allocation(pod):
+                        logger.debug(f'Excluding low priority pod '
+                                     f'{pod.metadata.name} from GPU allocation '
+                                     f'calculations')
+                        continue
+                    # Iterate over all the containers in the pod and sum the
+                    # GPU requests
+                    pod_allocated_qty = 0
+                    for container in pod.spec.containers:
+                        if container.resources.requests:
+                            pod_allocated_qty += get_node_accelerator_count(
+                                context, container.resources.requests)
+                    if pod_allocated_qty > 0:
+                        allocated_qty_by_node[
+                            pod.spec.node_name] += pod_allocated_qty
         except kubernetes.api_exception() as e:
             if e.status == 403:
                 pass
@@ -3184,29 +3205,10 @@ def get_kubernetes_node_info(
                 ip_address=node_ip)
             continue
 
-        allocated_qty = 0
         if pods is None:
             accelerators_available = -1
-
         else:
-            for pod in pods:
-                # Get all the pods running on the node
-                if (pod.spec.node_name == node.metadata.name and
-                        pod.status.phase in ['Running', 'Pending']):
-                    # Skip pods that should not count against GPU count
-                    if should_exclude_pod_from_gpu_allocation(pod):
-                        logger.debug(
-                            f'Excluding low priority pod '
-                            f'{pod.metadata.name} from GPU allocation '
-                            f'calculations on node {node.metadata.name}')
-                        continue
-                    # Iterate over all the containers in the pod and sum the
-                    # GPU requests
-                    for container in pod.spec.containers:
-                        if container.resources.requests:
-                            allocated_qty += get_node_accelerator_count(
-                                context, container.resources.requests)
-
+            allocated_qty = allocated_qty_by_node[node.metadata.name]
             accelerators_available = accelerator_count - allocated_qty
 
         # Exclude multi-host TPUs from being processed.
