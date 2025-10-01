@@ -224,8 +224,7 @@ class Shadeform(clouds.Cloud):
 
         # Get instance type
         r = resources.copy(accelerators=None)
-        feasible_resources = self.get_feasible_launchable_resources(r,
-                                                                    num_nodes=1)
+        feasible_resources = self._get_feasible_launchable_resources(r)
         instance_type = feasible_resources.resources_list[0].instance_type
 
         resources_vars = {}

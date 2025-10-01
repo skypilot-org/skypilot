@@ -74,6 +74,16 @@ def create_catalog(api_key: str, output_path: str) -> None:
             vcpus = float(config['vcpus'])
             memory_gb = int(config['memory_in_gb'])
 
+            # Append "B" to instance_type and gpu_type if they end with "G"
+            if instance_type.endswith('G'):
+                instance_type += 'B'
+            if gpu_type.endswith('G'):
+                gpu_type += 'B'
+
+            # Replace "GBx" with "Gx" (case sensitive)
+            if 'Gx' in instance_type:
+                instance_type = instance_type.replace('Gx', 'GBx')
+
             # Price is in cents per hour, convert to dollars
             price = float(instance['hourly_price']) / 100
 

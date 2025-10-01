@@ -80,9 +80,10 @@ def _wait_for_instances_ready(cluster_name_on_cloud: str,
     return False
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Run instances for the given cluster."""
+    del cluster_name  # unused - we use cluster_name_on_cloud
     logger.info(f'Running instances for cluster {cluster_name_on_cloud} '
                 f'in region {region}')
     logger.debug(f'DEBUG: region type={type(region)}, value={region!r}')
@@ -158,6 +159,13 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
         # Shadeform uses underscores instead of hyphens
         instance_type = instance_type.replace('-', '_')
+
+        if instance_type.endswith('B'):
+            instance_type = instance_type[:-1]
+
+        # Replace "GBx" with "Gx" (case sensitive)
+        if 'GBx' in instance_type:
+            instance_type = instance_type.replace('GBx', 'Gx')
 
         assert cloud, 'Cloud provider cannot be empty'
         assert instance_type, 'Instance type cannot be empty'
