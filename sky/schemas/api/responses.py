@@ -156,6 +156,8 @@ class StorageRecord(ResponseBaseModel):
     status: status_lib.StorageStatus
 
 
+# TODO (syang) figure out which fields are always present
+# and therefore can be non-optional.
 class ManagedJobRecord(ResponseBaseModel):
     """A single managed job record."""
     job_id: Optional[int] = None
