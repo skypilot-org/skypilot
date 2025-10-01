@@ -198,3 +198,24 @@ class ManagedJobRecord(ResponseBaseModel):
     current_cluster_name: Optional[str] = None
     job_id_on_pool_cluster: Optional[int] = None
     accelerators: Optional[Dict[str, int]] = None
+
+
+class VolumeRecord(ResponseBaseModel):
+    """A single volume record."""
+    name: str
+    type: str
+    launched_at: int
+    cloud: str
+    region: str
+    zone: Optional[str] = None
+    size: str
+    config: Dict[str, Any]
+    name_on_cloud: str
+    user_hash: str
+    user_name: str
+    workspace: str
+    last_attached_at: Optional[int] = None
+    last_use: Optional[str] = None
+    status: Optional[str] = None
+    usedby_pods: List[str]
+    usedby_clusters: List[str]
