@@ -977,7 +977,7 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
     default=False,
     required=False,
     help=('[Experimental] If the cluster is already up and available, skip '
-          'provisioning step.'))
+          'provisioning step. Setup step should be idempotent if set to True.'))
 @click.option('--git-url', type=str, help='Git repository URL.')
 @click.option('--git-ref',
               type=str,

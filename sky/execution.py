@@ -578,7 +578,8 @@ def launch(
             specified cluster. This is useful to migrate the cluster to a
             different availability zone or region.
         fast: [Experimental] If the cluster is already up and available,
-            skip provisioning and setup steps.
+            skip provisioning step. Setup step should be idempotent if
+            set to True.
 
     Raises:
         exceptions.ClusterOwnerIdentityMismatchError: if the cluster is
