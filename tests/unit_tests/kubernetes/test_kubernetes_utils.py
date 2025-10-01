@@ -106,19 +106,19 @@ def test_get_kubernetes_node_info():
             'accelerators_available'] == -1
 
     # Test case 3: Multi-host TPU node
-    mock_node_3 = mock.MagicMock()
-    mock_node_3.metadata.name = 'node-3'
-    mock_node_3.metadata.labels = {
+    mock_tpu_node_1 = mock.MagicMock()
+    mock_tpu_node_1.metadata.name = 'node-3'
+    mock_tpu_node_1.metadata.labels = {
         'skypilot.co/accelerator': 'tpu-v4-podslice',
         'cloud.google.com/gke-accelerator-count': '4',
         'cloud.google.com/gke-tpu-accelerator': 'tpu-v4-podslice',
         'cloud.google.com/gke-tpu-topology': '4x4',
         'cloud.google.com/gke-tpu-node-pool-type': 'multi-host'
     }
-    mock_node_3.status.allocatable = {'google.com/tpu': '4'}
+    mock_tpu_node_1.status.allocatable = {'google.com/tpu': '4'}
 
     with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
-                   return_value=[mock_gpu_node_1, mock_node_3]), \
+                   return_value=[mock_gpu_node_1, mock_tpu_node_1]), \
          mock.patch('sky.provision.kubernetes.utils.'
                    'get_all_pods_in_kubernetes_cluster',
                    return_value=[mock_pod_1]):
@@ -142,7 +142,7 @@ def test_get_kubernetes_node_info():
 
     # Test case 5: CPU-only nodes
     mock_cpu_node_1 = mock.MagicMock()
-    mock_cpu_node_1.metadata.name = 'cpu-node-1'
+    mock_cpu_node_1.metadata.name = 'node-4'
     mock_cpu_node_1.metadata.labels = {}
     mock_cpu_node_1.status.allocatable = {'cpu': '4', 'memory': '16Gi'}
     mock_cpu_node_1.status.addresses = [
@@ -150,7 +150,7 @@ def test_get_kubernetes_node_info():
     ]
 
     mock_cpu_node_2 = mock.MagicMock()
-    mock_cpu_node_2.metadata.name = 'cpu-node-2'
+    mock_cpu_node_2.metadata.name = 'node-5'
     mock_cpu_node_2.metadata.labels = {}
     mock_cpu_node_2.status.allocatable = {'cpu': '8', 'memory': '32Gi'}
     mock_cpu_node_2.status.addresses = [
@@ -166,14 +166,14 @@ def test_get_kubernetes_node_info():
         mock_get_pods.assert_not_called()
         assert isinstance(node_info, models.KubernetesNodesInfo)
         assert len(node_info.node_info_dict) == 2
-        assert node_info.node_info_dict['cpu-node-1'].accelerator_type is None
-        assert node_info.node_info_dict['cpu-node-1'].total[
+        assert node_info.node_info_dict['node-4'].accelerator_type is None
+        assert node_info.node_info_dict['node-4'].total[
             'accelerator_count'] == 0
-        assert node_info.node_info_dict['cpu-node-1'].free[
+        assert node_info.node_info_dict['node-4'].free[
             'accelerators_available'] == 0
-        assert node_info.node_info_dict['cpu-node-2'].total[
+        assert node_info.node_info_dict['node-5'].total[
             'accelerator_count'] == 0
-        assert node_info.node_info_dict['cpu-node-2'].free[
+        assert node_info.node_info_dict['node-5'].free[
             'accelerators_available'] == 0
 
     # Test case 6: Mixed CPU and GPU nodes
@@ -189,9 +189,9 @@ def test_get_kubernetes_node_info():
         mock_get_pods.assert_called_once()
         assert len(node_info.node_info_dict) == 2
         # CPU node should have 0 accelerators
-        assert node_info.node_info_dict['cpu-node-1'].total[
+        assert node_info.node_info_dict['node-4'].total[
             'accelerator_count'] == 0
-        assert node_info.node_info_dict['cpu-node-1'].free[
+        assert node_info.node_info_dict['node-4'].free[
             'accelerators_available'] == 0
         # GPU node should have correct allocation
         assert node_info.node_info_dict['node-1'].total[
