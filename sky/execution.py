@@ -415,13 +415,12 @@ def _execute_dag(
         task.sync_storage_mounts()
 
     try:
-        provisioning_skipped = False
         if Stage.PROVISION in stages:
             assert handle is None or skip_unnecessary_provisioning, (
                 'Provisioning requested, but handle is already set. PROVISION '
                 'should be excluded from stages or '
                 'skip_unecessary_provisioning should be set. ')
-            (handle, provisioning_skipped) = backend.provision(
+            (handle, _) = backend.provision(
                 task,
                 task.best_resources,
                 dryrun=dryrun,
