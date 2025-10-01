@@ -876,78 +876,81 @@ def test_resolve_volumes_with_envs_dict():
     t = task.Task.from_yaml_config(config)
     assert t._volumes == {'/mnt': {'name': 'vol1_suffix'}}
 
+
 def test_update_resources():
     t = task.Task()
-    t.set_resources([resources_lib.Resources(
-        cloud=registry.CLOUD_REGISTRY.from_str('aws'),
-        cpus=2,
-        memory=4), 
-        resources_lib.Resources(
-        cloud=registry.CLOUD_REGISTRY.from_str('gcp'),
-        cpus=4,
-        memory=8)])
-    assert repr(t.resources) == repr([resources_lib.Resources(
-        cloud=registry.CLOUD_REGISTRY.from_str('aws'),
-        cpus=2,
-        memory=4), 
-        resources_lib.Resources(
-        cloud=registry.CLOUD_REGISTRY.from_str('gcp'),
-        cpus=4,
-        memory=8)])
+    t.set_resources([
+        resources_lib.Resources(cloud=registry.CLOUD_REGISTRY.from_str('aws'),
+                                cpus=2,
+                                memory=4),
+        resources_lib.Resources(cloud=registry.CLOUD_REGISTRY.from_str('gcp'),
+                                cpus=4,
+                                memory=8)
+    ])
+    assert repr(t.resources) == repr([
+        resources_lib.Resources(cloud=registry.CLOUD_REGISTRY.from_str('aws'),
+                                cpus=2,
+                                memory=4),
+        resources_lib.Resources(cloud=registry.CLOUD_REGISTRY.from_str('gcp'),
+                                cpus=4,
+                                memory=8)
+    ])
     t.update_resources(memory=4)
-    assert repr(t.resources) == repr([resources_lib.Resources(
-        cloud=registry.CLOUD_REGISTRY.from_str('aws'),
-        cpus=2,
-        memory=4), 
-        resources_lib.Resources(
-        cloud=registry.CLOUD_REGISTRY.from_str('gcp'),
-        cpus=4,
-        memory=4)])
+    assert repr(t.resources) == repr([
+        resources_lib.Resources(cloud=registry.CLOUD_REGISTRY.from_str('aws'),
+                                cpus=2,
+                                memory=4),
+        resources_lib.Resources(cloud=registry.CLOUD_REGISTRY.from_str('gcp'),
+                                cpus=4,
+                                memory=4)
+    ])
 
     t.update_resources(memory=8)
-    assert repr(t.resources) == repr([resources_lib.Resources(
-        cloud=registry.CLOUD_REGISTRY.from_str('aws'),
-        cpus=2,
-        memory=8), 
-        resources_lib.Resources(
-        cloud=registry.CLOUD_REGISTRY.from_str('gcp'),
-        cpus=4,
-        memory=8)])
+    assert repr(t.resources) == repr([
+        resources_lib.Resources(cloud=registry.CLOUD_REGISTRY.from_str('aws'),
+                                cpus=2,
+                                memory=8),
+        resources_lib.Resources(cloud=registry.CLOUD_REGISTRY.from_str('gcp'),
+                                cpus=4,
+                                memory=8)
+    ])
 
     t.update_resources(cpus=6)
-    assert repr(t.resources) == repr([resources_lib.Resources(
-        cloud=registry.CLOUD_REGISTRY.from_str('aws'),
-        cpus=6,
-        memory=8),
-        resources_lib.Resources(
-        cloud=registry.CLOUD_REGISTRY.from_str('gcp'),
-        cpus=6,
-        memory=8)])
+    assert repr(t.resources) == repr([
+        resources_lib.Resources(cloud=registry.CLOUD_REGISTRY.from_str('aws'),
+                                cpus=6,
+                                memory=8),
+        resources_lib.Resources(cloud=registry.CLOUD_REGISTRY.from_str('gcp'),
+                                cpus=6,
+                                memory=8)
+    ])
 
     # make sure the examples in the docstring are working
     t.update_resources(use_spot=True)
-    assert repr(t.resources) == repr([resources_lib.Resources(
-        cloud=registry.CLOUD_REGISTRY.from_str('aws'),
-        cpus=6,
-        memory=8,
-        use_spot=True),
+    assert repr(t.resources) == repr([
+        resources_lib.Resources(cloud=registry.CLOUD_REGISTRY.from_str('aws'),
+                                cpus=6,
+                                memory=8,
+                                use_spot=True),
         resources_lib.Resources(cloud=registry.CLOUD_REGISTRY.from_str('gcp'),
-        cpus=6,
-        memory=8,
-        use_spot=True)])
-    
+                                cpus=6,
+                                memory=8,
+                                use_spot=True)
+    ])
+
     t.update_resources(autostop={'timeout': 3600})
-    assert repr(t.resources) == repr([resources_lib.Resources(
-        cloud=registry.CLOUD_REGISTRY.from_str('aws'),
-        cpus=6,
-        memory=8,
-        use_spot=True,
-        autostop={'timeout': 3600}),
+    assert repr(t.resources) == repr([
+        resources_lib.Resources(cloud=registry.CLOUD_REGISTRY.from_str('aws'),
+                                cpus=6,
+                                memory=8,
+                                use_spot=True,
+                                autostop={'timeout': 3600}),
         resources_lib.Resources(cloud=registry.CLOUD_REGISTRY.from_str('gcp'),
-        cpus=6,
-        memory=8,
-        use_spot=True,
-        autostop={'timeout': 3600})])
+                                cpus=6,
+                                memory=8,
+                                use_spot=True,
+                                autostop={'timeout': 3600})
+    ])
 
     with pytest.raises(AssertionError):
         t.update_resources(invalid_field=1)
