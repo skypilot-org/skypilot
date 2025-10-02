@@ -67,6 +67,7 @@ from sky.utils import common as common_lib
 from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import context_utils
+from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import perf_utils
 from sky.utils import status_lib
@@ -1962,8 +1963,22 @@ if __name__ == '__main__':
     # Restore the server user hash
     _init_or_restore_server_user_hash()
     max_db_connections = global_user_state.get_max_db_connections()
-    config = server_config.compute_server_config(cmd_args.deploy,
-                                                 max_db_connections)
+
+    # Reserve memory for jobs and serve/pool controller in consolidation mode.
+    reserved_memory_mb = None
+    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+        reserved_memory_mb = float(
+            controller_utils.MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB)
+        # For jobs controller, we need to reserve for both jobs and
+        # pool controller.
+        if not os.environ.get(constants.IS_SKYPILOT_SERVE_CONTROLLER):
+            reserved_memory_mb *= (1. +
+                                   controller_utils.POOL_JOBS_RESOURCES_RATIO)
+
+    config = server_config.compute_server_config(
+        cmd_args.deploy,
+        max_db_connections,
+        reserved_memory_mb=reserved_memory_mb)
 
     num_workers = config.num_server_workers
 

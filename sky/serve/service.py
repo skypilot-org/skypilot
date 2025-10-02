@@ -192,7 +192,6 @@ def _cleanup(service_name: str, pool: bool) -> bool:
                         f'Replica {info.replica_id} terminated successfully.')
                 else:
                     _set_to_failed_cleanup(info)
-                    failed = True
         time.sleep(3)
 
     versions = serve_state.get_service_versions(service_name)

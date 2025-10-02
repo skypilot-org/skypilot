@@ -540,6 +540,9 @@ def shared_controller_vars_to_fill(
         constants.USING_REMOTE_API_SERVER_ENV_VAR: str(
             common_utils.get_using_remote_api_server()),
         constants.OVERRIDE_CONSOLIDATION_MODE: 'true',
+        constants.IS_SKYPILOT_SERVE_CONTROLLER:
+            ('true'
+             if controller == Controllers.SKY_SERVE_CONTROLLER else 'false'),
     })
     if skypilot_config.loaded():
         # Only set the SKYPILOT_CONFIG env var if the user has a config file.
