@@ -75,6 +75,29 @@ def test_compute_server_config_low_resources(cpu_count, mem_size_gb):
     assert c.queue_backend == config.QueueBackend.MULTIPROCESSING
 
 
+@mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=48)
+@mock.patch('sky.utils.common_utils.get_cpu_count', return_value=12)
+@mock.patch('sky.utils.env_options.Options.RUNNING_IN_BUILDKITE.get',
+            return_value=False)
+def test_compute_server_config_pool(cpu_count, mem_size_gb, buildkite_mock):
+    from sky.utils import controller_utils
+    reserved_memory_mb = float(
+        controller_utils.MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB)
+
+    # Test deployment mode with reserved memory
+    c = config.compute_server_config(deploy=True,
+                                     reserved_memory_mb=reserved_memory_mb)
+    assert c.num_server_workers == 12
+    assert c.long_worker_config.garanteed_parallelism == 24
+    assert c.long_worker_config.burstable_parallelism == 0
+    assert c.short_worker_config.garanteed_parallelism == 114
+    assert c.short_worker_config.burstable_parallelism == 0
+    assert c.queue_backend == config.QueueBackend.MULTIPROCESSING
+
+    assert controller_utils._get_number_of_services(pool=True) == 5
+    assert controller_utils._get_request_parallelism(pool=True) == 40
+
+
 def test_parallel_size_long():
     # Test with insufficient memory
     cpu_count = 4
