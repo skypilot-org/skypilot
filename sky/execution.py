@@ -270,9 +270,10 @@ def _execute_dag(
         # This DB query is faster than fetching the full record.
         cluster_exists = global_user_state.cluster_with_name_exists(
             cluster_name)
-        # If it exists, fetch handle to capture launched resources so we can
-        # preserve concrete specs during provisioning even if the handle
-        # disappears mid-launch (e.g., concurrent teardown).
+        # If it exists, fetch the record to determine whether the current
+        # handle has concrete launched_resources. If not, we will re-optimize
+        # to obtain concrete specs for provisioning (handles can disappear
+        # during concurrent teardown).
         if cluster_exists:
             cluster_record = global_user_state.get_cluster_from_name(
                 cluster_name)
@@ -416,12 +417,6 @@ def _execute_dag(
                                                        quiet=_quiet_optimizer)
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
-
-    # Note: do not forcibly set task.best_resources to previously launched
-    # resources. If the existing handle is missing (recently terminated), we
-    # will have re-optimized above. If the handle exists, backend will reuse
-    # its launched_resources anyway. This avoids pinning to old placement when
-    # a fresh plan is desired during relaunch.
 
     backend.register_info(
         dag=dag,
