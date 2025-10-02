@@ -244,7 +244,6 @@ class SCPClient:
                 return False
         return True
 
-
     def add_security_group_rule(self, sg_id, direction,
                                 ports: Optional[List[str]],
                                 cnt: Optional[int]) -> None:
@@ -280,7 +279,6 @@ class SCPClient:
             self._post(url, request_body)
         else:
             return None
-
 
     def _firewall_rule_not_exist(self, firewall_id, internal_ip, direction,
                                  ports):
