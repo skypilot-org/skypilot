@@ -63,7 +63,7 @@ def launch_cluster(replica_id: int,
                    service_task_yaml_path: str,
                    cluster_name: str,
                    log_file: str,
-                   replica_to_request_id: serve_utils.ThreadSafeDict[int, str],
+                   replica_to_request_id: thread_utils.ThreadSafeDict[int, str],
                    resources_override: Optional[Dict[str, Any]] = None,
                    retry_until_up: bool = True,
                    max_retry: int = 3) -> None:
@@ -115,6 +115,8 @@ def launch_cluster(replica_id: int,
                                     cluster_name,
                                     retry_until_up=retry_until_up,
                                     _is_launched_by_sky_serve_controller=True)
+            logger.info(f'Replica cluster {cluster_name} launch requested '
+                        f'with request_id: {request_id}.')
             replica_to_request_id[replica_id] = request_id
             with open(log_file, 'a', encoding='utf-8') as f:
                 sdk.stream_and_get(request_id, output_stream=f)
@@ -718,12 +720,12 @@ class SkyPilotReplicaManager(ReplicaManager):
             spot_placer.SpotPlacer.from_task(spec, task))
         # TODO(tian): Store launch/down request id in the replica table, to make
         # the manager more persistent.
-        self._launch_thread_pool: serve_utils.ThreadSafeDict[
-            int, thread_utils.SafeThread] = serve_utils.ThreadSafeDict()
-        self._replica_to_request_id: serve_utils.ThreadSafeDict[
-            int, str] = serve_utils.ThreadSafeDict()
-        self._down_thread_pool: serve_utils.ThreadSafeDict[
-            int, thread_utils.SafeThread] = serve_utils.ThreadSafeDict()
+        self._launch_thread_pool: thread_utils.ThreadSafeDict[
+            int, thread_utils.SafeThread] = thread_utils.ThreadSafeDict()
+        self._replica_to_request_id: thread_utils.ThreadSafeDict[
+            int, str] = thread_utils.ThreadSafeDict()
+        self._down_thread_pool: thread_utils.ThreadSafeDict[
+            int, thread_utils.SafeThread] = thread_utils.ThreadSafeDict()
 
         threading.Thread(target=self._thread_pool_refresher).start()
         threading.Thread(target=self._job_status_fetcher).start()
@@ -906,15 +908,15 @@ class SkyPilotReplicaManager(ReplicaManager):
                                               info)
             launch_thread = self._launch_thread_pool[replica_id]
             if launch_thread.is_alive():
-                rid_found = False
+                request_id_found = False
                 # Should found immediately but add a 1 second timeout
                 # to avoid blocking the thread.
                 for _ in range(10):
                     if replica_id in self._replica_to_request_id:
-                        rid_found = True
+                        request_id_found = True
                         break
                     time.sleep(0.1)
-                if rid_found:
+                if request_id_found:
                     request_id = self._replica_to_request_id[replica_id]
                     sdk.api_cancel(request_id)
                 else:
@@ -924,9 +926,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                 launch_thread.join()
             logger.info(f'Interrupted launch thread for replica {replica_id} '
                         'and deleted the cluster.')
-            del self._launch_thread_pool[replica_id]
-            if replica_id in self._replica_to_request_id:
-                del self._replica_to_request_id[replica_id]
+            self._launch_thread_pool.pop(replica_id)
+            self._replica_to_request_id.pop(replica_id)
 
         if replica_id in self._down_thread_pool:
             logger.warning(f'Terminate thread for replica {replica_id} '
@@ -1106,9 +1107,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                     # when we enable user choose whether to retry or not.
                     logger.info(
                         f'Launch thread for replica {replica_id} finished.')
-                    del self._launch_thread_pool[replica_id]
-                    if replica_id in self._replica_to_request_id:
-                        del self._replica_to_request_id[replica_id]
+                    self._launch_thread_pool.pop(replica_id)
+                    self._replica_to_request_id.pop(replica_id)
                     if t.format_exc is not None:
                         logger.warning(
                             f'Launch thread for replica {replica_id} '
@@ -1164,7 +1164,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             else:
                 logger.info(
                     f'Terminate thread for replica {replica_id} finished.')
-                del self._down_thread_pool[replica_id]
+                self._down_thread_pool.pop(replica_id)
                 self._handle_sky_down_finish(info, format_exc=t.format_exc)
 
         # Clean old version

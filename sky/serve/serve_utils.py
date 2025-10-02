@@ -10,12 +10,11 @@ import pickle
 import re
 import shlex
 import shutil
-import threading
 import time
 import traceback
 import typing
-from typing import (Any, Callable, DefaultDict, Deque, Dict, Generic, Iterator,
-                    List, Optional, TextIO, Type, TypeVar, Union)
+from typing import (Any, Callable, DefaultDict, Deque, Dict, Iterator, List,
+                    Optional, TextIO, Type, Union)
 import uuid
 
 import colorama
@@ -158,50 +157,6 @@ _SIGNAL_TO_ERROR = {
     UserSignal.TERMINATE: exceptions.ServeUserTerminatedError,
 }
 
-# pylint: disable=invalid-name
-KeyType = TypeVar('KeyType')
-ValueType = TypeVar('ValueType')
-
-
-# Google style guide: Do not rely on the atomicity of built-in types.
-# Our launch and down process pool will be used by multiple threads,
-# therefore we need to use a thread-safe dict.
-# see https://google.github.io/styleguide/pyguide.html#218-threading
-class ThreadSafeDict(Generic[KeyType, ValueType]):
-    """A thread-safe dict."""
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self._dict: Dict[KeyType, ValueType] = dict(*args, **kwargs)
-        self._lock = threading.Lock()
-
-    def __getitem__(self, key: KeyType) -> ValueType:
-        with self._lock:
-            return self._dict.__getitem__(key)
-
-    def __setitem__(self, key: KeyType, value: ValueType) -> None:
-        with self._lock:
-            return self._dict.__setitem__(key, value)
-
-    def __delitem__(self, key: KeyType) -> None:
-        with self._lock:
-            return self._dict.__delitem__(key)
-
-    def __len__(self) -> int:
-        with self._lock:
-            return self._dict.__len__()
-
-    def __contains__(self, key: KeyType) -> bool:
-        with self._lock:
-            return self._dict.__contains__(key)
-
-    def items(self):
-        with self._lock:
-            return self._dict.items()
-
-    def values(self):
-        with self._lock:
-            return self._dict.values()
-
 
 class RequestsAggregator:
     """Base class for request aggregator."""
@@ -291,13 +246,13 @@ def is_consolidation_mode(pool: bool = False) -> bool:
     consolidation_mode = skypilot_config.get_nested(
         (controller.controller_type, 'controller', 'consolidation_mode'),
         default_value=False)
-    # We should only do this check on API server, as the controller will not
-    # have related config and will always seemingly disabled for consolidation
-    # mode. Check #6611 for more details.
     if os.environ.get(skylet_constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
         # if we are in the job controller, we must always be in consolidation
         # mode.
         return True
+    # We should only do this check on API server, as the controller will not
+    # have related config and will always seemingly disabled for consolidation
+    # mode. Check #6611 for more details.
     if os.environ.get(skylet_constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         _validate_consolidation_mode_config(consolidation_mode, pool)
     return consolidation_mode
