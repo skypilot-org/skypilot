@@ -33,6 +33,7 @@ from sky.backends import cloud_vm_ray_backend
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
+from sky.metrics import utils as metrics_lib
 from sky.schemas.api import responses
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -1344,13 +1345,16 @@ def get_managed_job_queue(
         job['status'] = job['status'].value
         job['schedule_state'] = job['schedule_state'].value
 
+        # TODO(rohan): pull into batch query
         pool = managed_job_state.get_pool_from_job_id(job['job_id'])
         if pool is not None:
+            # TODO(rohan): pull into batch query
             cluster_name, _ = managed_job_state.get_pool_submit_info(
                 job['job_id'])
         else:
             cluster_name = generate_managed_job_cluster_name(
                 job['task_name'], job['job_id'])
+        # TODO(rohan): pull into batch query
         handle = global_user_state.get_handle_from_cluster_name(
             cluster_name) if cluster_name is not None else None
         if isinstance(handle, backends.CloudVmRayResourceHandle):
@@ -1507,13 +1511,18 @@ def load_managed_job_queue(
         total_no_filter = total
         result_type = ManagedJobQueueResultType.LIST
 
+    user_hashes = set()
     for job in jobs:
-        job['status'] = managed_job_state.ManagedJobStatus(job['status'])
         if 'user_hash' in job and job['user_hash'] is not None:
             # Skip jobs that do not have user_hash info.
             # TODO(cooperc): Remove check before 0.12.0.
-            user = global_user_state.get_user(job['user_hash'])
-            job['user_name'] = user.name if user is not None else None
+            user_hashes.add(job['user_hash'])
+    user_hash_to_user = global_user_state.get_users(user_hashes)
+
+    for job in jobs:
+        job['status'] = managed_job_state.ManagedJobStatus(job['status'])
+        user = user_hash_to_user.get(job['user_hash'], None)
+        job['user_name'] = user.name if user is not None else None
     return jobs, total, result_type, total_no_filter, status_counts
 
 
