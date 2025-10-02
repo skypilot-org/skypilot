@@ -40,7 +40,9 @@ DEFAULT_HANDLER_NAME = 'default'
 # The path to the API request database.
 API_SERVER_REQUEST_DB_PATH = '~/.sky/api_server/requests.db'
 
-PER_WORKER_THREAD_POOL_MEMORY_GB = 8 / 1024  # 8MB
+# This is the memory we assume each background thread in the thread pool
+# for each fastapi worker consumes.
+PER_FAST_API_WORKER_THREAD_MEMORY_GB = 8 / 1024  # 8MB
 
 # The interval (seconds) for the cluster status to be refreshed in the
 # background.

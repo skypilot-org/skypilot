@@ -228,7 +228,7 @@ def _get_min_short_workers() -> int:
 
 
 def _max_short_worker_parallism(cpu_count: int, mem_size_gb: float,
-                                long_worker_parallism: int) -> int:
+                                long_worker_parallelism: int) -> int:
     """Max parallelism for short workers."""
     # Reserve memory for long workers and min available memory.
     # pylint: disable=import-outside-toplevel
@@ -237,8 +237,8 @@ def _max_short_worker_parallism(cpu_count: int, mem_size_gb: float,
                   if job_utils.is_consolidation_mode() else
                   server_constants.MIN_AVAIL_MEM_GB)
     reserved_mem = (
-        max_memory + (long_worker_parallism * LONG_WORKER_MEM_GB) +
-        server_constants.PER_WORKER_THREAD_POOL_MEMORY_GB * cpu_count)
+        max_memory + (long_worker_parallelism * LONG_WORKER_MEM_GB) +
+        server_constants.PER_FAST_API_WORKER_THREAD_MEMORY_GB * cpu_count)
     available_mem = max(0, mem_size_gb - reserved_mem)
     n = max(_get_min_short_workers(), int(available_mem / SHORT_WORKER_MEM_GB))
     return n
