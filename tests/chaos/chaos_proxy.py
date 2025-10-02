@@ -1,6 +1,7 @@
 """TCP proxy that brings chaos."""
 import argparse
 import asyncio
+from urllib import parse
 
 from sky.server import common
 
@@ -84,7 +85,9 @@ async def main(local_port, interval):
     global connection_counter
 
     server_url = common.get_server_url()
-    target_host, target_port = server_url.split('://')[1].split(':')
+    parsed = parse.urlparse(server_url)
+    target_host = parsed.hostname
+    target_port = parsed.port or 80  # Assume HTTP port if not specified
 
     async def client_handler(reader, writer):
         global connection_counter
