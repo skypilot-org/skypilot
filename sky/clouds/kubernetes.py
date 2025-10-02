@@ -98,14 +98,6 @@ class Kubernetes(clouds.Cloud):
     # Set of contexts that has logged as temporarily unreachable
     logged_unreachable_contexts: Set[str] = set()
 
-    @property
-    def ssh_key_secret_field_name(self):
-        # Use a fresh user hash to avoid conflicts in the secret object naming.
-        # This can happen when the controller is reusing the same user hash
-        # through USER_ID_ENV_VAR but has a different SSH key.
-        fresh_user_hash = common_utils.generate_user_hash()
-        return f'ssh-publickey-{fresh_user_hash}'
-
     @classmethod
     def _unsupported_features_for_resources(
         cls, resources: 'resources_lib.Resources'
@@ -695,7 +687,6 @@ class Kubernetes(clouds.Cloud):
             'k8s_port_mode': port_mode.value,
             'k8s_networking_mode': network_utils.get_networking_mode(
                 None, context=context).value,
-            'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_values': k8s_acc_label_values,
             'k8s_ssh_jump_name': self.SKY_SSH_JUMP_NAME,

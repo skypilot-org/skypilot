@@ -38,7 +38,6 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import gcp
 from sky.adaptors import ibm
-from sky.adaptors import kubernetes
 from sky.adaptors import runpod
 from sky.adaptors import seeweb as seeweb_adaptor
 from sky.adaptors import vast
@@ -47,7 +46,6 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.lambda_cloud import lambda_utils
 from sky.provision.primeintellect import utils as primeintellect_utils
 from sky.utils import common_utils
-from sky.utils import config_utils
 from sky.utils import kubernetes_enums
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -450,56 +448,8 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(str(e) +
                              ' Please check: ~/.sky/config.yaml.') from None
-    _, public_key_path = get_or_generate_keys()
 
-    # Add the user's public key to the SkyPilot cluster.
-    secret_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
-    secret_field_name = clouds.Kubernetes().ssh_key_secret_field_name
     namespace = kubernetes_utils.get_namespace_from_config(config['provider'])
-    k8s = kubernetes.kubernetes
-    with open(public_key_path, 'r', encoding='utf-8') as f:
-        public_key = f.read()
-        if not public_key.endswith('\n'):
-            public_key += '\n'
-
-        # Generate metadata
-        secret_metadata = {
-            'name': secret_name,
-            'labels': {
-                'parent': 'skypilot'
-            }
-        }
-        custom_metadata = skypilot_config.get_effective_region_config(
-            cloud='kubernetes',
-            region=context,
-            keys=('custom_metadata',),
-            default_value={})
-        config_utils.merge_k8s_configs(secret_metadata, custom_metadata)
-
-        secret = k8s.client.V1Secret(
-            metadata=k8s.client.V1ObjectMeta(**secret_metadata),
-            string_data={secret_field_name: public_key})
-    try:
-        if kubernetes_utils.check_secret_exists(secret_name, namespace,
-                                                context):
-            logger.debug(f'Key {secret_name} exists in the cluster, '
-                         'patching it...')
-            kubernetes.core_api(context).patch_namespaced_secret(
-                secret_name, namespace, secret)
-        else:
-            logger.debug(f'Key {secret_name} does not exist in the cluster, '
-                         'creating it...')
-            kubernetes.core_api(context).create_namespaced_secret(
-                namespace, secret)
-    except kubernetes.api_exception() as e:
-        if e.status == 409 and e.reason == 'AlreadyExists':
-            logger.debug(f'Key {secret_name} was created concurrently, '
-                         'patching it...')
-            kubernetes.core_api(context).patch_namespaced_secret(
-                secret_name, namespace, secret)
-        else:
-            raise e
-
     private_key_path, _ = get_or_generate_keys()
     if network_mode == nodeport_mode:
         ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
@@ -540,7 +490,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     config['auth']['ssh_proxy_command'] = ssh_proxy_cmd
     config['auth']['ssh_private_key'] = private_key_path
 
-    return config
+    return configure_ssh_info(config)
 
 
 # ---------------------------------- RunPod ---------------------------------- #
