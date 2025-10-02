@@ -119,18 +119,51 @@ def test_managed_jobs(test, count=10000):
     jobs_count = test.inject_managed_jobs(count)
     print(f"   Total injected: {jobs_count} managed jobs")
 
-    # Test get_managed_jobs
-    print("\n   Testing get_managed_jobs:")
+    # Test get_managed_jobs (raw DB query)
+    print("\n   Testing get_managed_jobs (raw DB query):")
     start_time = time.time()
     managed_jobs = job_state.get_managed_jobs()
-    duration_jobs = time.time() - start_time
+    duration_get_jobs = time.time() - start_time
     print(
-        f"   get_managed_jobs: {len(managed_jobs)} jobs in {duration_jobs:.3f}s"
+        f"   get_managed_jobs: {len(managed_jobs)} jobs in {duration_get_jobs:.3f}s"
     )
-    print(f"   Rate: {len(managed_jobs)/duration_jobs:.0f} jobs/sec")
+    print(f"   Rate: {len(managed_jobs)/duration_get_jobs:.0f} jobs/sec")
 
-    # Test sky jobs queue
-    print("\n   Testing sky jobs queue performance:")
+    # Test get_managed_job_queue (filtering + enrichment on controller)
+    print("\n   Testing get_managed_job_queue (filtering + enrichment):")
+    from sky.jobs import utils as managed_job_utils
+    from sky.workspaces import core as workspaces_core
+
+    accessible_workspaces = list(workspaces_core.get_workspaces().keys())
+    start_time = time.time()
+    queue_result = managed_job_utils.get_managed_job_queue(
+        skip_finished=False, accessible_workspaces=accessible_workspaces)
+    duration_get_queue = time.time() - start_time
+    print(
+        f"   get_managed_job_queue: {queue_result['total']} jobs in {duration_get_queue:.3f}s"
+    )
+    print(f"   Rate: {queue_result['total']/duration_get_queue:.0f} jobs/sec")
+
+    # Test load_managed_job_queue (JSON deserialization from SSH payload)
+    print("\n   Testing load_managed_job_queue (JSON deserialization):")
+    from sky.utils import message_utils
+
+    # Simulate the payload that would come from SSH run_on_head
+    payload_str = message_utils.encode_payload(queue_result)
+    payload_size_mb = len(payload_str) / (1024 * 1024)
+
+    start_time = time.time()
+    loaded_jobs, total, result_type, total_no_filter, status_counts = \
+        managed_job_utils.load_managed_job_queue(payload_str)
+    duration_load = time.time() - start_time
+    print(
+        f"   load_managed_job_queue: {len(loaded_jobs)} jobs in {duration_load:.3f}s"
+    )
+    print(f"   Rate: {len(loaded_jobs)/duration_load:.0f} jobs/sec")
+    print(f"   Payload size: {payload_size_mb:.2f} MB")
+
+    # Test sky jobs queue (full CLI path)
+    print("\n   Testing sky jobs queue (full CLI path):")
     start_time = time.time()
     result = subprocess.run(['sky', 'jobs', 'queue'],
                             capture_output=True,
@@ -153,7 +186,11 @@ def test_managed_jobs(test, count=10000):
     return {
         'injected': jobs_count,
         'retrieved': len(managed_jobs),
-        'duration': duration_jobs
+        'duration_get_jobs': duration_get_jobs,
+        'duration_get_queue': duration_get_queue,
+        'duration_load': duration_load,
+        'payload_size_mb': payload_size_mb,
+        'duration_cli': sky_jobs_queue_duration
     }
 
 
@@ -265,7 +302,20 @@ def main():
             print(f"\nManaged Jobs:")
             print(f"  Injected: {results['jobs']['injected']}")
             print(f"  Retrieved: {results['jobs']['retrieved']}")
-            print(f"  Duration: {results['jobs']['duration']:.3f}s")
+            print(
+                f"  get_managed_jobs: {results['jobs']['duration_get_jobs']:.3f}s"
+            )
+            print(
+                f"  get_managed_job_queue: {results['jobs']['duration_get_queue']:.3f}s"
+            )
+            print(
+                f"  load_managed_job_queue: {results['jobs']['duration_load']:.3f}s"
+            )
+            print(
+                f"  Payload size: {results['jobs']['payload_size_mb']:.2f} MB")
+            print(
+                f"  CLI (sky jobs queue): {results['jobs']['duration_cli']:.3f}s"
+            )
 
         print("\nTest completed successfully!")
 
