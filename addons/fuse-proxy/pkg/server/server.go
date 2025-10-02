@@ -89,6 +89,9 @@ func (s *Server) handleConnection(conn net.Conn) {
 		log.Errorf("Failed to receive namespace fd: %v", err)
 		return
 	}
+	// Close fd to avoid holding reference to the mnt namespace, which will
+	// block the ephmeral storage cleanup.
+	defer syscall.Close(nsFd)
 	if err := json.Unmarshal(msg, req); err != nil {
 		log.Errorf("Failed to unmarshal request: %v", err)
 		return
