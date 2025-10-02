@@ -265,6 +265,7 @@ def _execute_dag(
 
     cluster_exists = False
     existing_launchable_resources = None
+    _existing_handle_has_launchables = False
     if cluster_name is not None:
         # Fast path: quickly check whether the cluster exists.
         # This DB query is faster than fetching the full record.
@@ -283,6 +284,7 @@ def _execute_dag(
                         and existing_handle.launched_resources is not None):
                     existing_launchable_resources = (
                         existing_handle.launched_resources.copy())
+                    _existing_handle_has_launchables = True
         # TODO(woosuk): If the cluster exists, print a warning that
         # `cpus` and `memory` are not used as a job scheduling constraint,
         # unlike `gpus`.
@@ -379,7 +381,11 @@ def _execute_dag(
     is_managed = (_is_launched_by_jobs_controller or
                   _is_launched_by_sky_serve_controller)
 
-    if not cluster_exists:
+    # Run optimizer when there is no existing cluster OR when the existing
+    # cluster's handle is missing/invalid (e.g., recently terminated during a
+    # concurrent `down`) so that provisioning has concrete specs.
+    if (not cluster_exists) or (cluster_exists and
+                                not _existing_handle_has_launchables):
         # If spot is launched on serve or jobs controller, we don't need to
         # print out the hint.
         if (Stage.PROVISION in stages and task.use_spot and not is_managed):
