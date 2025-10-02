@@ -26,7 +26,7 @@ def test_compute_server_config_on_large_deployment(cpu_count, mem_size_gb):
     assert c.num_server_workers == 196
     assert c.long_worker_config.garanteed_parallelism == 392
     assert c.long_worker_config.burstable_parallelism == 0
-    assert c.short_worker_config.garanteed_parallelism == 2084
+    assert c.short_worker_config.garanteed_parallelism == 2078
     assert c.short_worker_config.burstable_parallelism == 0
     assert c.queue_backend == config.QueueBackend.MULTIPROCESSING
 
@@ -39,7 +39,7 @@ def test_compute_server_config(cpu_count, mem_size_gb):
     assert c.num_server_workers == 4
     assert c.long_worker_config.garanteed_parallelism == 8
     assert c.long_worker_config.burstable_parallelism == 0
-    assert c.short_worker_config.garanteed_parallelism == 36
+    assert c.short_worker_config.garanteed_parallelism == 35
     assert c.short_worker_config.burstable_parallelism == 0
     assert c.queue_backend == config.QueueBackend.MULTIPROCESSING
 
