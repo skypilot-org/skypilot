@@ -7,9 +7,23 @@ from typing import Any, Dict, List, Optional, Mapping, Union
 from sky.adaptors import cloudrift
 from sky.provision import common
 from sky.utils import common_utils
+import os
+import re
+from typing import Any, Dict, List, Mapping, Optional, Union
+
+import requests
+from packaging import version
+from requests import Response
+
+from dstack._internal.core.errors import BackendError, BackendInvalidCredentialsError
+from dstack._internal.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 # CloudRift credentials environment variable
 _CLOUDRIFT_CREDENTIALS_PATH = 'CLOUDRIFT_CREDENTIALS_PATH'
+CLOUDRIFT_SERVER_ADDRESS = "https://api.cloudrift.ai"
+CLOUDRIFT_API_VERSION = "2025-05-29"
 
 
 class CloudRiftError(Exception):
@@ -34,342 +48,218 @@ def get_credentials_path() -> Optional[str]:
     
     return None
 
-# TODO: Implement actual CloudRift client when API is available
-# For now, return a dummy client object
-class CloudRiftClient:
-    """Dummy CloudRift client."""
-    
-    def __init__(self):
-        self.instances = CloudRiftInstancesAPI()
-        self.images = CloudRiftImagesAPI()
-        self.instance_types = CloudRiftInstanceTypesAPI()
-
 
 class RiftClient:
-    def __init__(self,
-                 server_address=constants.SERVER_ADDRESS,
-                 user_email: Optional[str] = None,
-                 user_password: Optional[str] = None,
-                 token: Optional[str] = None,
-                 api_key: Optional[str] = None):
-        self.server_address = server_address
-        self.public_api_root = os.path.join(server_address, 'api/v1')
-        self.public_api_v2_root = os.path.join(server_address, 'api/v2')
-        self.internal_api_root = os.path.join(server_address, 'internal')
-        self.token = token
-        self.pat = None
-        if user_email is not None and user_password is not None:
-            if self.token is not None:
-                raise ValueError("Cannot provide both user_email and token")
-            self.login(user_email, user_password)
-        self.api_key = api_key
+    def __init__(self, api_key: Optional[str] = None):
+        self.server_address = CLOUDRIFT_SERVER_ADDRESS
+        self.public_api_root = os.path.join(CLOUDRIFT_SERVER_ADDRESS, "api/v1")
+        self.internal_api_root = os.path.join(CLOUDRIFT_SERVER_ADDRESS, "internal")
+        self.api_key = api_key if api_key else os.getenv("CLOUDRIFT_API_KEY")
 
-    def _make_request(self,
-                      method: str,
-                      url: str,
-                      data: Optional[Mapping[str, Any]] = None,
-                      version: Optional[str] = None,
-                      **kwargs) -> Union[Mapping[str, Any], str, Response]:
-        headers = {}
-        if self.api_key is not None:
-            headers['X-API-Key'] = self.api_key
-        if self.token is not None:
-            headers['Authorization'] = f"Bearer {self.token}"
-
-        if version is None and (self.public_api_root in url or self.public_api_v2_root in url):
-            version = constants.PUBLIC_API_VERSION
-
-        if version is not None and data is not None:
-            response = requests.request(method, url, headers=headers,
-                                        json={"version": version, "data": data}, **kwargs)
-        else:
-            if data is not None:
-                kwargs['data'] = data
-            response = requests.request(method, url, headers=headers, **kwargs)
-        if not response.ok:
-            raise HTTPError(f"{response.reason}: {response.text}", response=response)
+    def validate_api_key(self) -> bool:
+        """
+        Validates the API key by making a request to the server.
+        Returns True if the API key is valid, False otherwise.
+        """
         try:
-            response_json = response.json()
-            if isinstance(response_json, str):
-                return response_json
-            if version is not None:
-                assert version >= response_json['version']
-            return response_json['data']
-        except requests.exceptions.JSONDecodeError:
-            return response
+            response = self._make_request("auth/me")
+            if isinstance(response, dict):
+                return response.get("email", False)
+            return False
+        except BackendInvalidCredentialsError:
+            return False
+        except Exception as e:
+            logger.error(f"Error validating API key: {e}")
+            return False
 
-    def login(self, email: str, password: str):
-        resp = self._make_request('post', f'{self.public_api_root}/auth/login',
-                                  data={"email": email, "password": password})
-        self.token = resp["token"]
-        self.pat = resp['pat']
-        return resp
+    def get_instance_types(self) -> List[Dict]:
+        request_data = {"selector": {"ByServiceAndLocation": {"services": ["vm"]}}}
+        response_data = self._make_request("instance-types/list", request_data)
+        if isinstance(response_data, dict):
+            return response_data.get("instance_types", [])
+        return []
 
-    def logout(self):
-        self._make_request('post', f'{self.public_api_root}/auth/logout')
-        self.token = None
+    def list_recipies(self) -> List[Dict]:
+        request_data = {}
+        response_data = self._make_request("recipes/list", request_data)
+        if isinstance(response_data, dict):
+            return response_data.get("groups", [])
+        return []
 
-    def me(self):
-        return self._make_request('post', f'{self.public_api_root}/auth/me')
+    def get_vm_recipies(self) -> List[Dict]:
+        """
+        Retrieves a list of VM recipes from the CloudRift API.
+        Returns a list of dictionaries containing recipe information.
+        """
+        recipe_group = self.list_recipies()
+        vm_recipes = []
+        for group in recipe_group:
+            tags = group.get("tags ", [])
+            has_vm = "vm" in tags
+            if group.get("name", "").lower() != "linux" and not has_vm:
+                continue
 
-    def updates_enabled(self) -> bool:
-        result = self._make_request('get', f'{self.internal_api_root}/dev/updates_enabled')
-        return bool(result)
+            recipes = group.get("recipes", [])
+            for recipe in recipes:
+                details = recipe.get("details", {})
+                if details.get("VirtualMachine", False):
+                    vm_recipes.append(recipe)
 
-    def update_server(self, num_updates: int = 1):
-        """Update the server state, e.g., after renting a new instance."""
-        result = None
-        for _ in range(num_updates):
-            result = self._make_request('post', f'{self.internal_api_root}/dev/update_all')
-        return result
+        return vm_recipes
 
+    def get_vm_image_url(self) -> Optional[str]:
+        recipes = self.get_vm_recipies()
+        ubuntu_images = []
+        for recipe in recipes:
+            has_nvidia_driver = "nvidia-driver" in recipe.get("tags", [])
+            if not has_nvidia_driver:
+                continue
 
+            recipe_name = recipe.get("name", "")
+            if "Ubuntu" not in recipe_name:
+                continue
 
-class CloudRiftInstanceTypesAPI:
-    def __init__(self, client: ['RiftClient']):
-        self.client = client
-        self.api_root = os.path.join(client.public_api_root, 'instance-types')
+            url = recipe["details"].get("VirtualMachine", {}).get("image_url", None)
+            version_match = re.search(r".* (\d+\.\d+)", recipe_name)
+            if url and version_match and version_match.group(1):
+                ubuntu_version = version.parse(version_match.group(1))
+                ubuntu_images.append((ubuntu_version, url))
 
-    def list(self, services: Optional[Sequence[str]] = None, datacenters: Optional[Sequence[str]] = None,
-             providers: Optional[Sequence[str]] = None):
-        data = {}
-        if services is not None or datacenters is not None or providers is not None:
-            selector = {}
-            if services is not None:
-                selector['services'] = services
-            if datacenters is not None:
-                selector['datacenters'] = datacenters
-            if providers is not None:
-                selector['providers'] = providers
+        ubuntu_images.sort(key=lambda x: x[0])  # Sort by version
+        if ubuntu_images:
+            return ubuntu_images[-1][1]
 
-            if 'providers' in selector:
-                if 'datacenters' in selector:
-                    raise ValueError("Cannot filter by both providers and datacenters")
-                data = {'selector': {'ByServiceAndProvider': selector}}
-            else:
-                data = {'selector': {'ByServiceAndLocation': selector}}
-        return self.client._make_request('post', data=data, url=f'{self.api_root}/list')['instance_types']
+        return None
 
+    def deploy_instance(
+        self, instance_type: str, region: str, ssh_keys: List[str], cmd: str
+    ) -> List[str]:
+        image_url = self.get_vm_image_url()
+        if not image_url:
+            raise BackendError("No suitable VM image found.")
 
-class CloudRiftInstancesAPI:
-    def __init__(self, client: ['RiftClient']):
-        self.client = client
-        self.api_root = os.path.join(client.public_api_root, 'instances')
+        request_data = {
+            "config": {
+                "VirtualMachine": {
+                    # "cloudinit_url": "",
+                    "cloudinit_commands": cmd,
+                    "image_url": image_url,
+                    "ssh_key": {"PublicKeys": ssh_keys},
+                }
+            },
+            "selector": {
+                "ByInstanceTypeAndLocation": {
+                    "datacenters": [region],
+                    "instance_type": instance_type,
+                }
+            },
+            "with_public_ip": True,
+        }
+        logger.debug("Deploying instance with request data: %s", request_data)
 
-    def rent(self,
-             instance: str,
-             datacenters: Optional[List[str]] = None,
-             with_public_ip: bool = False,
-             vm: Optional[dict] = None,
-             docker: Optional[dict] = None,
-             node_id: Optional[str] = None,
-             blocking: bool = True,
-             timeout: int = 10,
-             reservation_type_id: Optional[str] = None,
-             reservation_id: Optional[str] = None,
-             team_id: Optional[str] = None,
-             bare_metal: Optional[dict] = None,
-             wait_for_active: bool = True
-             ):
-        if self.client.token is None:
-            raise RuntimeError("Token is required for renting an executor")
+        response_data = self._make_request("instances/rent", request_data)
+        if isinstance(response_data, dict):
+            return response_data.get("instance_ids", [])
+        return []
 
-        if node_id is None:
-            request = {
-                'selector': {'ByInstanceTypeAndLocation': {'instance_type': instance, 'datacenters': datacenters}},
-                'with_public_ip': with_public_ip
-            }
-        else:
-            request = {
-                'selector': {'ByNodeId': {'node_id': node_id, 'instance_type': instance}},
-                'with_public_ip': with_public_ip
-            }
-
-        if vm is not None and docker is not None:
-            raise ValueError("Only one of vm or docker can be specified")
-        elif vm is not None:
-            if 'cloudinit_config' not in vm:
-                vm['cloudinit_config'] = 'Auto'
-            request['config'] = {'VirtualMachine': vm}
-        elif bare_metal is not None:
-            request['config'] = {'BareMetal': bare_metal}
-        else:
-            request['config'] = {'Docker': {'image': None}} if docker is None else {'Docker': docker}
-
-        # Handle reservation types
-        if reservation_type_id and reservation_id:
-            raise ValueError("Only one of reservation_type_id or reservation_id can be specified")
-        elif reservation_type_id:
-            request["reservation"] = {"TypeID": reservation_type_id}
-        elif reservation_id:
-            request["reservation"] = {"ID": reservation_id}
-
-        if team_id is not None:
-            request["team_id"] = team_id
-
-        instance_id = self.client._make_request('post', url=f'{self.api_root}/rent',
-                                                data=request)['instance_ids'][0]
-        if not blocking:
-            return instance_id
-
-        start = time.time()
-        if self.client.updates_enabled():
-            while time.time() - start < timeout:
-                instance_info = self.info(instance_id=instance_id, team_id=team_id)
-                if instance_info and wait_for_active and instance_info['status'] == 'Active':
-                    return instance_id
-                if instance_info and not wait_for_active and instance_info['status'] != 'Initializing':
-                    return instance_id
-                # Wait for provider response
-                time.sleep(0.2)
-                self.client.update_server()
-        else:
-            while time.time() - start < timeout:
-                instance_info = self.info(instance_id=instance_id, team_id=team_id)
-                if instance_info and wait_for_active and instance_info['status'] == 'Active':
-                    return instance_id
-                if instance_info and not wait_for_active and instance_info['status'] != 'Initializing':
-                    return instance_id
-                time.sleep(1)
-
-        raise TimeoutError(f"Instance {instance_id} hasn't started")
-
-    def _list(self, selector):
-        return self.client._make_request('post', url=f"{self.api_root}/list", data={'selector': selector})['instances']
-
-    def info(self, instance_id: str, team_id: Optional[str] = None):
-        if team_id is not None:
-            selector = {'ByTeamId': {"id": team_id}}
-            if instance_id is not None:
-                selector['ByTeamId']["instance_ids"] = [instance_id]
-            instances = self._list(selector=selector)
-        else:
-            instances = self._list(selector={'ById': [instance_id]})
-
-        if len(instances) == 0:
-            return None
-
-        return instances[0]
-
-    def list(self, all=False, team_id: Optional[str] = None):
-        if all:
-            status = ['Initializing', 'Active', 'Deactivating', 'Inactive']
-        else:
-            status = ['Initializing', 'Active', 'Deactivating']
-        selector = {'ByStatus': status}
-
-        if team_id is not None:
-            selector = {'ByTeamId': {"id": team_id}}
-
-        return self._list(selector=selector)
-
-    def terminate(self, instance_id, blocking=True, timeout=10.0, team_id: Optional[str] = None):
-        if team_id is not None:
-            selector = {'ByTeamId': {"id": team_id, "instance_ids": [instance_id]}}
-        else:
-            selector = {'ById': [instance_id]}
-
-        return self._terminate(selector=selector, blocking=blocking, timeout=timeout)
-
-    def terminate_all(self, blocking=True, timeout=10.0):
-        return self._terminate(selector={'ByStatus': ['Initializing', 'Active']}, blocking=blocking, timeout=timeout)
-
-    def wait_for_status(self, instance_id: str, target_status: str, timeout: float = 10.0):
-        start = time.time()
-        while time.time() - start < timeout:
-            instance_info = self.info(instance_id=instance_id)
-            if instance_info and instance_info['status'] == target_status:
-                return instance_info
-            if self.client.updates_enabled():
-                time.sleep(0.2)
-                self.client.update_server()
-            else:
-                time.sleep(1)
-        raise TimeoutError(f"Instance {instance_id} hasn't reached status {target_status}")
-
-    def _terminate(self, selector, blocking=True, timeout=10.0):
-        terminated = self.client._make_request('post', url=f"{self.api_root}/terminate", data={'selector': selector})[
-            'terminated']
-        if not blocking:
-            return
-
-        if "ByTeamId" in selector:
-            selector['ByTeamId']["instance_ids"] = [t['id'] for t in terminated]
-        else:
-            selector = {'ById': [t['id'] for t in terminated]}
-
-        start = time.time()
-        if self.client.updates_enabled():
-            while time.time() - start < timeout:
-                self.client.update_server()
-                instances = self._list(selector=selector)
-                if all(inst['status'] == 'Inactive' for inst in instances):
-                    assert len(instances) == len(terminated)
-                    return terminated
-                # wait for provider response
-                time.sleep(0.2)
-        else:
-            while time.time() - start < timeout:
-                instances = self._list(selector=selector)
-                if all(inst['status'] == 'Inactive' for inst in instances):
-                    assert len(instances) == len(terminated)
-                    return terminated
-                time.sleep(1)
-
-        raise TimeoutError(f"Some of the instances haven't stopped")
-
-class ProvidersClient:
-    def __init__(self, client: ['RiftClient']):
-        self.client = client
-        self.api_root = os.path.join(client.public_api_root, 'providers')
-
-    def list(self, names: Optional[Sequence[str]] = None):
-        if names is None:
-            data = {}
-        else:
-            data = {'selector': {'ByName': names}}
-        return self.client._make_request('post', data=data, url=f'{self.api_root}/list')['providers']
-
-
-class CloudRiftImagesAPI:
-    """Dummy CloudRift images API."""
-    
-    def get(self, image_id: str) -> Dict:
-        """Gets image information."""
-        return {
-            'image': {
-                'id': image_id,
-                'name': f'cloudrift-image-{image_id}',
-                'size_gigabytes': 10.0
+    def list_instances(self, instance_ids: Optional[List[str]] = None) -> List[Dict]:
+        request_data = {
+            "selector": {
+                "ByStatus": ["Initializing", "Active", "Deactivating"],
             }
         }
+        logger.debug("Listing instances with request data: %s", request_data)
+        response_data = self._make_request("instances/list", request_data)
+        if isinstance(response_data, dict):
+            return response_data.get("instances", [])
 
-def filter_instances(
-    cluster_name_on_cloud: str,
-    status_filters: Optional[List[str]] = None
-) -> Dict[str, Dict[str, Any]]:
-    """Filter instances by cluster name and status.
+        return []
 
-    Args:
-        cluster_name_on_cloud: The name of the cluster on cloud.
-        status_filters: The status to filter by.
+    def get_instance_by_id(self, instance_id: str) -> Optional[Dict]:
+        request_data = {"selector": {"ById": [instance_id]}}
+        logger.debug("Getting instance with request data: %s", request_data)
+        response_data = self._make_request("instances/list", request_data)
+        if isinstance(response_data, dict):
+            instances = response_data.get("instances", [])
+            if isinstance(instances, list) and len(instances) > 0:
+                return instances[0]
 
-    Returns:
-        A dict mapping from instance id to instance metadata.
-    """
-    # Call CloudRift API to list all instances
-    instances_list = client().instances.list_instances()
-    
-    filtered = {}
-    for instance in instances_list:
-        name = instance.get('name', '')
-        if not name.startswith(cluster_name_on_cloud):
-            continue
-        if status_filters is not None and instance.get('status') not in status_filters:
-            continue
-        filtered[name] = instance
-    
-    return filtered
+        return None
+
+    def is_instance_ready(self, instance_id: str) -> bool:
+        """
+        Checks if the instance with the given ID is ready.
+        Returns True if the instance is ready, False otherwise.
+        """
+        instance_info = self.get_instance_by_id(instance_id)
+        if instance_info:
+            instance_type = instance_info.get("node_mode", "")
+            if instance_type == "VirtualMachine":
+                vms = instance_info.get("virtual_machines", [])
+                if len(vms) > 0:
+                    vm_ready = vms[0].get("ready", False)
+                    return vm_ready
+            else:
+                return instance_info.get("status", "") == "Active"
+        return False
+
+    def terminate_instance(self, instance_id: str) -> bool:
+        request_data = {"selector": {"ById": [instance_id]}}
+        logger.debug("Terminating instance with request data: %s", request_data)
+        response_data = self._make_request("instances/terminate", request_data)
+        if isinstance(response_data, dict):
+            info = response_data.get("terminated", [])
+            return len(info) > 0
+
+        return False
+
+    def _make_request(
+        self,
+        endpoint: str,
+        data: Optional[Mapping[str, Any]] = None,
+        method: str = "POST",
+        **kwargs,
+    ) -> Union[Mapping[str, Any], str, Response]:
+        headers = {}
+        if self.api_key is not None:
+            headers["X-API-Key"] = self.api_key
+
+        version = CLOUDRIFT_API_VERSION
+        full_url = f"{self.public_api_root}/{endpoint}"
+
+        try:
+            response = requests.request(
+                method,
+                full_url,
+                headers=headers,
+                json={"version": version, "data": data},
+                timeout=120,
+                **kwargs,
+            )
+
+            if not response.ok:
+                response.raise_for_status()
+            try:
+                response_json = response.json()
+                if isinstance(response_json, str):
+                    return response_json
+                if version is not None and version < response_json["version"]:
+                    logger.warning(
+                        "The API version %s is lower than the server version %s. ",
+                        version,
+                        response_json["version"],
+                    )
+                return response_json["data"]
+            except requests.exceptions.JSONDecodeError:
+                return response
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code in (
+                requests.codes.forbidden,
+                requests.codes.unauthorized,
+            ):
+                raise BackendInvalidCredentialsError(e.response.text)
+            raise
+
 
 
 def create_instance(
