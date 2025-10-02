@@ -79,7 +79,8 @@ def launch_cluster(replica_id: int,
     """
     # Use a different logger for each replica to avoid logging to the same file.
     launch_logger = sky_logging.init_logger(
-        f'{__name__}.launch_cluster.{cluster_name}', log_file=log_file)
+        f'{__name__}.launch_cluster.{cluster_name}')
+    launch_logger = sky_logging.configure_log_file(launch_logger, log_file)
     if resources_override is not None:
         launch_logger.info(f'Scaling up replica (id: {replica_id}) cluster '
                            f'{cluster_name} with resources override: '
@@ -168,7 +169,8 @@ def terminate_cluster(cluster_name: str,
     """Terminate the sky serve replica cluster."""
     if down_logger is None:
         down_logger = sky_logging.init_logger(
-            f'{__name__}.terminate_cluster.{cluster_name}', log_file=log_file)
+            f'{__name__}.terminate_cluster.{cluster_name}')
+        down_logger = sky_logging.configure_log_file(down_logger, log_file)
     time.sleep(replica_drain_delay_seconds)
     retry_cnt = 0
     backoff = common_utils.Backoff()

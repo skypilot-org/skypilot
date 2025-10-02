@@ -6,7 +6,6 @@ import logging
 import os
 import sys
 import threading
-from typing import Optional
 
 import colorama
 
@@ -160,31 +159,29 @@ def reload_logger():
 _setup_logger()
 
 
-def init_logger(name: str, log_file: Optional[str] = None) -> logging.Logger:
-    """Initialize a logger with optional file output.
+def init_logger(name: str) -> logging.Logger:
+    return logging.getLogger(name)
+
+
+def configure_log_file(logger: logging.Logger, log_file: str) -> logging.Logger:
+    """Configure a logger to output to a file.
 
     Args:
-        name: The name of the logger.
-        log_file: Optional path to a file where logs should be written.
-                 If None, the logger inherits the default behavior (stdout).
-                 If provided, logs will be written to the file.
+        logger: The logger to configure.
+        log_file: Path to a file where logs should be written.
 
     Returns:
         A configured logger instance.
     """
-    logger = logging.getLogger(name)
-
-    if log_file is not None:
-        logger.propagate = False
-        for handler in logger.handlers[:]:
-            logger.removeHandler(handler)
-        file_handler = logging.FileHandler(log_file)
-        if _show_logging_prefix():
-            file_handler.setFormatter(FORMATTER)
-        else:
-            file_handler.setFormatter(NO_PREFIX_FORMATTER)
-        logger.addHandler(file_handler)
-
+    logger.propagate = False
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+    file_handler = logging.FileHandler(log_file)
+    if _show_logging_prefix():
+        file_handler.setFormatter(FORMATTER)
+    else:
+        file_handler.setFormatter(NO_PREFIX_FORMATTER)
+    logger.addHandler(file_handler)
     return logger
 
 
