@@ -197,7 +197,7 @@ helm upgrade --install $RELEASE_NAME ./charts/skypilot --devel \
   --set apiService.image=$DOCKER_IMAGE
 ```
 
-> Notice that the tag should change every time you build the local changes.
+> Notice that the tag should change every time you build the local changes. When new changes are made to the code, repeat the previous steps to build the new changes and deploy the new changes to the API Server.
 
 Then, watch the status until the `READY` shows `1/1` and `STATUS` shows `Running`:
 
