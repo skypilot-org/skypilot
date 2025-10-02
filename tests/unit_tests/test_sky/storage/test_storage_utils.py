@@ -171,7 +171,7 @@ def test_zip_files_and_folders(ignore_dir_name, request):
             actual_zipped_files = zipf.namelist()
 
         expected_zipped_files = [
-            '.', 'ln-keep.py', 'ln-dir-keep.py', 'dir/subdir/ln-keep.py',
+            '', 'ln-keep.py', 'ln-dir-keep.py', 'dir/subdir/ln-keep.py',
             'dir/subdir/remove.py', 'keep.py', 'dir/keep.txt', 'dir/keep.a',
             'dir/subdir/keep.b', 'ln-folder', 'empty-folder/', 'dir/',
             'dir/subdir/', 'dir/subdir/remove_dir/'
