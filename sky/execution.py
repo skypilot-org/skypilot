@@ -264,25 +264,11 @@ def _execute_dag(
             f'{colorama.Style.RESET_ALL}')
 
     cluster_exists = False
-    _existing_handle_has_launchables = False
     if cluster_name is not None:
-        # Fast path: quickly check whether the cluster exists.
-        # This DB query is faster than fetching the full record.
+        # We use launched_at to check if the cluster exists, because this
+        # db query is faster than get_cluster_from_name.
         cluster_exists = global_user_state.cluster_with_name_exists(
             cluster_name)
-        # If it exists, fetch the record to determine whether the current
-        # handle has concrete launched_resources. If not, we will re-optimize
-        # to obtain concrete specs for provisioning (handles can disappear
-        # during concurrent teardown).
-        if cluster_exists:
-            cluster_record = global_user_state.get_cluster_from_name(
-                cluster_name)
-            if cluster_record is not None:
-                existing_handle = cluster_record.get('handle')
-                if (isinstance(existing_handle,
-                               backends.CloudVmRayResourceHandle)
-                        and existing_handle.launched_resources is not None):
-                    _existing_handle_has_launchables = True
         # TODO(woosuk): If the cluster exists, print a warning that
         # `cpus` and `memory` are not used as a job scheduling constraint,
         # unlike `gpus`.
@@ -379,11 +365,7 @@ def _execute_dag(
     is_managed = (_is_launched_by_jobs_controller or
                   _is_launched_by_sky_serve_controller)
 
-    # Run optimizer when there is no existing cluster OR when the existing
-    # cluster's handle is missing/invalid (e.g., recently terminated during a
-    # concurrent `down`) so that provisioning has concrete specs.
-    if (not cluster_exists) or (cluster_exists and
-                                not _existing_handle_has_launchables):
+    if not cluster_exists:
         # If spot is launched on serve or jobs controller, we don't need to
         # print out the hint.
         if (Stage.PROVISION in stages and task.use_spot and not is_managed):
@@ -435,6 +417,22 @@ def _execute_dag(
     try:
         provisioning_skipped = False
         if Stage.PROVISION in stages:
+            # Just-in-time safeguard: if best_resources is still None (e.g.,
+            # due to a recently-terminated existing cluster making us skip
+            # earlier optimization), do an optimization now to obtain a
+            # concrete provisioning plan and avoid backend asserts.
+            if task.best_resources is None:
+                if isinstance(backend, backends.CloudVmRayBackend):
+                    controller = controller_utils.Controllers.from_name(
+                        cluster_name)
+                    if controller is not None:
+                        job_logger.info(
+                            f'Choosing resources for {controller.value.name}...'
+                        )
+                    dag = optimizer.Optimizer.optimize(
+                        dag, minimize=optimize_target, quiet=_quiet_optimizer)
+                    task = dag.tasks[0]
+                    assert task.best_resources is not None, task
             assert handle is None or skip_unnecessary_provisioning, (
                 'Provisioning requested, but handle is already set. PROVISION '
                 'should be excluded from stages or '
