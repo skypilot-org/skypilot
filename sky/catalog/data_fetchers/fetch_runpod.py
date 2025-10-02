@@ -213,8 +213,16 @@ DEFAULT_GPU_INFO: Dict[str, Dict[str, Union[int, float]]] = {
     }
 }
 
+# A manual list of all CPU IDs RunPod currently supports
+# These are named as cpu{generation}{tier}
+# TODO: Investigate if these can be found from the API in an automated way
+#       currently there is little documentation or API to obtain them.
+DEFAULT_CPU_ONLY_IDS = ['cpu3c', 'cpu3g', 'cpu3m', 'cpu5c', 'cpu5g', 'cpu5m']
+
 # for backwards compatibility, force rename some gpus.
-# map the generated name to the original name
+# map the generated name to the original name.
+# RunPod GPU names currently supported are listed here:
+# https://docs.runpod.io/references/gpu-types
 GPU_NAME_OVERRIDES = {
     'A100-PCIe': 'A100-80GB',
     'A100-SXM': 'A100-80GB-SXM',
@@ -236,6 +244,8 @@ USEFUL_COLUMNS = [
 ]
 
 # Mapping of regions to their availability zones
+# TODO: Investigate if these can be found from the API in an automated way
+#       currently there is little documentation or API to obtain them.
 REGION_ZONES = {
     'CA': ['CA-MTL-1', 'CA-MTL-2', 'CA-MTL-3'],
     'CZ': ['EU-CZ-1'],
@@ -263,7 +273,7 @@ REGION_ZONES = {
 }
 
 
-def get_gpu_details(gpu_id: str, gpu_count: int = 1) -> Dict:
+def get_gpu_details(gpu_id: str, gpu_count: int = 1) -> Dict[str, Any]:
     """Get detailed GPU information using GraphQL query.
 
     This uses a custom graphql query because runpod.get_gpu(id) does not include
@@ -307,13 +317,72 @@ def get_gpu_details(gpu_id: str, gpu_count: int = 1) -> Dict:
         raise RuntimeError(f'GraphQL errors: {result["errors"]}')
 
     try:
-        gpu_type = result['data']['gpuTypes'][0]
+        gpu_query_result = result['data']['gpuTypes'][0]
     except Exception as e:
-        error_msg = ('No GPU Types found in RunPod query with'
+        error_msg = ('No GPU Types found in RunPod query with '
                      f'gpu_id={gpu_id}, gpu_count={gpu_count}')
         raise ValueError(error_msg) from e
 
-    return gpu_type
+    return gpu_query_result
+
+
+def query_cpu_id(cpu_id: str) -> List[Dict[str, Any]]:
+    query = f"""
+    query SecureCpuTypes {{
+      cpuFlavors(input: {{id: "{cpu_id}"}}) {{
+        id
+        groupId
+        displayName
+        minVcpu
+        maxVcpu
+        vcpuBurstable
+        ramMultiplier
+        diskLimitPerVcpu
+      }}
+    }}"""
+    result = graphql.run_graphql_query(query)
+
+    if 'errors' in result:
+        raise RuntimeError(f'GraphQL errors: {result["errors"]}')
+
+    try:
+        cpu_query_result = result['data']['cpuFlavors']
+    except Exception as e:
+        error_msg = (f'No CPU Types found in RunPod query with cpu_id={cpu_id}')
+        raise ValueError(error_msg) from e
+
+    return cpu_query_result
+
+
+def query_cpu_specifics(cpu_id: str,
+                        cpu_spec_id: str,
+                        data_center_id: str = '') -> List[Dict[str, Any]]:
+    query = f"""
+    query SecureCpuTypes {{
+      cpuFlavors(input: {{id: "{cpu_id}"}}) {{
+        id
+        groupId
+        displayName
+        specifics(input: {{instanceId: "{cpu_spec_id}", dataCenterId: "{data_center_id}"}}) {{
+          stockStatus
+          securePrice
+          slsPrice
+        }}
+      }}
+    }}"""
+    result = graphql.run_graphql_query(query)
+
+    if 'errors' in result:
+        raise RuntimeError(f'GraphQL errors: {result["errors"]}')
+
+    try:
+        cpu_query_result = result['data']['cpuFlavors']
+    except Exception as e:
+        error_msg = ('No CPU Types found in RunPod query with '
+                     f'cpu_id={cpu_id} cpu_spec_id={cpu_spec_id}')
+        raise ValueError(error_msg) from e
+
+    return cpu_query_result
 
 
 def format_price(price: float) -> float:
@@ -396,8 +465,91 @@ def get_gpu_info(base_gpu_name: str, gpu_type: Dict[str, Any],
     }
 
 
-def get_instance_configurations(gpu_id: str) -> List[Dict]:
-    """Generate instance configurations for a GPU type."""
+def get_cpu_instance_configurations(cpu_id: str) -> List[Dict[str, Any]]:
+    """Retrieves available CPU instance configurations for a CPU ID.
+    This function queries the available vCPU and memory combinations
+    for given CPU types over all supported regions and zones.
+    Args:
+        cpu_id (str): The identifier for the CPU type to query.
+    Returns:
+        List[Dict]: A list of dictionaries, each representing an instance
+            configuration with the following keys:
+                - 'InstanceType': Unique identifier for the instance type (str)
+                - 'AcceleratorName': Name of accelerator (None for CPU-only)
+                - 'AcceleratorCount': Number of accelerators (None for CPU-only)
+                - 'vCPUs': Number of virtual CPUs (float).
+                - 'SpotPrice': Spot price for the instance (None currently)
+                - 'MemoryGB': Amount of memory in GB (float).
+                - 'Price': Secure price for the instance (float).
+                - 'Region': Cloud region name (str).
+                - 'AvailabilityZone': Availability zone within the region (str).
+    """
+
+    instances = []
+
+    # Get vCPU and memory combinations for this CPU type
+    for cpu_info in query_cpu_id(cpu_id):
+        if not cpu_info.get('minVcpu') or not cpu_info.get(
+                'maxVcpu') or not cpu_info.get('ramMultiplier'):
+            print(f'Skipping CPU {cpu_id} due to missing vCPU or memory info')
+            continue
+        min_vcpu = int(cpu_info['minVcpu'])
+        max_vcpu = int(cpu_info['maxVcpu'])
+        ram_multiplier = int(cpu_info['ramMultiplier'])
+
+        # Iterate over possible vCPU counts (powers of 2 up to 2**8=512 vCPUs)
+        vcpu_counts = [
+            2**ii
+            for ii in range(1, 9)
+            if 2**ii >= min_vcpu and 2**ii <= max_vcpu
+        ]
+        for vcpus in vcpu_counts:
+            memory = int(vcpus * ram_multiplier)
+            cpu_spec_id = f'{cpu_id}-{vcpus}-{memory}'
+
+            # Iterate over all regions and zones
+            for region, zones in REGION_ZONES.items():
+                for zone in zones:
+                    for cpu_spec_output in query_cpu_specifics(
+                            cpu_id, cpu_spec_id, zone):
+                        instances.append({
+                            'InstanceType': cpu_spec_id,
+                            'AcceleratorName': None,
+                            'AcceleratorCount': None,
+                            'vCPUs': float(vcpus),
+                            'SpotPrice': None,
+                            'MemoryGiB': float(memory),
+                            'Price': float(
+                                cpu_spec_output['specifics']['securePrice']),
+                            'Region': region,
+                            'AvailabilityZone': zone,
+                            'GpuInfo': None,
+                        })
+
+    return instances
+
+
+def get_gpu_instance_configurations(gpu_id: str) -> List[Dict[str, Any]]:
+    """Retrieves available GPU instance configurations for a given GPU ID.
+    Only secure cloud instances are included (community cloud instances
+    are skipped).  Each configuration includes pricing (spot and base), region,
+    availabilityzone, and hardware details.
+    If the GPU type is not found a default maximum GPU count & memory is used.
+    Args:
+        gpu_id (str): The identifier of the GPU type
+    Returns:
+        List[Dict]: A list of dictionaries, each representing an instance
+            configuration with the following keys:
+                - 'InstanceType': String describing the instance type
+                - 'AcceleratorName': Name of the GPU accelerator.
+                - 'AcceleratorCount': Number of GPUs in the instance.
+                - 'SpotPrice': Spot price for the instance (if available).
+                - 'Price': Base price for the instance (if available).
+                - 'Region': Cloud region.
+                - 'AvailabilityZone': Availability zone within the region.
+                - Additional hardware info (e.g., memory, vCPU) from GPU info.
+    """
+
     instances = []
     detailed_gpu_1 = get_gpu_details(gpu_id, gpu_count=1)
     base_gpu_name = format_gpu_name(detailed_gpu_1)
@@ -449,7 +601,7 @@ def get_instance_configurations(gpu_id: str) -> List[Dict]:
     return instances
 
 
-def fetch_runpod_catalog(gpu_ids: Optional[str] = None) -> pd.DataFrame:
+def fetch_runpod_catalog(no_gpu: bool, no_cpu: bool) -> pd.DataFrame:
     """Fetch and process RunPod GPU catalog data.
 
     Args:
@@ -462,41 +614,54 @@ def fetch_runpod_catalog(gpu_ids: Optional[str] = None) -> pd.DataFrame:
         if not runpod.api_key:
             raise ValueError('RUNPOD_API_KEY environment variable not set')
 
-        # Get GPU list either from API or provided IDs
-        if gpu_ids:
-            gpus = [{'id': gpu_id.strip()} for gpu_id in gpu_ids.split(',')]
-        else:
+        # Get GPU list from API
+        instances = []
+        if not no_gpu:
             gpus = runpod.get_gpus()
             if not gpus:
                 raise ValueError('No GPU types returned from RunPod API')
 
-        # Generate instances from GPU ids
-        instances = [
-            instance for gpu in gpus
-            for instance in get_instance_configurations(gpu['id'])
-        ]
+            # Generate instances from GPU ids
+            instances.extend([
+                instance for gpu in gpus
+                for instance in get_gpu_instance_configurations(gpu['id'])
+            ])
 
-        # Create DataFrame
-        df = pd.DataFrame(instances)
+        if not no_cpu:
+            # Generate instances from CPU ids
+            instances.extend([
+                instance for cpu_id in DEFAULT_CPU_ONLY_IDS
+                for instance in get_cpu_instance_configurations(cpu_id)
+            ])
 
-        # Validate required columns
-        missing_columns = set(USEFUL_COLUMNS) - set(df.columns)
-        if missing_columns:
-            raise ValueError(f'Missing required columns: {missing_columns}')
-
-        # Ensure all required columns are present and in correct order
-        df = df[USEFUL_COLUMNS]
-
-        # Sort for consistency
-        df.sort_values(['AcceleratorName', 'InstanceType', 'AvailabilityZone'],
-                       inplace=True)
-
-        return df
+        return instances
 
     except Exception as e:
         print(traceback.format_exc())
         print(f'Failed to fetch RunPod catalog: {e}', file=sys.stderr)
         raise
+
+
+def save_catalog(instances: List[Dict[str, Any]], output_file: str) -> None:
+    """Save the catalog to a CSV file."""
+
+    # Create DataFrame
+    df = pd.DataFrame(instances)
+
+    # Validate required columns
+    missing_columns = set(USEFUL_COLUMNS) - set(df.columns)
+    if missing_columns:
+        raise ValueError(f'Missing required columns: {missing_columns}')
+
+    # Ensure all required columns are present and in correct order
+    df = df[USEFUL_COLUMNS]
+
+    # Sort for consistency
+    df.sort_values(['AcceleratorName', 'InstanceType', 'AvailabilityZone'],
+                   inplace=True)
+
+    df.to_csv(output_file, index=False)
+    print(f'RunPod catalog saved to {output_file}')
 
 
 def main():
@@ -505,22 +670,24 @@ def main():
     parser.add_argument('--output-dir',
                         default='runpod',
                         help='Directory to save the catalog files')
+    parser.add_argument('--no-gpu',
+                        help='Do not fetch and store catalog for RunPod GPUs',
+                        default=False,
+                        action='store_true')
     parser.add_argument(
-        '--gpu-ids',
-        help='Comma-separated list of RunPod GPU IDs to fetch. '
-        'If not provided, fetch all GPUs.',
-    )
+        '--no-cpu',
+        help='Do not fetch and store catalog for RunPod CPUs (serverless)',
+        default=False,
+        action='store_true')
     args = parser.parse_args()
 
     try:
-        # Create output directory
         os.makedirs(args.output_dir, exist_ok=True)
 
-        # Fetch and save catalog
-        df = fetch_runpod_catalog(args.gpu_ids)
-        output_path = os.path.join(args.output_dir, 'vms.csv')
-        df.to_csv(output_path, index=False)
-        print(f'RunPod Service Catalog saved to {output_path}')
+        catalog = fetch_runpod_catalog(args.no_gpu, args.no_cpu)
+
+        output_file_location = os.path.join(args.output_dir, 'vms.csv')
+        save_catalog(catalog, output_file_location)
 
     except ValueError as e:
         print(f'Error updating RunPod catalog: {e}', file=sys.stderr)
