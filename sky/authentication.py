@@ -48,7 +48,6 @@ from sky.provision.lambda_cloud import lambda_utils
 from sky.provision.primeintellect import utils as primeintellect_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
-from sky.utils import kubernetes_enums
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
@@ -432,26 +431,7 @@ def setup_ibm_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     context = kubernetes_utils.get_context_from_config(config['provider'])
 
-    # Default ssh session is established with kubectl port-forwarding with
-    # ClusterIP service.
-    nodeport_mode = kubernetes_enums.KubernetesNetworkingMode.NODEPORT
-    port_forward_mode = kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD
-    network_mode_str = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
-        region=context,
-        keys=('networking',),
-        default_value=port_forward_mode.value)
-    try:
-        network_mode = kubernetes_enums.KubernetesNetworkingMode.from_str(
-            network_mode_str)
-    except ValueError as e:
-        # Add message saying "Please check: ~/.sky/config.yaml" to the error
-        # message.
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(str(e) +
-                             ' Please check: ~/.sky/config.yaml.') from None
     _, public_key_path = get_or_generate_keys()
-
     # Add the user's public key to the SkyPilot cluster.
     secret_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
     secret_field_name = clouds.Kubernetes().ssh_key_secret_field_name
@@ -501,42 +481,23 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             raise e
 
     private_key_path, _ = get_or_generate_keys()
-    if network_mode == nodeport_mode:
-        ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
-        service_type = kubernetes_enums.KubernetesServiceType.NODEPORT
-        # Setup service for SSH jump pod. We create the SSH jump service here
-        # because we need to know the service IP address and port to set the
-        # ssh_proxy_command in the autoscaler config.
-        kubernetes_utils.setup_ssh_jump_svc(ssh_jump_name, namespace, context,
-                                            service_type)
-        ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
-            ssh_jump_name,
-            nodeport_mode,
-            private_key_path=private_key_path,
-            context=context,
-            namespace=namespace)
-    elif network_mode == port_forward_mode:
-        # Using `kubectl port-forward` creates a direct tunnel to the pod and
-        # does not require a ssh jump pod.
-        kubernetes_utils.check_port_forward_mode_dependencies()
-        # TODO(romilb): This can be further optimized. Instead of using the
-        #   head node as a jump pod for worker nodes, we can also directly
-        #   set the ssh_target to the worker node. However, that requires
-        #   changes in the downstream code to return a mapping of node IPs to
-        #   pod names (to be used as ssh_target) and updating the upstream
-        #   SSHConfigHelper to use a different ProxyCommand for each pod.
-        #   This optimization can reduce SSH time from ~0.35s to ~0.25s, tested
-        #   on GKE.
-        ssh_target = config['cluster_name'] + '-head'
-        ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
-            ssh_target,
-            port_forward_mode,
-            private_key_path=private_key_path,
-            context=context,
-            namespace=namespace)
-    else:
-        # This should never happen because we check for this in from_str above.
-        raise ValueError(f'Unsupported networking mode: {network_mode_str}')
+    # Using `kubectl port-forward` creates a direct tunnel to the pod and
+    # does not require a ssh jump pod.
+    kubernetes_utils.check_port_forward_mode_dependencies()
+    # TODO(romilb): This can be further optimized. Instead of using the
+    #   head node as a jump pod for worker nodes, we can also directly
+    #   set the ssh_target to the worker node. However, that requires
+    #   changes in the downstream code to return a mapping of node IPs to
+    #   pod names (to be used as ssh_target) and updating the upstream
+    #   SSHConfigHelper to use a different ProxyCommand for each pod.
+    #   This optimization can reduce SSH time from ~0.35s to ~0.25s, tested
+    #   on GKE.
+    pod_name = config['cluster_name'] + '-head'
+    ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
+        pod_name,
+        private_key_path=private_key_path,
+        context=context,
+        namespace=namespace)
     config['auth']['ssh_proxy_command'] = ssh_proxy_cmd
     config['auth']['ssh_private_key'] = private_key_path
 

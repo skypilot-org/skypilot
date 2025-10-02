@@ -1071,6 +1071,7 @@ _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
 }
 
 _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
+    # TODO(kevin): Remove 'networking' in v0.13.0.
     'networking': {
         'type': 'string',
         'case_insensitive_enum': [
