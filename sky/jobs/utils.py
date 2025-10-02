@@ -1325,7 +1325,7 @@ def get_managed_job_queue(
                                              page,
                                              limit,
                                              statuses=statuses)
-    # we need job ids for each job
+
     job_ids = set(job['job_id'] for job in jobs)
     job_id_to_pool_info = (
         managed_job_state.get_pool_and_submit_info_from_job_ids(job_ids))
