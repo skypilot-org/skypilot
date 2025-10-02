@@ -1510,20 +1510,20 @@ def load_managed_job_queue(
         total_no_filter = total
         result_type = ManagedJobQueueResultType.LIST
 
-    user_hashes = set()
+    job_id_to_user_hash: Dict[int, str] = {}
     for job in jobs:
         if 'user_hash' in job and job['user_hash'] is not None:
             # Skip jobs that do not have user_hash info.
             # TODO(cooperc): Remove check before 0.12.0.
-            user_hashes.add(job['user_hash'])
-    user_hash_to_user = global_user_state.get_users(user_hashes)
+            job_id_to_user_hash[job['job_id']] = job['user_hash']
+    user_hash_to_user = global_user_state.get_users(
+        job_id_to_user_hash.values())
 
     for job in jobs:
         job['status'] = managed_job_state.ManagedJobStatus(job['status'])
-        if 'user_hash' in job and job['user_hash'] is not None:
-            # Skip jobs that do not have user_hash info.
-            # TODO(cooperc): Remove check before 0.12.0.
-            user = user_hash_to_user.get(job['user_hash'], None)
+        if job['job_id'] in job_id_to_user_hash:
+            user_hash = job_id_to_user_hash[job['job_id']]
+            user = user_hash_to_user.get(user_hash, None)
             job['user_name'] = user.name if user is not None else None
     return jobs, total, result_type, total_no_filter, status_counts
 
