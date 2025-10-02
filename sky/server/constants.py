@@ -48,6 +48,12 @@ CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS = 60
 # background.
 VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS = 60
 
+# The assumed stack size per thread for glibc.
+GLIBC_PER_THREAD_STACK_SIZE_GB = 8 / 1024  # 8MB
+
+# The maximum number of concurrent kubernetes pod ssh connections.
+MAX_CONCURRENT_KUBE_SSH_CONNECTIONS = 1000
+
 # Environment variable for a file path to the API cookie file.
 # Keep in sync with websocket_proxy.py
 API_COOKIE_FILE_ENV_VAR = f'{constants.SKYPILOT_ENV_VAR_PREFIX}API_COOKIE_FILE'

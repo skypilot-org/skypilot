@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import base64
+import concurrent.futures
 import contextlib
 import datetime
 import hashlib
@@ -14,6 +15,7 @@ import posixpath
 import re
 import resource
 import shutil
+import socket
 import sys
 import threading
 from typing import Dict, List, Literal, Optional, Set, Tuple
@@ -1756,57 +1758,119 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
         pid=os.getpid())
     ssh_failed = False
     websocket_closed = False
+    
     try:
         conn_gauge.inc()
-        # Connect to the local port
-        reader, writer = await asyncio.open_connection('127.0.0.1', local_port)
-
-        async def websocket_to_ssh():
+        # Create a blocking socket connection to the SSH port
+        ssh_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        ssh_socket.connect(('127.0.0.1', local_port))
+        
+        # Get the current event loop for thread-safe WebSocket operations
+        loop = asyncio.get_running_loop()
+        
+        # Shared state for coordinating shutdown
+        shutdown_event = threading.Event()
+        
+        def websocket_to_ssh_thread():
+            """Thread function: WebSocket -> SSH (blocking)"""
+            nonlocal ssh_failed, websocket_closed
             try:
-                async for message in websocket.iter_bytes():
-                    writer.write(message)
+                while not shutdown_event.is_set():
                     try:
-                        await writer.drain()
-                    except Exception as e:  # pylint: disable=broad-except
-                        # Typically we will not reach here, if the ssh to pod
-                        # is disconnected, ssh_to_websocket will exit first.
-                        # But just in case.
-                        logger.error('Failed to write to pod through '
-                                     f'port-forward connection: {e}')
-                        nonlocal ssh_failed
-                        ssh_failed = True
-                        break
-            except fastapi.WebSocketDisconnect:
-                pass
-            nonlocal websocket_closed
-            websocket_closed = True
-            writer.close()
-
-        async def ssh_to_websocket():
-            try:
-                while True:
-                    data = await reader.read(1024)
-                    if not data:
-                        if not websocket_closed:
-                            logger.warning('SSH connection to pod is '
-                                           'disconnected before websocket '
-                                           'connection is closed')
-                            nonlocal ssh_failed
+                        # Get data from websocket (this needs to be done in the main loop)
+                        future = asyncio.run_coroutine_threadsafe(
+                            websocket.receive_bytes(), loop)
+                        data = future.result(timeout=0.1)  # Short timeout to check shutdown
+                        print(f"Received data from WebSocket: {data}")
+                        
+                        # Send to SSH socket (blocking, no yielding)
+                        ssh_socket.sendall(data)
+                        print("Sent data to SSH socket")
+                    except asyncio.TimeoutError:
+                        continue  # Check shutdown_event and try again
+                    except concurrent.futures.TimeoutError:
+                        future.cancel()
+                        continue
+                    except Exception as e:
+                        # Print exception type.
+                        print(f"Exception type: {type(e)}")
+                        if not shutdown_event.is_set():
+                            logger.error(f'WebSocket to SSH error: {e}')
                             ssh_failed = True
                         break
-                    await websocket.send_bytes(data)
-            except Exception:  # pylint: disable=broad-except
-                pass
+            except Exception as e:
+                logger.error(f'WebSocket to SSH thread error: {e}')
+                ssh_failed = True
+            finally:
+                websocket_closed = True
+                shutdown_event.set()
+                
+        def ssh_to_websocket_thread():
+            """Thread function: SSH -> WebSocket (blocking)"""
+            nonlocal ssh_failed, websocket_closed
             try:
-                await websocket.close()
-            except Exception:  # pylint: disable=broad-except
-                # The websocket might has been closed by the client.
-                pass
-
-        await asyncio.gather(websocket_to_ssh(), ssh_to_websocket())
+                ssh_socket.settimeout(0.1)  # Short timeout for non-blocking check
+                while not shutdown_event.is_set():
+                    try:
+                        # Read from SSH socket (blocking, no yielding)
+                        data = ssh_socket.recv(1024)
+                        if not data:
+                            if not websocket_closed:
+                                logger.warning('SSH connection to pod disconnected')
+                                ssh_failed = True
+                            break
+                            
+                        # Send to WebSocket (this needs to be done in the main loop)
+                        future = asyncio.run_coroutine_threadsafe(
+                            websocket.send_bytes(data), loop)
+                        future.result(timeout=1.0)  # Longer timeout for send
+                        
+                    except socket.timeout:
+                        continue  # Check shutdown_event and try again
+                    except Exception as e:
+                        if not shutdown_event.is_set():
+                            logger.error(f'SSH to WebSocket error: {e}')
+                            ssh_failed = True
+                        break
+            except Exception as e:
+                logger.error(f'SSH to WebSocket thread error: {e}')
+                ssh_failed = True
+            finally:
+                shutdown_event.set()
+                # Close WebSocket from main thread
+                try:
+                    future = asyncio.run_coroutine_threadsafe(
+                        websocket.close(), loop)
+                    future.result(timeout=1.0)
+                except Exception:
+                    pass  # WebSocket might already be closed
+                
+        # Start both threads
+        ws_to_ssh_thread = threading.Thread(target=websocket_to_ssh_thread, 
+                                           name="ws-to-ssh")
+        ssh_to_ws_thread = threading.Thread(target=ssh_to_websocket_thread,
+                                           name="ssh-to-ws")
+        
+        ws_to_ssh_thread.start()
+        ssh_to_ws_thread.start()
+        
+        # Wait for either thread to complete or signal shutdown
+        while ws_to_ssh_thread.is_alive() and ssh_to_ws_thread.is_alive():
+            await asyncio.sleep(0.1)
+            
+        # Signal shutdown and wait for threads to complete
+        shutdown_event.set()
+        ws_to_ssh_thread.join(timeout=2.0)
+        ssh_to_ws_thread.join(timeout=2.0)
+        
     finally:
         conn_gauge.dec()
         reason = ''
+        try:
+            ssh_socket.close()
+        except Exception:
+            pass
+            
         try:
             logger.info('Terminating kubectl port-forward process')
             proc.terminate()
