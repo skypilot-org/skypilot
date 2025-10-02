@@ -244,8 +244,10 @@ class SCPClient:
                 return False
         return True
 
+
     def add_security_group_rule(self, sg_id, direction,
-                                ports: Optional[List[str]], cnt: Optional[int]):
+                                ports: Optional[List[str]],
+                                cnt: Optional[int]) -> None:
         if ports is None:
             if direction == 'IN':
                 if cnt == 1:
@@ -275,9 +277,10 @@ class SCPClient:
                 target_address: ['0.0.0.0/0'],
                 'ruleDescription': 'sky security group rule'
             }
-            return self._post(url, request_body)
+            self._post(url, request_body)
         else:
             return None
+
 
     def _firewall_rule_not_exist(self, firewall_id, internal_ip, direction,
                                  ports):
