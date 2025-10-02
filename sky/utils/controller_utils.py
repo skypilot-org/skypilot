@@ -1294,7 +1294,8 @@ def get_resources_lock_path() -> str:
 
 def _get_number_of_services(pool: bool) -> int:
     return _get_parallelism(pool=pool,
-                            raw_resource_per_unit=SERVE_MONITORING_MEMORY_MB)
+                            raw_resource_per_unit=SERVE_MONITORING_MEMORY_MB *
+                            POOL_JOBS_RESOURCES_RATIO)
 
 
 @annotations.lru_cache(scope='request')

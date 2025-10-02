@@ -833,10 +833,11 @@ class SkyPilotReplicaManager(ReplicaManager):
         self._launch_replica(self._next_replica_id, resources_override)
         self._next_replica_id += 1
 
-    def _handle_sky_down_finish(self, info: ReplicaInfo, exitcode: int) -> None:
-        if exitcode != 0:
+    def _handle_sky_down_finish(self, info: ReplicaInfo,
+                                format_exc: Optional[str]) -> None:
+        if format_exc is not None:
             logger.error(f'Down thread for replica {info.replica_id} '
-                         f'exited abnormally with code {exitcode}.')
+                         f'exited abnormally with exception {format_exc}.')
             info.status_property.sky_down_status = (
                 common_utils.ProcessStatus.FAILED)
         else:
@@ -996,7 +997,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         # refresh. In this case, we skip spawning a new down thread to save
         # controller resources.
         if not global_user_state.cluster_with_name_exists(info.cluster_name):
-            self._handle_sky_down_finish(info, exitcode=0)
+            self._handle_sky_down_finish(info, format_exc=None)
             return
 
         # Otherwise, start the thread to terminate the cluster.
@@ -1108,11 +1109,11 @@ class SkyPilotReplicaManager(ReplicaManager):
                     del self._launch_thread_pool[replica_id]
                     if replica_id in self._replica_to_request_id:
                         del self._replica_to_request_id[replica_id]
-                    if t.exitcode != 0:
+                    if t.format_exc is not None:
                         logger.warning(
                             f'Launch thread for replica {replica_id} '
-                            f'exited abnormally with code {t.exitcode}. '
-                            f'Error: {t.exc}. Terminating...')
+                            f'exited abnormally with exception '
+                            f'{t.format_exc}. Terminating...')
                         info.status_property.sky_launch_status = (
                             common_utils.ProcessStatus.FAILED)
                         error_in_sky_launch = True
@@ -1131,7 +1132,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                         # availability of the location later.
                         location = info.get_spot_location()
                         assert location is not None
-                        if t.exitcode != 0:
+                        if t.format_exc is not None:
                             self._spot_placer.set_preemptive(location)
                             info.status_property.failed_spot_availability = True
                         else:
@@ -1164,7 +1165,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 logger.info(
                     f'Terminate thread for replica {replica_id} finished.')
                 del self._down_thread_pool[replica_id]
-                self._handle_sky_down_finish(info, exitcode=t.exitcode)
+                self._handle_sky_down_finish(info, format_exc=t.format_exc)
 
         # Clean old version
         replica_infos = serve_state.get_replica_infos(self._service_name)

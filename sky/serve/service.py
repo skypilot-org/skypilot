@@ -186,7 +186,7 @@ def _cleanup(service_name: str, pool: bool) -> bool:
                             f'{info.replica_id} finished.')
                 t.join()
                 del info2thr[info]
-                if t.exitcode == 0:
+                if t.format_exc is None:
                     serve_state.remove_replica(service_name, info.replica_id)
                     logger.info(
                         f'Replica {info.replica_id} terminated successfully.')
