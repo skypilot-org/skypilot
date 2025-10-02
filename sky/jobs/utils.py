@@ -1510,7 +1510,7 @@ def load_managed_job_queue(
         total_no_filter = total
         result_type = ManagedJobQueueResultType.LIST
 
-    user_hashes = set()
+    user_hashes = {}
     for job in jobs:
         if 'user_hash' in job and job['user_hash'] is not None:
             # Skip jobs that do not have user_hash info.
@@ -1520,8 +1520,9 @@ def load_managed_job_queue(
 
     for job in jobs:
         job['status'] = managed_job_state.ManagedJobStatus(job['status'])
-        user = user_hash_to_user.get(job['user_hash'], None)
-        job['user_name'] = user.name if user is not None else None
+        if 'user_hash' in job and job['user_hash'] is not None:
+            user = user_hash_to_user.get(job['user_hash'], None)
+            job['user_name'] = user.name if user is not None else None
     return jobs, total, result_type, total_no_filter, status_counts
 
 
