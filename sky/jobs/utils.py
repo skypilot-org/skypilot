@@ -33,7 +33,6 @@ from sky.backends import cloud_vm_ray_backend
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
-from sky.metrics import utils as metrics_lib
 from sky.schemas.api import responses
 from sky.skylet import constants
 from sky.skylet import job_lib
