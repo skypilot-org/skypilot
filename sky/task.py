@@ -1079,14 +1079,14 @@ class Task:
             self.resources, self._envs, self._secrets)
         return self
 
-    def update_resources(self, **update_params: Any) -> 'Task':
+    def update_resources_fields(self, **update_params: Any) -> 'Task':
         """Updates the resources for this task.
 
         Example:
             .. code-block:: python
 
-                task.update_resources(use_spot=True)
-                task.update_resources(autostop={'timeout': 3600})
+                task.update_resources_fields(use_spot=True)
+                task.update_resources_fields(autostop={'timeout': 3600})
 
         Args:
           update_params: A dictionary of parameters to update the resources.

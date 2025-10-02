@@ -877,7 +877,7 @@ def test_resolve_volumes_with_envs_dict():
     assert t._volumes == {'/mnt': {'name': 'vol1_suffix'}}
 
 
-def test_update_resources():
+def test_update_resources_fields():
     t = task.Task()
     t.set_resources([
         resources_lib.Resources(cloud=registry.CLOUD_REGISTRY.from_str('aws'),
@@ -895,7 +895,7 @@ def test_update_resources():
                                 cpus=4,
                                 memory=8)
     ])
-    t.update_resources(memory=4)
+    t.update_resources_fields(memory=4)
     assert repr(t.resources) == repr([
         resources_lib.Resources(cloud=registry.CLOUD_REGISTRY.from_str('aws'),
                                 cpus=2,
@@ -905,7 +905,7 @@ def test_update_resources():
                                 memory=4)
     ])
 
-    t.update_resources(memory=8)
+    t.update_resources_fields(memory=8)
     assert repr(t.resources) == repr([
         resources_lib.Resources(cloud=registry.CLOUD_REGISTRY.from_str('aws'),
                                 cpus=2,
@@ -915,7 +915,7 @@ def test_update_resources():
                                 memory=8)
     ])
 
-    t.update_resources(cpus=6)
+    t.update_resources_fields(cpus=6)
     assert repr(t.resources) == repr([
         resources_lib.Resources(cloud=registry.CLOUD_REGISTRY.from_str('aws'),
                                 cpus=6,
@@ -926,7 +926,7 @@ def test_update_resources():
     ])
 
     # make sure the examples in the docstring are working
-    t.update_resources(use_spot=True)
+    t.update_resources_fields(use_spot=True)
     assert repr(t.resources) == repr([
         resources_lib.Resources(cloud=registry.CLOUD_REGISTRY.from_str('aws'),
                                 cpus=6,
@@ -938,7 +938,7 @@ def test_update_resources():
                                 use_spot=True)
     ])
 
-    t.update_resources(autostop={'timeout': 3600})
+    t.update_resources_fields(autostop={'timeout': 3600})
     assert repr(t.resources) == repr([
         resources_lib.Resources(cloud=registry.CLOUD_REGISTRY.from_str('aws'),
                                 cpus=6,
@@ -953,4 +953,4 @@ def test_update_resources():
     ])
 
     with pytest.raises(AssertionError):
-        t.update_resources(invalid_field=1)
+        t.update_resources_fields(invalid_field=1)
