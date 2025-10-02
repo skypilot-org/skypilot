@@ -420,13 +420,11 @@ def _execute_dag(
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
 
-    if (Stage.PROVISION in stages and cluster_exists and
-            task.best_resources is None and
-            existing_launchable_resources is not None):
-        # Preserve the original launched resources in case the cluster handle
-        # disappears before provisioning (e.g., another terminal finishes
-        # tearing it down), so backend.provision() retains concrete specs.
-        task.best_resources = existing_launchable_resources
+    # Note: do not forcibly set task.best_resources to previously launched
+    # resources. If the existing handle is missing (recently terminated), we
+    # will have re-optimized above. If the handle exists, backend will reuse
+    # its launched_resources anyway. This avoids pinning to old placement when
+    # a fresh plan is desired during relaunch.
 
     backend.register_info(
         dag=dag,
