@@ -207,7 +207,7 @@ def _max_long_worker_parallism(cpu_count: int,
                   server_constants.MIN_AVAIL_MEM_GB)
     available_mem = max(
         0, mem_size_gb - max_memory -
-        server_constants.PER_WORKER_THREAD_POOL_MEMORY_GB * cpu_count)
+        server_constants.PER_FAST_API_WORKER_THREAD_MEMORY_GB * cpu_count)
     cpu_based_max_parallel = cpu_count * _CPU_MULTIPLIER_FOR_LONG_WORKERS
     mem_based_max_parallel = int(available_mem * _MAX_MEM_PERCENT_FOR_BLOCKING /
                                  LONG_WORKER_MEM_GB)
