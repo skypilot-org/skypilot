@@ -70,6 +70,57 @@ def test_unhealthy_server(mock_get_status):
         common.check_server_healthy()
 
 
+@mock.patch('sky.server.common._start_api_server')
+@mock.patch('sky.server.common.set_api_cookie_jar')
+@mock.patch('sky.server.common.versions.check_compatibility_at_client')
+@mock.patch('sky.server.common.make_authenticated_request')
+@mock.patch('sky.server.common.filelock.FileLock')
+@mock.patch('sky.server.common.is_api_server_local', return_value=True)
+@mock.patch('sky.server.common.get_server_url',
+            return_value='http://127.0.0.1:1111')
+def test_check_server_healthy_or_start_rechecks_status(
+        unused_mock_server_url, unused_mock_is_local, mock_filelock,
+        mock_make_request, mock_check_compat, unused_set_cookie,
+        mock_start_server):
+    """Re-check should observe the fresh server status before starting.
+
+    The test keeps the real `get_api_server_status` cache in place to ensure
+    the cache is cleared before re-fetching the server status.
+    """
+    healthy_response = mock.Mock()
+    healthy_response.status_code = 200
+    healthy_response.headers = {}
+    healthy_response.history = []
+    healthy_response.cookies = requests.cookies.RequestsCookieJar()
+    healthy_response.json.return_value = {
+        'status': ApiServerStatus.HEALTHY.value,
+        'api_version': server_constants.API_VERSION,
+        'version': sky.__version__,
+        'version_on_disk': sky.__version__,
+        'commit': sky.__commit__,
+        'user': {},
+        'basic_auth_enabled': False,
+    }
+
+    mock_make_request.side_effect = [
+        requests.exceptions.ConnectionError(), healthy_response
+    ]
+    mock_check_compat.return_value = mock.Mock(error=None)
+    mock_filelock.return_value.__enter__.return_value = None
+    mock_filelock.return_value.__exit__.return_value = None
+
+    with mock.patch.object(
+            common.get_api_server_status,
+            'cache_clear',
+            wraps=common.get_api_server_status.cache_clear) as mock_cache_clear:
+        common.check_server_healthy_or_start_fn()
+
+    assert mock_cache_clear.call_count == 1
+    assert mock_make_request.call_count == 2
+    mock_start_server.assert_not_called()
+    common.get_api_server_status.cache_clear()
+
+
 @mock.patch('sky.server.common.get_api_server_status')
 @mock.patch('sky.server.common.is_api_server_local')
 def test_local_client_server_mismatch(mock_is_local, mock_get_status):

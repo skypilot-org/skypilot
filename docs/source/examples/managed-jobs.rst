@@ -505,6 +505,13 @@ Notice that the :code:`pool` section is the only difference from a normal SkyPil
 To specify the number of workers in the pool, use the :code:`workers` field under :code:`pool`.
 When creating a pool, the :code:`run` section is ignored.
 
+The setup commands **must not be blocking**. If a long-running server is required, it should be launched in the background. The :code:`setsid` command ensures that setup processes are not terminated when the shell exits. An example using vLLM server is shown below:
+
+.. code-block:: yaml
+
+  setup: |
+    # Start a long-running vLLM server in the background
+    setsid bash -c "vllm serve $MODEL_NAME > ./vllm.log 2>&1" > /dev/null 2>&1 &
 
 To create a pool, use :code:`sky jobs pool apply`:
 
