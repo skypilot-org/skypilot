@@ -264,7 +264,6 @@ def _execute_dag(
             f'{colorama.Style.RESET_ALL}')
 
     cluster_exists = False
-    existing_launchable_resources = None
     _existing_handle_has_launchables = False
     if cluster_name is not None:
         # Fast path: quickly check whether the cluster exists.
@@ -282,8 +281,6 @@ def _execute_dag(
                 if (isinstance(existing_handle,
                                backends.CloudVmRayResourceHandle)
                         and existing_handle.launched_resources is not None):
-                    existing_launchable_resources = (
-                        existing_handle.launched_resources.copy())
                     _existing_handle_has_launchables = True
         # TODO(woosuk): If the cluster exists, print a warning that
         # `cpus` and `memory` are not used as a job scheduling constraint,
