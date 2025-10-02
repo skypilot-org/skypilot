@@ -249,6 +249,15 @@ jobs:
           COMMIT_SHA="${{ github.sha }}"
           COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/${COMMIT_SHA}"
           SHORT_SHA=$(echo "$COMMIT_SHA" | cut -c1-7)
+          EMOJI="🚨"
+          PRECHECK_TAG=""
+          if [[ "${{ github.event_name }}" == "schedule" && "${{ github.event.schedule }}" == "0 0 * * *" ]]; then
+            PRECHECK_TAG="[Preflight check, won't release] "
+            EMOJI="🔔"
+          fi
+          if [[ -n "$PRECHECK_TAG" ]]; then
+            TITLE_TEXT="${PRECHECK_TAG}${TITLE_TEXT}"
+          fi
           BUILDKITE_MSG=""
           if [[ "${{ needs.smoke-tests-aws.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-resource-heavy.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-no-resource-heavy.result }}" == "failure" || "${{ needs.smoke-tests-remote-server-kubernetes.result }}" == "failure" || "${{ needs.backward-compat-test-nightly.result }}" == "failure" || "${{ needs.backward-compat-test-stable.result }}" == "failure" ]]; then
             if [[ "${{ needs.smoke-tests-aws.result }}" == "failure" ]]; then
@@ -284,9 +293,9 @@ jobs:
               fi
               BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/quicktest-core/builds/${{ needs.backward-compat-test-stable.outputs.build_number }}|Buildkite Log(backward-compat-stable)>"
             fi
-            MARKDOWN_TEXT="🚨 Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> failed at Buildkite step for commit <${COMMIT_URL}|${SHORT_SHA}>. ${BUILDKITE_MSG}"
+            MARKDOWN_TEXT="${EMOJI} ${PRECHECK_TAG}Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> failed at Buildkite step for commit <${COMMIT_URL}|${SHORT_SHA}>. ${BUILDKITE_MSG}"
           else
-            MARKDOWN_TEXT="🚨 Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> failed for commit <${COMMIT_URL}|${SHORT_SHA}>."
+            MARKDOWN_TEXT="${EMOJI} ${PRECHECK_TAG}Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> failed for commit <${COMMIT_URL}|${SHORT_SHA}>."
           fi
           echo "message_text=${TITLE_TEXT}" >> $GITHUB_OUTPUT
           echo "message_block=${MARKDOWN_TEXT}" >> $GITHUB_OUTPUT
