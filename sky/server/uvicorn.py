@@ -4,6 +4,7 @@ This module is a wrapper around uvicorn to customize the behavior of the
 server.
 """
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import logging
 import os
 import signal
@@ -23,6 +24,7 @@ from sky.server import metrics as metrics_lib
 from sky.server import state
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
+from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import env_options
 from sky.utils import perf_utils
@@ -224,6 +226,31 @@ class Server(uvicorn.Server):
         finally:
             stop_monitor.set()
             monitor.join()
+
+    async def serve(self, sockets=None):
+        """Custom serve method that configures CPU-based thread pool
+        executor."""
+        # Configure thread pool executor with CPU count
+        cpu_count = common_utils.get_cpu_count()
+        thread_pool_size = cpu_count  # 1 thread per CPU core
+
+        # Create custom executor
+        executor = ThreadPoolExecutor(max_workers=thread_pool_size,)
+
+        # Set as default executor for the current event loop
+        loop = asyncio.get_running_loop()
+        loop.set_default_executor(executor)
+
+        logger.info(f'Configured thread pool with {thread_pool_size} threads '
+                    f'(based on {cpu_count} CPU cores)')
+
+        try:
+            # Call parent's serve method
+            await super().serve(sockets)
+        finally:
+            # Clean shutdown of the executor
+            executor.shutdown(wait=True)
+            logger.info('Thread pool executor shutdown complete')
 
 
 def run(config: uvicorn.Config, max_db_connections: Optional[int] = None):

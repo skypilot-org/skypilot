@@ -116,7 +116,7 @@ def compute_server_config(deploy: bool,
                                                        mem_size_gb,
                                                        local=not deploy)
     max_parallel_for_short = _max_short_worker_parallism(
-        mem_size_gb, max_parallel_for_long)
+        cpu_count, mem_size_gb, max_parallel_for_long)
     queue_backend = QueueBackend.MULTIPROCESSING
     burstable_parallel_for_long = 0
     burstable_parallel_for_short = 0
@@ -205,7 +205,9 @@ def _max_long_worker_parallism(cpu_count: int,
     max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
                   if job_utils.is_consolidation_mode() else
                   server_constants.MIN_AVAIL_MEM_GB)
-    available_mem = max(0, mem_size_gb - max_memory)
+    available_mem = max(
+        0, mem_size_gb - max_memory -
+        server_constants.PER_WORKER_THREAD_POOL_MEMORY_GB * cpu_count)
     cpu_based_max_parallel = cpu_count * _CPU_MULTIPLIER_FOR_LONG_WORKERS
     mem_based_max_parallel = int(available_mem * _MAX_MEM_PERCENT_FOR_BLOCKING /
                                  LONG_WORKER_MEM_GB)
@@ -225,7 +227,7 @@ def _get_min_short_workers() -> int:
     return _MIN_IDLE_SHORT_WORKERS + daemon_count
 
 
-def _max_short_worker_parallism(mem_size_gb: float,
+def _max_short_worker_parallism(cpu_count: int, mem_size_gb: float,
                                 long_worker_parallism: int) -> int:
     """Max parallelism for short workers."""
     # Reserve memory for long workers and min available memory.
@@ -234,7 +236,9 @@ def _max_short_worker_parallism(mem_size_gb: float,
     max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
                   if job_utils.is_consolidation_mode() else
                   server_constants.MIN_AVAIL_MEM_GB)
-    reserved_mem = max_memory + (long_worker_parallism * LONG_WORKER_MEM_GB)
+    reserved_mem = (
+        max_memory + (long_worker_parallism * LONG_WORKER_MEM_GB) +
+        server_constants.PER_WORKER_THREAD_POOL_MEMORY_GB * cpu_count)
     available_mem = max(0, mem_size_gb - reserved_mem)
     n = max(_get_min_short_workers(), int(available_mem / SHORT_WORKER_MEM_GB))
     return n

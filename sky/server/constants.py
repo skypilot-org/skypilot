@@ -40,6 +40,8 @@ DEFAULT_HANDLER_NAME = 'default'
 # The path to the API request database.
 API_SERVER_REQUEST_DB_PATH = '~/.sky/api_server/requests.db'
 
+PER_WORKER_THREAD_POOL_MEMORY_GB = 8 / 1024  # 8MB
+
 # The interval (seconds) for the cluster status to be refreshed in the
 # background.
 CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS = 60
