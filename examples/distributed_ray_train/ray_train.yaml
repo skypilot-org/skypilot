@@ -4,9 +4,6 @@
 
 resources:
   accelerators: L4:1
-  autostop:
-    down: true
-    idle_minutes: 60
 
 num_nodes: 2
 
