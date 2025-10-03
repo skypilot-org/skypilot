@@ -12,21 +12,24 @@ import traceback
 import typing
 from typing import Optional, Set
 
-from sky import backends, skypilot_config
+from sky import backends
 from sky import dag as dag_lib
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.client import sdk
 from sky.jobs import scheduler
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
 from sky.serve import serve_utils
-from sky.skylet import constants, job_lib
+from sky.skylet import constants
+from sky.skylet import job_lib
 from sky.usage import usage_lib
-from sky.utils import common_utils, env_options
+from sky.utils import common_utils
 from sky.utils import context_utils
+from sky.utils import env_options
 from sky.utils import registry
 from sky.utils import status_lib
 from sky.utils import ux_utils
@@ -427,7 +430,7 @@ class StrategyExecutor:
                                     _is_launched_by_jobs_controller=True,
                                 )
                                 self._logger.debug('sdk.launch request ID: '
-                                                  f'{request_id}')
+                                                   f'{request_id}')
                                 if log_file is None:
                                     raise OSError('Log file is None')
                                 with open(log_file, 'a', encoding='utf-8') as f:
@@ -441,7 +444,7 @@ class StrategyExecutor:
                                     req = await context_utils.to_thread(
                                         sdk.api_cancel, request_id)
                                     self._logger.debug('sdk.api_cancel request '
-                                                      f'ID: {req}')
+                                                       f'ID: {req}')
                                     try:
                                         await context_utils.to_thread(
                                             sdk.get, req)
@@ -466,7 +469,7 @@ class StrategyExecutor:
                                     cluster_name=self.cluster_name,
                                 )
                                 self._logger.debug('sdk.exec request ID: '
-                                                  f'{request_id}')
+                                                   f'{request_id}')
                                 job_id_on_pool_cluster, _ = (
                                     await context_utils.to_thread(
                                         sdk.get, request_id))
@@ -475,7 +478,7 @@ class StrategyExecutor:
                                     req = await context_utils.to_thread(
                                         sdk.api_cancel, request_id)
                                     self._logger.debug('sdk.api_cancel request '
-                                                      f'ID: {req}')
+                                                       f'ID: {req}')
                                     try:
                                         await context_utils.to_thread(
                                             sdk.get, req)
