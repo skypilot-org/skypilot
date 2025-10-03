@@ -111,12 +111,16 @@ def compute_server_config(deploy: bool,
     process after API server was introduced.
     """
     cpu_count = common_utils.get_cpu_count()
+    logger.debug(f'CPU count: {cpu_count}')
     mem_size_gb = common_utils.get_mem_size_gb()
+    logger.debug(f'Memory size: {mem_size_gb}GB')
     max_parallel_for_long = _max_long_worker_parallism(cpu_count,
                                                        mem_size_gb,
                                                        local=not deploy)
+    logger.debug(f'Max parallel for long: {max_parallel_for_long}')
     max_parallel_for_short = _max_short_worker_parallism(
         mem_size_gb, max_parallel_for_long)
+    logger.debug(f'Max parallel for short: {max_parallel_for_short}')
     queue_backend = QueueBackend.MULTIPROCESSING
     burstable_parallel_for_long = 0
     burstable_parallel_for_short = 0

@@ -449,9 +449,15 @@ def init_db_async(func):
 
 def reset_db_and_logs():
     """Create the database."""
+    logger.debug('clearing local API server database')
     server_common.clear_local_api_server_database()
+    logger.debug(
+        f'clearing local API server logs directory at {REQUEST_LOG_PATH_PREFIX}'
+    )
     shutil.rmtree(pathlib.Path(REQUEST_LOG_PATH_PREFIX).expanduser(),
                   ignore_errors=True)
+    logger.debug('clearing local API server client directory at '
+                 f'{server_common.API_SERVER_CLIENT_DIR.expanduser()}')
     shutil.rmtree(server_common.API_SERVER_CLIENT_DIR.expanduser(),
                   ignore_errors=True)
 
