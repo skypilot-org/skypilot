@@ -26,7 +26,7 @@ run: |
   if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
     ps aux | grep ray | grep 6379 &> /dev/null || ray start --head  --disable-usage-stats --port 6379
     sleep 5
-    python ray-train.py --num-workers $num_nodes
+    python train.py --num-workers $num_nodes
   else
     sleep 5
     ps aux | grep ray | grep 6379 &> /dev/null || ray start --address $head_ip:6379 --disable-usage-stats
