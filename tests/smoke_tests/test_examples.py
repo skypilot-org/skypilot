@@ -60,7 +60,7 @@ def test_min_gpt(generic_cloud: str, train_file: str, accelerator: Dict[str,
     smoke_tests_utils.run_one_test(test)
 
 
-# ---------- Test min-gpt ----------
+# ---------- Test ray-train ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
