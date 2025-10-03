@@ -106,7 +106,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 instance_type=config.node_config['InstanceType'],
                 region=region,
                 name = f'{cluster_name_on_cloud}-{suffix}-{node_type}',
-                ssh_keys=[remote_ssh_key_name],
+                ssh_keys=[config.node_config['PublicKey']],
                 cmd = ""
             )
             logger.info(f'Launched {node_type} node, '
@@ -126,15 +126,18 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         logger.info(f'Launched instance {instance_id}.')
         created_instance_ids.append(instance_id)
         if head_instance is None:
-            head_instance = instance
+            head_instance = instance_id
 
     instances_to_wait = created_instance_ids.copy()
+
+    print("instances_to_wait", instances_to_wait)
 
     # Wait for instances to be ready.
     for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
         instances = cloudrift_client.list_instances(instances_to_wait)
+        print("list instances", instances)
         for instance in instances:
-            if instance['status'] == 'Active':
+            if instance['status'] == 'Active' and instance['id'] in instances_to_wait:
                 instances_to_wait.remove(instance['id'])
         logger.info('Waiting for instances to be ready: '
                     f'({len(instances)}/{config.count}).')
@@ -153,7 +156,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         cluster_name=cluster_name_on_cloud,
         region=region,
         zone=None,
-        head_instance_id=head_instance['name'],
+        head_instance_id=head_instance,
         resumed_instance_ids=[],
         created_instance_ids=created_instance_ids,
     )

@@ -7,7 +7,6 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
-from sky.adaptors import cloudrift
 from sky.provision.cloudrift import utils as cloudrift_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -269,9 +268,9 @@ class CloudRift(clouds.Cloud):
         """Verify that the user has valid credentials for
         CloudRift's compute service."""
         
-        installed, err_msg = cloudrift.check_exceptions_dependencies_installed()
-        if not installed:
-            return False, err_msg
+        # installed, err_msg = cloudrift.check_exceptions_dependencies_installed()
+        # if not installed:
+        #     return False, err_msg
 
         try:
             # attempt to make a request for listing instances

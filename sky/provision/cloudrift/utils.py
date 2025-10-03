@@ -4,7 +4,6 @@ import os
 import uuid
 from typing import Any, Dict, List, Optional, Mapping, Union
 
-from sky.adaptors import cloudrift
 from sky.provision import common
 from sky.utils import common_utils
 import os
@@ -132,7 +131,7 @@ class RiftClient:
         return None
 
     def deploy_instance(
-        self, instance_type: str, region: str, ssh_keys: List[str], cmd: str
+        self, instance_type: str, name:str, region: str, ssh_keys: List[str], cmd: str
     ) -> List[str]:
         image_url = self.get_vm_image_url()
         if not image_url:
@@ -141,21 +140,22 @@ class RiftClient:
         request_data = {
             "config": {
                 "VirtualMachine": {
-                    # "cloudinit_url": "",
-                    "cloudinit_commands": cmd,
+                    "cloudinit_url": "https://storage.googleapis.com/cloudrift-vm-disks/cloudinit/ubuntu-base.cloudinit", # TODO FIX
+                    #"cloudinit_commands": cmd, # TODO FIX
                     "image_url": image_url,
                     "ssh_key": {"PublicKeys": ssh_keys},
                 }
             },
             "selector": {
                 "ByInstanceTypeAndLocation": {
-                    "datacenters": [region],
+                    #"datacenters": [region], # TODO add region
                     "instance_type": instance_type,
                 }
             },
             "with_public_ip": True,
         }
         logger.debug("Deploying instance with request data: %s", request_data)
+        print(request_data)
 
         response_data = self._make_request("instances/rent", request_data)
         if isinstance(response_data, dict):
@@ -168,6 +168,7 @@ class RiftClient:
                 "ByStatus": ["Initializing", "Active", "Deactivating"],
             }
         }
+        # TODO use instance_ids
         logger.debug("Listing instances with request data: %s", request_data)
         response_data = self._make_request("instances/list", request_data)
         if isinstance(response_data, dict):
@@ -356,19 +357,3 @@ def open_ports_instance(instance: Dict[str, Any], ports: List[str]) -> None:
     # For now, we just log the action
     pass
 
-
-def client():
-    """Returns a CloudRift client.
-
-    Returns:
-        A CloudRift client object.
-
-    Raises:
-        CloudRiftError: If CloudRift client creation fails.
-    """
-    # Check that the CloudRift Python package is installed
-    installed, err_msg = cloudrift.check_exceptions_dependencies_installed()
-    if not installed:
-        raise CloudRiftError(f'CloudRift dependencies not installed: {err_msg}')
-    
-    return CloudRiftClient()
