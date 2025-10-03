@@ -5854,8 +5854,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         common_utils.check_cluster_name_is_valid(cluster_name)
 
         if to_provision is None:
-            # Recently terminated after refresh.
-            # Fallback under the same lock:
+            # Recently terminated after refresh. OPTIMIZE usually ran outside
+            # the lock, so that decision may be stale by now. Under the lock,
+            # ensure we always have a concrete plan via the following order:
             #   1) Reuse last placement snapshot (if available);
             #   2) Else, call injected planner for a fresh plan.
             # If we still have a pre-refresh handle snapshot with a concrete
