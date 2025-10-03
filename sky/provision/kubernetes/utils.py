@@ -16,6 +16,8 @@ import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
+import ijson
+
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
@@ -1141,9 +1143,37 @@ def detect_accelerator_resource(
     return has_accelerator, cluster_resources
 
 
+@dataclasses.dataclass
+class V1ObjectMeta:
+    name: str
+    labels: Dict[str, str]
+    namespace: str = ''  # Used for pods, not nodes
+
+
+@dataclasses.dataclass
+class V1NodeAddress:
+    type: str
+    address: str
+
+
+@dataclasses.dataclass
+class V1NodeStatus:
+    allocatable: Dict[str, str]
+    capacity: Dict[str, str]
+    addresses: List[V1NodeAddress]
+
+
+@dataclasses.dataclass
+class V1Node:
+    metadata: V1ObjectMeta
+    status: V1NodeStatus
+
+
 @annotations.lru_cache(scope='request', maxsize=10)
 @_retry_on_error(resource_type='node')
-def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[Any]:
+def get_kubernetes_nodes(*,
+                         context: Optional[str] = None,
+                         stream: bool = False) -> List[V1Node]:
     """Gets the kubernetes nodes in the context.
 
     If context is None, gets the nodes in the current context.
@@ -1151,15 +1181,102 @@ def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[Any]:
     if context is None:
         context = get_current_kube_config_context_name()
 
-    nodes = kubernetes.core_api(context).list_node(
-        _request_timeout=kubernetes.API_TIMEOUT).items
+    # Deserialize using the API client
+    if not stream:
+        nodes = kubernetes.core_api(context).list_node(
+            _request_timeout=kubernetes.API_TIMEOUT).items
+    else:
+        response = kubernetes.core_api(context).list_node(
+            _request_timeout=kubernetes.API_TIMEOUT, _preload_content=False)
+        nodes = []
+        for prefix, event, value in ijson.parse(response, buf_size=8192):
+            if (prefix, event) == ('items.item', 'start_map'):
+                node = V1Node(metadata=V1ObjectMeta(name='', labels={}),
+                              status=V1NodeStatus(allocatable={},
+                                                  capacity={},
+                                                  addresses=[]))
+                labels = {}
+                allocatable = {}
+                capacity = {}
+                addresses = []
+            if (prefix, event) == ('items.item.metadata.name', 'string'):
+                node.metadata.name = value
+            elif (prefix, event) == ('items.item.metadata.labels', 'map_key'):
+                last_key = value
+            elif prefix.startswith(
+                    'items.item.metadata.labels.') and event == 'string':
+                labels[last_key] = value
+            elif (prefix, event) == ('items.item.metadata.labels', 'end_map'):
+                node.metadata.labels = labels
+            elif (prefix, event) == ('items.item.status.allocatable',
+                                     'map_key'):
+                last_key = value
+            elif prefix.startswith(
+                    'items.item.status.allocatable.') and event == 'string':
+                allocatable[last_key] = value
+            elif (prefix, event) == ('items.item.status.allocatable',
+                                     'end_map'):
+                node.status.allocatable = allocatable
+            elif (prefix, event) == ('items.item.status.capacity', 'map_key'):
+                last_key = value
+            elif prefix.startswith(
+                    'items.item.status.capacity.') and event == 'string':
+                capacity[last_key] = value
+            elif (prefix, event) == ('items.item.status.capacity', 'end_map'):
+                node.status.capacity = capacity
+            elif (prefix, event) == ('items.item.status.addresses.item',
+                                     'start_map'):
+                current_address = V1NodeAddress(type='', address='')
+            elif (prefix, event) == ('items.item.status.addresses.item.type',
+                                     'string'):
+                current_address.type = value
+            elif (prefix, event) == ('items.item.status.addresses.item.address',
+                                     'string'):
+                current_address.address = value
+            elif (prefix, event) == ('items.item.status.addresses.item',
+                                     'end_map'):
+                addresses.append(current_address)
+            elif (prefix, event) == ('items.item.status.addresses',
+                                     'end_array'):
+                node.status.addresses = addresses
+            elif (prefix, event) == ('items.item', 'end_map'):
+                nodes.append(node)
+
     return nodes
+
+
+@dataclasses.dataclass
+class V1PodStatus:
+    phase: str
+
+
+@dataclasses.dataclass
+class V1ResourceRequirements:
+    requests: Dict[str, str]
+
+
+@dataclasses.dataclass
+class V1Container:
+    resources: V1ResourceRequirements
+
+
+@dataclasses.dataclass
+class V1PodSpec:
+    containers: List[V1Container]
+    node_name: str
+
+
+@dataclasses.dataclass
+class V1Pod:
+    metadata: V1ObjectMeta
+    status: V1PodStatus
+    spec: V1PodSpec
 
 
 @_retry_on_error(resource_type='pod')
 def get_all_pods_in_kubernetes_cluster(*,
-                                       context: Optional[str] = None
-                                      ) -> List[Any]:
+                                       context: Optional[str] = None,
+                                       stream: bool = False) -> List[Any]:
     """Gets pods in all namespaces in kubernetes cluster indicated by context.
 
     Used for computing cluster resource usage.
@@ -1167,8 +1284,71 @@ def get_all_pods_in_kubernetes_cluster(*,
     if context is None:
         context = get_current_kube_config_context_name()
 
-    pods = kubernetes.core_api(context).list_pod_for_all_namespaces(
-        _request_timeout=kubernetes.API_TIMEOUT).items
+    response = kubernetes.core_api(context).list_pod_for_all_namespaces(
+        _request_timeout=kubernetes.API_TIMEOUT, _preload_content=False)
+
+    if not stream:
+        pod_list = kubernetes.core_api(context).api_client.deserialize(
+            response, 'V1PodList')
+        pods = pod_list.items
+    else:
+        pods = []
+        for prefix, event, value in ijson.parse(response, buf_size=8192):
+            if (prefix, event) == ('items.item', 'start_map'):
+                # Create a simplified pod object with only needed fields
+                pod = type(
+                    'Pod', (), {
+                        'metadata': type('Metadata', (), {
+                            'name': '',
+                            'namespace': '',
+                        })(),
+                        'status': type('Status', (), {
+                            'phase': '',
+                        })(),
+                        'spec': type('Spec', (), {
+                            'node_name': '',
+                            'containers': [],
+                        })(),
+                    })()
+                current_container = None
+                current_requests = None
+            elif (prefix, event) == ('items.item.metadata.name', 'string'):
+                pod.metadata.name = value
+            elif (prefix, event) == ('items.item.metadata.namespace', 'string'):
+                pod.metadata.namespace = value
+            elif (prefix, event) == ('items.item.status.phase', 'string'):
+                pod.status.phase = value
+            elif (prefix, event) == ('items.item.spec.nodeName', 'string'):
+                pod.spec.node_name = value
+            elif (prefix, event) == ('items.item.spec.containers.item',
+                                     'start_map'):
+                current_container = type('Container', (), {
+                    'resources': type('Resources', (), {
+                        'requests': None,
+                    })(),
+                })()
+            elif (prefix, event) == (
+                    'items.item.spec.containers.item.resources.requests',
+                    'start_map'):
+                current_requests = {}
+            elif prefix.startswith(
+                    'items.item.spec.containers.item.resources.requests.'
+            ) and event in ('string', 'number'):
+                # Extract the resource key from the prefix
+                resource_key = prefix.split('.')[-1]
+                current_requests[resource_key] = str(value)
+            elif (prefix, event) == (
+                    'items.item.spec.containers.item.resources.requests',
+                    'end_map'):
+                if current_container is not None:
+                    current_container.resources.requests = current_requests
+            elif (prefix, event) == ('items.item.spec.containers.item',
+                                     'end_map'):
+                if current_container is not None:
+                    pod.spec.containers.append(current_container)
+            elif (prefix, event) == ('items.item', 'end_map'):
+                pods.append(pod)
+
     return pods
 
 
@@ -2821,7 +3001,8 @@ def get_unlabeled_accelerator_nodes(context: Optional[str] = None) -> List[Any]:
 
 
 def get_kubernetes_node_info(
-        context: Optional[str] = None) -> models.KubernetesNodesInfo:
+        context: Optional[str] = None,
+        stream: bool = False) -> models.KubernetesNodesInfo:
     """Gets the resource information for all the nodes in the cluster.
 
     This function returns a model with node info map as a nested field. This
@@ -2841,7 +3022,7 @@ def get_kubernetes_node_info(
         KubernetesNodesInfo: A model that contains the node info map and other
             information.
     """
-    nodes = get_kubernetes_nodes(context=context)
+    nodes = get_kubernetes_nodes(context=context, stream=stream)
 
     lf, _ = detect_gpu_label_formatter(context)
     if not lf:
@@ -2863,7 +3044,8 @@ def get_kubernetes_node_info(
     allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
     if any_node_has_accelerators:
         try:
-            pods = get_all_pods_in_kubernetes_cluster(context=context)
+            pods = get_all_pods_in_kubernetes_cluster(context=context,
+                                                      stream=stream)
             # Pre-compute allocated accelerator count per node
             for pod in pods:
                 if pod.status.phase in ['Running', 'Pending']:
