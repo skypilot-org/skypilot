@@ -5869,14 +5869,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             #   2) Else, call the injected planner to produce a fresh plan.
             # This ensures we never fail due to the launch/down race where the
             # live handle disappears and no plan was precomputed by the caller.
-            if isinstance(handle_before_refresh, CloudVmRayResourceHandle) and 
-                    handle_before_refresh.launched_resources is not None:
+            if (isinstance(handle_before_refresh, CloudVmRayResourceHandle) and
+                    handle_before_refresh.launched_resources is not None):
                 to_provision = handle_before_refresh.launched_resources
                 # Ensure the requested task fits the previous placement.
                 self.check_resources_fit_cluster(handle_before_refresh, task)
-                logger.info(
-                    'Reusing previous placement to relaunch recently-'
-                    f'terminated cluster {cluster_name!r}.')
+                logger.info('Reusing previous placement to relaunch recently-'
+                            f'terminated cluster {cluster_name!r}.')
             elif self._planner is not None:
                 to_provision = self._planner(task)
             else:
