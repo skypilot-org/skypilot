@@ -1065,6 +1065,22 @@ def get_handle_from_cluster_name(
     return pickle.loads(row.handle)
 
 
+@_init_db
+@metrics_lib.time_me
+def get_handles_from_cluster_names(
+        cluster_names: Set[str]
+) -> Dict[str, Optional['backends.ResourceHandle']]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(cluster_table.c.name,
+                             cluster_table.c.handle).filter(
+                                 cluster_table.c.name.in_(cluster_names)).all()
+        return {
+            row.name: pickle.loads(row.handle) if row is not None else None
+            for row in rows
+        }
+
+
 @_init_db_async
 @metrics_lib.time_me
 async def get_status_from_cluster_name_async(
