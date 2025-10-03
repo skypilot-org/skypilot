@@ -25,6 +25,8 @@ def test_min_gpt(generic_cloud: str, train_file: str, accelerator: Dict[str,
         accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
+    # MinGPT code has a hardcoded 2 GPUs per node check, we need to set it to 2
+    accelerator = f'{accelerator}:2'
     name = smoke_tests_utils.get_cluster_name()
 
     def read_and_modify(file_path: str) -> str:
