@@ -62,6 +62,8 @@ HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_NAME = 'sky-data'
 # and store all data that needs to be persisted in future.
 HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH = '/home/sky'
 
+IJSON_BUFFER_SIZE = 64 * 1024  # 64KB, default from ijson
+
 
 class KubernetesHighPerformanceNetworkType(enum.Enum):
     """Enum for different Kubernetes cluster types with high performance
@@ -1187,9 +1189,7 @@ class V1Node:
 
 @annotations.lru_cache(scope='request', maxsize=10)
 @_retry_on_error(resource_type='node')
-def get_kubernetes_nodes(*,
-                         context: Optional[str] = None,
-                         stream: bool = False) -> List[V1Node]:
+def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[V1Node]:
     """Gets the kubernetes nodes in the context.
 
     If context is None, gets the nodes in the current context.
@@ -1197,17 +1197,14 @@ def get_kubernetes_nodes(*,
     if context is None:
         context = get_current_kube_config_context_name()
 
-    if not stream:
-        nodes = kubernetes.core_api(context).list_node(
-            _request_timeout=kubernetes.API_TIMEOUT).items
-    else:
-        response = kubernetes.core_api(context).list_node(
-            _request_timeout=kubernetes.API_TIMEOUT, _preload_content=False)
-
-        nodes = [
-            V1Node.from_dict(item_dict)
-            for item_dict in ijson.items(response, 'items.item', buf_size=8192)
-        ]
+    # Return raw urllib3.HTTPResponse object so that we can parse the json
+    # more efficiently.
+    response = kubernetes.core_api(context).list_node(
+        _request_timeout=kubernetes.API_TIMEOUT, _preload_content=False)
+    nodes = [
+        V1Node.from_dict(item_dict) for item_dict in ijson.items(
+            response, 'items.item', buf_size=IJSON_BUFFER_SIZE)
+    ]
 
     return nodes
 
@@ -1260,8 +1257,8 @@ class V1Pod:
 
 @_retry_on_error(resource_type='pod')
 def get_all_pods_in_kubernetes_cluster(*,
-                                       context: Optional[str] = None,
-                                       stream: bool = False) -> List[Any]:
+                                       context: Optional[str] = None
+                                      ) -> List[V1Pod]:
     """Gets pods in all namespaces in kubernetes cluster indicated by context.
 
     Used for computing cluster resource usage.
@@ -1269,18 +1266,14 @@ def get_all_pods_in_kubernetes_cluster(*,
     if context is None:
         context = get_current_kube_config_context_name()
 
-    if not stream:
-        pod_list = kubernetes.core_api(context).list_pod_for_all_namespaces(
-            _request_timeout=kubernetes.API_TIMEOUT)
-        pods = pod_list.items
-    else:
-        response = kubernetes.core_api(context).list_pod_for_all_namespaces(
-            _request_timeout=kubernetes.API_TIMEOUT, _preload_content=False)
-
-        pods = [
-            V1Pod.from_dict(item_dict)
-            for item_dict in ijson.items(response, 'items.item', buf_size=8192)
-        ]
+    # Return raw urllib3.HTTPResponse object so that we can parse the json
+    # more efficiently.
+    response = kubernetes.core_api(context).list_pod_for_all_namespaces(
+        _request_timeout=kubernetes.API_TIMEOUT, _preload_content=False)
+    pods = [
+        V1Pod.from_dict(item_dict) for item_dict in ijson.items(
+            response, 'items.item', buf_size=IJSON_BUFFER_SIZE)
+    ]
 
     return pods
 
@@ -2934,8 +2927,7 @@ def get_unlabeled_accelerator_nodes(context: Optional[str] = None) -> List[Any]:
 
 
 def get_kubernetes_node_info(
-        context: Optional[str] = None,
-        stream: bool = False) -> models.KubernetesNodesInfo:
+        context: Optional[str] = None) -> models.KubernetesNodesInfo:
     """Gets the resource information for all the nodes in the cluster.
 
     This function returns a model with node info map as a nested field. This
@@ -2955,7 +2947,7 @@ def get_kubernetes_node_info(
         KubernetesNodesInfo: A model that contains the node info map and other
             information.
     """
-    nodes = get_kubernetes_nodes(context=context, stream=stream)
+    nodes = get_kubernetes_nodes(context=context)
 
     lf, _ = detect_gpu_label_formatter(context)
     if not lf:
@@ -2977,8 +2969,7 @@ def get_kubernetes_node_info(
     allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
     if any_node_has_accelerators:
         try:
-            pods = get_all_pods_in_kubernetes_cluster(context=context,
-                                                      stream=stream)
+            pods = get_all_pods_in_kubernetes_cluster(context=context)
             # Pre-compute allocated accelerator count per node
             for pod in pods:
                 if pod.status.phase in ['Running', 'Pending']:
