@@ -5869,6 +5869,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             #   2) Else, call the injected planner to produce a fresh plan.
             # This ensures we never fail due to the launch/down race where the
             # live handle disappears and no plan was precomputed by the caller.
+            # If we still have a pre-refresh handle snapshot with a concrete
+            # placement, prefer reusing it.
             if (isinstance(handle_before_refresh, CloudVmRayResourceHandle) and
                     handle_before_refresh.launched_resources is not None):
                 to_provision = handle_before_refresh.launched_resources
@@ -5880,10 +5882,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 to_provision = self._planner(task)
             else:
                 # Without a snapshot or planner, we cannot proceed safely.
-                raise RuntimeError(
-                    'No concrete launch plan available after recent cloud '
-                    f'termination of cluster {cluster_name!r}. Ensure the '
-                    'OPTIMIZE stage runs or provide concrete resources.')
+                # Surface a user-friendly error without a long traceback.
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        'No concrete launch plan available after recent cloud '
+                        f'termination of cluster {cluster_name!r}. Ensure the '
+                        'OPTIMIZE stage runs or provide concrete resources.')
 
         return RetryingVmProvisioner.ToProvisionConfig(
             cluster_name,

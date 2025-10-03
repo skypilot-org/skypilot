@@ -410,7 +410,6 @@ def _execute_dag(
                   backends.CloudVmRayBackend) and Stage.OPTIMIZE in stages:
 
         def _planner(_t: 'sky.Task'):
-            nonlocal dag
             new_dag = optimizer.Optimizer.optimize(dag,
                                                    minimize=optimize_target,
                                                    quiet=_quiet_optimizer)
