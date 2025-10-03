@@ -80,7 +80,8 @@ def test_ray_train(generic_cloud: str, accelerator: Dict[str, str]) -> None:
     modified_content = content.replace('\'epochs\': 10,', '\'epochs\': 1,')
 
     # Create a temporary YAML file with the modified content
-    with tempfile.TemporaryDirectory(suffix='ray_train_tmp_workdir') as temp_dir:
+    with tempfile.TemporaryDirectory(
+            suffix='ray_train_tmp_workdir') as temp_dir:
         train_file_path = os.path.join(temp_dir, 'train.py')
         with open(train_file_path, 'w', encoding='utf-8') as f:
             f.write(modified_content)
@@ -88,15 +89,16 @@ def test_ray_train(generic_cloud: str, accelerator: Dict[str, str]) -> None:
         workdir_dir = temp_dir
 
         with open('examples/distributed_ray_train/ray_train.yaml',
-                'r',
-                encoding='utf-8') as f:
+                  'r',
+                  encoding='utf-8') as f:
             content = f.read()
         # Let the train exit after 1 epoch
-        modified_content = content.replace('workdir: .', f'workdir: {workdir_dir}')
+        modified_content = content.replace('workdir: .',
+                                           f'workdir: {workdir_dir}')
 
         # Create a temporary YAML file with the modified content
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                        delete=False) as f:
+                                         delete=False) as f:
             f.write(modified_content)
             f.flush()
             yaml_file_path = f.name
