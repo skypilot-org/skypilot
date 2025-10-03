@@ -3277,11 +3277,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._requested_features = set()
         self._dump_final_script = False
         self._is_managed = False
-        # Optional planner injected by the execution layer to produce a fresh
-        # concrete plan INSIDE the per-cluster lock when needed (e.g., no
-        # reusable placement snapshot and no caller-provided plan). This keeps
-        # optimization in the upper layer while ensuring the backend always has
-        # a concrete plan under the lock.
+        # Optional planner (via register_info): used under the per-cluster lock
+        # to produce a fresh concrete plan when neither a reusable snapshot nor
+        # a caller plan is available.
         self._planner = None
 
         # Command for running the setup script. It is only set when the
@@ -3300,10 +3298,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                               self._requested_features)
         self._dump_final_script = kwargs.pop('dump_final_script', False)
         self._is_managed = kwargs.pop('is_managed', False)
-        # Optional callable injected by the execution layer to produce a
-        # concrete Resources when neither a placement snapshot nor a caller
-        # plan is available after refresh. The backend does not import the
-        # optimizer; it only invokes this planner if needed under the lock.
+        # Optional planner callback for a fresh plan under lock when no
+        # reusable snapshot/caller plan exists. Keeps optimizer in upper layer.
         self._planner = kwargs.pop('planner', self._planner)
         assert not kwargs, f'Unexpected kwargs: {kwargs}'
 

@@ -5,7 +5,7 @@ See `Stage` for a Task's life cycle.
 import enum
 import logging
 import typing
-from typing import List, Optional, Tuple, Union, Callable
+from typing import Callable, List, Optional, Tuple, Union
 
 import colorama
 
