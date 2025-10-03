@@ -36,6 +36,12 @@ def test_min_gpt(generic_cloud: str, train_file: str, accelerator: Dict[str,
         modified_content = re.sub(r'accelerators:\s*[^\n]+',
                                   f'accelerators: {accelerator}',
                                   modified_content)
+        # MinGPT code has a hardcoded 2 GPUs per node check, we need to set it to a fork that removes
+        # the check
+        modified_content = re.sub(
+            r'git clone .*',
+            'git clone --depth 1 -b fix-mingpt https://github.com/michaelvll/examples || true',
+            modified_content)
 
         # Create a temporary YAML file with the modified content
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
@@ -52,7 +58,7 @@ def test_min_gpt(generic_cloud: str, train_file: str, accelerator: Dict[str,
         [
             f'sky launch -y -c {name} --infra {generic_cloud} {dist_train_file}',
             f'sky logs {name} 1 --status',
-            f'outputs=$(sky logs {name} 1); echo "$outputs" | grep "[RANK0] Epoch 1 | Iter 0 | Train Loss"',
+            f'outputs=$(sky logs {name} 1); echo "$outputs" && echo "$outputs" | grep "Epoch 1 | Iter 0 | Train Loss"',
         ],
         f'sky down -y {name}; rm {dist_train_file}',
         timeout=20 * 60,
@@ -108,7 +114,7 @@ def test_ray_train(generic_cloud: str, accelerator: Dict[str, str]) -> None:
             [
                 f'sky launch -y -c {name} --infra {generic_cloud} --memory 8+ --gpus {accelerator} {yaml_file_path}',
                 f'sky logs {name} 1 --status',
-                f'outputs=$(sky logs {name} 1); echo "$outputs" | grep "Train Epoch 0:"',
+                f'outputs=$(sky logs {name} 1); echo "$outputs" && echo "$outputs" | grep "Train Epoch 0:"',
             ],
             f'sky down -y {name}; rm -r {workdir_dir}; rm {yaml_file_path}',
             timeout=20 * 60,
