@@ -845,12 +845,6 @@ class TestKubernetesVolumeMerging(unittest.TestCase):
                         'kind': 'Pod',
                         'spec': {
                             'volumes': [{
-                                'name': 'secret-volume',
-                                'secret': {
-                                    'secretName': kubernetes.Kubernetes.
-                                                  SKY_SSH_KEY_SECRET_NAME
-                                }
-                            }, {
                                 'name': 'dshm',
                                 'emptyDir': {
                                     'medium': 'Memory'
@@ -860,10 +854,6 @@ class TestKubernetesVolumeMerging(unittest.TestCase):
                                 'name': 'ray-node',
                                 'image': 'test-image',
                                 'volumeMounts': [{
-                                    'name': 'secret-volume',
-                                    'readOnly': True,
-                                    'mountPath': '/etc/secret-volume'
-                                }, {
                                     'mountPath': '/dev/shm',
                                     'name': 'dshm'
                                 }]
@@ -917,15 +907,9 @@ class TestKubernetesVolumeMerging(unittest.TestCase):
 
         # Verify that both system and user volume mounts are present
         volume_mounts = container['volumeMounts']
-        self.assertEqual(len(volume_mounts), 4)  # 2 system + 2 user
+        self.assertEqual(len(volume_mounts), 3)  # 1 system + 2 user
 
         # Check system volume mounts are preserved
-        secret_mount = next(
-            (vm for vm in volume_mounts if vm['name'] == 'secret-volume'), None)
-        self.assertIsNotNone(secret_mount)
-        self.assertEqual(secret_mount['mountPath'], '/etc/secret-volume')
-        self.assertTrue(secret_mount['readOnly'])
-
         dshm_mount = next((vm for vm in volume_mounts if vm['name'] == 'dshm'),
                           None)
         self.assertIsNotNone(dshm_mount)
@@ -946,16 +930,9 @@ class TestKubernetesVolumeMerging(unittest.TestCase):
 
         # Verify that both system and user volumes are present
         volumes = pod_spec['volumes']
-        self.assertEqual(len(volumes), 4)  # 2 system + 2 user
+        self.assertEqual(len(volumes), 3)  # 1 system + 2 user
 
         # Check system volumes are preserved
-        secret_volume = next(
-            (v for v in volumes if v['name'] == 'secret-volume'), None)
-        self.assertIsNotNone(secret_volume)
-        self.assertIn('secret', secret_volume)
-        self.assertEqual(secret_volume['secret']['secretName'],
-                         kubernetes.Kubernetes.SKY_SSH_KEY_SECRET_NAME)
-
         dshm_volume = next((v for v in volumes if v['name'] == 'dshm'), None)
         self.assertIsNotNone(dshm_volume)
         self.assertIn('emptyDir', dshm_volume)

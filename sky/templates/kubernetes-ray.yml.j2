@@ -439,9 +439,6 @@ available_node_types:
         # object store. If you do not provide this, Ray will fall back to
         # /tmp which cause slowdowns if is not a shared memory volume.
         volumes:
-        - name: secret-volume
-          secret:
-            secretName: {{k8s_ssh_key_secret_name}}
         - name: dshm
           emptyDir:
             medium: Memory
@@ -864,7 +861,9 @@ available_node_types:
                 $(prefix_cmd) mkdir -p ~/.ssh;
                 $(prefix_cmd) chown -R $(whoami) ~/.ssh;
                 $(prefix_cmd) chmod 700 ~/.ssh;
-                $(prefix_cmd) cat /etc/secret-volume/ssh-publickey* > ~/.ssh/authorized_keys;
+                $(prefix_cmd) cat > ~/.ssh/authorized_keys <<'SKYPILOT_SSH_KEY_EOF'
+              skypilot:ssh_public_key_content
+              SKYPILOT_SSH_KEY_EOF
                 $(prefix_cmd) chmod 644 ~/.ssh/authorized_keys;
                 $(prefix_cmd) service ssh restart;
                 $(prefix_cmd) sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;
@@ -1100,9 +1099,6 @@ available_node_types:
           # object store. If you do not provide this, Ray will fall back to
           # /tmp which cause slowdowns if is not a shared memory volume.
           volumeMounts:
-          - name: secret-volume
-            readOnly: true
-            mountPath: "/etc/secret-volume"
           - mountPath: /dev/shm
             name: dshm
           {% if k8s_enable_gpudirect_tcpx %}
