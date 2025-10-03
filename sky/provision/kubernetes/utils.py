@@ -1331,12 +1331,14 @@ def get_all_pods_in_kubernetes_cluster(*,
                     'items.item.spec.containers.item.resources.requests',
                     'start_map'):
                 current_requests = {}
+            elif (prefix, event) == (
+                    'items.item.spec.containers.item.resources.requests',
+                    'map_key'):
+                last_key = value
             elif prefix.startswith(
                     'items.item.spec.containers.item.resources.requests.'
             ) and event in ('string', 'number'):
-                # Extract the resource key from the prefix
-                resource_key = prefix.split('.')[-1]
-                current_requests[resource_key] = str(value)
+                current_requests[last_key] = str(value)
             elif (prefix, event) == (
                     'items.item.spec.containers.item.resources.requests',
                     'end_map'):
