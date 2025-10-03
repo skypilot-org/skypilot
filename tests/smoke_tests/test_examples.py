@@ -106,7 +106,7 @@ def test_ray_train(generic_cloud: str, accelerator: Dict[str, str]) -> None:
         test = smoke_tests_utils.Test(
             'ray_train',
             [
-                f'sky launch -y -c {name} --infra {generic_cloud} --gpus {accelerator} {yaml_file_path}',
+                f'sky launch -y -c {name} --infra {generic_cloud} --memory 8+ --gpus {accelerator} {yaml_file_path}',
                 f'sky logs {name} 1 --status',
                 f'outputs=$(sky logs {name} 1); echo "$outputs" | grep "Train Epoch 0:"',
             ],
