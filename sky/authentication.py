@@ -35,7 +35,6 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
-from sky import skypilot_config
 from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import runpod
@@ -428,11 +427,6 @@ def setup_ibm_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     context = kubernetes_utils.get_context_from_config(config['provider'])
-
-    _, public_key_path = get_or_generate_keys()
-    # Add the user's public key to the SkyPilot cluster.
-    secret_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
-    secret_field_name = clouds.Kubernetes().ssh_key_secret_field_name
     namespace = kubernetes_utils.get_namespace_from_config(config['provider'])
     private_key_path, _ = get_or_generate_keys()
     # Using `kubectl port-forward` creates a direct tunnel to the pod and
@@ -455,6 +449,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     config['auth']['ssh_proxy_command'] = ssh_proxy_cmd
     config['auth']['ssh_private_key'] = private_key_path
 
+    # Add the user's public key to the SkyPilot cluster.
     return configure_ssh_info(config)
 
 

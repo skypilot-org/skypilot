@@ -48,8 +48,6 @@ _FUSERMOUNT_SHARED_DIR = '/var/run/fusermount'
 class Kubernetes(clouds.Cloud):
     """Kubernetes."""
 
-    SKY_SSH_KEY_SECRET_NAME = 'sky-ssh-keys'
-
     # Limit the length of the cluster name to avoid exceeding the limit of 63
     # characters for Kubernetes resources. We limit to 42 characters (63-21) to
     # allow additional characters for creating ingress services to expose ports.
@@ -688,7 +686,6 @@ class Kubernetes(clouds.Cloud):
             'accelerator_count': str(acc_count),
             'timeout': str(timeout),
             'k8s_port_mode': port_mode.value,
-            'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_values': k8s_acc_label_values,
             'k8s_service_account_name': k8s_service_account_name,
