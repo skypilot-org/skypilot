@@ -25,8 +25,6 @@ def test_min_gpt(generic_cloud: str, train_file: str, accelerator: Dict[str,
         accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
-    # MinGPT code has a hardcoded 2 GPUs per node check, we need to set it to 2
-    accelerator = f'{accelerator}:2'
     name = smoke_tests_utils.get_cluster_name()
 
     def read_and_modify(file_path: str) -> str:
@@ -37,6 +35,11 @@ def test_min_gpt(generic_cloud: str, train_file: str, accelerator: Dict[str,
             'main.py', 'main.py trainer_config.max_epochs=1')
         modified_content = re.sub(r'accelerators:\s*[^\n]+',
                                   f'accelerators: {accelerator}',
+                                  modified_content)
+        # MinGPT code has a hardcoded 2 GPUs per node check, we need to set it to a fork that removes
+        # the check
+        modified_content = re.sub(r'git clone .*',
+                                  'git clone --depth 1 -b fix-mingpt https://github.com/michaelvll/examples || true',
                                   modified_content)
 
         # Create a temporary YAML file with the modified content
