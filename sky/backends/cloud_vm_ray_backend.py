@@ -3277,6 +3277,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._requested_features = set()
         self._dump_final_script = False
         self._is_managed = False
+        # Optional planner (via register_info): used under the per-cluster lock
+        # to produce a fresh concrete plan when neither a reusable snapshot nor
+        # a caller plan is available.
+        self._planner = None
 
         # Command for running the setup script. It is only set when the
         # setup needs to be run outside the self._setup() and as part of
@@ -3294,6 +3298,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                               self._requested_features)
         self._dump_final_script = kwargs.pop('dump_final_script', False)
         self._is_managed = kwargs.pop('is_managed', False)
+        # Optional planner callback for a fresh plan under lock when no
+        # reusable snapshot/caller plan exists. Keeps optimizer in upper layer.
+        self._planner = kwargs.pop('planner', self._planner)
         assert not kwargs, f'Unexpected kwargs: {kwargs}'
 
     def check_resources_fit_cluster(
@@ -5843,33 +5850,41 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         common_utils.check_cluster_name_is_valid(cluster_name)
 
         if to_provision is None:
-            # The cluster is recently terminated either by autostop or manually
-            # terminated on the cloud. We should use the previously terminated
-            # resources to provision the cluster.
-            #
-            # FIXME(zongheng): this assert can be hit by using two terminals.
-            # First, create a 'dbg' cluster. Then:
-            #   Terminal 1: sky down dbg -y
-            #   Terminal 2: sky launch -c dbg -- echo
-            # Run it in order. Terminal 2 will show this error after terminal 1
-            # succeeds in downing the cluster and releasing the lock.
-            assert isinstance(
-                handle_before_refresh, CloudVmRayResourceHandle), (
-                    f'Trying to launch cluster {cluster_name!r} recently '
-                    'terminated on the cloud, but the handle is not a '
-                    f'CloudVmRayResourceHandle ({handle_before_refresh}).')
-            status_before_refresh_str = None
-            if status_before_refresh is not None:
-                status_before_refresh_str = status_before_refresh.value
-
-            logger.info(
-                f'The cluster {cluster_name!r} (status: '
-                f'{status_before_refresh_str}) was not found on the cloud: it '
-                'may be autodowned, manually terminated, or its launch never '
-                'succeeded. Provisioning a new cluster by using the same '
-                'resources as its original launch.')
-            to_provision = handle_before_refresh.launched_resources
-            self.check_resources_fit_cluster(handle_before_refresh, task)
+            # Recently terminated after refresh. OPTIMIZE usually ran outside
+            # the lock, so that decision may be stale by now. Under the lock,
+            # ensure we always have a concrete plan via the following order:
+            #   1) Reuse last placement snapshot (if available);
+            #   2) Else, call injected planner for a fresh plan.
+            # If we still have a pre-refresh handle snapshot with a concrete
+            # placement, prefer reusing it.
+            if (isinstance(handle_before_refresh, CloudVmRayResourceHandle) and
+                    handle_before_refresh.launched_resources is not None):
+                to_provision = handle_before_refresh.launched_resources
+                # Ensure the requested task fits the previous placement.
+                self.check_resources_fit_cluster(handle_before_refresh, task)
+                # Mirror the original message for reuse path.
+                status_before_refresh_str = None
+                if status_before_refresh is not None:
+                    status_before_refresh_str = status_before_refresh.value
+                logger.info(
+                    f'The cluster {cluster_name!r} (status: '
+                    f'{status_before_refresh_str}) was not found on the cloud: '
+                    'it may be autodowned, manually terminated, or its launch '
+                    'never succeeded. Provisioning a new cluster by using the '
+                    'same resources as its original launch.')
+            elif self._planner is not None:
+                to_provision = self._planner(task)
+                logger.info(
+                    'Previous placement snapshot missing; computing a fresh '
+                    'plan for provisioning.')
+            else:
+                # Without a snapshot or planner, we cannot proceed safely.
+                # Surface a user-friendly error without a long traceback.
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        'No concrete launch plan available after recent cloud '
+                        f'termination of cluster {cluster_name!r}. Ensure the '
+                        'OPTIMIZE stage runs or provide concrete resources.')
 
         return RetryingVmProvisioner.ToProvisionConfig(
             cluster_name,
