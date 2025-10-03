@@ -51,7 +51,6 @@ from sky.utils import controller_utils
 
 # ---------- file_mounts ----------
 @pytest.mark.no_vast  # VAST does not support num_nodes > 1 yet
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_file_mounts instead.
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 and storage mounting yet.
 @pytest.mark.no_seeweb  # Seeweb does not support num_nodes > 1 yet and storage mounting yet.
 def test_file_mounts(generic_cloud: str):
