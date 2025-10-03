@@ -1447,6 +1447,7 @@ def test_launch_with_failing_setup(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server
 def test_loopback_access_with_basic_auth(generic_cloud: str):
     """Test that loopback access works."""
     server_config_content = textwrap.dedent(f"""\
