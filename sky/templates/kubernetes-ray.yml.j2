@@ -861,9 +861,9 @@ available_node_types:
                 $(prefix_cmd) mkdir -p ~/.ssh;
                 $(prefix_cmd) chown -R $(whoami) ~/.ssh;
                 $(prefix_cmd) chmod 700 ~/.ssh;
-                $(prefix_cmd) cat > ~/.ssh/authorized_keys << 'SKYPILOT_SSH_KEY_EOF'
-                skypilot:ssh_public_key_content
-                SKYPILOT_SSH_KEY_EOF
+                $(prefix_cmd) cat > ~/.ssh/authorized_keys <<'SKYPILOT_SSH_KEY_EOF'
+              skypilot:ssh_public_key_content
+              SKYPILOT_SSH_KEY_EOF
                 $(prefix_cmd) chmod 644 ~/.ssh/authorized_keys;
                 $(prefix_cmd) service ssh restart;
                 $(prefix_cmd) sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;
