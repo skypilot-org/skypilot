@@ -395,12 +395,10 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.skypilot_config.get_effective_region_config')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
-    @patch('sky.provision.kubernetes.network_utils.get_networking_mode')
     @patch('sky.catalog.get_image_id_from_tag')
     @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
     def test_ipc_lock_capability_enabled_with_user_security_context(
-            self, mock_detect_network_type, mock_get_image,
-            mock_get_networking_mode, mock_get_port_mode,
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_cloud_config_value,
             mock_is_exec_auth, mock_get_accelerator_label_keys,
             mock_get_namespace, mock_get_current_context, mock_get_k8s_nodes):
@@ -431,10 +429,6 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         mock_port_mode = mock.MagicMock()
         mock_port_mode.value = "portforward"
         mock_get_port_mode.return_value = mock_port_mode
-
-        mock_networking_mode = mock.MagicMock()
-        mock_networking_mode.value = "portforward"
-        mock_get_networking_mode.return_value = mock_networking_mode
 
         # Mock image
         mock_get_image.return_value = "test-image:latest"
@@ -470,12 +464,10 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.skypilot_config.get_effective_region_config')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
-    @patch('sky.provision.kubernetes.network_utils.get_networking_mode')
     @patch('sky.catalog.get_image_id_from_tag')
     @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
     def test_ipc_lock_capability_disabled_when_no_high_perf_networking(
-            self, mock_detect_network_type, mock_get_image,
-            mock_get_networking_mode, mock_get_port_mode,
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_cloud_config_value,
             mock_is_exec_auth, mock_get_accelerator_label_keys,
             mock_get_namespace, mock_get_current_context, mock_get_k8s_nodes):
@@ -504,10 +496,6 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         mock_port_mode = mock.MagicMock()
         mock_port_mode.value = "portforward"
         mock_get_port_mode.return_value = mock_port_mode
-
-        mock_networking_mode = mock.MagicMock()
-        mock_networking_mode.value = "portforward"
-        mock_get_networking_mode.return_value = mock_networking_mode
 
         # Mock image
         mock_get_image.return_value = "test-image:latest"
@@ -541,12 +529,10 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.skypilot_config.get_effective_region_config')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
-    @patch('sky.provision.kubernetes.network_utils.get_networking_mode')
     @patch('sky.catalog.get_image_id_from_tag')
     @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
     def test_ipc_lock_capability_disabled_when_network_tier_not_best(
-            self, mock_detect_network_type, mock_get_image,
-            mock_get_networking_mode, mock_get_port_mode,
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_cloud_config_value,
             mock_is_exec_auth, mock_get_accelerator_label_keys,
             mock_get_namespace, mock_get_current_context, mock_get_k8s_nodes):
@@ -580,10 +566,6 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         mock_port_mode.value = "portforward"
         mock_get_port_mode.return_value = mock_port_mode
 
-        mock_networking_mode = mock.MagicMock()
-        mock_networking_mode.value = "portforward"
-        mock_get_networking_mode.return_value = mock_networking_mode
-
         # Mock image
         mock_get_image.return_value = "test-image:latest"
 
@@ -613,12 +595,10 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.skypilot_config.get_effective_region_config')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
-    @patch('sky.provision.kubernetes.network_utils.get_networking_mode')
     @patch('sky.catalog.get_image_id_from_tag')
     @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
     def test_nebius_network_tier_with_gpu_environment_variables(
-            self, mock_detect_network_type, mock_get_image,
-            mock_get_networking_mode, mock_get_port_mode,
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_cloud_config_value,
             mock_is_exec_auth, mock_get_gpu_resource_key,
             mock_get_accelerator_label_key_values,
@@ -673,10 +653,6 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         mock_port_mode = mock.MagicMock()
         mock_port_mode.value = "portforward"
         mock_get_port_mode.return_value = mock_port_mode
-
-        mock_networking_mode = mock.MagicMock()
-        mock_networking_mode.value = "portforward"
-        mock_get_networking_mode.return_value = mock_networking_mode
 
         # Mock image
         mock_get_image.return_value = "test-gpu-image:latest"
