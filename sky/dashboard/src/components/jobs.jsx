@@ -514,36 +514,36 @@ export function ManagedJobsTable({
     fetchDataRef.current = fetchData;
   }, [fetchData]);
 
-  // Track if this is the initial mount to avoid duplicate fetches
-  const isInitialMount = React.useRef(true);
+  // Track if this is the initial load to avoid duplicate fetches
+  const isInitialLoad = React.useRef(true);
 
   // Initial load - only runs once on mount
   React.useEffect(() => {
     fetchData({ includeStatus: true });
     // Mark that initial load is complete
-    isInitialMount.current = false;
+    isInitialLoad.current = false;
   }, []);
 
   // Fetch on pagination (page) changes without status request
-  // Skip on initial mount (page defaults to 1)
+  // Skip on initial load (page defaults to 1)
   React.useEffect(() => {
-    if (!isInitialMount.current) {
+    if (!isInitialLoad.current) {
       fetchData({ includeStatus: false });
     }
   }, [currentPage]);
 
   // Fetch on filters or page size changes with status request
-  // Skip on initial mount (filters default to [] and pageSize to 10)
+  // Skip on initial load (filters default to [] and pageSize to 10)
   React.useEffect(() => {
-    if (!isInitialMount.current) {
+    if (!isInitialLoad.current) {
       fetchData({ includeStatus: true });
     }
   }, [filters, pageSize]);
 
   // Fetch on status filter changes (activeTab, selectedStatuses, showAllMode)
-  // Skip on initial mount (these have default values)
+  // Skip on initial load (these have default values)
   React.useEffect(() => {
-    if (!isInitialMount.current) {
+    if (!isInitialLoad.current) {
       fetchData({ includeStatus: true });
     }
   }, [activeTab, selectedStatuses, showAllMode]);
