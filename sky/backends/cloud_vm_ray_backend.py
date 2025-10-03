@@ -3277,8 +3277,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._requested_features = set()
         self._dump_final_script = False
         self._is_managed = False
-        # Optional planner injected by upper layer to produce a fresh
-        # concrete provisioning plan when no reusable placement exists.
+        # Optional planner injected by the execution layer to produce a
+        # fresh, concrete provisioning plan INSIDE the per-cluster lock.
+        #
+        # Why: launch/down can race. After we acquire the lock and refresh
+        # state, the cluster may have just been terminated on the cloud, and
+        # we may have neither:
+        #   - a reusable placement snapshot (old handle.launched_resources),
+        #   - nor a caller-provided to_provision plan.
+        # In that case, calling this planner avoids the historical assertion
+        # failure (see issue similar to #7205) by generating a fresh plan
+        # under the lock, while keeping the optimizer in the upper layer.
         self._planner = None
 
         # Command for running the setup script. It is only set when the
@@ -3297,10 +3306,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                               self._requested_features)
         self._dump_final_script = kwargs.pop('dump_final_script', False)
         self._is_managed = kwargs.pop('is_managed', False)
-        # Optional callable injected by the execution layer to produce
-        # a concrete Resources for provisioning (fresh plan) when the
-        # existing cluster has just been torn down and no to_provision
-        # was provided by the caller.
+        # Optional callable injected by the execution layer to produce a
+        # concrete Resources for provisioning (fresh plan) when the existing
+        # cluster has just been torn down and neither a placement snapshot nor
+        # a caller-provided plan is available. This preserves layering: the
+        # backend does not import/own the optimizer; it just invokes the
+        # injected planner under the lock if needed.
         self._planner = kwargs.pop('planner', self._planner)
         assert not kwargs, f'Unexpected kwargs: {kwargs}'
 
@@ -5852,9 +5863,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         if to_provision is None:
             # Recently terminated on the cloud (autostop/manual) or record
-            # vanished after refresh. Prefer reusing the last launched
-            # placement snapshot if available; otherwise fall back to a fresh
-            # plan provided by an injected planner.
+            # vanished after refresh.
+            # Fallback order (all under the same cluster lock):
+            #   1) Reuse the last launched placement snapshot if available;
+            #   2) Else, call the injected planner to produce a fresh plan.
+            # This ensures we never fail due to the launch/down race where the
+            # live handle disappears and no plan was precomputed by the caller.
             if isinstance(handle_before_refresh, CloudVmRayResourceHandle) and 
                     handle_before_refresh.launched_resources is not None:
                 to_provision = handle_before_refresh.launched_resources
