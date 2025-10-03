@@ -5851,17 +5851,25 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         common_utils.check_cluster_name_is_valid(cluster_name)
 
         if to_provision is None:
-            # Recently terminated: prefer a fresh plan rather than relying on
-            # a possibly stale handle. If a planner is provided by the caller,
-            # use it to obtain a concrete Resources for provisioning.
-            if self._planner is not None:
+            # Recently terminated on the cloud (autostop/manual) or record
+            # vanished after refresh. Prefer reusing the last launched
+            # placement snapshot if available; otherwise fall back to a fresh
+            # plan provided by an injected planner.
+            if isinstance(handle_before_refresh, CloudVmRayResourceHandle) and 
+                    handle_before_refresh.launched_resources is not None:
+                to_provision = handle_before_refresh.launched_resources
+                # Ensure the requested task fits the previous placement.
+                self.check_resources_fit_cluster(handle_before_refresh, task)
+                logger.info(
+                    'Reusing previous placement to relaunch recently-'
+                    f'terminated cluster {cluster_name!r}.')
+            elif self._planner is not None:
                 to_provision = self._planner(task)
             else:
-                # Without a planner and no to_provision, we cannot proceed
-                # safely. Ask caller to provide a plan (via OPTIMIZE stage).
+                # Without a snapshot or planner, we cannot proceed safely.
                 raise RuntimeError(
-                    'No concrete launch plan available after a recent '
-                    f'teardown of cluster {cluster_name!r}. Ensure the '
+                    'No concrete launch plan available after recent cloud '
+                    f'termination of cluster {cluster_name!r}. Ensure the '
                     'OPTIMIZE stage runs or provide concrete resources.')
 
         return RetryingVmProvisioner.ToProvisionConfig(
