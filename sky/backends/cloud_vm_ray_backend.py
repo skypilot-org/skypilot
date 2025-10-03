@@ -3277,17 +3277,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._requested_features = set()
         self._dump_final_script = False
         self._is_managed = False
-        # Optional planner injected by the execution layer to produce a
-        # fresh, concrete provisioning plan INSIDE the per-cluster lock.
-        #
-        # Why: launch/down can race. After we acquire the lock and refresh
-        # state, the cluster may have just been terminated on the cloud, and
-        # we may have neither:
-        #   - a reusable placement snapshot (old handle.launched_resources),
-        #   - nor a caller-provided to_provision plan.
-        # In that case, calling this planner avoids the historical assertion
-        # failure (see issue similar to #7205) by generating a fresh plan
-        # under the lock, while keeping the optimizer in the upper layer.
+        # Optional planner injected by the execution layer to produce a fresh
+        # concrete plan INSIDE the per-cluster lock when needed (e.g., no
+        # reusable placement snapshot and no caller-provided plan). This keeps
+        # optimization in the upper layer while ensuring the backend always has
+        # a concrete plan under the lock.
         self._planner = None
 
         # Command for running the setup script. It is only set when the
@@ -3307,11 +3301,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._dump_final_script = kwargs.pop('dump_final_script', False)
         self._is_managed = kwargs.pop('is_managed', False)
         # Optional callable injected by the execution layer to produce a
-        # concrete Resources for provisioning (fresh plan) when the existing
-        # cluster has just been torn down and neither a placement snapshot nor
-        # a caller-provided plan is available. This preserves layering: the
-        # backend does not import/own the optimizer; it just invokes the
-        # injected planner under the lock if needed.
+        # concrete Resources when neither a placement snapshot nor a caller
+        # plan is available after refresh. The backend does not import the
+        # optimizer; it only invokes this planner if needed under the lock.
         self._planner = kwargs.pop('planner', self._planner)
         assert not kwargs, f'Unexpected kwargs: {kwargs}'
 
@@ -5862,13 +5854,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         common_utils.check_cluster_name_is_valid(cluster_name)
 
         if to_provision is None:
-            # Recently terminated on the cloud (autostop/manual) or record
-            # vanished after refresh.
-            # Fallback order (all under the same cluster lock):
-            #   1) Reuse the last launched placement snapshot if available;
-            #   2) Else, call the injected planner to produce a fresh plan.
-            # This ensures we never fail due to the launch/down race where the
-            # live handle disappears and no plan was precomputed by the caller.
+            # Recently terminated after refresh.
+            # Fallback under the same lock:
+            #   1) Reuse last placement snapshot (if available);
+            #   2) Else, call injected planner for a fresh plan.
             # If we still have a pre-refresh handle snapshot with a concrete
             # placement, prefer reusing it.
             if (isinstance(handle_before_refresh, CloudVmRayResourceHandle) and
@@ -5876,10 +5865,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 to_provision = handle_before_refresh.launched_resources
                 # Ensure the requested task fits the previous placement.
                 self.check_resources_fit_cluster(handle_before_refresh, task)
-                logger.info('Reusing previous placement to relaunch recently-'
-                            f'terminated cluster {cluster_name!r}.')
+                # Mirror the original message for reuse path.
+                status_before_refresh_str = None
+                if status_before_refresh is not None:
+                    status_before_refresh_str = status_before_refresh.value
+                logger.info(
+                    f'The cluster {cluster_name!r} (status: '
+                    f'{status_before_refresh_str}) was not found on the cloud: '
+                    'it may be autodowned, manually terminated, or its launch '
+                    'never succeeded. Provisioning a new cluster by using the '
+                    'same resources as its original launch.')
             elif self._planner is not None:
                 to_provision = self._planner(task)
+                logger.info(
+                    'Previous placement snapshot missing; computing a fresh '
+                    'plan for provisioning.')
             else:
                 # Without a snapshot or planner, we cannot proceed safely.
                 # Surface a user-friendly error without a long traceback.

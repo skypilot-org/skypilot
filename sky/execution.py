@@ -400,11 +400,9 @@ def _execute_dag(
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
 
-    # Inject a planner so the backend can compute a fresh, concrete plan
-    # INSIDE the per-cluster lock when needed (e.g., cluster was recently
-    # terminated and no reusable placement/to_provision exists). This keeps
-    # the optimizer in the execution layer while letting the final decision
-    # (reuse vs fresh) happen under the lock in the backend.
+    # Inject a planner so the backend can compute a fresh concrete plan under
+    # the per-cluster lock if needed (no reusable snapshot and no caller plan),
+    # while keeping optimization in the execution layer.
     planner = None
     if isinstance(backend,
                   backends.CloudVmRayBackend) and Stage.OPTIMIZE in stages:
