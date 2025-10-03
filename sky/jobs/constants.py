@@ -23,8 +23,8 @@ SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
 # jobs. See _get_launch_parallelism and _get_job_parallelism in scheduler.py.
 # We use 50 GB disk size to reduce the cost.
 CONTROLLER_RESOURCES: Dict[str, Union[str, int]] = {
-    'cpus': '4+',
-    'memory': '8x',
+    'cpus': '8+',
+    'memory': '4x',
     'disk_size': 50
 }
 
