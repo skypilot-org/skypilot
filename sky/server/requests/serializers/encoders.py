@@ -211,6 +211,12 @@ def encode_storage_ls(
     return [storage_info.model_dump() for storage_info in return_value]
 
 
+@register_encoder('volume_list')
+def encode_volume_list(
+        return_value: List[responses.VolumeRecord]) -> List[Dict[str, Any]]:
+    return [volume_info.model_dump() for volume_info in return_value]
+
+
 @register_encoder('job_status')
 def encode_job_status(return_value: Dict[int, Any]) -> Dict[int, str]:
     for job_id in return_value.keys():

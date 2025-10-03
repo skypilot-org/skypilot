@@ -15,7 +15,6 @@ import subprocess
 import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
-from urllib.parse import urlparse
 
 from sky import clouds
 from sky import exceptions
@@ -33,7 +32,6 @@ from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
-from sky.utils import directory_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
 from sky.utils import schemas
@@ -1560,23 +1558,6 @@ def get_port(svc_name: str, namespace: str, context: Optional[str]) -> int:
     return head_service.spec.ports[0].node_port
 
 
-def get_external_ip(network_mode: Optional[
-    kubernetes_enums.KubernetesNetworkingMode], context: Optional[str]) -> str:
-    if network_mode == kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD:
-        return '127.0.0.1'
-    # Return the IP address of the first node with an external IP
-    nodes = kubernetes.core_api(context).list_node().items
-    for node in nodes:
-        if node.status.addresses:
-            for address in node.status.addresses:
-                if address.type == 'ExternalIP':
-                    return address.address
-    # If no external IP is found, use the API server IP
-    api_host = kubernetes.core_api(context).api_client.configuration.host
-    parsed_url = urlparse(api_host)
-    return parsed_url.hostname
-
-
 def check_credentials(context: Optional[str],
                       timeout: int = kubernetes.API_TIMEOUT,
                       run_optional_checks: bool = False) -> \
@@ -2288,16 +2269,14 @@ def construct_ssh_jump_command(
 
 
 def get_ssh_proxy_command(
-    k8s_ssh_target: str,
-    network_mode: kubernetes_enums.KubernetesNetworkingMode,
+    pod_name: str,
     private_key_path: str,
     context: Optional[str],
     namespace: str,
 ) -> str:
     """Generates the SSH proxy command to connect to the pod.
 
-    Uses a jump pod if the network mode is NODEPORT, and direct port-forwarding
-    if the network mode is PORTFORWARD.
+    Uses a direct port-forwarding.
 
     By default, establishing an SSH connection creates a communication
     channel to a remote node by setting up a TCP connection. When a
@@ -2308,17 +2287,8 @@ def get_ssh_proxy_command(
     Pods within a Kubernetes cluster have internal IP addresses that are
     typically not accessible from outside the cluster. Since the default TCP
     connection of SSH won't allow access to these pods, we employ a
-    ProxyCommand to establish the required communication channel. We offer this
-    in two different networking options: NodePort/port-forward.
+    ProxyCommand to establish the required communication channel.
 
-    With the NodePort networking mode, a NodePort service is launched. This
-    service opens an external port on the node which redirects to the desired
-    port to a SSH jump pod. When establishing an SSH session in this mode, the
-    ProxyCommand makes use of this external port to create a communication
-    channel directly to port 22, which is the default port ssh server listens
-    on, of the jump pod.
-
-    With Port-forward mode, instead of directly exposing an external port,
     'kubectl port-forward' sets up a tunnel between a local port
     (127.0.0.1:23100) and port 22 of the provisioned pod. Then we establish TCP
     connection to the local end of this tunnel, 127.0.0.1:23100, using 'socat'.
@@ -2329,38 +2299,26 @@ def get_ssh_proxy_command(
     the local machine.
 
     Args:
-        k8s_ssh_target: str; The Kubernetes object that will be used as the
-            target for SSH. If network_mode is NODEPORT, this is the name of the
-            service. If network_mode is PORTFORWARD, this is the pod name.
-        network_mode: KubernetesNetworkingMode; networking mode for ssh
-            session. It is either 'NODEPORT' or 'PORTFORWARD'
+        pod_name: str; The Kubernetes pod name that will be used as the
+            target for SSH.
         private_key_path: str; Path to the private key to use for SSH.
             This key must be authorized to access the SSH jump pod.
-            Required for NODEPORT networking mode.
         namespace: Kubernetes namespace to use.
-            Required for NODEPORT networking mode.
     """
-    # Fetch IP to connect to for the jump svc
-    ssh_jump_ip = get_external_ip(network_mode, context)
+    ssh_jump_ip = '127.0.0.1'  # Local end of the port-forward tunnel
     assert private_key_path is not None, 'Private key path must be provided'
-    if network_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
-        assert namespace is not None, 'Namespace must be provided for NodePort'
-        ssh_jump_port = get_port(k8s_ssh_target, namespace, context)
-        ssh_jump_proxy_command = construct_ssh_jump_command(
-            private_key_path, ssh_jump_ip, ssh_jump_port=ssh_jump_port)
-    else:
-        ssh_jump_proxy_command_path = create_proxy_command_script()
-        ssh_jump_proxy_command = construct_ssh_jump_command(
-            private_key_path,
-            ssh_jump_ip,
-            ssh_jump_user=constants.SKY_SSH_USER_PLACEHOLDER,
-            proxy_cmd_path=ssh_jump_proxy_command_path,
-            proxy_cmd_target_pod=k8s_ssh_target,
-            # We embed both the current context and namespace to the SSH proxy
-            # command to make sure SSH still works when the current
-            # context/namespace is changed by the user.
-            current_kube_context=context,
-            current_kube_namespace=namespace)
+    ssh_jump_proxy_command_path = create_proxy_command_script()
+    ssh_jump_proxy_command = construct_ssh_jump_command(
+        private_key_path,
+        ssh_jump_ip,
+        ssh_jump_user=constants.SKY_SSH_USER_PLACEHOLDER,
+        proxy_cmd_path=ssh_jump_proxy_command_path,
+        proxy_cmd_target_pod=pod_name,
+        # We embed both the current context and namespace to the SSH proxy
+        # command to make sure SSH still works when the current
+        # context/namespace is changed by the user.
+        current_kube_context=context,
+        current_kube_namespace=namespace)
     return ssh_jump_proxy_command
 
 
@@ -2390,240 +2348,6 @@ def create_proxy_command_script() -> str:
     # home directory to be compatible when a SSH is called from a client in
     # client-server mode.
     return PORT_FORWARD_PROXY_CMD_PATH
-
-
-def setup_ssh_jump_svc(ssh_jump_name: str, namespace: str,
-                       context: Optional[str],
-                       service_type: kubernetes_enums.KubernetesServiceType):
-    """Sets up Kubernetes service resource to access for SSH jump pod.
-
-    This method acts as a necessary complement to be run along with
-    setup_ssh_jump_pod(...) method. This service ensures the pod is accessible.
-
-    Args:
-        ssh_jump_name: Name to use for the SSH jump service
-        namespace: Namespace to create the SSH jump service in
-        service_type: Networking configuration on either to use NodePort
-            or ClusterIP service to ssh in
-    """
-    # Fill in template - ssh_key_secret and ssh_jump_image are not required for
-    # the service spec, so we pass in empty strs.
-    content = fill_ssh_jump_template('', '', ssh_jump_name, service_type.value)
-
-    # Add custom metadata from config
-    merge_custom_metadata(content['service_spec']['metadata'], context)
-
-    # Create service
-    try:
-        kubernetes.core_api(context).create_namespaced_service(
-            namespace, content['service_spec'])
-    except kubernetes.api_exception() as e:
-        # SSH Jump Pod service already exists.
-        if e.status == 409:
-            ssh_jump_service = kubernetes.core_api(
-                context).read_namespaced_service(name=ssh_jump_name,
-                                                 namespace=namespace)
-            curr_svc_type = ssh_jump_service.spec.type
-            if service_type.value == curr_svc_type:
-                # If the currently existing SSH Jump service's type is identical
-                # to user's configuration for networking mode
-                logger.debug(
-                    f'SSH Jump Service {ssh_jump_name} already exists in the '
-                    'cluster, using it.')
-            else:
-                # If a different type of service type for SSH Jump pod compared
-                # to user's configuration for networking mode exists, we remove
-                # existing servie to create a new one following user's config
-                kubernetes.core_api(context).delete_namespaced_service(
-                    name=ssh_jump_name, namespace=namespace)
-                kubernetes.core_api(context).create_namespaced_service(
-                    namespace, content['service_spec'])
-                port_forward_mode = (
-                    kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value)
-                nodeport_mode = (
-                    kubernetes_enums.KubernetesNetworkingMode.NODEPORT.value)
-                clusterip_svc = (
-                    kubernetes_enums.KubernetesServiceType.CLUSTERIP.value)
-                nodeport_svc = (
-                    kubernetes_enums.KubernetesServiceType.NODEPORT.value)
-                curr_network_mode = port_forward_mode \
-                    if curr_svc_type == clusterip_svc else nodeport_mode
-                new_network_mode = nodeport_mode \
-                    if curr_svc_type == clusterip_svc else port_forward_mode
-                new_svc_type = nodeport_svc \
-                    if curr_svc_type == clusterip_svc else clusterip_svc
-                logger.info(
-                    f'Switching the networking mode from '
-                    f'\'{curr_network_mode}\' to \'{new_network_mode}\' '
-                    f'following networking configuration. Deleting existing '
-                    f'\'{curr_svc_type}\' service and recreating as '
-                    f'\'{new_svc_type}\' service.')
-        else:
-            raise
-    else:
-        logger.info(f'Created SSH Jump Service {ssh_jump_name}.')
-
-
-def setup_ssh_jump_pod(ssh_jump_name: str, ssh_jump_image: str,
-                       ssh_key_secret: str, namespace: str,
-                       context: Optional[str]):
-    """Sets up Kubernetes RBAC and pod for SSH jump host.
-
-    Our Kubernetes implementation uses a SSH jump pod to reach SkyPilot clusters
-    running inside a cluster. This function sets up the resources needed for
-    the SSH jump pod. This includes a service account which grants the jump pod
-    permission to watch for other SkyPilot pods and terminate itself if there
-    are no SkyPilot pods running.
-
-    setup_ssh_jump_service must also be run to ensure that the SSH jump pod is
-    reachable.
-
-    Args:
-        ssh_jump_image: Container image to use for the SSH jump pod
-        ssh_jump_name: Name to use for the SSH jump pod
-        ssh_key_secret: Secret name for the SSH key stored in the cluster
-        namespace: Namespace to create the SSH jump pod in
-    """
-    # Fill in template - service is created separately so service_type is not
-    # required, so we pass in empty str.
-    content = fill_ssh_jump_template(ssh_key_secret, ssh_jump_image,
-                                     ssh_jump_name, '')
-
-    # Add custom metadata to all objects
-    for object_type in content.keys():
-        merge_custom_metadata(content[object_type]['metadata'], context)
-
-    # ServiceAccount
-    try:
-        kubernetes.core_api(context).create_namespaced_service_account(
-            namespace, content['service_account'])
-    except kubernetes.api_exception() as e:
-        if e.status == 409:
-            logger.info(
-                'SSH Jump ServiceAccount already exists in the cluster, using '
-                'it.')
-        else:
-            raise
-    else:
-        logger.info('Created SSH Jump ServiceAccount.')
-    # Role
-    try:
-        kubernetes.auth_api(context).create_namespaced_role(
-            namespace, content['role'])
-    except kubernetes.api_exception() as e:
-        if e.status == 409:
-            logger.info(
-                'SSH Jump Role already exists in the cluster, using it.')
-        else:
-            raise
-    else:
-        logger.info('Created SSH Jump Role.')
-    # RoleBinding
-    try:
-        kubernetes.auth_api(context).create_namespaced_role_binding(
-            namespace, content['role_binding'])
-    except kubernetes.api_exception() as e:
-        if e.status == 409:
-            logger.info(
-                'SSH Jump RoleBinding already exists in the cluster, using '
-                'it.')
-        else:
-            raise
-    else:
-        logger.info('Created SSH Jump RoleBinding.')
-    # Pod
-    try:
-        kubernetes.core_api(context).create_namespaced_pod(
-            namespace, content['pod_spec'])
-    except kubernetes.api_exception() as e:
-        if e.status == 409:
-            logger.info(
-                f'SSH Jump Host {ssh_jump_name} already exists in the cluster, '
-                'using it.')
-        else:
-            raise
-    else:
-        logger.info(f'Created SSH Jump Host {ssh_jump_name}.')
-
-
-def clean_zombie_ssh_jump_pod(namespace: str, context: Optional[str],
-                              node_id: str):
-    """Analyzes SSH jump pod and removes if it is in a bad state
-
-    Prevents the existence of a dangling SSH jump pod. This could happen
-    in case the pod main container did not start properly (or failed). In that
-    case, jump pod lifecycle manager will not function properly to
-    remove the pod and service automatically, and must be done manually.
-
-    Args:
-        namespace: Namespace to remove the SSH jump pod and service from
-        node_id: Name of head pod
-    """
-
-    def find(l, predicate):
-        """Utility function to find element in given list"""
-        results = [x for x in l if predicate(x)]
-        return results[0] if results else None
-
-    # Get the SSH jump pod name from the head pod
-    try:
-        pod = kubernetes.core_api(context).read_namespaced_pod(
-            node_id, namespace)
-    except kubernetes.api_exception() as e:
-        if e.status == 404:
-            logger.warning(f'Failed to get pod {node_id},'
-                           ' but the pod was not found (404).')
-        raise
-    else:
-        ssh_jump_name = pod.metadata.labels.get('skypilot-ssh-jump')
-    try:
-        ssh_jump_pod = kubernetes.core_api(context).read_namespaced_pod(
-            ssh_jump_name, namespace)
-        cont_ready_cond = find(ssh_jump_pod.status.conditions,
-                               lambda c: c.type == 'ContainersReady')
-        if (cont_ready_cond and cont_ready_cond.status
-                == 'False') or ssh_jump_pod.status.phase == 'Pending':
-            # Either the main container is not ready or the pod failed
-            # to schedule. To be on the safe side and prevent a dangling
-            # ssh jump pod, lets remove it and the service. Otherwise, main
-            # container is ready and its lifecycle management script takes
-            # care of the cleaning.
-            kubernetes.core_api(context).delete_namespaced_pod(
-                ssh_jump_name, namespace)
-            kubernetes.core_api(context).delete_namespaced_service(
-                ssh_jump_name, namespace)
-    except kubernetes.api_exception() as e:
-        # We keep the warning in debug to avoid polluting the `sky launch`
-        # output.
-        logger.debug(f'Tried to check ssh jump pod {ssh_jump_name},'
-                     f' but got error {e}\n. Consider running `kubectl '
-                     f'delete pod {ssh_jump_name} -n {namespace}` to manually '
-                     'remove the pod if it has crashed.')
-        # We encountered an issue while checking ssh jump pod. To be on
-        # the safe side, lets remove its service so the port is freed
-        try:
-            kubernetes.core_api(context).delete_namespaced_service(
-                ssh_jump_name, namespace)
-        except kubernetes.api_exception():
-            pass
-
-
-def fill_ssh_jump_template(ssh_key_secret: str, ssh_jump_image: str,
-                           ssh_jump_name: str, service_type: str) -> Dict:
-    template_path = os.path.join(directory_utils.get_sky_dir(), 'templates',
-                                 'kubernetes-ssh-jump.yml.j2')
-    if not os.path.exists(template_path):
-        raise FileNotFoundError(
-            'Template "kubernetes-ssh-jump.j2" does not exist.')
-    with open(template_path, 'r', encoding='utf-8') as fin:
-        template = fin.read()
-    j2_template = jinja2.Template(template)
-    cont = j2_template.render(name=ssh_jump_name,
-                              image=ssh_jump_image,
-                              secret=ssh_key_secret,
-                              service_type=service_type)
-    content = yaml_utils.safe_load(cont)
-    return content
 
 
 def check_port_forward_mode_dependencies(

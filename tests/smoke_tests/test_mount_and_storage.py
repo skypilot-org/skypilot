@@ -149,8 +149,10 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
 
 # ---------- storage ----------
 def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
-                                       storage_name: str, ls_hello_command: str,
-                                       cloud: str, only_mount: bool,
+                                       storage_name: str,
+                                       empty_storage_name: str,
+                                       ls_hello_command: str, cloud: str,
+                                       only_mount: bool,
                                        include_mount_cached: bool):
     assert cloud in ['aws', 'gcp', 'azure', 'kubernetes']
     template_str = pathlib.Path(
@@ -171,6 +173,7 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
 
     content = template.render(
         storage_name=storage_name,
+        empty_storage_name=empty_storage_name,
         cloud=cloud,
         only_mount=only_mount,
         include_s3_mount=include_s3_mount,
@@ -211,7 +214,7 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
     clean_command = (
         f'sky down -y {cluster_name} && '
         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(cluster_name)} && '
-        f'sky storage delete -y {storage_name}')
+        f'sky storage delete -y {storage_name} {empty_storage_name}')
     return test_commands, clean_command
 
 
@@ -262,12 +265,14 @@ def test_aws_storage_mounts_arm64():
     name = smoke_tests_utils.get_cluster_name()
     cloud = 'aws'
     storage_name = f'sky-test-arm64-{int(time.time())}'
+    empty_storage_name = f'sky-test-arm64-empty-{int(time.time())}'
     ls_hello_command = f'aws s3 ls {storage_name}/hello.txt'
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         # Reuse the existing storage mounts command generator
         test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, ls_hello_command, cloud, False, False)
+            f, name, storage_name, empty_storage_name, ls_hello_command, cloud,
+            False, False)
 
         # Modify the sky launch command to force ARM64 instance
         for i, cmd in enumerate(test_commands):
@@ -302,10 +307,12 @@ def test_aws_storage_mounts_with_stop():
     name = smoke_tests_utils.get_cluster_name()
     cloud = 'aws'
     storage_name = f'sky-test-{int(time.time())}'
+    empty_storage_name = f'sky-test-empty-{int(time.time())}'
     ls_hello_command = f'aws s3 ls {storage_name}/hello.txt'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, ls_hello_command, cloud, False, True)
+            f, name, storage_name, empty_storage_name, ls_hello_command, cloud,
+            False, True)
         test = smoke_tests_utils.Test(
             'aws_storage_mounts',
             test_commands,
@@ -320,10 +327,12 @@ def test_aws_storage_mounts_with_stop_only_mount():
     name = smoke_tests_utils.get_cluster_name()
     cloud = 'aws'
     storage_name = f'sky-test-{int(time.time())}'
+    empty_storage_name = f'sky-test-empty-{int(time.time())}'
     ls_hello_command = f'aws s3 ls {storage_name}/hello.txt'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, ls_hello_command, cloud, True, False)
+            f, name, storage_name, empty_storage_name, ls_hello_command, cloud,
+            True, False)
         test = smoke_tests_utils.Test(
             'aws_storage_mounts_only_mount',
             test_commands,
@@ -338,10 +347,12 @@ def test_gcp_storage_mounts_with_stop():
     name = smoke_tests_utils.get_cluster_name()
     cloud = 'gcp'
     storage_name = f'sky-test-{int(time.time())}'
+    empty_storage_name = f'sky-test-empty-{int(time.time())}'
     ls_hello_command = f'{smoke_tests_utils.ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL} ls gs://{storage_name}/hello.txt'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, ls_hello_command, cloud, False, True)
+            f, name, storage_name, empty_storage_name, ls_hello_command, cloud,
+            False, True)
         test = smoke_tests_utils.Test(
             'gcp_storage_mounts',
             test_commands,
@@ -356,6 +367,7 @@ def test_azure_storage_mounts_with_stop():
     name = smoke_tests_utils.get_cluster_name()
     cloud = 'azure'
     storage_name = f'sky-test-{int(time.time())}'
+    empty_storage_name = f'sky-test-empty-{int(time.time())}'
     storage_account_name = TestStorageWithCredentials.get_az_storage_account_name(
     )
     storage_account_key = data_utils.get_az_storage_account_key(
@@ -368,7 +380,8 @@ def test_azure_storage_mounts_with_stop():
                         f'[ "$output" = "[]" ] && exit 1 || exit 0')
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, ls_hello_command, cloud, False, True)
+            f, name, storage_name, empty_storage_name, ls_hello_command, cloud,
+            False, True)
         test = smoke_tests_utils.Test(
             'azure_storage_mounts',
             test_commands,
@@ -394,6 +407,7 @@ def test_kubernetes_storage_mounts(storage_name_prefix: str):
     # (uses rclone fallback for ARM64, goofys for x86_64).
     name = smoke_tests_utils.get_cluster_name()
     storage_name = f'{storage_name_prefix}-{int(time.time())}'
+    empty_storage_name = f'{storage_name_prefix}-empty-{int(time.time())}'
 
     s3_ls_cmd = TestStorageWithCredentials.cli_ls_cmd(storage_lib.StoreType.S3,
                                                       storage_name, 'hello.txt')
@@ -418,7 +432,8 @@ def test_kubernetes_storage_mounts(storage_name_prefix: str):
     ls_hello_command = f'{cloud_cmd_cluster_setup_cmd} && {ls_hello_command}'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, ls_hello_command, 'kubernetes', False, False)
+            f, name, storage_name, empty_storage_name, ls_hello_command,
+            'kubernetes', False, False)
         test = smoke_tests_utils.Test(
             'kubernetes_storage_mounts',
             test_commands,

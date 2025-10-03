@@ -33,13 +33,10 @@ provider:
     networking_mode: {{k8s_networking_mode}}
 
     # We use internal IPs since we set up a port-forward between the kubernetes
-    # cluster and the local machine, or directly use NodePort to reach the
-    # head node.
+    # cluster and the local machine.
     use_internal_ips: true
 
     timeout: {{timeout}}
-
-    ssh_jump_image: {{k8s_ssh_jump_image}}
 
     # Namespace used to host SkyPilot system components, such as fuse device
     # manager.
@@ -276,8 +273,6 @@ available_node_types:
             parent: skypilot
             # component will be set for the head node pod to be the same as the head node service selector above if a
             skypilot-cluster: {{cluster_name_on_cloud}}
-            # Identifies the SSH jump pod used by this pod. Used in life cycle management of the ssh jump pod.
-            skypilot-ssh-jump: {{k8s_ssh_jump_name}}
             skypilot-user: {{ user }}
             # Custom tags for the pods
             {%- for label_key, label_value in labels.items() %}

@@ -1132,6 +1132,17 @@ List of allowed Kubernetes contexts (optional).
 
 List of context names that SkyPilot is allowed to use.
 
+If you want all available contexts to be allowed, set it to 'all' like this:
+
+.. code-block:: yaml
+
+  kubernetes:
+    allowed_contexts: all
+
+
+You can also set ``SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS`` environment variable to ``"true"``
+for the same effect. Configuration option overrides the environment variable if set.
+
 .. _config-yaml-kubernetes-custom-metadata:
 
 ``kubernetes.custom_metadata``
