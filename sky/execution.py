@@ -5,7 +5,7 @@ See `Stage` for a Task's life cycle.
 import enum
 import logging
 import typing
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, Callable
 
 import colorama
 
@@ -31,6 +31,7 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import sky
+    from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -406,7 +407,7 @@ def _execute_dag(
     # cluster just got terminated). To compensate without moving the optimizer
     # into the backend, we inject a small planner the backend can call under
     # the lock only when no reusable snapshot and no caller plan exist.
-    planner = None
+    planner: Optional[Callable[['sky.Task'], 'resources_lib.Resources']] = None
     if isinstance(backend,
                   backends.CloudVmRayBackend) and Stage.OPTIMIZE in stages:
 
