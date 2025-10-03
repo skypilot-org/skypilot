@@ -109,8 +109,6 @@ server_dependencies = [
     'pyjwt',
     'aiohttp',
     'anyio',
-    GRPC,
-    PROTOBUF,
     'aiosqlite',
     'greenlet',
 ]
@@ -211,17 +209,15 @@ extras_require: Dict[str, List[str]] = {
         # docs instead.
         # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long
     ],
-    'nebius': [
-        # Nebius requires grpcio and protobuf, so we need to include
-        # our constraints here.
-        'nebius>=0.2.47',
-        GRPC,
-        PROTOBUF,
-    ] + aws_dependencies,
+    'nebius': ['nebius>=0.2.47'] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'seeweb': ['ecsapi>=0.2.0'],
     'server': server_dependencies,
 }
+
+for extra, deps in extras_require.items():
+    if extra != 'remote':
+        deps.extend(remote)
 
 # Calculate which clouds should be included in the [all] installation.
 clouds_for_all = set(extras_require)
