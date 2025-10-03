@@ -1,8 +1,0 @@
-resources:
-  cloud: gcp
-  region: us-central1
-  zone: us-central1-c
-setup: |
-  echo jump host ready
-run: |
-  tail -f /dev/null
