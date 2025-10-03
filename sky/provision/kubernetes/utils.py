@@ -1168,6 +1168,22 @@ class V1Node:
     metadata: V1ObjectMeta
     status: V1NodeStatus
 
+    @classmethod
+    def from_dict(cls, data: dict) -> 'V1Node':
+        """Create V1Node from a dictionary."""
+        return cls(metadata=V1ObjectMeta(
+            name=data['metadata']['name'],
+            labels=data['metadata'].get('labels', {}),
+        ),
+                   status=V1NodeStatus(
+                       allocatable=data['status']['allocatable'],
+                       capacity=data['status']['capacity'],
+                       addresses=[
+                           V1NodeAddress(type=addr['type'],
+                                         address=addr['address'])
+                           for addr in data['status'].get('addresses', [])
+                       ]))
+
 
 @annotations.lru_cache(scope='request', maxsize=10)
 @_retry_on_error(resource_type='node')
@@ -1181,66 +1197,17 @@ def get_kubernetes_nodes(*,
     if context is None:
         context = get_current_kube_config_context_name()
 
-    # Deserialize using the API client
     if not stream:
         nodes = kubernetes.core_api(context).list_node(
             _request_timeout=kubernetes.API_TIMEOUT).items
     else:
         response = kubernetes.core_api(context).list_node(
             _request_timeout=kubernetes.API_TIMEOUT, _preload_content=False)
-        nodes = []
-        for prefix, event, value in ijson.parse(response, buf_size=8192):
-            if (prefix, event) == ('items.item', 'start_map'):
-                node = V1Node(metadata=V1ObjectMeta(name='', labels={}),
-                              status=V1NodeStatus(allocatable={},
-                                                  capacity={},
-                                                  addresses=[]))
-                labels = {}
-                allocatable = {}
-                capacity = {}
-                addresses = []
-            if (prefix, event) == ('items.item.metadata.name', 'string'):
-                node.metadata.name = value
-            elif (prefix, event) == ('items.item.metadata.labels', 'map_key'):
-                last_key = value
-            elif prefix.startswith(
-                    'items.item.metadata.labels.') and event == 'string':
-                labels[last_key] = value
-            elif (prefix, event) == ('items.item.metadata.labels', 'end_map'):
-                node.metadata.labels = labels
-            elif (prefix, event) == ('items.item.status.allocatable',
-                                     'map_key'):
-                last_key = value
-            elif prefix.startswith(
-                    'items.item.status.allocatable.') and event == 'string':
-                allocatable[last_key] = value
-            elif (prefix, event) == ('items.item.status.allocatable',
-                                     'end_map'):
-                node.status.allocatable = allocatable
-            elif (prefix, event) == ('items.item.status.capacity', 'map_key'):
-                last_key = value
-            elif prefix.startswith(
-                    'items.item.status.capacity.') and event == 'string':
-                capacity[last_key] = value
-            elif (prefix, event) == ('items.item.status.capacity', 'end_map'):
-                node.status.capacity = capacity
-            elif (prefix, event) == ('items.item.status.addresses.item',
-                                     'start_map'):
-                current_address = V1NodeAddress(type='', address='')
-            elif (prefix, event) == ('items.item.status.addresses.item.type',
-                                     'string'):
-                current_address.type = value
-            elif (prefix, event) == ('items.item.status.addresses.item.address',
-                                     'string'):
-                current_address.address = value
-            elif (prefix, event) == ('items.item.status.addresses.item',
-                                     'end_map'):
-                addresses.append(current_address)
-            elif (prefix, event) == ('items.item.status.addresses',
-                                     'end_array'):
-                node.status.addresses = addresses
-            elif (prefix, event) == ('items.item', 'end_map'):
-                nodes.append(node)
+
+        nodes = [
+            V1Node.from_dict(item_dict)
+            for item_dict in ijson.items(response, 'items.item', buf_size=8192)
+        ]
 
     return nodes
 
@@ -1272,6 +1239,24 @@ class V1Pod:
     status: V1PodStatus
     spec: V1PodSpec
 
+    @classmethod
+    def from_dict(cls, data: dict) -> 'V1Pod':
+        """Create V1Pod from a dictionary."""
+        return cls(metadata=V1ObjectMeta(
+            name=data['metadata']['name'],
+            labels=data['metadata'].get('labels', {}),
+            namespace=data['metadata'].get('namespace', ''),
+        ),
+                   status=V1PodStatus(phase=data['status'].get('phase', ''),),
+                   spec=V1PodSpec(
+                       node_name=data['spec'].get('nodeName', ''),
+                       containers=[
+                           V1Container(resources=V1ResourceRequirements(
+                               requests=container.get('resources', {}).get(
+                                   'requests', {})))
+                           for container in data['spec'].get('containers', [])
+                       ]))
+
 
 @_retry_on_error(resource_type='pod')
 def get_all_pods_in_kubernetes_cluster(*,
@@ -1284,72 +1269,18 @@ def get_all_pods_in_kubernetes_cluster(*,
     if context is None:
         context = get_current_kube_config_context_name()
 
-    response = kubernetes.core_api(context).list_pod_for_all_namespaces(
-        _request_timeout=kubernetes.API_TIMEOUT, _preload_content=False)
-
     if not stream:
-        pod_list = kubernetes.core_api(context).api_client.deserialize(
-            response, 'V1PodList')
+        pod_list = kubernetes.core_api(context).list_pod_for_all_namespaces(
+            _request_timeout=kubernetes.API_TIMEOUT)
         pods = pod_list.items
     else:
-        pods = []
-        for prefix, event, value in ijson.parse(response, buf_size=8192):
-            if (prefix, event) == ('items.item', 'start_map'):
-                # Create a simplified pod object with only needed fields
-                pod = type(
-                    'Pod', (), {
-                        'metadata': type('Metadata', (), {
-                            'name': '',
-                            'namespace': '',
-                        })(),
-                        'status': type('Status', (), {
-                            'phase': '',
-                        })(),
-                        'spec': type('Spec', (), {
-                            'node_name': '',
-                            'containers': [],
-                        })(),
-                    })()
-                current_container = None
-                current_requests = None
-            elif (prefix, event) == ('items.item.metadata.name', 'string'):
-                pod.metadata.name = value
-            elif (prefix, event) == ('items.item.metadata.namespace', 'string'):
-                pod.metadata.namespace = value
-            elif (prefix, event) == ('items.item.status.phase', 'string'):
-                pod.status.phase = value
-            elif (prefix, event) == ('items.item.spec.nodeName', 'string'):
-                pod.spec.node_name = value
-            elif (prefix, event) == ('items.item.spec.containers.item',
-                                     'start_map'):
-                current_container = type('Container', (), {
-                    'resources': type('Resources', (), {
-                        'requests': None,
-                    })(),
-                })()
-            elif (prefix, event) == (
-                    'items.item.spec.containers.item.resources.requests',
-                    'start_map'):
-                current_requests = {}
-            elif (prefix, event) == (
-                    'items.item.spec.containers.item.resources.requests',
-                    'map_key'):
-                last_key = value
-            elif prefix.startswith(
-                    'items.item.spec.containers.item.resources.requests.'
-            ) and event in ('string', 'number'):
-                current_requests[last_key] = str(value)
-            elif (prefix, event) == (
-                    'items.item.spec.containers.item.resources.requests',
-                    'end_map'):
-                if current_container is not None:
-                    current_container.resources.requests = current_requests
-            elif (prefix, event) == ('items.item.spec.containers.item',
-                                     'end_map'):
-                if current_container is not None:
-                    pod.spec.containers.append(current_container)
-            elif (prefix, event) == ('items.item', 'end_map'):
-                pods.append(pod)
+        response = kubernetes.core_api(context).list_pod_for_all_namespaces(
+            _request_timeout=kubernetes.API_TIMEOUT, _preload_content=False)
+
+        pods = [
+            V1Pod.from_dict(item_dict)
+            for item_dict in ijson.items(response, 'items.item', buf_size=8192)
+        ]
 
     return pods
 
