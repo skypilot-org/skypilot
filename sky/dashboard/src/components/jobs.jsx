@@ -514,36 +514,40 @@ export function ManagedJobsTable({
     fetchDataRef.current = fetchData;
   }, [fetchData]);
 
-  // Track if this is the initial load to avoid duplicate fetches
-  const isInitialLoad = React.useRef(true);
+  // Prevent duplicate API requests on first load/page refresh
+  // Multiple useEffects below would normally all fire on mount with their default values,
+  // causing redundant requests to the same API server endpoints.
+  // This ref ensures only the initial fetch effect runs, and subsequent effects
+  // only trigger on actual user interactions (page change, filter change, etc.)
+  const isInitialFetch = React.useRef(true);
 
   // Initial load - only runs once on mount
   React.useEffect(() => {
     fetchData({ includeStatus: true });
-    // Mark that initial load is complete
-    isInitialLoad.current = false;
+    // Mark that initial fetch is complete so other effects can run
+    isInitialFetch.current = false;
   }, []);
 
   // Fetch on pagination (page) changes without status request
-  // Skip on initial load (page defaults to 1)
+  // Skip on initial fetch (page defaults to 1)
   React.useEffect(() => {
-    if (!isInitialLoad.current) {
+    if (!isInitialFetch.current) {
       fetchData({ includeStatus: false });
     }
   }, [currentPage]);
 
   // Fetch on filters or page size changes with status request
-  // Skip on initial load (filters default to [] and pageSize to 10)
+  // Skip on initial fetch (filters default to [] and pageSize to 10)
   React.useEffect(() => {
-    if (!isInitialLoad.current) {
+    if (!isInitialFetch.current) {
       fetchData({ includeStatus: true });
     }
   }, [filters, pageSize]);
 
   // Fetch on status filter changes (activeTab, selectedStatuses, showAllMode)
-  // Skip on initial load (these have default values)
+  // Skip on initial fetch (these have default values)
   React.useEffect(() => {
-    if (!isInitialLoad.current) {
+    if (!isInitialFetch.current) {
       fetchData({ includeStatus: true });
     }
   }, [activeTab, selectedStatuses, showAllMode]);
