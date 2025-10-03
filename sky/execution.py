@@ -400,6 +400,23 @@ def _execute_dag(
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
 
+    # Inject a planner so backend can compute a fresh concrete plan inside the
+    # cluster lock if the cluster was recently torn down.
+    planner = None
+    if isinstance(backend,
+                  backends.CloudVmRayBackend) and Stage.OPTIMIZE in stages:
+
+        def _planner(_t: 'sky.Task'):
+            nonlocal dag
+            new_dag = optimizer.Optimizer.optimize(dag,
+                                                   minimize=optimize_target,
+                                                   quiet=_quiet_optimizer)
+            new_task = new_dag.tasks[0]
+            assert new_task.best_resources is not None, new_task
+            return new_task.best_resources.assert_launchable()
+
+        planner = _planner
+
     backend.register_info(
         dag=dag,
         optimize_target=optimize_target,
@@ -408,7 +425,8 @@ def _execute_dag(
         # after K8S pod recovers from a crash.
         # See `kubernetes-ray.yml.j2` for more details.
         dump_final_script=is_controller_high_availability_supported,
-        is_managed=is_managed)
+        is_managed=is_managed,
+        planner=planner)
 
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket
@@ -417,22 +435,6 @@ def _execute_dag(
     try:
         provisioning_skipped = False
         if Stage.PROVISION in stages:
-            # Just-in-time safeguard: if best_resources is still None (e.g.,
-            # due to a recently-terminated existing cluster making us skip
-            # earlier optimization), do an optimization now to obtain a
-            # concrete provisioning plan and avoid backend asserts.
-            if task.best_resources is None:
-                if isinstance(backend, backends.CloudVmRayBackend):
-                    controller = controller_utils.Controllers.from_name(
-                        cluster_name)
-                    if controller is not None:
-                        job_logger.info(
-                            f'Choosing resources for {controller.value.name}...'
-                        )
-                    dag = optimizer.Optimizer.optimize(
-                        dag, minimize=optimize_target, quiet=_quiet_optimizer)
-                    task = dag.tasks[0]
-                    assert task.best_resources is not None, task
             assert handle is None or skip_unnecessary_provisioning, (
                 'Provisioning requested, but handle is already set. PROVISION '
                 'should be excluded from stages or '

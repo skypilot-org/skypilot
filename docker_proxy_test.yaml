@@ -1,0 +1,10 @@
+resources:
+  cloud: gcp
+  region: us-central1
+  zone: us-central1-c
+  image_id: docker:gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+setup: |
+  echo setup inside docker
+run: |
+  whoami
+  echo $HOSTNAME
