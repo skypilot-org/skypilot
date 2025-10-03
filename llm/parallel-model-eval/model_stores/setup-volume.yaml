@@ -1,0 +1,39 @@
+resources:
+  accelerators: L4:1
+  disk_size: 50
+workdir: .
+volumes:
+  /volumes: model-checkpoints
+envs:
+  HF_TOKEN: null
+setup: |
+  uv venv --seed --python 3.10
+  source .venv/bin/activate
+  uv pip install torch transformers accelerate huggingface_hub
+run: |
+  source .venv/bin/activate
+  python -c "
+  from transformers import AutoModelForCausalLM, AutoTokenizer
+  import torch
+  import os
+  
+  # Use Llama-3.2-1B-Instruct model (has chat template)
+  hf_token = os.environ.get('HF_TOKEN')
+  print(f'HF_TOKEN available: {bool(hf_token)}')
+  
+  print('Loading Llama-3.2-1B-Instruct from HuggingFace...')
+  model_id = 'meta-llama/Llama-3.2-1B-Instruct'
+  
+  model = AutoModelForCausalLM.from_pretrained(
+      model_id, 
+      torch_dtype=torch.float16, 
+      device_map='auto',
+      token=hf_token
+  )
+  tokenizer = AutoTokenizer.from_pretrained(model_id, token=hf_token)
+  
+  print('Saving model to /volumes/agent-llama...')
+  model.save_pretrained('/volumes/agent-llama')
+  tokenizer.save_pretrained('/volumes/agent-llama')
+  print('✅ Llama-3.2-1B-Instruct saved to volume at /volumes/agent-llama')
+  "
