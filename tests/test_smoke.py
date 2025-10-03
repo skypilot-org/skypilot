@@ -39,3 +39,4 @@ from smoke_tests.test_region_and_zone import *
 from smoke_tests.test_sky_serve import *
 from smoke_tests.test_ssm import *
 from smoke_tests.test_workspaces import *
+from smoke_tests.test_examples import *
