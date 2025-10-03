@@ -10,6 +10,7 @@
 import tempfile
 import textwrap
 from unittest import mock
+from urllib import parse
 
 import pytest
 from smoke_tests import smoke_tests_utils
@@ -122,6 +123,11 @@ def test_cli_auto_retry(generic_cloud: str):
     """Test that cli auto retry works."""
     name = smoke_tests_utils.get_cluster_name()
     port = common_utils.find_free_port(23456)
+    server_url = smoke_tests_utils.get_api_server_url()
+    parsed = parse.urlparse(server_url)
+    api_proxy_url = f'http://127.0.0.1:{port}'
+    if parsed.username and parsed.password:
+        api_proxy_url = f'http://{parsed.username}:{parsed.password}@127.0.0.1:{port}'
     run_command = 'for i in {1..120}; do echo "output $i" && sleep 1; done'
     test = smoke_tests_utils.Test(
         'cli_auto_retry',
@@ -129,7 +135,7 @@ def test_cli_auto_retry(generic_cloud: str):
             # Chaos proxy will kill TCP connections every 30 seconds.
             f'python tests/chaos/chaos_proxy.py --port {port} --interval 30 & echo $! > /tmp/{name}-chaos.pid',
             # Both launch streaming and logs streaming should survive the chaos.
-            f'SKYPILOT_API_SERVER_ENDPOINT=http://127.0.0.1:{port} sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} \'{run_command}\'',
+            f'SKYPILOT_API_SERVER_ENDPOINT={api_proxy_url} sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} \'{run_command}\'',
             f'kill $(cat /tmp/{name}-chaos.pid)',
         ],
         timeout=smoke_tests_utils.get_timeout(generic_cloud),
@@ -154,7 +160,7 @@ def test_storage_delete(generic_cloud: str):
             mode: MOUNT
             store: s3
     run: |
-        echo "Data" > /output/data.txt 
+        echo "Data" > /output/data.txt
     """)
     with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
         job_yaml.write(bucket_job_yaml.encode('utf-8'))
