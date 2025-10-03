@@ -58,7 +58,7 @@ def test_min_gpt(generic_cloud: str, train_file: str, accelerator: Dict[str,
         [
             f'sky launch -y -c {name} --infra {generic_cloud} {dist_train_file}',
             f'sky logs {name} 1 --status',
-            f'outputs=$(sky logs {name} 1); echo "$outputs" && echo "$outputs" | grep "[RANK0] Epoch 1 | Iter 0 | Train Loss"',
+            f'outputs=$(sky logs {name} 1); echo "$outputs" && echo "$outputs" | grep "Epoch 1 | Iter 0 | Train Loss"',
         ],
         f'sky down -y {name}; rm {dist_train_file}',
         timeout=20 * 60,
