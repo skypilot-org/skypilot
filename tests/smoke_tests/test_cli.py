@@ -129,8 +129,7 @@ def test_cli_invalid_config_details(generic_cloud: str):
         f'{invalid_override} tests/test_yamls/minimal.yaml 2>&1 | tee /dev/stderr) && '
         'echo "\\n===Validating config error details===\\n" && '
         f'echo "$s" | grep "{details_msg}" && '
-        f'echo "$s" | grep "{suggestion_msg}"'
-    )
+        f'echo "$s" | grep "{suggestion_msg}"')
 
     test = smoke_tests_utils.Test(
         'cli_invalid_config_details', [command],
