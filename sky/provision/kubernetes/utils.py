@@ -1216,7 +1216,7 @@ class V1PodStatus:
 
 @dataclasses.dataclass
 class V1ResourceRequirements:
-    requests: Dict[str, str]
+    requests: Optional[Dict[str, str]]
 
 
 @dataclasses.dataclass
@@ -1227,7 +1227,7 @@ class V1Container:
 @dataclasses.dataclass
 class V1PodSpec:
     containers: List[V1Container]
-    node_name: str
+    node_name: Optional[str]
 
 
 @dataclasses.dataclass
@@ -1242,15 +1242,15 @@ class V1Pod:
         return cls(metadata=V1ObjectMeta(
             name=data['metadata']['name'],
             labels=data['metadata'].get('labels', {}),
-            namespace=data['metadata'].get('namespace', ''),
+            namespace=data['metadata'].get('namespace'),
         ),
-                   status=V1PodStatus(phase=data['status'].get('phase', ''),),
+                   status=V1PodStatus(phase=data['status'].get('phase'),),
                    spec=V1PodSpec(
-                       node_name=data['spec'].get('nodeName', ''),
+                       node_name=data['spec'].get('nodeName'),
                        containers=[
                            V1Container(resources=V1ResourceRequirements(
                                requests=container.get('resources', {}).get(
-                                   'requests', {})))
+                                   'requests') or None))
                            for container in data['spec'].get('containers', [])
                        ]))
 
