@@ -25,7 +25,7 @@ async def volume_list(request: fastapi.Request) -> None:
         'env_vars': auth_user.to_env_vars()
     } if auth_user else {}
     volume_list_body = payloads.VolumeListBody(**auth_user_env_vars_kwargs)
-    executor.schedule_request(
+    await executor.schedule_request(
         request_id=request.state.request_id,
         request_name='volume_list',
         request_body=volume_list_body,
@@ -38,7 +38,7 @@ async def volume_list(request: fastapi.Request) -> None:
 async def volume_delete(request: fastapi.Request,
                         volume_delete_body: payloads.VolumeDeleteBody) -> None:
     """Deletes a volume."""
-    executor.schedule_request(
+    await executor.schedule_request(
         request_id=request.state.request_id,
         request_name='volume_delete',
         request_body=volume_delete_body,
@@ -112,7 +112,7 @@ async def volume_apply(request: fastapi.Request,
             raise fastapi.HTTPException(
                 status_code=400,
                 detail='Runpod network volume is only supported on Runpod')
-    executor.schedule_request(
+    await executor.schedule_request(
         request_id=request.state.request_id,
         request_name='volume_apply',
         request_body=volume_apply_body,
