@@ -183,31 +183,10 @@ def _list_accelerators(
     pods = None
     allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
     if realtime and has_accelerator_nodes:
-        # Get the pods to get the real-time GPU usage
+        # Get the allocated GPU quantity by each node
         try:
-            pods = kubernetes_utils.get_all_pods_in_kubernetes_cluster(
-                context=context)
-            # Pre-compute allocated accelerators per node
-            if pods is not None:
-                for pod in pods:
-                    if pod.status.phase not in ['Running', 'Pending']:
-                        continue
-                    # Skip pods that should not count against GPU count
-                    if kubernetes_utils.should_exclude_pod_from_gpu_allocation(
-                            pod):
-                        logger.debug(
-                            f'Excluding pod {pod.metadata.name} from GPU count '
-                            f'calculations on node {pod.spec.node_name}')
-                        continue
-                    # Sum GPU requests across all containers
-                    for container in pod.spec.containers:
-                        if container.resources.requests:
-                            allocated_qty = (
-                                kubernetes_utils.get_node_accelerator_count(
-                                    context, container.resources.requests))
-                            if allocated_qty > 0 and pod.spec.node_name:
-                                allocated_qty_by_node[
-                                    pod.spec.node_name] += allocated_qty
+            allocated_qty_by_node = (
+                kubernetes_utils.get_allocated_gpu_qty_by_node(context=context))
         except kubernetes.api_exception() as e:
             if e.status == 403:
                 logger.warning(
