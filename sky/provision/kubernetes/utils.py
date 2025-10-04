@@ -1201,10 +1201,13 @@ def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[V1Node]:
     # more efficiently.
     response = kubernetes.core_api(context).list_node(
         _request_timeout=kubernetes.API_TIMEOUT, _preload_content=False)
-    nodes = [
-        V1Node.from_dict(item_dict) for item_dict in ijson.items(
-            response, 'items.item', buf_size=IJSON_BUFFER_SIZE)
-    ]
+    try:
+        nodes = [
+            V1Node.from_dict(item_dict) for item_dict in ijson.items(
+                response, 'items.item', buf_size=IJSON_BUFFER_SIZE)
+        ]
+    finally:
+        response.release_conn()
 
     return nodes
 
