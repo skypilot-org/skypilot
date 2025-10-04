@@ -15,15 +15,9 @@ JOB_CONTROLLER_INDICATOR_FILE = '~/.sky/is_jobs_controller'
 CONSOLIDATED_SIGNAL_PATH = os.path.expanduser('~/.sky/signals/')
 SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
 # Resources as a dict for the jobs controller.
-# Use smaller CPU instance type for jobs controller, but with more memory, i.e.
-# r6i.xlarge (4vCPUs, 32 GB) for AWS, Standard_E4s_v5 (4vCPUs, 32 GB) for Azure,
-# and n2-highmem-4 (4 vCPUs, 32 GB) for GCP, etc.
-# Concurrently limits are set based on profiling. 4x num vCPUs is the launch
-# parallelism limit, and memory / 350MB is the limit to concurrently running
-# jobs. See _get_launch_parallelism and _get_job_parallelism in scheduler.py.
 # We use 50 GB disk size to reduce the cost.
 CONTROLLER_RESOURCES: Dict[str, Union[str, int]] = {
-    'cpus': '8+',
+    'cpus': '4+',
     'memory': '4x',
     'disk_size': 50
 }
