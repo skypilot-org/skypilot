@@ -206,9 +206,9 @@ class VolumeRecord(ResponseBaseModel):
     type: str
     launched_at: int
     cloud: str
-    region: str
+    region: Optional[str] = None
     zone: Optional[str] = None
-    size: str
+    size: Optional[str] = None
     config: Dict[str, Any]
     name_on_cloud: str
     user_hash: str
