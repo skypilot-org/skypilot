@@ -1057,3 +1057,143 @@ def test_coreweave_autoscaler():
 
     # Test that CoreweaveAutoscaler cannot query backend (like other simple autoscalers)
     assert CoreweaveAutoscaler.can_query_backend == False
+
+
+def test_accelerator_scaling_transient_state():
+    """Tests that accelerator discovery handles nodes during scaling (with labels but zero capacity)."""
+    # Mock node that is scaling up - has labels but zero allocatable GPUs
+    mock_scaling_node = mock.MagicMock()
+    mock_scaling_node.metadata.name = 'scaling-node'
+    mock_scaling_node.metadata.labels = {
+        'cloud.google.com/gke-accelerator': 'nvidia-l4',
+        'cloud.google.com/gke-accelerator-count': '2'
+    }
+    # Node is not ready yet, so allocatable shows 0
+    mock_scaling_node.status.allocatable = {'nvidia.com/gpu': '0'}
+    mock_scaling_node.status.addresses = [
+        mock.MagicMock(type='InternalIP', address='10.0.0.1')
+    ]
+
+    with mock.patch('sky.clouds.cloud_in_iterable', return_value=True), \
+         mock.patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name', return_value='test-context'), \
+         mock.patch('sky.provision.kubernetes.utils.check_credentials', return_value=[True]), \
+         mock.patch('sky.provision.kubernetes.utils.detect_accelerator_resource', return_value=True), \
+         mock.patch('sky.provision.kubernetes.utils.detect_gpu_label_formatter', return_value=[utils.GKELabelFormatter(), None]), \
+         mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes', return_value=[mock_scaling_node]), \
+         mock.patch('sky.provision.kubernetes.utils.get_all_pods_in_kubernetes_cluster', return_value=[]), \
+         mock.patch('sky.provision.kubernetes.utils.get_gpu_resource_key', return_value='nvidia.com/gpu'):
+
+        counts, capacity, available = kubernetes_catalog.list_accelerators_realtime(
+            True, None, None, None)
+
+        # All three dicts should have the same keys, even though capacity is 0
+        assert (set(counts.keys()) == set(capacity.keys()) == set(available.keys())), \
+            (f'Keys of counts ({list(counts.keys())}), capacity ({list(capacity.keys())}), '
+             f'and available ({list(available.keys())}) must be the same.')
+
+        # L4 should be in all dicts
+        assert 'L4' in counts
+        assert 'L4' in capacity
+        assert 'L4' in available
+
+        # Capacity and available should be 0 for the scaling node
+        assert capacity['L4'] == 0
+        assert available['L4'] == 0
+
+
+def test_accelerator_mixed_ready_and_scaling_nodes():
+    """Tests handling of clusters with both ready and scaling nodes."""
+    # Mock ready node with available GPUs
+    mock_ready_node = mock.MagicMock()
+    mock_ready_node.metadata.name = 'ready-node'
+    mock_ready_node.metadata.labels = {
+        'cloud.google.com/gke-accelerator': 'nvidia-l4',
+        'cloud.google.com/gke-accelerator-count': '4'
+    }
+    mock_ready_node.status.allocatable = {'nvidia.com/gpu': '4'}
+    mock_ready_node.status.addresses = [
+        mock.MagicMock(type='InternalIP', address='10.0.0.1')
+    ]
+
+    # Mock scaling node with labels but zero allocatable
+    mock_scaling_node = mock.MagicMock()
+    mock_scaling_node.metadata.name = 'scaling-node'
+    mock_scaling_node.metadata.labels = {
+        'cloud.google.com/gke-accelerator': 'nvidia-l4',
+        'cloud.google.com/gke-accelerator-count': '4'
+    }
+    mock_scaling_node.status.allocatable = {'nvidia.com/gpu': '0'}
+    mock_scaling_node.status.addresses = [
+        mock.MagicMock(type='InternalIP', address='10.0.0.2')
+    ]
+
+    # Mock pod consuming 2 GPUs on ready node
+    mock_pod = mock.MagicMock()
+    mock_pod.spec.node_name = 'ready-node'
+    mock_pod.status.phase = 'Running'
+    mock_pod.metadata.name = 'gpu-pod'
+    mock_pod.metadata.namespace = 'default'
+    mock_container = mock.MagicMock()
+    mock_container.resources.requests = {'nvidia.com/gpu': '2'}
+    mock_pod.spec.containers = [mock_container]
+
+    with mock.patch('sky.clouds.cloud_in_iterable', return_value=True), \
+         mock.patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name', return_value='test-context'), \
+         mock.patch('sky.provision.kubernetes.utils.check_credentials', return_value=[True]), \
+         mock.patch('sky.provision.kubernetes.utils.detect_accelerator_resource', return_value=True), \
+         mock.patch('sky.provision.kubernetes.utils.detect_gpu_label_formatter', return_value=[utils.GKELabelFormatter(), None]), \
+         mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes', return_value=[mock_ready_node, mock_scaling_node]), \
+         mock.patch('sky.provision.kubernetes.utils.get_all_pods_in_kubernetes_cluster', return_value=[mock_pod]), \
+         mock.patch('sky.provision.kubernetes.utils.get_gpu_resource_key', return_value='nvidia.com/gpu'):
+
+        counts, capacity, available = kubernetes_catalog.list_accelerators_realtime(
+            True, None, None, None)
+
+        # Keys should match
+        assert (set(counts.keys()) == set(capacity.keys()) == set(available.keys())), \
+            (f'Keys of counts ({list(counts.keys())}), capacity ({list(capacity.keys())}), '
+             f'and available ({list(available.keys())}) must be the same.')
+
+        # Should have L4 with capacity of 4 (only from ready node)
+        assert 'L4' in capacity
+        assert capacity['L4'] == 4
+
+        # Available should be 2 (4 total - 2 used on ready node, scaling node contributes 0)
+        assert available['L4'] == 2
+
+
+def test_accelerator_no_allocatable_but_labels():
+    """Tests nodes with accelerator labels but completely unschedulable (no allocatable reported)."""
+    # Mock node with labels but no allocatable resources at all (e.g., node initializing)
+    mock_node = mock.MagicMock()
+    mock_node.metadata.name = 'initializing-node'
+    mock_node.metadata.labels = {
+        'cloud.google.com/gke-accelerator': 'nvidia-a100-80gb',
+        'cloud.google.com/gke-accelerator-count': '8'
+    }
+    mock_node.status.allocatable = {}  # Empty allocatable
+    mock_node.status.addresses = [
+        mock.MagicMock(type='InternalIP', address='10.0.0.1')
+    ]
+
+    with mock.patch('sky.clouds.cloud_in_iterable', return_value=True), \
+         mock.patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name', return_value='test-context'), \
+         mock.patch('sky.provision.kubernetes.utils.check_credentials', return_value=[True]), \
+         mock.patch('sky.provision.kubernetes.utils.detect_accelerator_resource', return_value=True), \
+         mock.patch('sky.provision.kubernetes.utils.detect_gpu_label_formatter', return_value=[utils.GKELabelFormatter(), None]), \
+         mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes', return_value=[mock_node]), \
+         mock.patch('sky.provision.kubernetes.utils.get_all_pods_in_kubernetes_cluster', return_value=[]), \
+         mock.patch('sky.provision.kubernetes.utils.get_gpu_resource_key', return_value='nvidia.com/gpu'):
+
+        counts, capacity, available = kubernetes_catalog.list_accelerators_realtime(
+            True, None, None, None)
+
+        # Keys should still match (even if all are empty or have the accelerator with 0 capacity)
+        assert (set(counts.keys()) == set(capacity.keys()) == set(available.keys())), \
+            (f'Keys of counts ({list(counts.keys())}), capacity ({list(capacity.keys())}), '
+             f'and available ({list(available.keys())}) must be the same.')
+
+        # Since allocatable is 0, A100-80GB should have 0 capacity
+        if 'A100-80GB' in capacity:
+            assert capacity['A100-80GB'] == 0
+            assert available['A100-80GB'] == 0

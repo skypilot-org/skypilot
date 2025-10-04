@@ -216,6 +216,9 @@ def _list_accelerators(
                     kubernetes_utils.get_node_accelerator_count(
                         context, node.status.allocatable))
 
+                # Track all discovered accelerator names, even if count is 0
+                # (e.g., during node scaling). We need this to ensure all three
+                # output dicts have consistent keys.
                 if accelerator_count > 0:
                     # TPUs are counted in a different way compared to GPUs.
                     # Multi-node GPUs can be split into smaller units and be
@@ -234,6 +237,11 @@ def _list_accelerators(
                         if accelerator_count not in accelerators_qtys:
                             accelerators_qtys.add(
                                 (accelerator_name, accelerator_count))
+                else:
+                    # Node has labels but zero allocatable capacity
+                    # (e.g., scaling). Add a (name, 0) entry so we track this
+                    # accelerator exists.
+                    accelerators_qtys.add((accelerator_name, 0))
 
                 if accelerator_count >= min_quantity_filter:
                     quantized_count = (
@@ -245,6 +253,11 @@ def _list_accelerators(
                     else:
                         total_accelerators_capacity[
                             accelerator_name] += quantized_count
+                else:
+                    # Ensure the accelerator is tracked in capacity dict
+                    # even if 0
+                    if accelerator_name not in total_accelerators_capacity:
+                        total_accelerators_capacity[accelerator_name] = 0
 
                 if pods is None:
                     # If we can't get the pods, we can't get the GPU usage
