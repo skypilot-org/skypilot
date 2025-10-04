@@ -1273,10 +1273,13 @@ def get_all_pods_in_kubernetes_cluster(*,
     # more efficiently.
     response = kubernetes.core_api(context).list_pod_for_all_namespaces(
         _request_timeout=kubernetes.API_TIMEOUT, _preload_content=False)
-    pods = [
-        V1Pod.from_dict(item_dict) for item_dict in ijson.items(
-            response, 'items.item', buf_size=IJSON_BUFFER_SIZE)
-    ]
+    try:
+        pods = [
+            V1Pod.from_dict(item_dict) for item_dict in ijson.items(
+                response, 'items.item', buf_size=IJSON_BUFFER_SIZE)
+        ]
+    finally:
+        response.release_conn()
 
     return pods
 
