@@ -1284,33 +1284,33 @@ def test_managed_jobs_config_labels_isolation(generic_cloud: str, request):
         region = request.getfixturevalue('aws_config_region')
         infra_arg = f'--infra aws/{region}'
         config_dict = {'aws': {'labels': {label_key: label_value}}}
-        presence_cmd = (
-            f'OUTPUT=$(aws ec2 describe-instances --region {region} '
+        get_instance_cmd = (
+            f'aws ec2 describe-instances --region {region} '
             f'--filters Name=tag:{label_key},Values={label_value} '
             'Name=instance-state-name,Values=running '
-            '--query "Reservations[].Instances[].InstanceId" --output text); '
+            '--query "Reservations[].Instances[].Tags[?Key==\'Name\'].Value" '
+            '--output text | grep -v "sky-jobs-controller"')
+        presence_cmd = (
+            f'OUTPUT=$({get_instance_cmd}); '
             'echo "$OUTPUT"; '
             'test -n "$OUTPUT"')
         absence_cmd = (
-            f'OUTPUT=$(aws ec2 describe-instances --region {region} '
-            f'--filters Name=tag:{label_key},Values={label_value} '
-            'Name=instance-state-name,Values=running '
-            '--query "Reservations[].Instances[].InstanceId" --output text); '
+            f'OUTPUT=$({get_instance_cmd}); '
             'echo "$OUTPUT"; '
             'test -z "$OUTPUT"')
     elif generic_cloud == 'gcp':
         infra_arg = '--infra gcp'
         config_dict = {'gcp': {'labels': {label_key: label_value}}}
-        presence_cmd = (
-            f'INSTANCES=$(gcloud compute instances list '
+        get_instance_cmd = (
+            f'gcloud compute instances list '
             f'--filter="labels.{label_key}={label_value}" '
-            '--format="value(name,zone)"); '
+            '--format="value(name,zone)" | grep -v "sky-jobs-controller"')
+        presence_cmd = (
+            f'INSTANCES=$({get_instance_cmd}); '
             'echo "$INSTANCES"; '
             'test -n "$INSTANCES"')
         absence_cmd = (
-            f'INSTANCES=$(gcloud compute instances list '
-            f'--filter="labels.{label_key}={label_value}" '
-            '--format="value(name,zone)"); '
+            f'INSTANCES=$({get_instance_cmd}); '
             'echo "$INSTANCES"; '
             'test -z "$INSTANCES"')
     else:  # kubernetes
@@ -1324,14 +1324,15 @@ def test_managed_jobs_config_labels_isolation(generic_cloud: str, request):
                 }
             }
         }
+        get_instance_cmd = (
+            f'kubectl get pods -A -l {label_key}={label_value} '
+            '--no-headers | grep -v "sky-jobs-controller" || true')
         presence_cmd = (
-            f'PODS=$(kubectl get pods -A -l {label_key}={label_value} '
-            '--no-headers || true); '
+            f'PODS=$({get_instance_cmd}); '
             'echo "$PODS"; '
             'test -n "$PODS"')
         absence_cmd = (
-            f'PODS=$(kubectl get pods -A -l {label_key}={label_value} '
-            '--no-headers || true); '
+            f'PODS=$({get_instance_cmd}); '
             'echo "$PODS"; '
             'test -z "$PODS"')
 
@@ -1382,6 +1383,8 @@ def test_managed_jobs_config_labels_isolation(generic_cloud: str, request):
         test = smoke_tests_utils.Test(
             'managed_jobs_config_labels_isolation',
             commands,
+            teardown=(f'sky jobs cancel -y -n {job_with_config}; '
+                      f'sky jobs cancel -y -n {job_without_config}'),
             env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
             timeout=25 * 60,
         )
