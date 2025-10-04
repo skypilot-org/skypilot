@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}-api-server
+  name: {{ include "skypilot.fullname" . }}-api-server
   namespace: {{ .Release.Namespace }}
 spec:
   # Note: replicas > 1 is not well tested.
@@ -24,7 +24,7 @@ spec:
   {{- end }}
   selector:
     matchLabels:
-      app: {{ .Release.Name }}-api
+      app: {{ include "skypilot.fullname" . }}-api
   template:
     metadata:
       annotations:
@@ -38,7 +38,7 @@ spec:
         {{- toYaml .Values.apiService.annotations | nindent 8 }}
         {{- end }}
       labels:
-        app: {{ .Release.Name }}-api
+        app: {{ include "skypilot.fullname" . }}-api
         # This label indicates that the API server is ready to serve requests.
         skypilot.co/ready: "true"
     spec:
@@ -67,7 +67,7 @@ spec:
         - name: SKYPILOT_DEV
           value: {{ .Values.apiService.skypilotDev | quote }}
         - name: SKYPILOT_RELEASE_NAME
-          value: {{ .Release.Name | quote }}
+          value: {{ include "skypilot.fullname" . | quote }}
         {{- if include "skypilot.enableBasicAuthInAPIServer" . | trim | eq "true" }}
         - name: SKYPILOT_INITIAL_BASIC_AUTH
           valueFrom:
@@ -101,7 +101,7 @@ spec:
         - name: SKYPILOT_DB_CONNECTION_URI
           valueFrom:
             secretKeyRef:
-              name: {{ .Release.Name }}-db-connection
+              name: {{ include "skypilot.fullname" . }}-db-connection
               key: connection_string
         {{- end }}
         {{- if .Values.apiService.authUserHeaderName }}
@@ -521,7 +521,7 @@ spec:
       {{- if .Values.storage.enabled }}
       - name: state-volume
         persistentVolumeClaim:
-          claimName: {{ .Release.Name }}-state
+          claimName: {{ include "skypilot.fullname" . }}-state
       {{- else }}
       - name: state-volume
         emptyDir: {}
@@ -561,11 +561,11 @@ spec:
       {{- end }}
       - name: skypilot-config
         configMap:
-          name: {{ .Release.Name }}-config
+          name: {{ include "skypilot.fullname" . }}-config
       {{- if .Values.apiService.sshNodePools }}
       - name: skypilot-ssh-node-pools
         secret:
-          secretName: {{ .Release.Name }}-ssh-node-pools
+          secretName: {{ include "skypilot.fullname" . }}-ssh-node-pools
       {{- end }}
       {{- if .Values.apiService.sshKeySecret }}
       - name: skypilot-ssh-identity
