@@ -16,6 +16,8 @@ import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
+import ijson
+
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
@@ -59,6 +61,8 @@ HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_NAME = 'sky-data'
 # TODO(andy): Consider using dedicated path like `/var/skypilot`
 # and store all data that needs to be persisted in future.
 HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH = '/home/sky'
+
+IJSON_BUFFER_SIZE = 64 * 1024  # 64KB, default from ijson
 
 
 class KubernetesHighPerformanceNetworkType(enum.Enum):
@@ -1141,9 +1145,51 @@ def detect_accelerator_resource(
     return has_accelerator, cluster_resources
 
 
+@dataclasses.dataclass
+class V1ObjectMeta:
+    name: str
+    labels: Dict[str, str]
+    namespace: str = ''  # Used for pods, not nodes
+
+
+@dataclasses.dataclass
+class V1NodeAddress:
+    type: str
+    address: str
+
+
+@dataclasses.dataclass
+class V1NodeStatus:
+    allocatable: Dict[str, str]
+    capacity: Dict[str, str]
+    addresses: List[V1NodeAddress]
+
+
+@dataclasses.dataclass
+class V1Node:
+    metadata: V1ObjectMeta
+    status: V1NodeStatus
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'V1Node':
+        """Create V1Node from a dictionary."""
+        return cls(metadata=V1ObjectMeta(
+            name=data['metadata']['name'],
+            labels=data['metadata'].get('labels', {}),
+        ),
+                   status=V1NodeStatus(
+                       allocatable=data['status']['allocatable'],
+                       capacity=data['status']['capacity'],
+                       addresses=[
+                           V1NodeAddress(type=addr['type'],
+                                         address=addr['address'])
+                           for addr in data['status'].get('addresses', [])
+                       ]))
+
+
 @annotations.lru_cache(scope='request', maxsize=10)
 @_retry_on_error(resource_type='node')
-def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[Any]:
+def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[V1Node]:
     """Gets the kubernetes nodes in the context.
 
     If context is None, gets the nodes in the current context.
@@ -1151,15 +1197,68 @@ def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[Any]:
     if context is None:
         context = get_current_kube_config_context_name()
 
-    nodes = kubernetes.core_api(context).list_node(
-        _request_timeout=kubernetes.API_TIMEOUT).items
+    # Return raw urllib3.HTTPResponse object so that we can parse the json
+    # more efficiently.
+    response = kubernetes.core_api(context).list_node(
+        _request_timeout=kubernetes.API_TIMEOUT, _preload_content=False)
+    nodes = [
+        V1Node.from_dict(item_dict) for item_dict in ijson.items(
+            response, 'items.item', buf_size=IJSON_BUFFER_SIZE)
+    ]
+
     return nodes
+
+
+@dataclasses.dataclass
+class V1PodStatus:
+    phase: str
+
+
+@dataclasses.dataclass
+class V1ResourceRequirements:
+    requests: Optional[Dict[str, str]]
+
+
+@dataclasses.dataclass
+class V1Container:
+    resources: V1ResourceRequirements
+
+
+@dataclasses.dataclass
+class V1PodSpec:
+    containers: List[V1Container]
+    node_name: Optional[str]
+
+
+@dataclasses.dataclass
+class V1Pod:
+    metadata: V1ObjectMeta
+    status: V1PodStatus
+    spec: V1PodSpec
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'V1Pod':
+        """Create V1Pod from a dictionary."""
+        return cls(metadata=V1ObjectMeta(
+            name=data['metadata']['name'],
+            labels=data['metadata'].get('labels', {}),
+            namespace=data['metadata'].get('namespace'),
+        ),
+                   status=V1PodStatus(phase=data['status'].get('phase'),),
+                   spec=V1PodSpec(
+                       node_name=data['spec'].get('nodeName'),
+                       containers=[
+                           V1Container(resources=V1ResourceRequirements(
+                               requests=container.get('resources', {}).get(
+                                   'requests') or None))
+                           for container in data['spec'].get('containers', [])
+                       ]))
 
 
 @_retry_on_error(resource_type='pod')
 def get_all_pods_in_kubernetes_cluster(*,
                                        context: Optional[str] = None
-                                      ) -> List[Any]:
+                                      ) -> List[V1Pod]:
     """Gets pods in all namespaces in kubernetes cluster indicated by context.
 
     Used for computing cluster resource usage.
@@ -1167,8 +1266,15 @@ def get_all_pods_in_kubernetes_cluster(*,
     if context is None:
         context = get_current_kube_config_context_name()
 
-    pods = kubernetes.core_api(context).list_pod_for_all_namespaces(
-        _request_timeout=kubernetes.API_TIMEOUT).items
+    # Return raw urllib3.HTTPResponse object so that we can parse the json
+    # more efficiently.
+    response = kubernetes.core_api(context).list_pod_for_all_namespaces(
+        _request_timeout=kubernetes.API_TIMEOUT, _preload_content=False)
+    pods = [
+        V1Pod.from_dict(item_dict) for item_dict in ijson.items(
+            response, 'items.item', buf_size=IJSON_BUFFER_SIZE)
+    ]
+
     return pods
 
 
