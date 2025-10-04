@@ -1267,6 +1267,130 @@ def test_managed_jobs_env_isolation(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+
+@pytest.mark.managed_jobs
+def test_managed_jobs_config_labels_isolation(generic_cloud: str, request):
+    supported_clouds = {'aws', 'gcp', 'kubernetes'}
+    if generic_cloud not in supported_clouds:
+        pytest.skip(f'Unsupported cloud {generic_cloud} for label isolation test.')
+
+    name = smoke_tests_utils.get_cluster_name()
+    job_with_config = f'{name}-cfg'
+    job_without_config = f'{name}-plain'
+    label_key = 'skypilot-smoke-label'
+    label_value = f'{name}-value'
+
+    if generic_cloud == 'aws':
+        region = request.getfixturevalue('aws_config_region')
+        infra_arg = f'--infra aws/{region}'
+        config_dict = {'aws': {'labels': {label_key: label_value}}}
+        presence_cmd = (
+            f'OUTPUT=$(aws ec2 describe-instances --region {region} '
+            f'--filters Name=tag:{label_key},Values={label_value} '
+            'Name=instance-state-name,Values=running '
+            '--query "Reservations[].Instances[].InstanceId" --output text); '
+            'echo "$OUTPUT"; '
+            'test -n "$OUTPUT"')
+        absence_cmd = (
+            f'OUTPUT=$(aws ec2 describe-instances --region {region} '
+            f'--filters Name=tag:{label_key},Values={label_value} '
+            'Name=instance-state-name,Values=running '
+            '--query "Reservations[].Instances[].InstanceId" --output text); '
+            'echo "$OUTPUT"; '
+            'test -z "$OUTPUT"')
+    elif generic_cloud == 'gcp':
+        infra_arg = '--infra gcp'
+        config_dict = {'gcp': {'labels': {label_key: label_value}}}
+        presence_cmd = (
+            f'INSTANCES=$(gcloud compute instances list '
+            f'--filter="labels.{label_key}={label_value}" '
+            '--format="value(name,zone)"); '
+            'echo "$INSTANCES"; '
+            'test -n "$INSTANCES"')
+        absence_cmd = (
+            f'INSTANCES=$(gcloud compute instances list '
+            f'--filter="labels.{label_key}={label_value}" '
+            '--format="value(name,zone)"); '
+            'echo "$INSTANCES"; '
+            'test -z "$INSTANCES"')
+    else:  # kubernetes
+        infra_arg = '--infra kubernetes'
+        config_dict = {
+            'kubernetes': {
+                'custom_metadata': {
+                    'labels': {
+                        label_key: label_value,
+                    }
+                }
+            }
+        }
+        presence_cmd = (
+            f'PODS=$(kubectl get pods -A -l {label_key}={label_value} '
+            '--no-headers || true); '
+            'echo "$PODS"; '
+            'test -n "$PODS"')
+        absence_cmd = (
+            f'PODS=$(kubectl get pods -A -l {label_key}={label_value} '
+            '--no-headers || true); '
+            'echo "$PODS"; '
+            'test -z "$PODS"')
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as config_file:
+        config_file.write(yaml_utils.dump_yaml_str(config_dict))
+        config_file.flush()
+
+        commands = [
+            smoke_tests_utils.with_config(
+                f'sky jobs launch -n {job_with_config} {infra_arg} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} "sleep 180" -y -d',
+                config_file.name),
+            smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=job_with_config,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=600),
+            f'echo "Checking label presence for {job_with_config}"',
+            presence_cmd,
+            f'sky jobs cancel -y -n {job_with_config}',
+            smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=job_with_config,
+                job_status=[
+                    sky.ManagedJobStatus.CANCELLED,
+                    sky.ManagedJobStatus.SUCCEEDED
+                ],
+                timeout=240),
+        ]
+
+        commands.extend([
+            f'sky jobs launch -n {job_without_config} {infra_arg} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} "sleep 180" -y -d',
+            smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=job_without_config,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=600),
+            f'echo "Checking label absence for {job_without_config}"',
+            absence_cmd,
+            f'sky jobs cancel -y -n {job_without_config}',
+            smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=job_without_config,
+                job_status=[
+                    sky.ManagedJobStatus.CANCELLED,
+                    sky.ManagedJobStatus.SUCCEEDED
+                ],
+                timeout=240),
+        ])
+
+        test = smoke_tests_utils.Test(
+            'managed_jobs_config_labels_isolation',
+            commands,
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=25 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+
+
+
 def _get_ha_kill_test(name: str, generic_cloud: str,
                       status: sky.ManagedJobStatus, first_timeout: int,
                       second_timeout: int) -> smoke_tests_utils.Test:
