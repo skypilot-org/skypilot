@@ -39,6 +39,7 @@
 ----
 
 :fire: *News* :fire:
+- [Sep 2025] Serve models with **Nvidia Dynamo** for high-performance multi-node inference: [**example**](./examples/serve/nvidia-dynamo/)
 - [Aug 2025] Serve and finetune **OpenAI GPT-OSS models** (gpt-oss-120b, gpt-oss-20b) with one command on any infra: [**serve**](./llm/gpt-oss/) + [**LoRA and full finetuning**](./llm/gpt-oss-finetuning/)
 - [Jul 2025] Run large-scale **LLM training with TorchTitan** on any cloud: [**example**](./llm/torchtitan/)
 - [Jul 2025] Run distributed **RL training for LLMs** with Verl (PPO, GRPO) on any cloud: [**example**](./llm/verl/)
