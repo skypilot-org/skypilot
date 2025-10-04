@@ -1232,10 +1232,12 @@ def realtime_kubernetes_gpu_availability(
             quantity_filter=quantity_filter,
             case_sensitive=False)
         assert (set(counts.keys()) == set(capacity.keys()) == set(
-            available.keys())), (f'Keys of counts ({list(counts.keys())}), '
-                                 f'capacity ({list(capacity.keys())}), '
-                                 f'and available ({list(available.keys())}) '
-                                 'must be the same.')
+            available.keys())), (
+                f'Keys of counts ({list(counts.keys())}), '
+                f'capacity ({list(capacity.keys())}), '
+                f'and available ({list(available.keys())}) '
+                f'must be the same. This may occur during cluster scaling '
+                f'events. Context: {context}')
         realtime_gpu_availability_list: List[
             models.RealtimeGpuAvailability] = []
 

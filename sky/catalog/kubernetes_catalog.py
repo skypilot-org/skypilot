@@ -317,6 +317,26 @@ def _list_accelerators(
     qtys_map = common.list_accelerators_impl('Kubernetes', df, gpus_only,
                                              name_filter, region_filter,
                                              quantity_filter, case_sensitive)
+
+    # Align keys across counts, capacity, and available dictionaries.
+    # During cluster scaling events (e.g., node pool resizing), accelerators
+    # may be discovered but not yet have capacity/availability reported.
+    # We need to ensure all three dicts have the same keys to avoid assertion
+    # errors downstream.
+    all_keys = (set(qtys_map.keys()) | set(total_accelerators_capacity.keys()) |
+                set(total_accelerators_available.keys()))
+
+    for key in all_keys:
+        # Set default empty list for counts if key is missing
+        if key not in qtys_map:
+            qtys_map[key] = []
+        # Set default 0 for capacity if key is missing
+        if key not in total_accelerators_capacity:
+            total_accelerators_capacity[key] = 0
+        # Set default 0 for available if key is missing
+        if key not in total_accelerators_available:
+            total_accelerators_available[key] = 0
+
     return qtys_map, total_accelerators_capacity, total_accelerators_available
 
 
