@@ -23,16 +23,16 @@ _DEFAULT_AUTOSTOP = {
 @pytest.mark.parametrize(
     ('controller_type', 'custom_controller_resources_config', 'expected'), [
         ('jobs', {}, {
-            'cpus': '8+',
+            'cpus': '4+',
             'memory': '4x',
             'disk_size': 50,
             'autostop': _DEFAULT_AUTOSTOP,
         }),
         ('jobs', {
-            'cpus': '4+',
+            'cpus': '8+',
             'disk_size': 100,
         }, {
-            'cpus': '4+',
+            'cpus': '8+',
             'memory': '4x',
             'disk_size': 100,
             'autostop': _DEFAULT_AUTOSTOP,
