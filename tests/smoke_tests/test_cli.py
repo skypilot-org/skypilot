@@ -119,6 +119,25 @@ def test_sky_login_wih_env_endpoint(generic_cloud: str):
     smoke_tests_utils.run_one_test(test, check_sky_status=False)
 
 
+@pytest.mark.no_remote_server
+def test_cli_invalid_config_details(generic_cloud: str):
+    """Test that invalid config overrides surface detailed CLI errors."""
+    invalid_override = 'gcp.label.smoke-test=test-value'
+    details_msg = 'Details: Invalid config YAML from (CLI).'
+    suggestion_msg = "Instead of 'label', did you mean 'labels'?"
+    command = (
+        's=$(SKYPILOT_DEBUG=0 sky launch --config '
+        f'{invalid_override} tests/test_yamls/minimal.yaml 2>&1 | tee /dev/stderr) && '
+        'echo "\\n===Validating config error details===\\n" && '
+        f'echo "$s" | grep "{details_msg}" && '
+        f'echo "$s" | grep "{suggestion_msg}"')
+
+    test = smoke_tests_utils.Test(
+        'cli_invalid_config_details', [command],
+        timeout=smoke_tests_utils.get_timeout(generic_cloud))
+    smoke_tests_utils.run_one_test(test, check_sky_status=False)
+
+
 def test_cli_auto_retry(generic_cloud: str):
     """Test that cli auto retry works."""
     name = smoke_tests_utils.get_cluster_name()
