@@ -1803,17 +1803,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
             return None
 
     def submit_workspace() -> Optional[server_common.RequestId[Dict[str, Any]]]:
-        try:
-            return sdk.workspaces()
-        except RuntimeError:
-            # Backward compatibility for API server before #5660.
-            # TODO(zhwu): remove this after 0.10.0.
-            logger.warning(f'{colorama.Style.DIM}SkyPilot API server is '
-                           'in an old version, and may miss feature: '
-                           'workspaces. Update with: sky api stop; '
-                           'sky api start'
-                           f'{colorama.Style.RESET_ALL}')
-            return None
+        return sdk.workspaces()
 
     active_workspace = skypilot_config.get_active_workspace()
 
