@@ -1671,7 +1671,6 @@ def get_port(svc_name: str, namespace: str, context: Optional[str]) -> int:
 
 
 def check_credentials(context: Optional[str],
-                      timeout: int = kubernetes.API_TIMEOUT,
                       run_optional_checks: bool = False) -> \
         Tuple[bool, Optional[str]]:
     """Check if the credentials in kubeconfig file are valid
@@ -1686,9 +1685,8 @@ def check_credentials(context: Optional[str],
         str: Error message if credentials are invalid, None otherwise
     """
     try:
-        namespace = get_kube_config_context_namespace(context)
-        kubernetes.core_api(context).list_namespaced_pod(
-            namespace, _request_timeout=timeout)
+        get_kube_config_context_namespace(context)
+        get_kubernetes_nodes(context=context)
     except ImportError:
         # TODO(romilb): Update these error strs to also include link to docs
         #  when docs are ready.
