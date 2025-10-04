@@ -2956,18 +2956,18 @@ def get_kubernetes_node_info(
         label_keys = lf.get_label_keys()
 
     # Check if all nodes have no accelerators to avoid fetching pods
-    any_node_has_accelerators = False
+    has_accelerator_nodes = False
     for node in nodes:
         accelerator_count = get_node_accelerator_count(context,
                                                        node.status.allocatable)
         if accelerator_count > 0:
-            any_node_has_accelerators = True
+            has_accelerator_nodes = True
             break
 
     # Get the pods to get the real-time resource usage
     pods = None
     allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
-    if any_node_has_accelerators:
+    if has_accelerator_nodes:
         try:
             pods = get_all_pods_in_kubernetes_cluster(context=context)
             # Pre-compute allocated accelerator count per node
