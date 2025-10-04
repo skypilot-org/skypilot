@@ -23,8 +23,8 @@ _DEFAULT_AUTOSTOP = {
 @pytest.mark.parametrize(
     ('controller_type', 'custom_controller_resources_config', 'expected'), [
         ('jobs', {}, {
-            'cpus': '4+',
-            'memory': '8x',
+            'cpus': '8+',
+            'memory': '4x',
             'disk_size': 50,
             'autostop': _DEFAULT_AUTOSTOP,
         }),
@@ -33,7 +33,7 @@ _DEFAULT_AUTOSTOP = {
             'disk_size': 100,
         }, {
             'cpus': '4+',
-            'memory': '8x',
+            'memory': '4x',
             'disk_size': 100,
             'autostop': _DEFAULT_AUTOSTOP,
         }),
@@ -66,6 +66,8 @@ def test_get_controller_resources(controller_type: str,
     monkeypatch.setattr('sky.skypilot_config.loaded', lambda: True)
     monkeypatch.setattr('sky.skypilot_config.get_nested',
                         get_custom_controller_resources)
+    monkeypatch.setattr('sky.global_user_state.get_handle_from_cluster_name',
+                        lambda _: None)
 
     controller_resources = list(
         controller_utils.get_controller_resources(
