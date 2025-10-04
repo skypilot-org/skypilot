@@ -3,6 +3,7 @@
 Kubernetes does not require a catalog of instances, but we need an image catalog
 mapping SkyPilot image tags to corresponding container image tags.
 """
+import collections
 import re
 import typing
 from typing import Dict, List, Optional, Set, Tuple
@@ -167,12 +168,46 @@ def _list_accelerators(
     accelerators_qtys: Set[Tuple[str, int]] = set()
     keys = lf.get_label_keys()
     nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
+
+    # Check if any nodes have accelerators before fetching pods
+    has_accelerator_nodes = False
+    for node in nodes:
+        for key in keys:
+            if key in node.metadata.labels:
+                has_accelerator_nodes = True
+                break
+        if has_accelerator_nodes:
+            break
+
+    # Only fetch pods if we have accelerator nodes and realtime is requested
     pods = None
-    if realtime:
+    allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
+    if realtime and has_accelerator_nodes:
         # Get the pods to get the real-time GPU usage
         try:
             pods = kubernetes_utils.get_all_pods_in_kubernetes_cluster(
                 context=context)
+            # Pre-compute allocated accelerators per node
+            if pods is not None:
+                for pod in pods:
+                    if pod.status.phase not in ['Running', 'Pending']:
+                        continue
+                    # Skip pods that should not count against GPU count
+                    if kubernetes_utils.should_exclude_pod_from_gpu_allocation(
+                            pod):
+                        logger.debug(
+                            f'Excluding pod {pod.metadata.name} from GPU count '
+                            f'calculations on node {pod.spec.node_name}')
+                        continue
+                    # Sum GPU requests across all containers
+                    for container in pod.spec.containers:
+                        if container.resources.requests:
+                            allocated_qty = (
+                                kubernetes_utils.get_node_accelerator_count(
+                                    context, container.resources.requests))
+                            if allocated_qty > 0 and pod.spec.node_name:
+                                allocated_qty_by_node[
+                                    pod.spec.node_name] += allocated_qty
         except kubernetes.api_exception() as e:
             if e.status == 403:
                 logger.warning(
@@ -191,7 +226,6 @@ def _list_accelerators(
     for node in nodes:
         for key in keys:
             if key in node.metadata.labels:
-                allocated_qty = 0
                 accelerator_name = lf.get_accelerator_from_label_value(
                     node.metadata.labels.get(key))
 
@@ -251,26 +285,7 @@ def _list_accelerators(
                     total_accelerators_available[accelerator_name] = -1
                     continue
 
-                for pod in pods:
-                    # Get all the pods running on the node
-                    if (pod.spec.node_name == node.metadata.name and
-                            pod.status.phase in ['Running', 'Pending']):
-                        # Skip pods that should not count against GPU count
-                        if (kubernetes_utils.
-                                should_exclude_pod_from_gpu_allocation(pod)):
-                            logger.debug(
-                                f'Excluding pod '
-                                f'{pod.metadata.name} from GPU count '
-                                f'calculations on node {node.metadata.name}')
-                            continue
-                        # Iterate over all the containers in the pod and sum
-                        # the GPU requests
-                        for container in pod.spec.containers:
-                            if container.resources.requests:
-                                allocated_qty += (
-                                    kubernetes_utils.get_node_accelerator_count(
-                                        context, container.resources.requests))
-
+                allocated_qty = allocated_qty_by_node[node.metadata.name]
                 accelerators_available = accelerator_count - allocated_qty
                 # Initialize the total_accelerators_available to make sure the
                 # key exists in the dictionary.
