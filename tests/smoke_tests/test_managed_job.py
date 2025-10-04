@@ -1267,12 +1267,12 @@ def test_managed_jobs_env_isolation(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-
 @pytest.mark.managed_jobs
 def test_managed_jobs_config_labels_isolation(generic_cloud: str, request):
     supported_clouds = {'aws', 'gcp', 'kubernetes'}
     if generic_cloud not in supported_clouds:
-        pytest.skip(f'Unsupported cloud {generic_cloud} for label isolation test.')
+        pytest.skip(
+            f'Unsupported cloud {generic_cloud} for label isolation test.')
 
     name = smoke_tests_utils.get_cluster_name()
     job_with_config = f'{name}-cfg'
@@ -1290,14 +1290,12 @@ def test_managed_jobs_config_labels_isolation(generic_cloud: str, request):
             'Name=instance-state-name,Values=running '
             '--query "Reservations[].Instances[].Tags[?Key==\'Name\'].Value" '
             '--output text | grep -v "sky-jobs-controller"')
-        presence_cmd = (
-            f'OUTPUT=$({get_instance_cmd}); '
-            'echo "$OUTPUT"; '
-            'test -n "$OUTPUT"')
-        absence_cmd = (
-            f'OUTPUT=$({get_instance_cmd}); '
-            'echo "$OUTPUT"; '
-            'test -z "$OUTPUT"')
+        presence_cmd = (f'OUTPUT=$({get_instance_cmd}); '
+                        'echo "$OUTPUT"; '
+                        'test -n "$OUTPUT"')
+        absence_cmd = (f'OUTPUT=$({get_instance_cmd}); '
+                       'echo "$OUTPUT"; '
+                       'test -z "$OUTPUT"')
     elif generic_cloud == 'gcp':
         infra_arg = '--infra gcp'
         config_dict = {'gcp': {'labels': {label_key: label_value}}}
@@ -1305,14 +1303,12 @@ def test_managed_jobs_config_labels_isolation(generic_cloud: str, request):
             f'gcloud compute instances list '
             f'--filter="labels.{label_key}={label_value}" '
             '--format="value(name,zone)" | grep -v "sky-jobs-controller"')
-        presence_cmd = (
-            f'INSTANCES=$({get_instance_cmd}); '
-            'echo "$INSTANCES"; '
-            'test -n "$INSTANCES"')
-        absence_cmd = (
-            f'INSTANCES=$({get_instance_cmd}); '
-            'echo "$INSTANCES"; '
-            'test -z "$INSTANCES"')
+        presence_cmd = (f'INSTANCES=$({get_instance_cmd}); '
+                        'echo "$INSTANCES"; '
+                        'test -n "$INSTANCES"')
+        absence_cmd = (f'INSTANCES=$({get_instance_cmd}); '
+                       'echo "$INSTANCES"; '
+                       'test -z "$INSTANCES"')
     else:  # kubernetes
         infra_arg = '--infra kubernetes'
         config_dict = {
@@ -1327,14 +1323,12 @@ def test_managed_jobs_config_labels_isolation(generic_cloud: str, request):
         get_instance_cmd = (
             f'kubectl get pods -A -l {label_key}={label_value} '
             '--no-headers | grep -v "sky-jobs-controller" || true')
-        presence_cmd = (
-            f'PODS=$({get_instance_cmd}); '
-            'echo "$PODS"; '
-            'test -n "$PODS"')
-        absence_cmd = (
-            f'PODS=$({get_instance_cmd}); '
-            'echo "$PODS"; '
-            'test -z "$PODS"')
+        presence_cmd = (f'PODS=$({get_instance_cmd}); '
+                        'echo "$PODS"; '
+                        'test -n "$PODS"')
+        absence_cmd = (f'PODS=$({get_instance_cmd}); '
+                       'echo "$PODS"; '
+                       'test -z "$PODS"')
 
     with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as config_file:
         config_file.write(yaml_utils.dump_yaml_str(config_dict))
@@ -1345,14 +1339,16 @@ def test_managed_jobs_config_labels_isolation(generic_cloud: str, request):
                 f'sky jobs launch -n {job_with_config} {infra_arg} '
                 f'{smoke_tests_utils.LOW_RESOURCE_ARG} "sleep 180" -y -d',
                 config_file.name),
-            smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=job_with_config,
                 job_status=[sky.ManagedJobStatus.RUNNING],
                 timeout=600),
             f'echo "Checking label presence for {job_with_config}"',
             presence_cmd,
             f'sky jobs cancel -y -n {job_with_config}',
-            smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=job_with_config,
                 job_status=[
                     sky.ManagedJobStatus.CANCELLED,
@@ -1364,14 +1360,16 @@ def test_managed_jobs_config_labels_isolation(generic_cloud: str, request):
         commands.extend([
             f'sky jobs launch -n {job_without_config} {infra_arg} '
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} "sleep 180" -y -d',
-            smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=job_without_config,
                 job_status=[sky.ManagedJobStatus.RUNNING],
                 timeout=600),
             f'echo "Checking label absence for {job_without_config}"',
             absence_cmd,
             f'sky jobs cancel -y -n {job_without_config}',
-            smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=job_without_config,
                 job_status=[
                     sky.ManagedJobStatus.CANCELLED,
@@ -1389,9 +1387,6 @@ def test_managed_jobs_config_labels_isolation(generic_cloud: str, request):
             timeout=25 * 60,
         )
         smoke_tests_utils.run_one_test(test)
-
-
-
 
 
 def _get_ha_kill_test(name: str, generic_cloud: str,
