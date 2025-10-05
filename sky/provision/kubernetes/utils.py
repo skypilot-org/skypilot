@@ -1671,7 +1671,6 @@ def get_port(svc_name: str, namespace: str, context: Optional[str]) -> int:
 
 
 def check_credentials(context: Optional[str],
-                      timeout: int = kubernetes.API_TIMEOUT,
                       run_optional_checks: bool = False) -> \
         Tuple[bool, Optional[str]]:
     """Check if the credentials in kubeconfig file are valid
@@ -1686,9 +1685,8 @@ def check_credentials(context: Optional[str],
         str: Error message if credentials are invalid, None otherwise
     """
     try:
-        namespace = get_kube_config_context_namespace(context)
-        kubernetes.core_api(context).list_namespaced_pod(
-            namespace, _request_timeout=timeout)
+        get_kube_config_context_namespace(context)
+        nodes = get_kubernetes_nodes(context=context)
     except ImportError:
         # TODO(romilb): Update these error strs to also include link to docs
         #  when docs are ready.
@@ -1734,7 +1732,7 @@ def check_credentials(context: Optional[str],
     # `sky launch --gpus <gpu>` and the optimizer does not list Kubernetes as a
     # provider if their cluster GPUs are not setup correctly.
     gpu_msg = ''
-    unlabeled_nodes = get_unlabeled_accelerator_nodes(context)
+    unlabeled_nodes = get_unlabeled_accelerator_nodes(context, nodes=nodes)
     if unlabeled_nodes:
         gpu_msg = (f'Cluster has {len(unlabeled_nodes)} nodes with '
                    f'accelerators that are not labeled. '
@@ -2895,7 +2893,9 @@ def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: 'str') -> Any:
     return kubernetes.api_client().deserialize(fake_kube_response, object_type)
 
 
-def get_unlabeled_accelerator_nodes(context: Optional[str] = None) -> List[Any]:
+def get_unlabeled_accelerator_nodes(
+        context: Optional[str] = None,
+        nodes: Optional[List[V1Node]] = None) -> List[Any]:
     """Gets a list of unlabeled GPU nodes in the cluster.
 
     This function returns a list of nodes that have GPU resources but no label
@@ -2903,11 +2903,13 @@ def get_unlabeled_accelerator_nodes(context: Optional[str] = None) -> List[Any]:
 
     Args:
         context: The context to check.
+        nodes: List of nodes to check. If None, gets the nodes from the cluster.
 
     Returns:
         List[Any]: List of unlabeled nodes with accelerators.
     """
-    nodes = get_kubernetes_nodes(context=context)
+    if nodes is None:
+        nodes = get_kubernetes_nodes(context=context)
     nodes_with_accelerator = []
     for node in nodes:
         if get_gpu_resource_key(context) in node.status.capacity:
