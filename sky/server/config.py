@@ -205,7 +205,11 @@ def _max_long_worker_parallism(cpu_count: int,
     max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
                   if job_utils.is_consolidation_mode() else
                   server_constants.MIN_AVAIL_MEM_GB)
-    available_mem = max(0, mem_size_gb - max_memory)
+    reserved_ssh_mem = (
+        server_constants.MAX_CONCURRENT_KUBE_SSH_CONNECTIONS * 
+        server_constants.GLIBC_PER_THREAD_STACK_SIZE_GB
+    )
+    available_mem = max(0, mem_size_gb - max_memory - reserved_ssh_mem)
     cpu_based_max_parallel = cpu_count * _CPU_MULTIPLIER_FOR_LONG_WORKERS
     mem_based_max_parallel = int(available_mem * _MAX_MEM_PERCENT_FOR_BLOCKING /
                                  LONG_WORKER_MEM_GB)
@@ -234,7 +238,14 @@ def _max_short_worker_parallism(mem_size_gb: float,
     max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
                   if job_utils.is_consolidation_mode() else
                   server_constants.MIN_AVAIL_MEM_GB)
-    reserved_mem = max_memory + (long_worker_parallism * LONG_WORKER_MEM_GB)
+    reserved_ssh_mem = (
+        server_constants.MAX_CONCURRENT_KUBE_SSH_CONNECTIONS * 
+        server_constants.GLIBC_PER_THREAD_STACK_SIZE_GB
+    )
+    reserved_mem = (
+        max_memory + (long_worker_parallism * LONG_WORKER_MEM_GB) + 
+        reserved_ssh_mem
+    )
     available_mem = max(0, mem_size_gb - reserved_mem)
     n = max(_get_min_short_workers(), int(available_mem / SHORT_WORKER_MEM_GB))
     return n
