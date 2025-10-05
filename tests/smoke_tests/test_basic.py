@@ -245,8 +245,8 @@ def test_launch_fast(generic_cloud: str):
             ' echo "$s" && '
             # Validate that cluster was not re-launched.
             '! echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
-            # Validate that setup was not re-run.
-            '! echo "$s" | grep -A 1 "Running setup on" | grep "running setup" && '
+            # Validate that setup was re-run.
+            'echo "$s" | grep -A 1 "Job started. Streaming logs..." | grep "(setup" | grep "running setup" && '
             # Validate that the task ran and finished.
             'echo "$s" | grep -A 1 "task run finish" | grep "Job finished (status: SUCCEEDED)"',
             f'sky logs {name} 2 --status',
@@ -316,8 +316,8 @@ def test_launch_fast_with_cluster_changes(generic_cloud: str, tmp_path):
             ' echo "$s" && '
             # Validate that cluster was not re-launched.
             '! echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
-            # Validate that setup was not re-run.
-            '! echo "$s" | grep -A 1 "Running setup on" | grep "running setup" && '
+            # Validate that setup was re-run.
+            'echo "$s" | grep -A 1 "Job started. Streaming logs..." | grep "(setup" | grep "running setup" && '
             f'sky logs {name} 2 --status',
 
             # Copy current config as a base.
