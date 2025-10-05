@@ -1324,6 +1324,36 @@ def get_all_pods_in_kubernetes_cluster(*,
     return pods
 
 
+def list_namespaced_pod(
+        context: Optional[str],
+        namespace: str,
+        field_selector: Optional[str] = None,
+        label_selector: Optional[str] = None,
+        filter_function: Optional[Callable[[V1Pod],
+                                           bool]] = None) -> List[V1Pod]:
+    """Gets pods in the given namespace in kubernetes cluster indicated by context.
+
+    Uses response stream to parse the json more efficiently.
+    """
+    response = kubernetes.core_api(context).list_namespaced_pod(
+        namespace,
+        field_selector=field_selector,
+        label_selector=label_selector,
+        _preload_content=False)
+    pods = []
+    try:
+        item_dicts = ijson.items(response,
+                                 'items.item',
+                                 buf_size=IJSON_BUFFER_SIZE)
+        for item_dict in item_dicts:
+            pod = V1Pod.from_dict(item_dict)
+            if filter_function is None or filter_function(pod):
+                pods.append(pod)
+    finally:
+        response.release_conn()
+    return pods
+
+
 def check_instance_fits(context: Optional[str],
                         instance: str) -> Tuple[bool, Optional[str]]:
     """Checks if the instance fits on the Kubernetes cluster.
