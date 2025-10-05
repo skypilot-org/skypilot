@@ -11,6 +11,7 @@ from smoke_tests import smoke_tests_utils
 
 
 @pytest.mark.no_vast  # Requires GCP
+@pytest.mark.no_shadeform  # Requires GCP
 @pytest.mark.no_fluidstack  # Requires GCP to be enabled
 @pytest.mark.no_nebius  # Requires GCP to be enabled
 @pytest.mark.no_kubernetes  # Requires GCP to be enabled
