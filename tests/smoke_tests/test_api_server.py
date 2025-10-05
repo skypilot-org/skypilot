@@ -350,8 +350,12 @@ def test_managed_jobs_force_disable_cloud_bucket(generic_cloud: str):
 
 
 def test_big_file_upload_memory_usage(generic_cloud: str):
-    if not smoke_tests_utils.is_remote_server_test():
-        pytest.skip('This test is only for remote server')
+    # TODO(kevin): Re-enable this once we have a standardized way to expose /metrics
+    # on the non-docker remote API servers used for smoke tests.
+    if not smoke_tests_utils.is_docker_remote_api_server():
+        pytest.skip(
+            'This test is only for remote server setup with setup_docker_container fixture'
+        )
 
     def compare_rss_metrics(baseline: Dict[Tuple[str, ...], List[Tuple[float,
                                                                        float]]],
