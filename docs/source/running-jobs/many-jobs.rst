@@ -374,4 +374,4 @@ Then, submit all jobs by iterating over the config files and calling ``sky jobs 
 Best practices for scaling
 --------------------------
 
-By default, around 90 jobs can be managed at once. However, with some simple configuration, SkyPilot can reliably support **2000 jobs running in parallel**. See :ref:`the best practices <jobs-controller-sizing>` for more info.
+By default, roughly 600 jobs can run in parallel (with about 24 launching at once). Increasing the controller's resources bumps those ceilings proportionally, and large controllers can reliably manage thousands of jobs in parallel. See :ref:`the best practices <jobs-controller-sizing>` for more info.
