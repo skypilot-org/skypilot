@@ -1,0 +1,73 @@
+# Full finetuning of Llama-4 Maverick 17B MoE model with 128 experts.
+#
+# Usage:
+#
+#  HF_TOKEN=xxx sky launch llama-4-maverick-sft.yaml -c maverick --env HF_TOKEN
+#
+# This config requires at least 4 nodes with 8x H200 GPUs each.
+
+envs:
+  HF_TOKEN:
+
+resources:
+  cpus: 100+
+  memory: 1000+
+  accelerators: H200:8
+  disk_tier: best
+
+num_nodes: 4
+
+# Optional: configure buckets for dataset and checkpoints. You can then use the
+# /checkpoints directory to write checkpoints, which writes to local disk first
+# and asynchronously uploads to the cloud bucket. Pass /checkpoints to the main
+# training script.
+# file_mounts:
+#  /dataset:
+#    source: s3://my-dataset-bucket
+#    mode: COPY  # COPY mode will prefetch the dataset to the node for faster access
+#  /checkpoints:
+#    source: s3://my-checkpoint-bucket
+#    mode: MOUNT_CACHED  # MOUNT_CACHED mode will intelligently cache the checkpoint for faster writes
+
+setup: |
+  conda create -n training python=3.10 -y
+  conda activate training
+
+  # Install torch and torchtune nightly builds
+  pip install --pre --upgrade torch==2.8.0.dev20250610+cu126 torchvision==0.23.0.dev20250610+cu126 torchao==0.12.0.dev20250611+cu126 --index-url https://download.pytorch.org/whl/nightly/cu126 # full options are cpu/cu118/cu124/cu126/xpu/rocm6.2/rocm6.3/rocm6.4
+  pip install --pre --upgrade torchtune==0.7.0.dev20250610+cpu --extra-index-url https://download.pytorch.org/whl/nightly/cpu
+
+  # Download the model (~700 GB, may take time to download)
+  tune download meta-llama/Llama-4-Maverick-17B-128E-Instruct \
+    --hf-token $HF_TOKEN
+
+run: |
+  conda activate training
+
+  MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+  echo "Starting distributed finetuning, head node: $MASTER_ADDR"
+
+  tune run \
+  --nnodes $SKYPILOT_NUM_NODES \
+  --nproc_per_node $SKYPILOT_NUM_GPUS_PER_NODE \
+  --rdzv_id $SKYPILOT_TASK_ID \
+  --rdzv_backend c10d \
+  --rdzv_endpoint=$MASTER_ADDR:29500 \
+  full_finetune_distributed \
+  --config llama4/maverick_17B_128E_full \
+  model_dir=/tmp/Llama-4-Maverick-17B-128E-Instruct \
+  dataset.packed=True tokenizer.max_seq_len=4096 \
+  gradient_accumulation_steps=1 \
+  enable_activation_offloading=True \
+  activation_offloading_use_streams=False \
+  optimizer_in_bwd=True \
+  optimizer=torch.optim.AdamW \
+  optimizer_kwargs.fused=True \
+  max_steps_per_epoch=1 \
+  epochs=10 \
+  enable_dcp=True \
+  enable_async_checkpointing=True \
+  resume_from_checkpoint=False \
+  keep_last_n_checkpoints=1 \
+  fsdp_cpu_offload=True
+

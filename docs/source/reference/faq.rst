@@ -7,6 +7,8 @@ Frequently Asked Questions
 .. contents::
     :local:
     :depth: 2
+    :backlinks: none
+
 
 Git and GitHub
 --------------
@@ -14,23 +16,29 @@ Git and GitHub
 How to clone private GitHub repositories in a job?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Currently, SkyPilot does not support secret management or SSH agent forwarding to your sky clusters.
-You will need to use `file_mounts` to sync your Github SSH private key to your sky cluster.
+Use ``workdir`` to clone private GitHub repositories in a job.
 
 .. code-block:: yaml
 
   # your_task.yaml
-  file_mounts:
-    ~/.ssh/id_rsa: ~/.ssh/your-ssh-private-key
-
-  setup: |
-    chmod 600 ~/.ssh/id_rsa
-    git clone git@github.com:your-proj/your-repo.git
+  workdir:
+    url: git@github.com:your-proj/your-repo.git
+    ref: main
 
   run: |
     cd your-repo
     git pull
 
+**Authentication**:
+
+*For HTTPS URLs*: Set the ``GIT_TOKEN`` environment variable. SkyPilot will automatically use this token for authentication.
+
+*For SSH/SCP URLs*: SkyPilot will attempt to authenticate using SSH keys in the following order:
+
+1. SSH key specified by the ``GIT_SSH_KEY_PATH`` environment variable
+2. SSH key configured in ``~/.ssh/config`` for the git host
+3. Default SSH key at ``~/.ssh/id_rsa``
+4. Default SSH key at ``~/.ssh/id_ed25519`` (if ``~/.ssh/id_rsa`` does not exist)
 
 How to ensure my workdir's ``.git`` is synced up for managed spot jobs?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -211,6 +219,24 @@ You will need to install a PyTorch version that is compatible with your NVIDIA d
 Miscellaneous
 -------------
 
+Why can't I use ``ray.init(address="auto")`` directly in my SkyPilot job?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+SkyPilot uses Ray internally on port 6380 for cluster management. When you use ``ray.init(address="auto")``, Ray connects to SkyPilot's internal cluster, causing resource bundling conflicts where user workloads interfere with SkyPilot's resource management.
+
+**Always start your own Ray cluster** on a different port (e.g., 6379). See the :ref:`distributed Ray example <dist-jobs>` for the correct pattern:
+
+.. code-block:: yaml
+
+  run: |
+    head_ip=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+    if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
+      ray start --head
+      python your_script.py
+    else
+      ray start --address $head_ip:6379
+    fi
+
 How can I launch a VS Code tunnel using a SkyPilot task definition?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -243,22 +269,22 @@ need to manually stop the old API server to have the new version take effect.
   sky api stop
 
 
+.. _migration-0.8.1:
 
-
-.. _migration-0.8.0:
-
-Migration from ``SkyPilot<=0.8.0``
+Migration from ``SkyPilot<=0.8.1``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-After ``SkyPilot v0.8.0``, SkyPilot has moved to a new client-server architecture, which is more flexible and powerful.
-It also introduces the :ref:`asynchronous execution model <async>`, which may cause compatibility issues with user programs using
-previous SkyPilot SDKs.
+After ``SkyPilot v0.8.1``, SkyPilot has moved to a new client-server architecture, which is more flexible and powerful.
+It also introduces the :ref:`asynchronous execution model <async>`, which may cause compatibility issues with user programs using  previous SkyPilot SDKs.
 
-All SkyPilot SDKs (except log related functions, including ``sky.tail_logs``, ``sky.jobs.tail_logs``, ``sky.serve.tail_logs``) are now asynchronous, and they return a request ID that can be used to manage the request.
+
+Asynchronous execution
+^^^^^^^^^^^^^^^^^^^^^^
+All SkyPilot SDKs (except log related functions: ``sky.tail_logs``, ``sky.jobs.tail_logs``, ``sky.serve.tail_logs``) are now asynchronous, and they return a request ID that can be used to manage the request.
 
 **Action needed**: Wrapping all SkyPilot SDK function calls with ``sky.stream_and_get()`` will make your program behave mostly the same as before:
 
-``SkyPilot<=0.8.0``:
+``SkyPilot<=0.8.1``:
 
 .. code-block:: python
 
@@ -266,7 +292,7 @@ All SkyPilot SDKs (except log related functions, including ``sky.tail_logs``, ``
   job_id, handle = sky.launch(task)
   sky.tail_logs(job_id)
 
-``SkyPilot>0.8.0``:
+``SkyPilot>0.8.1``:
 
 .. code-block:: python
   :emphasize-lines: 2
@@ -274,3 +300,11 @@ All SkyPilot SDKs (except log related functions, including ``sky.tail_logs``, ``
   task = sky.Task(run="echo hello SkyPilot")
   job_id, handle = sky.stream_and_get(sky.launch(task))
   sky.tail_logs(job_id)
+
+Removed arguments: :code:`detach_setup`/:code:`detach_run`
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+:code:`detach_setup`/:code:`detach_run` in :code:`sky.launch` were removed after
+:code:`0.8.1`, because setup and run are now detached by default with Python SDK.
+If you would like to view the logs for the jobs submitted to a cluster, you can
+explicitly call ``sky.tail_logs(job_id)`` as shown above.

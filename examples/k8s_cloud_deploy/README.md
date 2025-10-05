@@ -21,7 +21,7 @@ pip install "skypilot-nightly[lambda,kubernetes]"
 1. Edit `cloud_k8s.yaml` to set the desired number of workers and GPUs per node. If using GCP, AWS or Azure, uncomment the ports line to allow inbound connections to the Kubernetes API server. 
 ```yaml
 resources:
-  cloud: lambda
+  infra: lambda
   accelerators: A10:1
   # ports: 6443
 
@@ -44,13 +44,13 @@ NAME              STATUS   ROLES                  AGE   VERSION
 
 $ sky show-gpus --cloud kubernetes
 Kubernetes GPUs
-GPU  REQUESTABLE_QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
-A10  1                         2           2              
+GPU  REQUESTABLE_QTY_PER_NODE  UTILIZATION
+A10  1                         2 of 2 free
 
 Kubernetes per node GPU availability
-NODE_NAME        GPU_NAME  TOTAL_GPUS  FREE_GPUS
-129-80-133-44    A10       1           1
-150-230-191-161  A10       1           1
+NODE             GPU       UTILIZATION
+129-80-133-44    A10       1 of 1 free
+150-230-191-161  A10       1 of 1 free
 ```
 
 ## Run AI workloads on your Kubernetes cluster with SkyPilot
@@ -60,7 +60,7 @@ To launch a [GPU enabled development cluster](https://docs.skypilot.co/en/latest
 
 SkyPilot will setup SSH config for you.
 * [SSH access](https://docs.skypilot.co/en/latest/examples/interactive-development.html#ssh): `ssh mycluster`
-* [VSCode remote development](https://docs.skypilot.co/en/latest/examples/interactive-development.html#vscode): `code --remote ssh-remote+mycluster "/"`
+* [VSCode remote development](https://docs.skypilot.co/en/latest/examples/interactive-development.html#vscode): `code --remote ssh-remote+mycluster "/home"`
 
 
 ### Jobs

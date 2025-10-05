@@ -6,8 +6,7 @@ service:
 
 resources:
   ports: 8080
-  cloud: aws
-  cpus: 2+
+  infra: aws
 
 workdir: examples/serve/http_server
 

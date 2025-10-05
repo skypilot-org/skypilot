@@ -4,14 +4,17 @@ This is a remote utility module that provides logging functionality.
 """
 import collections
 import copy
+import functools
 import io
 import multiprocessing.pool
 import os
+import queue as queue_lib
 import shlex
 import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 from typing import (Deque, Dict, Iterable, Iterator, List, Optional, TextIO,
                     Tuple, Union)
@@ -21,6 +24,8 @@ import colorama
 from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import job_lib
+from sky.utils import context
+from sky.utils import context_utils
 from sky.utils import log_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -35,6 +40,11 @@ PEEK_HEAD_LINES_FOR_START_STREAM = 20
 logger = sky_logging.init_logger(__name__)
 
 LOG_FILE_START_STREAMING_AT = 'Waiting for task resources on '
+
+# 16-64KiB seems to be the sweet spot:
+# https://github.com/grpc/grpc.github.io/issues/371
+# TODO(kevin): Benchmark this ourselves and verify.
+DEFAULT_LOG_CHUNK_SIZE = 16 * 1024  # 16KiB
 
 
 class _ProcessingArgs:
@@ -59,6 +69,16 @@ class _ProcessingArgs:
         self.streaming_prefix = streaming_prefix
 
 
+def _get_context():
+    # TODO(aylei): remove this after we drop the backward-compatibility for
+    # 0.9.x in 0.12.0
+    # Keep backward-compatibility for the old version of SkyPilot runtimes.
+    if 'context' in globals():
+        return context.get()
+    else:
+        return None
+
+
 def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
     """Process the stream of a process."""
     out_io = io.TextIOWrapper(io_stream,
@@ -77,6 +97,9 @@ def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
     with open(args.log_path, 'a', encoding='utf-8') as fout:
         with line_processor:
             while True:
+                ctx = _get_context()
+                if ctx is not None and ctx.is_canceled():
+                    return
                 line = out_io.readline()
                 if not line:
                     break
@@ -111,26 +134,24 @@ def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
     return ''.join(out)
 
 
-def process_subprocess_stream(proc, args: _ProcessingArgs) -> Tuple[str, str]:
-    """Redirect the process's filtered stdout/stderr to both stream and file"""
+def process_subprocess_stream(proc, stdout_stream_handler,
+                              stderr_stream_handler) -> Tuple[str, str]:
+    """Process the stream of a process in threads, blocking."""
     if proc.stderr is not None:
         # Asyncio does not work as the output processing can be executed in a
         # different thread.
         # selectors is possible to handle the multiplexing of stdout/stderr,
         # but it introduces buffering making the output not streaming.
         with multiprocessing.pool.ThreadPool(processes=1) as pool:
-            err_args = copy.copy(args)
-            err_args.line_processor = None
-            stderr_fut = pool.apply_async(_handle_io_stream,
-                                          args=(proc.stderr, sys.stderr,
-                                                err_args))
+            stderr_fut = pool.apply_async(stderr_stream_handler,
+                                          args=(proc.stderr, sys.stderr))
             # Do not launch a thread for stdout as the rich.status does not
             # work in a thread, which is used in
             # log_utils.RayUpLineProcessor.
-            stdout = _handle_io_stream(proc.stdout, sys.stdout, args)
+            stdout = stdout_stream_handler(proc.stdout, sys.stdout)
             stderr = stderr_fut.get()
     else:
-        stdout = _handle_io_stream(proc.stdout, sys.stdout, args)
+        stdout = stdout_stream_handler(proc.stdout, sys.stdout)
         stderr = ''
     return stdout, stderr
 
@@ -149,6 +170,7 @@ def run_with_log(
     process_stream: bool = True,
     line_processor: Optional[log_utils.LineProcessor] = None,
     streaming_prefix: Optional[str] = None,
+    log_cmd: bool = False,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str]]:
     """Runs a command and logs its output to a file.
@@ -175,13 +197,21 @@ def run_with_log(
     # Redirect stderr to stdout when using ray, to preserve the order of
     # stdout and stderr.
     stdout_arg = stderr_arg = None
-    if process_stream:
+    ctx = _get_context()
+    if process_stream or ctx is not None:
+        # Capture stdout/stderr of the subprocess if:
+        # 1. Post-processing is needed (process_stream=True)
+        # 2. Potential contextual handling is needed (ctx is not None)
+        # TODO(aylei): can we always capture the stdout/stderr?
         stdout_arg = subprocess.PIPE
         stderr_arg = subprocess.PIPE if not with_ray else subprocess.STDOUT
     # Use stdin=subprocess.DEVNULL by default, as allowing inputs will mess up
     # the terminal output when typing in the terminal that starts the API
     # server.
     stdin = kwargs.pop('stdin', subprocess.DEVNULL)
+    if log_cmd:
+        with open(log_path, 'a', encoding='utf-8') as f:
+            print(f'Running command: {cmd}', file=f)
     with subprocess.Popen(cmd,
                           stdout=stdout_arg,
                           stderr=stderr_arg,
@@ -193,6 +223,8 @@ def run_with_log(
             subprocess_utils.kill_process_daemon(proc.pid)
             stdout = ''
             stderr = ''
+            stdout_stream_handler = None
+            stderr_stream_handler = None
 
             if process_stream:
                 if skip_lines is None:
@@ -219,7 +251,35 @@ def run_with_log(
                     replace_crlf=with_ray,
                     streaming_prefix=streaming_prefix,
                 )
-                stdout, stderr = process_subprocess_stream(proc, args)
+                stdout_stream_handler = functools.partial(
+                    _handle_io_stream,
+                    args=args,
+                )
+                if proc.stderr is not None:
+                    err_args = copy.copy(args)
+                    err_args.line_processor = None
+                    stderr_stream_handler = functools.partial(
+                        _handle_io_stream,
+                        args=err_args,
+                    )
+            if ctx is not None:
+                # When runs in a coroutine, always process the subprocess
+                # stream to:
+                # 1. handle context cancellation
+                # 2. redirect subprocess stdout/stderr to the contextual
+                #    stdout/stderr of current coroutine.
+                stdout, stderr = context_utils.pipe_and_wait_process(
+                    ctx,
+                    proc,
+                    cancel_callback=subprocess_utils.kill_children_processes,
+                    stdout_stream_handler=stdout_stream_handler,
+                    stderr_stream_handler=stderr_stream_handler)
+            elif process_stream:
+                # When runs in a process, only process subprocess stream if
+                # necessary to avoid unnecessary stream handling overhead.
+                stdout, stderr = process_subprocess_stream(
+                    proc, stdout_stream_handler, stderr_stream_handler)
+            # Ensure returncode is set.
             proc.wait()
             if require_outputs:
                 return proc.returncode, stdout, stderr
@@ -301,6 +361,17 @@ def run_bash_command_with_log(bash_command: str,
                             shell=True)
 
 
+def run_bash_command_with_log_and_return_pid(
+        bash_command: str,
+        log_path: str,
+        env_vars: Optional[Dict[str, str]] = None,
+        stream_logs: bool = False,
+        with_ray: bool = False):
+    return_code = run_bash_command_with_log(bash_command, log_path, env_vars,
+                                            stream_logs, with_ray)
+    return {'return_code': return_code, 'pid': os.getpid()}
+
+
 def _follow_job_logs(file,
                      job_id: int,
                      start_streaming: bool,
@@ -342,9 +413,9 @@ def _follow_job_logs(file,
                     wait_last_logs = False
                     continue
                 status_str = status.value if status is not None else 'None'
-                print(ux_utils.finishing_message(
-                    f'Job finished (status: {status_str}).'),
-                      flush=True)
+                finish = ux_utils.finishing_message(
+                    f'Job finished (status: {status_str}).')
+                yield finish + '\n'
                 return
 
             time.sleep(SKY_LOG_TAILING_GAP_SECONDS)
@@ -491,9 +562,215 @@ def tail_logs(job_id: Optional[int],
                     if start_streaming:
                         print(line, end='', flush=True)
                 status_str = status.value if status is not None else 'None'
-                print(ux_utils.finishing_message(
-                    f'Job finished (status: {status_str}).'),
-                      flush=True)
+                # Only show "Job finished" for actually terminal states
+                if status is not None and status.is_terminal():
+                    print(ux_utils.finishing_message(
+                        f'Job finished (status: {status_str}).'),
+                          flush=True)
         except FileNotFoundError:
             print(f'{colorama.Fore.RED}ERROR: Logs for job {job_id} (status:'
                   f' {status.value}) does not exist.{colorama.Style.RESET_ALL}')
+
+
+def tail_logs_iter(job_id: Optional[int],
+                   log_dir: Optional[str],
+                   managed_job_id: Optional[int] = None,
+                   follow: bool = True,
+                   tail: int = 0) -> Iterator[str]:
+    """Tail the logs of a job. This is mostly the same as tail_logs, but
+    returns an iterator instead of printing to stdout/stderr."""
+    if job_id is None:
+        # This only happens when job_lib.get_latest_job_id() returns None,
+        # which means no job has been submitted to this cluster. See
+        # sky.skylet.job_lib.JobLibCodeGen.tail_logs for more details.
+        logger.info('Skip streaming logs as no job has been submitted.')
+        return
+    job_str = f'job {job_id}'
+    if managed_job_id is not None:
+        job_str = f'managed job {managed_job_id}'
+    if log_dir is None:
+        msg = f'{job_str.capitalize()} not found (see `sky queue`).'
+        yield msg + '\n'
+        return
+    logger.debug(f'Tailing logs for job, real job_id {job_id}, managed_job_id '
+                 f'{managed_job_id}.')
+    log_path = os.path.join(log_dir, 'run.log')
+    log_path = os.path.expanduser(log_path)
+
+    status = job_lib.update_job_status([job_id], silent=True)[0]
+
+    # Wait for the log to be written. This is needed due to the `ray submit`
+    # will take some time to start the job and write the log.
+    retry_cnt = 0
+    while status is not None and not status.is_terminal():
+        retry_cnt += 1
+        if os.path.exists(log_path) and status != job_lib.JobStatus.INIT:
+            break
+        if retry_cnt >= SKY_LOG_WAITING_MAX_RETRY:
+            err = (f'{colorama.Fore.RED}ERROR: Logs for '
+                   f'{job_str} (status: {status.value}) does not exist '
+                   f'after retrying {retry_cnt} times.'
+                   f'{colorama.Style.RESET_ALL}')
+            yield err + '\n'
+            return
+        waiting = (f'INFO: Waiting {SKY_LOG_WAITING_GAP_SECONDS}s for the logs '
+                   'to be written...')
+        yield waiting + '\n'
+        time.sleep(SKY_LOG_WAITING_GAP_SECONDS)
+        status = job_lib.update_job_status([job_id], silent=True)[0]
+
+    start_stream_at = LOG_FILE_START_STREAMING_AT
+    # Explicitly declare the type to avoid mypy warning.
+    lines: Iterable[str] = []
+    if follow and status in [
+            job_lib.JobStatus.SETTING_UP,
+            job_lib.JobStatus.PENDING,
+            job_lib.JobStatus.RUNNING,
+    ]:
+        # Not using `ray job logs` because it will put progress bar in
+        # multiple lines.
+        with open(log_path, 'r', newline='', encoding='utf-8') as log_file:
+            # Using `_follow` instead of `tail -f` to streaming the whole
+            # log and creating a new process for tail.
+            start_streaming = False
+            if tail > 0:
+                head_lines_of_log_file = _peek_head_lines(log_file)
+                lines = collections.deque(log_file, maxlen=tail)
+                start_streaming = _should_stream_the_whole_tail_lines(
+                    head_lines_of_log_file, lines, start_stream_at)
+                for line in lines:
+                    if start_stream_at in line:
+                        start_streaming = True
+                    if start_streaming:
+                        yield line
+            # Now, the cursor is at the end of the last lines
+            # if tail > 0
+            for line in _follow_job_logs(log_file,
+                                         job_id=job_id,
+                                         start_streaming=start_streaming,
+                                         start_streaming_at=start_stream_at):
+                yield line
+    else:
+        try:
+            start_streaming = False
+            with open(log_path, 'r', encoding='utf-8') as log_file:
+                if tail > 0:
+                    # If tail > 0, we need to read the last n lines.
+                    # We use double ended queue to rotate the last n lines.
+                    head_lines_of_log_file = _peek_head_lines(log_file)
+                    lines = collections.deque(log_file, maxlen=tail)
+                    start_streaming = _should_stream_the_whole_tail_lines(
+                        head_lines_of_log_file, lines, start_stream_at)
+                else:
+                    lines = log_file
+                for line in lines:
+                    if start_stream_at in line:
+                        start_streaming = True
+                    if start_streaming:
+                        yield line
+                status_str = status.value if status is not None else 'None'
+                # Only show "Job finished" for actually terminal states
+                if status is not None and status.is_terminal():
+                    finish = ux_utils.finishing_message(
+                        f'Job finished (status: {status_str}).')
+                    yield finish + '\n'
+            return
+        except FileNotFoundError:
+            err = (
+                f'{colorama.Fore.RED}ERROR: Logs for job {job_id} (status:'
+                f' {status.value}) does not exist.{colorama.Style.RESET_ALL}')
+            yield err + '\n'
+
+
+class LogBuffer:
+    """In-memory buffer for chunking log lines for streaming."""
+
+    def __init__(self, max_chars: int = DEFAULT_LOG_CHUNK_SIZE):
+        """Initialize the log buffer.
+
+        Args:
+            max_chars: Maximum buffer size (in characters, not bytes) before
+                       flushing. The actual amount of bytes (UTF-8 encoding)
+                       could be more than this, depending on the characters,
+                       i.e. ASCII characters take 1 byte, while others
+                       may take 2-4 bytes. But this is fine as our default
+                       chunk size is well below the default value of
+                       grpc.max_receive_message_length which is 4MB.
+        """
+        self.max_chars = max_chars
+        self._buffer = io.StringIO()
+
+    def _should_flush(self) -> bool:
+        return self._buffer.tell() >= self.max_chars
+
+    def flush(self) -> str:
+        """Get the current buffered content and clear the buffer.
+
+        Returns:
+            The buffered log lines as a single string
+        """
+        if not self._buffer.tell():
+            return ''
+        chunk = self._buffer.getvalue()
+        self._buffer.truncate(0)
+        self._buffer.seek(0)
+        return chunk
+
+    def write(self, line: str) -> bool:
+        """Add a line to the buffer.
+
+        Args:
+            line: The log line to add
+
+        Returns:
+            True if buffer should be flushed after adding the line
+        """
+        self._buffer.write(line)
+        return self._should_flush()
+
+    def close(self):
+        self._buffer.close()
+
+
+def buffered_iter_with_timeout(buffer: LogBuffer, iterable: Iterable[str],
+                               timeout: float) -> Iterable[str]:
+    """Iterates over an iterable, writing each item to a buffer,
+        and flushing the buffer when it is full or no item is
+        yielded within the timeout duration."""
+    # TODO(kevin): Simplify this using asyncio.timeout, once we move
+    # the skylet event loop and gRPC server to asyncio.
+    # https://docs.python.org/3/library/asyncio-task.html#timeouts
+
+    queue: queue_lib.Queue = queue_lib.Queue()
+    sentinel = object()
+
+    def producer():
+        try:
+            for item in iterable:
+                queue.put(item)
+        finally:
+            queue.put(sentinel)
+
+    thread = threading.Thread(target=producer, daemon=True)
+    thread.start()
+
+    while True:
+        try:
+            item = queue.get(timeout=timeout)
+        except queue_lib.Empty:
+            out = buffer.flush()
+            if out:
+                yield out
+            continue
+
+        if item is sentinel:
+            thread.join()
+            out = buffer.flush()
+            if out:
+                yield out
+            return
+
+        if buffer.write(item):
+            out = buffer.flush()
+            if out:
+                yield out

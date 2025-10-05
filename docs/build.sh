@@ -11,7 +11,9 @@ check_file_age() {
 # Only run sky show-gpus commands if output files don't exist or are old
 if ! check_file_age "source/compute/show-gpus-all.txt"; then
     sky show-gpus -a > source/compute/show-gpus-all.txt
-    sed -i '' '/^tpu-v2-128/,$d' source/compute/show-gpus-all.txt && echo "... [omitted long outputs] ..." >> source/compute/show-gpus-all.txt
+    sed '/^tpu-v2-128/,$d' source/compute/show-gpus-all.txt > source/compute/show-gpus-all.txt-new
+    mv source/compute/show-gpus-all.txt-new source/compute/show-gpus-all.txt
+    echo "... [omitted long outputs] ..." >> source/compute/show-gpus-all.txt
 fi
 
 if ! check_file_age "source/compute/show-gpus-h100-8.txt"; then
@@ -34,11 +36,18 @@ done
 if [ "$AUTO_BUILD" = true ]; then
     # Use sphinx-autobuild for automatic rebuilding
     # Ignore gallery directory to prevent unnecessary rebuilds
+    export SPHINX_BUILD_LOCAL=true
+    export SPHINX_PORT=${PORT:-8000}
     sphinx-autobuild source build/html \
         --ignore "*.md" \
-        --port $PORT
+        --port ${PORT:-8000}
 else
     rm -rf build docs
+    
+    # Set build environment (only if not already set by GitHub Actions)
+    if [ -z "$SPHINX_BUILD_PRODUCTION" ]; then
+        export SPHINX_BUILD_LOCAL=true
+    fi
 
     # MacOS and GNU `script` have different usages
     if [ "$(uname -s)" = "Linux" ]; then
@@ -49,8 +58,18 @@ else
     fi
 
     # Check if the output contains "ERROR:" or "WARNING:"
-    if grep -q -E "ERROR:|WARNING:" /tmp/build_docs.txt; then
+    if grep -q -E "ERROR:|WARNING:|CRITICAL:" /tmp/build_docs.txt; then
         echo "Errors or warnings detected, exiting..."
+        exit 1
+    fi
+
+    # Validate llms.txt
+    if [ -f "build/html/llms.txt" ]; then
+        if [ -f "validate_llms_txt.py" ]; then
+            python validate_llms_txt.py || exit 1
+        fi
+    else
+        echo "ERROR: llms.txt not found"
         exit 1
     fi
 fi

@@ -13,42 +13,51 @@ SkyServe relies on the authorization of the service running on underlying servic
 We define a SkyServe service spec for serving Llama-3 chatbot with vLLM and an API key. In the example YAML below, we define the authorization token as an environment variable, :code:`AUTH_TOKEN`, and pass it to both the service field to enable :code:`readiness_probe` to access the replicas and the vllm entrypoint to start services on replicas with the API key.
 
 .. code-block:: yaml
-  :emphasize-lines: 5,10-11,28
+  :emphasize-lines: 7,12-13,36
 
   # auth.yaml
   envs:
-    MODEL_NAME: meta-llama/Meta-Llama-3-8B-Instruct
-    HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
-    AUTH_TOKEN: # TODO: Fill with your own auth token (a random string), or use --env to pass.
+    MODEL_NAME: Qwen/Qwen3-0.6B
+
+  secrets:
+    HF_TOKEN: null
+    AUTH_TOKEN: null
 
   service:
     readiness_probe:
       path: /v1/models
       headers:
         Authorization: Bearer $AUTH_TOKEN
-    replicas: 2
+      initial_delay_seconds: 1800
+    replicas: 1
 
   resources:
     accelerators: {L4, A10g, A10, L40, A40, A100, A100-80GB}
-    ports: 8000
+    cpus: 7+
+    memory: 20+
+    ports: 8087
 
   setup: |
-    pip install vllm==0.4.0.post1 flash-attn==2.5.7 gradio openai
-    # python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
+    uv venv --python 3.10 --seed
+    source .venv/bin/activate
+    uv pip install vllm==0.10.0 --torch-backend=auto
+    # Have to use triton==3.2.0 to avoid https://github.com/triton-lang/triton/issues/6698
+    uv pip install triton==3.2.0
+    uv pip install openai
 
   run: |
+    source .venv/bin/activate
     export PATH=$PATH:/sbin
-    python -m vllm.entrypoints.openai.api_server \
-      --model $MODEL_NAME --trust-remote-code \
-      --gpu-memory-utilization 0.95 \
-      --host 0.0.0.0 --port 8000 \
+    vllm serve $MODEL_NAME --trust-remote-code \
+      --host 0.0.0.0 --port 8087 \
       --api-key $AUTH_TOKEN
+
 
 To deploy the service, run the following command:
 
 .. code-block:: bash
 
-  HF_TOKEN=xxx AUTH_TOKEN=yyy sky serve up auth.yaml -n auth --env HF_TOKEN --env AUTH_TOKEN
+  HF_TOKEN=xxx AUTH_TOKEN=yyy sky serve up auth.yaml -n auth --secret HF_TOKEN --secret AUTH_TOKEN
 
 To send a request to the service endpoint, a service client need to include the static API key in a request's header:
 
@@ -57,11 +66,11 @@ To send a request to the service endpoint, a service client need to include the 
 
   $ ENDPOINT=$(sky serve status --endpoint auth)
   $ AUTH_TOKEN=yyy
-  $ curl http://$ENDPOINT/v1/chat/completions \
+  $ curl $ENDPOINT/v1/chat/completions \
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer $AUTH_TOKEN" \
       -d '{
-        "model": "meta-llama/Meta-Llama-3-8B-Instruct",
+        "model": "Qwen/Qwen3-0.6B",
         "messages": [
           {
             "role": "system",
@@ -71,8 +80,7 @@ To send a request to the service endpoint, a service client need to include the 
             "role": "user",
             "content": "Who are you?"
           }
-        ],
-        "stop_token_ids": [128009, 128001]
+        ]
       }' | jq
 
 .. raw:: HTML
@@ -85,27 +93,38 @@ To send a request to the service endpoint, a service client need to include the 
 .. code-block:: console
 
   {
-    "id": "cmpl-cad2c1a2a6ee44feabed0b28be294d6f",
-    "object": "chat.completion",
-    "created": 1716819147,
-    "model": "meta-llama/Meta-Llama-3-8B-Instruct",
-    "choices": [
-      {
-        "index": 0,
-        "message": {
-          "role": "assistant",
-          "content": "I'm so glad you asked! I'm LLaMA, an AI assistant developed by Meta AI that can understand and respond to human input in a conversational manner. I'm here to help you with any questions, tasks, or topics you'd like to discuss. I can provide information on a wide range of subjects, from science and history to entertainment and culture. I can also assist with language-related tasks such as language translation, text summarization, and even writing and proofreading. My goal is to provide accurate and helpful responses to your inquiries, while also being friendly and engaging. So, what's on your mind? How can I assist you today?"
-        },
-        "logprobs": null,
-        "finish_reason": "stop",
-        "stop_reason": 128009
-      }
-    ],
-    "usage": {
-      "prompt_tokens": 26,
-      "total_tokens": 160,
-      "completion_tokens": 134
+  "id": "chatcmpl-f5f1bffa4b504a8b8e842436f3701b3f",
+  "object": "chat.completion",
+  "created": 1753994285,
+  "model": "Qwen/Qwen3-0.6B",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "<think>\nOkay, the user is asking, \"Who are you?\" I need to respond appropriately. First, I should acknowledge their question and explain that I'm an AI assistant. I should mention that I'm designed to help with various tasks and provide information. I should keep it friendly and open-ended to encourage further interaction. Let me make sure the response is clear and concise.\n</think>\n\nI'm an AI assistant designed to help with a wide range of questions and tasks. How can I assist you today? 😊",
+        "refusal": null,
+        "annotations": null,
+        "audio": null,
+        "function_call": null,
+        "tool_calls": [],
+        "reasoning_content": null
+      },
+      "logprobs": null,
+      "finish_reason": "stop",
+      "stop_reason": null
     }
+  ],
+  "service_tier": null,
+  "system_fingerprint": null,
+  "usage": {
+    "prompt_tokens": 23,
+    "total_tokens": 128,
+    "completion_tokens": 105,
+    "prompt_tokens_details": null
+  },
+  "prompt_logprobs": null,
+  "kv_transfer_params": null
   }
 
 .. raw:: html
@@ -116,8 +135,8 @@ A service client without an API key will not be able to access the service and g
 
 .. code-block:: bash
 
-  $ curl http://$ENDPOINT/v1/models
+  $ curl $ENDPOINT/v1/models
   {"error": "Unauthorized"}
 
-  $ curl http://$ENDPOINT/v1/models -H "Authorization: Bearer random-string"
+  $ curl $ENDPOINT/v1/models -H "Authorization: Bearer random-string"
   {"error": "Unauthorized"}

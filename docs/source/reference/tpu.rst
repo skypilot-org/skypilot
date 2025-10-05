@@ -29,7 +29,7 @@ Use one command to quickly get TPU nodes for development:
 
 After the command finishes, you will be dropped into a TPU host VM and can start developing code right away.
 
-Below, we show examples of using SkyPilot to (1) train LLMs on TPU VMs/Pods and (2) train MNIST on TPU Nodes (legacy).
+Below, we show examples of using SkyPilot to (1) train LLMs on TPU VMs/Pods and (2) train MNIST on TPU nodes (legacy).
 
 TPU architectures
 =================
@@ -75,8 +75,8 @@ Here is a complete task YAML that trains a `Llama 3 model <https://ai.meta.com/b
    resources:
       accelerators: tpu-v6e-8 # Fill in the accelerator type you want to use
 
-   envs:
-      HF_TOKEN: # fill in your huggingface token
+   secrets:
+      HF_TOKEN: null # fill in your huggingface token
 
    workdir: .
 
@@ -132,7 +132,7 @@ Launch it with:
 
 .. code-block:: console
 
-   $ HF_TOKEN=<your-huggingface-token> sky launch train-llama3-8b.yaml -c llama-3-train --env HF_TOKEN
+   $ HF_TOKEN=<your-huggingface-token> sky launch train-llama3-8b.yaml -c llama-3-train --secret HF_TOKEN
 
 You should see the following outputs when the job finishes.
 
@@ -190,7 +190,7 @@ We can run the same Llama 3 training job in on a TPU Pod with the following comm
 
 .. code-block:: console
 
-   $ HF_TOKEN=<your-huggingface-token> sky launch -c tpu-pod --gpus tpu-v6e-32 train-llama3-8b.yaml --env HF_TOKEN
+   $ HF_TOKEN=<your-huggingface-token> sky launch -c tpu-pod --gpus tpu-v6e-32 train-llama3-8b.yaml --secret HF_TOKEN
 
 You should see the following output.
 
@@ -237,14 +237,14 @@ To submit more jobs to  the same TPU Pod, use :code:`sky exec`:
 
 .. code-block:: console
 
-   $ HF_TOKEN=<your-huggingface-token> sky exec tpu-pod train-llama3-8b.yaml --env HF_TOKEN
+   $ HF_TOKEN=<your-huggingface-token> sky exec tpu-pod train-llama3-8b.yaml --secret HF_TOKEN
 
 
 **You can find more useful examples for Serving LLMs on TPUs in** `SkyPilot repo <https://github.com/skypilot-org/skypilot/tree/master/examples/tpu/v6e>`__.
 
 
 
-TPU Nodes (Legacy)
+TPU nodes (legacy)
 ------------------
 
 In a TPU Node, a normal CPU VM (an `n1` instance) needs to be provisioned to communicate with the TPU host/device.
@@ -337,9 +337,3 @@ This YAML lives under the `SkyPilot repo <https://github.com/skypilot-org/skypil
    (mnist-tpu-node pid=28961) 58/58 [==============================] - 1s 20ms/step - loss: 0.1139 - sparse_categorical_accuracy: 0.9655 - val_loss: 0.0831 - val_sparse_categorical_accuracy: 0.9742
    ...
    (mnist-tpu-node pid=28961) {'accuracy_top_1': 0.9741753339767456, 'eval_loss': 0.0831054300069809, 'loss': 0.11388632655143738, 'training_accuracy_top_1': 0.9654667377471924}
-
-
-
-
-
-

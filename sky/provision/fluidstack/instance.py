@@ -1,7 +1,7 @@
 """FluidStack instance provisioning."""
 import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky import authentication as auth
 from sky import exceptions
@@ -26,6 +26,7 @@ logger = sky_logging.init_logger(__name__)
 
 def get_internal_ip(node_info: Dict[str, Any]) -> None:
     node_info['internal_ip'] = node_info['ip_address']
+
     private_key_path, _ = auth.get_or_generate_keys()
     runner = command_runner.SSHCommandRunner(
         (node_info['ip_address'], 22),
@@ -77,10 +78,10 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
     return head_instance_id
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
-
+    del cluster_name  # unused
     pending_status = ['pending', 'provisioning']
     while True:
         instances = _filter_instances(cluster_name_on_cloud, pending_status)
@@ -286,11 +287,13 @@ def get_cluster_info(
 
 
 def query_instances(
+    cluster_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
+    del cluster_name  # unused
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     instances = _filter_instances(cluster_name_on_cloud, None)
     instances = _filter_instances(cluster_name_on_cloud, None)
@@ -301,7 +304,8 @@ def query_instances(
         'failed': status_lib.ClusterStatus.INIT,
         'terminated': None,
     }
-    statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
+    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                              Optional[str]]] = {}
     for inst_id, inst in instances.items():
         if inst['status'] not in status_map:
             with ux_utils.print_exception_no_traceback():
@@ -310,7 +314,7 @@ def query_instances(
         status = status_map.get(inst['status'], None)
         if non_terminated_only and status is None:
             continue
-        statuses[inst_id] = status
+        statuses[inst_id] = (status, None)
     return statuses
 
 

@@ -1,7 +1,7 @@
 name: resnet-app-storage
 
 resources:
-  cloud: aws
+  infra: aws
   accelerators: V100
   use_spot: true
   spot_recovery: failover

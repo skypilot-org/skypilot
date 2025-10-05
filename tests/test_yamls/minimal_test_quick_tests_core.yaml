@@ -1,5 +1,5 @@
 resources:
-  cloud: aws
+  infra: aws
   instance_type: t3.small
 
 file_mounts:

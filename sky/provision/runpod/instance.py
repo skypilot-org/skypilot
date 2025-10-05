@@ -1,6 +1,6 @@
 """RunPod instance provisioning."""
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
 from sky.provision import common
@@ -44,10 +44,10 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
     return head_instance_id
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
-
+    del cluster_name  # unused
     pending_status = ['CREATED', 'RESTARTING']
 
     while True:
@@ -70,15 +70,31 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 f'Cluster {cluster_name_on_cloud} has no head node.')
         logger.info(f'Cluster {cluster_name_on_cloud} already has '
                     f'{len(exist_instances)} nodes, no need to start more.')
-        return common.ProvisionRecord(provider_name='runpod',
-                                      cluster_name=cluster_name_on_cloud,
-                                      region=region,
-                                      zone=None,
-                                      head_instance_id=head_instance_id,
-                                      resumed_instance_ids=[],
-                                      created_instance_ids=[])
+        return common.ProvisionRecord(
+            provider_name='runpod',
+            cluster_name=cluster_name_on_cloud,
+            region=region,
+            zone=config.provider_config['availability_zone'],
+            head_instance_id=head_instance_id,
+            resumed_instance_ids=[],
+            created_instance_ids=[])
 
     created_instance_ids = []
+    volume_mounts = config.node_config.get('VolumeMounts', [])
+    network_volume_id = None
+    volume_mount_path = None
+    if volume_mounts:
+        if len(volume_mounts) > 1:
+            logger.warning(
+                f'RunPod only supports one network volume mount, '
+                f'but {len(volume_mounts)} are specified. Only the first one '
+                f'will be used.')
+        volume_mount = volume_mounts[0]
+        network_volume_id = volume_mount.get('VolumeIdOnCloud')
+        volume_mount_path = volume_mount.get('MountPath')
+        if network_volume_id is None or volume_mount_path is None:
+            raise RuntimeError(
+                'Network volume ID and mount path must be specified.')
     for _ in range(to_start_count):
         node_type = 'head' if head_instance_id is None else 'worker'
         try:
@@ -87,6 +103,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 node_type=node_type,
                 instance_type=config.node_config['InstanceType'],
                 region=region,
+                zone=config.provider_config['availability_zone'],
                 disk_size=config.node_config['DiskSize'],
                 image_name=config.node_config['ImageId'],
                 ports=config.ports_to_open_on_launch,
@@ -95,6 +112,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 bid_per_gpu=config.node_config['BidPerGPU'],
                 docker_login_config=config.provider_config.get(
                     'docker_login_config'),
+                network_volume_id=network_volume_id,
+                volume_mount_path=volume_mount_path,
             )
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'run_instances error: {e}')
@@ -118,13 +137,14 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
         time.sleep(POLL_INTERVAL)
     assert head_instance_id is not None, 'head_instance_id should not be None'
-    return common.ProvisionRecord(provider_name='runpod',
-                                  cluster_name=cluster_name_on_cloud,
-                                  region=region,
-                                  zone=None,
-                                  head_instance_id=head_instance_id,
-                                  resumed_instance_ids=[],
-                                  created_instance_ids=created_instance_ids)
+    return common.ProvisionRecord(
+        provider_name='runpod',
+        cluster_name=cluster_name_on_cloud,
+        region=region,
+        zone=config.provider_config['availability_zone'],
+        head_instance_id=head_instance_id,
+        resumed_instance_ids=[],
+        created_instance_ids=created_instance_ids)
 
 
 def wait_instances(region: str, cluster_name_on_cloud: str,
@@ -198,11 +218,13 @@ def get_cluster_info(
 
 
 def query_instances(
+    cluster_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
+    del cluster_name  # unused
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     instances = _filter_instances(cluster_name_on_cloud, None)
 
@@ -212,12 +234,13 @@ def query_instances(
         'PAUSED': status_lib.ClusterStatus.INIT,
         'RUNNING': status_lib.ClusterStatus.UP,
     }
-    statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
+    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                              Optional[str]]] = {}
     for inst_id, inst in instances.items():
         status = status_map[inst['status']]
         if non_terminated_only and status is None:
             continue
-        statuses[inst_id] = status
+        statuses[inst_id] = (status, None)
     return statuses
 
 

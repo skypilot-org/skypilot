@@ -9,10 +9,11 @@ from click import testing as cli_testing
 import pytest
 
 import sky
-from sky import cli
 from sky import clouds
 from sky import exceptions
 from sky import optimizer
+from sky import skypilot_config
+from sky.client.cli import command
 from sky.utils import registry
 from sky.utils import resources_utils
 
@@ -72,6 +73,15 @@ def _test_resources(
         assert expected_cloud.is_same_cloud(resources.cloud)
 
 
+def _test_resources_from_yaml(spec: str, cluster_name: str = None):
+    resources = sky.Resources.from_yaml_config(spec)
+    with sky.Dag() as dag:
+        task = sky.Task('test_task')
+        task.set_resources(resources)
+    sky.stream_and_get(sky.launch(dag, dryrun=True, cluster_name=cluster_name))
+    return resources
+
+
 def _test_resources_launch(*resources_args,
                            cluster_name: str = None,
                            **resources_kwargs):
@@ -86,15 +96,16 @@ def _test_resources_launch(*resources_args,
 
 
 def test_resources_aws(enable_all_clouds):
-    _test_resources_launch(sky.AWS(), 'p3.2xlarge')
+    _test_resources_launch(infra='aws', instance_type='p3.2xlarge')
 
 
 def test_resources_azure(enable_all_clouds):
-    _test_resources_launch(sky.Azure(), 'Standard_NC24s_v3')
+    _test_resources_launch(infra='azure', instance_type='Standard_NC24s_v3')
 
 
 def test_resources_gcp(enable_all_clouds):
-    _test_resources_launch(sky.GCP(), 'n1-standard-16')
+    _test_resources_launch(infra='gcp', instance_type='n1-standard-16')
+    _test_resources_launch(infra='gcp', instance_type='a3-highgpu-8g')
 
 
 def test_partial_cpus(enable_all_clouds):
@@ -216,7 +227,7 @@ def test_instance_type_from_cpu_memory(enable_all_clouds, capfd):
     # Choose General Purpose instance types
     assert 'm6i.2xlarge' in stdout  # AWS, 8 vCPUs, 32 GB memory
     assert 'Standard_D8s_v5' in stdout  # Azure, 8 vCPUs, 32 GB memory
-    assert 'n2-standard-8' in stdout  # GCP, 8 vCPUs, 32 GB memory
+    assert 'n4-standard-8' in stdout  # GCP, 8 vCPUs, 32 GB memory
 
     _test_resources_launch(memory=32)
     stdout, _ = capfd.readouterr()
@@ -224,14 +235,14 @@ def test_instance_type_from_cpu_memory(enable_all_clouds, capfd):
     # is specified
     assert 'r6i.xlarge' in stdout  # AWS, 4 vCPUs, 32 GB memory
     assert 'Standard_E4s_v5' in stdout  # Azure, 4 vCPUs, 32 GB memory
-    assert 'n2-highmem-4' in stdout  # GCP, 4 vCPUs, 32 GB memory
+    assert 'n4-highmem-4' in stdout  # GCP, 4 vCPUs, 32 GB memory
 
     _test_resources_launch(memory='64+')
     stdout, _ = capfd.readouterr()
     # Choose memory-optimized instance types
     assert 'r6i.2xlarge' in stdout  # AWS, 8 vCPUs, 64 GB memory
     assert 'Standard_E8s_v5' in stdout  # Azure, 8 vCPUs, 64 GB memory
-    assert 'n2-highmem-8' in stdout  # GCP, 8 vCPUs, 64 GB memory
+    assert 'n4-highmem-8' in stdout  # GCP, 8 vCPUs, 64 GB memory
     assert 'gpu_1x_a10' in stdout  # Lambda, 30 vCPUs, 200 GB memory
 
     _test_resources_launch(cpus='4+', memory='4+')
@@ -314,6 +325,9 @@ def test_instance_type_matches_accelerators(enable_all_clouds):
     _test_resources_launch(sky.GCP(),
                            instance_type='a2-highgpu-1g',
                            accelerators='a100')
+    _test_resources_launch(sky.GCP(),
+                           instance_type='a3-highgpu-8g',
+                           accelerators={'H100': 8})
 
     _test_resources_launch(sky.AWS(),
                            instance_type='p3.16xlarge',
@@ -411,24 +425,19 @@ def test_invalid_image(enable_all_clouds):
 
     with pytest.raises(ValueError) as e:
         _test_resources(cloud=sky.Lambda(), image_id='some-image')
-    assert 'only supported for AWS/GCP/Azure/IBM/OCI/Kubernetes' in str(e.value)
+    assert 'Lambda cloud only supports Docker images' in str(e.value)
 
 
 def test_valid_image(enable_all_clouds):
-    _test_resources(cloud=sky.AWS(),
-                    region='us-east-1',
-                    image_id='ami-0868a20f5a3bf9702')
+    _test_resources(infra='aws/us-east-1', image_id='ami-0868a20f5a3bf9702')
     _test_resources(
-        cloud=sky.GCP(),
-        region='us-central1',
+        infra='gcp/us-central1',
         image_id=
-        'projects/deeplearning-platform-release/global/images/family/common-cpu-v20230126'
-    )
+        'projects/ubuntu-os-cloud/global/images/ubuntu-2204-jammy-v20240927')
     _test_resources(
-        cloud=sky.GCP(),
+        infra='gcp',
         image_id=
-        'projects/deeplearning-platform-release/global/images/family/common-cpu-v20230126'
-    )
+        'projects/ubuntu-os-cloud/global/images/ubuntu-2204-jammy-v20240927')
 
 
 def test_parse_cpus_from_yaml():
@@ -494,6 +503,11 @@ def test_parse_accelerators_from_yaml():
     spec = textwrap.dedent("""\
       resources:
         accelerators: \"V100: 0.5\"""")
+    _test_parse_accelerators(spec, {'V100': 0.5})
+
+    spec = textwrap.dedent("""\
+      resources:
+        accelerators: {V100: 0.5}""")
     _test_parse_accelerators(spec, {'V100': 0.5})
 
     # Invalid.
@@ -562,39 +576,13 @@ def test_invalid_accelerators_regions(enable_all_clouds):
     task = sky.Task(run='echo hi')
     task.set_resources(
         sky.Resources(
-            sky.AWS(),
+            infra='aws/us-west-1',
             accelerators='A100:8',
-            region='us-west-1',
         ))
     with pytest.raises(exceptions.ResourcesUnavailableError) as e:
         sky.stream_and_get(
             sky.launch(task, cluster_name='should-fail', dryrun=True))
         assert 'No launchable resource found for' in str(e.value), str(e.value)
-
-
-def _test_optimize_speed(resources: sky.Resources):
-    with sky.Dag() as dag:
-        task = sky.Task(run='echo hi')
-        task.set_resources(resources)
-    start = time.time()
-    sky.optimize(dag)
-    end = time.time()
-    # 5.0 seconds = somewhat flaky.
-    assert end - start < 6.0, (f'optimize took too long for {resources}, '
-                               f'{end - start} seconds')
-
-
-def test_optimize_speed(enable_all_clouds):
-    _test_optimize_speed(sky.Resources(cpus=4))
-    for cloud in registry.CLOUD_REGISTRY.values():
-        _test_optimize_speed(sky.Resources(cloud, cpus='4+'))
-    _test_optimize_speed(sky.Resources(cpus='4+', memory='4+'))
-    _test_optimize_speed(
-        sky.Resources(cpus='4+', memory='4+', accelerators='V100:1'))
-    _test_optimize_speed(
-        sky.Resources(cpus='4+', memory='4+', accelerators='A100-80GB:8'))
-    _test_optimize_speed(
-        sky.Resources(cpus='4+', memory='4+', accelerators='tpu-v3-32'))
 
 
 def test_infer_cloud_from_region_or_zone(enable_all_clouds):
@@ -658,26 +646,30 @@ def test_infer_cloud_from_region_or_zone(enable_all_clouds):
 
 def test_ordered_resources(enable_all_clouds):
     captured_output = io.StringIO()
-    sys.stdout = captured_output  # Redirect stdout to the StringIO object
+    original_stdout = sys.stdout
+    try:
+        sys.stdout = captured_output  # Redirect stdout to the StringIO object
 
-    with sky.Dag() as dag:
-        task = sky.Task('test_task')
-        task.set_resources([
-            sky.Resources(accelerators={'V100': 1}),
-            sky.Resources(accelerators={'T4': 1}),
-            sky.Resources(accelerators={'K80': 1}),
-            sky.Resources(accelerators={'T4': 4}),
-        ])
-    dag = sky.optimize(dag)
-    cli_runner = cli_testing.CliRunner()
-    request_id = sky.launch(task, dryrun=True)
-    result = cli_runner.invoke(cli.api_logs, [request_id])
-    assert not result.exit_code
+        with sky.Dag() as dag:
+            task = sky.Task('test_task')
+            task.set_resources([
+                sky.Resources(accelerators={'V100': 1}),
+                sky.Resources(accelerators={'T4': 1}),
+                sky.Resources(accelerators={'K80': 1}),
+                sky.Resources(accelerators={'T4': 4}),
+            ])
+        dag = sky.optimize(dag)
+        cli_runner = cli_testing.CliRunner()
+        request_id = sky.launch(task, dryrun=True)
+        result = cli_runner.invoke(command.api_logs, [request_id])
+        assert not result.exit_code
 
-    # Access the captured output
-    output = captured_output.getvalue()
-    assert any('V100' in line and '✔' in line for line in output.splitlines()), \
-        'Expected to find a line with V100 and ✔ indicating V100 was chosen'
+        # Access the captured output
+        output = captured_output.getvalue()
+        assert any('V100' in line and '✔' in line for line in output.splitlines()), \
+            'Expected to find a line with V100 and ✔ indicating V100 was chosen'
+    finally:
+        sys.stdout = original_stdout  # Restore original stdout
 
 
 def test_disk_tier_mismatch(enable_all_clouds):
@@ -698,7 +690,7 @@ def test_optimize_disk_tier(enable_all_clouds):
     def _get_all_candidate_cloud(r: sky.Resources) -> Set[clouds.Cloud]:
         task = sky.Task()
         task.set_resources(r)
-        _, per_cloud_candidates, _ = optimizer._fill_in_launchable_resources(
+        _, per_cloud_candidates, _, _ = optimizer._fill_in_launchable_resources(
             task, blocked_resources=None)
         return set(per_cloud_candidates.keys())
 
@@ -730,6 +722,33 @@ def test_optimize_disk_tier(enable_all_clouds):
         map(registry.CLOUD_REGISTRY.get, ['aws', 'gcp'])), ultra_tier_candidates
 
 
+def test_launch_dryrun_with_reservations_and_dummy_sink(enable_all_clouds):
+    """
+    Tests that 'sky launch --dryrun' with reservations configured
+    does not raise an AssertionError when Optimizer processes DummySink.
+    Simulates 'sky launch --gpus A100:8 --cloud aws --dryrun'
+    """
+    override_config_dict = {
+        'aws': {
+            'specific_reservations': ['cr-xxx', 'cr-yyy']
+        }
+    }
+    runner = cli_testing.CliRunner()
+    with skypilot_config.override_skypilot_config(override_config_dict):
+        # Ensure AWS is treated as an enabled cloud. The enable_all_clouds
+        # fixture should typically handle this.
+        result = runner.invoke(
+            command.launch, ['--cloud', 'aws', '--gpus', 'A100:8', '--dryrun'])
+
+        # Check for a successful dryrun invocation
+        if result.exit_code != 0:
+            pytest.fail(f"'sky launch --dryrun' failed with exit code "
+                        f"{result.exit_code}.\nOutput:\n{result.output}\n"
+                        f"Exception Info: {result.exc_info}")
+
+    # If no exception is raised and exit code is 0, the test passes.
+
+
 def test_resource_hints_for_invalid_resources(capfd, enable_all_clouds):
     """Tests that helpful hints are shown when no matching resources are found."""
     # Test when there are no fuzzy candidates
@@ -741,3 +760,110 @@ def test_resource_hints_for_invalid_resources(capfd, enable_all_clouds):
     assert 'Try specifying a different memory size' in stdout
     assert 'add "+" to the end of the memory size' in stdout
     assert 'Did you mean:' not in stdout  # No fuzzy candidates
+
+
+def test_accelerator_memory_filtering(capfd, enable_all_clouds):
+    """Test filtering accelerators by memory requirements."""
+    # Test exact memory match
+    spec = {'accelerators': '16GB'}
+    _test_resources_from_yaml(spec)
+    stdout, _ = capfd.readouterr()
+    assert 'T4' in stdout  # T4 has 16GB memory
+
+    # Test memory with plus (greater than or equal)
+    spec = {'accelerators': '32GB+'}
+    _test_resources_from_yaml(spec)
+    stdout, _ = capfd.readouterr()
+    assert 'V100' in stdout  # V100 has 32GB memory
+    assert 'A100' in stdout  # A100 has 40GB/80GB memory
+    assert 'T4' not in stdout  # T4 has 16GB memory
+
+    spec = {'accelerators': ['32GB+']}
+    _test_resources_from_yaml(spec)
+    stdout, _ = capfd.readouterr()
+    assert 'V100' in stdout  # V100 has 32GB memory
+    assert 'A100' in stdout  # A100 has 40GB/80GB memory
+    assert 'T4' not in stdout  # T4 has 16GB memory
+
+    _test_resources_from_yaml({'accelerators': {'32GB+': 1, 'T4': 1}})
+    stdout, _ = capfd.readouterr()
+    assert 'V100' in stdout  # V100 has 32GB memory
+    assert 'A100' in stdout  # A100 has 40GB/80GB memory
+    assert 'T4' in stdout  # T4 has 16GB memory
+
+    _test_resources_from_yaml({'accelerators': ['32GB+', 'T4']})
+    stdout, _ = capfd.readouterr()
+    assert 'V100' in stdout  # V100 has 32GB memory
+    assert 'A100' in stdout  # A100 has 40GB/80GB memory
+    assert 'T4' in stdout  # T4 has 16GB memory
+
+    _test_resources_from_yaml({'accelerators': ['32GB+', '16gb']})
+    stdout, _ = capfd.readouterr()
+    assert 'V100' in stdout  # V100 has 32GB memory
+    assert 'A100' in stdout  # A100 has 40GB/80GB memory
+    assert 'T4' in stdout  # T4 has 16GB memory
+
+    # Test memory with different units
+    spec = {'accelerators': '16384MB'}  # 16GB in MB
+    _test_resources_from_yaml(spec)
+    stdout, _ = capfd.readouterr()
+    assert 'T4' in stdout
+
+
+def test_accelerator_manufacturer_filtering(capfd, enable_all_clouds):
+    """Test filtering accelerators by manufacturer."""
+    # Test NVIDIA GPUs
+    spec = {'accelerators': 'nvidia:16GB:1'}
+    _test_resources_from_yaml(spec)
+    stdout, _ = capfd.readouterr()
+    assert 'T4' in stdout
+
+    # Test with memory plus
+    spec = {'accelerators': 'nvidia:32GB+'}
+    _test_resources_from_yaml(spec)
+    stdout, _ = capfd.readouterr()
+    assert 'V100' in stdout
+    assert 'A100' in stdout
+    assert 'T4' not in stdout
+
+
+def test_accelerator_cloud_filtering(capfd, enable_all_clouds):
+    """Test filtering accelerators by cloud provider."""
+    # Test AWS GPUs
+    spec = {'accelerators': '16GB'}
+    _test_resources_from_yaml(spec)
+    stdout, _ = capfd.readouterr()
+
+    # Test Azure GPUs
+    spec = {'accelerators': '16GB'}
+    _test_resources_from_yaml(spec)
+    stdout, _ = capfd.readouterr()
+
+    # Test with manufacturer and memory
+    spec = {'accelerators': 'nvidia:32GB+'}
+    _test_resources_from_yaml(spec)
+    stdout, _ = capfd.readouterr()
+
+
+def test_candidate_logging(enable_all_clouds, capfd):
+    """
+    Verifies that the optimizer candidate log outputs the correct chosen/cheapest resource.
+    """
+    with sky.Dag() as dag:
+        task = sky.Task('test_candidate_logging')
+        task.set_resources([
+            sky.Resources(accelerators={'L4': 1},
+                          use_spot=True,
+                          cloud=sky.AWS()),
+            # Other more expensive GPUs
+            sky.Resources(accelerators={'A100': 1}, use_spot=True),
+            sky.Resources(accelerators={'H100': 1}, use_spot=True),
+            sky.Resources(accelerators={'H200': 1}, use_spot=True),
+        ])
+    sky.optimize(dag)
+    sky.stream_and_get(sky.launch(dag, dryrun=True))
+    stdout, _ = capfd.readouterr()
+    l4_section = any(
+        'L4:1' in line and '✔' in line for line in stdout.splitlines())
+    assert l4_section, 'Expected L4:1 to be chosen.'
+    assert f'Multiple {sky.AWS()} instances satisfy L4:1. The cheapest [spot](gpus=L4:1' in stdout, 'Expected L4:1 to be marked as cheapest.'

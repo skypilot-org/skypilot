@@ -7,7 +7,7 @@
 #   sky down myclus
 
 resources:
-  cloud: gcp
+  infra: gcp
   accelerators: V100:1 # Provision 1 V100 GPU per node
 
 # Provision 2 nodes, giving us a total of 2 GPUs in the cluster

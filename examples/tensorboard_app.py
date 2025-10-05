@@ -19,7 +19,7 @@ with sky.Dag() as dag:
            cd models && pip install -e .)'
 
     task = sky.Task('setup', workdir=workdir, setup=setup)
-    task.set_resources(sky.Resources(sky.AWS(), accelerators={'V100': 1}))
+    task.set_resources(sky.Resources(infra='aws', accelerators={'V100': 1}))
 sky.stream_and_get(sky.launch(dag, cluster_name='tb'))
 
 # Run the training task.

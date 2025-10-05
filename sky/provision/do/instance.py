@@ -1,7 +1,7 @@
 """DigitalOcean instance provisioning."""
 
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import uuid
 
 from sky import sky_logging
@@ -26,10 +26,10 @@ def _get_head_instance(
     return None
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
-
+    del cluster_name  # unused
     pending_status = ['new']
     newly_started_instances = utils.filter_instances(cluster_name_on_cloud,
                                                      pending_status + ['off'])
@@ -242,11 +242,13 @@ def get_cluster_info(
 
 
 def query_instances(
+    cluster_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
+    del cluster_name  # unused
     # terminated instances are not retrieved by the
     # API making `non_terminated_only` argument moot.
     del non_terminated_only
@@ -260,10 +262,11 @@ def query_instances(
         'active': status_lib.ClusterStatus.UP,
         'off': status_lib.ClusterStatus.STOPPED,
     }
-    statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
+    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                              Optional[str]]] = {}
     for instance_meta in instances.values():
         status = status_map[instance_meta['status']]
-        statuses[instance_meta['name']] = status
+        statuses[instance_meta['name']] = (status, None)
     return statuses
 
 

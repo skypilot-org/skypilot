@@ -2,7 +2,7 @@
 <!-- $REMOVE -->
 # Point, Launch, and Serve Vision Llama 3.2 on Kubernetes or Any Cloud
 <!-- $END_REMOVE -->
-<!-- $UNCOMMENT# Vision Llama 3.2 (Meta) -->
+<!-- $UNCOMMENT# Vision Llama 3.2 -->
 
 
 [Llama 3.2](https://ai.meta.com/blog/llama-3-2-connect-2024-vision-edge-mobile-devices/) family was released by Meta on Sep 25, 2024. It not only includes the latest improved (and smaller) LLM models for chat, but also includes multimodal vision-language models. Let's _point and launch_ it with SkyPilot.
@@ -38,7 +38,7 @@
 envs:
   MODEL_NAME: meta-llama/Llama-3.2-3B-Instruct
   # MODEL_NAME: meta-llama/Llama-3.2-3B-Vision
-  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
 
 service:
   replicas: 2
@@ -84,7 +84,7 @@ You can also get the full YAML file [here](https://github.com/skypilot-org/skypi
 
 Launch a single spot instance to serve Llama 3.2 on your infra:
 ```console
-$ HF_TOKEN=xxx sky launch llama3_2.yaml -c llama3_2 --env HF_TOKEN
+$ HF_TOKEN=xxx sky launch llama3_2.yaml -c llama3_2 --secret HF_TOKEN
 ```
 
 ```console
@@ -180,7 +180,7 @@ sky down llama3_2
 Let's launch a vision llama now! The multimodal capacity of Llama-3.2 could open up a lot of new use cases. We will go with the largest 11B model here.
 
 ```console
-$ HF_TOKEN=xxx sky launch llama3_2-vision-11b.yaml -c llama3_2-vision --env HF_TOKEN
+$ HF_TOKEN=xxx sky launch llama3_2-vision-11b.yaml -c llama3_2-vision --secret HF_TOKEN
 ```
 
 ```console
@@ -291,7 +291,7 @@ After playing with the model, you can deploy the model with autoscaling and load
 
 With no change to the YAML, launch a fully managed service on your infra:
 ```console
-HF_TOKEN=xxx sky serve up llama3_2-vision-11b.yaml -n llama3_2 --env HF_TOKEN
+HF_TOKEN=xxx sky serve up llama3_2-vision-11b.yaml -n llama3_2 --secret HF_TOKEN
 ```
 
 Wait until the service is ready:

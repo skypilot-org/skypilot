@@ -9,7 +9,6 @@ service:
 
 resources:
   ports: 8080
-  cpus: 2+
 
 workdir: tests/skyserve/load_balancer
 

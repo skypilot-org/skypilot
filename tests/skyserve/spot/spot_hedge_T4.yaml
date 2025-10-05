@@ -1,0 +1,47 @@
+service:
+  readiness_probe:
+    path: /v1/chat/completions
+    post_data:
+      model: $MODEL_NAME
+      messages:
+        - role: user
+          content: Hello! What is your name?
+      max_tokens: 1
+    initial_delay_seconds: 1800
+  replica_policy:
+    min_replicas: 1
+    max_replicas: 3
+    target_qps_per_replica: 10
+    num_overprovision: 1
+    dynamic_ondemand_fallback: true
+    spot_placer: dynamic_fallback
+
+envs:
+  MODEL_NAME: meta-llama/Llama-3.2-3B-Instruct
+secrets:
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
+
+resources:
+  any_of:
+    # Enable all region in AWS.
+    - infra: aws
+      # region: us-east-1
+      # zone: us-east-1f
+    # Enable one zone in GCP.
+    - infra: gcp/*/europe-west2-a
+  use_spot: true
+  accelerators: T4
+  ports: 9000  # Expose to internet traffic.
+
+setup: pip install vllm==0.6.2
+
+run: |
+  echo 'Starting vllm api server...'
+
+  vllm serve $MODEL_NAME \
+    --port 9000 \
+    --dtype=half \
+    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+    --max-num-seqs 64 \
+    --max-model-len 1024 \
+    2>&1 | tee vllm_server.log

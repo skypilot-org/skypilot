@@ -69,6 +69,20 @@ def credential_error_exception():
 
 
 @common.load_lazy_modules(_LAZY_MODULES)
+def auth_error_exception():
+    """GoogleAuthError exception."""
+    from google.auth import exceptions
+    return exceptions.GoogleAuthError
+
+
+@common.load_lazy_modules(_LAZY_MODULES)
+def gcp_auth_refresh_error_exception():
+    """GCP auth refresh error exception."""
+    from google.auth import exceptions
+    return exceptions.RefreshError
+
+
+@common.load_lazy_modules(_LAZY_MODULES)
 def get_credentials(cred_type: str, credentials_field: str):
     """Get GCP credentials."""
     from google.oauth2 import service_account

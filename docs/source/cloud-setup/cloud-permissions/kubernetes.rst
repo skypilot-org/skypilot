@@ -6,7 +6,7 @@ Kubernetes
 When running outside your Kubernetes cluster, SkyPilot uses your local ``~/.kube/config`` file
 for authentication and creating resources on your Kubernetes cluster.
 
-When running inside your Kubernetes cluster (e.g., as a Spot controller or Serve controller),
+When running inside your Kubernetes cluster (e.g., as a remote API server, Job controller or Serve controller),
 SkyPilot can operate using either of the following three authentication methods:
 
 1. **Automatically create a service account**: SkyPilot can automatically create the service
@@ -69,9 +69,22 @@ SkyPilot requires permissions equivalent to the following roles to be able to ma
       name: sky-sa-role  # Can be changed if needed
       namespace: default  # Change to your namespace if using a different one.
     rules:
-      - apiGroups: ["*"]
-        resources: ["*"]
-        verbs: ["*"]
+      # Required for managing pods and their lifecycle
+      - apiGroups: [ "" ]
+        resources: [ "pods", "pods/status", "pods/exec", "pods/portforward" ]
+        verbs: [ "*" ]
+      # Required for managing services for SkyPilot Pods
+      - apiGroups: [ "" ]
+        resources: [ "services" ]
+        verbs: [ "*" ]
+      # Required for managing SSH keys
+      - apiGroups: [ "" ]
+        resources: [ "secrets" ]
+        verbs: [ "*" ]
+      # Required for retrieving reason when Pod scheduling fails.
+      - apiGroups: [ "" ]
+        resources: [ "events" ]
+        verbs: [ "get", "list", "watch" ]
     ---
     # ClusterRole for accessing cluster-wide resources. Details for each resource below:
     kind: ClusterRole
@@ -82,11 +95,17 @@ SkyPilot requires permissions equivalent to the following roles to be able to ma
       labels:
         parent: skypilot
     rules:
+      # Required for getting node resources.
       - apiGroups: [""]
-        resources: ["nodes"]  # Required for getting node resources.
+        resources: ["nodes"]
         verbs: ["get", "list", "watch"]
+      # Required for autodetecting the runtime class of the nodes.
       - apiGroups: ["node.k8s.io"]
-        resources: ["runtimeclasses"]   # Required for autodetecting the runtime class of the nodes.
+        resources: ["runtimeclasses"]
+        verbs: ["get", "list", "watch"]
+      # Required for accessing storage classes.
+      - apiGroups: ["storage.k8s.io"]
+        resources: ["storageclasses"]
         verbs: ["get", "list", "watch"]
 
 
@@ -139,7 +158,7 @@ To allow this, you will need to also create a ``skypilot-system`` namespace whic
       labels:
         parent: skypilot
     ---
-    # Role for the skypilot-system namespace to create FUSE device manager and
+    # Role for the skypilot-system namespace to create fusermount-server and
     # any other system components required by SkyPilot.
     # This role must be bound in the skypilot-system namespace to the service account used for SkyPilot.
     kind: Role
@@ -150,9 +169,9 @@ To allow this, you will need to also create a ``skypilot-system`` namespace whic
       labels:
         parent: skypilot
     rules:
-      - apiGroups: ["*"]
-        resources: ["*"]
-        verbs: ["*"]
+      - apiGroups: [ "*" ]
+        resources: [ "apps" ]
+        verbs: [ "daemonsets" ]
 
 
 Permissions for using Ingress
@@ -209,9 +228,22 @@ To create a service account that has all necessary permissions for SkyPilot (inc
       labels:
         parent: skypilot
     rules:
-      - apiGroups: ["*"]  # Required for creating pods, services, secrets and other necessary resources in the namespace.
-        resources: ["*"]
-        verbs: ["*"]
+      # Required for managing pods and their lifecycle
+      - apiGroups: [ "" ]
+        resources: [ "pods", "pods/status", "pods/exec", "pods/portforward" ]
+        verbs: [ "*" ]
+      # Required for managing services for SkyPilot Pods
+      - apiGroups: [ "" ]
+        resources: [ "services" ]
+        verbs: [ "*" ]
+      # Required for managing SSH keys
+      - apiGroups: [ "" ]
+        resources: [ "secrets" ]
+        verbs: [ "*" ]
+      # Required for retrieving reason when Pod scheduling fails.
+      - apiGroups: [ "" ]
+        resources: [ "events" ]
+        verbs: [ "get", "list", "watch" ]
     ---
     # RoleBinding for the service account
     kind: RoleBinding
@@ -250,6 +282,9 @@ To create a service account that has all necessary permissions for SkyPilot (inc
       - apiGroups: [""]                 # Required for `sky show-gpus` command
         resources: ["pods"]
         verbs: ["get", "list"]
+      - apiGroups: ["storage.k8s.io"]   # Required for using volumes
+        resources: ["storageclasses"]
+        verbs: ["get", "list", "watch"]
     ---
     # ClusterRoleBinding for the service account
     apiVersion: rbac.authorization.k8s.io/v1
@@ -277,7 +312,7 @@ To create a service account that has all necessary permissions for SkyPilot (inc
         parent: skypilot
     ---
     # Optional: If using object store mounting, create role in the skypilot-system
-    # namespace to create FUSE device manager.
+    # namespace to create fusermount-server.
     kind: Role
     apiVersion: rbac.authorization.k8s.io/v1
     metadata:
@@ -286,12 +321,12 @@ To create a service account that has all necessary permissions for SkyPilot (inc
       labels:
         parent: skypilot
     rules:
-      - apiGroups: ["*"]
-        resources: ["*"]
-        verbs: ["*"]
+      - apiGroups: [ "apps" ]
+        resources: [ "daemonsets" ]
+        verbs: [ "*" ]
     ---
     # Optional: If using object store mounting, create rolebinding in the skypilot-system
-    # namespace to create FUSE device manager.
+    # namespace to create fusermount-server.
     apiVersion: rbac.authorization.k8s.io/v1
     kind: RoleBinding
     metadata:
@@ -305,7 +340,7 @@ To create a service account that has all necessary permissions for SkyPilot (inc
         namespace: default  # Change this to the namespace where the service account is created
     roleRef:
       kind: Role
-      name: skypilot-system-service-account-role  # Use the same name as the role at line 88
+      name: skypilot-system-service-account-role  # Use the same name as the role above
       apiGroup: rbac.authorization.k8s.io
     ---
     # Optional: Role for accessing ingress resources
@@ -319,9 +354,6 @@ To create a service account that has all necessary permissions for SkyPilot (inc
     rules:
       - apiGroups: [""]
         resources: ["services"]
-        verbs: ["list", "get", "watch"]
-      - apiGroups: ["rbac.authorization.k8s.io"]
-        resources: ["roles", "rolebindings"]
         verbs: ["list", "get", "watch"]
     ---
     # Optional: RoleBinding for accessing ingress resources
@@ -338,7 +370,7 @@ To create a service account that has all necessary permissions for SkyPilot (inc
         namespace: default  # Change this to the namespace where the service account is created
     roleRef:
       kind: Role
-      name: sky-sa-role-ingress-nginx  # Use the same name as the role at line 119
+      name: sky-sa-role-ingress-nginx  # Use the same name as the role above
       apiGroup: rbac.authorization.k8s.io
 
 Create the service account using the following command:

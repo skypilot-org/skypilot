@@ -4,11 +4,12 @@ import enum
 import itertools
 import json
 import math
-import re
 import typing
-from typing import Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from sky import skypilot_config
+from sky.skylet import constants
+from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import ux_utils
 
@@ -48,6 +49,48 @@ class DiskTier(enum.Enum):
     def __le__(self, other: 'DiskTier') -> bool:
         types = list(DiskTier)
         return types.index(self) <= types.index(other)
+
+
+class NetworkTier(enum.Enum):
+    """All network tiers supported by SkyPilot."""
+    STANDARD = 'standard'
+    BEST = 'best'
+
+    @classmethod
+    def supported_tiers(cls) -> List[str]:
+        return [tier.value for tier in cls]
+
+    @classmethod
+    def cli_help_message(cls) -> str:
+        return (
+            f'Network tier. Could be one of {", ".join(cls.supported_tiers())}'
+            f'. If {cls.BEST.value} is specified, use the best network tier '
+            'available on the specified instance. '
+            f'Default: {cls.STANDARD.value}')
+
+    @classmethod
+    def from_str(cls, tier: str) -> 'NetworkTier':
+        if tier not in cls.supported_tiers():
+            raise ValueError(f'Invalid network tier: {tier}')
+        return cls(tier)
+
+    def __le__(self, other: 'NetworkTier') -> bool:
+        types = list(NetworkTier)
+        return types.index(self) <= types.index(other)
+
+
+class StorageType(enum.Enum):
+    """Storage type."""
+    # Durable network storage, e.g. GCP persistent disks
+    NETWORK = 'network'
+    # Local instance storage, e.g. GCP local SSDs
+    INSTANCE = 'instance'
+
+
+class DiskAttachMode(enum.Enum):
+    """Disk attach mode."""
+    READ_ONLY = 'read_only'
+    READ_WRITE = 'read_write'
 
 
 @dataclasses.dataclass
@@ -139,32 +182,54 @@ def simplify_ports(ports: List[str]) -> List[str]:
 
 def format_resource(resource: 'resources_lib.Resources',
                     simplify: bool = False) -> str:
+    resource = resource.assert_launchable()
+    vcpu, mem = resource.cloud.get_vcpus_mem_from_instance_type(
+        resource.instance_type)
+
+    components = []
+
+    if resource.accelerators is not None:
+        acc, count = list(resource.accelerators.items())[0]
+        components.append(f'gpus={acc}:{count}')
+
+    is_k8s = str(resource.cloud).lower() == 'kubernetes'
+    if (resource.accelerators is None or is_k8s or not simplify):
+        if vcpu is not None:
+            components.append(f'cpus={int(vcpu)}')
+        if mem is not None:
+            components.append(f'mem={int(mem)}')
+
+    instance_type = resource.instance_type
     if simplify:
-        cloud = resource.cloud
-        if resource.accelerators is None:
-            vcpu, _ = cloud.get_vcpus_mem_from_instance_type(
-                resource.instance_type)
-            hardware = f'vCPU={int(vcpu)}'
-        else:
-            hardware = f'{resource.accelerators}'
-        spot = '[Spot]' if resource.use_spot else ''
-        return f'{cloud}({spot}{hardware})'
+        instance_type = common_utils.truncate_long_string(instance_type, 15)
+    if not is_k8s:
+        components.append(instance_type)
+    if simplify:
+        components.append('...')
     else:
-        # accelerator_args is way too long.
-        # Convert from:
-        #  GCP(n1-highmem-8, {'tpu-v2-8': 1}, accelerator_args={'runtime_version': '2.12.0'}  # pylint: disable=line-too-long
-        # to:
-        #  GCP(n1-highmem-8, {'tpu-v2-8': 1}...)
-        pattern = ', accelerator_args={.*}'
-        launched_resource_str = re.sub(pattern, '...', str(resource))
-        return launched_resource_str
+        image_id = resource.image_id
+        if image_id is not None:
+            if None in image_id:
+                components.append(f'image_id={image_id[None]}')
+            else:
+                components.append(f'image_id={image_id}')
+        components.append(f'disk={resource.disk_size}')
+        disk_tier = resource.disk_tier
+        if disk_tier is not None:
+            components.append(f'disk_tier={disk_tier.value}')
+        ports = resource.ports
+        if ports is not None:
+            components.append(f'ports={ports}')
+
+    spot = '[spot]' if resource.use_spot else ''
+    return f'{spot}({"" if not components else ", ".join(components)})'
 
 
 def get_readable_resources_repr(handle: 'backends.CloudVmRayResourceHandle',
                                 simplify: bool = False) -> str:
     if (handle.launched_nodes is not None and
             handle.launched_resources is not None):
-        return (f'{handle.launched_nodes}x '
+        return (f'{handle.launched_nodes}x'
                 f'{format_resource(handle.launched_resources, simplify)}')
     return _DEFAULT_MESSAGE_HANDLE_INITIALIZING
 
@@ -208,11 +273,189 @@ def need_to_query_reservations() -> bool:
     clouds that do not use reservations.
     """
     for cloud_str in registry.CLOUD_REGISTRY.keys():
-        cloud_specific_reservations = skypilot_config.get_nested(
-            (cloud_str, 'specific_reservations'), None)
-        cloud_prioritize_reservations = skypilot_config.get_nested(
-            (cloud_str, 'prioritize_reservations'), False)
+        cloud_specific_reservations = (
+            skypilot_config.get_effective_region_config(
+                cloud=cloud_str,
+                region=None,
+                keys=('specific_reservations',),
+                default_value=None))
+        cloud_prioritize_reservations = (
+            skypilot_config.get_effective_region_config(
+                cloud=cloud_str,
+                region=None,
+                keys=('prioritize_reservations',),
+                default_value=False))
         if (cloud_specific_reservations is not None or
                 cloud_prioritize_reservations):
             return True
     return False
+
+
+def make_launchables_for_valid_region_zones(
+    launchable_resources: 'resources_lib.Resources',
+    override_optimize_by_zone: bool = False,
+) -> List['resources_lib.Resources']:
+    assert launchable_resources.is_launchable()
+    # In principle, all provisioning requests should be made at the granularity
+    # of a single zone. However, for on-demand instances, we batch the requests
+    # to the zones in the same region in order to leverage the region-level
+    # provisioning APIs of AWS and Azure. This way, we can reduce the number of
+    # API calls, and thus the overall failover time. Note that this optimization
+    # does not affect the user cost since the clouds charge the same prices for
+    # on-demand instances in the same region regardless of the zones. On the
+    # other hand, for spot instances, we do not batch the requests because the
+    # "AWS" spot prices may vary across zones.
+    # For GCP, we do not batch the requests because GCP reservation system is
+    # zone based. Therefore, price estimation is potentially different across
+    # zones.
+
+    # NOTE(woosuk): GCP does not support region-level provisioning APIs. Thus,
+    # while we return per-region resources here, the provisioner will still
+    # issue the request for one zone at a time.
+    # NOTE(woosuk): If we support Azure spot instances, we should batch the
+    # requests since Azure spot prices are region-level.
+    # TODO(woosuk): Batch the per-zone AWS spot instance requests if they are
+    # in the same region and have the same price.
+    # TODO(woosuk): A better design is to implement batching at a higher level
+    # (e.g., in provisioner or optimizer), not here.
+    launchables = []
+    regions = launchable_resources.get_valid_regions_for_launchable()
+    for region in regions:
+        assert launchable_resources.cloud is not None, 'Cloud must be specified'
+        optimize_by_zone = (override_optimize_by_zone or
+                            launchable_resources.cloud.optimize_by_zone())
+        # It is possible that we force the optimize_by_zone but some clouds
+        # do not support zone-level provisioning (i.e. Azure). So we check
+        # if there is zone-level information in the region first.
+        if (region.zones is not None and
+            (launchable_resources.use_spot or optimize_by_zone)):
+            # Spot instances.
+            # Do not batch the per-zone requests.
+            for zone in region.zones:
+                launchables.append(
+                    launchable_resources.copy(region=region.name,
+                                              zone=zone.name))
+        else:
+            # On-demand instances.
+            # Batch the requests at the granularity of a single region.
+            launchables.append(launchable_resources.copy(region=region.name))
+    return launchables
+
+
+def parse_memory_resource(resource_qty_str: Union[str, int, float],
+                          field_name: str,
+                          ret_type: type = int,
+                          unit: str = 'gb',
+                          allow_plus: bool = False,
+                          allow_x: bool = False,
+                          allow_rounding: bool = False) -> str:
+    """Returns memory size in chosen units given a resource quantity string.
+
+    Args:
+        resource_qty_str: Resource quantity string
+        unit: Unit to convert to
+        allow_plus: Whether to allow '+' prefix
+        allow_x: Whether to allow 'x' suffix
+    """
+    assert unit in constants.MEMORY_SIZE_UNITS, f'Invalid unit: {unit}'
+
+    error_msg = (f'"{field_name}" field should be a '
+                 f'{constants.MEMORY_SIZE_PATTERN}+?,'
+                 f' got {resource_qty_str}')
+
+    resource_str = str(resource_qty_str)
+
+    # Handle plus and x suffixes, x is only used internally for jobs controller
+    plus = ''
+    if resource_str.endswith('+'):
+        if allow_plus:
+            resource_str = resource_str[:-1]
+            plus = '+'
+        else:
+            raise ValueError(error_msg)
+
+    x = ''
+    if resource_str.endswith('x'):
+        if allow_x:
+            resource_str = resource_str[:-1]
+            x = 'x'
+        else:
+            raise ValueError(error_msg)
+
+    try:
+        # We assume it is already in the wanted units to maintain backwards
+        # compatibility
+        ret_type(resource_str)
+        return f'{resource_str}{plus}{x}'
+    except ValueError:
+        pass
+
+    resource_str = resource_str.lower()
+    for mem_unit, multiplier in constants.MEMORY_SIZE_UNITS.items():
+        if resource_str.endswith(mem_unit):
+            try:
+                value = ret_type(resource_str[:-len(mem_unit)])
+                converted = (value * multiplier /
+                             constants.MEMORY_SIZE_UNITS[unit])
+                if not allow_rounding and ret_type(converted) != converted:
+                    raise ValueError(error_msg)
+                converted = ret_type(converted)
+                return f'{converted}{plus}{x}'
+            except ValueError:
+                continue
+
+    raise ValueError(error_msg)
+
+
+def parse_time_minutes(time: str) -> int:
+    """Convert a time string to minutes.
+
+    Args:
+        time: Time string with optional unit suffix (e.g., '30m', '2h', '1d')
+
+    Returns:
+        Time in minutes as an integer
+    """
+    time_str = str(time)
+
+    if time_str.isdecimal():
+        # We assume it is already in minutes to maintain backwards
+        # compatibility
+        return int(time_str)
+
+    time_str = time_str.lower()
+    for unit, multiplier in constants.TIME_UNITS.items():
+        if time_str.endswith(unit):
+            try:
+                value = float(time_str[:-len(unit)])
+                final_value = math.ceil(value * multiplier)
+                if final_value >= 0:
+                    return final_value
+            except ValueError:
+                continue
+
+    raise ValueError(f'Invalid time format: {time}')
+
+
+def normalize_any_of_resources_config(
+        any_of: List[Dict[str, Any]]) -> Tuple[str, ...]:
+    """Normalize a list of any_of resources config to a canonical form.
+
+    Args:
+        any_of: A list of any_of resources config.
+
+    Returns:
+        A normalized tuple representation that can be compared for equality.
+        Two lists with the same resource configurations in different orders
+        will produce the same normalized result.
+    """
+    if not any_of:
+        return tuple()
+
+    # Convert each config to JSON string with sorted keys, then sort the list
+    normalized_configs = [
+        json.dumps(config, sort_keys=True, separators=(',', ':'))
+        for config in any_of
+    ]
+
+    return tuple(sorted(normalized_configs))

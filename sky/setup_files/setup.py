@@ -45,6 +45,7 @@ original_init_content = None
 system = platform.system()
 
 
+# Keep in sync with sky/server/common.py get_skypilot_version_on_disk()
 def find_version():
     # Extract version information from filepath
     # Adapted from:
@@ -147,45 +148,47 @@ if os.path.exists(readme_filepath):
     long_description = io.open(readme_filepath, 'r', encoding='utf-8').read()
     long_description = parse_readme(long_description)
 
-atexit.register(revert_commit_hash)
-replace_commit_hash()
-
-setuptools.setup(
-    # NOTE: this affects the package.whl wheel name. When changing this (if
-    # ever), you must grep for '.whl' and change all corresponding wheel paths
-    # (templates/*.j2 and wheel_utils.py).
-    name='skypilot',
-    version=find_version(),
-    packages=setuptools.find_packages(),
-    author='SkyPilot Team',
-    license='Apache 2.0',
-    readme='README.md',
-    description='SkyPilot: An intercloud broker for the clouds',
-    long_description=long_description,
-    long_description_content_type='text/markdown',
-    setup_requires=['wheel'],
-    requires_python='>=3.7',
-    install_requires=dependencies['install_requires'],
-    extras_require=dependencies['extras_require'],
-    entry_points={
-        'console_scripts': ['sky = sky.cli:cli'],
-    },
-    include_package_data=True,
-    classifiers=[
-        'Programming Language :: Python :: 3.7',
-        'Programming Language :: Python :: 3.8',
-        'Programming Language :: Python :: 3.9',
-        'Programming Language :: Python :: 3.10',
-        'Programming Language :: Python :: 3.11',
-        'License :: OSI Approved :: Apache Software License',
-        'Operating System :: OS Independent',
-        'Topic :: Software Development :: Libraries :: Python Modules',
-        'Topic :: System :: Distributed Computing',
-    ],
-    project_urls={
-        'Homepage': 'https://github.com/skypilot-org/skypilot',
-        'Issues': 'https://github.com/skypilot-org/skypilot/issues',
-        'Discussion': 'https://github.com/skypilot-org/skypilot/discussions',
-        'Documentation': 'https://docs.skypilot.co/',
-    },
-)
+if __name__ == '__main__':
+    atexit.register(revert_commit_hash)
+    replace_commit_hash()
+    setuptools.setup(
+        # NOTE: this affects the package.whl wheel name. When changing this (if
+        # ever), you must grep for '.whl' and change all corresponding wheel paths
+        # (templates/*.j2 and wheel_utils.py).
+        name='skypilot',
+        version=find_version(),
+        packages=setuptools.find_packages(),
+        author='SkyPilot Team',
+        license='Apache 2.0',
+        readme='README.md',
+        description='SkyPilot: Run AI on Any Infra — Unified, Faster, Cheaper.',
+        long_description=long_description,
+        long_description_content_type='text/markdown',
+        setup_requires=['wheel'],
+        requires_python='>=3.7',
+        install_requires=dependencies['install_requires'],
+        extras_require=dependencies['extras_require'],
+        entry_points={
+            'console_scripts': ['sky = sky.cli:cli'],
+        },
+        include_package_data=True,
+        classifiers=[
+            'Programming Language :: Python :: 3.7',
+            'Programming Language :: Python :: 3.8',
+            'Programming Language :: Python :: 3.9',
+            'Programming Language :: Python :: 3.10',
+            'Programming Language :: Python :: 3.11',
+            'Programming Language :: Python :: 3.12',
+            'Programming Language :: Python :: 3.13',
+            'License :: OSI Approved :: Apache Software License',
+            'Operating System :: OS Independent',
+            'Topic :: Software Development :: Libraries :: Python Modules',
+            'Topic :: System :: Distributed Computing',
+        ],
+        project_urls={
+            'Homepage': 'https://github.com/skypilot-org/skypilot',
+            'Issues': 'https://github.com/skypilot-org/skypilot/issues',
+            'Discussion': 'https://github.com/skypilot-org/skypilot/discussions',
+            'Documentation': 'https://docs.skypilot.co/',
+        },
+    )

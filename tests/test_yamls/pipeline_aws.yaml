@@ -4,9 +4,9 @@ name: pipeline
 name: a
 
 resources:
-  cloud: aws
-  region: us-east-2
+  infra: aws/us-east-2
   cpus: 2+
+  memory: 4+
 
 run: |
   echo train starts
@@ -19,6 +19,10 @@ run: |
 ---
 name: b
 
+resources:
+  infra: aws
+  cpus: 2+
+  memory: 4+
 
 setup: |
   echo setup for train
@@ -33,6 +37,11 @@ run: |
 
 name: eval1
 
+resources:
+  infra: aws
+  cpus: 2+
+  memory: 4+
+
 setup: |
   echo setup for eval
   sleep 20
@@ -45,6 +54,11 @@ run: |
 ---
 
 name: eval2
+
+resources:
+  infra: aws
+  cpus: 2+
+  memory: 4+
 
 setup: |
   echo setup for eval

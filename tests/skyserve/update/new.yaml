@@ -7,8 +7,7 @@ service:
 
 resources:
   ports: 8081
-  cloud: gcp
-  cpus: 2+
+  infra: gcp
 
 workdir: tests/skyserve/update
 
@@ -16,6 +15,6 @@ run: |
   if (( $SKYPILOT_SERVE_REPLICA_ID % 2 == 0 )); then
     # Sleep for replicas with even id, so that we can test the mixing traffic
     # of rolling update
-    sleep 60
+    sleep 120
   fi
   python3 new_server.py --port 8081

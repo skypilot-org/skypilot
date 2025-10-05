@@ -9,7 +9,6 @@ resources:
   ports:
     - 8080
     - 8081
-  cpus: 2+
 
 setup: |
   wget https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/examples/serve/http_server/server.py

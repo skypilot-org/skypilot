@@ -11,16 +11,32 @@ on:
           - 'skypilot-nightly'
           - 'skypilot'
         default: 'skypilot-nightly'
+      version:
+        description: 'SkyPilot version to build (i.e. 1.0.0.dev20250625, optional if fetch from PyPI, required if build from source)'
+        required: false
+        type: string
+      build_method:
+        description: 'Build method: build from source or fetch from PyPI'
+        required: true
+        type: choice
+        options:
+          - 'source'
+          - 'pypi'
+        default: 'pypi'
   workflow_call:
     inputs:
       package_name:
         description: 'SkyPilot PyPI package name'
         required: true
         type: string
+      version:
+        description: 'SkyPilot version to build (i.e. 1.0.0.dev20250625)'
+        required: false
+        type: string
     outputs:
       version:
-        description: "The version fetched from PyPI"
-        value: ${{ jobs.build.outputs.version }}
+        description: "The version used for the Docker build"
+        value: ${{ jobs.prepare.outputs.version }}
     secrets:
       DOCKER_USERNAME:
         required: true
@@ -28,46 +44,239 @@ on:
         required: true
 
 jobs:
-  
-  build:
+  prepare:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.latest_version }}
+      trigger_type: ${{ steps.trigger_type.outputs.trigger_type }}
+      install_from_source: ${{ steps.install_method.outputs.install_from_source }}
     steps:
+      # Always checkout repository (Docker build always needs Dockerfile)
       - name: Checkout repository
         uses: actions/checkout@v4
+      # Determine how this workflow was triggered
+      - name: Determine trigger type
+        id: trigger_type
+        run: |
+          echo "github.workflow_ref: ${{ github.workflow_ref }}"
 
-      - name: Find the release version
+          # Check if workflow_ref contains this file's path (docker-build.yaml)
+          if [[ "${{ github.workflow_ref }}" == *"docker-build.yaml"* ]]; then
+            echo "trigger_type=direct" >> $GITHUB_OUTPUT
+            echo "Triggered from this file directly"
+          else
+            echo "trigger_type=workflow_call" >> $GITHUB_OUTPUT
+            echo "Triggered by other file through workflow_call"
+          fi
+
+      - name: Determine installation method
+        id: install_method
+        run: |
+          if [ "${{ steps.trigger_type.outputs.trigger_type }}" == "workflow_call" ]; then
+            echo "install_from_source=false" >> $GITHUB_OUTPUT
+            echo "Installing from wheel (triggered by other file through workflow_call)"
+          elif [ "${{ inputs.build_method }}" == "pypi" ]; then
+            echo "install_from_source=false" >> $GITHUB_OUTPUT
+            echo "Installing from wheel (fetch from PyPI)"
+          else
+            echo "install_from_source=true" >> $GITHUB_OUTPUT
+            echo "Installing from source (triggered from this file directly)"
+          fi
+
+      # For PyPI fetch: download wheel and source
+      - name: Download wheel from PyPI
+        if: steps.install_method.outputs.install_from_source == 'false' && inputs.build_method == 'pypi'
+        run: |
+          # Determine version to download
+          if [ -n "${{ inputs.version }}" ]; then
+            # Use the provided version
+            echo "Using provided version: ${{ inputs.version }}"
+            VERSION_TO_DOWNLOAD="${{ inputs.version }}"
+          else
+            # Fetch package info from PyPI
+            echo "Fetching package info for ${{ inputs.package_name }}"
+            PACKAGE_INFO=$(curl -s https://pypi.org/pypi/${{ inputs.package_name }}/json)
+            # Parse JSON and get the latest version
+            LATEST_VERSION=$(echo $PACKAGE_INFO | jq -r '.info.version')
+            echo "Latest version found: $LATEST_VERSION"
+            VERSION_TO_DOWNLOAD="$LATEST_VERSION"
+          fi
+
+          # Download wheel
+          mkdir -p dist
+          pip download --no-deps --dest dist ${{ inputs.package_name }}==$VERSION_TO_DOWNLOAD
+
+      # For PyPI fetch: upload artifacts for reuse
+      - name: Upload artifacts
+        if: steps.install_method.outputs.install_from_source == 'false' && inputs.build_method == 'pypi'
+        uses: actions/upload-artifact@v4
+        with:
+          name: skypilot-artifacts-${{ inputs.package_name }}
+          path: dist/
+
+      # For trigger by other file through workflow_call or PyPI fetch: download all artifacts
+      - name: Download artifacts
+        if: steps.install_method.outputs.install_from_source == 'false'
+        uses: actions/download-artifact@v4
+        with:
+          name: skypilot-artifacts-${{ inputs.package_name }}
+          path: dist/
+
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Find and verify version
         id: version
         run: |
-          # Fetch package info from PyPI
-          echo "Fetching package info for ${{ inputs.package_name }}"
-          PACKAGE_INFO=$(curl -s https://pypi.org/pypi/${{ inputs.package_name }}/json)
-          # Parse JSON and get the latest version
-          LATEST_VERSION=$(echo $PACKAGE_INFO | jq -r '.info.version')
-          echo "Latest version found: $LATEST_VERSION"
-          echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          if [ "${{ steps.install_method.outputs.install_from_source }}" == "true" ]; then
+            if [ -z "${{ inputs.version }}" ]; then
+              echo "Error: Version must be provided when building from source"
+              exit 1
+            fi
+            # Verify sky/__init__.py exists
+            if [ ! -f "sky/__init__.py" ]; then
+              echo "Error: sky/__init__.py not found"
+              exit 1
+            fi
+            # Use the provided version and sed replace in source
+            echo "Using provided version for source build: ${{ inputs.version }}"
+            sed -i "s/__version__ = '.*'/__version__ = '${{ inputs.version }}'/g" sky/__init__.py
+          fi
+
+          # Setup uv environment and install package
+          uv venv --seed ~/version-env
+          source ~/version-env/bin/activate
+
+          if [ "${{ steps.install_method.outputs.install_from_source }}" == "true" ]; then
+            echo "Installing from source..."
+            uv pip install -e .
+          else
+            echo "Installing from wheel..."
+            # Find wheel file - handle both skypilot and skypilot-nightly, with underscores
+            WHEEL=$(ls dist/*skypilot*.whl | head -1)
+            if [ -z "$WHEEL" ]; then
+              echo "Error: No wheel file found in dist directory"
+              ls -la dist/
+              exit 1
+            fi
+            echo "Found wheel: $WHEEL"
+            uv pip install "$WHEEL"
+          fi
+
+          # Extract version using sky -v
+          VERSION=$(sky -v | grep -o 'version [0-9][^,]*' | cut -d' ' -f2)
+          echo "Installed version: $VERSION"
+          echo "latest_version=$VERSION" >> $GITHUB_OUTPUT
+
+          # Verify version is not exactly 1.0.0-dev0
+          if [[ "$VERSION" == "1.0.0-dev0" ]]; then
+            echo "Error: Version cannot be exactly 1.0.0-dev0"
+            exit 1
+          fi
           cat $GITHUB_OUTPUT
 
-      - name: Update Dockerfile version
-        run: |
-          sed -i 's/skypilot-nightly\[all\]/${{ inputs.package_name }}[all]==${{ steps.version.outputs.latest_version }}/g' Dockerfile
+      # Upload complete build context (source code + wheels) for build jobs
+      - name: Upload build context
+        uses: actions/upload-artifact@v4
+        with:
+          name: skypilot-build-context-${{ inputs.package_name }}
+          path: .
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+  build:
+    needs: prepare
+    strategy:
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      # Download complete build context (source code + wheels if applicable)
+      - name: Download build context
+        uses: actions/download-artifact@v4
+        with:
+          name: skypilot-build-context-${{ inputs.package_name }}
+          path: .
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Extract platform name for tags
+        id: platform
+        run: |
+          PLATFORM_NAME=$(echo "${{ matrix.platform }}" | sed 's/\//-/g')
+          echo "name=$PLATFORM_NAME" >> $GITHUB_OUTPUT
+
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platform }}
           push: true
-          tags: "${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:latest,${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ steps.version.outputs.latest_version }}"
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: "${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }}-${{ steps.platform.outputs.name }}"
+          build-args: |
+            INSTALL_FROM_SOURCE=${{ needs.prepare.outputs.install_from_source }}
+          cache-from: |
+            type=gha,scope=${{ steps.platform.outputs.name }}
+          cache-to: |
+            type=gha,mode=max,scope=${{ steps.platform.outputs.name }}
+
+  manifest:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Create multi-platform manifest
+        run: |
+          # Create multi-platform manifest from temporary tags
+          docker buildx imagetools create \
+            -t ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:latest \
+            -t ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }} \
+            ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }}-linux-amd64 \
+            ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }}-linux-arm64
+
+      - name: Clean up temporary tags
+        if: always()
+        run: |
+          echo "🧹 Cleaning up temporary tags..."
+
+          # Get auth token for Docker Hub API
+          TOKEN=$(curl -s -H "Content-Type: application/json" -X POST \
+            -d '{"username": "${{ secrets.DOCKER_USERNAME }}", "password": "${{ secrets.DOCKER_PASSWORD }}"}' \
+            https://hub.docker.com/v2/users/login/ | jq -r .token)
+
+          # Delete temporary tags
+          for tag in "${{ needs.prepare.outputs.version }}-linux-amd64" "${{ needs.prepare.outputs.version }}-linux-arm64"; do
+            echo "Deleting tag: $tag"
+            curl -X DELETE \
+              -H "Authorization: JWT $TOKEN" \
+              "https://hub.docker.com/v2/repositories/${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}/tags/$tag/" || true
+          done
+
+      - name: Summary of final tags
+        run: |
+          echo "✅ Multi-platform tags created:"
+          echo "   - ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:latest"
+          echo "   - ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }}"
+          echo ""
+          echo "🚀 Built with native runners for maximum performance!"
+          echo "🧹 Temporary tags cleaned up automatically!"

@@ -169,7 +169,8 @@ Whichever infra you use for GPUs, SkyPilot abstracts away the mundane infra task
 
 envs:
   MODEL_NAME: meta-llama/Meta-Llama-3.1-8B-Instruct
-  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
+secrets:
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
 
 service:
   replicas: 2
@@ -226,7 +227,7 @@ You can also get the full YAML file [here](https://github.com/skypilot-org/skypi
 Launch a fully managed service with load-balancing and auto-recovery:
 
 ```
-HF_TOKEN=xxx sky serve up llama-3_1.yaml -n llama31 --env HF_TOKEN --gpus L4:1 --env MODEL_NAME=meta-llama/Meta-Llama-3.1-8B-Instruct
+HF_TOKEN=xxx sky serve up llama-3_1.yaml -n llama31 --secret HF_TOKEN --gpus L4:1 --env MODEL_NAME=meta-llama/Meta-Llama-3.1-8B-Instruct
 ```
 
 Wait until the service is ready:

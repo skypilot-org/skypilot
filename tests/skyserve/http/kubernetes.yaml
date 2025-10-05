@@ -6,8 +6,7 @@ service:
 
 resources:
   ports: 8080
-  cloud: kubernetes
-  cpus: 2+
+  infra: kubernetes
 
 workdir: examples/serve/http_server
 

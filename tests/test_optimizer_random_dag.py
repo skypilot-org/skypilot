@@ -7,13 +7,9 @@ import numpy as np
 import pandas as pd
 
 import sky
+from sky import catalog
 from sky import clouds
 from sky import exceptions
-from sky.clouds import service_catalog
-from sky.utils import registry
-
-ALL_INSTANCE_TYPE_INFOS = sum(
-    sky.list_accelerators(gpus_only=True).values(), [])
 
 DUMMY_NODES = [
     sky.optimizer._DUMMY_SOURCE_NAME,
@@ -34,6 +30,11 @@ def generate_random_dag(
     random.seed(seed)
     single_node_task_ids = random.choices(list(range(num_tasks)),
                                           k=num_tasks // 2)
+
+    # Get instance type infos inside the function
+    all_instance_type_infos = sum(
+        sky.list_accelerators(gpus_only=True).values(), [])
+
     with sky.Dag() as dag:
         for i in range(num_tasks):
             op = sky.Task(name=f'task{i}')
@@ -66,7 +67,7 @@ def generate_random_dag(
 
             num_candidates = random.randint(1, max_num_candidate_resources)
             candidate_instance_types = random.choices(
-                ALL_INSTANCE_TYPE_INFOS, k=len(ALL_INSTANCE_TYPE_INFOS))
+                all_instance_type_infos, k=len(all_instance_type_infos))
 
             candidate_resources = set()
             for candidate in candidate_instance_types:
@@ -74,7 +75,7 @@ def generate_random_dag(
                 if pd.isna(instance_type):
                     assert candidate.cloud == 'GCP', candidate
                     (instance_list,
-                     _) = service_catalog.get_instance_type_for_accelerator(
+                     _) = catalog.get_instance_type_for_accelerator(
                          candidate.accelerator_name,
                          candidate.accelerator_count,
                          clouds='gcp')
@@ -83,7 +84,7 @@ def generate_random_dag(
                     if 'tpu' in candidate.accelerator_name:
                         instance_type = 'TPU-VM'
                 resources = sky.Resources(
-                    cloud=registry.CLOUD_REGISTRY.from_str(candidate.cloud),
+                    infra=candidate.cloud,
                     instance_type=instance_type,
                     accelerators={
                         candidate.accelerator_name: candidate.accelerator_count

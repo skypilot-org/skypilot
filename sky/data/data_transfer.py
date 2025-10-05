@@ -14,6 +14,7 @@ Currently implemented:
 TODO:
 - All combinations of Azure Transfer
 - All combinations of R2 Transfer
+- All combinations of Nebius Transfer
 - GCS -> S3
 """
 import json
@@ -94,7 +95,8 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
     logger.info(f'{colorama.Fore.GREEN}Transfer job scheduled: '
                 f'{colorama.Style.RESET_ALL}'
                 f's3://{s3_bucket_name} -> gs://{gs_bucket_name} ')
-    logger.debug(json.dumps(operation, indent=4))
+    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        logger.debug(json.dumps(operation, indent=4))
     logger.info('Waiting for the transfer to finish')
     start = time.time()
     with rich_utils.safe_status('Transferring'):
@@ -135,6 +137,35 @@ def s3_to_r2(s3_bucket_name: str, r2_bucket_name: str) -> None:
                               'a local source for the storage object.')
 
 
+def s3_to_nebius(s3_bucket_name: str, nebius_bucket_name: str) -> None:
+    """Creates a one-time transfer from Amazon S3 to Nebius Object Storage.
+
+    it will block until the transfer is complete.
+
+    Args:
+      s3_bucket_name: str; Name of the Amazon S3 Bucket
+      nebius_bucket_name: str; Name of the Cloudflare R2 Bucket
+    """
+    raise NotImplementedError('Moving data directly from clouds to Nebius is '
+                              'currently not supported. Please specify '
+                              'a local source for the storage object.')
+
+
+def r2_to_nebius(r2_bucket_name: str, nebius_bucket_name: str) -> None:
+    """Creates a one-time transfer from Cloudflare R2 Bucket to
+     Nebius Object Storage.
+
+    it will block until the transfer is complete.
+
+    Args:
+      r2_bucket_name: str; Name of the Amazon S3 Bucket
+      nebius_bucket_name: str; Name of the Cloudflare R2 Bucket
+    """
+    raise NotImplementedError('Moving data directly from clouds to Nebius is '
+                              'currently not supported. Please specify '
+                              'a local source for the storage object.')
+
+
 def gcs_to_s3(gs_bucket_name: str, s3_bucket_name: str) -> None:
     """Creates a one-time transfer from Google Cloud Storage to Amazon S3.
 
@@ -160,6 +191,19 @@ def gcs_to_r2(gs_bucket_name: str, r2_bucket_name: str) -> None:
                               'a local source for the storage object.')
 
 
+def gcs_to_nebius(gs_bucket_name: str, nebius_bucket_name: str) -> None:
+    """Creates a one-time transfer from Google Cloud Storage to
+     Nebius Object Storage.
+
+     Args:
+      gs_bucket_name: str; Name of the Google Cloud Storage Bucket
+      nebius_bucket_name: str; Name of the Nebius Bucket
+    """
+    raise NotImplementedError('Moving data directly from clouds to Nebius is '
+                              'currently not supported. Please specify '
+                              'a local source for the storage object.')
+
+
 def r2_to_gcs(r2_bucket_name: str, gs_bucket_name: str) -> None:
     """Creates a one-time transfer from Cloudflare R2 to Google Cloud Storage.
 
@@ -175,6 +219,22 @@ def r2_to_gcs(r2_bucket_name: str, gs_bucket_name: str) -> None:
                               'a local source for the storage object.')
 
 
+def nebius_to_gcs(nebius_bucket_name: str, gs_bucket_name: str) -> None:
+    """Creates a one-time transfer from Nebius Object Storage
+     to Google Cloud Storage.
+
+    Can be viewed from: https://console.cloud.google.com/transfer/cloud
+    it will block until the transfer is complete.
+
+    Args:
+      nebius_bucket_name: str; Name of the Nebius Object Storage
+      gs_bucket_name: str; Name of the Google Cloud Storage Bucket
+    """
+    raise NotImplementedError('Moving data directly from Nebius to clouds is '
+                              'currently not supported. Please specify '
+                              'a local source for the storage object.')
+
+
 def r2_to_s3(r2_bucket_name: str, s3_bucket_name: str) -> None:
     """Creates a one-time transfer from Amazon S3 to Google Cloud Storage.
 
@@ -183,6 +243,22 @@ def r2_to_s3(r2_bucket_name: str, s3_bucket_name: str) -> None:
 
     Args:
       r2_bucket_name: str; Name of the Cloudflare R2 Bucket\
+      s3_bucket_name: str; Name of the Amazon S3 Bucket
+    """
+    raise NotImplementedError('Moving data directly from R2 to clouds is '
+                              'currently not supported. Please specify '
+                              'a local source for the storage object.')
+
+
+def nebius_to_s3(nebius_bucket_name: str, s3_bucket_name: str) -> None:
+    """Creates a one-time transfer from Nebius Object Storage
+    to Amazon S3 Bucket.
+
+    Can be viewed from: https://console.cloud.google.com/transfer/cloud
+    it will block until the transfer is complete.
+
+    Args:
+      nebius_bucket_name: str; Name of the Nebius Object Storage\
       s3_bucket_name: str; Name of the Amazon S3 Bucket
     """
     raise NotImplementedError('Moving data directly from R2 to clouds is '

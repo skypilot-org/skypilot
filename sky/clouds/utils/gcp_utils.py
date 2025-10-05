@@ -10,7 +10,7 @@ import dataclasses
 import json
 import time
 import typing
-from typing import List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import cachetools
 
@@ -18,6 +18,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.provision.gcp import constants
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
@@ -36,9 +37,10 @@ def is_tpu(resources: Optional['resources_lib.Resources']) -> bool:
 def is_tpu_vm(resources: Optional['resources_lib.Resources']) -> bool:
     if not is_tpu(resources):
         return False
-    assert (resources is not None and len(resources.accelerators) == 1)
+    assert (resources is not None and resources.accelerators is not None and
+            len(resources.accelerators) == 1)
     acc, _ = list(resources.accelerators.items())[0]
-    if kubernetes_utils.is_tpu_on_gke(acc):
+    if kubernetes_utils.is_tpu_on_gke(acc, normalize=False):
         return False
     if resources.accelerator_args is None:
         return True
@@ -48,7 +50,7 @@ def is_tpu_vm(resources: Optional['resources_lib.Resources']) -> bool:
 def is_tpu_vm_pod(resources: Optional['resources_lib.Resources']) -> bool:
     if not is_tpu_vm(resources):
         return False
-    assert resources is not None
+    assert resources is not None and resources.accelerators is not None
     acc, _ = list(resources.accelerators.items())[0]
     return not acc.endswith('-8')
 
@@ -136,10 +138,16 @@ def _list_reservations_for_instance_type(
     For example, if we have a specific reservation with n1-highmem-8
     in us-central1-c. `sky launch --gpus V100` will fail.
     """
-    prioritize_reservations = skypilot_config.get_nested(
-        ('gcp', 'prioritize_reservations'), False)
-    specific_reservations = skypilot_config.get_nested(
-        ('gcp', 'specific_reservations'), [])
+    prioritize_reservations = skypilot_config.get_effective_region_config(
+        cloud='gcp',
+        region=None,
+        keys=('prioritize_reservations',),
+        default_value=False)
+    specific_reservations = skypilot_config.get_effective_region_config(
+        cloud='gcp',
+        region=None,
+        keys=('specific_reservations',),
+        default_value=[])
     if not prioritize_reservations and not specific_reservations:
         return []
     logger.debug(f'Querying GCP reservations for instance {instance_type!r}')
@@ -167,16 +175,94 @@ def _list_reservations_for_instance_type(
     return [GCPReservation.from_dict(r) for r in json.loads(stdout)]
 
 
-def get_minimal_permissions() -> List[str]:
+def get_minimal_compute_permissions() -> List[str]:
     permissions = copy.copy(constants.VM_MINIMAL_PERMISSIONS)
-    if skypilot_config.get_nested(('gcp', 'vpc_name'), None) is None:
+    if skypilot_config.get_effective_region_config(
+            cloud='gcp', region=None, keys=('vpc_name',),
+            default_value=None) is None:
         # If custom VPC is not specified, permissions to modify network are
         # required to ensure SkyPilot to be able to setup the network, and
         # allow opening ports (e.g., via `resources.ports`).
         permissions += constants.FIREWALL_PERMISSIONS
 
-    if (skypilot_config.get_nested(('gcp', 'prioritize_reservations'), False) or
-            skypilot_config.get_nested(('gcp', 'specific_reservations'), [])):
+    if (skypilot_config.get_effective_region_config(
+            cloud='gcp',
+            region=None,
+            keys=('prioritize_reservations',),
+            default_value=False) or skypilot_config.get_effective_region_config(
+                cloud='gcp',
+                region=None,
+                keys=('specific_reservations',),
+                default_value=[])):
         permissions += constants.RESERVATION_PERMISSIONS
 
+    permissions += constants.GCP_MINIMAL_PERMISSIONS
+
     return permissions
+
+
+def get_minimal_storage_permissions() -> List[str]:
+    permissions = copy.copy(constants.STORAGE_MINIMAL_PERMISSIONS)
+
+    permissions += constants.GCP_MINIMAL_PERMISSIONS
+
+    return permissions
+
+
+# Get the DWS configuration for the given context in GKE.
+def get_dws_config(
+    context: str,
+    k8s_kueue_local_queue_name: Optional[str],
+    cluster_config_overrides: Optional[Dict[str, Any]] = None,
+) -> Tuple[bool, bool, Optional[int]]:
+    """Get the DWS configuration for the given context.
+
+        Args:
+            context: The context to get the DWS configuration for.
+            k8s_kueue_local_queue_name: The name of the Kueue local queue.
+            cluster_config_overrides: The cluster config overrides.
+
+        Returns:
+            A tuple of (enable_flex_start,
+                        enable_flex_start_queued_provisioning,
+                        max_run_duration_seconds).
+
+        Raises:
+            ValueError: If k8s_kueue_local_queue_name is missing to enable
+                        flex start queued provisioning for the given context.
+        """
+    dws_config = skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=context,
+        keys=('dws',),
+        default_value={},
+        override_configs=cluster_config_overrides)
+    if not dws_config:
+        return False, False, None
+
+    enabled = dws_config.get('enabled', False)
+    if not enabled:
+        return False, False, None
+
+    enable_flex_start = False
+    enable_flex_start_queued_provisioning = False
+    max_run_duration_seconds = None
+    # If users already use Kueue, use the flex start with queued
+    # provisioning mode.
+    if k8s_kueue_local_queue_name:
+        enable_flex_start_queued_provisioning = True
+    else:
+        enable_flex_start = True
+
+    if not enable_flex_start_queued_provisioning:
+        return (enable_flex_start, enable_flex_start_queued_provisioning,
+                max_run_duration_seconds)
+
+    # Max run duration is only used in the flex start with queued
+    # provisioning mode.
+    max_run_duration = dws_config.get('max_run_duration', None)
+    if max_run_duration:
+        max_run_duration_seconds = resources_utils.parse_time_minutes(
+            max_run_duration) * 60
+    return (enable_flex_start, enable_flex_start_queued_provisioning,
+            max_run_duration_seconds)

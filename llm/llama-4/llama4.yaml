@@ -1,0 +1,36 @@
+envs:
+  MODEL_NAME: meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8
+  # MODEL_NAME: meta-llama/Llama-3.2-3B-Vision
+
+secrets:
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
+
+resources:
+  accelerators: { H100:8, H200:8, B100:8, B200:8, GB200:8 }
+  cpus: 32+
+  disk_size: 512  # Ensure model checkpoints can fit.
+  disk_tier: best
+  ports: 8081
+
+setup: |
+  uv pip install "vllm>=0.8.3"
+
+run: |
+  echo 'Starting vllm api server...'
+
+  vllm serve $MODEL_NAME \
+    --port 8081 \
+    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+    --max-model-len 430000
+
+service:
+  replicas: 2
+  # An actual request for readiness probe.
+  readiness_probe:
+    path: /v1/chat/completions
+    post_data:
+      model: $MODEL_NAME
+      messages:
+        - role: user
+          content: Hello! What is your name?
+      max_tokens: 1

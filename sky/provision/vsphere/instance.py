@@ -1,12 +1,12 @@
 """Vsphere instance provisioning."""
 import json
 import typing
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import vsphere as vsphere_adaptor
-from sky.clouds.service_catalog.common import get_catalog_path
+from sky.catalog.common import get_catalog_path
 from sky.provision import common
 from sky.provision.vsphere import vsphere_utils
 from sky.provision.vsphere.common import custom_script as custom_script_lib
@@ -30,9 +30,10 @@ HEAD_NODE_VALUE = '1'
 WORKER_NODE_VALUE = '0'
 
 
-def run_instances(region: str, cluster_name: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
+    del cluster_name  # unused
     logger.info('New provision of Vsphere: run_instances().')
 
     resumed_instance_ids: List[str] = []
@@ -40,7 +41,7 @@ def run_instances(region: str, cluster_name: str,
     vc_object = _get_vc_object(region)
     vc_object.connect()
 
-    exist_instances = _get_filtered_instance(vc_object, cluster_name,
+    exist_instances = _get_filtered_instance(vc_object, cluster_name_on_cloud,
                                              config.provider_config)
     head_instance_id = _get_head_instance_id(exist_instances)
 
@@ -89,8 +90,8 @@ def run_instances(region: str, cluster_name: str,
             config, region, vc_object)
         # TODO: update logic for multi-node creation
         for _ in range(to_start_num):
-            created_instance_uuid = _create_instances(cluster_name, config,
-                                                      region, vc_object,
+            created_instance_uuid = _create_instances(cluster_name_on_cloud,
+                                                      config, region, vc_object,
                                                       vsphere_cluster_name)
             created_instance_ids.append(created_instance_uuid)
         if head_instance_id is None:
@@ -104,7 +105,7 @@ def run_instances(region: str, cluster_name: str,
         provider_name='vsphere',
         region=region,
         zone=vsphere_cluster_name,
-        cluster_name=cluster_name,
+        cluster_name=cluster_name_on_cloud,
         head_instance_id=head_instance_id,
         resumed_instance_ids=resumed_instance_ids,
         created_instance_ids=created_instance_ids,
@@ -393,11 +394,13 @@ def _get_cluster_name_filter(cluster_name_on_cloud):
 
 
 def query_instances(
+    cluster_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
+    del cluster_name  # unused
     logger.info('New provision of Vsphere: query_instances().')
     assert provider_config is not None, cluster_name_on_cloud
     region = provider_config['region']
@@ -413,12 +416,13 @@ def query_instances(
         'suspended': None,
     }
 
-    status = {}
+    status: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                            Optional[str]]] = {}
     for inst in instances:
         stat = status_map[inst.runtime.powerState]
         if non_terminated_only and stat is None:
             continue
-        status[inst.summary.config.instanceUuid] = stat
+        status[inst.summary.config.instanceUuid] = (stat, None)
     vc_object.disconnect()
     return status
 

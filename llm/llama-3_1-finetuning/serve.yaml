@@ -2,7 +2,7 @@
 #
 # Usage:
 #
-#  HF_TOKEN=xxx sky launch serve.yaml -c llama31-serve --env HF_TOKEN
+#  HF_TOKEN=xxx sky launch serve.yaml -c llama31-serve --secret HF_TOKEN
 
 envs:
   MODEL_SIZE: 8B

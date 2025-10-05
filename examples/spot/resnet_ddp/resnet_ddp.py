@@ -117,7 +117,7 @@ def main():
     # We need to use seeds to make sure that the models initialized in different processes are the same
     set_random_seeds(random_seed=random_seed)
 
-    # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
+    # Initializes the distributed backend which will take care of synchronizing nodes/GPUs
     torch.distributed.init_process_group(backend="nccl")
 
     # Encapsulate the model on the GPU assigned to the current process

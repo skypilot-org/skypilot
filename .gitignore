@@ -15,3 +15,5 @@ sky/clouds/service_catalog/data_fetchers/*.csv
 
 # For editor files
 *.swp
+.buildkite/*.yaml
+.coverage

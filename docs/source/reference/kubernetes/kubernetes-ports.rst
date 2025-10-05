@@ -52,7 +52,7 @@ These load balancers will be automatically terminated when the cluster is delete
 
     To work around this issue, make sure all your ports have services running behind them.
 
-Internal Load Balancers
+Internal load balancers
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 To restrict your services to be accessible only within the cluster, you can set all SkyPilot services to use `internal load balancers <https://kubernetes.io/docs/concepts/services-networking/service/#internal-load-balancer>`_.
@@ -124,6 +124,7 @@ To use this mode:
 .. tip::
 
     For RKE2 and K3s, the pre-installed Nginx ingress is not correctly configured by default. Follow the `bare-metal installation instructions <https://kubernetes.github.io/ingress-nginx/deploy/#bare-metal-clusters/>`_ to set up the Nginx ingress controller correctly.
+
 
 When using this mode, SkyPilot creates an ingress resource and a ClusterIP service for each port opened. The port can be accessed externally by using the Ingress URL plus a path prefix of the form :code:`/skypilot/{pod_name}/{port}`.
 

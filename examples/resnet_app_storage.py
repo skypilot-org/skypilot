@@ -71,7 +71,7 @@ with sky.Dag() as dag:
     train.set_inputs('s3://imagenet-bucket', estimated_size_gigabytes=150)
     train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
     train.set_resources({
-        sky.Resources(sky.AWS(), 'p3.2xlarge'),
+        sky.Resources(infra='aws', instance_type='p3.2xlarge'),
     })
 
 sky.launch(dag)

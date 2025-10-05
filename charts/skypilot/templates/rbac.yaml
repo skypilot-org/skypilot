@@ -1,16 +1,33 @@
+{{- if .Values.rbac.create }}
+{{/* TODO(aylei): removed in v0.11.0 */}}
+{{- if .Values.rbac.rules }}
+{{- fail "`.rbac.rules` is deprecated. Please use `.rbac.namespaceRules` and `.rbac.clusterRules` instead" }}
+{{- end }}
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: {{ .Release.Name }}-api-sa
+  name: {{ include "skypilot.serviceAccountName" . }}
   namespace: {{ .Release.Namespace }}
+  {{- if .Values.rbac.serviceAccountAnnotations }}
+  annotations:
+    {{- toYaml .Values.rbac.serviceAccountAnnotations | nindent 4 }}
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: {{ .Release.Name }}-api-role
 rules:
-{{ toYaml .Values.rbac.rules | indent 2 }}
+{{ toYaml .Values.rbac.clusterRules | indent 2 }}
+{{- if .Values.rbac.manageRbacPolicies }}
+  - apiGroups: [ "rbac.authorization.k8s.io" ]
+    resources: [ "clusterroles", "clusterrolebindings" ]
+    verbs: [ "*" ]
+{{- end }}
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -18,9 +35,45 @@ metadata:
   name: {{ .Release.Name }}-api-role-binding
 subjects:
 - kind: ServiceAccount
-  name: {{ .Release.Name }}-api-sa
+  name: {{ include "skypilot.serviceAccountName" . }}
   namespace: {{ .Release.Namespace }}
 roleRef:
   kind: ClusterRole
   name: {{ .Release.Name }}-api-role
   apiGroup: rbac.authorization.k8s.io
+{{- $namespace := .Values.kubernetesCredentials.inclusterNamespace | default .Release.Namespace }}
+{{- if ne $namespace .Release.Namespace }}
+---
+{{- include "skypilot.ensureNamespace" $namespace }}
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Release.Name }}-api-role
+  namespace: {{ $namespace }}
+rules:
+{{ toYaml .Values.rbac.namespaceRules | indent 2 }}
+{{- if .Values.rbac.manageRbacPolicies }}
+  - apiGroups: [ "rbac.authorization.k8s.io" ]
+    resources: [ "roles", "rolebindings" ]
+    verbs: [ "*" ]
+  - apiGroups: [ "" ]
+    resources: [ "serviceaccounts" ]
+    verbs: [ "*" ]
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Release.Name }}-api-role-binding
+  namespace: {{ $namespace }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "skypilot.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ .Release.Name }}-api-role
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

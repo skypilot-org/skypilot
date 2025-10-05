@@ -18,6 +18,11 @@ file_mounts:
   /mount_public_azure:
     source: https://azureopendatastorage.blob.core.windows.net/nyctlc
     mode: MOUNT
+  
+  # Multiple mount points for Azure
+  /mount_public_azure_2:
+    source: https://azureopendatastorage.blob.core.windows.net/nyctlc
+    mode: MOUNT
   {% endif %}
 
   # Mounting private buckets in COPY mode with a source dir
@@ -40,6 +45,20 @@ file_mounts:
     mode: MOUNT
   {% endif %}
 
+  # Mounting private buckets in MOUNT_CACHED mode
+  {% if include_mount_cached | default(False) %}
+  /mount_private_mount_cached:
+    name: {{storage_name}}
+    source: ~/tmp-workdir
+    mode: MOUNT_CACHED
+  {% endif %}
+
+  # Mounting empty workdir
+  /mount_empty_workdir:
+    name: {{empty_storage_name}}
+    source: ~/empty-workdir
+    mode: MOUNT
+
 run: |
   set -ex
 
@@ -52,6 +71,7 @@ run: |
   {% endif %}
   {% if include_azure_mount | default(True) %}
   ls -ltr /mount_public_azure/green
+  ls -ltr /mount_public_azure_2/green
   {% endif %}
 
   # Check private bucket contents
@@ -71,4 +91,16 @@ run: |
 
   # Write to private bucket in MOUNT mode should pass
   echo "hello" > /mount_private_mount/hello.txt
+  {% endif %}
+
+  {% if include_mount_cached | default(False) %}
+  # Check private bucket contents
+  ls -ltr /mount_private_mount_cached/foo
+  ls -ltr /mount_private_mount_cached/tmp\ file
+
+  # Symlinks are not copied to buckets
+  ! ls /mount_private_mount_cached/circle-link
+
+  # Write to private bucket in MOUNT_CACHED mode should pass
+  echo "hello" > /mount_private_mount_cached/hello.txt
   {% endif %}

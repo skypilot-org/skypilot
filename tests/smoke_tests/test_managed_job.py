@@ -26,17 +26,20 @@ import re
 import tempfile
 import time
 
+import jinja2
 import pytest
 from smoke_tests import smoke_tests_utils
 from smoke_tests import test_mount_and_storage
 
 import sky
 from sky import jobs
+from sky import skypilot_config
 from sky.clouds import gcp
 from sky.data import storage as storage_lib
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import yaml_utils
 
 
 # ---------- Testing managed job ----------
@@ -44,22 +47,21 @@ from sky.utils import controller_utils
 # when the controller being on Azure, which takes a long time for launching
 # step.
 @pytest.mark.managed_jobs
-@pytest.mark.no_nebius  # Autodown and Autostop not supported.
-@pytest.mark.resource_heavy
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
 def test_managed_jobs_basic(generic_cloud: str):
     """Test the managed jobs yaml."""
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'managed-jobs',
         [
-            f'sky jobs launch -n {name}-1 --cloud {generic_cloud} examples/managed_job.yaml -y -d',
-            f'sky jobs launch -n {name}-2 --cloud {generic_cloud} examples/managed_job.yaml -y -d',
+            f'sky jobs launch -n {name}-1 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} examples/managed_job.yaml -y -d',
+            f'sky jobs launch -n {name}-2 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} examples/managed_job.yaml -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-1',
                 job_status=[
                     sky.ManagedJobStatus.PENDING,
-                    sky.ManagedJobStatus.SUBMITTED,
+                    sky.ManagedJobStatus.DEPRECATED_SUBMITTED,
                     sky.ManagedJobStatus.STARTING, sky.ManagedJobStatus.RUNNING
                 ],
                 timeout=60),
@@ -67,7 +69,8 @@ def test_managed_jobs_basic(generic_cloud: str):
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-2',
                 job_status=[sky.ManagedJobStatus.RUNNING],
-                timeout=180 if generic_cloud == 'azure' else 120),
+                timeout=360
+                if generic_cloud in ['azure', 'kubernetes', 'nebius'] else 120),
             f'sky jobs cancel -y -n {name}-1',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -82,8 +85,54 @@ def test_managed_jobs_basic(generic_cloud: str):
         # TODO(zhwu): Change to f'sky jobs cancel -y -n {name}-1 -n {name}-2' when
         # canceling multiple job names is supported.
         f'sky jobs cancel -y -n {name}-1; sky jobs cancel -y -n {name}-2',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
+def test_managed_jobs_cli_exit_codes(generic_cloud: str):
+    """Test that managed jobs CLI commands properly return exit codes based on job success/failure."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'managed_jobs_exit_codes',
+        [
+            # Test jobs launch with successful job
+            f'sky jobs launch -y -n jobs-{name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo jobs success" && echo "Jobs launch exit code: $?"',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'jobs-{name}',
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=60),
+
+            # Get job ID from the queue and test logs with successful job
+            f'JOB_ROW=$(sky jobs queue | grep jobs-{name} | head -n1) && '
+            f'echo "$JOB_ROW" && '
+            f'JOB_ID=$(echo "$JOB_ROW" | awk \'{{print $1}}\') && '
+            f'echo "JOB_ID=$JOB_ID" && '
+            f'sky jobs logs $JOB_ID && echo "Jobs logs exit code: $?"',
+
+            # Test jobs launch with failing job
+            f'sky jobs launch -y -n jobs-fail-{name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "exit 1" || echo "Jobs launch failed exit code: $?" | grep "Jobs launch failed exit code: 100"',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'jobs-fail-{name}',
+                job_status=[sky.ManagedJobStatus.FAILED],
+                timeout=60),
+
+            # Get job ID from the queue and test logs with failed job
+            f'JOB_ROW=$(sky jobs queue | grep jobs-fail-{name} | head -n1) && '
+            f'echo "$JOB_ROW" && '
+            f'JOB_ID=$(echo "$JOB_ROW" | awk \'{{print $1}}\') && '
+            f'echo "JOB_ID=$JOB_ID" && '
+            f'sky jobs logs $JOB_ID || echo "Failed jobs logs exit code: $?" | grep "Failed jobs logs exit code: 100"',
+        ],
+        f'sky jobs cancel -y -n jobs-{name}; sky jobs cancel -y -n jobs-fail-{name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=20 * 60,  # Consistent with other managed jobs tests
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -96,41 +145,55 @@ def test_managed_jobs_basic(generic_cloud: str):
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.no_do  # DO does not support spot instances
 @pytest.mark.no_vast  # The pipeline.yaml uses other clouds
-@pytest.mark.no_nebius  # Nebius does not support spot instances
+@pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
+@pytest.mark.no_seeweb  # Seeweb does not support spot instances
 @pytest.mark.managed_jobs
 def test_job_pipeline(generic_cloud: str):
     """Test a job pipeline."""
     name = smoke_tests_utils.get_cluster_name()
-    test = smoke_tests_utils.Test(
-        'job_pipeline',
-        [
-            f'sky jobs launch -n {name} tests/test_yamls/pipeline.yaml --cloud {generic_cloud} -y -d',
-            # Need to wait for setup and job initialization.
-            'sleep 30',
-            rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "STARTING\|RUNNING"',
-            # `grep -A 4 {name}` finds the job with {name} and the 4 lines
-            # after it, i.e. the 4 tasks within the job.
-            # `sed -n 2p` gets the second line of the 4 lines, i.e. the first
-            # task within the job.
-            rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 2p | grep "STARTING\|RUNNING"',
-            f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 3p | grep "PENDING"',
+
+    # Use Jinja templating to generate the pipeline YAML with the specific cloud
+    template_str = pathlib.Path('tests/test_yamls/pipeline.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(cloud=generic_cloud)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+
+        test = smoke_tests_utils.Test(
+            'job_pipeline',
+            [
+                f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} {file_path} -y -d',
+                # Need to wait for setup and job initialization.
+                'sleep 30',
+                rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "STARTING\|RUNNING"',
+                # `grep -A 4 {name}` finds the job with {name} and the 4 lines
+                # after it, i.e. the 4 tasks within the job.
+                # `sed -n 2p` gets the second line of the 4 lines, i.e. the first
+                # task within the job.
+                rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 2p | grep "STARTING\|RUNNING"',
+                f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 3p | grep "PENDING"',
+                f'sky jobs cancel -y -n {name}',
+                'sleep 5',
+                rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 2p | grep "CANCELLING\|CANCELLED"',
+                rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 3p | grep "CANCELLING\|CANCELLED"',
+                rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 4p | grep "CANCELLING\|CANCELLED"',
+                rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 5p | grep "CANCELLING\|CANCELLED"',
+                'sleep 200',
+                f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 2p | grep "CANCELLED"',
+                f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 3p | grep "CANCELLED"',
+                f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 4p | grep "CANCELLED"',
+                f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 5p | grep "CANCELLED"',
+            ],
             f'sky jobs cancel -y -n {name}',
-            'sleep 5',
-            rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 2p | grep "CANCELLING\|CANCELLED"',
-            rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 3p | grep "CANCELLING\|CANCELLED"',
-            rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 4p | grep "CANCELLING\|CANCELLED"',
-            rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 5p | grep "CANCELLING\|CANCELLED"',
-            'sleep 200',
-            f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 2p | grep "CANCELLED"',
-            f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 3p | grep "CANCELLED"',
-            f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 4p | grep "CANCELLED"',
-            f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 5p | grep "CANCELLED"',
-        ],
-        f'sky jobs cancel -y -n {name}',
-        # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
-        timeout=30 * 60,
-    )
-    smoke_tests_utils.run_one_test(test)
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
+            timeout=30 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_fluidstack  #fluidstack does not support spot instances
@@ -140,7 +203,10 @@ def test_job_pipeline(generic_cloud: str):
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.no_do  # DO does not support spot instances
-@pytest.mark.no_nebius  # Nebius does not support spot instances
+@pytest.mark.no_vast  # Test fails to stay within a single cloud
+@pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
+@pytest.mark.no_seeweb  # Seeweb does not support spot instances
 @pytest.mark.managed_jobs
 def test_managed_jobs_failed_setup(generic_cloud: str):
     """Test managed job with failed setup."""
@@ -148,7 +214,7 @@ def test_managed_jobs_failed_setup(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'managed_jobs_failed_setup',
         [
-            f'sky jobs launch -n {name} --cloud {generic_cloud} -y -d tests/test_yamls/failed_setup.yaml',
+            f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} -y -d tests/test_yamls/failed_setup.yaml',
             # Make sure the job failed quickly.
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -157,6 +223,7 @@ def test_managed_jobs_failed_setup(generic_cloud: str):
                 timeout=365),
         ],
         f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
@@ -170,7 +237,9 @@ def test_managed_jobs_failed_setup(generic_cloud: str):
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.no_vast  # Test fails to stay within a single cloud
-@pytest.mark.no_nebius  # Nebius does not support spot instances
+@pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
+@pytest.mark.no_seeweb  # Seeweb does not support spot instances
 @pytest.mark.managed_jobs
 def test_managed_jobs_pipeline_failed_setup(generic_cloud: str):
     """Test managed job with failed setup for a pipeline."""
@@ -178,7 +247,7 @@ def test_managed_jobs_pipeline_failed_setup(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'managed_jobs_pipeline_failed_setup',
         [
-            f'sky jobs launch -n {name} --cloud {generic_cloud} -y -d tests/test_yamls/failed_setup_pipeline.yaml',
+            f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} -y -d tests/test_yamls/failed_setup_pipeline.yaml',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -196,6 +265,7 @@ def test_managed_jobs_pipeline_failed_setup(generic_cloud: str):
             f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 5p | grep "CANCELLED"',
         ],
         f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=30 * 60,
     )
@@ -217,7 +287,7 @@ def test_managed_jobs_recovery_aws(aws_config_region):
         'managed_jobs_recovery_aws',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
-            rf'sky jobs launch --cloud aws --region {region} --use-spot -n {name} "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800" -y -d',
+            rf'sky jobs launch --infra aws/{region} --use-spot -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -243,6 +313,7 @@ def test_managed_jobs_recovery_aws(aws_config_region):
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo "$RUN_ID"; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | grep "$RUN_ID"',
         ],
         f'sky jobs cancel -y -n {name}; {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=25 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -267,7 +338,7 @@ def test_managed_jobs_recovery_gcp():
         'managed_jobs_recovery_gcp',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
-            rf'sky jobs launch --cloud gcp --zone {zone} -n {name} --use-spot --cpus 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800" -y -d',
+            rf'sky jobs launch --infra gcp/*/{zone} -n {name} --use-spot {smoke_tests_utils.LOW_RESOURCE_ARG} "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -286,6 +357,7 @@ def test_managed_jobs_recovery_gcp():
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo "$RUN_ID"; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | grep "$RUN_ID"',
         ],
         f'sky jobs cancel -y -n {name}; {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=25 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -344,6 +416,7 @@ def test_managed_jobs_pipeline_recovery_aws(aws_config_region):
             f'cat /tmp/{name}-run-ids | sed -n 2p | grep `cat /tmp/{name}-run-id`',
         ],
         f'sky jobs cancel -y -n {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=25 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -366,7 +439,7 @@ def test_managed_jobs_pipeline_recovery_gcp():
         'managed_jobs_pipeline_recovery_gcp',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
-            f'sky jobs launch -n {name} tests/test_yamls/pipeline_gcp.yaml -y -d',
+            f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/pipeline_gcp.yaml -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -395,6 +468,7 @@ def test_managed_jobs_pipeline_recovery_gcp():
             f'cat /tmp/{name}-run-ids | sed -n 2p | grep `cat /tmp/{name}-run-id`',
         ],
         f'sky jobs cancel -y -n {name}; {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=25 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -408,7 +482,9 @@ def test_managed_jobs_pipeline_recovery_gcp():
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.no_do  # DO does not have spot instances
 @pytest.mark.no_vast  # Uses other clouds
-@pytest.mark.no_nebius  # Nebius does not support spot instances
+@pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
+@pytest.mark.no_seeweb  # Seeweb does not support spot instances
 @pytest.mark.managed_jobs
 def test_managed_jobs_recovery_default_resources(generic_cloud: str):
     """Test managed job recovery for default resources."""
@@ -416,7 +492,7 @@ def test_managed_jobs_recovery_default_resources(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'managed-spot-recovery-default-resources',
         [
-            f'sky jobs launch -n {name} --cloud {generic_cloud} --use-spot "sleep 30 && sudo shutdown now && sleep 1000" -y -d',
+            f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} --use-spot "sleep 30 && sudo shutdown now && sleep 1000" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -427,6 +503,7 @@ def test_managed_jobs_recovery_default_resources(generic_cloud: str):
                 timeout=360),
         ],
         f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=25 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -444,7 +521,7 @@ def test_managed_jobs_recovery_multi_node_aws(aws_config_region):
         'managed_jobs_recovery_multi_node_aws',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
-            rf'sky jobs launch --cloud aws --region {region} -n {name} --use-spot --num-nodes 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800" -y -d',
+            rf'sky jobs launch --infra aws/{region} -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot --num-nodes 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -471,6 +548,7 @@ def test_managed_jobs_recovery_multi_node_aws(aws_config_region):
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],
         f'sky jobs cancel -y -n {name}; {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=30 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -483,7 +561,7 @@ def test_managed_jobs_recovery_multi_node_gcp():
     name = smoke_tests_utils.get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
-    zone = 'us-west2-a'
+    zone = 'us-central1-a'
     # Use ':' to match as the cluster name will contain the suffix with job id
     query_cmd = (
         f'gcloud compute instances list --filter='
@@ -495,7 +573,7 @@ def test_managed_jobs_recovery_multi_node_gcp():
         'managed_jobs_recovery_multi_node_gcp',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
-            rf'sky jobs launch --cloud gcp --zone {zone} -n {name} --use-spot --num-nodes 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800" -y -d',
+            rf'sky jobs launch --infra gcp/*/{zone} -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot --num-nodes 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -514,6 +592,7 @@ def test_managed_jobs_recovery_multi_node_gcp():
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],
         f'sky jobs cancel -y -n {name}; {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=25 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -536,7 +615,7 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
             # Test cancellation during spot cluster being launched.
-            f'sky jobs launch --cloud aws --region {region} -n {name} --use-spot "sleep 1000" -y -d',
+            f'sky jobs launch --infra aws/{region} -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot "sleep 1000" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -559,7 +638,7 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
                  '--output text) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
                 )),
             # Test cancelling the spot cluster during spot job being setup.
-            f'sky jobs launch --cloud aws --region {region} -n {name}-2 --use-spot tests/test_yamls/test_long_setup.yaml -y -d',
+            f'sky jobs launch --infra aws/{region} -n {name}-2 {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot tests/test_yamls/test_long_setup.yaml -y -d',
             # The job is set up in the cluster, will shown as RUNNING.
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -581,7 +660,7 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
                  '--output text) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
                 )),
             # Test cancellation during spot job is recovering.
-            f'sky jobs launch --cloud aws --region {region} -n {name}-3 --use-spot "sleep 1000" -y -d',
+            f'sky jobs launch --infra aws/{region} -n {name}-3 {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot "sleep 1000" -y -d',
             # The job is running in the cluster, will shown as RUNNING.
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -617,6 +696,7 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
                 )),
         ],
         smoke_tests_utils.down_cluster_for_cloud_cmd(name),
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=25 * 60)
     smoke_tests_utils.run_one_test(test)
 
@@ -645,7 +725,7 @@ def test_managed_jobs_cancellation_gcp():
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
             # Test cancellation during spot cluster being launched.
-            f'sky jobs launch --cloud gcp --zone {zone} -n {name} --use-spot "sleep 1000" -y -d',
+            f'sky jobs launch --infra gcp/*/{zone} -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot "sleep 1000" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -658,7 +738,7 @@ def test_managed_jobs_cancellation_gcp():
                 job_status=[sky.ManagedJobStatus.CANCELLED],
                 timeout=155),
             # Test cancelling the spot cluster during spot job being setup.
-            f'sky jobs launch --cloud gcp --zone {zone} -n {name}-2 --use-spot tests/test_yamls/test_long_setup.yaml -y -d',
+            f'sky jobs launch --infra gcp/*/{zone} -n {name}-2 {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot tests/test_yamls/test_long_setup.yaml -y -d',
             # The job is set up in the cluster, will shown as RUNNING.
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -672,7 +752,7 @@ def test_managed_jobs_cancellation_gcp():
                 job_status=[sky.ManagedJobStatus.CANCELLED],
                 timeout=155),
             # Test cancellation during spot job is recovering.
-            f'sky jobs launch --cloud gcp --zone {zone} -n {name_3} --use-spot "sleep 1000" -y -d',
+            f'sky jobs launch --infra gcp/*/{zone} -n {name_3} {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot "sleep 1000" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name_3,
@@ -697,13 +777,14 @@ def test_managed_jobs_cancellation_gcp():
                 )),
         ],
         smoke_tests_utils.down_cluster_for_cloud_cmd(name),
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=25 * 60)
     smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_vast  # Uses other clouds
+@pytest.mark.no_hyperbolic  # Uses other clouds
 @pytest.mark.managed_jobs
-@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 def test_managed_jobs_retry_logs(generic_cloud: str):
     """Test managed job retry logs are properly displayed when a task fails."""
     timeout = 7 * 60  # 7 mins
@@ -711,13 +792,13 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
         timeout *= 2
     name = smoke_tests_utils.get_cluster_name()
     yaml_path = 'tests/test_yamls/test_managed_jobs_retry.yaml'
-    yaml_config = common_utils.read_yaml_all(yaml_path)
+    yaml_config = yaml_utils.read_yaml_all(yaml_path)
     for task_config in yaml_config:
         task_config['resources'] = task_config.get('resources', {})
         task_config['resources']['cloud'] = generic_cloud
 
     with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as yaml_file:
-        common_utils.dump_yaml(yaml_file.name, yaml_config)
+        yaml_utils.dump_yaml(yaml_file.name, yaml_config)
         yaml_path = yaml_file.name
         with tempfile.NamedTemporaryFile(mode='w', suffix='.log') as log_file:
             test = smoke_tests_utils.Test(
@@ -725,7 +806,7 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
                 [
                     # TODO(zhwu): we should make the override for generic_cloud
                     # work with multiple stages in pipeline.
-                    f'sky jobs launch -n {name} {yaml_path} -y -d',
+                    f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path} -y -d',
                     # TODO(zhwu): Check why the logs does not return immediately
                     # after job status FAILED.
                     f'sky jobs logs -n {name} | tee {log_file.name} ',
@@ -739,6 +820,7 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
                     f'! cat {log_file.name} | grep "Job 2"',
                 ],
                 f'sky jobs cancel -y -n {name}',
+                env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
                 timeout=timeout)
             smoke_tests_utils.run_one_test(test)
 
@@ -751,11 +833,14 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_do  # DO does not support spot instances
 @pytest.mark.no_vast  # Uses other clouds
-@pytest.mark.no_nebius  # Nebius does not support spot instances
+@pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
+@pytest.mark.no_seeweb  # Seeweb does not support spot instances
 @pytest.mark.managed_jobs
-@pytest.mark.resource_heavy
 def test_managed_jobs_storage(generic_cloud: str):
     """Test storage with managed job"""
+    timeout = 215
+    low_resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
     name = smoke_tests_utils.get_cluster_name()
     yaml_str = pathlib.Path(
         'examples/managed_job_with_storage.yaml').read_text()
@@ -763,21 +848,23 @@ def test_managed_jobs_storage(generic_cloud: str):
     storage_name = f'sky-test-{timestamp}'
     output_storage_name = f'sky-test-output-{timestamp}'
 
+    # First, add an initialization for region
+    region = None
+    region_flag = ''
+    region_validation_base_cmd = 'true'
+    use_spot = ' --use-spot'
+    output_check_cmd = None
+
     # Also perform region testing for bucket creation to validate if buckets are
     # created in the correct region and correctly mounted in managed jobs.
     # However, we inject this testing only for AWS and GCP since they are the
     # supported object storage providers in SkyPilot.
-    region_flag = ''
-    region_validation_cmd = 'true'
-    use_spot = ' --use-spot'
     if generic_cloud == 'aws':
-        region = 'eu-central-1'
-        region_flag = f' --region {region}'
+        region = 'us-east-2'
+        region_flag = f'/{region}'
         region_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.S3, bucket_name=output_storage_name)
-        region_validation_cmd = f's=$({region_cmd}) && echo "$s" && echo; echo "$s" | grep {region}'
-        region_validation_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
-            name, region_validation_cmd)
+        region_validation_base_cmd = f's=$({region_cmd}) && echo "$s" && echo; echo "$s" | grep {region}'
         s3_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
             storage_lib.StoreType.S3, output_storage_name, 'output.txt')
         output_check_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
@@ -788,13 +875,11 @@ def test_managed_jobs_storage(generic_cloud: str):
             name,
             f'{non_persistent_bucket_removed_check_cmd} && exit 1 || true')
     elif generic_cloud == 'gcp':
-        region = 'us-west2'
-        region_flag = f' --region {region}'
+        region = 'us-central1'
+        region_flag = f'/{region}'
         region_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.GCS, bucket_name=output_storage_name)
-        region_validation_cmd = f'{region_cmd} | grep {region}'
-        region_validation_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
-            name, region_validation_cmd)
+        region_validation_base_cmd = f'{region_cmd} | grep {region}'
         gcs_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
             storage_lib.StoreType.GCS, output_storage_name, 'output.txt')
         output_check_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
@@ -805,16 +890,17 @@ def test_managed_jobs_storage(generic_cloud: str):
             name,
             f'{non_persistent_bucket_removed_check_cmd} && exit 1 || true')
     elif generic_cloud == 'azure':
+        # Azure instances with smaller than 7G memory can have flaky performance,
+        # so we keep the default resource to avoid flakiness.
+        low_resource_arg = ""
         region = 'centralus'
-        region_flag = f' --region {region}'
-        storage_account_name = test_mount_and_storage.TestStorageWithCredentials. \
+        region_flag = f'/{region}'
+        storage_account_name = test_mount_and_storage.TestStorageWithCredentials.\
             get_az_storage_account_name(region)
         region_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.AZURE,
             storage_account_name=storage_account_name)
-        region_validation_cmd = f'{region_cmd} | grep {region}'
-        region_validation_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
-            name, region_validation_cmd)
+        region_validation_base_cmd = f'{region_cmd} | grep {region}'
         az_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
             storage_lib.StoreType.AZURE,
             output_storage_name,
@@ -827,15 +913,28 @@ def test_managed_jobs_storage(generic_cloud: str):
         non_persistent_bucket_removed_check_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
             name,
             f'{non_persistent_bucket_removed_check_cmd} && exit 1 || true')
+        timeout *= 2
     elif generic_cloud == 'kubernetes':
         # With Kubernetes, we don't know which object storage provider is used.
-        # Check both S3 and GCS if bucket exists in either.
+        # Check S3, GCS and Azure if bucket exists in any of them.
         s3_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
             storage_lib.StoreType.S3, output_storage_name, 'output.txt')
         s3_output_check_cmd = f'{s3_check_file_count} | grep 1'
         gcs_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
             storage_lib.StoreType.GCS, output_storage_name, 'output.txt')
         gcs_output_check_cmd = f'{gcs_check_file_count} | grep 1'
+        # For Azure, we need to get the storage account name for the region
+        storage_account_name = test_mount_and_storage.TestStorageWithCredentials.get_az_storage_account_name(
+        )
+        az_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
+            storage_lib.StoreType.AZURE,
+            output_storage_name,
+            'output.txt',
+            storage_account_name=storage_account_name)
+        az_output_check_cmd = f'{az_check_file_count} | grep 1'
+        nebius_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
+            storage_lib.StoreType.NEBIUS, output_storage_name, 'output.txt')
+        nebius_output_check_cmd = f'{nebius_check_file_count} | grep 1'
         cloud_dependencies_setup_cmd = ' && '.join(
             controller_utils._get_cloud_dependencies_installation_commands(
                 controller_utils.Controllers.JOBS_CONTROLLER))
@@ -847,16 +946,48 @@ def test_managed_jobs_storage(generic_cloud: str):
         output_check_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
             name, f'{cloud_dependencies_setup_cmd}; '
             f'{try_activating_gcp_service_account}; '
-            f'{{ {s3_output_check_cmd} || {gcs_output_check_cmd}; }}')
+            f'{{ {s3_output_check_cmd} || {gcs_output_check_cmd} || {az_output_check_cmd} || {nebius_output_check_cmd}; }}'
+        )
         use_spot = ' --no-use-spot'
         storage_removed_check_s3_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_ls_cmd(
             storage_lib.StoreType.S3, storage_name)
         storage_removed_check_gcs_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_ls_cmd(
             storage_lib.StoreType.GCS, storage_name)
+        storage_removed_check_az_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_ls_cmd(
+            storage_lib.StoreType.AZURE, storage_name)
         non_persistent_bucket_removed_check_cmd = (
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name, f'{{ {storage_removed_check_s3_cmd} && exit 1; }} || '
-                f'{{ {storage_removed_check_gcs_cmd} && exit 1; }} || true'))
+                f'{{ {storage_removed_check_gcs_cmd} && exit 1; }} || '
+                f'{{ {storage_removed_check_az_cmd} && exit 1; }} || true'))
+        timeout *= 4
+
+    # Apply universal retry mechanism with 30s timeout for region validation.
+    # This is useful for jobs consolidation mode, where the job submission is
+    # very fast (don't need to launch a controller VM) and the bucket might not
+    # be created yet immediately after the job submission.
+    region_validation_timeout_for_consolidation = 30
+    # Only apply to non-trivial region validation commands.
+    if region_validation_base_cmd != 'true':
+        if smoke_tests_utils.server_side_is_consolidation_mode():
+            region_validation_cmd = (
+                'start_time=$SECONDS; '
+                'while true; do '
+                f'if (( $SECONDS - start_time > {region_validation_timeout_for_consolidation} )); then '
+                f'  echo "Timeout after {region_validation_timeout_for_consolidation} seconds waiting for region validation"; exit 1; '
+                'fi; '
+                f'if {region_validation_base_cmd}; then '
+                '  echo "Region validation succeeded"; break; '
+                'fi; '
+                'echo "Retrying region validation..."; '
+                'sleep 5; '
+                'done')
+        else:
+            region_validation_cmd = region_validation_base_cmd
+        region_validation_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
+            name, region_validation_cmd)
+    else:
+        region_validation_cmd = region_validation_base_cmd
 
     yaml_str = yaml_str.replace('sky-workdir-zhwu', storage_name)
     yaml_str = yaml_str.replace('sky-output-bucket', output_storage_name)
@@ -872,13 +1003,13 @@ def test_managed_jobs_storage(generic_cloud: str):
                     generic_cloud, name),
                 # Override CPU/memory requirements to relax resource constraints
                 # and reduce the chance of out-of-stock
-                f'sky jobs launch -n {name}{use_spot} --cpus 2+ --memory 4+ --cloud {generic_cloud}{region_flag} {file_path} -y -d',
+                f'sky jobs launch -n {name}{use_spot} {low_resource_arg} --infra {generic_cloud}{region_flag} {file_path} -y -d',
                 region_validation_cmd,  # Check if the bucket is created in the correct region
                 smoke_tests_utils.
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=name,
                     job_status=[sky.ManagedJobStatus.SUCCEEDED],
-                    timeout=215),
+                    timeout=timeout),
                 # Wait for the job to be cleaned up.
                 'sleep 50',
                 # Check if file was written to the mounted output bucket
@@ -888,6 +1019,7 @@ def test_managed_jobs_storage(generic_cloud: str):
             (f'sky jobs cancel -y -n {name}; '
              f'sky storage delete {output_storage_name} -y; '
              f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)} || true'),
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
             # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
             timeout=20 * 60,
         )
@@ -933,7 +1065,7 @@ def test_managed_jobs_intermediate_storage(generic_cloud: str):
                     *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
                     # Verify command fails with correct error - run only once
                     # In API server, we don't error out if the bucket does not exist, instead we create it.
-                    # f'err=$(sky jobs launch -n {name} --cloud {generic_cloud} {file_path} -y 2>&1); '
+                    # f'err=$(sky jobs launch -n {name} --infra {generic_cloud} {file_path} -y 2>&1); '
                     # f'ret=$?; if [ $ret -ne 0 ] && echo "$err" | grep -q "StorageBucketCreateError: '
                     # f'Jobs bucket \'{intermediate_storage_name}\' does not exist."; then exit 0; '
                     # f'else exit 1; fi',
@@ -942,7 +1074,7 @@ def test_managed_jobs_intermediate_storage(generic_cloud: str):
                         cmd=
                         f'aws s3api create-bucket --bucket {intermediate_storage_name}'
                     ),
-                    f'sky jobs launch -n {name} --cloud {generic_cloud} {file_path} -y',
+                    f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} {file_path} -y',
                     # fail because the bucket does not exist
                     smoke_tests_utils.
                     get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -961,7 +1093,7 @@ def test_managed_jobs_intermediate_storage(generic_cloud: str):
                  f'sky storage delete {output_storage_name} -y || true; '
                  f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}'),
                 env={
-                    'SKYPILOT_CONFIG': user_config_path,
+                    skypilot_config.ENV_VAR_GLOBAL_CONFIG: user_config_path,
                     constants.SKY_API_SERVER_URL_ENV_VAR:
                         sky.server.common.get_server_url()
                 },
@@ -997,6 +1129,7 @@ def test_managed_jobs_tpu():
                 timeout=935),
         ],
         f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
@@ -1005,31 +1138,31 @@ def test_managed_jobs_tpu():
 
 # ---------- Testing env for managed jobs ----------
 @pytest.mark.no_vast  # Uses unsatisfiable machines
+@pytest.mark.no_hyperbolic  # Uses unsatisfiable machines
 @pytest.mark.managed_jobs
-@pytest.mark.no_nebius  # Autodown and Autostop not supported.
-@pytest.mark.resource_heavy
 def test_managed_jobs_inline_env(generic_cloud: str):
     """Test managed jobs env"""
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'test-managed-jobs-inline-env',
         [
-            rf'sky jobs launch -n {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "echo "\$TEST_ENV"; ([[ ! -z \"\$TEST_ENV\" ]] && [[ ! -z \"\${constants.SKYPILOT_NODE_IPS}\" ]] && [[ ! -z \"\${constants.SKYPILOT_NODE_RANK}\" ]] && [[ ! -z \"\${constants.SKYPILOT_NUM_NODES}\" ]]) || exit 1"',
+            rf'sky jobs launch -n {name} -y --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --env TEST_ENV="hello world" -- "echo "\$TEST_ENV"; ([[ ! -z \"\$TEST_ENV\" ]] && [[ ! -z \"\${constants.SKYPILOT_NODE_IPS}\" ]] && [[ ! -z \"\${constants.SKYPILOT_NODE_RANK}\" ]] && [[ ! -z \"\${constants.SKYPILOT_NUM_NODES}\" ]]) || exit 1"',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
                 timeout=55),
-            f'JOB_ROW=$(sky jobs queue | grep {name} | head -n1) && '
-            f'echo "$JOB_ROW" && echo "$JOB_ROW" | grep "SUCCEEDED" && '
+            f'JOB_ROW=$(sky jobs queue -v | grep {name} | head -n1) && '
+            f'echo "$JOB_ROW" && echo "$JOB_ROW" | grep -E "DONE|ALIVE" | grep "SUCCEEDED" && '
             f'JOB_ID=$(echo "$JOB_ROW" | awk \'{{print $1}}\') && '
             f'echo "JOB_ID=$JOB_ID" && '
             # Test that logs are still available after the job finishes.
             'unset SKYPILOT_DEBUG; s=$(sky jobs logs $JOB_ID --refresh) && echo "$s" && echo "$s" | grep "hello world" && '
             # Make sure we skip the unnecessary logs.
-            'echo "$s" | head -n1 | grep "Waiting for"',
+            'echo "$s" | head -n2 | grep "Waiting for"',
         ],
         f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
@@ -1037,14 +1170,14 @@ def test_managed_jobs_inline_env(generic_cloud: str):
 
 
 @pytest.mark.no_vast  # The test uses other clouds
+@pytest.mark.no_hyperbolic  # The test uses other clouds
 @pytest.mark.managed_jobs
-@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 def test_managed_jobs_logs_sync_down(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'test-managed-jobs-logs-sync-down',
         [
-            f'sky jobs launch -n {name} --cloud {generic_cloud} --cpus 2+ -y examples/managed_job.yaml -d',
+            f'sky jobs launch -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y examples/managed_job.yaml -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}',
@@ -1079,6 +1212,258 @@ def test_managed_jobs_logs_sync_down(generic_cloud: str):
             'cat $(echo "$log_path")/run.log | grep "start counting"',
         ],
         f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# Only run this test on Kubernetes since this test relies on kubernetes.pod_config
+@pytest.mark.kubernetes
+@pytest.mark.managed_jobs
+def test_managed_jobs_env_isolation(generic_cloud: str):
+    """Test that the job controller execution env of jobs are isolated."""
+    base_name = smoke_tests_utils.get_cluster_name()
+    for i in range(2):
+        name = f'{base_name}-{i}'
+        # We want to verify job controller isolates the skypilot config for each job,
+        # kubernetes.pod_config is the easiest way to verify the correct skypilot config
+        # is used in job controller. We assume the job controller is cloud agnostic, thus
+        # this case will also cover the same case for other clouds.
+        test = smoke_tests_utils.Test(
+            'test-managed-jobs-env-isolation',
+            [
+                # Sleep 60 to workaround the issue that SUCCEED job cannot be tailed by name
+                f'sky jobs launch -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y -d \'echo "$TEST_POD_ENV"; sleep 60\'',
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=f'{name}',
+                    job_status=[sky.ManagedJobStatus.RUNNING],
+                    timeout=80),
+                f'sky jobs logs -n {name} --no-follow | grep "my name is {name}"',
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=f'{name}',
+                    job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                    timeout=80),
+            ],
+            f'sky jobs cancel -y -n {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=20 * 60,
+            config_dict={
+                'kubernetes': {
+                    'pod_config': {
+                        'spec': {
+                            'containers': [{
+                                'env': [{
+                                    'name': 'TEST_POD_ENV',
+                                    'value': f'my name is {name}'
+                                }]
+                            }]
+                        }
+                    }
+                }
+            })
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+def test_managed_jobs_config_labels_isolation(generic_cloud: str, request):
+    supported_clouds = {'aws', 'gcp', 'kubernetes'}
+    if generic_cloud not in supported_clouds:
+        pytest.skip(
+            f'Unsupported cloud {generic_cloud} for label isolation test.')
+
+    name = smoke_tests_utils.get_cluster_name()
+    job_with_config = f'{name}-cfg'
+    job_without_config = f'{name}-plain'
+    label_key = 'skypilot-smoke-label'
+    label_value = f'{name}-value'
+
+    if generic_cloud == 'aws':
+        region = request.getfixturevalue('aws_config_region')
+        infra_arg = f'--infra aws/{region}'
+        config_dict = {'aws': {'labels': {label_key: label_value}}}
+        get_instance_cmd = (
+            f'aws ec2 describe-instances --region {region} '
+            f'--filters Name=tag:{label_key},Values={label_value} '
+            'Name=instance-state-name,Values=running '
+            '--query "Reservations[].Instances[].Tags[?Key==\'Name\'].Value" '
+            '--output text | grep -v "sky-jobs-controller"')
+        presence_cmd = (f'OUTPUT=$({get_instance_cmd}); '
+                        'echo "$OUTPUT"; '
+                        'test -n "$OUTPUT"')
+        absence_cmd = (f'OUTPUT=$({get_instance_cmd}); '
+                       'echo "$OUTPUT"; '
+                       'test -z "$OUTPUT"')
+    elif generic_cloud == 'gcp':
+        infra_arg = '--infra gcp'
+        config_dict = {'gcp': {'labels': {label_key: label_value}}}
+        get_instance_cmd = (
+            f'gcloud compute instances list '
+            f'--filter="labels.{label_key}={label_value}" '
+            '--format="value(name,zone)" | grep -v "sky-jobs-controller"')
+        presence_cmd = (f'INSTANCES=$({get_instance_cmd}); '
+                        'echo "$INSTANCES"; '
+                        'test -n "$INSTANCES"')
+        absence_cmd = (f'INSTANCES=$({get_instance_cmd}); '
+                       'echo "$INSTANCES"; '
+                       'test -z "$INSTANCES"')
+    else:  # kubernetes
+        infra_arg = '--infra kubernetes'
+        config_dict = {
+            'kubernetes': {
+                'custom_metadata': {
+                    'labels': {
+                        label_key: label_value,
+                    }
+                }
+            }
+        }
+        get_instance_cmd = (
+            f'kubectl get pods -A -l {label_key}={label_value} '
+            '--no-headers | grep -v "sky-jobs-controller" || true')
+        presence_cmd = (f'PODS=$({get_instance_cmd}); '
+                        'echo "$PODS"; '
+                        'test -n "$PODS"')
+        absence_cmd = (f'PODS=$({get_instance_cmd}); '
+                       'echo "$PODS"; '
+                       'test -z "$PODS"')
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as config_file:
+        config_file.write(yaml_utils.dump_yaml_str(config_dict))
+        config_file.flush()
+
+        commands = [
+            smoke_tests_utils.with_config(
+                f'sky jobs launch -n {job_with_config} {infra_arg} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} "sleep 180" -y -d',
+                config_file.name),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=job_with_config,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=600),
+            f'echo "Checking label presence for {job_with_config}"',
+            presence_cmd,
+            f'sky jobs cancel -y -n {job_with_config}',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=job_with_config,
+                job_status=[
+                    sky.ManagedJobStatus.CANCELLED,
+                    sky.ManagedJobStatus.SUCCEEDED
+                ],
+                timeout=240),
+        ]
+
+        commands.extend([
+            f'sky jobs launch -n {job_without_config} {infra_arg} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} "sleep 180" -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=job_without_config,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=600),
+            f'echo "Checking label absence for {job_without_config}"',
+            absence_cmd,
+            f'sky jobs cancel -y -n {job_without_config}',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=job_without_config,
+                job_status=[
+                    sky.ManagedJobStatus.CANCELLED,
+                    sky.ManagedJobStatus.SUCCEEDED
+                ],
+                timeout=240),
+        ])
+
+        test = smoke_tests_utils.Test(
+            'managed_jobs_config_labels_isolation',
+            commands,
+            teardown=(f'sky jobs cancel -y -n {job_with_config}; '
+                      f'sky jobs cancel -y -n {job_without_config}'),
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=25 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+def _get_ha_kill_test(name: str, generic_cloud: str,
+                      status: sky.ManagedJobStatus, first_timeout: int,
+                      second_timeout: int) -> smoke_tests_utils.Test:
+    skypilot_config_path = 'tests/test_yamls/managed_jobs_ha_config.yaml'
+
+    pytest_config_file_override = smoke_tests_utils.pytest_config_file_override(
+    )
+    if pytest_config_file_override is not None:
+        with open(pytest_config_file_override, 'r') as f:
+            base_config = f.read()
+        with open(skypilot_config_path, 'r') as f:
+            ha_config = f.read()
+        with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                         delete=False) as f:
+            f.write(base_config)
+            f.write(ha_config)
+            f.flush()
+            skypilot_config_path = f.name
+
+    return smoke_tests_utils.Test(
+        f'test-managed-jobs-ha-kill-{status.value.lower()}',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd(generic_cloud, name),
+            f'sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y examples/managed_job.yaml -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}', job_status=[status], timeout=first_timeout),
+            smoke_tests_utils.kill_and_wait_controller(name, 'jobs'),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}',
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=second_timeout),
+            f's=$(sky jobs logs --controller -n {name} --no-follow); echo "$s"; echo "$s" | grep "Job succeeded."',
+            rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "SUCCEEDED"',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env={skypilot_config.ENV_VAR_SKYPILOT_CONFIG: skypilot_config_path},
+        timeout=20 * 60,
+    )
+
+
+@pytest.mark.kubernetes
+@pytest.mark.managed_jobs
+def test_managed_jobs_ha_kill_running(generic_cloud: str):
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip(
+            'Skipping HA test in non-docker remote api server environment as '
+            'controller might be managed by different user/test agents')
+
+    name = smoke_tests_utils.get_cluster_name()
+    test = _get_ha_kill_test(
+        name,
+        generic_cloud,
+        sky.ManagedJobStatus.RUNNING,
+        first_timeout=200,
+        second_timeout=335,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.managed_jobs
+def test_managed_jobs_ha_kill_starting(generic_cloud: str):
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip(
+            'Skipping HA test in non-docker remote api server environment as '
+            'controller might be managed by different user/test agents')
+    name = smoke_tests_utils.get_cluster_name()
+    test = _get_ha_kill_test(
+        name,
+        generic_cloud,
+        sky.ManagedJobStatus.STARTING,
+        first_timeout=95,
+        second_timeout=600,
     )
     smoke_tests_utils.run_one_test(test)

@@ -7,16 +7,17 @@ resources:
   any_of:
     # Avoid using docker image for lambda due to the docker is not supported on
     # Lambda yet, but the base image works.
-    - cloud: lambda
+    - infra: lambda
       image_id: null
-    - cloud: aws
-    - cloud: gcp
-    - cloud: azure
-    - cloud: fluidstack
-    - cloud: kubernetes
+    - infra: aws
+    - infra: gcp
+    - infra: azure
+    - infra: fluidstack
+    - infra: kubernetes
   
 
 setup: |
+  conda activate base
   cd ~
   pip install tqdm tiktoken requests datasets
 
@@ -69,6 +70,7 @@ setup: |
 
 
 run: |
+  conda activate base
   cd ~/llm.c
   # Processing data
   # tokenize the FineWeb dataset 10B tokens sample (takes ~1 hour, get lunch?)

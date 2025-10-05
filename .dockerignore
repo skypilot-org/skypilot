@@ -1,1 +1,5 @@
-**/.git
+# Keep .git history for skypilot repository to serve git info when install from source
+*/**/.git
+**/__pycache__
+sky/dashboard/node_modules
+sky/dashboard/.next

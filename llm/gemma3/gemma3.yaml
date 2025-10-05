@@ -1,0 +1,36 @@
+resources:
+  accelerators:  {L4:1, L4:4, A100:1, A100-80GB:1}
+  ports: 8000
+  disk_tier: best
+  use_spot: true
+
+envs: 
+  HF_TOKEN:
+  MODEL_NAME: google/gemma-3-4b-it
+  MAX_MODEL_LEN: 4096
+
+setup: |
+  uv pip install vllm
+
+run: |
+  echo 'Starting vllm openai api server...'
+  python -m vllm.entrypoints.openai.api_server \
+    --host 0.0.0.0 \
+    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+    --model $MODEL_NAME \
+    --max-model-len $MAX_MODEL_LEN
+
+service:
+  replica_policy:
+    min_replicas: 1
+    max_replicas: 2
+    target_qps_per_replica: 5
+  # An actual request for readiness probe.
+  readiness_probe:
+    path: /v1/chat/completions
+    post_data:
+      model: $MODEL_NAME
+      messages:
+        - role: user
+          content: Hello! What is your name?
+      max_tokens: 1

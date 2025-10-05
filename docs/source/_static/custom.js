@@ -1,3 +1,10 @@
+// Google Tag Manager
+(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+})(window,document,'script','dataLayer','GTM-WDLMDR6J');
+
 document.addEventListener('DOMContentLoaded', function () {
        var script = document.createElement('script');
        script.src = 'https://widget.kapa.ai/kapa-widget.bundle.js';
@@ -21,16 +28,22 @@ document.addEventListener('DOMContentLoaded', function () {
        r.src=t+h._hjSettings.hjid+j+h._hjSettings.hjsv;
        a.appendChild(r);
 })(window,document,'https://static.hotjar.com/c/hotjar-','.js?sv=');
+!function(t){var k="ko",i=(window.globalKoalaKey=window.globalKoalaKey||k);if(window[i])return;var ko=(window[i]=[]);["identify","track","removeListeners","on","off","qualify","ready"].forEach(function(t){ko[t]=function(){var n=[].slice.call(arguments);return n.unshift(t),ko.push(n),ko}});var n=document.createElement("script");n.async=!0,n.setAttribute("src","https://cdn.getkoala.com/v1/pk_d9bb6290ccb8a01b2d181fc0c8cf0dbb9836/sdk.js"),(document.body || document.head).appendChild(n)}();
 
 // New items: add 'new-item' class for for new items.
 document.addEventListener('DOMContentLoaded', () => {
     // New items:
     const newItems = [
-        { selector: '.toctree-l1 > a', text: 'Many Parallel Jobs' },
-        { selector: '.toctree-l2 > a', text: 'Multiple Kubernetes Clusters' },
         { selector: '.toctree-l2 > a', text: 'HTTPS Encryption' },
-        { selector: '.toctree-l1 > a', text: 'Asynchronous Execution' },
-        { selector: '.toctree-l1 > a', text: 'Team Deployment' },
+        { selector: '.toctree-l1 > a', text: 'Examples' },
+        { selector: '.toctree-l1 > a', text: 'Workspaces: Isolating Teams' },
+        { selector: '.toctree-l1 > a', text: 'External Logging Storage' },
+        { selector: '.toctree-l1 > a', text: 'Authentication and RBAC' },
+        { selector: '.toctree-l1 > a', text: 'Volumes' },
+        { selector: '.toctree-l2 > a', text: 'Upgrading API Server' },
+        { selector: '.toctree-l1 > a', text: 'High Availability Controller' },
+        { selector: '.toctree-l2 > a', text: 'High Availability Controller' },
+        { selector: '.toctree-l3 > a', text: 'Advanced: High Availability Controller' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {

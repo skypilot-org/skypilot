@@ -7,10 +7,8 @@ service:
 
 resources:
   ports: 8080
-  cloud: gcp
-  cpus: 2+
+  infra: gcp
 
 workdir: examples/serve/http_server
 
 run: python3 server.py --port 8080
-

@@ -9,7 +9,8 @@ import logging
 from multiprocessing import pool
 import re
 import time
-from typing import Any, Callable, Dict, List, Optional, Set, TypeVar
+import typing
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar
 
 from sky import sky_logging
 from sky.adaptors import aws
@@ -17,11 +18,17 @@ from sky.clouds import aws as aws_cloud
 from sky.clouds.utils import aws_utils
 from sky.provision import common
 from sky.provision import constants
+from sky.provision.aws import config as aws_config
 from sky.provision.aws import utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    from botocore import waiter as botowaiter
+    import mypy_boto3_ec2
+    from mypy_boto3_ec2 import type_defs as ec2_type_defs
 
 logger = sky_logging.init_logger(__name__)
 
@@ -55,7 +62,9 @@ _RESUME_PER_INSTANCE_TIMEOUT = 120  # 2 minutes
 # https://aws.amazon.com/ec2/pricing/on-demand/#Data_Transfer_within_the_same_AWS_Region
 
 
-def _default_ec2_resource(region: str, check_credentials: bool = True) -> Any:
+def _default_ec2_resource(
+        region: str,
+        check_credentials: bool = True) -> 'mypy_boto3_ec2.ServiceResource':
     if not hasattr(aws, 'version'):
         # For backward compatibility, reload the module if the aws module was
         # imported before and stale. Used for, e.g., a live jobs controller
@@ -99,7 +108,8 @@ def _default_ec2_resource(region: str, check_credentials: bool = True) -> Any:
                         check_credentials=check_credentials)
 
 
-def _cluster_name_filter(cluster_name_on_cloud: str) -> List[Dict[str, Any]]:
+def _cluster_name_filter(
+        cluster_name_on_cloud: str) -> List['ec2_type_defs.FilterTypeDef']:
     return [{
         'Name': f'tag:{constants.TAG_RAY_CLUSTER_NAME}',
         'Values': [cluster_name_on_cloud],
@@ -174,9 +184,15 @@ def _merge_tag_specs(tag_specs: List[Dict[str, Any]],
             tag_specs += [user_tag_spec]
 
 
-def _create_instances(ec2_fail_fast, cluster_name: str,
-                      node_config: Dict[str, Any], tags: Dict[str, str],
-                      count: int, associate_public_ip_address: bool) -> List:
+def _create_instances(
+    ec2_fail_fast,
+    cluster_name: str,
+    node_config: Dict[str, Any],
+    tags: Dict[str, str],
+    count: int,
+    associate_public_ip_address: bool,
+    max_efa_interfaces: int,
+) -> List:
     tags = {
         'Name': cluster_name,
         constants.TAG_RAY_CLUSTER_NAME: cluster_name,
@@ -229,7 +245,36 @@ def _create_instances(ec2_fail_fast, cluster_name: str,
                 # Whether the VM(s) should have a public IP.
                 'AssociatePublicIpAddress': associate_public_ip_address,
                 'Groups': security_group_ids,
+                'InterfaceType': 'efa'
+                                 if max_efa_interfaces > 0 else 'interface',
             }]
+            # Due to AWS limitation, if an instance type supports multiple
+            # network cards, we cannot assign public IP addresses to the
+            # instance during creation, which will raise the following error:
+            #   (InvalidParameterCombination) when calling the RunInstances
+            #   operation: The associatePublicIPAddress parameter cannot be
+            #   specified when launching with multiple network interfaces.
+            # So we only attach multiple network interfaces if public IP is
+            # not required.
+            # TODO(hailong): support attaching/detaching elastic IP to expose
+            # public IP in this case.
+            if max_efa_interfaces > 1 and not associate_public_ip_address:
+                instance_type = conf['InstanceType']
+                for i in range(1, max_efa_interfaces):
+                    interface_type = 'efa-only'
+                    # Special handling for P5 instances
+                    # Refer to https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa-acc-inst-types.html#efa-for-p5 for more details. # pylint: disable=line-too-long
+                    if (instance_type == 'p5.48xlarge' or
+                            instance_type == 'p5e.48xlarge'):
+                        interface_type = 'efa' if i % 4 == 0 else 'efa-only'
+                    network_interfaces.append({
+                        'SubnetId': subnet_id,
+                        'DeviceIndex': 1,
+                        'NetworkCardIndex': i,
+                        'AssociatePublicIpAddress': False,
+                        'Groups': security_group_ids,
+                        'InterfaceType': interface_type,
+                    })
             conf['NetworkInterfaces'] = network_interfaces
 
             instances = _ec2_call_with_retry_on_server_error(
@@ -266,9 +311,10 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
     return head_instance_id
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
+    del cluster_name  # unused
     ec2 = _default_ec2_resource(region)
     # NOTE: We set max_attempts=0 for fast failing when the resource is not
     # available (although the doc says it will only retry for network
@@ -279,10 +325,11 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     zone = None
     resumed_instance_ids: List[str] = []
     created_instance_ids: List[str] = []
+    max_efa_interfaces = config.provider_config.get('max_efa_interfaces', 0)
 
     # sort tags by key to support deterministic unit test stubbing
     tags = dict(sorted(copy.deepcopy(config.tags).items()))
-    filters = [{
+    filters: List['ec2_type_defs.FilterTypeDef'] = [{
         'Name': 'instance-state-name',
         'Values': ['pending', 'running', 'stopping', 'stopped'],
     }, {
@@ -494,7 +541,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                     tags,
                     reservation_count,
                     associate_public_ip_address=(
-                        not config.provider_config['use_internal_ips']))
+                        not config.provider_config['use_internal_ips']),
+                    max_efa_interfaces=max_efa_interfaces)
                 created_instances.extend(created_reserved_instances)
                 to_start_count -= reservation_count
                 if to_start_count <= 0:
@@ -517,7 +565,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 tags,
                 to_start_count,
                 associate_public_ip_address=(
-                    not config.provider_config['use_internal_ips']))
+                    not config.provider_config['use_internal_ips']),
+                max_efa_interfaces=max_efa_interfaces)
+
             created_instances.extend(created_remaining_instances)
         created_instances.sort(key=lambda x: x.id)
 
@@ -551,7 +601,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                                   created_instance_ids=created_instance_ids)
 
 
-def _filter_instances(ec2, filters: List[Dict[str, Any]],
+def _filter_instances(ec2: 'mypy_boto3_ec2.ServiceResource',
+                      filters: List['ec2_type_defs.FilterTypeDef'],
                       included_instances: Optional[List[str]],
                       excluded_instances: Optional[List[str]]):
     instances = ec2.instances.filter(Filters=filters)
@@ -575,11 +626,13 @@ def _filter_instances(ec2, filters: List[Dict[str, Any]],
 # stop() and terminate() for example already implicitly assume non-terminated.
 @common_utils.retry
 def query_instances(
+    cluster_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
+    del cluster_name  # unused
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)
@@ -598,12 +651,13 @@ def query_instances(
         'shutting-down': None,
         'terminated': None,
     }
-    statuses = {}
+    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                              Optional[str]]] = {}
     for inst in instances:
         status = status_map[inst.state['Name']]
         if non_terminated_only and status is None:
             continue
-        statuses[inst.id] = status
+        statuses[inst.id] = (status, None)
     return statuses
 
 
@@ -616,7 +670,7 @@ def stop_instances(
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)
-    filters: List[Dict[str, Any]] = [
+    filters: List['ec2_type_defs.FilterTypeDef'] = [
         {
             'Name': 'instance-state-name',
             'Values': ['pending', 'running'],
@@ -653,7 +707,7 @@ def terminate_instances(
     managed_by_skypilot = provider_config['security_group'].get(
         'ManagedBySkyPilot', True)
     ec2 = _default_ec2_resource(region)
-    filters = [
+    filters: List['ec2_type_defs.FilterTypeDef'] = [
         {
             'Name': 'instance-state-name',
             # exclude 'shutting-down' or 'terminated' states
@@ -671,48 +725,49 @@ def terminate_instances(
                                   filters,
                                   included_instances=None,
                                   excluded_instances=None)
-    instances.terminate()
-    if (sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME or
-            not managed_by_skypilot):
-        # Using default AWS SG or user specified security group. We don't need
-        # to wait for the termination of the instances, as we do not need to
-        # delete the SG.
-        return
-    # If ports are specified, we need to delete the newly created Security
-    # Group. Here we wait for all instances to be terminated, since the
-    # Security Group dependent on them.
-    for instance in instances:
-        instance.wait_until_terminated()
+    instance_list = list(instances)
+    default_sg = aws_config.get_security_group_from_vpc_id(
+        ec2, _get_vpc_id(provider_config),
+        aws_cloud.DEFAULT_SECURITY_GROUP_NAME)
+    if sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME:
+        # Case 1: The default SG is used, we don't need to ensure instance are
+        # terminated.
+        instances.terminate()
+    elif not managed_by_skypilot:
+        # Case 2: We are not managing the non-default sg. We don't need to
+        # ensure instances are terminated.
+        instances.terminate()
+    elif (managed_by_skypilot and default_sg is not None):
+        # Case 3: We are managing the non-default sg. The default SG exists
+        # so we can move the instances to the default SG and terminate them
+        # without blocking.
+
+        # Make this multithreaded: modify all instances' SGs in parallel.
+        def modify_instance_sg(instance):
+            instance.modify_attribute(Groups=[default_sg.id])
+            logger.debug(f'Instance {instance.id} modified to use default SG:'
+                         f'{default_sg.id} for quick deletion.')
+
+        with pool.ThreadPool() as thread_pool:
+            thread_pool.map(modify_instance_sg, instances)
+            thread_pool.close()
+            thread_pool.join()
+
+        instances.terminate()
+    else:
+        # Case 4: We are managing the non-default sg. The default SG does not
+        # exist. We must block on instance termination so that we can
+        # delete the security group.
+        instances.terminate()
+        for instance in instance_list:
+            instance.wait_until_terminated()
+
     # TODO(suquark): Currently, the implementation of GCP and Azure will
     #  wait util the cluster is fully terminated, while other clouds just
     #  trigger the termination process (via http call) and then return.
     #  It's not clear that which behavior should be expected. We will not
     #  wait for the termination for now, since this is the default behavior
     #  of most cloud implementations (including AWS).
-
-
-def _get_sg_from_name(
-    ec2: Any,
-    sg_name: str,
-) -> Any:
-    # GroupNames will only filter SGs in the default VPC, so we need to use
-    # Filters here. Ref:
-    # https://boto3.amazonaws.com/v1/documentation/api/1.26.112/reference/services/ec2/service-resource/security_groups.html  # pylint: disable=line-too-long
-    sgs = ec2.security_groups.filter(Filters=[{
-        'Name': 'group-name',
-        'Values': [sg_name]
-    }])
-    num_sg = len(list(sgs))
-    if num_sg == 0:
-        logger.warning(f'Expected security group {sg_name} not found. ')
-        return None
-    if num_sg > 1:
-        # TODO(tian): Better handle this case. Maybe we can check when creating
-        # the SG and throw an error if there is already an existing SG with the
-        # same name.
-        logger.warning(f'Found {num_sg} security groups with name {sg_name}. ')
-        return None
-    return list(sgs)[0]
 
 
 def _maybe_move_to_new_sg(
@@ -750,7 +805,7 @@ def open_ports(
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)
     sg_name = provider_config['security_group']['GroupName']
-    filters = [
+    filters: List['ec2_type_defs.FilterTypeDef'] = [
         {
             'Name': 'instance-state-name',
             # exclude 'shutting-down' or 'terminated' states
@@ -767,7 +822,9 @@ def open_ports(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Instance with cluster name '
                              f'{cluster_name_on_cloud} not found.')
-    sg = _get_sg_from_name(ec2, sg_name)
+    sg = aws_config.get_security_group_from_vpc_id(ec2,
+                                                   _get_vpc_id(provider_config),
+                                                   sg_name)
     if sg is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Cannot find new security group '
@@ -788,6 +845,7 @@ def open_ports(
                 range(existing_rule['FromPort'], existing_rule['ToPort'] + 1))
         elif existing_rule['IpProtocol'] == '-1':
             # For AWS, IpProtocol = -1 means all traffic
+            all_traffic_allowed: bool = False
             for group_pairs in existing_rule['UserIdGroupPairs']:
                 if group_pairs['GroupId'] != sg.id:
                     # We skip the port opening when the rule allows access from
@@ -796,8 +854,10 @@ def open_ports(
                     # The security group created by SkyPilot allows all traffic
                     # from the same security group, which should not be skipped.
                     existing_ports.add(-1)
+                    all_traffic_allowed = True
                     break
-            break
+            if all_traffic_allowed:
+                break
 
     ports_to_open = []
     # Do not need to open any ports when all traffic is already allowed.
@@ -822,7 +882,23 @@ def open_ports(
 
     # For the case when every new ports is already opened.
     if ip_permissions:
-        sg.authorize_ingress(IpPermissions=ip_permissions)
+        # Filter out any permissions that already exist in the security group
+        existing_permissions = set()
+        for rule in sg.ip_permissions:
+            if rule['IpProtocol'] == 'tcp':
+                for ip_range in rule.get('IpRanges', []):
+                    if ip_range.get('CidrIp') == '0.0.0.0/0':
+                        existing_permissions.add(
+                            (rule['FromPort'], rule['ToPort']))
+
+        # Remove any permissions that already exist
+        filtered_permissions = []
+        for perm in ip_permissions:
+            if (perm['FromPort'], perm['ToPort']) not in existing_permissions:
+                filtered_permissions.append(perm)
+
+        if filtered_permissions:
+            sg.authorize_ingress(IpPermissions=filtered_permissions)
 
 
 def cleanup_ports(
@@ -844,7 +920,9 @@ def cleanup_ports(
         # We only want to delete the SG that is dedicated to this cluster (i.e.,
         # this cluster have opened some ports).
         return
-    sg = _get_sg_from_name(ec2, sg_name)
+    sg = aws_config.get_security_group_from_vpc_id(ec2,
+                                                   _get_vpc_id(provider_config),
+                                                   sg_name)
     if sg is None:
         logger.warning(
             'Find security group failed. Skip cleanup security group.')
@@ -874,7 +952,7 @@ def wait_instances(region: str, cluster_name_on_cloud: str,
     ec2 = _default_ec2_resource(region)
     client = ec2.meta.client
 
-    filters = [
+    filters: List['ec2_type_defs.FilterTypeDef'] = [
         {
             'Name': f'tag:{constants.TAG_RAY_CLUSTER_NAME}',
             'Values': [cluster_name_on_cloud],
@@ -903,6 +981,7 @@ def wait_instances(region: str, cluster_name_on_cloud: str,
         raise RuntimeError(
             f'No instances found for cluster {cluster_name_on_cloud}.')
 
+    waiter: 'botowaiter.Waiter'
     if state == status_lib.ClusterStatus.UP:
         waiter = client.get_waiter('instance_running')
     elif state == status_lib.ClusterStatus.STOPPED:
@@ -921,7 +1000,7 @@ def get_cluster_info(
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     """See sky/provision/__init__.py"""
     ec2 = _default_ec2_resource(region)
-    filters = [
+    filters: List['ec2_type_defs.FilterTypeDef'] = [
         {
             'Name': 'instance-state-name',
             'Values': ['running'],
@@ -954,3 +1033,23 @@ def get_cluster_info(
         provider_name='aws',
         provider_config=provider_config,
     )
+
+
+def _get_vpc_id(provider_config: Dict[str, Any]) -> str:
+    region = provider_config['region']
+    ec2 = _default_ec2_resource(provider_config['region'])
+    if 'vpc_name' in provider_config:
+        return aws_config.get_vpc_id_by_name(ec2, provider_config['vpc_name'],
+                                             region)
+    else:
+        # Retrieve the default VPC name from the region.
+        response = ec2.meta.client.describe_vpcs(Filters=[{
+            'Name': 'isDefault',
+            'Values': ['true']
+        }])
+        if len(response['Vpcs']) == 0:
+            raise ValueError(f'No default VPC found in region {region}')
+        elif len(response['Vpcs']) > 1:
+            raise ValueError(f'Multiple default VPCs found in region {region}')
+        else:
+            return response['Vpcs'][0]['VpcId']

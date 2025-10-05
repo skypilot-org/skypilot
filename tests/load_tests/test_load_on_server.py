@@ -15,6 +15,7 @@ from typing import Dict, List
 
 import numpy as np
 
+import sky
 from sky import jobs as managed_jobs
 from sky import serve as serve_lib
 from sky.client import sdk
@@ -145,9 +146,10 @@ def test_logs_requests(num_requests, cloud):
 
 def test_jobs_requests(num_requests, cloud, is_async=True):
     print(f"Testing {num_requests} jobs launch requests")
-    cmd = f'sky jobs launch --cloud={cloud} --cpus=2 "echo hello" -y'
+    cmd = f'sky jobs launch --cloud={cloud} --cpus=2 "echo hello && sleep 120" -y'
     if is_async:
         cmd += ' --async'
+    print(f"Running {cmd}, concurrency={num_requests}")
     run_concurrent_requests(num_requests, cmd)
 
 
@@ -220,8 +222,24 @@ def test_tail_logs_api(num_requests, cloud):
     run_single_request(0, cleanup_cmd)
 
 
+def test_validate_api(num_requests):
+    print(f"Testing {num_requests} validate API requests")
+
+    def validate():
+        with sky.Dag() as dag:
+            dag.add(sky.Task(name='echo', run='echo hello'))
+            sdk.validate(dag)
+
+    run_concurrent_api_requests(num_requests, validate, 'API /validate')
+
+
+def test_api_status(num_requests):
+    print(f"Testing {num_requests} API status requests")
+    run_concurrent_api_requests(num_requests, sdk.api_status, 'API /status')
+
+
 all_requests = ['launch', 'status', 'logs', 'jobs', 'serve']
-all_apis = ['status', 'cli_status', 'tail_logs']
+all_apis = ['status', 'cli_status', 'tail_logs', 'validate', 'api_status']
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -250,6 +268,10 @@ if __name__ == '__main__':
                         choices=all_apis + ['all'],
                         default=[],
                         help='List of APIs to test')
+    parser.add_argument(
+        '--run-async',
+        action='store_true',
+        help='Whether to run requests asynchronously (if possible)')
 
     args = parser.parse_args()
 
@@ -270,7 +292,7 @@ if __name__ == '__main__':
             thread = None
             if request_type == 'launch':
                 thread = threading.Thread(target=test_launch_requests,
-                                          args=(args.n, cloud, True))
+                                          args=(args.n, cloud, args.run_async))
             elif request_type == 'status':
                 thread = threading.Thread(target=test_status_requests,
                                           args=(args.n,))
@@ -279,7 +301,7 @@ if __name__ == '__main__':
                                           args=(args.n, cloud))
             elif request_type == 'jobs':
                 thread = threading.Thread(target=test_jobs_requests,
-                                          args=(args.n, cloud))
+                                          args=(args.n, cloud, args.run_async))
             elif request_type == 'serve':
                 thread = threading.Thread(target=test_serve_requests,
                                           args=(args.n, cloud))
@@ -299,6 +321,12 @@ if __name__ == '__main__':
             elif api == 'tail_logs':
                 thread = threading.Thread(target=test_tail_logs_api,
                                           args=(args.n, cloud))
+            elif api == 'validate':
+                thread = threading.Thread(target=test_validate_api,
+                                          args=(args.n,))
+            elif api == 'api_status':
+                thread = threading.Thread(target=test_api_status,
+                                          args=(args.n,))
             if thread:
                 test_threads.append(thread)
                 thread.start()

@@ -1,0 +1,10 @@
+{{- if and (not (index .Values.ingress "oauth2-proxy" "enabled")) .Values.apiService.enableUserManagement (not .Values.apiService.initialBasicAuthSecret) .Values.apiService.initialBasicAuthCredentials }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}-initial-basic-auth
+  namespace: {{ .Release.Namespace }}
+type: Opaque
+stringData:
+  auth: {{ .Values.apiService.initialBasicAuthCredentials | quote }}
+{{- end }}

@@ -3,13 +3,18 @@
 import json
 import os
 import time
+import typing
 from typing import Any, Dict, List, Optional, Union
 
-import requests
-
 from sky import sky_logging
-import sky.provision.paperspace.constants as constants
+from sky.adaptors import common as adaptors_common
+from sky.provision.paperspace import constants
 from sky.utils import common_utils
+
+if typing.TYPE_CHECKING:
+    import requests
+else:
+    requests = adaptors_common.LazyImport('requests')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -25,7 +30,7 @@ class PaperspaceCloudError(Exception):
     pass
 
 
-def raise_paperspace_api_error(response: requests.Response) -> None:
+def raise_paperspace_api_error(response: 'requests.Response') -> None:
     """Raise PaperspaceCloudError if appropriate."""
     status_code = response.status_code
     if status_code == 200:

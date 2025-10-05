@@ -1,12 +1,13 @@
-"""Lambda instance provisioning."""
+"""Lambda Cloud instance provisioning."""
 
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
 from sky.provision import common
-import sky.provision.lambda_cloud.lambda_utils as lambda_utils
+from sky.provision.lambda_cloud import lambda_utils
 from sky.utils import common_utils
+from sky.utils import resources_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
 
@@ -67,9 +68,10 @@ def _get_private_ip(instance_info: Dict[str, Any], single_node: bool) -> str:
     return private_ip
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster"""
+    del cluster_name  # unused
     lambda_client = _get_lambda_client()
     pending_status = ['booting']
     while True:
@@ -105,34 +107,35 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     created_instance_ids = []
     remote_ssh_key_name = config.authentication_config['remote_key_name']
 
-    def launch_nodes(node_type: str, quantity: int) -> List[str]:
+    def launch_node(node_type: str) -> str:
         try:
             instance_ids = lambda_client.create_instances(
                 instance_type=config.node_config['InstanceType'],
                 region=region,
                 name=f'{cluster_name_on_cloud}-{node_type}',
-                quantity=quantity,
+                # Quantity cannot actually be greater than 1; see:
+                # https://github.com/skypilot-org/skypilot/issues/7084
+                quantity=1,
                 ssh_key_name=remote_ssh_key_name,
             )
-            logger.info(f'Launched {len(instance_ids)} {node_type} node(s), '
-                        f'instance_ids: {instance_ids}')
-            return instance_ids
+            logger.info(f'Launched {node_type} node, '
+                        f'instance_id: {instance_ids[0]}')
+            return instance_ids[0]
         except Exception as e:
             logger.warning(f'run_instances error: {e}')
             raise
 
     if head_instance_id is None:
-        instance_ids = launch_nodes('head', 1)
-        assert len(instance_ids) == 1
-        created_instance_ids.append(instance_ids[0])
-        head_instance_id = instance_ids[0]
+        head_instance_id = launch_node('head')
+        created_instance_ids.append(head_instance_id)
 
     assert head_instance_id is not None, 'head_instance_id should not be None'
 
     worker_node_count = to_start_count - 1
     if worker_node_count > 0:
-        instance_ids = launch_nodes('worker', worker_node_count)
-        created_instance_ids.extend(instance_ids)
+        for _ in range(worker_node_count):
+            worker_instance_id = launch_node('worker')
+            created_instance_ids.append(worker_instance_id)
 
     while True:
         instances = _filter_instances(cluster_name_on_cloud, ['active'])
@@ -225,11 +228,13 @@ def get_cluster_info(
 
 
 def query_instances(
+    cluster_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
+    del cluster_name  # unused
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     instances = _filter_instances(cluster_name_on_cloud, None)
 
@@ -239,27 +244,112 @@ def query_instances(
         'unhealthy': status_lib.ClusterStatus.INIT,
         'terminating': None,
     }
-    statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
+    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                              Optional[str]]] = {}
     for instance_id, instance in instances.items():
         status = status_map.get(instance['status'])
         if non_terminated_only and status is None:
             continue
-        statuses[instance_id] = status
+        statuses[instance_id] = (status, None)
     return statuses
 
 
-def open_ports(
-    cluster_name_on_cloud: str,
-    ports: List[str],
-    provider_config: Optional[Dict[str, Any]] = None,
-) -> None:
-    raise NotImplementedError('open_ports is not supported for Lambda Cloud')
+def open_ports(cluster_name_on_cloud: str,
+               ports: List[str],
+               provider_config: Optional[Dict[str, Any]] = None) -> None:
+    """Open firewall ports for Lambda Cloud.
+
+    Args:
+        cluster_name_on_cloud: Cluster name on Lambda Cloud.
+        ports: List of ports to open.
+        provider_config: Lambda Cloud provider config. Contains the API key.
+    """
+    if not ports:
+        return
+
+    # Skip port opening for us-south-1 region where it's not supported
+    region = None
+    if provider_config is not None:
+        region = provider_config.get('region')
+
+    # Skip port opening for us-south-1, as it's not supported by Lambda Cloud
+    # https://cloud.lambda.ai/api/v1/docs#get-/api/v1/firewall-rules
+    if region == 'us-south-1':
+        logger.warning(
+            f'Skipping port opening for cluster {cluster_name_on_cloud} in '
+            f'us-south-1 region, as firewall rules are not supported there.')
+        return
+
+    del provider_config, cluster_name_on_cloud  # No longer needed
+
+    lambda_client = lambda_utils.LambdaCloudClient()
+
+    # Get existing rules to avoid duplicates
+    existing_rules = lambda_client.list_firewall_rules()
+    existing_ports = set()
+    for rule in existing_rules:
+        port_range = rule.get('port_range')
+        if rule.get('protocol') == 'tcp' and port_range is not None:
+            if len(port_range) == 1:
+                # For single ports
+                existing_ports.add(port_range[0])
+            elif len(port_range) == 2:
+                # For port ranges, add all ports in the range
+                existing_ports.update(range(port_range[0], port_range[1] + 1))
+
+    # Convert port strings to a set of individual ports
+    ports_to_open = resources_utils.port_ranges_to_set(ports)
+
+    # Remove ports that are already open
+    ports_to_open = ports_to_open - existing_ports
+
+    # If no ports need to be opened, return early
+    if not ports_to_open:
+        return
+
+    # Convert individual ports to consolidated ranges
+    port_ranges = resources_utils.port_set_to_ranges(ports_to_open)
+
+    # Open port ranges
+    for port_range in port_ranges:
+        if '-' in port_range:
+            # Handle range (e.g., "1000-1010")
+            start, end = map(int, port_range.split('-'))
+            logger.debug(f'Opening port range {port_range}/tcp')
+            try:
+                lambda_client.create_firewall_rule(port_range=[start, end],
+                                                   protocol='tcp')
+            except lambda_utils.LambdaCloudError as e:
+                logger.warning(f'Failed to open port range {port_range}: {e}')
+        else:
+            # Handle single port
+            port = int(port_range)
+            logger.debug(f'Opening port {port}/tcp')
+            try:
+                lambda_client.create_firewall_rule(port_range=[port, port],
+                                                   protocol='tcp')
+            except lambda_utils.LambdaCloudError as e:
+                logger.warning(f'Failed to open port {port}: {e}')
 
 
-def cleanup_ports(
-    cluster_name_on_cloud: str,
-    ports: List[str],
-    provider_config: Optional[Dict[str, Any]] = None,
-) -> None:
-    """See sky/provision/__init__.py"""
+def cleanup_ports(cluster_name_on_cloud: str,
+                  ports: List[str],
+                  provider_config: Optional[Dict[str, Any]] = None) -> None:
+    """Skip cleanup of firewall rules.
+
+    Lambda Cloud firewall rules are global to the account, not cluster-specific.
+    We skip cleanup because rules may be used by other clusters.
+
+    TODO(zhwu): the firewall rules may accumulate over time, and we may need
+    to add a way to automatically clean them up.
+
+    Args:
+        cluster_name_on_cloud: Unused.
+        ports: Unused.
+        provider_config: Unused.
+    """
     del cluster_name_on_cloud, ports, provider_config  # Unused.
+
+    # Break the long line by splitting it
+    logger.info('Skipping cleanup of Lambda Cloud firewall rules '
+                'as they are account-wide.')

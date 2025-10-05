@@ -3,7 +3,7 @@
 import dataclasses
 import shlex
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 from sky.skylet import constants
@@ -15,20 +15,50 @@ logger = sky_logging.init_logger(__name__)
 # Configure environment variables. A docker image can have environment variables
 # set in the Dockerfile with `ENV``. We need to export these variables to the
 # shell environment, so that our ssh session can access them.
+# Filter out RAY_RUNTIME_ENV_HOOK to prevent Ray version conflicts.
+# Docker images with Ray 2.48.0+ set this for UV package manager support,
+# but it causes FAILED_DRIVER errors with SkyPilot's Ray 2.9.3.
+# See: https://github.com/skypilot-org/skypilot/pull/7181
 SETUP_ENV_VARS_CMD = (
     'prefix_cmd() '
     '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
-    'printenv | while IFS=\'=\' read -r key value; do echo "export $key=\\\"$value\\\""; done > '  # pylint: disable=line-too-long
-    '~/container_env_var.sh && '
-    '$(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh;'
-)
+    'export -p | grep -v RAY_RUNTIME_ENV_HOOK > ~/container_env_var.sh && '
+    '$(prefix_cmd) '
+    'mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh;')
 
 # Docker daemon may not be ready when the machine is firstly started. The error
 # message starts with the following string. We should wait for a while and retry
 # the command.
 DOCKER_PERMISSION_DENIED_STR = ('permission denied while trying to connect to '
                                 'the Docker daemon socket')
+
+DOCKER_SOCKET_NOT_READY_STR = ('Is the docker daemon running?')
+
 _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS = 30
+
+# Install AWS CLI v2 (not v1 from pip) as it's required for ECR authentication
+# AWS CLI v2 is installed as a standalone binary, not a Python package. See:
+# https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
+INSTALL_AWS_CLI_CMD = (
+    'which aws || ((command -v unzip >/dev/null 2>&1 || '
+    '(sudo apt-get update && sudo apt-get install -y unzip)) && '
+    'curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" '
+    '-o "/tmp/awscliv2.zip" && '
+    'unzip -q /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install '
+    '&& rm -rf /tmp/awscliv2.zip /tmp/aws)')
+
+
+def _extract_region_from_ecr_server(server: str) -> str:
+    """Extract AWS region from ECR server URL.
+
+    ECR server format: <account-id>.dkr.ecr.<region>.amazonaws.com
+    Returns the region part from the URL.
+    """
+    # Split: ['<account-id>', 'dkr', 'ecr', '<region>', 'amazonaws', 'com']
+    parts = server.split('.')
+    if len(parts) >= 6 and parts[1] == 'dkr' and parts[2] == 'ecr':
+        return parts[3]
+    raise ValueError(f'Invalid ECR server format: {server}')
 
 
 @dataclasses.dataclass
@@ -79,6 +109,21 @@ def check_bind_mounts_cmd(cname, docker_cmd):
 
 def check_docker_image(cname, docker_cmd):
     return _check_helper(cname, '.Config.Image', docker_cmd)
+
+
+def maybe_remove_container_cmds(container_name, docker_cmd):
+    """Remove the container if it exists. If not, it will be a no-op.
+    """
+    docker_rm = [
+        docker_cmd,
+        'rm',
+        '-f',
+        container_name,
+        '2>/dev/null',
+        '||',
+        'true',
+    ]
+    return ' '.join(docker_rm)
 
 
 def docker_start_cmds(
@@ -147,12 +192,16 @@ class DockerInitializer:
         self.docker_cmd = 'podman' if use_podman else 'docker'
         self.log_path = log_path
 
-    def _run(self,
-             cmd,
-             run_env='host',
-             wait_for_docker_daemon: bool = False,
-             separate_stderr: bool = False,
-             log_err_when_fail: bool = True) -> str:
+    def _run(
+        self,
+        cmd,
+        run_env='host',
+        wait_for_docker_daemon: bool = False,
+        separate_stderr: bool = False,
+        log_err_when_fail: bool = True,
+        flock_name: Optional[str] = None,
+        flock_args: Optional[str] = None,
+    ) -> str:
 
         if run_env == 'docker':
             cmd = self._docker_expand_user(cmd, any_char=True)
@@ -161,8 +210,13 @@ class DockerInitializer:
             # an error: `the input device is not a TTY`, and it works without
             # `-it` flag.
             # TODO(zhwu): ray use the `-it` flag, we need to check why.
-            cmd = (f'{self.docker_cmd} exec {self.container_name} /bin/bash -c'
-                   f' {shlex.quote(cmd)} ')
+            cmd = (f'{self.docker_cmd} exec -u 0 {self.container_name}'
+                   f' /bin/bash -c {shlex.quote(cmd)} ')
+
+        if flock_name is not None:
+            flock_args = flock_args or ''
+            cmd = (f'flock {flock_args} /tmp/{flock_name} '
+                   f'-c {shlex.quote(cmd)}')
 
         logger.debug(f'+ {cmd}')
         start = time.time()
@@ -173,22 +227,25 @@ class DockerInitializer:
                 stream_logs=False,
                 separate_stderr=separate_stderr,
                 log_path=self.log_path)
-            if (DOCKER_PERMISSION_DENIED_STR in stdout + stderr and
-                    wait_for_docker_daemon):
-                if time.time() - start > _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS:
-                    if rc == 0:
-                        # Set returncode to 1 if failed to connect to docker
-                        # daemon after timeout.
-                        rc = 1
-                    break
-                # Close the cached connection to make the permission update of
-                # ssh user take effect, e.g. usermod -aG docker $USER, called
-                # by cloud-init of Azure.
-                self.runner.close_cached_connection()
-                logger.info('Failed to connect to docker daemon. It might be '
-                            'initializing, retrying in 5 seconds...')
-                time.sleep(5)
-                continue
+            if (DOCKER_PERMISSION_DENIED_STR in stdout + stderr or
+                    DOCKER_SOCKET_NOT_READY_STR in stdout + stderr):
+                if wait_for_docker_daemon:
+                    if time.time(
+                    ) - start > _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS:
+                        if rc == 0:
+                            # Set returncode to 1 if failed to connect to docker
+                            # daemon after timeout.
+                            rc = 1
+                        break
+                    # Close the cached connection to make the permission update
+                    # of ssh user take effect, e.g. usermod -aG docker $USER,
+                    # called by cloud-init of Azure.
+                    self.runner.close_cached_connection()
+                    logger.info(
+                        'Failed to connect to docker daemon. It might be '
+                        'initializing, retrying in 5 seconds...')
+                    time.sleep(5)
+                    continue
             break
         subprocess_utils.handle_returncode(
             rc,
@@ -211,20 +268,56 @@ class DockerInitializer:
         if self._check_container_exited():
             self.initialized = True
             self._run(f'{self.docker_cmd} start {self.container_name}')
-            self._run('sudo service ssh start', run_env='docker')
+            self._run('sudo service ssh start',
+                      run_env='docker',
+                      flock_name=f'{self.container_name}.sky.lifecycle.lock',
+                      flock_args='-s -w 1')
             return self._run('whoami', run_env='docker')
 
         # SkyPilot: Docker login if user specified a private docker registry.
         if 'docker_login_config' in self.docker_config:
-            # TODO(tian): Maybe support a command to get the login password?
             docker_login_config = DockerLoginConfig(
                 **self.docker_config['docker_login_config'])
-            self._run(
-                f'{self.docker_cmd} login --username '
-                f'{docker_login_config.username} '
-                f'--password {docker_login_config.password} '
-                f'{docker_login_config.server}',
-                wait_for_docker_daemon=True)
+
+            if docker_login_config.password:
+                # Password is allowed to be empty, in that case, we will not run
+                # the login command, and assume that the image pulling is
+                # authenticated by the IAM permission on the VM.
+                self._run(
+                    f'{self.docker_cmd} login --username '
+                    f'{shlex.quote(docker_login_config.username)} '
+                    f'--password {shlex.quote(docker_login_config.password)} '
+                    f'{shlex.quote(docker_login_config.server)}',
+                    wait_for_docker_daemon=True)
+            elif (docker_login_config.server.endswith('.amazonaws.com') and
+                  '.dkr.ecr.' in docker_login_config.server):
+                # AWS ECR: Use aws ecr get-login-password for authentication
+                # ECR format: <account-id>.dkr.ecr.<region>.amazonaws.com
+                # This command uses the IAM credentials from the EC2 instance
+                # Ref: https://docs.aws.amazon.com/AmazonECR/latest/userguide/registry_auth.html # pylint: disable=line-too-long
+                region = _extract_region_from_ecr_server(
+                    docker_login_config.server)
+
+                # AWS CLI is not pre-installed on AWS instances, unlike gcloud
+                # on GCP instances, so we need to install it first
+                self._run(INSTALL_AWS_CLI_CMD, wait_for_docker_daemon=False)
+
+                self._run(
+                    f'aws ecr get-login-password --region {region} | '
+                    f'{self.docker_cmd} login --username AWS '
+                    f'--password-stdin '
+                    f'{shlex.quote(docker_login_config.server)}',
+                    wait_for_docker_daemon=True)
+            elif docker_login_config.server.endswith('-docker.pkg.dev'):
+                # Docker image server is on GCR, we need to do additional setup
+                # to pull the image.
+                # When no username or password is provided, we assume that
+                # we are on GCP VM (i.e. gcloud auth configure-docker is
+                # enough), or the image server is public.
+                # For the former case, gcloud should be available, and latter
+                # should be fine to fail the following command.
+                self._run('gcloud auth configure-docker '
+                          f'{docker_login_config.server} --quiet || true')
             # We automatically add the server prefix to the image name if
             # the user did not add it.
             specific_image = docker_login_config.format_image(specific_image)
@@ -266,6 +359,10 @@ class DockerInitializer:
                 'sudo mv /tmp/daemon.json /etc/docker/daemon.json;'
                 'sudo systemctl restart docker; } || true')
             user_docker_run_options = self.docker_config.get('run_options', [])
+            remove_container_cmd = maybe_remove_container_cmds(
+                self.container_name,
+                self.docker_cmd,
+            )
             start_command = docker_start_cmds(
                 specific_image,
                 self.container_name,
@@ -273,7 +370,9 @@ class DockerInitializer:
                     self._auto_configure_shm(user_docker_run_options)),
                 self.docker_cmd,
             )
-            self._run(start_command)
+            self._run(f'{remove_container_cmd} && {start_command}',
+                      flock_name=f'{self.container_name}.sky.lifecycle.lock',
+                      flock_args='-x -w 10')
 
         # SkyPilot: Setup Commands.
         # TODO(zhwu): the following setups should be aligned with the kubernetes
@@ -291,14 +390,18 @@ class DockerInitializer:
             'echo "export DEBIAN_FRONTEND=noninteractive" >> ~/.bashrc;',
             run_env='docker')
         # Install dependencies.
-        self._run(
-            'sudo apt-get update; '
+        cmd = (
+            'bash -lc \''
+            'exec 200>/var/tmp/sky_apt.lock; '
+            'flock -x -w 120 200 || exit 1; '
+            'export DEBIAN_FRONTEND=noninteractive; '
+            'apt-get -yq update && '
             # Our mount script will install gcsfuse without fuse package.
             # We need to install fuse package first to enable storage mount.
             # The dpkg option is to suppress the prompt for fuse installation.
-            'sudo apt-get -o DPkg::Options::="--force-confnew" install -y '
-            'rsync curl wget patch openssh-server python3-pip fuse;',
-            run_env='docker')
+            'apt-get -o DPkg::Options::=--force-confnew install -y '
+            'rsync curl wget patch openssh-server python3-pip fuse\'')
+        self._run(cmd, run_env='docker')
 
         # Copy local authorized_keys to docker container.
         # Stop and disable jupyter service. This is to avoid port conflict on
@@ -324,13 +427,16 @@ class DockerInitializer:
         # `mesg: ttyname failed: inappropriate ioctl for device`.
         # see https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
         port = constants.DEFAULT_DOCKER_PORT
+        # In case the port is already configured in the sshd_config file
+        # in some images, we delete it first and then append the new one.
         # pylint: disable=anomalous-backslash-in-string
         self._run(
-            f'sudo sed -i "s/#Port 22/Port {port}/" /etc/ssh/sshd_config;'
+            'sudo sed -i "/^Port .*/d" /etc/ssh/sshd_config;'
+            f'echo "Port {port}" | sudo tee -a /etc/ssh/sshd_config > /dev/null;'
             'mkdir -p ~/.ssh;'
             'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys;'
             'sudo service ssh start;'
-            'sudo sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;'
+            'sudo sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;'
             f'{SETUP_ENV_VARS_CMD}',
             run_env='docker')
 
@@ -371,9 +477,13 @@ class DockerInitializer:
         user_pos = string.find('~')
         if user_pos > -1:
             if self.home_dir is None:
-                cmd = (f'{self.docker_cmd} exec {self.container_name} '
-                       'printenv HOME')
-                self.home_dir = self._run(cmd, separate_stderr=True)
+                cmd = (f'{self.docker_cmd} exec {self.container_name}'
+                       ' printenv HOME')
+                self.home_dir = self._run(
+                    cmd,
+                    separate_stderr=True,
+                    flock_name=f'{self.container_name}.sky.lifecycle.lock',
+                    flock_args='-s -w 1')
                 # Check for unexpected newline in home directory, which can be
                 # a common issue when the output is mixed with stderr.
                 assert '\n' not in self.home_dir, (

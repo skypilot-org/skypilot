@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.abspath('.'))
 sys.path.insert(0, os.path.abspath('../'))
 sys.path.insert(0, os.path.abspath('../../'))
 
-import prepare_github_markdown
+import generate_examples
 
 # -- Project information
 
@@ -37,12 +37,23 @@ extensions = [
     'sphinx_autodoc_typehints',
     'sphinx_click',
     'sphinx_copybutton',
+    "sphinx_togglebutton",  # Used for collapsible sections in examples.
     'sphinxcontrib.googleanalytics',
     'sphinxemoji.sphinxemoji',
     'sphinx_design',
     'myst_parser',
     'notfound.extension',
     'sphinx.ext.autosectionlabel',
+    'extension.linting',
+    'extension.markdown_export',
+    'extension.dynamic_llms_txt',
+]
+# Needed for admonitions in markdown:
+# https://myst-parser.readthedocs.io/en/latest/syntax/admonitions.html
+myst_enable_extensions = [
+    "colon_fence",
+    # Converts http links to clickable links in HTML output.
+    "linkify",
 ]
 
 intersphinx_mapping = {
@@ -70,6 +81,11 @@ napoleon_custom_sections = [
 # Python methods should be presented in source code order
 autodoc_member_order = 'bysource'
 
+# Mock imports for modules that should not be loaded during doc build
+autodoc_mock_imports = [
+    'sky.schemas.generated',
+]
+
 
 # -- Options for HTML output
 def render_svg_logo(path):
@@ -78,6 +94,10 @@ def render_svg_logo(path):
 
     return content
 
+
+# Add extra paths that contain custom files here, relative to this directory.
+# These files are copied directly to the root of the documentation.
+html_extra_path = ['robots.txt']
 
 # html_theme = 'sphinx_book_theme'
 html_theme = 'pydata_sphinx_theme'
@@ -108,7 +128,7 @@ html_theme_options = {
         'icon': 'fab fa-github',
     }],
     'use_edit_page_button': True,
-    'announcement': None,
+    'announcement': '',  # Put announcements such as meetups here.
     'secondary_sidebar_items': [
         'page-toc',
         'edit-this-page',
@@ -168,18 +188,97 @@ html_css_files = ['custom.css']
 myst_heading_anchors = 7
 show_sphinx = False
 
-exclude_patterns = ['_gallery_original']
-myst_heading_anchors = 3
+exclude_patterns = [
+    '_gallery_original',
+    'generated-examples',
+]
+myst_url_schemes = {
+    'http': None,
+    'https': None,
+    'mailto': None,
+    'ftp': None,
+    'local': {
+        'url': '{{path}}',
+        'title': '{{path}}',
+    },
+    'gh-issue': {
+        'url': 'https://github.com/skypilot-org/skypilot/issues/{{path}}#{{fragment}}',
+        'title': 'Issue #{{path}}',
+        'classes': ['github'],
+    },
+    'gh-pr': {
+        'url': 'https://github.com/skypilot-org/skypilot/pull/{{path}}#{{fragment}}',
+        'title': 'Pull Request #{{path}}',
+        'classes': ['github'],
+    },
+    'gh-dir': {
+        'url': 'https://github.com/skypilot-org/skypilot/tree/master/{{path}}',
+        'title': '{{path}}',
+        'classes': ['github'],
+    },
+    'gh-file': {
+        'url': 'https://github.com/skypilot-org/skypilot/blob/master/{{path}}',
+        'title': '{{path}}',
+        'classes': ['github'],
+    },
+}
 
 googleanalytics_id = 'G-92WF3MDCJV'
 
 autosectionlabel_prefix_document = True
 
-suppress_warnings = [
-    'autosectionlabel.*',
-]
+suppress_warnings = ['autosectionlabel.*']
+
+# Adapted from vllm-project/vllm
+# see https://docs.readthedocs.io/en/stable/reference/environment-variables.html # noqa
+READTHEDOCS_VERSION_TYPE = os.environ.get('READTHEDOCS_VERSION_TYPE')
+if READTHEDOCS_VERSION_TYPE == "tag":
+    # remove the warning banner if the version is a tagged release
+    header_file = os.path.join(os.path.dirname(__file__),
+                               "_templates/header.html")
+    # The file might be removed already if the build is triggered multiple times
+    # (readthedocs build both HTML and PDF versions separately)
+    if os.path.exists(header_file):
+        os.remove(header_file)
+
+
+def copy_example_assets(app, exception):
+    """Copy example assets to the build directory after HTML build."""
+    if exception is not None:
+        return
+
+    import glob
+    import shutil
+
+    # Only copy assets for HTML builds
+    if app.builder.name != 'html':
+        return
+
+    # Find the examples directory relative to docs/source
+    examples_dir = os.path.abspath(os.path.join(app.srcdir, '../../examples'))
+
+    if os.path.exists(examples_dir):
+        # Find all assets directories in examples
+        for assets_dir in glob.glob(os.path.join(examples_dir, '*/assets')):
+            if os.path.exists(assets_dir):
+                # Destination directory in the built HTML
+                dest_dir = os.path.join(app.outdir, 'examples', 'applications',
+                                        'assets')
+                os.makedirs(dest_dir, exist_ok=True)
+
+                # Copy all files from assets directory
+                for file in os.listdir(assets_dir):
+                    src = os.path.join(assets_dir, file)
+                    dst = os.path.join(dest_dir, file)
+                    if os.path.isfile(src):
+                        shutil.copy2(src, dst)
+                        print(f'Copied asset: {file}')
 
 
 def setup(app):
-    app.connect('builder-inited',
-                prepare_github_markdown.handle_markdown_in_gallery)
+    # Run generate_examples directly during setup instead of connecting to builder-inited
+    # This ensures it completes fully before any build steps start
+    generate_examples.generate_examples(app)
+
+    # Connect the asset copying to the build-finished event
+    app.connect('build-finished', copy_example_assets)

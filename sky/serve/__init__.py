@@ -3,6 +3,7 @@ import os
 
 from sky.serve.client.sdk import down
 from sky.serve.client.sdk import status
+from sky.serve.client.sdk import sync_down_logs
 from sky.serve.client.sdk import tail_logs
 from sky.serve.client.sdk import terminate_replica
 from sky.serve.client.sdk import up
@@ -21,6 +22,7 @@ from sky.serve.serve_utils import generate_service_name
 from sky.serve.serve_utils import ServeCodeGen
 from sky.serve.serve_utils import ServiceComponent
 from sky.serve.serve_utils import UpdateMode
+from sky.serve.serve_utils import validate_service_task
 from sky.serve.service_spec import SkyServiceSpec
 
 os.makedirs(os.path.expanduser(SKYSERVE_METADATA_DIR), exist_ok=True)
@@ -36,6 +38,7 @@ __all__ = [
     'LB_POLICIES',
     'ReplicaStatus',
     'ServiceComponent',
+    'sync_down_logs',
     'ServiceStatus',
     'ServeCodeGen',
     'SkyServiceSpec',

@@ -1,0 +1,100 @@
+name: Wait for Buildkite Build
+
+on:
+  workflow_call:
+    inputs:
+      organization:
+        required: true
+        type: string
+        description: "Buildkite organization name"
+      pipeline:
+        required: true
+        type: string
+        description: "Buildkite pipeline name"
+      build_number:
+        required: true
+        type: string
+        description: "Buildkite build number to wait for"
+      timeout_minutes:
+        required: false
+        type: number
+        default: 120
+        description: "Timeout in minutes (default: 2 hours)"
+      fail_on_buildkite_failure:
+        required: false
+        type: boolean
+        default: true
+        description: "Whether to fail the job if the Buildkite build fails (default: true)"
+    secrets:
+      BUILDKITE_TOKEN:
+        required: true
+        description: "Buildkite API token with read access"
+    outputs:
+      build_status:
+        description: "Final status of the build (success, failure, timeout)"
+        value: ${{ jobs.wait.outputs.build_status }}
+
+jobs:
+  wait:
+    runs-on: ubuntu-latest
+    outputs:
+      build_status: ${{ steps.wait_buildkite.outputs.build_status }}
+    steps:
+      - name: Wait for Buildkite build completion
+        id: wait_buildkite
+        env:
+          BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+          FAIL_ON_BUILDKITE_FAILURE: ${{ inputs.fail_on_buildkite_failure }}
+        run: |
+          organization="${{ inputs.organization }}"
+          pipeline="${{ inputs.pipeline }}"
+          build_number="${{ inputs.build_number }}"
+          max_attempts=$((2 * ${{ inputs.timeout_minutes }}))  # Check every 30 seconds
+          attempt=0
+
+          while [ $attempt -lt $max_attempts ]; do
+            response=$(curl -s -H "Authorization: Bearer $BUILDKITE_TOKEN" \
+              "https://api.buildkite.com/v2/organizations/$organization/pipelines/$pipeline/builds/$build_number")
+
+            # Check if response contains only an error message
+            if [ $(echo "$response" | jq 'has("message") and length == 1') == "true" ]; then
+              error_message=$(echo "$response" | jq -r '.message')
+              echo "Error from Buildkite API: $error_message"
+              echo "build_status=failure" >> $GITHUB_OUTPUT
+              exit 1
+            fi
+
+            status=$(echo "$response" | jq -r '.state')
+
+            case $status in
+              "passed")
+                echo "Buildkite build succeeded"
+                echo "build_status=success" >> $GITHUB_OUTPUT
+                exit 0
+                ;;
+              "failed"|"canceled"|"blocked")
+                echo "Buildkite build failed with status: $status"
+                echo "build_status=failure" >> $GITHUB_OUTPUT
+                if [ "$FAIL_ON_BUILDKITE_FAILURE" = "true" ]; then
+                  exit 1
+                else
+                  echo "Not failing workflow despite Buildkite failure: $status"
+                  exit 0
+                fi
+                ;;
+              *)
+                echo "Buildkite build status: $status - waiting..."
+                sleep 30
+                attempt=$((attempt+1))
+                ;;
+            esac
+          done
+
+          echo "Timeout waiting for Buildkite build to complete (${{ inputs.timeout_minutes }} minute limit reached)"
+          echo "build_status=timeout" >> $GITHUB_OUTPUT
+          if [ "$FAIL_ON_BUILDKITE_FAILURE" = "true" ]; then
+            exit 1
+          else
+            echo "Not failing workflow despite Buildkite timeout"
+            exit 0
+          fi

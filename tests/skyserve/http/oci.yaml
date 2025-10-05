@@ -3,7 +3,7 @@ service:
   replicas: 2
 
 resources:
-  cloud: oci
+  infra: oci
   ports: 8080
   cpus: 2+
 

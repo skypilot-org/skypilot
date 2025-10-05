@@ -1,10 +1,13 @@
 """Helper functions for object store mounting in Sky Storage"""
+import hashlib
+import os
 import random
 import shlex
 import textwrap
 from typing import Optional
 
 from sky import exceptions
+from sky.skylet import constants
 from sky.utils import command_runner
 
 # Values used to construct mounting commands
@@ -14,27 +17,66 @@ _TYPE_CACHE_TTL = '5s'
 _RENAME_DIR_LIMIT = 10000
 # https://github.com/GoogleCloudPlatform/gcsfuse/releases
 GCSFUSE_VERSION = '2.2.0'
+# Creates a fusermount3 soft link on older (<22) Ubuntu systems to utilize
+# Rclone's mounting utility.
+FUSERMOUNT3_SOFT_LINK_CMD = ('[ ! -f /bin/fusermount3 ] && '
+                             'sudo ln -s /bin/fusermount /bin/fusermount3 || '
+                             'true')
 # https://github.com/Azure/azure-storage-fuse/releases
 BLOBFUSE2_VERSION = '2.2.0'
 _BLOBFUSE_CACHE_ROOT_DIR = '~/.sky/blobfuse2_cache'
 _BLOBFUSE_CACHE_DIR = ('~/.sky/blobfuse2_cache/'
                        '{storage_account_name}_{container_name}')
+# https://github.com/rclone/rclone/releases
 RCLONE_VERSION = 'v1.68.2'
+
+# A wrapper for goofys to choose the logging mechanism based on environment.
+_GOOFYS_WRAPPER = ('$(if [ -S /dev/log ] ; then '
+                   'echo "goofys"; '
+                   'else '
+                   'echo "goofys --log-file $(mktemp -t goofys.XXXX.log)"; '
+                   'fi)')
+
+
+def get_rclone_install_cmd() -> str:
+    """ RClone installation for both apt-get and rpm.
+    This would be common command.
+    """
+    # pylint: disable=line-too-long
+    install_cmd = (
+        'ARCH=$(uname -m) && '
+        'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+        '  ARCH_SUFFIX="arm64"; '
+        'else '
+        '  ARCH_SUFFIX="amd64"; '
+        'fi && '
+        f'(which dpkg > /dev/null 2>&1 && (which rclone > /dev/null || (cd ~ > /dev/null'
+        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
+        f' && sudo dpkg -i rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
+        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb)))'
+        f' || (which rclone > /dev/null || (cd ~ > /dev/null'
+        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm'
+        f' && sudo yum --nogpgcheck install rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm -y'
+        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm))')
+    return install_cmd
 
 
 def get_s3_mount_install_cmd() -> str:
-    """Returns a command to install S3 mount utility goofys."""
-    install_cmd = ('ARCH=$(uname -m) && '
-                   'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
-                   '  echo "goofys is not supported on $ARCH" && '
-                   f'  exit {exceptions.ARCH_NOT_SUPPORTED_EXIT_CODE}; '
-                   'else '
-                   '  ARCH_SUFFIX="amd64"; '
-                   'fi && '
-                   'sudo wget -nc https://github.com/romilbhardwaj/goofys/'
-                   'releases/download/0.24.0-romilb-upstream/goofys '
-                   '-O /usr/local/bin/goofys && '
-                   'sudo chmod 755 /usr/local/bin/goofys')
+    """Returns command for basic S3 mounting (goofys by default, rclone for
+    ARM64)."""
+    # TODO(aylei): maintain our goofys fork under skypilot-org
+    install_cmd = (
+        'ARCH=$(uname -m) && '
+        'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+        # Use rclone for ARM64 since goofys doesn't support it
+        # Extract core rclone installation logic without redundant ARCH check
+        f'  {get_rclone_install_cmd()}; '
+        'else '
+        '  sudo wget -nc https://github.com/aylei/goofys/'
+        'releases/download/0.24.0-aylei-upstream/goofys '
+        '-O /usr/local/bin/goofys && '
+        'sudo chmod 755 /usr/local/bin/goofys; '
+        'fi')
     return install_cmd
 
 
@@ -42,15 +84,67 @@ def get_s3_mount_install_cmd() -> str:
 def get_s3_mount_cmd(bucket_name: str,
                      mount_path: str,
                      _bucket_sub_path: Optional[str] = None) -> str:
-    """Returns a command to mount an S3 bucket using goofys."""
+    """Returns a command to mount an S3 bucket (goofys by default, rclone for
+    ARM64)"""
     if _bucket_sub_path is None:
         _bucket_sub_path = ''
     else:
         _bucket_sub_path = f':{_bucket_sub_path}'
-    mount_cmd = ('goofys -o allow_other '
-                 f'--stat-cache-ttl {_STAT_CACHE_TTL} '
-                 f'--type-cache-ttl {_TYPE_CACHE_TTL} '
-                 f'{bucket_name}{_bucket_sub_path} {mount_path}')
+
+    # Use rclone for ARM64 architectures since goofys doesn't support them
+    arch_check = 'ARCH=$(uname -m) && '
+    rclone_mount = (
+        f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
+        f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
+        # Have to add --s3-env-auth=true to allow rclone to access private
+        # buckets.
+        '--daemon --allow-other --s3-env-auth=true')
+    goofys_mount = (f'{_GOOFYS_WRAPPER} -o allow_other '
+                    f'--stat-cache-ttl {_STAT_CACHE_TTL} '
+                    f'--type-cache-ttl {_TYPE_CACHE_TTL} '
+                    f'{bucket_name}{_bucket_sub_path} {mount_path}')
+
+    mount_cmd = (f'{arch_check}'
+                 f'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+                 f'  {rclone_mount}; '
+                 f'else '
+                 f'  {goofys_mount}; '
+                 f'fi')
+    return mount_cmd
+
+
+def get_nebius_mount_cmd(nebius_profile_name: str,
+                         bucket_name: str,
+                         endpoint_url: str,
+                         mount_path: str,
+                         _bucket_sub_path: Optional[str] = None) -> str:
+    """Returns a command to mount Nebius bucket (goofys by default, rclone for
+    ARM64)."""
+    if _bucket_sub_path is None:
+        _bucket_sub_path = ''
+    else:
+        _bucket_sub_path = f':{_bucket_sub_path}'
+
+    # Use rclone for ARM64 architectures since goofys doesn't support them
+    arch_check = 'ARCH=$(uname -m) && '
+    rclone_mount = (
+        f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
+        f'AWS_PROFILE={nebius_profile_name} '
+        f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
+        f'--s3-endpoint {endpoint_url} --daemon --allow-other')
+    goofys_mount = (f'AWS_PROFILE={nebius_profile_name} {_GOOFYS_WRAPPER} '
+                    '-o allow_other '
+                    f'--stat-cache-ttl {_STAT_CACHE_TTL} '
+                    f'--type-cache-ttl {_TYPE_CACHE_TTL} '
+                    f'--endpoint {endpoint_url} '
+                    f'{bucket_name}{_bucket_sub_path} {mount_path}')
+
+    mount_cmd = (f'{arch_check}'
+                 f'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+                 f'  {rclone_mount}; '
+                 f'else '
+                 f'  {goofys_mount}; '
+                 f'fi')
     return mount_cmd
 
 
@@ -94,7 +188,12 @@ def get_az_mount_install_cmd() -> str:
         'sudo apt-get update; '
         'sudo apt-get install -y '
         '-o Dpkg::Options::="--force-confdef" '
-        'fuse3 libfuse3-dev && '
+        'fuse3 libfuse3-dev || { '
+        '  echo "fuse3 not available, falling back to fuse"; '
+        '  sudo apt-get install -y '
+        '  -o Dpkg::Options::="--force-confdef" '
+        '  fuse libfuse-dev; '
+        '} && '
         'ARCH=$(uname -m) && '
         'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
         '  echo "blobfuse2 is not supported on $ARCH" && '
@@ -153,14 +252,38 @@ def get_az_mount_cmd(container_name: str,
         bucket_sub_path_arg = ''
     else:
         bucket_sub_path_arg = f'--subdirectory={_bucket_sub_path}/ '
+    mount_options = ['allow_other', 'default_permissions']
+    # Format: -o flag1,flag2
+    fusermount_options = '-o ' + ','.join(
+        mount_options) if mount_options else ''
+    # Format: -o flag1 -o flag2
+    blobfuse2_options = ' '.join(
+        f'-o {opt}' for opt in mount_options) if mount_options else ''
     # TODO(zpoint): clear old cache that has been created in the previous boot.
+    # Do not set umask to avoid permission problems for non-root users.
+    blobfuse2_cmd = ('blobfuse2 --no-symlinks '
+                     f'--tmp-path {cache_path}_$({remote_boot_time_cmd}) '
+                     f'{bucket_sub_path_arg}'
+                     f'--container-name {container_name}')
+    # 1. Set -o nonempty to bypass empty directory check of blobfuse2 when using
+    # fusermount-wrapper, since the mount is delegated to fusermount and
+    # blobfuse2 only get the mounted fd.
+    # 2. {} is the mount point placeholder that will be replaced with the
+    # mounted fd by fusermount-wrapper.
+    # 3. set --foreground to workaround lock confliction of multiple blobfuse2
+    # daemon processes (#5307) and use -d to daemonsize blobfuse2 in
+    # fusermount-wrapper.
+    wrapped = (f'fusermount-wrapper -d -m {mount_path} {fusermount_options} '
+               f'-- {blobfuse2_cmd} -o nonempty --foreground {{}}')
+    original = f'{blobfuse2_cmd} {blobfuse2_options} {mount_path}'
+    # If fusermount-wrapper is available, use it to wrap the blobfuse2 command
+    # to avoid requiring root privilege.
+    # TODO(aylei): feeling hacky, refactor this.
+    get_mount_cmd = ('command -v fusermount-wrapper >/dev/null 2>&1 && '
+                     f'echo "{wrapped}" || echo "{original}"')
     mount_cmd = (f'AZURE_STORAGE_ACCOUNT={storage_account_name} '
                  f'{key_env_var} '
-                 f'blobfuse2 {mount_path} --allow-other --no-symlinks '
-                 '-o umask=022 -o default_permissions '
-                 f'--tmp-path {cache_path}_$({remote_boot_time_cmd}) '
-                 f'{bucket_sub_path_arg}'
-                 f'--container-name {container_name}')
+                 f'$({get_mount_cmd})')
     return mount_cmd
 
 
@@ -171,45 +294,49 @@ def get_r2_mount_cmd(r2_credentials_path: str,
                      bucket_name: str,
                      mount_path: str,
                      _bucket_sub_path: Optional[str] = None) -> str:
-    """Returns a command to install R2 mount utility goofys."""
+    """Returns a command to mount R2 bucket (goofys by default, rclone for
+    ARM64)."""
     if _bucket_sub_path is None:
         _bucket_sub_path = ''
     else:
         _bucket_sub_path = f':{_bucket_sub_path}'
-    mount_cmd = (f'AWS_SHARED_CREDENTIALS_FILE={r2_credentials_path} '
-                 f'AWS_PROFILE={r2_profile_name} goofys -o allow_other '
-                 f'--stat-cache-ttl {_STAT_CACHE_TTL} '
-                 f'--type-cache-ttl {_TYPE_CACHE_TTL} '
-                 f'--endpoint {endpoint_url} '
-                 f'{bucket_name}{_bucket_sub_path} {mount_path}')
+
+    # Use rclone for ARM64 architectures since goofys doesn't support them
+    arch_check = 'ARCH=$(uname -m) && '
+    rclone_mount = (
+        f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
+        f'AWS_SHARED_CREDENTIALS_FILE={r2_credentials_path} '
+        f'AWS_PROFILE={r2_profile_name} '
+        f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
+        f'--s3-endpoint {endpoint_url} --daemon --allow-other')
+    goofys_mount = (f'AWS_SHARED_CREDENTIALS_FILE={r2_credentials_path} '
+                    f'AWS_PROFILE={r2_profile_name} {_GOOFYS_WRAPPER} '
+                    '-o allow_other '
+                    f'--stat-cache-ttl {_STAT_CACHE_TTL} '
+                    f'--type-cache-ttl {_TYPE_CACHE_TTL} '
+                    f'--endpoint {endpoint_url} '
+                    f'{bucket_name}{_bucket_sub_path} {mount_path}')
+
+    mount_cmd = (f'{arch_check}'
+                 f'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+                 f'  {rclone_mount}; '
+                 f'else '
+                 f'  {goofys_mount}; '
+                 f'fi')
     return mount_cmd
 
 
-def get_cos_mount_install_cmd() -> str:
-    """Returns a command to install IBM COS mount utility rclone."""
-    install_cmd = ('rclone version >/dev/null 2>&1 || '
-                   '(curl https://rclone.org/install.sh | '
-                   'sudo bash)')
-    return install_cmd
-
-
-def get_cos_mount_cmd(rclone_config_data: str,
-                      rclone_config_path: str,
-                      bucket_rclone_profile: str,
+def get_cos_mount_cmd(rclone_config: str,
+                      rclone_profile_name: str,
                       bucket_name: str,
                       mount_path: str,
                       _bucket_sub_path: Optional[str] = None) -> str:
     """Returns a command to mount an IBM COS bucket using rclone."""
-    # creates a fusermount soft link on older (<22) Ubuntu systems for
-    # rclone's mount utility.
-    set_fuser3_soft_link = ('[ ! -f /bin/fusermount3 ] && '
-                            'sudo ln -s /bin/fusermount /bin/fusermount3 || '
-                            'true')
     # stores bucket profile in rclone config file at the cluster's nodes.
-    configure_rclone_profile = (f'{set_fuser3_soft_link}; '
-                                'mkdir -p ~/.config/rclone/ && '
-                                f'echo "{rclone_config_data}" >> '
-                                f'{rclone_config_path}')
+    configure_rclone_profile = (f'{FUSERMOUNT3_SOFT_LINK_CMD}; '
+                                f'mkdir -p {constants.RCLONE_CONFIG_DIR} && '
+                                f'echo "{rclone_config}" >> '
+                                f'{constants.RCLONE_CONFIG_PATH}')
     if _bucket_sub_path is None:
         sub_path_arg = f'{bucket_name}/{_bucket_sub_path}'
     else:
@@ -217,32 +344,66 @@ def get_cos_mount_cmd(rclone_config_data: str,
     # --daemon will keep the mounting process running in the background.
     mount_cmd = (f'{configure_rclone_profile} && '
                  'rclone mount '
-                 f'{bucket_rclone_profile}:{sub_path_arg} {mount_path} '
+                 f'{rclone_profile_name}:{sub_path_arg} {mount_path} '
                  '--daemon')
     return mount_cmd
 
 
-def get_rclone_install_cmd() -> str:
-    """ RClone installation for both apt-get and rpm.
-    This would be common command.
-    """
-    # pylint: disable=line-too-long
-    install_cmd = (
-        'ARCH=$(uname -m) && '
-        'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
-        '  ARCH_SUFFIX="arm"; '
-        'else '
-        '  ARCH_SUFFIX="amd64"; '
-        'fi && '
-        f'(which dpkg > /dev/null 2>&1 && (which rclone > /dev/null || (cd ~ > /dev/null'
-        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
-        f' && sudo dpkg -i rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
-        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb)))'
-        f' || (which rclone > /dev/null || (cd ~ > /dev/null'
-        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm'
-        f' && sudo yum --nogpgcheck install rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm -y'
-        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm))')
-    return install_cmd
+def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
+                         bucket_name: str, mount_path: str) -> str:
+    """Returns a command to mount a bucket using rclone with vfs cache."""
+    # stores bucket profile in rclone config file at the remote nodes.
+    configure_rclone_profile = (f'{FUSERMOUNT3_SOFT_LINK_CMD}; '
+                                f'mkdir -p {constants.RCLONE_CONFIG_DIR} && '
+                                f'echo {shlex.quote(rclone_config)} >> '
+                                f'{constants.RCLONE_CONFIG_PATH}')
+    # Assume mount path is unique. We use a hash of mount path as
+    # various filenames related to the mount.
+    # This is because the full path may be longer than
+    # the filename length limit.
+    # The hash is a non-negative integer in string form.
+    hashed_mount_path = hashlib.md5(mount_path.encode()).hexdigest()
+    log_file_path = os.path.join(constants.RCLONE_MOUNT_CACHED_LOG_DIR,
+                                 f'{hashed_mount_path}.log')
+    create_log_cmd = (f'mkdir -p {constants.RCLONE_MOUNT_CACHED_LOG_DIR} && '
+                      f'touch {log_file_path}')
+    # when mounting multiple directories with vfs cache mode, it's handled by
+    # rclone to create separate cache directories at ~/.cache/rclone/vfs. It is
+    # not necessary to specify separate cache directories.
+    mount_cmd = (
+        f'{create_log_cmd} && '
+        f'{configure_rclone_profile} && '
+        'rclone mount '
+        f'{rclone_profile_name}:{bucket_name} {mount_path} '
+        # '--daemon' keeps the mounting process running in the background.
+        # fail in 10 seconds if mount cannot complete by then,
+        # which should be plenty of time.
+        '--daemon --daemon-wait 10 '
+        f'--log-file {log_file_path} --log-level INFO '
+        # '--dir-cache-time' sets how long directory listings are cached before
+        # rclone checks the remote storage for changes again. A shorter
+        # interval allows for faster detection of new or updated files on the
+        # remote, but increases the frequency of metadata lookups.
+        '--allow-other --vfs-cache-mode full --dir-cache-time 10s '
+        # '--transfers 1' guarantees the files written at the local mount point
+        # to be uploaded to the backend storage in the order of creation.
+        # '--vfs-cache-poll-interval' specifies the frequency of how often
+        # rclone checks the local mount point for stale objects in cache.
+        # '--vfs-write-back' defines the time to write files on remote storage
+        # after last use of the file in local mountpoint.
+        '--transfers 1 --vfs-cache-poll-interval 10s --vfs-write-back 1s '
+        # Have rclone evict files if the cache size exceeds 10G.
+        # This is to prevent cache from growing too large and
+        # using up all the disk space. Note that files that opened
+        # by a process is not evicted from the cache.
+        '--vfs-cache-max-size 10G '
+        # give each mount its own cache directory
+        f'--cache-dir {constants.RCLONE_CACHE_DIR}/{hashed_mount_path} '
+        # This command produces children processes, which need to be
+        # detached from the current process's terminal. The command doesn't
+        # produce any output, so we aren't dropping any logs.
+        '> /dev/null 2>&1')
+    return mount_cmd
 
 
 def get_oci_mount_cmd(mount_path: str, store_name: str, region: str,
@@ -324,13 +485,20 @@ def get_mounting_script(
 
         {command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}
 
-        MOUNT_PATH={mount_path}
+        MOUNT_PATH=$(eval echo {mount_path})
         MOUNT_BINARY={mount_binary}
 
         # Check if path is already mounted
-        if grep -q $MOUNT_PATH /proc/mounts ; then
+        if findmnt -rn -T "$MOUNT_PATH" >/dev/null 2>&1; then
             echo "Path already mounted - unmounting..."
-            fusermount -uz "$MOUNT_PATH"
+            (command -v fusermount >/dev/null 2>&1 && fusermount -uz "$MOUNT_PATH") \
+            || (command -v fusermount3 >/dev/null 2>&1 && fusermount3 -uz "$MOUNT_PATH") \
+            || sudo umount -l "$MOUNT_PATH" || true
+            # Ensure it's really gone (avoids races)
+            for i in $(seq 1 20); do
+                if ! findmnt -rn -T "$MOUNT_PATH" >/dev/null 2>&1; then break; fi
+                sleep 0.2
+            done
             echo "Successfully unmounted $MOUNT_PATH."
         fi
 
@@ -345,14 +513,16 @@ def get_mounting_script(
         # Check if mount path exists
         if [ ! -d "$MOUNT_PATH" ]; then
           echo "Mount path $MOUNT_PATH does not exist. Creating..."
-          sudo mkdir -p $MOUNT_PATH
-          sudo chmod 777 $MOUNT_PATH
+          sudo mkdir -p "$MOUNT_PATH"
+          sudo chmod 777 "$MOUNT_PATH"
         else
-          # Check if mount path contains files
-          if [ "$(ls -A $MOUNT_PATH)" ]; then
-            echo "Mount path $MOUNT_PATH is not empty. Please mount to another path or remove it first."
-            exit {exceptions.MOUNT_PATH_NON_EMPTY_CODE}
-          fi
+            # If not a mountpoint and contains files, clean it to satisfy SkyPilot check
+            if ! findmnt -rn -T "$MOUNT_PATH" >/dev/null 2>&1; then
+                if [ -n "$(ls -A "$MOUNT_PATH" 2>/dev/null)" ]; then
+                  echo "Cleaning non-empty mount path before mount..."
+                  sudo bash -lc 'shopt -s dotglob nullglob; rm -rf --one-file-system -- '"$MOUNT_PATH"'/*' 2>/dev/null || true
+                fi
+            fi
         fi
         echo "Mounting $SOURCE_BUCKET to $MOUNT_PATH with $MOUNT_BINARY..."
         {mount_cmd}

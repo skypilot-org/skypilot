@@ -8,6 +8,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sky import exceptions
+from sky import logs
 from sky import provision
 from sky import sky_logging
 from sky.provision import common
@@ -21,6 +22,7 @@ from sky.utils import accelerator_registry
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import env_options
+from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -44,7 +46,9 @@ _DUMP_RAY_PORTS = (
 
 _RAY_PORT_COMMAND = (
     f'RAY_PORT=$({constants.SKY_PYTHON_CMD} -c '
-    '"from sky.skylet import job_lib; print(job_lib.get_ray_port())" '
+    '"from sky import sky_logging\n'
+    'with sky_logging.silent(): '
+    'from sky.skylet import job_lib; print(job_lib.get_ray_port())" '
     '2> /dev/null || echo 6379);'
     f'{constants.SKY_PYTHON_CMD} -c "from sky.utils import message_utils; '
     'print(message_utils.encode_payload({\'ray_port\': $RAY_PORT}))"')
@@ -80,7 +84,7 @@ def _set_usage_run_id_cmd() -> str:
     latest one when the function is called.
     """
     return (
-        f'cat {usage_constants.USAGE_RUN_ID_FILE} || '
+        f'cat {usage_constants.USAGE_RUN_ID_FILE} 2> /dev/null || '
         # The run id is retrieved locally for the current run, so that the
         # remote cluster will be set with the same run id as the initial
         # launch operation.
@@ -132,6 +136,20 @@ def _hint_worker_log_path(cluster_name: str, cluster_info: common.ClusterInfo,
         logger.info(f'Logs of worker nodes can be found at: {worker_log_path}')
 
 
+class SSHThreadPoolExecutor(futures.ThreadPoolExecutor):
+    """ThreadPoolExecutor that kills children processes on exit."""
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # ssh command runner eventually calls
+        # log_lib.run_with_log, which will spawn
+        # subprocesses. If we are exiting the context
+        # we need to kill the children processes
+        # to avoid leakage.
+        subprocess_utils.kill_children_processes()
+        self.shutdown()
+        return False
+
+
 def _parallel_ssh_with_cache(func,
                              cluster_name: str,
                              stage_name: str,
@@ -144,7 +162,7 @@ def _parallel_ssh_with_cache(func,
         # as 32 is too large for some machines.
         max_workers = subprocess_utils.get_parallel_threads(
             cluster_info.provider_name)
-    with futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+    with SSHThreadPoolExecutor(max_workers=max_workers) as pool:
         results = []
         runners = provision.get_command_runners(cluster_info.provider_name,
                                                 cluster_info, **ssh_credentials)
@@ -499,7 +517,7 @@ def start_skylet_on_head_node(cluster_name: str,
 def _internal_file_mounts(file_mounts: Dict,
                           runner: command_runner.CommandRunner,
                           log_path: str) -> None:
-    if file_mounts is None or not file_mounts:
+    if not file_mounts:
         return
 
     for dst, src in file_mounts.items():
@@ -555,3 +573,36 @@ def internal_file_mounts(cluster_name: str, common_file_mounts: Dict[str, str],
         ssh_credentials=ssh_credentials,
         max_workers=subprocess_utils.get_max_workers_for_file_mounts(
             common_file_mounts, cluster_info.provider_name))
+
+
+@common.log_function_start_end
+@timeline.event
+def setup_logging_on_cluster(logging_agent: logs.LoggingAgent,
+                             cluster_name: resources_utils.ClusterName,
+                             cluster_info: common.ClusterInfo,
+                             ssh_credentials: Dict[str, Any]) -> None:
+    """Setup logging agent (fluentbit) on all nodes after provisioning."""
+    _hint_worker_log_path(cluster_name.name_on_cloud, cluster_info,
+                          'logging_setup')
+
+    @_auto_retry()
+    def _setup_node(runner: command_runner.CommandRunner, log_path: str):
+        cmd = logging_agent.get_setup_command(cluster_name)
+        logger.info(f'Running command on node: {cmd}')
+        returncode, stdout, stderr = runner.run(cmd,
+                                                stream_logs=False,
+                                                require_outputs=True,
+                                                log_path=log_path,
+                                                source_bashrc=True)
+        if returncode:
+            raise RuntimeError(f'Failed to setup logging agent\n{cmd}\n'
+                               f'(exit code {returncode}). Error: '
+                               f'===== stdout ===== \n{stdout}\n'
+                               f'===== stderr ====={stderr}')
+
+    _parallel_ssh_with_cache(_setup_node,
+                             cluster_name.name_on_cloud,
+                             stage_name='logging_setup',
+                             digest=None,
+                             cluster_info=cluster_info,
+                             ssh_credentials=ssh_credentials)

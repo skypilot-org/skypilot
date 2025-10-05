@@ -2,50 +2,80 @@
 
 import argparse
 import asyncio
+import base64
 import contextlib
-import dataclasses
 import datetime
-import logging
+import hashlib
+import json
+import multiprocessing
 import os
 import pathlib
+import posixpath
 import re
+import resource
 import shutil
 import sys
+import threading
 from typing import Dict, List, Literal, Optional, Set, Tuple
 import uuid
 import zipfile
 
 import aiofiles
+import anyio
 import fastapi
 from fastapi.middleware import cors
 import starlette.middleware.base
+import uvloop
 
 import sky
+from sky import catalog
 from sky import check as sky_check
 from sky import clouds
 from sky import core
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
-from sky import optimizer
+from sky import models
 from sky import sky_logging
-from sky.clouds import service_catalog
 from sky.data import storage_utils
+from sky.jobs import utils as managed_job_utils
 from sky.jobs.server import server as jobs_rest
+from sky.metrics import utils as metrics_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.schemas.api import responses
 from sky.serve.server import server as serve_rest
 from sky.server import common
+from sky.server import config as server_config
 from sky.server import constants as server_constants
+from sky.server import daemons
+from sky.server import metrics
+from sky.server import state
 from sky.server import stream_utils
+from sky.server import versions
+from sky.server.auth import authn
+from sky.server.auth import loopback
+from sky.server.auth import oauth2_proxy
 from sky.server.requests import executor
 from sky.server.requests import payloads
+from sky.server.requests import preconditions
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
+from sky.ssh_node_pools import server as ssh_node_pools_rest
 from sky.usage import usage_lib
+from sky.users import permission
+from sky.users import server as users_rest
+from sky.utils import admin_policy_utils
 from sky.utils import common as common_lib
 from sky.utils import common_utils
+from sky.utils import context
+from sky.utils import context_utils
 from sky.utils import dag_utils
+from sky.utils import perf_utils
 from sky.utils import status_lib
+from sky.utils import subprocess_utils
+from sky.utils.db import db_utils
+from sky.volumes.server import server as volumes_rest
+from sky.workspaces import server as workspaces_rest
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -55,32 +85,74 @@ else:
 
 P = ParamSpec('P')
 
+_SERVER_USER_HASH_KEY = 'server_user_hash'
 
-def _add_timestamp_prefix_for_server_logs() -> None:
-    server_logger = sky_logging.init_logger('sky.server')
-    # Clear existing handlers first to prevent duplicates
-    server_logger.handlers.clear()
-    # Disable propagation to avoid the root logger of SkyPilot being affected
-    server_logger.propagate = False
-    # Add date prefix to the log message printed by loggers under
-    # server.
-    stream_handler = logging.StreamHandler(sys.stdout)
-    stream_handler.flush = sys.stdout.flush  # type: ignore
-    stream_handler.setFormatter(sky_logging.FORMATTER)
-    server_logger.addHandler(stream_handler)
-    # Add date prefix to the log message printed by uvicorn.
-    for name in ['uvicorn', 'uvicorn.access']:
-        uvicorn_logger = logging.getLogger(name)
-        uvicorn_logger.handlers.clear()
-        uvicorn_logger.addHandler(stream_handler)
-
-
-_add_timestamp_prefix_for_server_logs()
 logger = sky_logging.init_logger(__name__)
 
 # TODO(zhwu): Streaming requests, such log tailing after sky launch or sky logs,
 # need to be detached from the main requests queue. Otherwise, the streaming
 # response will block other requests from being processed.
+
+
+def _basic_auth_401_response(content: str):
+    """Return a 401 response with basic auth realm."""
+    return fastapi.responses.JSONResponse(
+        status_code=401,
+        headers={'WWW-Authenticate': 'Basic realm=\"SkyPilot\"'},
+        content=content)
+
+
+def _try_set_basic_auth_user(request: fastapi.Request):
+    auth_header = request.headers.get('authorization')
+    if not auth_header or not auth_header.lower().startswith('basic '):
+        return
+
+    # Check username and password
+    encoded = auth_header.split(' ', 1)[1]
+    try:
+        decoded = base64.b64decode(encoded).decode()
+        username, password = decoded.split(':', 1)
+    except Exception:  # pylint: disable=broad-except
+        return
+
+    users = global_user_state.get_user_by_name(username)
+    if not users:
+        return
+
+    for user in users:
+        if not user.name or not user.password:
+            continue
+        username_encoded = username.encode('utf8')
+        db_username_encoded = user.name.encode('utf8')
+        if (username_encoded == db_username_encoded and
+                common.crypt_ctx.verify(password, user.password)):
+            request.state.auth_user = user
+            break
+
+
+class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to handle RBAC."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        # TODO(hailong): should have a list of paths
+        # that are not checked for RBAC
+        if (request.url.path.startswith('/dashboard/') or
+                request.url.path.startswith('/api/')):
+            return await call_next(request)
+
+        auth_user = request.state.auth_user
+        if auth_user is None:
+            return await call_next(request)
+
+        permission_service = permission.permission_service
+        # Check the role permission
+        if permission_service.check_endpoint_permission(auth_user.id,
+                                                        request.url.path,
+                                                        request.method):
+            return fastapi.responses.JSONResponse(
+                status_code=403, content={'detail': 'Forbidden'})
+
+        return await call_next(request)
 
 
 class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
@@ -90,8 +162,242 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         request_id = str(uuid.uuid4())
         request.state.request_id = request_id
         response = await call_next(request)
+        # TODO(syang): remove X-Request-ID when v0.10.0 is released.
         response.headers['X-Request-ID'] = request_id
+        response.headers['X-Skypilot-Request-ID'] = request_id
         return response
+
+
+def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
+    header_name = os.environ.get(constants.ENV_VAR_SERVER_AUTH_USER_HEADER,
+                                 'X-Auth-Request-Email')
+    if header_name not in request.headers:
+        return None
+    user_name = request.headers[header_name]
+    user_hash = hashlib.md5(
+        user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
+    return models.User(id=user_hash, name=user_name)
+
+
+class InitializeRequestAuthUserMiddleware(
+        starlette.middleware.base.BaseHTTPMiddleware):
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        # Make sure that request.state.auth_user is set. Otherwise, we may get a
+        # KeyError while trying to read it.
+        request.state.auth_user = None
+        return await call_next(request)
+
+
+class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to handle HTTP Basic Auth."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        if managed_job_utils.is_consolidation_mode(
+        ) and loopback.is_loopback_request(request):
+            return await call_next(request)
+
+        if request.url.path.startswith('/api/health'):
+            # Try to set the auth user from basic auth
+            _try_set_basic_auth_user(request)
+            return await call_next(request)
+
+        auth_header = request.headers.get('authorization')
+        if not auth_header:
+            return _basic_auth_401_response('Authentication required')
+
+        # Only handle basic auth
+        if not auth_header.lower().startswith('basic '):
+            return _basic_auth_401_response('Invalid authentication method')
+
+        # Check username and password
+        encoded = auth_header.split(' ', 1)[1]
+        try:
+            decoded = base64.b64decode(encoded).decode()
+            username, password = decoded.split(':', 1)
+        except Exception:  # pylint: disable=broad-except
+            return _basic_auth_401_response('Invalid basic auth')
+
+        users = global_user_state.get_user_by_name(username)
+        if not users:
+            return _basic_auth_401_response('Invalid credentials')
+
+        valid_user = False
+        for user in users:
+            if not user.name or not user.password:
+                continue
+            username_encoded = username.encode('utf8')
+            db_username_encoded = user.name.encode('utf8')
+            if (username_encoded == db_username_encoded and
+                    common.crypt_ctx.verify(password, user.password)):
+                valid_user = True
+                request.state.auth_user = user
+                await authn.override_user_info_in_request_body(request, user)
+                break
+        if not valid_user:
+            return _basic_auth_401_response('Invalid credentials')
+
+        return await call_next(request)
+
+
+class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to handle Bearer Token Auth (Service Accounts)."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        """Make sure correct bearer token auth is present.
+
+        1. If the request has the X-Skypilot-Auth-Mode: token header, it must
+           have a valid bearer token.
+        2. For backwards compatibility, if the request has a Bearer token
+           beginning with "sky_" (even if X-Skypilot-Auth-Mode is not present),
+           it must be a valid token.
+        3. If X-Skypilot-Auth-Mode is not set to "token", and there is no Bearer
+           token beginning with "sky_", allow the request to continue.
+
+        In conjunction with an auth proxy, the idea is to make the auth proxy
+        bypass requests with bearer tokens, instead setting the
+        X-Skypilot-Auth-Mode header. The auth proxy should either validate the
+        auth or set the header X-Skypilot-Auth-Mode: token.
+        """
+        has_skypilot_auth_header = (
+            request.headers.get('X-Skypilot-Auth-Mode') == 'token')
+        auth_header = request.headers.get('authorization')
+        has_bearer_token_starting_with_sky = (
+            auth_header and auth_header.lower().startswith('bearer ') and
+            auth_header.split(' ', 1)[1].startswith('sky_'))
+
+        if (not has_skypilot_auth_header and
+                not has_bearer_token_starting_with_sky):
+            # This is case #3 above. We do not need to validate the request.
+            # No Bearer token, continue with normal processing (OAuth2 cookies,
+            # etc.)
+            return await call_next(request)
+        # After this point, all requests must be validated.
+
+        if auth_header is None:
+            return fastapi.responses.JSONResponse(
+                status_code=401, content={'detail': 'Authentication required'})
+
+        # Extract token
+        split_header = auth_header.split(' ', 1)
+        if split_header[0].lower() != 'bearer':
+            return fastapi.responses.JSONResponse(
+                status_code=401,
+                content={'detail': 'Invalid authentication method'})
+        sa_token = split_header[1]
+
+        # Handle SkyPilot service account tokens
+        return await self._handle_service_account_token(request, sa_token,
+                                                        call_next)
+
+    async def _handle_service_account_token(self, request: fastapi.Request,
+                                            sa_token: str, call_next):
+        """Handle SkyPilot service account tokens."""
+        # Check if service account tokens are enabled
+        sa_enabled = os.environ.get(constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS,
+                                    'false').lower()
+        if sa_enabled != 'true':
+            return fastapi.responses.JSONResponse(
+                status_code=401,
+                content={'detail': 'Service account authentication disabled'})
+
+        try:
+            # Import here to avoid circular imports
+            # pylint: disable=import-outside-toplevel
+            from sky.users.token_service import token_service
+
+            # Verify and decode JWT token
+            payload = token_service.verify_token(sa_token)
+
+            if payload is None:
+                logger.warning('Service account token verification failed')
+                return fastapi.responses.JSONResponse(
+                    status_code=401,
+                    content={
+                        'detail': 'Invalid or expired service account token'
+                    })
+
+            # Extract user information from JWT payload
+            user_id = payload.get('sub')
+            user_name = payload.get('name')
+            token_id = payload.get('token_id')
+
+            if not user_id or not token_id:
+                logger.warning(
+                    'Invalid token payload: missing user_id or token_id')
+                return fastapi.responses.JSONResponse(
+                    status_code=401,
+                    content={'detail': 'Invalid token payload'})
+
+            # Verify user still exists in database
+            user_info = global_user_state.get_user(user_id)
+            if user_info is None:
+                logger.warning(
+                    f'Service account user {user_id} no longer exists')
+                return fastapi.responses.JSONResponse(
+                    status_code=401,
+                    content={'detail': 'Service account user no longer exists'})
+
+            # Update last used timestamp for token tracking
+            try:
+                global_user_state.update_service_account_token_last_used(
+                    token_id)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Failed to update token last used time: {e}')
+
+            # Set the authenticated user
+            auth_user = models.User(id=user_id,
+                                    name=user_name or user_info.name)
+            request.state.auth_user = auth_user
+
+            # Override user info in request body for service account requests
+            await authn.override_user_info_in_request_body(request, auth_user)
+
+            logger.debug(f'Authenticated service account: {user_id}')
+
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Service account authentication failed: {e}',
+                         exc_info=True)
+            return fastapi.responses.JSONResponse(
+                status_code=401,
+                content={
+                    'detail': f'Service account authentication failed: {str(e)}'
+                })
+
+        return await call_next(request)
+
+
+class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to handle auth proxy."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        auth_user = _get_auth_user_header(request)
+
+        if request.state.auth_user is not None:
+            # Previous middleware is trusted more than this middleware.  For
+            # instance, a client could set the Authorization and the
+            # X-Auth-Request-Email header. In that case, the auth proxy will be
+            # skipped and we should rely on the Bearer token to authenticate the
+            # user - but that means the user could set X-Auth-Request-Email to
+            # whatever the user wants. We should thus ignore it.
+            if auth_user is not None:
+                logger.debug('Warning: ignoring auth proxy header since the '
+                             'auth user was already set.')
+            return await call_next(request)
+
+        # Add user to database if auth_user is present
+        if auth_user is not None:
+            newly_added = global_user_state.add_or_update_user(auth_user)
+            if newly_added:
+                permission.permission_service.add_user_if_not_exists(
+                    auth_user.id)
+
+        # Store user info in request.state for access by GET endpoints
+        if auth_user is not None:
+            request.state.auth_user = auth_user
+
+        await authn.override_user_info_in_request_body(request, auth_user)
+        return await call_next(request)
 
 
 # Default expiration time for upload ids before cleanup.
@@ -123,26 +429,184 @@ async def cleanup_upload_ids():
                 upload_ids_to_cleanup.pop((upload_id, user_hash))
 
 
+async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
+                           interval: float = 0.1) -> None:
+    target = loop.time() + interval
+
+    pid = str(os.getpid())
+    lag_threshold = perf_utils.get_loop_lag_threshold()
+
+    def tick():
+        nonlocal target
+        now = loop.time()
+        lag = max(0.0, now - target)
+        if lag_threshold is not None and lag > lag_threshold:
+            logger.warning(f'Event loop lag {lag} seconds exceeds threshold '
+                           f'{lag_threshold} seconds.')
+        metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_SECONDS.labels(
+            pid=pid).observe(lag)
+        target = now + interval
+        loop.call_at(target, tick)
+
+    loop.call_at(target, tick)
+
+
+def schedule_on_boot_check():
+    try:
+        executor.schedule_request(
+            request_id='skypilot-server-on-boot-check',
+            request_name='check',
+            request_body=payloads.CheckBody(),
+            func=sky_check.check,
+            schedule_type=requests_lib.ScheduleType.SHORT,
+            is_skypilot_system=True,
+        )
+    except exceptions.RequestAlreadyExistsError:
+        # Lifespan will be executed in each uvicorn worker process, we
+        # can safely ignore the error if the task is already scheduled.
+        logger.debug('Request skypilot-server-on-boot-check already exists.')
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-name
     """FastAPI lifespan context manager."""
     del app  # unused
     # Startup: Run background tasks
-    for event in requests_lib.INTERNAL_REQUEST_DAEMONS:
-        executor.schedule_request(
-            request_id=event.id,
-            request_name=event.name,
-            request_body=payloads.RequestBody(),
-            func=event.event_fn,
-            schedule_type=requests_lib.ScheduleType.SHORT,
-            is_skypilot_system=True,
-        )
+    for event in daemons.INTERNAL_REQUEST_DAEMONS:
+        if event.should_skip():
+            continue
+        try:
+            executor.schedule_request(
+                request_id=event.id,
+                request_name=event.name,
+                request_body=payloads.RequestBody(),
+                func=event.run_event,
+                schedule_type=requests_lib.ScheduleType.SHORT,
+                is_skypilot_system=True,
+                # Request deamon should be retried if the process pool is
+                # broken.
+                retryable=True,
+            )
+        except exceptions.RequestAlreadyExistsError:
+            # Lifespan will be executed in each uvicorn worker process, we
+            # can safely ignore the error if the task is already scheduled.
+            logger.debug(f'Request {event.id} already exists.')
+    schedule_on_boot_check()
     asyncio.create_task(cleanup_upload_ids())
+    if metrics_utils.METRICS_ENABLED:
+        # Start monitoring the event loop lag in each server worker
+        # event loop (process).
+        asyncio.create_task(loop_lag_monitor(asyncio.get_event_loop()))
     yield
     # Shutdown: Add any cleanup code here if needed
 
 
+# Add a new middleware class to handle /internal/dashboard prefix
+class InternalDashboardPrefixMiddleware(
+        starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to handle /internal/dashboard prefix in requests."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        path = request.url.path
+        if path.startswith('/internal/dashboard/'):
+            # Remove /internal/dashboard prefix and update request scope
+            request.scope['path'] = path.replace('/internal/dashboard/', '/', 1)
+        return await call_next(request)
+
+
+class CacheControlStaticMiddleware(starlette.middleware.base.BaseHTTPMiddleware
+                                  ):
+    """Middleware to add cache control headers to static files."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        if request.url.path.startswith('/dashboard/_next'):
+            response = await call_next(request)
+            response.headers['Cache-Control'] = 'max-age=3600'
+            return response
+        return await call_next(request)
+
+
+class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to check the path of requests."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        if request.url.path.startswith('/dashboard/'):
+            # If the requested path is not relative to the expected directory,
+            # then the user is attempting path traversal, so deny the request.
+            parent = pathlib.Path('/dashboard')
+            request_path = pathlib.Path(posixpath.normpath(request.url.path))
+            if not _is_relative_to(request_path, parent):
+                return fastapi.responses.JSONResponse(
+                    status_code=403, content={'detail': 'Forbidden'})
+        return await call_next(request)
+
+
+class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to control requests when server is shutting down."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        if state.get_block_requests():
+            # Allow /api/ paths to continue, which are critical to operate
+            # on-going requests but will not submit new requests.
+            if not request.url.path.startswith('/api/'):
+                # Client will retry on 503 error.
+                return fastapi.responses.JSONResponse(
+                    status_code=503,
+                    content={
+                        'detail': 'Server is shutting down, '
+                                  'please try again later.'
+                    })
+
+        return await call_next(request)
+
+
+class APIVersionMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to add API version to the request."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        version_info = versions.check_compatibility_at_server(request.headers)
+        # Bypass version handling for backward compatibility with clients prior
+        # to v0.11.0, the client will check the version in the body of
+        # /api/health response and hint an upgrade.
+        # TODO(aylei): remove this after v0.13.0 is released.
+        if version_info is None:
+            return await call_next(request)
+        if version_info.error is None:
+            versions.set_remote_api_version(version_info.api_version)
+            versions.set_remote_version(version_info.version)
+            response = await call_next(request)
+        else:
+            response = fastapi.responses.JSONResponse(
+                status_code=400,
+                content={
+                    'error': common.ApiServerStatus.VERSION_MISMATCH.value,
+                    'message': version_info.error,
+                })
+        response.headers[server_constants.API_VERSION_HEADER] = str(
+            server_constants.API_VERSION)
+        response.headers[server_constants.VERSION_HEADER] = \
+            versions.get_local_readable_version()
+        return response
+
+
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
+# Middleware wraps in the order defined here. E.g., given
+#   app.add_middleware(Middleware1)
+#   app.add_middleware(Middleware2)
+#   app.add_middleware(Middleware3)
+# The effect will be like:
+#   Middleware3(Middleware2(Middleware1(request)))
+# If MiddlewareN does something like print(n); call_next(); print(n), you'll get
+#   3; 2; 1; <request>; 1; 2; 3
+# Use environment variable to make the metrics middleware optional.
+if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
+    app.add_middleware(metrics.PrometheusMiddleware)
+app.add_middleware(APIVersionMiddleware)
+app.add_middleware(RBACMiddleware)
+app.add_middleware(InternalDashboardPrefixMiddleware)
+app.add_middleware(GracefulShutdownMiddleware)
+app.add_middleware(PathCleanMiddleware)
+app.add_middleware(CacheControlStaticMiddleware)
 app.add_middleware(
     cors.CORSMiddleware,
     # TODO(zhwu): in production deployment, we should restrict the allowed
@@ -151,10 +615,91 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=['*'],
     allow_headers=['*'],
-    expose_headers=['X-Request-ID'])
+    # TODO(syang): remove X-Request-ID \when v0.10.0 is released.
+    expose_headers=['X-Request-ID', 'X-Skypilot-Request-ID'])
+# The order of all the authentication-related middleware is important.
+# RBACMiddleware must precede all the auth middleware, so it can access
+# request.state.auth_user.
+app.add_middleware(RBACMiddleware)
+# Authentication based on oauth2-proxy.
+app.add_middleware(oauth2_proxy.OAuth2ProxyMiddleware)
+# AuthProxyMiddleware should precede BasicAuthMiddleware and
+# BearerTokenMiddleware, since it should be skipped if either of those set the
+# auth user.
+app.add_middleware(AuthProxyMiddleware)
+enable_basic_auth = os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false')
+if str(enable_basic_auth).lower() == 'true':
+    app.add_middleware(BasicAuthMiddleware)
+# Bearer token middleware should always be present to handle service account
+# authentication
+app.add_middleware(BearerTokenMiddleware)
+# InitializeRequestAuthUserMiddleware must be the last added middleware so that
+# request.state.auth_user is always set, but can be overridden by the auth
+# middleware above.
+app.add_middleware(InitializeRequestAuthUserMiddleware)
 app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
+app.include_router(users_rest.router, prefix='/users', tags=['users'])
+app.include_router(workspaces_rest.router,
+                   prefix='/workspaces',
+                   tags=['workspaces'])
+app.include_router(volumes_rest.router, prefix='/volumes', tags=['volumes'])
+app.include_router(ssh_node_pools_rest.router,
+                   prefix='/ssh_node_pools',
+                   tags=['ssh_node_pools'])
+# increase the resource limit for the server
+soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
+
+# Increase the limit of files we can open to our hard limit. This fixes bugs
+# where we can not aquire file locks or open enough logs and the API server
+# crashes. On Mac, the hard limit is 9,223,372,036,854,775,807.
+# TODO(luca) figure out what to do if we need to open more than 2^63 files.
+try:
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
+except Exception:  # pylint: disable=broad-except
+    pass  # no issue, we will warn the user later if its too low
+
+
+@app.get('/token')
+async def token(request: fastapi.Request,
+                local_port: Optional[int] = None) -> fastapi.responses.Response:
+    del local_port  # local_port is used by the served js, but ignored by server
+    user = _get_auth_user_header(request)
+
+    token_data = {
+        'v': 1,  # Token version number, bump for backwards incompatible.
+        'user': user.id if user is not None else None,
+        'cookies': request.cookies,
+    }
+    # Use base64 encoding to avoid having to escape anything in the HTML.
+    json_bytes = json.dumps(token_data).encode('utf-8')
+    base64_str = base64.b64encode(json_bytes).decode('utf-8')
+
+    html_dir = pathlib.Path(__file__).parent / 'html'
+    token_page_path = html_dir / 'token_page.html'
+    try:
+        with open(token_page_path, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+    except FileNotFoundError as e:
+        raise fastapi.HTTPException(
+            status_code=500, detail='Token page template not found.') from e
+
+    user_info_string = f'Logged in as {user.name}' if user is not None else ''
+    html_content = html_content.replace(
+        'SKYPILOT_API_SERVER_USER_TOKEN_PLACEHOLDER',
+        base64_str).replace('USER_PLACEHOLDER', user_info_string)
+
+    return fastapi.responses.HTMLResponse(
+        content=html_content,
+        headers={
+            'Cache-Control': 'no-cache, no-transform',
+            # X-Accel-Buffering: no is useful for preventing buffering issues
+            # with some reverse proxies.
+            'X-Accel-Buffering': 'no'
+        })
 
 
 @app.post('/check')
@@ -171,12 +716,15 @@ async def check(request: fastapi.Request,
 
 
 @app.get('/enabled_clouds')
-async def enabled_clouds(request: fastapi.Request) -> None:
+async def enabled_clouds(request: fastapi.Request,
+                         workspace: Optional[str] = None,
+                         expand: bool = False) -> None:
     """Gets enabled clouds on the server."""
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='enabled_clouds',
-        request_body=payloads.RequestBody(),
+        request_body=payloads.EnabledCloudsBody(workspace=workspace,
+                                                expand=expand),
         func=core.enabled_clouds,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
@@ -202,7 +750,7 @@ async def kubernetes_node_info(
         request: fastapi.Request,
         kubernetes_node_info_body: payloads.KubernetesNodeInfoRequestBody
 ) -> None:
-    """Gets Kubernetes node information."""
+    """Gets Kubernetes nodes information and hints."""
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='kubernetes_node_info',
@@ -233,7 +781,7 @@ async def list_accelerators(
         request_id=request.state.request_id,
         request_name='list_accelerators',
         request_body=list_accelerator_counts_body,
-        func=service_catalog.list_accelerators,
+        func=catalog.list_accelerators,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
@@ -248,7 +796,7 @@ async def list_accelerator_counts(
         request_id=request.state.request_id,
         request_name='list_accelerator_counts',
         request_body=list_accelerator_counts_body,
-        func=service_catalog.list_accelerator_counts,
+        func=catalog.list_accelerator_counts,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
@@ -258,17 +806,40 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     """Validates the user's DAG."""
     # TODO(SKY-1035): validate if existing cluster satisfies the requested
     # resources, e.g. sky exec --gpus V100:8 existing-cluster-with-no-gpus
+
+    # TODO: Our current launch process is split into three calls:
+    # validate, optimize, and launch. This requires us to apply the admin policy
+    # in each step, which may be an expensive operation. We should consolidate
+    # these into a single call or have a TTL cache for (task, admin_policy)
+    # pairs.
     logger.debug(f'Validating tasks: {validate_body.dag}')
+
+    context.initialize()
+    ctx = context.get()
+    assert ctx is not None
+    # TODO(aylei): generalize this to all requests without a db record.
+    ctx.override_envs(validate_body.env_vars)
+
+    def validate_dag(dag: dag_utils.dag_lib.Dag):
+        # TODO: Admin policy may contain arbitrary code, which may be expensive
+        # to run and may block the server thread. However, moving it into the
+        # executor adds a ~150ms penalty on the local API server because of
+        # added RTTs. For now, we stick to doing the validation inline in the
+        # server thread.
+        with admin_policy_utils.apply_and_use_config_in_current_request(
+                dag,
+                request_options=validate_body.get_request_options()) as dag:
+            dag.resolve_and_validate_volumes()
+            # Skip validating workdir and file_mounts, as those need to be
+            # validated after the files are uploaded to the SkyPilot API server
+            # with `upload_mounts_to_api_server`.
+            dag.validate(skip_file_mounts=True, skip_workdir=True)
+
     try:
         dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
-        for task in dag.tasks:
-            # Will validate workdir and file_mounts in the backend, as those
-            # need to be validated after the files are uploaded to the SkyPilot
-            # API server with `upload_mounts_to_api_server`.
-            task.validate_name()
-            task.validate_run()
-            for r in task.resources:
-                r.validate()
+        # Apply admin policy and validate DAG is blocking, run it in a separate
+        # thread executor to avoid blocking the uvicorn event loop.
+        await context_utils.to_thread(validate_dag, dag)
     except Exception as e:  # pylint: disable=broad-except
         raise fastapi.HTTPException(
             status_code=400, detail=exceptions.serialize_exception(e)) from e
@@ -283,7 +854,7 @@ async def optimize(optimize_body: payloads.OptimizeBody,
         request_name='optimize',
         request_body=optimize_body,
         ignore_return_value=True,
-        func=optimizer.Optimizer.optimize,
+        func=core.optimize,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
@@ -308,16 +879,30 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
         chunk_index: The chunk index, starting from 0.
         total_chunks: The total number of chunks.
     """
+    # Field _body would be set if the request body has been received, fail fast
+    # to surface potential memory issues, i.e. catch the issue in our smoke
+    # test.
+    # pylint: disable=protected-access
+    if hasattr(request, '_body'):
+        raise fastapi.HTTPException(
+            status_code=500,
+            detail='Upload request body should not be received before streaming'
+        )
     # Add the upload id to the cleanup list.
     upload_ids_to_cleanup[(upload_id,
                            user_hash)] = (datetime.datetime.now() +
                                           _DEFAULT_UPLOAD_EXPIRATION_TIME)
+    # For anonymous access, use the user hash from client
+    user_id = user_hash
+    if request.state.auth_user is not None:
+        # Otherwise, the authenticated identity should be used.
+        user_id = request.state.auth_user.id
 
     # TODO(SKY-1271): We need to double check security of uploading zip file.
     client_file_mounts_dir = (
-        common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_hash /
+        common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
         'file_mounts')
-    client_file_mounts_dir.mkdir(parents=True, exist_ok=True)
+    await anyio.Path(client_file_mounts_dir).mkdir(parents=True, exist_ok=True)
 
     # Check upload_id to be a valid SkyPilot run_timestamp appended with 8 hex
     # characters, e.g. 'sky-2025-01-17-09-10-13-933602-35d31c22'.
@@ -340,7 +925,7 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
         zip_file_path = client_file_mounts_dir / f'{upload_id}.zip'
     else:
         chunk_dir = client_file_mounts_dir / upload_id
-        chunk_dir.mkdir(parents=True, exist_ok=True)
+        await anyio.Path(chunk_dir).mkdir(parents=True, exist_ok=True)
         zip_file_path = chunk_dir / f'part{chunk_index}.incomplete'
 
     try:
@@ -370,8 +955,9 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
         zip_file_path.rename(zip_file_path.with_suffix(''))
         missing_chunks = get_missing_chunks(total_chunks)
         if missing_chunks:
-            return payloads.UploadZipFileResponse(status='uploading',
-                                                  missing_chunks=missing_chunks)
+            return payloads.UploadZipFileResponse(
+                status=responses.UploadStatus.UPLOADING.value,
+                missing_chunks=missing_chunks)
         zip_file_path = client_file_mounts_dir / f'{upload_id}.zip'
         async with aiofiles.open(zip_file_path, 'wb') as zip_file:
             for chunk in range(total_chunks):
@@ -385,10 +971,11 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
                         await zip_file.write(data)
 
     logger.info(f'Uploaded zip file: {zip_file_path}')
-    unzip_file(zip_file_path, client_file_mounts_dir)
+    await unzip_file(zip_file_path, client_file_mounts_dir)
     if total_chunks > 1:
-        shutil.rmtree(chunk_dir)
-    return payloads.UploadZipFileResponse(status='completed')
+        await context_utils.to_thread(shutil.rmtree, chunk_dir)
+    return payloads.UploadZipFileResponse(
+        status=responses.UploadStatus.COMPLETED.value)
 
 
 def _is_relative_to(path: pathlib.Path, parent: pathlib.Path) -> bool:
@@ -401,61 +988,69 @@ def _is_relative_to(path: pathlib.Path, parent: pathlib.Path) -> bool:
         return False
 
 
-def unzip_file(zip_file_path: pathlib.Path,
-               client_file_mounts_dir: pathlib.Path) -> None:
-    """Unzips a zip file."""
-    try:
-        with zipfile.ZipFile(zip_file_path, 'r') as zipf:
-            for member in zipf.infolist():
-                # Determine the new path
-                original_path = os.path.normpath(member.filename)
-                new_path = client_file_mounts_dir / original_path.lstrip('/')
+async def unzip_file(zip_file_path: pathlib.Path,
+                     client_file_mounts_dir: pathlib.Path) -> None:
+    """Unzips a zip file without blocking the event loop."""
 
-                if (member.external_attr >> 28) == 0xA:
-                    # Symlink. Read the target path and create a symlink.
+    def _do_unzip() -> None:
+        try:
+            with zipfile.ZipFile(zip_file_path, 'r') as zipf:
+                for member in zipf.infolist():
+                    # Determine the new path
+                    original_path = os.path.normpath(member.filename)
+                    new_path = client_file_mounts_dir / original_path.lstrip(
+                        '/')
+
+                    if (member.external_attr >> 28) == 0xA:
+                        # Symlink. Read the target path and create a symlink.
+                        new_path.parent.mkdir(parents=True, exist_ok=True)
+                        target = zipf.read(member).decode()
+                        assert not os.path.isabs(target), target
+                        # Since target is a relative path, we need to check that
+                        # it is under `client_file_mounts_dir` for security.
+                        full_target_path = (new_path.parent / target).resolve()
+                        if not _is_relative_to(full_target_path,
+                                               client_file_mounts_dir):
+                            raise ValueError(
+                                f'Symlink target {target} leads to a '
+                                'file not in userspace. Aborted.')
+
+                        if new_path.exists() or new_path.is_symlink():
+                            new_path.unlink(missing_ok=True)
+                        new_path.symlink_to(
+                            target,
+                            target_is_directory=member.filename.endswith('/'))
+                        continue
+
+                    # Handle directories
+                    if member.filename.endswith('/'):
+                        new_path.mkdir(parents=True, exist_ok=True)
+                        continue
+
+                    # Handle files
                     new_path.parent.mkdir(parents=True, exist_ok=True)
-                    target = zipf.read(member).decode()
-                    assert not os.path.isabs(target), target
-                    # Since target is a relative path, we need to check that it
-                    # is under `client_file_mounts_dir` for security.
-                    full_target_path = (new_path.parent / target).resolve()
-                    if not _is_relative_to(full_target_path,
-                                           client_file_mounts_dir):
-                        raise ValueError(f'Symlink target {target} leads to a '
-                                         'file not in userspace. Aborted.')
+                    with zipf.open(member) as member_file, new_path.open(
+                            'wb') as f:
+                        # Use shutil.copyfileobj to copy files in chunks,
+                        # so it does not load the entire file into memory.
+                        shutil.copyfileobj(member_file, f)
+        except zipfile.BadZipFile as e:
+            logger.error(f'Bad zip file: {zip_file_path}')
+            raise fastapi.HTTPException(
+                status_code=400,
+                detail=f'Invalid zip file: {common_utils.format_exception(e)}')
+        except Exception as e:
+            logger.error(f'Error unzipping file: {zip_file_path}')
+            raise fastapi.HTTPException(
+                status_code=500,
+                detail=(f'Error unzipping file: '
+                        f'{common_utils.format_exception(e)}'))
+        finally:
+            # Cleanup the temporary file regardless of
+            # success/failure handling above
+            zip_file_path.unlink(missing_ok=True)
 
-                    if new_path.exists() or new_path.is_symlink():
-                        new_path.unlink(missing_ok=True)
-                    new_path.symlink_to(
-                        target,
-                        target_is_directory=member.filename.endswith('/'))
-                    continue
-
-                # Handle directories
-                if member.filename.endswith('/'):
-                    new_path.mkdir(parents=True, exist_ok=True)
-                    continue
-
-                # Handle files
-                new_path.parent.mkdir(parents=True, exist_ok=True)
-                with zipf.open(member) as member_file, new_path.open('wb') as f:
-                    # Use shutil.copyfileobj to copy files in chunks, so it does
-                    # not load the entire file into memory.
-                    shutil.copyfileobj(member_file, f)
-    except zipfile.BadZipFile as e:
-        logger.error(f'Bad zip file: {zip_file_path}')
-        raise fastapi.HTTPException(
-            status_code=400,
-            detail=f'Invalid zip file: {common_utils.format_exception(e)}')
-    except Exception as e:
-        logger.error(f'Error unzipping file: {zip_file_path}')
-        raise fastapi.HTTPException(
-            status_code=500,
-            detail=(f'Error unzipping file: '
-                    f'{common_utils.format_exception(e)}'))
-
-    # Cleanup the temporary file
-    zip_file_path.unlink()
+    await context_utils.to_thread(_do_unzip)
 
 
 @app.post('/launch')
@@ -471,6 +1066,7 @@ async def launch(launch_body: payloads.LaunchBody,
         func=execution.launch,
         schedule_type=requests_lib.ScheduleType.LONG,
         request_cluster_name=launch_body.cluster_name,
+        retryable=launch_body.retry_until_up,
     )
 
 
@@ -478,13 +1074,18 @@ async def launch(launch_body: payloads.LaunchBody,
 # pylint: disable=redefined-builtin
 async def exec(request: fastapi.Request, exec_body: payloads.ExecBody) -> None:
     """Executes a task on an existing cluster."""
+    cluster_name = exec_body.cluster_name
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='exec',
         request_body=exec_body,
         func=execution.exec,
+        precondition=preconditions.ClusterStartCompletePrecondition(
+            request_id=request.state.request_id,
+            cluster_name=cluster_name,
+        ),
         schedule_type=requests_lib.ScheduleType.LONG,
-        request_cluster_name=exec_body.cluster_name,
+        request_cluster_name=cluster_name,
     )
 
 
@@ -508,6 +1109,10 @@ async def status(
     status_body: payloads.StatusBody = payloads.StatusBody()
 ) -> None:
     """Gets cluster statuses."""
+    if state.get_block_requests():
+        raise fastapi.HTTPException(
+            status_code=503,
+            detail='Server is shutting down, please try again later.')
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='status',
@@ -626,24 +1231,20 @@ async def logs(
     # TODO(zhwu): This should wait for the request on the cluster, e.g., async
     # launch, to finish, so that a user does not need to manually pull the
     # request status.
-    executor.schedule_request(
+    request_task = executor.prepare_request(
         request_id=request.state.request_id,
         request_name='logs',
         request_body=cluster_job_body,
         func=core.tail_logs,
-        # TODO(aylei): We have tail logs scheduled as SHORT request, because it
-        # should be responsive. However, it can be long running if the user's
-        # job keeps running, and we should avoid it taking the SHORT worker.
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=cluster_job_body.cluster_name,
     )
-
-    request_task = requests_lib.get_request(request.state.request_id)
-
+    task = executor.execute_request_in_coroutine(request_task)
+    background_tasks.add_task(task.cancel)
     # TODO(zhwu): This makes viewing logs in browser impossible. We should adopt
     # the same approach as /stream.
     return stream_utils.stream_response(
-        request_id=request_task.request_id,
+        request_id=request.state.request_id,
         logs_path=request_task.log_path,
         background_tasks=background_tasks,
     )
@@ -671,7 +1272,8 @@ async def download_logs(
 
 
 @app.post('/download')
-async def download(download_body: payloads.DownloadBody) -> None:
+async def download(download_body: payloads.DownloadBody,
+                   request: fastapi.Request) -> None:
     """Downloads a folder from the cluster to the local machine."""
     folder_paths = [
         pathlib.Path(folder_path) for folder_path in download_body.folder_paths
@@ -696,11 +1298,25 @@ async def download(download_body: payloads.DownloadBody) -> None:
         logs_dir_on_api_server).expanduser().resolve() / zip_filename
 
     try:
-        folders = [
-            str(folder_path.expanduser().resolve())
-            for folder_path in folder_paths
-        ]
-        storage_utils.zip_files_and_folders(folders, zip_path)
+
+        def _zip_files_and_folders(folder_paths, zip_path):
+            folders = [
+                str(folder_path.expanduser().resolve())
+                for folder_path in folder_paths
+            ]
+            # Check for optional query parameter to control zip entry structure
+            relative = request.query_params.get('relative', 'home')
+            if relative == 'items':
+                # Dashboard-friendly: entries relative to selected folders
+                storage_utils.zip_files_and_folders(folders,
+                                                    zip_path,
+                                                    relative_to_items=True)
+            else:
+                # CLI-friendly (default): entries with full paths for mapping
+                storage_utils.zip_files_and_folders(folders, zip_path)
+
+        await context_utils.to_thread(_zip_files_and_folders, folder_paths,
+                                      zip_path)
 
         # Add home path to the response headers, so that the client can replace
         # the remote path in the zip file to the local path.
@@ -722,13 +1338,57 @@ async def download(download_body: payloads.DownloadBody) -> None:
                                     detail=f'Error creating zip file: {str(e)}')
 
 
-@app.get('/cost_report')
-async def cost_report(request: fastapi.Request) -> None:
+# TODO(aylei): run it asynchronously after global_user_state support async op
+@app.post('/provision_logs')
+def provision_logs(cluster_body: payloads.ClusterNameBody,
+                   follow: bool = True,
+                   tail: int = 0) -> fastapi.responses.StreamingResponse:
+    """Streams the provision.log for the latest launch request of a cluster."""
+    # Prefer clusters table first, then cluster_history as fallback.
+    log_path_str = global_user_state.get_cluster_provision_log_path(
+        cluster_body.cluster_name)
+    if not log_path_str:
+        log_path_str = global_user_state.get_cluster_history_provision_log_path(
+            cluster_body.cluster_name)
+    if not log_path_str:
+        raise fastapi.HTTPException(
+            status_code=404,
+            detail=('Provision log path is not recorded for this cluster. '
+                    'Please relaunch to generate provisioning logs.'))
+
+    log_path = pathlib.Path(log_path_str).expanduser().resolve()
+    if not log_path.exists():
+        raise fastapi.HTTPException(
+            status_code=404,
+            detail=f'Provision log path does not exist: {str(log_path)}')
+
+    # Tail semantics: 0 means print all lines. Convert 0 -> None for streamer.
+    effective_tail = None if tail is None or tail <= 0 else tail
+
+    return fastapi.responses.StreamingResponse(
+        content=stream_utils.log_streamer(
+            None,
+            log_path,
+            tail=effective_tail,
+            follow=follow,
+            cluster_name=cluster_body.cluster_name),
+        media_type='text/plain',
+        headers={
+            'Cache-Control': 'no-cache, no-transform',
+            'X-Accel-Buffering': 'no',
+            'Transfer-Encoding': 'chunked',
+        },
+    )
+
+
+@app.post('/cost_report')
+async def cost_report(request: fastapi.Request,
+                      cost_report_body: payloads.CostReportBody) -> None:
     """Gets the cost report of a cluster."""
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='cost_report',
-        request_body=payloads.RequestBody(),
+        request_body=cost_report_body,
         func=core.cost_report,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
@@ -773,12 +1433,13 @@ async def local_up(request: fastapi.Request,
 
 
 @app.post('/local_down')
-async def local_down(request: fastapi.Request) -> None:
+async def local_down(request: fastapi.Request,
+                     local_down_body: payloads.LocalDownBody) -> None:
     """Tears down the Kubernetes cluster started by local_up."""
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='local_down',
-        request_body=payloads.RequestBody(),
+        request_body=local_down_body,
         func=core.local_down,
         schedule_type=requests_lib.ScheduleType.LONG,
     )
@@ -786,24 +1447,32 @@ async def local_down(request: fastapi.Request) -> None:
 
 # === API server related APIs ===
 @app.get('/api/get')
-async def api_get(request_id: str) -> requests_lib.RequestPayload:
+async def api_get(request_id: str) -> payloads.RequestPayload:
     """Gets a request with a given request ID prefix."""
     while True:
-        request_task = requests_lib.get_request(request_id)
-        if request_task is None:
+        req_status = await requests_lib.get_request_status_async(request_id)
+        if req_status is None:
             print(f'No task with request ID {request_id}', flush=True)
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Request {request_id!r} not found')
-        if request_task.status > requests_lib.RequestStatus.RUNNING:
-            request_error = request_task.get_error()
-            if request_error is not None:
-                raise fastapi.HTTPException(status_code=500,
-                                            detail=dataclasses.asdict(
-                                                request_task.encode()))
-            return request_task.encode()
+        if (req_status.status == requests_lib.RequestStatus.RUNNING and
+                daemons.is_daemon_request_id(request_id)):
+            # Daemon requests run forever, break without waiting for complete.
+            break
+        if req_status.status > requests_lib.RequestStatus.RUNNING:
+            break
         # yield control to allow other coroutines to run, sleep shortly
         # to avoid storming the DB and CPU in the meantime
         await asyncio.sleep(0.1)
+    request_task = await requests_lib.get_request_async(request_id)
+    if request_task.should_retry:
+        raise fastapi.HTTPException(
+            status_code=503, detail=f'Request {request_id!r} should be retried')
+    request_error = request_task.get_error()
+    if request_error is not None:
+        raise fastapi.HTTPException(status_code=500,
+                                    detail=request_task.encode().model_dump())
+    return request_task.encode()
 
 
 @app.get('/api/stream')
@@ -872,17 +1541,31 @@ async def stream(
 
     # Original plain text streaming logic
     if request_id is not None:
-        request_task = requests_lib.get_request(request_id)
+        request_task = await requests_lib.get_request_async(request_id)
         if request_task is None:
             print(f'No task with request ID {request_id}')
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Request {request_id!r} not found')
         log_path_to_stream = request_task.log_path
+        if not log_path_to_stream.exists():
+            # The log file might be deleted by the request GC daemon but the
+            # request task is still in the database.
+            raise fastapi.HTTPException(
+                status_code=404,
+                detail=f'Log of request {request_id!r} has been deleted')
     else:
         assert log_path is not None, (request_id, log_path)
         if log_path == constants.API_SERVER_LOGS:
             resolved_log_path = pathlib.Path(
                 constants.API_SERVER_LOGS).expanduser()
+            if not resolved_log_path.exists():
+                raise fastapi.HTTPException(
+                    status_code=404,
+                    detail='Server log file does not exist. The API server may '
+                    'have been started with `--foreground` - check the '
+                    'stdout of API server process, such as: '
+                    '`kubectl logs -n api-server-namespace '
+                    'api-server-pod-name`')
         else:
             # This should be a log path under ~/sky_logs.
             resolved_logs_directory = pathlib.Path(
@@ -903,6 +1586,15 @@ async def stream(
                     detail=f'Log path {log_path!r} does not exist')
 
         log_path_to_stream = resolved_log_path
+
+    headers = {
+        'Cache-Control': 'no-cache, no-transform',
+        'X-Accel-Buffering': 'no',
+        'Transfer-Encoding': 'chunked'
+    }
+    if request_id is not None:
+        headers[server_constants.STREAM_REQUEST_HEADER] = request_id
+
     return fastapi.responses.StreamingResponse(
         content=stream_utils.log_streamer(request_id,
                                           log_path_to_stream,
@@ -910,11 +1602,7 @@ async def stream(
                                           tail=tail,
                                           follow=follow),
         media_type='text/plain',
-        headers={
-            'Cache-Control': 'no-cache, no-transform',
-            'X-Accel-Buffering': 'no',
-            'Transfer-Encoding': 'chunked'
-        },
+        headers=headers,
     )
 
 
@@ -937,7 +1625,7 @@ async def api_status(
         None, description='Request IDs to get status for.'),
     all_status: bool = fastapi.Query(
         False, description='Get finished requests as well.'),
-) -> List[requests_lib.RequestPayload]:
+) -> List[payloads.RequestPayload]:
     """Gets the list of requests."""
     if request_ids is None:
         statuses = None
@@ -946,50 +1634,92 @@ async def api_status(
                 requests_lib.RequestStatus.PENDING,
                 requests_lib.RequestStatus.RUNNING,
             ]
-        return [
-            request_task.readable_encode()
-            for request_task in requests_lib.get_request_tasks(status=statuses)
-        ]
+        request_tasks = await requests_lib.get_request_tasks_async(
+            req_filter=requests_lib.RequestTaskFilter(status=statuses))
+        return [r.readable_encode() for r in request_tasks]
     else:
         encoded_request_tasks = []
         for request_id in request_ids:
-            request_task = requests_lib.get_request(request_id)
+            request_task = await requests_lib.get_request_async(request_id)
             if request_task is None:
                 continue
             encoded_request_tasks.append(request_task.readable_encode())
         return encoded_request_tasks
 
 
-@app.get('/api/health')
-async def health() -> Dict[str, str]:
+@app.get(
+    '/api/health',
+    # response_model_exclude_unset omits unset fields
+    # in the response JSON.
+    response_model_exclude_unset=True)
+async def health(request: fastapi.Request) -> responses.APIHealthResponse:
     """Checks the health of the API server.
 
     Returns:
-        A dictionary with the following keys:
-        - status: str; The status of the API server.
-        - api_version: str; The API version of the API server.
-        - commit: str; The commit hash of SkyPilot used for API server.
-        - version: str; The version of SkyPilot used for API server.
+        responses.APIHealthResponse: The health response.
     """
-    return {
-        'status': common.ApiServerStatus.HEALTHY.value,
-        'api_version': server_constants.API_VERSION,
-        'commit': sky.__commit__,
-        'version': sky.__version__,
-    }
+    user = request.state.auth_user
+    server_status = common.ApiServerStatus.HEALTHY
+    if getattr(request.state, 'anonymous_user', False):
+        # API server authentication is enabled, but the request is not
+        # authenticated. We still have to serve the request because the
+        # /api/health endpoint has two different usage:
+        # 1. For health check from `api start` and external ochestration
+        #    tools (k8s), which does not require authentication and user info.
+        # 2. Return server info to client and hint client to login if required.
+        # Separating these two usage to different APIs will break backward
+        # compatibility for existing ochestration solutions (e.g. helm chart).
+        # So we serve these two usages in a backward compatible manner below.
+        client_version = versions.get_remote_api_version()
+        # - For Client with API version >= 14, we return 200 response with
+        #   status=NEEDS_AUTH, new client will handle the login process.
+        # - For health check from `sky api start`, the client code always uses
+        #   the same API version with the server, thus there is no compatibility
+        #   issue.
+        server_status = common.ApiServerStatus.NEEDS_AUTH
+        if client_version is None:
+            # - For health check from ochestration tools (e.g. k8s), we also
+            #   return 200 with status=NEEDS_AUTH, which passes HTTP probe
+            #   check.
+            # - There is no harm when an malicious client calls /api/health
+            #   without authentication since no sensitive information is
+            #   returned.
+            return responses.APIHealthResponse(
+                status=common.ApiServerStatus.HEALTHY,)
+        # TODO(aylei): remove this after min_compatible_api_version >= 14.
+        if client_version < 14:
+            # For Client with API version < 14, the NEEDS_AUTH status is not
+            # honored. Return 401 to trigger the login process.
+            raise fastapi.HTTPException(status_code=401,
+                                        detail='Authentication required')
+
+    logger.debug(f'Health endpoint: request.state.auth_user = {user}')
+    return responses.APIHealthResponse(
+        status=server_status,
+        # Kept for backward compatibility, clients before 0.11.0 will read this
+        # field to check compatibility and hint the user to upgrade the CLI.
+        # TODO(aylei): remove this field after 0.13.0
+        api_version=str(server_constants.API_VERSION),
+        version=sky.__version__,
+        version_on_disk=common.get_skypilot_version_on_disk(),
+        commit=sky.__commit__,
+        basic_auth_enabled=os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH,
+                                          'false').lower() == 'true',
+        user=user if user is not None else None,
+    )
 
 
 @app.websocket('/kubernetes-pod-ssh-proxy')
-async def kubernetes_pod_ssh_proxy(
-    websocket: fastapi.WebSocket,
-    cluster_name_body: payloads.ClusterNameBody = fastapi.Depends()
-) -> None:
+async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
+                                   cluster_name: str) -> None:
     """Proxies SSH to the Kubernetes pod with websocket."""
     await websocket.accept()
-    cluster_name = cluster_name_body.cluster_name
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
 
-    cluster_records = core.status(cluster_name, all_users=True)
+    # Run core.status in another thread to avoid blocking the event loop.
+    cluster_records = await context_utils.to_thread(core.status,
+                                                    cluster_name,
+                                                    all_users=True)
     cluster_record = cluster_records[0]
     if cluster_record['status'] != status_lib.ClusterStatus.UP:
         raise fastapi.HTTPException(
@@ -1028,7 +1758,12 @@ async def kubernetes_pod_ssh_proxy(
             return
 
     logger.info(f'Starting port-forward to local port: {local_port}')
+    conn_gauge = metrics_utils.SKY_APISERVER_WEBSOCKET_CONNECTIONS.labels(
+        pid=os.getpid())
+    ssh_failed = False
+    websocket_closed = False
     try:
+        conn_gauge.inc()
         # Connect to the local port
         reader, writer = await asyncio.open_connection('127.0.0.1', local_port)
 
@@ -1036,9 +1771,21 @@ async def kubernetes_pod_ssh_proxy(
             try:
                 async for message in websocket.iter_bytes():
                     writer.write(message)
-                    await writer.drain()
+                    try:
+                        await writer.drain()
+                    except Exception as e:  # pylint: disable=broad-except
+                        # Typically we will not reach here, if the ssh to pod
+                        # is disconnected, ssh_to_websocket will exit first.
+                        # But just in case.
+                        logger.error('Failed to write to pod through '
+                                     f'port-forward connection: {e}')
+                        nonlocal ssh_failed
+                        ssh_failed = True
+                        break
             except fastapi.WebSocketDisconnect:
                 pass
+            nonlocal websocket_closed
+            websocket_closed = True
             writer.close()
 
         async def ssh_to_websocket():
@@ -1046,61 +1793,226 @@ async def kubernetes_pod_ssh_proxy(
                 while True:
                     data = await reader.read(1024)
                     if not data:
+                        if not websocket_closed:
+                            logger.warning('SSH connection to pod is '
+                                           'disconnected before websocket '
+                                           'connection is closed')
+                            nonlocal ssh_failed
+                            ssh_failed = True
                         break
                     await websocket.send_bytes(data)
             except Exception:  # pylint: disable=broad-except
                 pass
-            await websocket.close()
+            try:
+                await websocket.close()
+            except Exception:  # pylint: disable=broad-except
+                # The websocket might has been closed by the client.
+                pass
 
         await asyncio.gather(websocket_to_ssh(), ssh_to_websocket())
     finally:
-        proc.terminate()
+        conn_gauge.dec()
+        reason = ''
+        try:
+            logger.info('Terminating kubectl port-forward process')
+            proc.terminate()
+        except ProcessLookupError:
+            stdout = await proc.stdout.read()
+            logger.error('kubectl port-forward was terminated before the '
+                         'ssh websocket connection was closed. Remaining '
+                         f'output: {str(stdout)}')
+            reason = 'KubectlPortForwardExit'
+            metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
+                pid=os.getpid(), reason='KubectlPortForwardExit').inc()
+        else:
+            if ssh_failed:
+                reason = 'SSHToPodDisconnected'
+            else:
+                reason = 'ClientClosed'
+        metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
+            pid=os.getpid(), reason=reason).inc()
+
+
+@app.get('/all_contexts')
+async def all_contexts(request: fastapi.Request) -> None:
+    """Gets all Kubernetes and SSH node pool contexts."""
+
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='all_contexts',
+        request_body=payloads.RequestBody(),
+        func=core.get_all_contexts,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+    )
 
 
 # === Internal APIs ===
 @app.get('/api/completion/cluster_name')
 async def complete_cluster_name(incomplete: str,) -> List[str]:
-    return global_user_state.get_cluster_names_start_with(incomplete)
+    return await context_utils.to_thread(
+        global_user_state.get_cluster_names_start_with, incomplete)
 
 
 @app.get('/api/completion/storage_name')
 async def complete_storage_name(incomplete: str,) -> List[str]:
-    return global_user_state.get_storage_names_start_with(incomplete)
+    return await context_utils.to_thread(
+        global_user_state.get_storage_names_start_with, incomplete)
+
+
+@app.get('/api/completion/volume_name')
+async def complete_volume_name(incomplete: str,) -> List[str]:
+    return await context_utils.to_thread(
+        global_user_state.get_volume_names_start_with, incomplete)
+
+
+@app.get('/api/completion/api_request')
+async def complete_api_request(incomplete: str,) -> List[str]:
+    return await requests_lib.get_api_request_ids_start_with(incomplete)
+
+
+@app.get('/dashboard/{full_path:path}')
+async def serve_dashboard(full_path: str):
+    """Serves the Next.js dashboard application.
+
+    Args:
+        full_path: The path requested by the client.
+        e.g. /clusters, /jobs
+
+    Returns:
+        FileResponse for static files or index.html for client-side routing.
+
+    Raises:
+        HTTPException: If the path is invalid or file not found.
+    """
+    # Try to serve the staticfile directly e.g. /skypilot.svg,
+    # /favicon.ico, and /_next/, etc.
+    file_path = os.path.join(server_constants.DASHBOARD_DIR, full_path)
+    if os.path.isfile(file_path):
+        return fastapi.responses.FileResponse(file_path)
+
+    # Serve index.html for client-side routing
+    # e.g. /clusters, /jobs
+    index_path = os.path.join(server_constants.DASHBOARD_DIR, 'index.html')
+    try:
+        with open(index_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        return fastapi.responses.HTMLResponse(content=content)
+    except Exception as e:
+        logger.error(f'Error serving dashboard: {e}')
+        raise fastapi.HTTPException(status_code=500, detail=str(e))
+
+
+# Redirect the root path to dashboard
+@app.get('/')
+async def root():
+    return fastapi.responses.RedirectResponse(url='/dashboard/')
+
+
+def _init_or_restore_server_user_hash():
+    """Restores the server user hash from the global user state db.
+
+    The API server must have a stable user hash across restarts and potential
+    multiple replicas. Thus we persist the user hash in db and restore it on
+    startup. When upgrading from old version, the user hash will be read from
+    the local file (if any) to keep the user hash consistent.
+    """
+
+    def apply_user_hash(user_hash: str) -> None:
+        # For local API server, the user hash in db and local file should be
+        # same so there is no harm to override here.
+        common_utils.set_user_hash_locally(user_hash)
+        # Refresh the server user hash for current process after restore or
+        # initialize the user hash in db, child processes will get the correct
+        # server id from the local cache file.
+        common_lib.refresh_server_id()
+
+    user_hash = global_user_state.get_system_config(_SERVER_USER_HASH_KEY)
+    if user_hash is not None:
+        apply_user_hash(user_hash)
+        return
+
+    # Initial deployment, generate a user hash and save it to the db.
+    user_hash = common_utils.get_user_hash()
+    global_user_state.set_system_config(_SERVER_USER_HASH_KEY, user_hash)
+    apply_user_hash(user_hash)
 
 
 if __name__ == '__main__':
     import uvicorn
-    requests_lib.reset_db_and_logs()
+
+    from sky.server import uvicorn as skyuvicorn
+
+    skyuvicorn.add_timestamp_prefix_for_server_logs()
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', default=46580, type=int)
     parser.add_argument('--deploy', action='store_true')
+    # Serve metrics on a separate port to isolate it from the application APIs:
+    # metrics port will not be exposed to the public network typically.
+    parser.add_argument('--metrics-port', default=9090, type=int)
     cmd_args = parser.parse_args()
+    if cmd_args.port == cmd_args.metrics_port:
+        raise ValueError('port and metrics-port cannot be the same')
+
     # Show the privacy policy if it is not already shown. We place it here so
     # that it is shown only when the API server is started.
     usage_lib.maybe_show_privacy_policy()
 
-    num_workers = 1
-    if cmd_args.deploy:
-        num_workers = common_utils.get_cpu_count()
+    # Initialize global user state db
+    db_utils.set_max_connections(1)
+    global_user_state.initialize_and_get_db()
+    # Initialize request db
+    requests_lib.reset_db_and_logs()
+    # Restore the server user hash
+    _init_or_restore_server_user_hash()
+    max_db_connections = global_user_state.get_max_db_connections()
+    config = server_config.compute_server_config(cmd_args.deploy,
+                                                 max_db_connections)
 
-    sub_procs = []
+    num_workers = config.num_server_workers
+
+    queue_server: Optional[multiprocessing.Process] = None
+    workers: List[executor.RequestWorker] = []
+    # Global background tasks that will be scheduled in a separate event loop.
+    global_tasks: List[asyncio.Task] = []
     try:
-        sub_procs = executor.start(cmd_args.deploy)
+        background = uvloop.new_event_loop()
+        if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
+            metrics_server = metrics.build_metrics_server(
+                cmd_args.host, cmd_args.metrics_port)
+            global_tasks.append(background.create_task(metrics_server.serve()))
+        global_tasks.append(
+            background.create_task(requests_lib.requests_gc_daemon()))
+        global_tasks.append(
+            background.create_task(
+                global_user_state.cluster_event_retention_daemon()))
+        threading.Thread(target=background.run_forever, daemon=True).start()
+
+        queue_server, workers = executor.start(config)
+
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request
         # workers or interrupt running requests.
-        uvicorn.run('sky.server.server:app',
-                    host=cmd_args.host,
-                    port=cmd_args.port,
-                    workers=num_workers)
+        uvicorn_config = uvicorn.Config('sky.server.server:app',
+                                        host=cmd_args.host,
+                                        port=cmd_args.port,
+                                        workers=num_workers)
+        skyuvicorn.run(uvicorn_config,
+                       max_db_connections=config.num_db_connections_per_worker)
     except Exception as exc:  # pylint: disable=broad-except
         logger.error(f'Failed to start SkyPilot API server: '
                      f'{common_utils.format_exception(exc, use_bracket=True)}')
         raise
     finally:
         logger.info('Shutting down SkyPilot API server...')
-        for sub_proc in sub_procs:
-            sub_proc.terminate()
-            sub_proc.join()
+
+        for gt in global_tasks:
+            gt.cancel()
+        subprocess_utils.run_in_parallel(lambda worker: worker.cancel(),
+                                         workers,
+                                         num_threads=len(workers))
+        if queue_server is not None:
+            queue_server.kill()
+            queue_server.join()

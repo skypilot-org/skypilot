@@ -8,11 +8,18 @@ This file is imported by setup.py, so:
 import sys
 from typing import Dict, List
 
+clouds_with_ray = ['ibm', 'docker', 'scp']
+
 install_requires = [
-    'wheel',
+    'wheel<0.46.0',  # https://github.com/skypilot-org/skypilot/issues/5153
+    'setuptools',  # TODO: match version to pyproject.toml once #5153 is fixed
+    'pip',
     'cachetools',
     # NOTE: ray requires click>=7.0.
-    'click >= 7.0',
+    # click 8.2.0 has a bug in parsing the command line arguments:
+    # https://github.com/pallets/click/issues/2894
+    # TODO(aylei): remove this once the bug is fixed in click.
+    'click >= 7.0, < 8.2.0',
     'colorama',
     'cryptography',
     # Jinja has a bug in older versions because of the lack of pinning
@@ -32,7 +39,8 @@ install_requires = [
     # Light weight requirement, can be replaced with "typing" once
     # we deprecate Python 3.7 (this will take a while).
     'typing_extensions',
-    'filelock >= 3.6.0',
+    # filelock 3.15.0 or higher is required for async file locking.
+    'filelock >= 3.15.0',
     'packaging',
     'psutil',
     'pulp',
@@ -40,9 +48,17 @@ install_requires = [
     # (https://github.com/yaml/pyyaml/issues/601)
     # <= 3.13 may encounter https://github.com/ultralytics/yolov5/issues/414
     'pyyaml > 3.13, != 5.4.*',
+    'ijson',
     'requests',
+    # SkyPilot inherits from uvicorn.Server to customize the behavior of
+    # uvicorn, so we need to pin uvicorn version to avoid potential break
+    # changes.
+    # Notes for current version check:
+    # - uvicorn 0.33.0 is the latest version that supports Python 3.8
+    # - uvicorn 0.36.0 removes setup_event_loop thus breaks SkyPilot's custom
+    #   behavior.
+    'uvicorn[standard] >=0.33.0, <0.36.0',
     'fastapi',
-    'uvicorn[standard]',
     # Some pydantic versions are not compatible with ray. Adopted from ray's
     # setup.py:
     # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L254
@@ -53,37 +69,70 @@ install_requires = [
     'aiofiles',
     'httpx',
     'setproctitle',
+    'sqlalchemy',
+    'psycopg2-binary',
+    'aiosqlite',
+    'asyncpg',
+    # TODO(hailong): These three dependencies should be removed after we make
+    # the client-side actually not importing them.
+    'casbin',
+    'sqlalchemy_adapter',
+    # Required for API server metrics
+    'prometheus_client>=0.8.0',
+    'passlib',
+    'bcrypt==4.0.1',
+    'pyjwt',
+    'gitpython',
+    'types-paramiko',
+    'alembic',
+    'aiohttp',
+    'aiosqlite',
+    'anyio',
+]
+
+# See requirements-dev.txt for the version of grpc and protobuf
+# used to generate the code during development.
+
+# The grpc version at runtime has to be newer than the version
+# used to generate the code.
+GRPC = 'grpcio>=1.63.0'
+# >= 5.26.1 because the runtime version can't be older than the version
+# used to generate the code.
+# < 7.0.0 because code generated for a major version V will be supported by
+# protobuf runtimes of version V and V+1.
+# https://protobuf.dev/support/cross-version-runtime-guarantee
+PROTOBUF = 'protobuf>=5.26.1, < 7.0.0'
+
+server_dependencies = [
+    'casbin',
+    'sqlalchemy_adapter',
+    'passlib',
+    'pyjwt',
+    'aiohttp',
+    'anyio',
+    GRPC,
+    PROTOBUF,
+    'aiosqlite',
+    'greenlet',
 ]
 
 local_ray = [
     # Lower version of ray will cause dependency conflict for
     # click/grpcio/protobuf.
-    # Excluded 2.6.0 as it has a bug in the cluster launcher:
+    # Ray 2.6.1+ resolved cluster launcher bugs
+    # and grpcio issues on Apple Silicon.
     # https://github.com/ray-project/ray/releases/tag/ray-2.6.1
-    'ray[default] >= 2.2.0, != 2.6.0',
+    'ray[default] >= 2.6.1',
 ]
 
 remote = [
-    # Adopted from ray's setup.py:
-    # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L251-L252
-    # SkyPilot: != 1.48.0 is required to avoid the error where ray dashboard
-    # fails to start when ray start is called (#2054).
-    # Tracking issue: https://github.com/ray-project/ray/issues/30984
-    'grpcio >= 1.32.0, != 1.48.0; python_version < \'3.10\'',
-    'grpcio >= 1.42.0, != 1.48.0; python_version >= \'3.10\'',
-    # Adopted from ray's setup.py:
-    # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L343
-    'protobuf >= 3.15.3, != 3.19.5',
+    GRPC,
+    PROTOBUF,
 ]
 
 # NOTE: Change the templates/jobs-controller.yaml.j2 file if any of the
 # following packages dependencies are changed.
 aws_dependencies = [
-    # botocore does not work with urllib3>=2.0.0, according to
-    # https://github.com/boto/botocore/issues/2926
-    # We have to explicitly pin the version to optimize the time for
-    # poetry install. See https://github.com/orgs/python-poetry/discussions/7937
-    'urllib3<2',
     # NOTE: this installs CLI V1. To use AWS SSO (e.g., `aws sso login`), users
     # should instead use CLI V2 which is not pip-installable. See
     # https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html.
@@ -114,28 +163,44 @@ extras_require: Dict[str, List[str]] = {
         'azure-mgmt-compute>=33.0.0',
         'azure-storage-blob>=12.23.1',
         'msgraph-sdk',
-    ] + local_ray,
+        'msrestazure',
+    ],
     # We need google-api-python-client>=2.69.0 to enable 'discardLocalSsd'
     # parameter for stopping instances. Reference:
     # https://github.com/googleapis/google-api-python-client/commit/f6e9d3869ed605b06f7cbf2e8cf2db25108506e6
-    'gcp': ['google-api-python-client>=2.69.0', 'google-cloud-storage'],
+    'gcp': [
+        'google-api-python-client>=2.69.0',
+        'google-cloud-storage',
+        # see https://github.com/conda/conda/issues/13619
+        # see https://github.com/googleapis/google-api-python-client/issues/2554
+        'pyopenssl >= 23.2.0, <24.3.0',
+    ],
     'ibm': [
-        'ibm-cloud-sdk-core', 'ibm-vpc', 'ibm-platform-services', 'ibm-cos-sdk'
+        'ibm-cloud-sdk-core',
+        'ibm-vpc',
+        'ibm-platform-services>=0.48.0',
+        'ibm-cos-sdk',
     ] + local_ray,
     'docker': ['docker'] + local_ray,
     'lambda': [],  # No dependencies needed for lambda
     'cloudflare': aws_dependencies,
     'scp': local_ray,
-    'oci': ['oci'] + local_ray,
+    'oci': ['oci'],
     # Kubernetes 32.0.0 has an authentication bug: https://github.com/kubernetes-client/python/issues/2333 # pylint: disable=line-too-long
-    'kubernetes': ['kubernetes>=20.0.0,!=32.0.0'],
+    'kubernetes': [
+        'kubernetes>=20.0.0,!=32.0.0', 'websockets', 'python-dateutil'
+    ],
+    'ssh': ['kubernetes>=20.0.0,!=32.0.0', 'websockets', 'python-dateutil'],
     'remote': remote,
     # For the container registry auth api. Reference:
     # https://github.com/runpod/runpod-python/releases/tag/1.6.1
-    'runpod': ['runpod>=1.6.1'],
+    # RunPod needs a TOML parser to read ~/.runpod/config.toml. On Python 3.11+
+    # stdlib provides tomllib; on lower versions we depend on tomli explicitly.
+    'runpod': ['runpod>=1.6.1', 'tomli; python_version < "3.11"'],
     'fluidstack': [],  # No dependencies needed for fluidstack
     'cudo': ['cudo-compute>=0.1.10'],
     'paperspace': [],  # No dependencies needed for paperspace
+    'primeintellect': [],  # No dependencies needed for primeintellect
     'do': ['pydo>=0.3.0', 'azure-core>=1.24.0', 'azure-common'],
     'vast': ['vastai-sdk>=0.1.12'],
     'vsphere': [
@@ -147,13 +212,34 @@ extras_require: Dict[str, List[str]] = {
         # docs instead.
         # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long
     ],
-    'nebius': ['nebius>=0.2.0',]
+    'nebius': [
+        # Nebius requires grpcio and protobuf, so we need to include
+        # our constraints here.
+        'nebius>=0.2.47',
+        GRPC,
+        PROTOBUF,
+    ] + aws_dependencies,
+    'hyperbolic': [],  # No dependencies needed for hyperbolic
+    'seeweb': ['ecsapi>=0.2.0'],
+    'server': server_dependencies,
 }
 
-# Nebius needs python3.10. If python 3.9 [all] will not install nebius
+# Calculate which clouds should be included in the [all] installation.
+clouds_for_all = set(extras_require)
+clouds_for_all.remove('remote')
+
 if sys.version_info < (3, 10):
-    filtered_keys = [k for k in extras_require if k != 'nebius']
-    extras_require['all'] = sum(
-        [v for k, v in extras_require.items() if k != 'nebius'], [])
-else:
-    extras_require['all'] = sum(extras_require.values(), [])
+    # Nebius needs python3.10. If python 3.9 [all] will not install nebius
+    clouds_for_all.remove('nebius')
+    clouds_for_all.remove('seeweb')
+
+if sys.version_info >= (3, 12):
+    # The version of ray we use does not work with >= 3.12, so avoid clouds
+    # that require ray.
+    clouds_for_all -= set(clouds_with_ray)
+    # vast requires setuptools==51.1.1 which will not work with python >= 3.12
+    # TODO: Remove once https://github.com/vast-ai/vast-sdk/pull/6 is released
+    clouds_for_all.remove('vast')
+
+extras_require['all'] = list(
+    set().union(*[extras_require[cloud] for cloud in clouds_for_all]))

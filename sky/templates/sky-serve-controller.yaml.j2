@@ -34,6 +34,9 @@ file_mounts:
   {%- for remote_catalog_path, local_catalog_path in modified_catalogs.items() %}
   {{remote_catalog_path}}: {{local_catalog_path}}
   {%- endfor %}
+  {%- for controller_file_mount_path, local_file_mount_path in local_to_controller_file_mounts.items() %}
+  {{controller_file_mount_path}}: {{local_file_mount_path}}
+  {%- endfor %}
 {%- if use_tls %}
   {{remote_tls_keyfile}}: {{local_tls_keyfile}}
   {{remote_tls_certfile}}: {{local_tls_certfile}}
@@ -42,13 +45,30 @@ file_mounts:
 run: |
   # Activate the Python environment, so that cloud SDKs can be found in the
   # PATH.
+  {%- if consolidation_mode_job_id is none %}
   {{ sky_activate_python_env }}
+  {%- endif %}
   # Start sky serve service.
-  python -u -m sky.serve.service \
+  {%- if consolidation_mode_job_id is not none %}
+  {{sky_python_cmd}} \
+  {%- else %}
+  python \
+  {%- endif %}
+   -u -m sky.serve.service \
     --service-name {{service_name}} \
     --task-yaml {{remote_task_yaml_path}} \
+    --entrypoint {{entrypoint}} \
+    {%- if consolidation_mode_job_id is not none %}
+    --job-id {{consolidation_mode_job_id}} \
+    {%- else %}
     --job-id $SKYPILOT_INTERNAL_JOB_ID \
-    >> {{controller_log_file}} 2>&1
+    {%- endif %}
+    >> {{controller_log_file}} 2>&1 \
+    {%- if consolidation_mode_job_id is not none %}
+    &
+    {%- endif %}
+    # For consolidation mode, we need to run the service in the background so
+    # that it can immediately return in serve.core.up().
 
 envs:
 {%- for env_name, env_value in controller_envs.items() %}

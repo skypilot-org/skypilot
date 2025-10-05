@@ -19,10 +19,10 @@ from sky.adaptors import aws
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import ibm
+from sky.adaptors import nebius
 from sky.adaptors import oci
 from sky.clouds import gcp
 from sky.data import data_utils
-from sky.data.data_utils import Rclone
 from sky.skylet import constants
 from sky.utils import ux_utils
 
@@ -453,19 +453,18 @@ class IBMCosCloudStorage(CloudStorage):
     def _get_rclone_sync_command(self, source: str, destination: str):
         bucket_name, data_path, bucket_region = data_utils.split_cos_path(
             source)
-        bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
-            bucket_name, Rclone.RcloneClouds.IBM)
-        data_path_in_bucket = bucket_name + data_path
-        rclone_config_data = Rclone.get_rclone_config(bucket_name,
-                                                      Rclone.RcloneClouds.IBM,
-                                                      bucket_region)
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.IBM.get_profile_name(bucket_name))
+        data_path_in_bucket = f'{bucket_name}{data_path}'
+        rclone_config = data_utils.Rclone.RcloneStores.IBM.get_config(
+            rclone_profile_name=rclone_profile_name, region=bucket_region)
         # configure_rclone stores bucket profile in remote cluster's rclone.conf
         configure_rclone = (
-            f' mkdir -p ~/.config/rclone/ &&'
-            f' echo "{rclone_config_data}">> {Rclone.RCLONE_CONFIG_PATH}')
+            f' mkdir -p {constants.RCLONE_CONFIG_DIR} &&'
+            f' echo "{rclone_config}">> {constants.RCLONE_CONFIG_PATH}')
         download_via_rclone = (
             'rclone copy '
-            f'{bucket_rclone_profile}:{data_path_in_bucket} {destination}')
+            f'{rclone_profile_name}:{data_path_in_bucket} {destination}')
 
         all_commands = list(self._GET_RCLONE)
         all_commands.append(configure_rclone)
@@ -543,6 +542,66 @@ class OciCloudStorage(CloudStorage):
         return download_via_ocicli
 
 
+class NebiusCloudStorage(CloudStorage):
+    """Nebius Cloud Storage."""
+
+    # List of commands to install AWS CLI
+    _GET_AWSCLI = [
+        'aws --version >/dev/null 2>&1 || '
+        f'{constants.SKY_UV_PIP_CMD} install awscli',
+    ]
+
+    def is_directory(self, url: str) -> bool:
+        """Returns whether nebius 'url' is a directory.
+
+        In cloud object stores, a "directory" refers to a regular object whose
+        name is a prefix of other objects.
+        """
+        nebius_s3 = nebius.resource('s3')
+        bucket_name, path = data_utils.split_nebius_path(url)
+        bucket = nebius_s3.Bucket(bucket_name)
+
+        num_objects = 0
+        for obj in bucket.objects.filter(Prefix=path):
+            num_objects += 1
+            if obj.key == path:
+                return False
+            # If there are more than 1 object in filter, then it is a directory
+            if num_objects == 3:
+                return True
+
+        # A directory with few or no items
+        return True
+
+    def make_sync_dir_command(self, source: str, destination: str) -> str:
+        """Downloads using AWS CLI."""
+        # AWS Sync by default uses 10 threads to upload files to the bucket.
+        # To increase parallelism, modify max_concurrent_requests in your
+        # aws config file (Default path: ~/.aws/config).
+        assert 'nebius://' in source, 'nebius:// is not in source'
+        source = source.replace('nebius://', 's3://')
+        download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+                               'sync --no-follow-symlinks '
+                               f'{source} {destination} '
+                               f'--profile={nebius.NEBIUS_PROFILE_NAME}')
+
+        all_commands = list(self._GET_AWSCLI)
+        all_commands.append(download_via_awscli)
+        return ' && '.join(all_commands)
+
+    def make_sync_file_command(self, source: str, destination: str) -> str:
+        """Downloads a file using AWS CLI."""
+        assert 'nebius://' in source, 'nebius:// is not in source'
+        source = source.replace('nebius://', 's3://')
+        download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+                               f'cp {source} {destination} '
+                               f'--profile={nebius.NEBIUS_PROFILE_NAME}')
+
+        all_commands = list(self._GET_AWSCLI)
+        all_commands.append(download_via_awscli)
+        return ' && '.join(all_commands)
+
+
 def get_storage_from_path(url: str) -> CloudStorage:
     """Returns a CloudStorage by identifying the scheme:// in a URL."""
     result = urllib.parse.urlsplit(url)
@@ -559,6 +618,7 @@ _REGISTRY = {
     'r2': R2CloudStorage(),
     'cos': IBMCosCloudStorage(),
     'oci': OciCloudStorage(),
+    'nebius': NebiusCloudStorage(),
     # TODO: This is a hack, as Azure URL starts with https://, we should
     # refactor the registry to be able to take regex, so that Azure blob can
     # be identified with `https://(.*?)\.blob\.core\.windows\.net`

@@ -3,8 +3,7 @@ service:
   replicas: 2
 
 resources:
-  cloud: oci
-  region: us-sanjose-1
+  infra: oci/us-sanjose-1
   ports: 8080
   cpus: 2+
 

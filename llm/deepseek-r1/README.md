@@ -156,9 +156,10 @@ The only change needed is to add a service section for serving specific configur
 ```yaml
 service:
   # Specifying the path to the endpoint to check the readiness of the service.
-  readiness_probe: /health
-  # Allow up to 1 hour for cold start
-  initial_delay_seconds: 3600
+  readiness_probe:
+    path: /health
+    # Allow up to 1 hour for cold start
+    initial_delay_seconds: 3600
   # Autoscaling from 0 to 2 replicas
   replica_policy:
     min_replicas: 0
@@ -169,6 +170,4 @@ And run the [SkyPilot YAML](https://github.com/skypilot-org/skypilot/blob/master
 ```bash
 sky serve up -n r1-serve deepseek-r1-671B.yaml
 ```
-
-
 

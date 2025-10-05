@@ -8,8 +8,7 @@ service:
 
 resources:
   ports: 9000
-  cloud: gcp
-  cpus: 2+
+  infra: gcp
 
 workdir: examples/serve/misc/cancel
 

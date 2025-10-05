@@ -1,11 +1,12 @@
 """Autoscalers: perform autoscaling by monitoring metrics."""
 import bisect
+import copy
 import dataclasses
 import enum
 import math
 import time
 import typing
-from typing import Any, Dict, Iterable, List, Optional, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 from sky import sky_logging
 from sky.serve import constants
@@ -56,8 +57,8 @@ class AutoscalerDecision:
 def _generate_scale_up_decisions(
         num: int, target: Optional[Dict[str, Any]]) -> List[AutoscalerDecision]:
     return [
-        AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP, target)
-        for _ in range(num)
+        AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
+                           copy.copy(target)) for _ in range(num)
     ]
 
 
@@ -134,6 +135,7 @@ class Autoscaler:
         self.min_replicas: int = spec.min_replicas
         self.max_replicas: int = (spec.max_replicas if spec.max_replicas
                                   is not None else spec.min_replicas)
+        self.num_overprovision: Optional[int] = spec.num_overprovision
         # Target number of replicas is initialized to min replicas
         self.target_num_replicas: int = spec.min_replicas
         self.latest_version: int = constants.INITIAL_VERSION
@@ -142,6 +144,12 @@ class Autoscaler:
         # unrecoverable failure.
         self.latest_version_ever_ready: int = self.latest_version - 1
         self.update_mode = serve_utils.DEFAULT_UPDATE_MODE
+
+    def get_final_target_num_replicas(self) -> int:
+        """Get the final target number of replicas."""
+        if self.num_overprovision is None:
+            return self.target_num_replicas
+        return self.target_num_replicas + self.num_overprovision
 
     def _calculate_target_num_replicas(self) -> int:
         """Calculate target number of replicas."""
@@ -166,6 +174,14 @@ class Autoscaler:
             self, request_aggregator_info: Dict[str, Any]) -> None:
         """Collect request information from aggregator for autoscaling."""
         raise NotImplementedError
+
+    def info(self) -> Dict[str, Any]:
+        """Get information about the autoscaler."""
+        return {
+            'target_num_replicas': self.target_num_replicas,
+            'min_replicas': self.min_replicas,
+            'max_replicas': self.max_replicas,
+        }
 
     def _generate_scaling_decisions(
         self,
@@ -197,6 +213,10 @@ class Autoscaler:
         # TODO(MaoZiming): use NAME to get the class.
         if spec.use_ondemand_fallback:
             return FallbackRequestRateAutoscaler(service_name, spec)
+        elif isinstance(spec.target_qps_per_replica, dict):
+            # Use instance-aware autoscaler
+            # when target_qps_per_replica is a dict
+            return InstanceAwareRequestRateAutoscaler(service_name, spec)
         else:
             return RequestRateAutoscaler(service_name, spec)
 
@@ -207,7 +227,7 @@ class Autoscaler:
         0, to make the service scale faster when the service is not running.
         This will happen when min_replicas = 0 and no traffic.
         """
-        if self.target_num_replicas == 0:
+        if self.get_final_target_num_replicas() == 0:
             return constants.AUTOSCALER_NO_REPLICA_DECISION_INTERVAL_SECONDS
         else:
             return constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS
@@ -236,13 +256,14 @@ class Autoscaler:
             # old and latest versions are allowed in rolling update, this will
             # not affect the time it takes for the service to updated to the
             # latest version.
-            if num_latest_ready_replicas >= self.target_num_replicas:
+            if (num_latest_ready_replicas >=
+                    self.get_final_target_num_replicas()):
                 # Once the number of ready new replicas is greater than or equal
                 # to the target, we can scale down all old replicas.
                 return [info.replica_id for info in old_nonterminal_replicas]
             # If rolling update is in progress, we scale down old replicas
             # based on the number of ready new replicas.
-            num_old_replicas_to_keep = (self.target_num_replicas -
+            num_old_replicas_to_keep = (self.get_final_target_num_replicas() -
                                         num_latest_ready_replicas)
             # Remove old replicas (especially old launching replicas) and only
             # keep the required number of replicas, as we want to let the new
@@ -390,6 +411,8 @@ class _AutoscalerWithHysteresis(Autoscaler):
         # `_set_target_num_replicas_with_hysteresis` to have the replicas
         # quickly scale after each update.
         self.target_num_replicas = self._calculate_target_num_replicas()
+        logger.debug(f'Target number of replicas: {self.target_num_replicas}'
+                     'after update_version.')
         # Cleanup hysteresis counters.
         self.upscale_counter = 0
         self.downscale_counter = 0
@@ -422,6 +445,7 @@ class _AutoscalerWithHysteresis(Autoscaler):
             f'Old target number of replicas: {old_target_num_replicas}. '
             f'Current target number of replicas: {target_num_replicas}. '
             f'Final target number of replicas: {self.target_num_replicas}. '
+            f'Num overprovision: {self.num_overprovision}. '
             f'Upscale counter: {self.upscale_counter}/'
             f'{self.scale_up_threshold}. '
             f'Downscale counter: {self.downscale_counter}/'
@@ -446,20 +470,28 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
             request_timestamps: All request timestamps within the window.
         """
         super().__init__(service_name, spec)
-        self.target_qps_per_replica: Optional[
-            float] = spec.target_qps_per_replica
+        self.target_qps_per_replica: Optional[Union[float, Dict[
+            str, float]]] = spec.target_qps_per_replica
         self.qps_window_size: int = constants.AUTOSCALER_QPS_WINDOW_SIZE_SECONDS
         self.request_timestamps: List[float] = []
 
     def _calculate_target_num_replicas(self) -> int:
         if self.target_qps_per_replica is None:
             return self.min_replicas
+
+        # RequestRateAutoscaler should only handle float values
+        if isinstance(self.target_qps_per_replica, dict):
+            raise ValueError('RequestRateAutoscaler does not support dict '
+                             'target_qps_per_replica. Should use '
+                             'InstanceAwareRequestRateAutoscaler instead.')
+
         num_requests_per_second = len(
             self.request_timestamps) / self.qps_window_size
-        target_num_replicas = math.ceil(num_requests_per_second /
-                                        self.target_qps_per_replica)
+        target_num_replicas = \
+            math.ceil(num_requests_per_second / self.target_qps_per_replica)
         logger.info(f'Requests per second: {num_requests_per_second}. '
                     f'Target number of replicas: {target_num_replicas}.')
+
         return self._clip_target_num_replicas(target_num_replicas)
 
     def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
@@ -492,6 +524,7 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
     ) -> List[AutoscalerDecision]:
         """Generate Autoscaling decisions based on request rate."""
 
+        # Use standard hysteresis-based logic (non-instance-aware)
         self._set_target_num_replicas_with_hysteresis()
 
         latest_nonterminal_replicas: List['replica_managers.ReplicaInfo'] = []
@@ -505,8 +538,9 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
 
         # Case 1. when latest_nonterminal_replicas is less
         # than num_to_provision, we always scale up new replicas.
-        if len(latest_nonterminal_replicas) < self.target_num_replicas:
-            num_replicas_to_scale_up = (self.target_num_replicas -
+        target_num_replicas = self.get_final_target_num_replicas()
+        if len(latest_nonterminal_replicas) < target_num_replicas:
+            num_replicas_to_scale_up = (target_num_replicas -
                                         len(latest_nonterminal_replicas))
             logger.info('Number of replicas to scale up: '
                         f'{num_replicas_to_scale_up}')
@@ -514,11 +548,12 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
                 _generate_scale_up_decisions(num_replicas_to_scale_up, None))
 
         # Case 2: when latest_nonterminal_replicas is more
-        # than self.target_num_replicas, we scale down new replicas.
+        # than target_num_replicas, we scale down new replicas.
         replicas_to_scale_down = []
-        if len(latest_nonterminal_replicas) > self.target_num_replicas:
+        if len(latest_nonterminal_replicas) > target_num_replicas:
             num_replicas_to_scale_down = (len(latest_nonterminal_replicas) -
-                                          self.target_num_replicas)
+                                          target_num_replicas)
+            # Use standard downscaling logic
             replicas_to_scale_down = (
                 _select_nonterminal_replicas_to_scale_down(
                     num_replicas_to_scale_down, latest_nonterminal_replicas))
@@ -541,6 +576,334 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
             self.request_timestamps = dynamic_states.pop('request_timestamps')
         if dynamic_states:
             logger.info(f'Remaining dynamic states: {dynamic_states}')
+
+
+class InstanceAwareRequestRateAutoscaler(RequestRateAutoscaler):
+    """Instance-aware RequestRateAutoscaler:
+    Autoscale based on each replica's GPU-specific QPS.
+
+    This autoscaler considers different QPS targets for different GPU types
+    when target_qps_per_replica is provided as a dictionary mapping GPU types
+    to their respective QPS targets.
+    """
+
+    def __init__(self, service_name: str,
+                 spec: 'service_spec.SkyServiceSpec') -> None:
+        super().__init__(service_name, spec)
+        # Ensure target_qps_per_replica is a dict for instance-aware logic
+        assert isinstance(spec.target_qps_per_replica, dict), \
+            'InstanceAware Autoscaler requires dict type target_qps_per_replica'
+        # Re-assign with correct type using setattr to avoid typing issues
+        self.target_qps_per_replica = spec.target_qps_per_replica
+
+    def _generate_scaling_decisions(
+        self,
+        replica_infos: List['replica_managers.ReplicaInfo'],
+    ) -> List[AutoscalerDecision]:
+        """Generate autoscaling decisions with instance-aware logic."""
+        # Always use instance-aware logic
+        # since target_qps_per_replica is guaranteed to be dict
+        self._set_target_num_replicas_with_instance_aware_logic(replica_infos)
+
+        latest_nonterminal_replicas: List['replica_managers.ReplicaInfo'] = []
+
+        for info in replica_infos:
+            if not info.is_terminal and info.version == self.latest_version:
+                latest_nonterminal_replicas.append(info)
+
+        target_num_replicas = self.get_final_target_num_replicas()
+        current_num_replicas = len(latest_nonterminal_replicas)
+
+        scaling_decisions: List[AutoscalerDecision] = []
+
+        # Decide if to scale up or down.
+        if target_num_replicas > current_num_replicas:
+            for _ in range(target_num_replicas - current_num_replicas):
+                # No resources_override to use when scaling up
+                scaling_decisions.append(
+                    AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
+                                       target=None))
+        elif target_num_replicas < current_num_replicas:
+            num_replicas_to_scale_down = \
+                current_num_replicas - target_num_replicas
+
+            # Use instance-aware scale down logic
+            replicas_to_scale_down = self._select_replicas_to_scale_down_by_qps(
+                num_replicas_to_scale_down, latest_nonterminal_replicas)
+            for replica_id in replicas_to_scale_down:
+                scaling_decisions.append(
+                    AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
+                                       target=replica_id))
+
+        # Outdated replicas are handled by base class generate_scaling_decisions
+        # No need to handle them here
+
+        upscale_decisions = [
+            d for d in scaling_decisions
+            if d.operator == AutoscalerDecisionOperator.SCALE_UP
+        ]
+        downscale_decisions = [
+            d for d in scaling_decisions
+            if d.operator == AutoscalerDecisionOperator.SCALE_DOWN
+        ]
+        logger.info(f'Scaling decisions: '
+                    f'{len(upscale_decisions)} scale up, '
+                    f'{len(downscale_decisions)} scale down '
+                    f'(latest nonterminal: {current_num_replicas}, '
+                    f'target: {target_num_replicas})')
+
+        return scaling_decisions
+
+    def _set_target_num_replicas_with_instance_aware_logic(
+            self, replica_infos: List['replica_managers.ReplicaInfo']) -> None:
+        """Set target_num_replicas using instance-aware logic."""
+        assert isinstance(self.target_qps_per_replica,
+                          dict), 'Expected dict for instance-aware logic'
+        target_qps_dict = self.target_qps_per_replica
+
+        num_requests_per_second = len(
+            self.request_timestamps) / self.qps_window_size
+
+        total_qps = self._calculate_total_qps_from_replicas(replica_infos)
+        if total_qps > 0:
+            if num_requests_per_second >= total_qps:
+                # for upscaling, max_target_qps is the standard qps
+                max_target_qps = max(target_qps_dict.values())
+                over_request_num = num_requests_per_second - total_qps
+                current_num_replicas = len(replica_infos)
+                raw_target_num = current_num_replicas + math.ceil(
+                    over_request_num / max_target_qps)
+                target_num_replicas = self._clip_target_num_replicas(
+                    raw_target_num)
+                logger.info(
+                    f'Instance-aware autoscaling: total QPS {total_qps}, '
+                    f'num_requests_per_second: {num_requests_per_second}, '
+                    f'upscaling, using maximum QPS {max_target_qps} '
+                    f'from {target_qps_dict}, '
+                    f'target replicas: {target_num_replicas}')
+            else:
+                # for downscaling, use qps for every ready_target_qps_list
+                # to calculate target_num_replicas
+                ready_target_qps_list = \
+                    self._extract_target_qps_list_from_ready_replicas(
+                        replica_infos)
+                ready_target_qps_list = sorted(ready_target_qps_list,
+                                               reverse=True)
+                if not ready_target_qps_list:
+                    # Fallback to maximum QPS from config if no ready replicas
+                    ready_target_qps_list = [max(target_qps_dict.values())]
+
+                raw_target_num = 0
+                qps_sum = 0.0
+                for qps in ready_target_qps_list:
+                    raw_target_num += 1
+                    qps_sum += qps
+                    if qps_sum > num_requests_per_second:
+                        break
+
+                target_num_replicas = self._clip_target_num_replicas(
+                    raw_target_num)
+                logger.info(
+                    f'Instance-aware autoscaling: total QPS {total_qps}, '
+                    f'num_requests_per_second: {num_requests_per_second}, '
+                    f'downscaling, using ready QPS list '
+                    f'{ready_target_qps_list}, '
+                    f'target replicas: {target_num_replicas}')
+        else:
+            # no replica is ready; use the normal min_replicas
+            target_num_replicas = self._clip_target_num_replicas(
+                self.min_replicas)
+            logger.info(f'Instance-aware autoscaling: no replica QPS available,'
+                        f' target replicas: {target_num_replicas}')
+
+        # Apply hysteresis logic
+        old_target_num_replicas = self.target_num_replicas
+
+        # Faster scale up when there is no replica.
+        if self.target_num_replicas == 0:
+            self.target_num_replicas = target_num_replicas
+        elif target_num_replicas > self.target_num_replicas:
+            self.upscale_counter += 1
+            self.downscale_counter = 0
+            if self.upscale_counter >= self.scale_up_threshold:
+                self.upscale_counter = 0
+                self.target_num_replicas = target_num_replicas
+        elif target_num_replicas < self.target_num_replicas:
+            self.downscale_counter += 1
+            self.upscale_counter = 0
+            if self.downscale_counter >= self.scale_down_threshold:
+                self.downscale_counter = 0
+                self.target_num_replicas = target_num_replicas
+        else:
+            self.upscale_counter = self.downscale_counter = 0
+
+        logger.info(
+            f'Instance-aware: Old target number of replicas: '
+            f'{old_target_num_replicas}. '
+            f'Current target number of replicas: {target_num_replicas}. '
+            f'Final target number of replicas: {self.target_num_replicas}. '
+            f'Num overprovision: {self.num_overprovision}. '
+            f'Upscale counter: {self.upscale_counter}/'
+            f'{self.scale_up_threshold}. '
+            f'Downscale counter: {self.downscale_counter}/'
+            f'{self.scale_down_threshold}. ')
+
+    def _calculate_total_qps_from_replicas(
+            self, replica_infos: List['replica_managers.ReplicaInfo']) -> float:
+        """Calculate total QPS based on current replica GPU types."""
+        total_qps = 0.0
+        logger.info(f'Calculating total QPS from {len(replica_infos)} replicas')
+
+        for replica_info in replica_infos:
+            # Skip non-valid replicas
+            valid_statuses = [
+                serve_state.ReplicaStatus.READY,
+                serve_state.ReplicaStatus.STARTING,
+                serve_state.ReplicaStatus.PROVISIONING
+            ]
+            if replica_info.status not in valid_statuses:
+                logger.info(f'Skipping replica {replica_info.replica_id} '
+                            f'with status: {replica_info.status}')
+                continue
+
+            gpu_type = self._get_gpu_type_from_replica_info(replica_info)
+            logger.info(f'Processing replica {replica_info.replica_id} '
+                        f'with GPU type: {gpu_type}')
+
+            # Use flexible matching logic
+            qps_for_this_gpu = self._get_target_qps_for_gpu_type(gpu_type)
+            total_qps += qps_for_this_gpu
+            logger.info(f'GPU type {gpu_type} -> {qps_for_this_gpu} QPS')
+
+        logger.info(f'Calculated total QPS: {total_qps}')
+        return total_qps
+
+    def _get_target_qps_for_gpu_type(self, gpu_type: str) -> float:
+        """Get target QPS for a specific GPU type with flexible matching."""
+        assert isinstance(self.target_qps_per_replica,
+                          dict), 'Expected dict for instance-aware logic'
+        target_qps_dict = self.target_qps_per_replica
+
+        # Direct match first
+        if gpu_type in target_qps_dict:
+            return target_qps_dict[gpu_type]
+
+        # Try matching by base name (e.g., 'A100' matches 'A100:1')
+        for config_key in target_qps_dict.keys():
+            # Remove count suffix (e.g., 'A100:1' -> 'A100')
+            base_name = config_key.split(':')[0]
+            if gpu_type == base_name:
+                return target_qps_dict[config_key]
+
+        # Fallback to minimum QPS
+        logger.warning(f'No matching QPS found for GPU type: {gpu_type}. '
+                       f'Available types: {list(target_qps_dict.keys())}. '
+                       f'Using minimum QPS as fallback.')
+        return min(target_qps_dict.values())
+
+    def _get_gpu_type_from_replica_info(
+            self, replica_info: 'replica_managers.ReplicaInfo') -> str:
+        """Extract GPU type from ReplicaInfo object."""
+        gpu_type = 'unknown'
+        handle = replica_info.handle()
+        if handle is not None:
+            accelerators = handle.launched_resources.accelerators
+            if accelerators and len(accelerators) > 0:
+                # Get the first accelerator type
+                gpu_type = list(accelerators.keys())[0]
+        return gpu_type
+
+    def _extract_target_qps_list_from_ready_replicas(
+            self,
+            replica_infos: List['replica_managers.ReplicaInfo']) -> List[float]:
+        """Extract target QPS list from current READY replicas."""
+        ready_replica_qps = []
+
+        for replica_info in replica_infos:
+            # Check if replica is READY
+            if replica_info.status != serve_state.ReplicaStatus.READY:
+                logger.info(
+                    f'Replica {replica_info.replica_id} '
+                    f'not ready (status: {replica_info.status}), skipping')
+                continue
+
+            gpu_type = self._get_gpu_type_from_replica_info(replica_info)
+
+            # Use flexible matching logic
+            qps_for_this_gpu = self._get_target_qps_for_gpu_type(gpu_type)
+            ready_replica_qps.append(qps_for_this_gpu)
+            logger.info(f'Ready replica {replica_info.replica_id} '
+                        f'with GPU {gpu_type}: {qps_for_this_gpu} QPS')
+
+        if ready_replica_qps:
+            logger.info(
+                f'Target QPS list from ready replicas: {ready_replica_qps}')
+            return ready_replica_qps
+
+        return []
+
+    def _select_replicas_to_scale_down_by_qps(
+            self, num_replicas_to_scale_down: int,
+            replica_infos: List['replica_managers.ReplicaInfo']) -> List[int]:
+        """Select replicas to scale down (lowest QPS first)."""
+        # Create a list of (replica_info, target_qps) tuples
+        replica_qps_pairs: List[Tuple['replica_managers.ReplicaInfo',
+                                      float]] = []
+
+        for info in replica_infos:
+            # Include old-version replicas as well so they also get a target_qps
+            # assigned. Skip terminal replicas only.
+            if info.is_terminal:
+                continue
+
+            # Get GPU type directly from replica info
+            gpu_type = self._get_gpu_type_from_replica_info(info)
+
+            # Use flexible matching logic
+            target_qps = self._get_target_qps_for_gpu_type(gpu_type)
+
+            replica_qps_pairs.append((info, float(target_qps)))
+            logger.info(f'Replica {info.replica_id} '
+                        f'with GPU {gpu_type}: {target_qps} QPS')
+
+        # Create a mapping from replica_id to target_qps for sorting
+        replica_qps_map = {
+            info.replica_id: target_qps
+            for info, target_qps in replica_qps_pairs
+        }
+
+        # Sort replicas by: 1. status order, 2. target_qps (asc),
+        # 3. version (asc), 4. replica_id (desc)
+        sorted_replicas = sorted(
+            replica_infos,
+            key=lambda info: (
+                info.status.scale_down_decision_order(),
+                replica_qps_map.get(info.replica_id, float('inf')),
+                info.version,
+                -info.replica_id,
+            ))
+
+        selected_replica_ids = []
+        for info in sorted_replicas:
+            if info.is_terminal:
+                continue
+            selected_replica_ids.append(info.replica_id)
+            if len(selected_replica_ids) >= num_replicas_to_scale_down:
+                break
+
+        logger.info(
+            f'Selected {len(selected_replica_ids)} replicas to scale down: '
+            f'{selected_replica_ids}')
+        return selected_replica_ids
+
+    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
+                       update_mode: serve_utils.UpdateMode) -> None:
+        super(RequestRateAutoscaler,
+              self).update_version(version, spec, update_mode)
+        # Ensure it's a dict and re-assign using setattr to avoid typing
+        assert isinstance(spec.target_qps_per_replica, dict), \
+            'InstanceAware Autoscaler requires dict type target_qps_per_replica'
+        self.target_qps_per_replica = spec.target_qps_per_replica
 
 
 class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
@@ -633,7 +996,7 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
         all_replica_ids_to_scale_down: List[int] = []
 
         # Decide how many spot instances to launch.
-        num_spot_to_provision = (self.target_num_replicas -
+        num_spot_to_provision = (self.get_final_target_num_replicas() -
                                  self.base_ondemand_fallback_replicas)
         if num_nonterminal_spot < num_spot_to_provision:
             # Not enough spot instances, scale up.
@@ -665,9 +1028,17 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
             # because the provisioning spot can fail to UP due to the capacity
             # issue, and on-demand should fill the gap between the required
             # number of spot and ready spot.
-            num_ondemand_to_provision += (num_spot_to_provision -
-                                          num_ready_spot)
+            # When scaling down spot instances, it is possible that the number
+            # of ready spot is more than the number of spot to provision, thus
+            # generate a negative number. In this case, we don't need to
+            # provision on-demand instances.
+            num_ondemand_to_provision += max(
+                0, num_spot_to_provision - num_ready_spot)
 
+        # Make sure we don't launch on-demand fallback for
+        # overprovisioned replicas.
+        num_ondemand_to_provision = min(num_ondemand_to_provision,
+                                        self.target_num_replicas)
         if num_ondemand_to_provision > num_nonterminal_ondemand:
             num_ondemand_to_scale_up = (num_ondemand_to_provision -
                                         num_nonterminal_ondemand)

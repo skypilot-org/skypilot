@@ -16,7 +16,7 @@ Install the latest SkyPilot and check your setup of the cloud credentials:
 pip install git+https://github.com/skypilot-org/skypilot.git
 sky check
 ```
-See the Vicuna SkyPilot YAMLs: for [training](train.yaml) and for [serving](serve.yaml).
+See the Vicuna SkyPilot YAMLs: for [training](https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna/train.yaml) and for [serving](https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna/serve.yaml).
 
 ## Serve the official Vicuna model by yourself with SkyPilot
 
@@ -50,22 +50,22 @@ sky launch -c vicuna-openai-api -s serve-openai-api-endpoint.yaml
 ## Training Vicuna with SkyPilot
 Currently, training requires GPUs with 80GB memory.  See `sky show-gpus --all` for supported GPUs.
 
-We can start the training of Vicuna model on the dummy data [dummy.json](dummy.json)[^1] **with a single command**. It will automatically find the available cheapest VM on any cloud.
+We can start the training of Vicuna model on the dummy data [dummy.json](https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna/dummy.json)[^1] **with a single command**. It will automatically find the available cheapest VM on any cloud.
 
-**To train on your own data**, replace the file with your own, or change the line `/data/mydata.json: ./dummy.json` to the path of your own data in the [train.yaml](train.yaml).
+**To train on your own data**, replace the file with your own, or change the line `/data/mydata.json: ./dummy.json` to the path of your own data in the [train.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna/train.yaml).
 
 [^1]: The dummy data was originally from the official Vicuna repository, [FastChat](https://github.com/lm-sys/FastChat).
 
 Steps for training on your cloud(s):
 
-1. Replace the bucket name in [train.yaml](train.yaml) with some unique name, so the SkyPilot can create a bucket for you to store the model weights. See `# Change to your own bucket` in the YAML file.
+1. Replace the bucket name in [train.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna/train.yaml) with some unique name, so the SkyPilot can create a bucket for you to store the model weights. See `# Change to your own bucket` in the YAML file.
 
 2. **Training the Vicuna-7B model on 8 A100 GPUs (80GB memory) using spot instances**:
 ```bash
 # Launch it on managed spot to save 3x cost
 sky jobs launch -n vicuna train.yaml
 ```
-Note: if you would like to see the training curve on W&B, you can add `--env WANDB_API_KEY` to the above command, which will propagate your local W&B API key in the environment variable to the job.
+Note: if you would like to see the training curve on W&B, you can add `--secret WANDB_API_KEY` to the above command, which will propagate your local W&B API key securely to the job.
 
 [Optional] Train a larger 13B model
 ```
