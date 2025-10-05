@@ -1,4 +1,8 @@
-"""Tests for sky serve down --failed-only functionality."""
+"""Tests for sky serve down --failed-only functionality.
+
+This tests the server-side implementation where the controller queries
+its own database for failed replicas and terminates them.
+"""
 import unittest.mock as mock
 
 import click
@@ -6,24 +10,33 @@ from click import testing as cli_testing
 import pytest
 
 from sky.client.cli import command
-from sky.serve import serve_state
 
 
-class TestServeDownFailedOnly:
-    """Test the --failed-only flag for sky serve down."""
+class TestServeDownFailedOnlyClient:
+    """Test the client-side CLI for --failed-only flag."""
 
     @pytest.fixture(autouse=True)
     def setup(self, monkeypatch):
         """Set up mocks for testing."""
-        # Mock the serve_lib module
-        self.mock_terminate_replica = mock.MagicMock(return_value='request-id')
-        self.mock_down = mock.MagicMock()
+        # Mock the serve_lib.terminate_failed_replicas to return a request ID
+        self.mock_terminate_failed_replicas = mock.MagicMock(
+            return_value='request-id-123')
 
+        monkeypatch.setattr(
+            'sky.client.cli.command.serve_lib.terminate_failed_replicas',
+            self.mock_terminate_failed_replicas)
+
+        # Mock serve_lib.down
+        self.mock_down = mock.MagicMock(return_value='request-id-down')
+        monkeypatch.setattr('sky.client.cli.command.serve_lib.down',
+                            self.mock_down)
+
+        # Mock serve_lib.terminate_replica
+        self.mock_terminate_replica = mock.MagicMock(
+            return_value='request-id-replica')
         monkeypatch.setattr(
             'sky.client.cli.command.serve_lib.terminate_replica',
             self.mock_terminate_replica)
-        monkeypatch.setattr('sky.client.cli.command.serve_lib.down',
-                            self.mock_down)
 
         # Mock _async_call_or_wait to just return immediately
         def mock_async_wait(*args, **kwargs):
@@ -32,29 +45,8 @@ class TestServeDownFailedOnly:
         monkeypatch.setattr('sky.client.cli.command._async_call_or_wait',
                             mock_async_wait)
 
-    def test_failed_only_with_failed_replicas(self, monkeypatch):
-        """Test --failed-only when there are failed replicas."""
-        # Create mock replica objects
-        mock_replica1 = mock.MagicMock()
-        mock_replica1.replica_id = 1
-        mock_replica1.status = serve_state.ReplicaStatus.FAILED_PROVISION
-
-        mock_replica2 = mock.MagicMock()
-        mock_replica2.replica_id = 3
-        mock_replica2.status = serve_state.ReplicaStatus.FAILED_PROBING
-
-        # Mock get_replicas_at_status to return different replicas for different statuses
-        def mock_get_replicas_at_status(service_name, status):
-            if status == serve_state.ReplicaStatus.FAILED_PROVISION:
-                return [mock_replica1]
-            elif status == serve_state.ReplicaStatus.FAILED_PROBING:
-                return [mock_replica2]
-            else:
-                return []
-
-        monkeypatch.setattr('sky.serve.serve_state.get_replicas_at_status',
-                            mock_get_replicas_at_status)
-
+    def test_failed_only_calls_terminate_failed_replicas(self):
+        """Test that --failed-only calls the correct SDK function."""
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(command.serve_down,
                                    ['test-service', '--failed-only', '-y'])
@@ -62,50 +54,15 @@ class TestServeDownFailedOnly:
         # Check that the command succeeded
         assert result.exit_code == 0, (result.exception, result.output)
 
-        # Check that terminate_replica was called for each failed replica
-        assert self.mock_terminate_replica.call_count == 2
+        # Check that terminate_failed_replicas was called with the service name
+        self.mock_terminate_failed_replicas.assert_called_once_with(
+            'test-service')
 
-        # Verify the calls were made with correct parameters
-        # Check that both replica IDs were called with purge=True
-        replica_ids_called = set()
-        for call in self.mock_terminate_replica.call_args_list:
-            args, kwargs = call
-            assert args[0] == 'test-service'
-            replica_ids_called.add(args[1])
-            # purge might be in args[2] or kwargs['purge']
-            if len(args) > 2:
-                assert args[2] == True  # purge=True
-            else:
-                assert kwargs.get('purge', False) == True
-
-        assert replica_ids_called == {1, 3}
-
-        # Check output mentions the replicas
-        assert 'Found 2 failed replica(s)' in result.output
-        assert 'Successfully terminated 2 failed replica(s)' in result.output
-
-    def test_failed_only_with_no_failed_replicas(self, monkeypatch):
-        """Test --failed-only when there are no failed replicas."""
-
-        # Mock get_replicas_at_status to return empty list
-        def mock_get_replicas_at_status(service_name, status):
-            return []
-
-        monkeypatch.setattr('sky.serve.serve_state.get_replicas_at_status',
-                            mock_get_replicas_at_status)
-
-        cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(command.serve_down,
-                                   ['test-service', '--failed-only', '-y'])
-
-        # Check that the command succeeded
-        assert result.exit_code == 0, (result.exception, result.output)
+        # Check that regular down was NOT called
+        self.mock_down.assert_not_called()
 
         # Check that terminate_replica was NOT called
-        assert self.mock_terminate_replica.call_count == 0
-
-        # Check output mentions no failed replicas
-        assert 'No failed replicas found' in result.output
+        self.mock_terminate_replica.assert_not_called()
 
     def test_failed_only_requires_single_service(self):
         """Test that --failed-only requires exactly one service name."""
@@ -125,7 +82,6 @@ class TestServeDownFailedOnly:
     def test_failed_only_cannot_be_used_with_all(self):
         """Test that --failed-only cannot be used with --all."""
         cli_runner = cli_testing.CliRunner()
-        # The validation for --failed-only requiring a single service happens first
         result = cli_runner.invoke(command.serve_down,
                                    ['--failed-only', '--all', '-y'])
 
@@ -146,21 +102,8 @@ class TestServeDownFailedOnly:
         assert result.exit_code == click.UsageError.exit_code
         assert 'The --failed-only option cannot be used with the --replica-id option' in result.output
 
-    def test_failed_only_confirmation_prompt(self, monkeypatch):
+    def test_failed_only_confirmation_prompt(self):
         """Test that --failed-only shows a confirmation prompt without -y."""
-        # Mock get_replicas_at_status to return a failed replica
-        mock_replica = mock.MagicMock()
-        mock_replica.replica_id = 1
-        mock_replica.status = serve_state.ReplicaStatus.FAILED_PROVISION
-
-        def mock_get_replicas_at_status(service_name, status):
-            if status == serve_state.ReplicaStatus.FAILED_PROVISION:
-                return [mock_replica]
-            return []
-
-        monkeypatch.setattr('sky.serve.serve_state.get_replicas_at_status',
-                            mock_get_replicas_at_status)
-
         cli_runner = cli_testing.CliRunner()
 
         # Test with 'n' (abort)
@@ -169,167 +112,165 @@ class TestServeDownFailedOnly:
                                    input='n\n')
         assert result.exit_code == 1  # Aborted
         assert 'Terminating all failed replicas' in result.output
+        assert 'purge' in result.output.lower()
+
+        # Verify no actual termination was called
+        self.mock_terminate_failed_replicas.assert_not_called()
 
         # Test with 'y' (proceed)
         result = cli_runner.invoke(command.serve_down,
                                    ['test-service', '--failed-only'],
                                    input='y\n')
         assert result.exit_code == 0
-        assert self.mock_terminate_replica.call_count == 1
+        self.mock_terminate_failed_replicas.assert_called_once()
 
-    def test_failed_only_deduplicates_replica_ids(self, monkeypatch):
-        """Test that --failed-only deduplicates replicas with same ID."""
-        # Create mock replicas with the same ID appearing in multiple statuses
-        mock_replica1_v1 = mock.MagicMock()
-        mock_replica1_v1.replica_id = 1
-        mock_replica1_v1.status = serve_state.ReplicaStatus.FAILED_PROVISION
+    def test_regular_down_still_works(self):
+        """Test that regular serve down without --failed-only still works."""
+        cli_runner = cli_testing.CliRunner()
+        result = cli_runner.invoke(command.serve_down, ['test-service', '-y'])
 
-        mock_replica1_v2 = mock.MagicMock()
-        mock_replica1_v2.replica_id = 1
-        mock_replica1_v2.status = serve_state.ReplicaStatus.FAILED_PROBING
+        assert result.exit_code == 0
+        self.mock_down.assert_called_once()
+        self.mock_terminate_failed_replicas.assert_not_called()
 
-        mock_replica2 = mock.MagicMock()
-        mock_replica2.replica_id = 2
-        mock_replica2.status = serve_state.ReplicaStatus.FAILED_CLEANUP
-
-        # Mock get_replicas_at_status to return overlapping replica IDs
-        def mock_get_replicas_at_status(service_name, status):
-            if status == serve_state.ReplicaStatus.FAILED_PROVISION:
-                return [mock_replica1_v1]
-            elif status == serve_state.ReplicaStatus.FAILED_PROBING:
-                return [mock_replica1_v2]  # Same replica ID as above
-            elif status == serve_state.ReplicaStatus.FAILED_CLEANUP:
-                return [mock_replica2]
-            else:
-                return []
-
-        monkeypatch.setattr('sky.serve.serve_state.get_replicas_at_status',
-                            mock_get_replicas_at_status)
-
+    def test_replica_id_down_still_works(self):
+        """Test that serve down with --replica-id still works."""
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(command.serve_down,
-                                   ['test-service', '--failed-only', '-y'])
+                                   ['test-service', '--replica-id', '1', '-y'])
 
-        # Check that the command succeeded
-        assert result.exit_code == 0, (result.exception, result.output)
+        assert result.exit_code == 0
+        self.mock_terminate_replica.assert_called_once_with(
+            'test-service', 1, False)
+        self.mock_terminate_failed_replicas.assert_not_called()
+        self.mock_down.assert_not_called()
 
-        # Verify terminate_replica was called only 2 times (not 3)
-        # because replica ID 1 should be deduplicated
-        assert self.mock_terminate_replica.call_count == 2
 
-        # Verify the calls were made for replica IDs 1 and 2
-        replica_ids_called = set()
-        for call in self.mock_terminate_replica.call_args_list:
-            args, kwargs = call
-            replica_ids_called.add(args[1])
+class TestServeDownFailedOnlyServerSide:
+    """Test the server-side implementation in serve_utils."""
 
-        assert replica_ids_called == {1, 2}
+    def test_terminate_failed_replicas_function_exists(self):
+        """Test that the terminate_failed_replicas function exists in serve_utils."""
+        from sky.serve import serve_utils
+        assert hasattr(serve_utils, 'terminate_failed_replicas')
+        assert callable(serve_utils.terminate_failed_replicas)
 
-        # Check output mentions 2 replicas (deduplicated)
-        assert 'Found 2 failed replica(s)' in result.output
+    def test_terminate_failed_replicas_with_no_replicas(self, monkeypatch):
+        """Test terminate_failed_replicas when there are no failed replicas."""
+        from sky.serve import serve_state
+        from sky.serve import serve_utils
 
-    def test_failed_only_handles_termination_errors(self, monkeypatch):
-        """Test that --failed-only continues when individual terminations fail."""
-        # Create mock replicas
-        mock_replica1 = mock.MagicMock()
-        mock_replica1.replica_id = 1
-        mock_replica1.status = serve_state.ReplicaStatus.FAILED_PROVISION
+        # Mock _get_service_status to return a valid service
+        mock_service_status = {
+            'name': 'test-service',
+            'status': serve_state.ServiceStatus.READY,
+            'controller_port': 30001,
+            'pool': False,
+        }
+        monkeypatch.setattr('sky.serve.serve_utils._get_service_status',
+                            lambda *args, **kwargs: mock_service_status)
 
-        mock_replica2 = mock.MagicMock()
-        mock_replica2.replica_id = 2
-        mock_replica2.status = serve_state.ReplicaStatus.FAILED_PROBING
-
-        mock_replica3 = mock.MagicMock()
-        mock_replica3.replica_id = 3
-        mock_replica3.status = serve_state.ReplicaStatus.FAILED_CLEANUP
-
-        def mock_get_replicas_at_status(service_name, status):
-            if status == serve_state.ReplicaStatus.FAILED_PROVISION:
-                return [mock_replica1]
-            elif status == serve_state.ReplicaStatus.FAILED_PROBING:
-                return [mock_replica2]
-            elif status == serve_state.ReplicaStatus.FAILED_CLEANUP:
-                return [mock_replica3]
-            else:
-                return []
-
+        # Mock get_replicas_at_status to return empty list
         monkeypatch.setattr('sky.serve.serve_state.get_replicas_at_status',
-                            mock_get_replicas_at_status)
+                            lambda *args: [])
 
-        # Make terminate_replica fail for replica 2
-        def mock_terminate_with_error(service_name, replica_id, purge):
-            if replica_id == 2:
-                raise RuntimeError('Simulated termination error')
-            return 'request-id'
+        # Mock failed_statuses
+        monkeypatch.setattr(
+            'sky.serve.serve_state.ReplicaStatus.failed_statuses',
+            lambda: [serve_state.ReplicaStatus.FAILED_PROVISION])
 
-        self.mock_terminate_replica.side_effect = mock_terminate_with_error
+        result = serve_utils.terminate_failed_replicas('test-service')
+        assert 'No failed replicas found' in result
 
-        cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(command.serve_down,
-                                   ['test-service', '--failed-only', '-y'])
+    def test_terminate_failed_replicas_with_service_not_found(
+            self, monkeypatch):
+        """Test terminate_failed_replicas when service doesn't exist."""
+        from sky.serve import serve_utils
 
-        # Check that the command succeeded (doesn't abort on error)
-        assert result.exit_code == 0, (result.exception, result.output)
+        # Mock _get_service_status to return None
+        monkeypatch.setattr('sky.serve.serve_utils._get_service_status',
+                            lambda *args, **kwargs: None)
 
-        # Verify terminate_replica was called 3 times (tried all)
-        assert self.mock_terminate_replica.call_count == 3
+        with pytest.raises(ValueError, match="does not exist"):
+            serve_utils.terminate_failed_replicas('nonexistent-service')
 
-        # Check output mentions both success and failure
-        assert 'Successfully terminated 2 failed replica(s)' in result.output
-        assert '1 replica(s) could not be terminated' in result.output
-        assert 'Failed to terminate replica 2' in result.output
+    def test_codegen_terminate_failed_replicas(self):
+        """Test that ServeCodeGen has the terminate_failed_replicas method."""
+        from sky.serve.serve_utils import ServeCodeGen
 
-    def test_failed_only_handles_get_replicas_error(self, monkeypatch):
-        """Test that --failed-only handles errors from get_replicas_at_status."""
+        assert hasattr(ServeCodeGen, 'terminate_failed_replicas')
+        code = ServeCodeGen.terminate_failed_replicas('test-service')
 
-        def mock_get_replicas_error(service_name, status):
-            raise RuntimeError('Simulated get_replicas error')
+        # Check that the generated code contains the function call
+        assert 'serve_utils.terminate_failed_replicas' in code
+        assert "'test-service'" in code or '"test-service"' in code
 
-        monkeypatch.setattr('sky.serve.serve_state.get_replicas_at_status',
-                            mock_get_replicas_error)
 
-        cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(command.serve_down,
-                                   ['test-service', '--failed-only', '-y'])
+class TestServeDownFailedOnlyIntegration:
+    """Integration tests for the complete flow."""
 
-        # Check that the command failed
-        assert result.exit_code != 0
-
-        # Check output mentions the error
-        assert 'Error retrieving failed replicas' in result.output
-
-    def test_failed_only_help_text_mentions_purge(self):
-        """Test that the help text for --failed-only mentions purge."""
+    def test_help_text_mentions_failed_only(self):
+        """Test that the help text for serve down mentions --failed-only."""
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(command.serve_down, ['--help'])
 
         assert result.exit_code == 0
-        # Check that the help text mentions purge behavior
         assert '--failed-only' in result.output
+        # Check that it mentions purge behavior
         assert 'purge' in result.output.lower(
         ) or 'forcefully' in result.output.lower()
 
-    def test_failed_only_confirmation_mentions_purge(self, monkeypatch):
-        """Test that the confirmation prompt mentions purge."""
-        # Mock get_replicas_at_status to return a failed replica
-        mock_replica = mock.MagicMock()
-        mock_replica.replica_id = 1
-        mock_replica.status = serve_state.ReplicaStatus.FAILED_PROVISION
+    def test_sdk_function_exists(self):
+        """Test that the SDK function exists."""
+        from sky import serve
+        assert hasattr(serve, 'terminate_failed_replicas')
+        assert callable(serve.terminate_failed_replicas)
 
-        def mock_get_replicas_at_status(service_name, status):
-            if status == serve_state.ReplicaStatus.FAILED_PROVISION:
-                return [mock_replica]
-            return []
+    def test_server_core_function_exists(self):
+        """Test that the server core function exists."""
+        from sky.serve.server import core
+        assert hasattr(core, 'terminate_failed_replicas')
+        assert callable(core.terminate_failed_replicas)
 
-        monkeypatch.setattr('sky.serve.serve_state.get_replicas_at_status',
-                            mock_get_replicas_at_status)
+    def test_payload_class_exists(self):
+        """Test that the payload class exists."""
+        from sky.server.requests import payloads
+        assert hasattr(payloads, 'ServeTerminateFailedReplicasBody')
 
+        # Test instantiation
+        body = payloads.ServeTerminateFailedReplicasBody(service_name='test')
+        assert body.service_name == 'test'
+
+
+class TestConsistency:
+    """Test consistency and error handling."""
+
+    def test_error_messages_are_clear(self):
+        """Test that error messages are user-friendly."""
         cli_runner = cli_testing.CliRunner()
 
-        # Test confirmation prompt
+        # Test multiple service names error
+        result = cli_runner.invoke(
+            command.serve_down, ['service1', 'service2', '--failed-only', '-y'])
+        assert 'single service name' in result.output
+
+        # Test with --all error
+        result = cli_runner.invoke(command.serve_down,
+                                   ['--failed-only', '--all', '-y'])
+        assert result.exit_code != 0
+
+        # Test with --replica-id error
+        result = cli_runner.invoke(
+            command.serve_down,
+            ['test-service', '--failed-only', '--replica-id', '1', '-y'])
+        assert 'cannot be used with the --replica-id option' in result.output
+
+    def test_confirmation_message_mentions_purge(self):
+        """Test that confirmation mentions purge."""
+        cli_runner = cli_testing.CliRunner()
+
         result = cli_runner.invoke(command.serve_down,
                                    ['test-service', '--failed-only'],
                                    input='n\n')
-        assert result.exit_code == 1  # Aborted
-        # Check that confirmation mentions purge
+        # Check confirmation mentions purge
         assert 'purge' in result.output.lower()

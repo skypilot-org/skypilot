@@ -706,6 +706,11 @@ class ServeTerminateReplicaBody(RequestBody):
     purge: bool = False
 
 
+class ServeTerminateFailedReplicasBody(RequestBody):
+    """The request body for the serve terminate failed replicas endpoint."""
+    service_name: str
+
+
 class KillRequestProcessesBody(RequestBody):
     """The request body for the kill request processes endpoint."""
     request_ids: List[str]

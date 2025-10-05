@@ -155,6 +155,37 @@ def terminate_replica(service_name: str, replica_id: int,
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+def terminate_failed_replicas(
+        service_name: str) -> server_common.RequestId[None]:
+    """Terminates all failed replicas for the given service.
+
+    This function queries the controller for all replicas in failed states
+    and terminates them with purge=True.
+
+    Args:
+        service_name: Name of the service.
+
+    Returns:
+        The request ID of the terminate failed replicas request.
+
+    Request Raises:
+        sky.exceptions.ClusterNotUpError: if the sky serve controller is
+            not up.
+        RuntimeError: if failed to access the controller or query failed
+            replicas.
+        ValueError: if the service does not exist.
+    """
+    body = payloads.ServeTerminateFailedReplicasBody(service_name=service_name,)
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/serve/terminate-failed-replicas',
+        json=json.loads(body.model_dump_json()),
+        timeout=(5, None))
+    return server_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
 def status(
     service_names: Optional[Union[str, List[str]]]
 ) -> server_common.RequestId[List[Dict[str, Any]]]:

@@ -5697,78 +5697,6 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
     click.echo(msg)
 
 
-def _terminate_failed_replicas_for_service(service_name: str,
-                                           async_call: bool) -> None:
-    """Terminate all failed replicas for a given service.
-
-    Args:
-        service_name: Name of the service.
-        async_call: Whether to make async calls.
-    """
-    # pylint: disable=import-outside-toplevel
-    from sky.serve import serve_state
-
-    # Get all failed replica statuses
-    failed_statuses = serve_state.ReplicaStatus.failed_statuses()
-
-    # Collect all failed replicas, using a dict to deduplicate by replica_id
-    failed_replicas_dict = {}
-    try:
-        for replica_status in failed_statuses:
-            replicas = serve_state.get_replicas_at_status(
-                service_name, replica_status)
-            for replica in replicas:
-                # Use replica_id as key to deduplicate
-                if replica.replica_id not in failed_replicas_dict:
-                    failed_replicas_dict[replica.replica_id] = replica
-    except Exception as e:  # pylint: disable=broad-except
-        click.echo(f'{colorama.Fore.RED}Error retrieving failed replicas: '
-                   f'{e}{colorama.Style.RESET_ALL}')
-        raise
-
-    failed_replicas = list(failed_replicas_dict.values())
-
-    if not failed_replicas:
-        click.echo(f'{colorama.Fore.YELLOW}No failed replicas found for '
-                   f'service {service_name!r}.{colorama.Style.RESET_ALL}')
-        return
-
-    # Terminate each failed replica with purge=True
-    click.echo(f'{colorama.Fore.CYAN}Found {len(failed_replicas)} failed '
-               f'replica(s) for service {service_name!r}. '
-               f'Terminating...{colorama.Style.RESET_ALL}')
-
-    terminated_count = 0
-    failed_count = 0
-
-    for replica_info in failed_replicas:
-        replica_id = replica_info.replica_id
-        replica_status = replica_info.status
-        click.echo(f'  Terminating replica {replica_id} '
-                   f'(status: {replica_status.value})...')
-        try:
-            request_id = serve_lib.terminate_replica(service_name,
-                                                     replica_id,
-                                                     purge=True)
-            _async_call_or_wait(
-                request_id, async_call,
-                f'sky.serve.terminate_replica (replica {replica_id})')
-            terminated_count += 1
-        except Exception as e:  # pylint: disable=broad-except
-            click.echo(f'{colorama.Fore.RED}  Failed to terminate replica '
-                       f'{replica_id}: {e}{colorama.Style.RESET_ALL}')
-            failed_count += 1
-
-    # Print summary
-    if terminated_count > 0:
-        click.echo(f'{colorama.Fore.GREEN}Successfully terminated '
-                   f'{terminated_count} failed replica(s).'
-                   f'{colorama.Style.RESET_ALL}')
-    if failed_count > 0:
-        click.echo(f'{colorama.Fore.YELLOW}{failed_count} replica(s) '
-                   f'could not be terminated.{colorama.Style.RESET_ALL}')
-
-
 @serve.command('down', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @click.argument('service_names', required=False, type=str, nargs=-1)
@@ -5898,7 +5826,8 @@ def serve_down(
     if failed_only:
         # Handle --failed-only: terminate all failed replicas
         service_name = service_names[0]
-        _terminate_failed_replicas_for_service(service_name, async_call)
+        request_id = serve_lib.terminate_failed_replicas(service_name)
+        _async_call_or_wait(request_id, async_call, 'sky.serve.down')
     elif replica_id_is_defined:
         assert replica_id is not None
         request_id = serve_lib.terminate_replica(service_names[0], replica_id,
