@@ -24,18 +24,23 @@ class CloudRift(clouds.Cloud):
 
     _REPR = 'CloudRift'
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
-            'Migrating '
-            f'disk is not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
+        clouds.CloudImplementationFeatures.MULTI_NODE:
+            ('Multi-node not supported yet, as the interconnection among nodes '),
+        clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instances are not supported in {_REPR}.',
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
-            'Custom disk tiers'
-            f' is not supported in {_REPR}.',
+            (f'Customizing disk tier is not supported yet on {_REPR}.'),
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
-            ('Custom network tier is currently not supported in '
-             f'{_REPR}.'),
+            (f'Custom network tier is not supported yet on {_REPR}.'),
+        clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
+            (f'Mounting object stores is not supported on {_REPR}. To read data '
+             f'from object stores on {_REPR}, use `mode: COPY` to copy the data '
+             'to local disk.'),
+        clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+            ('High availability controllers are not supported on RunPod.'),
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
-            ('Customized multiple network interfaces are not supported in '
-             f'{_REPR}.'),
+            ('Customized multiple network interfaces are not supported on '
+             'RunPod.'),
     }
     # CloudRift maximum node name length
     _MAX_CLUSTER_NAME_LEN_LIMIT = 255

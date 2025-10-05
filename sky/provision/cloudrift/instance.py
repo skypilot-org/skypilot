@@ -288,9 +288,9 @@ def open_ports(
 ) -> None:
     """See sky/provision/__init__.py"""
     del provider_config  # unused
-    instances = utils.filter_instances(cluster_name_on_cloud, ['running'])
-    for instance_meta in instances.values():
-        utils.open_ports_instance(instance_meta, ports)
+    # instances = utils.filter_instances(cluster_name_on_cloud, ['running'])
+    # for instance_meta in instances.values():
+    #     utils.open_ports_instance(instance_meta, ports)
 
 
 def cleanup_ports(
