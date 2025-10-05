@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 17
+API_VERSION = 20
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -34,6 +34,7 @@ VERSION_HEADER = 'X-SkyPilot-Version'
 REQUEST_NAME_PREFIX = 'sky.'
 # The memory (GB) that SkyPilot tries to not use to prevent OOM.
 MIN_AVAIL_MEM_GB = 2
+MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE = 4
 # Default encoder/decoder handler name.
 DEFAULT_HANDLER_NAME = 'default'
 # The path to the API request database.
@@ -60,3 +61,6 @@ DASHBOARD_DIR = os.path.join(os.path.dirname(__file__), '..', 'dashboard',
 
 # The interval (seconds) for the event to be restarted in the background.
 DAEMON_RESTART_INTERVAL_SECONDS = 20
+
+# Cookie header for stream request id.
+STREAM_REQUEST_HEADER = 'X-SkyPilot-Stream-Request-ID'

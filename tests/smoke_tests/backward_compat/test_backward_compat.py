@@ -2,10 +2,12 @@ import os
 import pathlib
 import re
 import subprocess
+import sys
 import tempfile
 import textwrap
 from typing import Sequence
 
+import jinja2
 import pytest
 from smoke_tests import smoke_tests_utils
 
@@ -95,6 +97,10 @@ class TestBackwardCompatibility:
         """Session-wide setup that runs exactly once (concurrency limited to 1)."""
         # No locking mechanism needed since concurrency is limited to 1
         base_branch = request.config.getoption("--base-branch")
+        if not base_branch:
+            # Default to the minimum compatible version as the base branch
+            base_branch = f'v{constants.MIN_COMPATIBLE_VERSION}'
+        print(f'base_branch: {base_branch}', file=sys.stderr, flush=True)
 
         # Check if gcloud is installed
         if subprocess.run('gcloud --version', shell=True).returncode != 0:
@@ -146,6 +152,9 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && '
             'uv pip uninstall skypilot && '
             'uv pip install --prerelease=allow "azure-cli>=2.65.0" && '
+            # Fix https://github.com/skypilot-org/skypilot/issues/7287
+            # for legacy skypilot versions.
+            'uv pip install uvicorn==0.35.0 && '
             f'{pip_install_cmd}')
 
         # Install current version in current environment
@@ -228,7 +237,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && sky autostop -i 10 -y {cluster_name}',
             f'{self.ACTIVATE_BASE} && sky exec -d --cloud {generic_cloud} --num-nodes 2 {cluster_name} sleep 120',
             # Must restart API server after switch the code base to ensure the client and server run in same version.
-            # Test coverage for client and server run in differnet verions should be done in test_client_server_compatibility.
+            # Test coverage for client and server run in differnet versions should be done in test_client_server_compatibility.
             f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && result="$(sky status {cluster_name})"; echo "$result"; echo "$result" | grep UP',
             f'{self.ACTIVATE_CURRENT} && result="$(sky status -r {cluster_name})"; echo "$result"; echo "$result" | grep UP',
             need_launch_cmd,
@@ -377,7 +386,10 @@ class TestBackwardCompatibility:
         # Dynamically inspect versions from both environments
         base_version = self._get_base_skylet_version()
         current_version = skylet_constants.SKYLET_VERSION
-        expect_version_mismatch = base_version != current_version
+        # After SKYLET_VERSION 17, we should gracefully handle the version
+        # mismatch.
+        expect_version_mismatch = int(
+            base_version) <= 17 and base_version != current_version
 
         # Build the current environment commands with version mismatch handling
         # Common initial commands
@@ -514,8 +526,9 @@ class TestBackwardCompatibility:
         teardown = f'{self.ACTIVATE_CURRENT} && sky serve down {serve_name}* -y'
         self.run_compatibility_test(serve_name, commands, teardown)
 
-    def test_client_server_compatibility(self, generic_cloud: str):
-        """Test client server compatibility across versions"""
+    def test_client_server_compatibility_old_server(self, generic_cloud: str):
+        """Test client server compatibility across versions
+        where the API server is running an older version than the client."""
         if self.BASE_API_VERSION < self.CURRENT_MIN_COMPATIBLE_API_VERSION or \
                 self.CURRENT_API_VERSION < self.BASE_MIN_COMPATIBLE_API_VERSION:
             if self.BASE_API_VERSION < 11:
@@ -566,6 +579,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && result="$(sky logs {cluster_name} 1)"; echo "$result"; echo "$result" | grep "hello world"',
             f'{self.ACTIVATE_BASE} && sky exec {cluster_name} "echo from base"',
             f'{self.ACTIVATE_CURRENT} && result="$(sky logs {cluster_name} 2)"; echo "$result"; echo "$result" | grep "from base"',
+            f'{self.ACTIVATE_CURRENT} && result="$(sky status)"; echo "$result"; echo "$result" | grep "{cluster_name}"',
             f'{self.ACTIVATE_BASE} && sky autostop -i 1 -y {cluster_name}',
             # serve test
             f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
@@ -579,6 +593,106 @@ class TestBackwardCompatibility:
         ]
 
         teardown = f'{self.ACTIVATE_BASE} && sky down {cluster_name} -y && sky serve down {cluster_name}* -y'
+
+        if generic_cloud == 'kubernetes':
+            commands.extend([
+                # volume test
+                f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
+                f'sky volumes apply -y -n {cluster_name}-0 --infra {generic_cloud} --type k8s-pvc --size 1Gi',
+                # No restart on switch to current, cli in current, server in bases
+                f'{self.ACTIVATE_CURRENT} && sky volumes apply -y -n {cluster_name}-1 --type k8s-pvc --size 1Gi',
+                f'{self.ACTIVATE_CURRENT} && sky volumes ls | grep "{cluster_name}-0"',
+                f'{self.ACTIVATE_CURRENT} && sky volumes ls | grep "{cluster_name}-1"',
+                f'{self.ACTIVATE_CURRENT} && sky volumes delete {cluster_name}-0 -y',
+                f'{self.ACTIVATE_CURRENT} && sky volumes delete {cluster_name}-1 -y',
+            ])
+            teardown += ' && sky volumes delete {cluster_name}* -y'
+
+        self.run_compatibility_test(cluster_name, commands, teardown)
+
+    def test_client_server_compatibility_new_server(self, generic_cloud: str):
+        """Test client server compatibility across versions
+        where the API server is running a newer version than the client."""
+        if self.BASE_API_VERSION < self.CURRENT_MIN_COMPATIBLE_API_VERSION or \
+                self.CURRENT_API_VERSION < self.BASE_MIN_COMPATIBLE_API_VERSION:
+            if self.BASE_API_VERSION < 11:
+                pytest.skip(
+                    f'Base API version: {self.BASE_API_VERSION} is too old, the enforce compatibility is supported after 11(release 0.10.0)'
+                )
+            if self.CURRENT_API_VERSION < 11:
+                pytest.skip(
+                    f'Current API version: {self.CURRENT_API_VERSION} is too old, the enforce compatibility is supported after 11(release 0.10.0)'
+                )
+            # This test runs against the master branch or the latest release
+            # version, which must enforce compatibility in this test based on
+            # our new version strategy that adjacent minor versions must be
+            # compatible.
+            pytest.fail(
+                f'Base API version: {self.BASE_API_VERSION} and current API '
+                f'version: {self.CURRENT_API_VERSION} are not compatible:\n'
+                f'- Base minimal compatible API version: {self.BASE_MIN_COMPATIBLE_API_VERSION}\n'
+                f'- Current minimal compatible API version: {self.CURRENT_MIN_COMPATIBLE_API_VERSION}\n'
+                'Change is rejected since it breaks the compatibility between adjacent versions'
+            )
+        cluster_name = smoke_tests_utils.get_cluster_name()
+        job_name = f"{cluster_name}-job"
+        commands = [
+            # Check API version compatibility
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
+            f'{self.ACTIVATE_BASE} && result="$(sky status 2>&1)" || true; '
+            'if echo "$result" | grep -q "SkyPilot API server is too old"; then '
+            '  echo "$result" && exit 1; '
+            'fi',
+            # managed job test
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
+            f'sky jobs launch -d --infra {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} -n {job_name} "echo hello world; sleep 60"',
+            # No restart on switch to base, cli in base, server in current, verify cli works with different version of sky server
+            f'{self.ACTIVATE_BASE} && sky api status',
+            f'{self.ACTIVATE_BASE} && sky api info',
+            f'{self.ACTIVATE_BASE} && {self._wait_for_managed_job_status(job_name, [sky.ManagedJobStatus.RUNNING])}',
+            f'{self.ACTIVATE_BASE} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {job_name} | grep RUNNING',
+            f'{self.ACTIVATE_BASE} && result="$(sky jobs logs --no-follow -n {job_name})"; echo "$result"; echo "$result" | grep "hello world"',
+            f'{self.ACTIVATE_BASE} && {self._wait_for_managed_job_status(job_name, [sky.ManagedJobStatus.SUCCEEDED])}',
+            f'{self.ACTIVATE_BASE} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {job_name} | grep SUCCEEDED',
+            # cluster launch/exec test
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} &&'
+            f'sky launch --infra {generic_cloud} -y -c {cluster_name} "echo hello world; sleep 60"',
+            # No restart on switch to base, cli in base, server in current
+            f'{self.ACTIVATE_BASE} && result="$(sky queue {cluster_name})"; echo "$result"',
+            f'{self.ACTIVATE_BASE} && result="$(sky logs {cluster_name} 1 --status)"; echo "$result"',
+            f'{self.ACTIVATE_BASE} && result="$(sky logs {cluster_name} 1)"; echo "$result"; echo "$result" | grep "hello world"',
+            f'{self.ACTIVATE_CURRENT} && sky exec {cluster_name} "echo from current"',
+            f'{self.ACTIVATE_BASE} && result="$(sky logs {cluster_name} 2)"; echo "$result"; echo "$result" | grep "from current"',
+            f'{self.ACTIVATE_BASE} && result="$(sky status)"; echo "$result"; echo "$result" | grep "{cluster_name}"',
+            f'{self.ACTIVATE_CURRENT} && sky autostop -i 1 -y {cluster_name}',
+            # serve test
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
+            f'sky serve up --infra {generic_cloud} -y -n {cluster_name}-0 examples/serve/http_server/task.yaml',
+            # No restart on switch to base, cli in base, server in current
+            f'{self.ACTIVATE_BASE} && sky serve status {cluster_name}-0',
+            f'{self.ACTIVATE_BASE} && sky serve logs {cluster_name}-0 2 --no-follow',
+            f'{self.ACTIVATE_BASE} && sky serve logs --controller {cluster_name}-0 --no-follow',
+            f'{self.ACTIVATE_BASE} && sky serve logs --load-balancer {cluster_name}-0 --no-follow',
+            f'{self.ACTIVATE_BASE} && sky serve down {cluster_name}-0 -y',
+        ]
+
+        teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name} -y && sky serve down {cluster_name}* -y'
+
+        if generic_cloud == 'kubernetes':
+            commands.extend([
+                # volume test
+                f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
+                f'sky volumes apply -y -n {cluster_name}-0 --infra {generic_cloud} --type k8s-pvc --size 1Gi',
+                # No restart on switch to base, cli in base, server in current
+                # Base version might contain the bug in https://github.com/skypilot-org/skypilot/issues/7380, so we need to specify --infra
+                f'{self.ACTIVATE_BASE} && sky volumes apply -y -n {cluster_name}-1 --infra {generic_cloud} --type k8s-pvc --size 1Gi',
+                f'{self.ACTIVATE_BASE} && sky volumes ls | grep "{cluster_name}-0"',
+                f'{self.ACTIVATE_BASE} && sky volumes ls | grep "{cluster_name}-1"',
+                f'{self.ACTIVATE_BASE} && sky volumes delete {cluster_name}-0 -y',
+                f'{self.ACTIVATE_BASE} && sky volumes delete {cluster_name}-1 -y',
+            ])
+            teardown += ' && sky volumes delete {cluster_name}* -y'
+
         self.run_compatibility_test(cluster_name, commands, teardown)
 
     def test_sdk_compatibility(self, generic_cloud: str):
@@ -611,3 +725,69 @@ class TestBackwardCompatibility:
         ]
         teardown = f'{self.ACTIVATE_CURRENT} && {cmd_to_sdk_file} down --cluster-name {cluster_name}'
         self.run_compatibility_test(cluster_name, commands, teardown)
+
+    def test_server_downgrade_upgrade_compatibility(self, generic_cloud: str):
+        """Test server compatibility between downgrade and upgrade."""
+        cluster_name = smoke_tests_utils.get_cluster_name()
+
+        commands = [
+            # Launch cluster with current (newer) server version
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
+            f'sky launch --infra {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} -c {cluster_name} examples/minimal.yaml',
+            f'{self.ACTIVATE_CURRENT} && sky stop -y {cluster_name}',
+
+            # Switch to base (older) server and try to start the cluster
+            f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && sky start -y {cluster_name}',
+            f'{self.ACTIVATE_BASE} && sky status {cluster_name} | grep UP',
+            f'{self.ACTIVATE_BASE} && sky exec {cluster_name} "echo server-downgrade-test"',
+            f'{self.ACTIVATE_BASE} && sky logs {cluster_name} | grep "server-downgrade-test"',
+            f'{self.ACTIVATE_BASE} && sky stop -y {cluster_name}',
+
+            # Switch back to current (newer) server and try to start the cluster
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && sky start -y {cluster_name}',
+            f'{self.ACTIVATE_CURRENT} && sky status {cluster_name} | grep UP',
+        ]
+
+        teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name} -y'
+        self.run_compatibility_test(cluster_name, commands, teardown)
+
+    @pytest.mark.kubernetes
+    def test_volume_compatibility(self):
+        """Test volume operations across versions"""
+        volume_name = f'vol-{smoke_tests_utils.get_cluster_name()}'
+        cluster_name = smoke_tests_utils.get_cluster_name()
+
+        template_str = pathlib.Path(
+            'tests/test_yamls/test_volume.yaml.j2').read_text()
+        template = jinja2.Template(template_str)
+        content = template.render(volume_name=volume_name)
+
+        with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                         delete=False) as f:
+            f.write(content)
+            f.flush()
+            task_yaml_path = f.name
+
+            commands = [
+                # Create volume in base version
+                f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
+                # Base version might contain the bug in https://github.com/skypilot-org/skypilot/issues/7380, so we need to specify --infra
+                f'sky volumes apply -y -n {volume_name} --infra k8s --type k8s-pvc --size 1Gi',
+                f'{self.ACTIVATE_BASE} && sky volumes ls | grep "{volume_name}"',
+
+                # Use volume in current version
+                f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
+                f'sky volumes ls | grep "{volume_name}"',
+                # Launch new task with volume
+                f'{self.ACTIVATE_CURRENT} && sky launch -y -c {cluster_name} --infra k8s {task_yaml_path}',
+                f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1 --status',
+
+                # Down the cluster first before deleting volume
+                f'{self.ACTIVATE_CURRENT} && sky down {cluster_name} -y',
+                # Test volume deletion
+                f'{self.ACTIVATE_CURRENT} && sky volumes delete {volume_name} -y',
+                f'{self.ACTIVATE_CURRENT} && (vol=$(sky volumes ls | grep "{volume_name}" || true); if [ -n "$vol" ]; then echo "Volume not deleted" && exit 1; else echo "Volume deleted successfully"; fi)',
+            ]
+            teardown = f'{self.ACTIVATE_CURRENT} && (sky down {cluster_name} -y || true) && (sky volumes delete {volume_name} -y || true)'
+            self.run_compatibility_test(f'{volume_name}-compat', commands,
+                                        teardown)

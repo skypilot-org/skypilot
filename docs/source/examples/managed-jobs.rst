@@ -454,8 +454,15 @@ To submit the pipeline, the same command :code:`sky jobs launch` is used. The pi
 
 .. _pool:
 
-Using pools
------------
+Using pools (experimental)
+--------------------------
+
+.. warning::
+
+  Pools are currently in alpha so some features are not currently supported:
+
+  - Pools does not currently support heterogeneous clusters (e.g., mixed H100 and H200 workers)
+  - Pools does not currently support multiple jobs running concurrently on the same worker
 
 SkyPilot supports spawning a **pool** for launching many jobs that share the same environment — for example, batch inference or large-scale data processing.
 
@@ -482,8 +489,8 @@ Here is a simple example of creating a pool:
     workers: 3
 
   resources:
-    # Specify the resources for each worker, e.g. use either H100 or H200.
-    accelerators: {H100:1, H200:1}
+    # Specify the resources for each worker.
+    accelerators: H100
 
   file_mounts:
     /my-data:
@@ -498,6 +505,13 @@ Notice that the :code:`pool` section is the only difference from a normal SkyPil
 To specify the number of workers in the pool, use the :code:`workers` field under :code:`pool`.
 When creating a pool, the :code:`run` section is ignored.
 
+The setup commands **must not be blocking**. If a long-running server is required, it should be launched in the background. The :code:`setsid` command ensures that setup processes are not terminated when the shell exits. An example using vLLM server is shown below:
+
+.. code-block:: yaml
+
+  setup: |
+    # Start a long-running vLLM server in the background
+    setsid bash -c "vllm serve $MODEL_NAME > ./vllm.log 2>&1" > /dev/null 2>&1 &
 
 To create a pool, use :code:`sky jobs pool apply`:
 
@@ -713,6 +727,11 @@ If no such pool exists, it will create a new one; this is equivalent to the beha
 
 Pools will automatically detect changes in the worker configuration. If only the pool configuration (e.g. number of workers) is changed, the pool will be updated in place to reuse the previous workers; otherwise, if the setup, file mounts, workdir, or resources configuration is changed, new worker clusters will be created and the old ones will be terminated gradually.
 
+You can also update the number of workers in a pool without a YAML file by using the :code:`--workers` flag:
+
+.. code-block:: console
+
+  $ sky jobs pool apply -p gpu-pool --workers 10
 
 .. note::
 
@@ -740,15 +759,31 @@ The pool will be torn down in the background, and any remaining resources will b
   - **Fractional GPU support**: Allow jobs to request and share fractional GPU resources.
 
 
+File uploads for managed jobs
+-----------------------------
+
+For managed jobs, SkyPilot uses an intermediate bucket to store files used in the task, such as local :code:`file_mounts` and the :code:`workdir`.
+
+If you do not configure a bucket, SkyPilot will automatically create a temporary bucket named :code:`skypilot-filemounts-{username}-{run_id}` for each job launch. SkyPilot automatically deletes the bucket after the job completes.
+
+**Object store access is not necessary to use managed jobs.** If cloud object storage is not available (e.g., Kubernetes deployments), SkyPilot automatically falls back to a two-hop upload that copies files to the jobs controller and then downloads them to the jobs. 
+
+.. tip::
+
+  To force disable using cloud buckets even when available, set :ref:`jobs.force_disable_cloud_bucket <config-yaml-jobs-force-disable-cloud-bucket>` in your config:
+
+  .. code-block:: yaml
+
+    # ~/.sky/config.yaml
+    jobs:
+      force_disable_cloud_bucket: true
+
 .. _intermediate-bucket:
 
 Setting the job files bucket
-----------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-For managed jobs, SkyPilot requires an intermediate bucket to store files used in the task, such as local file mounts, temporary files, and the workdir.
-If you do not configure a bucket, SkyPilot will automatically create a temporary bucket named :code:`skypilot-filemounts-{username}-{run_id}` for each job launch. SkyPilot automatically deletes the bucket after the job completes.
-
-Alternatively, you can pre-provision a bucket and use it as an intermediate for storing file by setting :code:`jobs.bucket` in :code:`~/.sky/config.yaml`:
+If you want to use a pre-provisioned bucket for storing intermediate files, set :code:`jobs.bucket` in :code:`~/.sky/config.yaml`:
 
 .. code-block:: yaml
 
@@ -779,13 +814,12 @@ When using a custom bucket (:code:`jobs.bucket`), the job-specific directories (
 .. tip::
   Multiple users can share the same intermediate bucket. Each user's jobs will have their own unique job-specific directories, ensuring that files are kept separate and organized.
 
-
 .. _jobs-controller:
 
 How it works: The jobs controller
 ---------------------------------
 
-The jobs controller is a small on-demand CPU VM or pod running in the cloud that manages all jobs of a user.
+The jobs controller is a small on-demand CPU VM or pod created by SkyPilot to manage all jobs.
 It is automatically launched when the first managed job is submitted, and it is autostopped after it has been idle for 10 minutes (i.e., after all managed jobs finish and no new managed job is submitted in that duration).
 Thus, **no user action is needed** to manage its lifecycle.
 
@@ -799,6 +833,26 @@ you can still tear it down manually with
   Tearing down the jobs controller loses all logs and status information for the finished managed jobs. It is only allowed when there are no in-progress managed jobs to ensure no resource leakage.
 
 To adjust the size of the jobs controller instance, see :ref:`jobs-controller-custom-resources`.
+
+.. _managed-jobs-high-availability-controller:
+
+High availability controller
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+High availability mode ensures the controller for Managed Jobs remains resilient to failures by running it as a Kubernetes Deployment with automatic restarts and persistent storage. This helps maintain management capabilities even if the controller pod crashes or the node fails.
+
+To enable high availability for Managed Jobs, simply set the ``high_availability`` flag to ``true`` under ``jobs.controller`` in your ``~/.sky/config.yaml``, and ensure the controller runs on Kubernetes:
+
+.. code-block:: yaml
+    :emphasize-lines: 4-5
+
+    jobs:
+      controller:
+        resources:
+          cloud: kubernetes
+        high_availability: true
+
+This will deploy the controller as a Kubernetes Deployment with persistent storage, allowing automatic recovery on failures. For prerequisites, setup steps, and recovery behavior, see the detailed page: :ref:`high-availability-controller`.
 
 
 Setup and best practices

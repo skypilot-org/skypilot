@@ -1,5 +1,7 @@
 """ RunPod Cloud. """
 
+from importlib import util as import_lib_util
+import os
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
@@ -12,9 +14,7 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
     from sky.utils import volume as volume_lib
 
-_CREDENTIAL_FILES = [
-    'config.toml',
-]
+_CREDENTIAL_FILE = 'config.toml'
 
 
 @registry.CLOUD_REGISTRY.register
@@ -44,6 +44,7 @@ class RunPod(clouds.Cloud):
              'RunPod.'),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
+    _MAX_VOLUME_NAME_LEN_LIMIT = 30
     _regions: List[clouds.Region] = []
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
@@ -179,6 +180,10 @@ class RunPod(clouds.Cloud):
         del dryrun, cluster_name  # unused
         assert zones is not None, (region, zones)
 
+        if volume_mounts and len(volume_mounts) > 1:
+            raise ValueError(f'RunPod only supports one network volume mount, '
+                             f'but {len(volume_mounts)} are specified.')
+
         zone_names = [zone.name for zone in zones]
 
         resources = resources.assert_launchable()
@@ -280,30 +285,84 @@ class RunPod(clouds.Cloud):
 
     @classmethod
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """ Verify that the user has valid credentials for RunPod. """
+        """Verify that the user has valid credentials for RunPod. """
+        dependency_error_msg = ('Failed to import runpod or TOML parser. '
+                                'Install: pip install "skypilot[runpod]".')
         try:
-            import runpod  # pylint: disable=import-outside-toplevel
-            valid, error = runpod.check_credentials()
+            runpod_spec = import_lib_util.find_spec('runpod')
+            if runpod_spec is None:
+                return False, dependency_error_msg
+            # Prefer stdlib tomllib (Python 3.11+); fallback to tomli
+            tomllib_spec = import_lib_util.find_spec('tomllib')
+            tomli_spec = import_lib_util.find_spec('tomli')
+            if tomllib_spec is None and tomli_spec is None:
+                return False, dependency_error_msg
+        except ValueError:
+            # docstring of importlib_util.find_spec:
+            # First, sys.modules is checked to see if the module was alread
+            # imported.
+            # If so, then sys.modules[name].__spec__ is returned.
+            # If that happens to be set to None, then ValueError is raised.
+            return False, dependency_error_msg
 
-            if not valid:
+        valid, error = cls._check_runpod_credentials()
+        if not valid:
+            return False, (
+                f'{error} \n'  # First line is indented by 4 spaces
+                '    Credentials can be set up by running: \n'
+                f'        $ pip install runpod \n'
+                f'        $ runpod config\n'
+                '    For more information, see https://docs.skypilot.co/en/latest/getting-started/installation.html#runpod'  # pylint: disable=line-too-long
+            )
+
+        return True, None
+
+    @classmethod
+    def _check_runpod_credentials(cls, profile: str = 'default'):
+        """Checks if the credentials file exists and is valid."""
+        credential_file = os.path.expanduser(f'~/.runpod/{_CREDENTIAL_FILE}')
+        if not os.path.exists(credential_file):
+            return False, '~/.runpod/config.toml does not exist.'
+
+        # We don't need to import TOML parser if config.toml does not exist.
+        # When needed, prefer stdlib tomllib (py>=3.11); otherwise use tomli.
+        # TODO(andy): remove this fallback after dropping Python 3.10 support.
+        try:
+            try:
+                import tomllib as toml  # pylint: disable=import-outside-toplevel
+            except ModuleNotFoundError:  # py<3.11
+                import tomli as toml  # pylint: disable=import-outside-toplevel
+        except ModuleNotFoundError:
+            # Should never happen. We already installed proper dependencies for
+            # different Python versions in setup_files/dependencies.py.
+            return False, (
+                '~/.runpod/config.toml exists but no TOML parser is available. '
+                'Install tomli for Python < 3.11: pip install tomli.')
+
+        # Check for default api_key
+        try:
+            with open(credential_file, 'rb') as cred_file:
+                config = toml.load(cred_file)
+
+            if profile not in config:
                 return False, (
-                    f'{error} \n'  # First line is indented by 4 spaces
-                    '    Credentials can be set up by running: \n'
-                    f'        $ pip install runpod \n'
-                    f'        $ runpod config\n'
-                    '    For more information, see https://docs.skypilot.co/en/latest/getting-started/installation.html#runpod'  # pylint: disable=line-too-long
+                    f'~/.runpod/config.toml is missing {profile} profile.')
+
+            if 'api_key' not in config[profile]:
+                return (
+                    False,
+                    '~/.runpod/config.toml is missing '
+                    f'api_key for {profile} profile.',
                 )
 
-            return True, None
+        except (TypeError, ValueError):
+            return False, '~/.runpod/config.toml is not a valid TOML file.'
 
-        except ImportError:
-            return False, ('Failed to import runpod. '
-                           'To install, run: pip install skypilot[runpod]')
+        return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {
-            f'~/.runpod/{filename}': f'~/.runpod/{filename}'
-            for filename in _CREDENTIAL_FILES
+            f'~/.runpod/{_CREDENTIAL_FILE}': f'~/.runpod/{_CREDENTIAL_FILE}'
         }
 
     @classmethod
@@ -323,3 +382,15 @@ class RunPod(clouds.Cloud):
         # TODO: use 0.0 for now to allow all images. We should change this to
         # return the docker image size.
         return 0.0
+
+    @classmethod
+    def is_volume_name_valid(cls,
+                             volume_name: str) -> Tuple[bool, Optional[str]]:
+        """Validates that the volume name is valid for this cloud.
+
+        - must be <= 30 characters
+        """
+        if len(volume_name) > cls._MAX_VOLUME_NAME_LEN_LIMIT:
+            return (False, f'Volume name exceeds the maximum length of '
+                    f'{cls._MAX_VOLUME_NAME_LEN_LIMIT} characters.')
+        return True, None

@@ -1302,6 +1302,17 @@ class Storage(object):
             global_user_state.set_storage_status(self.name, StorageStatus.READY)
 
     @classmethod
+    def from_handle(cls, handle: StorageHandle) -> 'Storage':
+        """Create Storage from StorageHandle object.
+        """
+        obj = cls(name=handle.storage_name,
+                  source=handle.source,
+                  sync_on_reconstruction=False)
+        obj.handle = handle
+        obj._add_store_from_metadata(handle.sky_stores)
+        return obj
+
+    @classmethod
     def from_yaml_config(cls, config: Dict[str, Any]) -> 'Storage':
         common_utils.validate_schema(config, schemas.get_storage_schema(),
                                      'Invalid storage YAML: ')
@@ -2700,7 +2711,11 @@ class AzureBlobStore(AbstractStore):
             name=override_args.get('name', metadata.name),
             storage_account_name=override_args.get(
                 'storage_account', metadata.storage_account_name),
-            source=override_args.get('source', metadata.source),
+            # TODO(cooperc): fix the types for mypy 1.16
+            # Azure store expects a string path; metadata.source may be a Path
+            # or List[Path].
+            source=override_args.get('source',
+                                     metadata.source),  # type: ignore[arg-type]
             region=override_args.get('region', metadata.region),
             is_sky_managed=override_args.get('is_sky_managed',
                                              metadata.is_sky_managed),

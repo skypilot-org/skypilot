@@ -1,12 +1,12 @@
 
 <!-- $REMOVE -->
-# Run Kimi-K2 on Kubernetes or Any Cloud
+# Run Kimi K2 on Kubernetes or Any Cloud
 <!-- $END_REMOVE -->
 <!-- $UNCOMMENT# Kimi-K2 -->
 
+[Kimi K2](https://huggingface.co/moonshotai/Kimi-K2-Instruct) is a large language model developed by Moonshot AI. It features 32 billion activated parameters and 1 trillion total parameters, making it a powerful model that requires multi-node serving due to its substantial size.
 
-[Kimi-K2](https://huggingface.co/moonshotai/Kimi-K2-Instruct) is a large language model developed by Moonshot AI. It features 32 billion activated parameters and 1 trillion total parameters, making it a powerful model that requires multi-node serving due to its substantial size.
-
+![](https://i.imgur.com/fmLh7Tm.png)
 
 ## Prerequisites
 
@@ -14,7 +14,7 @@
 - Check that `sky check` shows clouds or Kubernetes are enabled.
 - **Note**: This model requires at least 16 H100s due to its large size.
 
-## Run Kimi-K2
+## Run Kimi K2
 
 ```bash
 HF_TOKEN=xxx sky launch kimi-k2.sky.yaml -c kimi-k2 --secret HF_TOKEN
@@ -92,15 +92,15 @@ service:
 ```
 
 
-Due to Kimi-K2's large size (1 trillion total parameters with 32 billion activated parameters), this configuration uses **multi-node serving** with vLLM:
+Due to Kimi K2's large size (1 trillion total parameters with 32 billion activated parameters), this configuration uses **multi-node serving** with vLLM:
 
 - **Pipeline Parallelism**: The model is distributed across 2 nodes using `pipeline-parallel-size`
 - **Tensor Parallelism**: Each node uses 8 H100 GPUs with `tensor-parallel-size`
 - **Ray Cluster**: Coordinates the multi-node setup for distributed serving
 
-🎉 **Congratulations!** 🎉 You have now launched the Kimi-K2 LLM on your infra with multi-node serving.
+🎉 **Congratulations!** 🎉 You have now launched the Kimi K2 LLM on your infra with multi-node serving.
 
-### Chat with Kimi-K2 with OpenAI API
+### Chat with Kimi K2 with OpenAI API
 
 To curl `/v1/chat/completions`:
 ```console

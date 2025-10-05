@@ -21,6 +21,7 @@ class JobsCacheManager {
       userMatch,
       workspaceMatch,
       poolMatch,
+      statuses,
     } = filters;
 
     const keyParts = [
@@ -29,6 +30,9 @@ class JobsCacheManager {
       userMatch ? `user:${userMatch}` : '',
       workspaceMatch ? `workspace:${workspaceMatch}` : '',
       poolMatch ? `pool:${poolMatch}` : '',
+      statuses && statuses.length > 0
+        ? `statuses:${statuses.sort().join(',')}`
+        : '',
     ].filter(Boolean);
 
     return keyParts.join('|') || 'default';
@@ -71,7 +75,7 @@ class JobsCacheManager {
    * - If full dataset cache is fresh: slice locally
    * - Otherwise: fetch only the requested page from server and prefetch full dataset in background
    * @param {Object} options - Query options including pagination
-   * @returns {Promise<{jobs: Array, total: number, controllerStopped: boolean, fromCache: boolean, cacheStatus: string}>}
+   * @returns {Promise<{jobs: Array, total: number, totalNoFilter: number, controllerStopped: boolean, statusCounts: Object, fromCache: boolean, cacheStatus: string}>}
    */
   async getPaginatedJobs(options = {}) {
     const { page = 1, limit = 10, ...filterOptions } = options;
@@ -83,34 +87,56 @@ class JobsCacheManager {
       const localCacheStatus = this._getCacheStatus(filterKey);
       if (localCacheStatus.isCached && localCacheStatus.hasData) {
         const cachedData = localCacheStatus.data;
-        const startIndex = (page - 1) * limit;
-        const endIndex = startIndex + limit;
-        const paginatedJobs = cachedData.jobs.slice(startIndex, endIndex);
+        const isEmptyFullCache =
+          !cachedData.jobs ||
+          (Array.isArray(cachedData.jobs) && cachedData.jobs.length === 0);
 
-        // Background refresh when stale or older than half TTL
-        if (
-          !this.prefetching.has(filterKey) &&
-          (!localCacheStatus.isFresh ||
-            localCacheStatus.age > localCacheStatus.maxAge / 2)
-        ) {
-          const prefetchPromise = this._loadFullDataset(
-            filterOptions,
-            filterKey
-          )
-            .catch(() => {})
-            .finally(() => this.prefetching.delete(filterKey));
-          this.prefetching.set(filterKey, prefetchPromise);
+        // If the cached full dataset is empty, do not short-circuit.
+        // Kick off an immediate full-dataset prefetch (if not running),
+        // and fall through to server-side page fetch to get fresh data now.
+        if (isEmptyFullCache) {
+          if (!this.prefetching.has(filterKey)) {
+            const prefetchPromise = this._loadFullDataset(
+              filterOptions,
+              filterKey
+            )
+              .catch(() => {})
+              .finally(() => this.prefetching.delete(filterKey));
+            this.prefetching.set(filterKey, prefetchPromise);
+          }
+          // fall through to server fetch below
+        } else {
+          const startIndex = (page - 1) * limit;
+          const endIndex = startIndex + limit;
+          const paginatedJobs = cachedData.jobs.slice(startIndex, endIndex);
+
+          // Background refresh when stale or older than half TTL
+          if (
+            !this.prefetching.has(filterKey) &&
+            (!localCacheStatus.isFresh ||
+              localCacheStatus.age > localCacheStatus.maxAge / 2)
+          ) {
+            const prefetchPromise = this._loadFullDataset(
+              filterOptions,
+              filterKey
+            )
+              .catch(() => {})
+              .finally(() => this.prefetching.delete(filterKey));
+            this.prefetching.set(filterKey, prefetchPromise);
+          }
+
+          return {
+            jobs: paginatedJobs,
+            total: cachedData.total,
+            totalNoFilter: cachedData.totalNoFilter || cachedData.total,
+            controllerStopped: cachedData.controllerStopped,
+            statusCounts: cachedData.statusCounts || {},
+            fromCache: true,
+            cacheStatus: localCacheStatus.isFresh
+              ? 'local_cache_hit'
+              : 'local_cache_stale_hit',
+          };
         }
-
-        return {
-          jobs: paginatedJobs,
-          total: cachedData.total,
-          controllerStopped: cachedData.controllerStopped,
-          fromCache: true,
-          cacheStatus: localCacheStatus.isFresh
-            ? 'local_cache_hit'
-            : 'local_cache_stale_hit',
-        };
       }
 
       // 2) No local cache: fetch current page only to keep UI responsive
@@ -144,7 +170,9 @@ class JobsCacheManager {
       return {
         jobs: pageJobs,
         total: pageTotal,
+        totalNoFilter: pageResponse?.totalNoFilter || pageTotal,
         controllerStopped,
+        statusCounts: pageResponse?.statusCounts || {},
         fromCache: false,
         cacheStatus: 'server_page_fetch',
       };
@@ -153,7 +181,9 @@ class JobsCacheManager {
       return {
         jobs: [],
         total: 0,
+        totalNoFilter: 0,
         controllerStopped: false,
+        statusCounts: {},
         fromCache: false,
         cacheStatus: 'error',
       };
@@ -176,7 +206,10 @@ class JobsCacheManager {
     const fullData = {
       jobs: fullDataResponse.jobs,
       total: fullDataResponse.jobs.length,
+      totalNoFilter:
+        fullDataResponse.totalNoFilter || fullDataResponse.jobs.length,
       controllerStopped: false,
+      statusCounts: fullDataResponse.statusCounts || {},
       timestamp: Date.now(),
     };
 

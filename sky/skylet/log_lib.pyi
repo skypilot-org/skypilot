@@ -4,7 +4,7 @@ overloaded type hints for run_with_log(), as we need to determine
 the return type based on the value of require_outputs.
 """
 import typing
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, Iterable, Iterator, List, Optional, Tuple, Union
 
 from typing_extensions import Literal
 
@@ -129,8 +129,46 @@ def run_bash_command_with_log(bash_command: str,
     ...
 
 
+def run_bash_command_with_log_and_return_pid(
+        bash_command: str,
+        log_path: str,
+        env_vars: Optional[Dict[str, str]] = ...,
+        stream_logs: bool = ...,
+        with_ray: bool = ...):
+    ...
+
+
 def tail_logs(job_id: int,
               log_dir: Optional[str],
               managed_job_id: Optional[int] = ...,
               follow: bool = ...) -> None:
+    ...
+
+
+def tail_logs_iter(job_id: Optional[int],
+                   log_dir: Optional[str],
+                   managed_job_id: Optional[int] = ...,
+                   follow: bool = ...,
+                   tail: int = ...) -> Iterator[str]:
+    ...
+
+
+class LogBuffer:
+    max_chars: int
+
+    def __init__(self, max_chars: int = ...):
+        ...
+
+    def flush(self) -> str:
+        ...
+
+    def write(self, line: str) -> bool:
+        ...
+
+    def close(self):
+        ...
+
+
+def buffered_iter_with_timeout(buffer: LogBuffer, iterable: Iterable[str],
+                               timeout: float) -> Iterable[str]:
     ...

@@ -126,6 +126,16 @@ spec:
         - name: SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL
           value: {{ include "skypilot.oauth2ProxyURL" . }}
         {{- end }}
+        - name: SKYPILOT_POD_CPU_CORE_LIMIT
+          valueFrom:
+            resourceFieldRef:
+              containerName: skypilot-api
+              resource: requests.cpu
+        - name: SKYPILOT_POD_MEMORY_BYTES_LIMIT
+          valueFrom:
+            resourceFieldRef:
+              containerName: skypilot-api
+              resource: requests.memory
         # Use tini as the init process
         command: ["tini", "--"]
         # Start API server in foreground (if supported) to:
@@ -262,6 +272,11 @@ spec:
           mountPath: /root/.aws
           readOnly: true
         {{- end }}
+        {{- if .Values.r2Credentials.enabled }}
+        - name: r2-config
+          mountPath: /root/.cloudflare
+          readOnly: true
+        {{- end }}
         {{- if .Values.gcpCredentials.enabled }}
         - name: gcp-config
           mountPath: /root/.config/gcloud
@@ -302,10 +317,6 @@ spec:
         - name: nebius-credentials
           mountPath: /root/.nebius_credentials
         {{- end }}
-        {{- if .Values.r2Credentials.enabled }}
-        - name: r2-credentials
-          mountPath: /root/.cloudflare
-        {{- end }}
         {{- if .Values.apiService.extraVolumeMounts }}
         {{- toYaml .Values.apiService.extraVolumeMounts | nindent 8 }}
         {{- end }}
@@ -344,6 +355,53 @@ spec:
         volumeMounts:
         - name: aws-config
           mountPath: /root/.aws
+      {{- end }}
+      {{- if .Values.r2Credentials.enabled }}
+      - name: setup-r2-credentials
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        image: {{ .Values.apiService.image }}
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -e
+          echo "Setting up R2 credentials..."
+          mkdir -p /root/.cloudflare
+          
+          # Direct echo of environment variables (no quotes around EOF)
+          cat > /root/.cloudflare/r2.credentials <<EOF
+          $R2_CREDENTIALS
+          EOF
+          
+          cat > /root/.cloudflare/accountid <<EOF
+          $R2_ACCOUNT_ID
+          EOF
+          
+          chmod 600 /root/.cloudflare/r2.credentials
+          chmod 600 /root/.cloudflare/accountid
+          
+          echo "R2 credentials setup complete:"
+          ls -la /root/.cloudflare/
+          echo "First line of r2.credentials:"
+          head -n 1 /root/.cloudflare/r2.credentials
+          echo "Account ID:"
+          cat /root/.cloudflare/accountid
+        env:
+        - name: R2_CREDENTIALS
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.r2Credentials.r2SecretName }}
+              key: r2.credentials
+        - name: R2_ACCOUNT_ID
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.r2Credentials.r2SecretName }}
+              key: accountid
+        volumeMounts:
+        - name: r2-config
+          mountPath: /root/.cloudflare
       {{- end }}
       {{- if .Values.gcpCredentials.enabled }}
       - name: setup-gcp-credentials
@@ -496,11 +554,6 @@ spec:
         secret:
           secretName: {{ .Values.nebiusCredentials.nebiusSecretName }}
       {{- end }}
-      {{- if .Values.r2Credentials.enabled }}
-      - name: r2-credentials
-        secret:
-          secretName: {{ .Values.r2Credentials.r2SecretName }}
-      {{- end }}
       {{- if .Values.kubernetesCredentials.useKubeconfig }}
       - name: kube-config
         secret:
@@ -522,4 +575,8 @@ spec:
       {{- end }}
       {{- if .Values.apiService.extraVolumes }}
       {{- toYaml .Values.apiService.extraVolumes | nindent 6 }}
+      {{- end }}
+      {{- if .Values.r2Credentials.enabled }}
+      - name: r2-config
+        emptyDir: {}
       {{- end }}

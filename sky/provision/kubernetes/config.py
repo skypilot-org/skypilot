@@ -3,20 +3,12 @@ import copy
 import logging
 import math
 import os
-import typing
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
-from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes
 from sky.provision import common
-from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
-from sky.utils import kubernetes_enums
-
-if typing.TYPE_CHECKING:
-    import yaml
-else:
-    yaml = adaptors_common.LazyImport('yaml')
+from sky.utils import yaml_utils
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +25,6 @@ def bootstrap_instances(
     context = kubernetes_utils.get_context_from_config(config.provider_config)
 
     _configure_services(namespace, context, config.provider_config)
-
-    networking_mode = network_utils.get_networking_mode(
-        config.provider_config.get('networking_mode'), context)
-    if networking_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
-        config = _configure_ssh_jump(namespace, context, config)
 
     requested_service_account = config.node_config['spec']['serviceAccountName']
     if (requested_service_account ==
@@ -487,41 +474,6 @@ def _configure_autoscaler_cluster_role_binding(
                 f'{created_msg(binding_field, name)}')
 
 
-def _configure_ssh_jump(namespace, context, config: common.ProvisionConfig):
-    """Creates a SSH jump pod to connect to the cluster.
-
-    Also updates config['auth']['ssh_proxy_command'] to use the newly created
-    jump pod.
-    """
-    provider_config = config.provider_config
-    pod_cfg = config.node_config
-
-    ssh_jump_name = pod_cfg['metadata']['labels']['skypilot-ssh-jump']
-    ssh_jump_image = provider_config['ssh_jump_image']
-
-    volumes = pod_cfg['spec']['volumes']
-    # find 'secret-volume' and get the secret name
-    secret_volume = next(filter(lambda x: x['name'] == 'secret-volume',
-                                volumes))
-    ssh_key_secret_name = secret_volume['secret']['secretName']
-
-    # TODO(romilb): We currently split SSH jump pod and svc creation. Service
-    #  is first created in authentication.py::setup_kubernetes_authentication
-    #  and then SSH jump pod creation happens here. This is because we need to
-    #  set the ssh_proxy_command in the ray YAML before we pass it to the
-    #  autoscaler. If in the future if we can write the ssh_proxy_command to the
-    #  cluster yaml through this method, then we should move the service
-    #  creation here.
-
-    # TODO(romilb): We should add a check here to make sure the service is up
-    #  and available before we create the SSH jump pod. If for any reason the
-    #  service is missing, we should raise an error.
-
-    kubernetes_utils.setup_ssh_jump_pod(ssh_jump_name, ssh_jump_image,
-                                        ssh_key_secret_name, namespace, context)
-    return config
-
-
 def _configure_skypilot_system_namespace(
         provider_config: Dict[str, Any]) -> None:
     """Creates the namespace for skypilot-system mounting if it does not exist.
@@ -592,7 +544,7 @@ def _configure_fuse_mounting(provider_config: Dict[str, Any]) -> None:
     daemonset_path = os.path.join(
         root_dir, 'kubernetes/manifests/fusermount-server-daemonset.yaml')
     with open(daemonset_path, 'r', encoding='utf-8') as file:
-        daemonset = yaml.safe_load(file)
+        daemonset = yaml_utils.safe_load(file)
     kubernetes_utils.merge_custom_metadata(daemonset['metadata'])
     try:
         kubernetes.apps_api(context).create_namespaced_daemon_set(
@@ -672,4 +624,9 @@ def _configure_services(namespace: str, context: Optional[str],
 
 
 class KubernetesError(Exception):
-    pass
+
+    def __init__(self,
+                 *args,
+                 insufficent_resources: Optional[List[str]] = None):
+        self.insufficent_resources = insufficent_resources
+        super().__init__(*args)

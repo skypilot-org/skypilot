@@ -96,6 +96,12 @@ class Backend(Generic[_ResourceHandleType]):
         return self._sync_workdir(handle, workdir, envs_and_secrets)
 
     @timeline.event
+    @usage_lib.messages.usage.update_runtime('download_file')
+    def download_file(self, handle: _ResourceHandleType, local_file_path: str,
+                      remote_file_path: str) -> None:
+        return self._download_file(handle, local_file_path, remote_file_path)
+
+    @timeline.event
     @usage_lib.messages.usage.update_runtime('sync_file_mounts')
     def sync_file_mounts(
         self,
@@ -147,9 +153,8 @@ class Backend(Generic[_ResourceHandleType]):
     def teardown(self,
                  handle: _ResourceHandleType,
                  terminate: bool,
-                 purge: bool = False,
-                 explicitly_requested: bool = False) -> None:
-        self._teardown(handle, terminate, purge, explicitly_requested)
+                 purge: bool = False) -> None:
+        self._teardown(handle, terminate, purge)
 
     def register_info(self, **kwargs) -> None:
         """Register backend-specific information."""
@@ -171,6 +176,10 @@ class Backend(Generic[_ResourceHandleType]):
     def _sync_workdir(self, handle: _ResourceHandleType,
                       workdir: Union[Path, Dict[str, Any]],
                       envs_and_secrets: Dict[str, str]) -> None:
+        raise NotImplementedError
+
+    def _download_file(self, handle: _ResourceHandleType, local_file_path: str,
+                       remote_file_path: str) -> None:
         raise NotImplementedError
 
     def _sync_file_mounts(
@@ -201,6 +210,5 @@ class Backend(Generic[_ResourceHandleType]):
     def _teardown(self,
                   handle: _ResourceHandleType,
                   terminate: bool,
-                  purge: bool = False,
-                  explicitly_requested: bool = False):
+                  purge: bool = False):
         raise NotImplementedError

@@ -31,7 +31,7 @@ import {
   getPoolStatus,
 } from '@/data/connectors/jobs';
 import jobsCacheManager from '@/lib/jobs-cache-manager';
-import { getClusters } from '@/data/connectors/clusters';
+import { getClusters, downloadJobLogs } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
 import {
@@ -44,8 +44,12 @@ import {
   RotateCwIcon,
   MonitorPlay,
   RefreshCcw,
+  Download,
 } from 'lucide-react';
-import { handleJobAction } from '@/data/connectors/jobs';
+import {
+  handleJobAction,
+  downloadManagedJobLogs,
+} from '@/data/connectors/jobs';
 import { ConfirmationModal } from '@/components/elements/modals';
 import { isJobController } from '@/data/utils';
 import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
@@ -212,9 +216,6 @@ export function ManagedJobs() {
     dashboardCache.invalidate(getWorkspaces);
     dashboardCache.invalidate(getUsers);
 
-    // Refresh parent component data (including poolsData for link matching)
-    fetchData(true); // Pass true to indicate it's a refresh button click
-
     // Trigger a re-fetch in both tables via their refreshDataRef
     if (jobsRefreshRef.current) {
       jobsRefreshRef.current();
@@ -311,6 +312,7 @@ export function ManagedJobsTable({
 }) {
   const [data, setData] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
+  const [totalNoFilter, setTotalNoFilter] = useState(0);
   const [sortConfig, setSortConfig] = useState({
     key: null,
     direction: 'ascending',
@@ -323,6 +325,7 @@ export function ManagedJobsTable({
   const expandedRowRef = useRef(null);
   const [selectedStatuses, setSelectedStatuses] = useState([]);
   const [statusCounts, setStatusCounts] = useState({});
+  const [apiStatusCounts, setApiStatusCounts] = useState({});
   const [controllerStopped, setControllerStopped] = useState(false);
   const [controllerLaunching, setControllerLaunching] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
@@ -335,6 +338,8 @@ export function ManagedJobsTable({
     onConfirm: null,
   });
   const isMobile = useMobile();
+  // Guards multiple concurrent fetches: only latest response should commit
+  const requestSeqRef = useRef(0);
 
   const handleRestartController = async () => {
     setConfirmationModal({
@@ -361,6 +366,9 @@ export function ManagedJobsTable({
   const fetchData = React.useCallback(
     async (options = {}) => {
       const includeStatus = options.includeStatus !== false;
+      // Bump request sequence and capture a version for this fetch
+      const version = requestSeqRef.current + 1;
+      requestSeqRef.current = version;
       setLocalLoading(true);
       setLoading(true); // Set parent loading state
       try {
@@ -371,12 +379,31 @@ export function ManagedJobsTable({
           );
           return f && f.value ? String(f.value) : undefined;
         };
+        // Determine statuses parameter based on current state
+        let statusesParam = undefined;
+
+        // If specific statuses are selected, use those
+        if (selectedStatuses.length > 0) {
+          statusesParam = selectedStatuses;
+        } else if (!showAllMode) {
+          // If not in "show all" mode but no specific statuses selected, show no jobs
+          statusesParam = [];
+        } else if (activeTab === 'active') {
+          // Show all active jobs
+          statusesParam = statusGroups.active;
+        } else if (activeTab === 'finished') {
+          // Show all finished jobs
+          statusesParam = statusGroups.finished;
+        }
+        // For activeTab === 'all' and showAllMode === true, don't set statuses (show all jobs)
+
         const params = {
           allUsers: true,
           nameMatch: getFilterValue('name'),
           userMatch: getFilterValue('user'),
           workspaceMatch: getFilterValue('workspace'),
           poolMatch: getFilterValue('pool'),
+          statuses: statusesParam,
           page: currentPage, // page index starting from 1
           limit: pageSize,
         };
@@ -403,11 +430,13 @@ export function ManagedJobsTable({
         const {
           jobs = [],
           total = 0,
+          totalNoFilter = 0,
           controllerStopped = false,
           cacheStatus = 'unknown',
+          statusCounts = {},
         } = jobsResponse || {};
 
-        let isControllerStopped = !!controllerStopped;
+        let isControllerStopped = false;
         let isLaunching = false;
         if (includeStatus && clustersData) {
           const jobControllerCluster = clustersData?.find((c) =>
@@ -424,11 +453,16 @@ export function ManagedJobsTable({
           }
         }
 
-        setData(jobs);
-        setTotalCount(total || 0);
-        setControllerStopped(!!isControllerStopped);
-        setControllerLaunching(!!isLaunching);
-        setIsInitialLoad(false);
+        // Only commit if this is still the latest request
+        if (version === requestSeqRef.current) {
+          setData(jobs);
+          setTotalCount(total || 0);
+          setTotalNoFilter(totalNoFilter || 0);
+          setControllerStopped(!!isControllerStopped);
+          setControllerLaunching(!!isLaunching);
+          setApiStatusCounts(statusCounts);
+          setIsInitialLoad(false);
+        }
 
         // Log cache status for debugging
         if (process.env.NODE_ENV === 'development') {
@@ -438,20 +472,33 @@ export function ManagedJobsTable({
             isDataLoading,
             jobCount: jobs.length,
             totalCount: total,
+            totalNoFilter: totalNoFilter,
           });
         }
       } catch (err) {
         console.error('Error fetching data:', err);
         // Still set data to empty array on error to show proper UI
-        setData([]);
-        setControllerStopped(false);
-        setIsInitialLoad(false);
+        if (version === requestSeqRef.current) {
+          setData([]);
+          setControllerStopped(false);
+          setIsInitialLoad(false);
+        }
       } finally {
-        setLocalLoading(false);
-        setLoading(false); // Clear parent loading state
+        if (version === requestSeqRef.current) {
+          setLocalLoading(false);
+          setLoading(false); // Clear parent loading state
+        }
       }
     },
-    [setLoading, filters, currentPage, pageSize]
+    [
+      setLoading,
+      filters,
+      currentPage,
+      pageSize,
+      selectedStatuses,
+      showAllMode,
+      activeTab,
+    ]
   );
 
   // Expose fetchData to parent component
@@ -467,20 +514,43 @@ export function ManagedJobsTable({
     fetchDataRef.current = fetchData;
   }, [fetchData]);
 
-  // Initial load
+  // Prevent duplicate API requests on first load/page refresh
+  // Multiple useEffects below would normally all fire on mount with their default values,
+  // causing redundant requests to the same API server endpoints.
+  // This ref ensures only the initial fetch effect runs, and subsequent effects
+  // only trigger on actual user interactions (page change, filter change, etc.)
+  const isInitialFetch = React.useRef(true);
+
+  // Initial load - only runs once on mount
   React.useEffect(() => {
     fetchData({ includeStatus: true });
+    // Mark that initial fetch is complete so other effects can run
+    isInitialFetch.current = false;
   }, []);
 
   // Fetch on pagination (page) changes without status request
+  // Skip on initial fetch (page defaults to 1)
   React.useEffect(() => {
-    fetchData({ includeStatus: false });
+    if (!isInitialFetch.current) {
+      fetchData({ includeStatus: false });
+    }
   }, [currentPage]);
 
   // Fetch on filters or page size changes with status request
+  // Skip on initial fetch (filters default to [] and pageSize to 10)
   React.useEffect(() => {
-    fetchData({ includeStatus: true });
+    if (!isInitialFetch.current) {
+      fetchData({ includeStatus: true });
+    }
   }, [filters, pageSize]);
+
+  // Fetch on status filter changes (activeTab, selectedStatuses, showAllMode)
+  // Skip on initial fetch (these have default values)
+  React.useEffect(() => {
+    if (!isInitialFetch.current) {
+      fetchData({ includeStatus: true });
+    }
+  }, [activeTab, selectedStatuses, showAllMode]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -555,30 +625,10 @@ export function ManagedJobsTable({
     return statusGroups[activeTab].includes(status);
   };
 
-  // Filter data based on filters and selected statuses
+  // Server already applied all filters including status filtering
   const filteredData = React.useMemo(() => {
-    // Server already applied name/user/workspace/pool filters.
-    let filtered = data;
-
-    // If specific statuses are selected, show jobs with any of those statuses
-    if (selectedStatuses.length > 0) {
-      return filtered.filter((item) => selectedStatuses.includes(item.status));
-    }
-
-    // If no statuses are selected but we're in "show all" mode
-    if (showAllMode) {
-      // Show all jobs if activeTab is 'all', otherwise filter by active/finished
-      if (activeTab === 'all') {
-        return filtered; // Show all jobs regardless of status
-      }
-      return filtered.filter((item) =>
-        statusGroups[activeTab].includes(item.status)
-      );
-    }
-
-    // If no statuses are selected and we're not in "show all" mode, show no jobs
-    return [];
-  }, [data, activeTab, selectedStatuses, showAllMode]);
+    return data;
+  }, [data]);
 
   // Sort the filtered data
   const sortedData = React.useMemo(() => {
@@ -625,17 +675,15 @@ export function ManagedJobsTable({
       // We're not in "show all" mode if there are specific statuses selected
       setShowAllMode(false);
     }
+
+    // Reset to first page when changing status filters
+    setCurrentPage(1);
   };
 
-  // Update status counts when data changes
+  // Update status counts from API data
   useEffect(() => {
-    const safeData = data || [];
-    const counts = safeData.reduce((acc, job) => {
-      acc[job.status] = (acc[job.status] || 0) + 1;
-      return acc;
-    }, {});
-    setStatusCounts(counts);
-  }, [data]);
+    setStatusCounts(apiStatusCounts);
+  }, [apiStatusCounts]);
 
   // Page navigation handlers
   const goToPreviousPage = () => {
@@ -662,7 +710,7 @@ export function ManagedJobsTable({
           <div className="flex flex-wrap items-center">
             <span className="mr-2 text-sm font-medium">Statuses:</span>
             <div className="flex flex-wrap gap-2 items-center">
-              {!loading && (!data || data.length === 0) && !isInitialLoad && (
+              {!loading && totalNoFilter === 0 && !isInitialLoad && (
                 <span className="text-gray-500 mr-2">No jobs found</span>
               )}
               {Object.entries(statusCounts).map(([status, count]) => (
@@ -684,15 +732,19 @@ export function ManagedJobsTable({
                   </span>
                 </button>
               ))}
-              {data && data.length > 0 && (
+              {totalNoFilter > 0 && (
                 <div className="flex items-center ml-2 gap-2">
                   <span className="text-gray-500">(</span>
                   <button
                     onClick={() => {
                       // When showing all jobs, clear all selected statuses
-                      setActiveTab('all');
-                      setSelectedStatuses([]);
-                      setShowAllMode(true);
+                      // Use React.startTransition to batch state updates
+                      React.startTransition(() => {
+                        setActiveTab('all');
+                        setSelectedStatuses([]);
+                        setShowAllMode(true);
+                        setCurrentPage(1);
+                      });
                     }}
                     className={`text-sm font-medium ${
                       activeTab === 'all' && showAllMode
@@ -706,9 +758,13 @@ export function ManagedJobsTable({
                   <button
                     onClick={() => {
                       // When showing all active jobs, clear all selected statuses
-                      setActiveTab('active');
-                      setSelectedStatuses([]);
-                      setShowAllMode(true);
+                      // Use React.startTransition to batch state updates
+                      React.startTransition(() => {
+                        setActiveTab('active');
+                        setSelectedStatuses([]);
+                        setShowAllMode(true);
+                        setCurrentPage(1);
+                      });
                     }}
                     className={`text-sm font-medium ${
                       activeTab === 'active' && showAllMode
@@ -722,9 +778,13 @@ export function ManagedJobsTable({
                   <button
                     onClick={() => {
                       // When showing all finished jobs, clear all selected statuses
-                      setActiveTab('finished');
-                      setSelectedStatuses([]);
-                      setShowAllMode(true);
+                      // Use React.startTransition to batch state updates
+                      React.startTransition(() => {
+                        setActiveTab('finished');
+                        setSelectedStatuses([]);
+                        setShowAllMode(true);
+                        setCurrentPage(1);
+                      });
                     }}
                     className={`text-sm font-medium ${
                       activeTab === 'finished' && showAllMode
@@ -751,10 +811,6 @@ export function ManagedJobsTable({
                 // Call the refresh function passed from parent
                 if (onRefresh) {
                   onRefresh();
-                }
-                // Also call the local refresh function to ensure loading state is set
-                if (refreshDataRef && refreshDataRef.current) {
-                  refreshDataRef.current();
                 }
               }}
               disabled={loading}
@@ -1036,6 +1092,7 @@ export function ManagedJobsTable({
                             jobParent="/jobs"
                             jobId={item.id}
                             managed={true}
+                            workspace={item.workspace}
                           />
                         </TableCell>
                       </TableRow>
@@ -1224,6 +1281,7 @@ export function Status2Actions({
   jobParent,
   jobId,
   managed,
+  workspace = 'default',
 }) {
   const router = useRouter();
 
@@ -1236,8 +1294,32 @@ export function Status2Actions({
     });
   };
 
+  const handleDownloadLogs = (e, controller = false) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (managed) {
+      // For managed jobs
+      downloadManagedJobLogs({
+        jobId: parseInt(jobId),
+        controller: controller,
+      });
+    } else {
+      // For cluster jobs, extract cluster name from jobParent
+      const clusterNameMatch = jobParent.match(/\/clusters\/(.+)/);
+      if (clusterNameMatch) {
+        const clusterName = clusterNameMatch[1];
+        downloadJobLogs({
+          clusterName: clusterName,
+          jobIds: [jobId],
+          workspace: workspace,
+        });
+      }
+    }
+  };
+
   return (
-    <div className="flex items-center space-x-4">
+    <div className="flex items-center space-x-2">
       <Tooltip
         key="logs"
         content="View Job Logs"
@@ -1251,21 +1333,19 @@ export function Status2Actions({
           {withLabel && <span className="ml-1.5">Logs</span>}
         </button>
       </Tooltip>
-      {managed && (
-        <Tooltip
-          key="controllerlogs"
-          content="View Controller Logs"
-          className="capitalize text-sm text-muted-foreground"
+      <Tooltip
+        key="downloadlogs"
+        content="Download Job Logs"
+        className="capitalize text-sm text-muted-foreground"
+      >
+        <button
+          onClick={(e) => handleDownloadLogs(e, false)}
+          className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
         >
-          <button
-            onClick={(e) => handleLogsClick(e, 'controllerlogs')}
-            className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
-          >
-            <MonitorPlay className="w-4 h-4" />
-            {withLabel && <span className="ml-2">Controller Logs</span>}
-          </button>
-        </Tooltip>
-      )}
+          <Download className="w-4 h-4" />
+          {withLabel && <span className="ml-1.5">Download</span>}
+        </button>
+      </Tooltip>
     </div>
   );
 }
@@ -1277,6 +1357,7 @@ export function ClusterJobs({
   refreshClusterJobsOnly,
   userFilter = null,
   nameFilter = null,
+  workspace = 'default',
 }) {
   const [expandedRowId, setExpandedRowId] = useState(null);
   const [sortConfig, setSortConfig] = useState({
@@ -1517,6 +1598,7 @@ export function ClusterJobs({
                         jobParent={`/clusters/${clusterName}`}
                         jobId={item.id}
                         managed={false}
+                        workspace={workspace}
                       />
                     </TableCell>
                   </TableRow>

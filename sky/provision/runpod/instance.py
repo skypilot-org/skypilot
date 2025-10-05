@@ -44,10 +44,10 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
     return head_instance_id
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
-
+    del cluster_name  # unused
     pending_status = ['CREATED', 'RESTARTING']
 
     while True:
@@ -80,6 +80,21 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             created_instance_ids=[])
 
     created_instance_ids = []
+    volume_mounts = config.node_config.get('VolumeMounts', [])
+    network_volume_id = None
+    volume_mount_path = None
+    if volume_mounts:
+        if len(volume_mounts) > 1:
+            logger.warning(
+                f'RunPod only supports one network volume mount, '
+                f'but {len(volume_mounts)} are specified. Only the first one '
+                f'will be used.')
+        volume_mount = volume_mounts[0]
+        network_volume_id = volume_mount.get('VolumeIdOnCloud')
+        volume_mount_path = volume_mount.get('MountPath')
+        if network_volume_id is None or volume_mount_path is None:
+            raise RuntimeError(
+                'Network volume ID and mount path must be specified.')
     for _ in range(to_start_count):
         node_type = 'head' if head_instance_id is None else 'worker'
         try:
@@ -97,6 +112,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 bid_per_gpu=config.node_config['BidPerGPU'],
                 docker_login_config=config.provider_config.get(
                     'docker_login_config'),
+                network_volume_id=network_volume_id,
+                volume_mount_path=volume_mount_path,
             )
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'run_instances error: {e}')

@@ -69,6 +69,7 @@ def _bulk_provision(
 
     provision_record = provision.run_instances(provider_name,
                                                region_name,
+                                               str(cluster_name),
                                                cluster_name.name_on_cloud,
                                                config=config)
 
@@ -167,7 +168,7 @@ def bulk_provision(
             # This error is a user error instead of a provisioning failure.
             # And there is no possibility to fix it by teardown.
             raise
-        except Exception:  # pylint: disable=broad-except
+        except Exception as exc:  # pylint: disable=broad-except
             zone_str = 'all zones'
             if zones:
                 zone_str = ','.join(zone.name for zone in zones)
@@ -189,14 +190,18 @@ def bulk_provision(
                         provider_config=original_config['provider'])
                     break
                 except NotImplementedError as e:
-                    verb = 'terminate' if terminate else 'stop'
+                    assert not terminate, (
+                        'Terminating must be supported by all clouds')
+                    exc_msg = common_utils.format_exception(exc).replace(
+                        '\n', ' ')
                     # If the underlying cloud does not support stopping
                     # instances, we should stop failover as well.
                     raise provision_common.StopFailoverError(
-                        'During provisioner\'s failover, '
-                        f'{terminate_str.lower()} {cluster_name!r} failed. '
-                        f'We cannot {verb} the resources launched, as it is '
-                        f'not supported by {cloud}. Please try launching the '
+                        f'Provisioning cluster {cluster_name.display_name} '
+                        f'failed: {exc_msg}. Failover is stopped for safety '
+                        'because the cluster was previously in UP state but '
+                        f'{cloud} does not support stopping instances to '
+                        'preserve the cluster state. Please try launching the '
                         'cluster again, or terminate it with: '
                         f'sky down {cluster_name.display_name}') from e
                 except Exception as e:  # pylint: disable=broad-except
@@ -522,6 +527,7 @@ def _post_provision_setup(
             status.update(
                 ux_utils.spinner_message(
                     'Checking controller version compatibility'))
+
             try:
                 server_jobs_utils.check_version_mismatch_and_non_terminal_jobs()
             except exceptions.ClusterNotUpError:

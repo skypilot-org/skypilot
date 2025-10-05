@@ -36,6 +36,7 @@ import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
+from sky import clouds
 from sky import global_user_state
 from sky import skypilot_config
 from sky.adaptors import azure
@@ -52,6 +53,7 @@ from sky.utils import controller_utils
 @pytest.mark.no_vast  # VAST does not support num_nodes > 1 yet
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_file_mounts instead.
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 and storage mounting yet.
+@pytest.mark.no_seeweb  # Seeweb does not support num_nodes > 1 yet and storage mounting yet.
 def test_file_mounts(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     extra_flags = ''
@@ -111,7 +113,13 @@ def test_oci_mounts():
 @pytest.mark.no_vast  # Requires GCP
 @pytest.mark.no_fluidstack  # Requires GCP to be enabled
 @pytest.mark.no_hyperbolic  # Requires GCP to be enabled
+@pytest.mark.no_seeweb  # Requires GCP to be enabled
 def test_using_file_mounts_with_env_vars(generic_cloud: str):
+    if smoke_tests_utils.is_remote_server_test():
+        enabled_cloud_storages = smoke_tests_utils.get_enabled_cloud_storages()
+        if not clouds.cloud_in_iterable(clouds.GCP(), enabled_cloud_storages):
+            pytest.skip('Skipping test because GCS is not enabled')
+
     name = smoke_tests_utils.get_cluster_name()
     storage_name = TestStorageWithCredentials.generate_bucket_name()
     test_commands = [
@@ -141,8 +149,10 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
 
 # ---------- storage ----------
 def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
-                                       storage_name: str, ls_hello_command: str,
-                                       cloud: str, only_mount: bool,
+                                       storage_name: str,
+                                       empty_storage_name: str,
+                                       ls_hello_command: str, cloud: str,
+                                       only_mount: bool,
                                        include_mount_cached: bool):
     assert cloud in ['aws', 'gcp', 'azure', 'kubernetes']
     template_str = pathlib.Path(
@@ -154,8 +164,16 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
     include_gcs_mount = cloud in ['gcp', 'kubernetes']
     include_azure_mount = cloud == 'azure'
 
+    if cloud == 'kubernetes':
+        enabled_cloud_storages = smoke_tests_utils.get_enabled_cloud_storages()
+        if not clouds.cloud_in_iterable(clouds.AWS(), enabled_cloud_storages):
+            include_s3_mount = False
+        if not clouds.cloud_in_iterable(clouds.GCP(), enabled_cloud_storages):
+            include_gcs_mount = False
+
     content = template.render(
         storage_name=storage_name,
+        empty_storage_name=empty_storage_name,
         cloud=cloud,
         only_mount=only_mount,
         include_s3_mount=include_s3_mount,
@@ -196,30 +214,78 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
     clean_command = (
         f'sky down -y {cluster_name} && '
         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(cluster_name)} && '
+        f'sky storage delete -y {storage_name} {empty_storage_name}')
+    return test_commands, clean_command
+
+
+def _storage_mount_cached_test_command_generator(f1: TextIO, f2: TextIO,
+                                                 cluster_name: str,
+                                                 storage_name: str, cloud: str):
+    assert cloud in ['aws', 'gcp', 'azure', 'kubernetes']
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_storage_mount_cached.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+
+    write_content = template.render(
+        storage_name=storage_name,
+        write_files=True,
+        check_files=False,
+    )
+    check_content = template.render(
+        storage_name=storage_name,
+        write_files=False,
+        check_files=True,
+    )
+    f1.write(write_content)
+    f2.write(check_content)
+    f1.flush()
+    f2.flush()
+    write_file_path = f1.name
+    check_file_path = f2.name
+
+    test_commands = [
+        smoke_tests_utils.launch_cluster_for_cloud_cmd(cloud, cluster_name),
+        *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+        f'sky launch -y -c {cluster_name} --infra {cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {write_file_path}',
+        f'sky logs {cluster_name} 1 --status',  # Ensure job succeeded.
+        f'sky down -y {cluster_name}',
+        f'sky launch -y -c {cluster_name} --infra {cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {check_file_path}',
+        f'sky logs {cluster_name} 1 --status',  # Ensure job succeeded.
+    ]
+    clean_command = (
+        f'sky down -y {cluster_name} && '
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(cluster_name)} && '
         f'sky storage delete -y {storage_name}')
     return test_commands, clean_command
 
 
 @pytest.mark.aws
-@pytest.mark.skip(reason='Skip due to AWS AMI selection issue')
 def test_aws_storage_mounts_arm64():
     """Test S3 storage mounting on ARM64 architecture using rclone."""
     name = smoke_tests_utils.get_cluster_name()
     cloud = 'aws'
     storage_name = f'sky-test-arm64-{int(time.time())}'
+    empty_storage_name = f'sky-test-arm64-empty-{int(time.time())}'
     ls_hello_command = f'aws s3 ls {storage_name}/hello.txt'
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         # Reuse the existing storage mounts command generator
         test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, ls_hello_command, cloud, False, False)
+            f, name, storage_name, empty_storage_name, ls_hello_command, cloud,
+            False, False)
 
         # Modify the sky launch command to force ARM64 instance
         for i, cmd in enumerate(test_commands):
             if cmd.startswith('sky launch') and '--infra aws' in cmd:
                 # Insert ARM64 instance type before the YAML file path
                 test_commands[i] = cmd.replace(
-                    'sky launch', 'sky launch --instance-type m6g.large')
+                    'sky launch', 'sky launch --instance-type m6g.large'
+                ).replace(
+                    '--infra aws',
+                    # Use ARM64 AMI to make sure the launch succeeds.
+                    # The image ID is retrieved with:
+                    # aws ec2 describe-images --owners amazon --filters "Name=name,Values=Deep Learning ARM64 Base OSS*Ubuntu 22.04*" --region $REGION --query "Images | sort_by(@, &CreationDate) | [-1].{Name:Name,ImageId:ImageId}" --output text | cat
+                    '--infra aws/us-west-2 --image-id ami-03ac43540bf1c63c0')
                 break
 
         # Add ARM64-specific verification
@@ -241,10 +307,12 @@ def test_aws_storage_mounts_with_stop():
     name = smoke_tests_utils.get_cluster_name()
     cloud = 'aws'
     storage_name = f'sky-test-{int(time.time())}'
+    empty_storage_name = f'sky-test-empty-{int(time.time())}'
     ls_hello_command = f'aws s3 ls {storage_name}/hello.txt'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, ls_hello_command, cloud, False, True)
+            f, name, storage_name, empty_storage_name, ls_hello_command, cloud,
+            False, True)
         test = smoke_tests_utils.Test(
             'aws_storage_mounts',
             test_commands,
@@ -259,10 +327,12 @@ def test_aws_storage_mounts_with_stop_only_mount():
     name = smoke_tests_utils.get_cluster_name()
     cloud = 'aws'
     storage_name = f'sky-test-{int(time.time())}'
+    empty_storage_name = f'sky-test-empty-{int(time.time())}'
     ls_hello_command = f'aws s3 ls {storage_name}/hello.txt'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, ls_hello_command, cloud, True, False)
+            f, name, storage_name, empty_storage_name, ls_hello_command, cloud,
+            True, False)
         test = smoke_tests_utils.Test(
             'aws_storage_mounts_only_mount',
             test_commands,
@@ -277,10 +347,12 @@ def test_gcp_storage_mounts_with_stop():
     name = smoke_tests_utils.get_cluster_name()
     cloud = 'gcp'
     storage_name = f'sky-test-{int(time.time())}'
+    empty_storage_name = f'sky-test-empty-{int(time.time())}'
     ls_hello_command = f'{smoke_tests_utils.ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL} ls gs://{storage_name}/hello.txt'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, ls_hello_command, cloud, False, True)
+            f, name, storage_name, empty_storage_name, ls_hello_command, cloud,
+            False, True)
         test = smoke_tests_utils.Test(
             'gcp_storage_mounts',
             test_commands,
@@ -295,6 +367,7 @@ def test_azure_storage_mounts_with_stop():
     name = smoke_tests_utils.get_cluster_name()
     cloud = 'azure'
     storage_name = f'sky-test-{int(time.time())}'
+    empty_storage_name = f'sky-test-empty-{int(time.time())}'
     storage_account_name = TestStorageWithCredentials.get_az_storage_account_name(
     )
     storage_account_key = data_utils.get_az_storage_account_key(
@@ -307,7 +380,8 @@ def test_azure_storage_mounts_with_stop():
                         f'[ "$output" = "[]" ] && exit 1 || exit 0')
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, ls_hello_command, cloud, False, True)
+            f, name, storage_name, empty_storage_name, ls_hello_command, cloud,
+            False, True)
         test = smoke_tests_utils.Test(
             'azure_storage_mounts',
             test_commands,
@@ -318,12 +392,22 @@ def test_azure_storage_mounts_with_stop():
 
 
 @pytest.mark.kubernetes
-def test_kubernetes_storage_mounts():
+@pytest.mark.parametrize(
+    'storage_name_prefix',
+    [
+        'sky-test',
+        # split the alphabet into 2 parts
+        # to avoid the storage name being too long.
+        '0-a-b-c-d-e-f-g-h-i-j-k-l-m',
+        '0-n-o-p-q-r-s-t-u-v-w-x-y-z',
+    ])
+def test_kubernetes_storage_mounts(storage_name_prefix: str):
     # Tests bucket mounting on k8s, assuming S3 is configured.
     # S3 mounting now works on all architectures including ARM64
     # (uses rclone fallback for ARM64, goofys for x86_64).
     name = smoke_tests_utils.get_cluster_name()
-    storage_name = f'sky-test-{int(time.time())}'
+    storage_name = f'{storage_name_prefix}-{int(time.time())}'
+    empty_storage_name = f'{storage_name_prefix}-empty-{int(time.time())}'
 
     s3_ls_cmd = TestStorageWithCredentials.cli_ls_cmd(storage_lib.StoreType.S3,
                                                       storage_name, 'hello.txt')
@@ -348,7 +432,8 @@ def test_kubernetes_storage_mounts():
     ls_hello_command = f'{cloud_cmd_cluster_setup_cmd} && {ls_hello_command}'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, ls_hello_command, 'kubernetes', False, False)
+            f, name, storage_name, empty_storage_name, ls_hello_command,
+            'kubernetes', False, False)
         test = smoke_tests_utils.Test(
             'kubernetes_storage_mounts',
             test_commands,
@@ -359,10 +444,33 @@ def test_kubernetes_storage_mounts():
 
 
 @pytest.mark.kubernetes
+def test_kubernetes_storage_mounts_cached():
+    name = smoke_tests_utils.get_cluster_name()
+    cloud = 'kubernetes'
+    storage_name = f'sky-test-{int(time.time())}'
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f1:
+        with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f2:
+            test_commands, clean_command = _storage_mount_cached_test_command_generator(
+                f1, f2, name, storage_name, cloud)
+            test = smoke_tests_utils.Test(
+                'kubernetes_storage_mount_cached',
+                test_commands,
+                clean_command,
+                timeout=20 * 60,  # 20 mins
+            )
+            smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
 def test_kubernetes_context_switch():
     name = smoke_tests_utils.get_cluster_name()
     new_context = f'sky-test-context-{int(time.time())}'
     new_namespace = f'sky-test-namespace-{int(time.time())}'
+
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip('Skipping test because the Kubernetes configs and '
+                    'credentials are located on the remote API server '
+                    'and not the machine where the test is running')
 
     test_commands = [
         # Launch a cluster and run a simple task
@@ -502,6 +610,7 @@ def test_ibm_storage_mounts():
 @pytest.mark.no_vast  # VAST does not support multi-cloud features
 @pytest.mark.no_fluidstack  # FluidStack doesn't have stable package installation
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support multi-cloud features
+@pytest.mark.no_seeweb  # Seeweb does not support multi-cloud features
 @pytest.mark.parametrize('ignore_file',
                          [constants.SKY_IGNORE_FILE, constants.GIT_IGNORE_FILE])
 def test_ignore_exclusions(generic_cloud: str, ignore_file: str):
@@ -588,6 +697,7 @@ exclude.py
             test_commands,
             teardown_commands,
             smoke_tests_utils.get_timeout(generic_cloud, 15 * 60),  # 15 mins
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -1262,6 +1372,8 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_kubernetes
+    @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
@@ -1290,6 +1402,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.parametrize('store_type', [
         pytest.param(storage_lib.StoreType.S3, marks=pytest.mark.aws),
         pytest.param(storage_lib.StoreType.GCS, marks=pytest.mark.gcp),
@@ -1354,6 +1467,8 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_kubernetes
+    @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.xdist_group('multiple_bucket_deletion')
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -1400,6 +1515,8 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_kubernetes
+    @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
@@ -1430,6 +1547,8 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_kubernetes
+    @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
@@ -1464,6 +1583,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
@@ -1486,6 +1606,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.parametrize(
         'tmp_public_storage_obj, store_type',
         [('s3://tcga-2-open', storage_lib.StoreType.S3),
@@ -1596,6 +1717,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.parametrize(
         'private_bucket',
         [
@@ -1625,6 +1747,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
                               ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
@@ -1679,6 +1802,8 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_kubernetes
+    @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     def test_copy_mount_existing_storage(self,
                                          tmp_copy_mnt_existing_storage_obj):
         # Creates a bucket with no source in MOUNT mode (empty bucket), and
@@ -1693,6 +1818,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
@@ -1730,6 +1856,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.parametrize('invalid_name_list, store_type',
                              [(AWS_INVALID_NAMES, storage_lib.StoreType.S3),
                               (GCS_INVALID_NAMES, storage_lib.StoreType.GCS),
@@ -1757,6 +1884,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.parametrize(
         'gitignore_structure, store_type',
         [(GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.S3),
@@ -1804,6 +1932,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
                               ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),

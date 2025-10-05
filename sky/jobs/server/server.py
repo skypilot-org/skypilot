@@ -5,6 +5,7 @@ import pathlib
 import fastapi
 
 from sky import sky_logging
+from sky.jobs import utils as managed_jobs_utils
 from sky.jobs.server import core
 from sky.server import common as server_common
 from sky.server import stream_utils
@@ -22,16 +23,30 @@ router = fastapi.APIRouter()
 @router.post('/launch')
 async def launch(request: fastapi.Request,
                  jobs_launch_body: payloads.JobsLaunchBody) -> None:
+    # In consolidation mode, the jobs controller will use sky.launch on the same
+    # API server to launch the underlying job cluster. If you start run many
+    # jobs.launch requests, some may be blocked for a long time by sky.launch
+    # requests triggered by earlier jobs, which leads to confusing behavior as
+    # the jobs.launch requests trickle though. Also, since we don't have to
+    # actually launch a jobs controller sky cluster, the jobs.launch request is
+    # much quicker in consolidation mode. So we avoid the issue by just using
+    # the short executor instead - then jobs.launch will not be blocked by
+    # sky.launch.
+    consolidation_mode = managed_jobs_utils.is_consolidation_mode()
+    schedule_type = (api_requests.ScheduleType.SHORT
+                     if consolidation_mode else api_requests.ScheduleType.LONG)
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='jobs.launch',
         request_body=jobs_launch_body,
         func=core.launch,
-        schedule_type=api_requests.ScheduleType.LONG,
+        schedule_type=schedule_type,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
     )
 
 
+# For backwards compatibility
+# TODO(hailong): Remove before 0.12.0.
 @router.post('/queue')
 async def queue(request: fastapi.Request,
                 jobs_queue_body: payloads.JobsQueueBody) -> None:
@@ -42,6 +57,21 @@ async def queue(request: fastapi.Request,
         func=core.queue,
         schedule_type=(api_requests.ScheduleType.LONG if jobs_queue_body.refresh
                        else api_requests.ScheduleType.SHORT),
+        request_cluster_name=common.JOB_CONTROLLER_NAME,
+    )
+
+
+@router.post('/queue/v2')
+async def queue_v2(request: fastapi.Request,
+                   jobs_queue_body_v2: payloads.JobsQueueV2Body) -> None:
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='jobs.queue_v2',
+        request_body=jobs_queue_body_v2,
+        func=core.queue_v2_api,
+        schedule_type=(api_requests.ScheduleType.LONG
+                       if jobs_queue_body_v2.refresh else
+                       api_requests.ScheduleType.SHORT),
         request_cluster_name=common.JOB_CONTROLLER_NAME,
     )
 
@@ -64,22 +94,27 @@ async def logs(
     request: fastapi.Request, jobs_logs_body: payloads.JobsLogsBody,
     background_tasks: fastapi.BackgroundTasks
 ) -> fastapi.responses.StreamingResponse:
-    executor.schedule_request(
+    schedule_type = api_requests.ScheduleType.SHORT
+    if jobs_logs_body.refresh:
+        # When refresh is specified, the job controller might be restarted,
+        # which takes longer time to finish. We schedule it to long executor.
+        schedule_type = api_requests.ScheduleType.LONG
+    request_task = executor.prepare_request(
         request_id=request.state.request_id,
         request_name='jobs.logs',
         request_body=jobs_logs_body,
         func=core.tail_logs,
-        # TODO(aylei): We have tail logs scheduled as SHORT request, because it
-        # should be responsive. However, it can be long running if the user's
-        # job keeps running, and we should avoid it taking the SHORT worker
-        # indefinitely.
-        # When refresh is True we schedule it as LONG because a controller
-        # restart might be needed.
-        schedule_type=api_requests.ScheduleType.LONG
-        if jobs_logs_body.refresh else api_requests.ScheduleType.SHORT,
+        schedule_type=schedule_type,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
     )
-    request_task = api_requests.get_request(request.state.request_id)
+    if schedule_type == api_requests.ScheduleType.LONG:
+        executor.schedule_prepared_request(request_task)
+    else:
+        # For short request, run in the coroutine to avoid blocking
+        # short workers.
+        task = executor.execute_request_in_coroutine(request_task)
+        # Cancel the coroutine after the request is done or client disconnects
+        background_tasks.add_task(task.cancel)
 
     return stream_utils.stream_response(
         request_id=request_task.request_id,

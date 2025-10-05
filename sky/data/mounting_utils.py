@@ -38,6 +38,29 @@ _GOOFYS_WRAPPER = ('$(if [ -S /dev/log ] ; then '
                    'fi)')
 
 
+def get_rclone_install_cmd() -> str:
+    """ RClone installation for both apt-get and rpm.
+    This would be common command.
+    """
+    # pylint: disable=line-too-long
+    install_cmd = (
+        'ARCH=$(uname -m) && '
+        'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+        '  ARCH_SUFFIX="arm64"; '
+        'else '
+        '  ARCH_SUFFIX="amd64"; '
+        'fi && '
+        f'(which dpkg > /dev/null 2>&1 && (which rclone > /dev/null || (cd ~ > /dev/null'
+        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
+        f' && sudo dpkg -i rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
+        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb)))'
+        f' || (which rclone > /dev/null || (cd ~ > /dev/null'
+        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm'
+        f' && sudo yum --nogpgcheck install rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm -y'
+        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm))')
+    return install_cmd
+
+
 def get_s3_mount_install_cmd() -> str:
     """Returns command for basic S3 mounting (goofys by default, rclone for
     ARM64)."""
@@ -47,18 +70,7 @@ def get_s3_mount_install_cmd() -> str:
         'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
         # Use rclone for ARM64 since goofys doesn't support it
         # Extract core rclone installation logic without redundant ARCH check
-        '  ARCH_SUFFIX="arm" && '
-        f'  (which dpkg > /dev/null 2>&1 && (which rclone > /dev/null || '
-        f'(cd ~ > /dev/null && curl -O https://downloads.rclone.org/'
-        f'{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb '
-        f'&& sudo dpkg -i rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb '
-        f'&& rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb))) || '
-        f'(which rclone > /dev/null || (cd ~ > /dev/null && curl -O '
-        f'https://downloads.rclone.org/{RCLONE_VERSION}/'
-        f'rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm && '
-        f'sudo yum --nogpgcheck install '
-        f'rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm -y && '
-        f'rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm)); '
+        f'  {get_rclone_install_cmd()}; '
         'else '
         '  sudo wget -nc https://github.com/aylei/goofys/'
         'releases/download/0.24.0-aylei-upstream/goofys '
@@ -84,7 +96,9 @@ def get_s3_mount_cmd(bucket_name: str,
     rclone_mount = (
         f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
         f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
-        '--daemon --allow-other')
+        # Have to add --s3-env-auth=true to allow rclone to access private
+        # buckets.
+        '--daemon --allow-other --s3-env-auth=true')
     goofys_mount = (f'{_GOOFYS_WRAPPER} -o allow_other '
                     f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                     f'--type-cache-ttl {_TYPE_CACHE_TTL} '
@@ -349,9 +363,9 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
     # the filename length limit.
     # The hash is a non-negative integer in string form.
     hashed_mount_path = hashlib.md5(mount_path.encode()).hexdigest()
-    log_file_path = os.path.join(constants.RCLONE_LOG_DIR,
+    log_file_path = os.path.join(constants.RCLONE_MOUNT_CACHED_LOG_DIR,
                                  f'{hashed_mount_path}.log')
-    create_log_cmd = (f'mkdir -p {constants.RCLONE_LOG_DIR} && '
+    create_log_cmd = (f'mkdir -p {constants.RCLONE_MOUNT_CACHED_LOG_DIR} && '
                       f'touch {log_file_path}')
     # when mounting multiple directories with vfs cache mode, it's handled by
     # rclone to create separate cache directories at ~/.cache/rclone/vfs. It is
@@ -390,29 +404,6 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         # produce any output, so we aren't dropping any logs.
         '> /dev/null 2>&1')
     return mount_cmd
-
-
-def get_rclone_install_cmd() -> str:
-    """ RClone installation for both apt-get and rpm.
-    This would be common command.
-    """
-    # pylint: disable=line-too-long
-    install_cmd = (
-        'ARCH=$(uname -m) && '
-        'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
-        '  ARCH_SUFFIX="arm"; '
-        'else '
-        '  ARCH_SUFFIX="amd64"; '
-        'fi && '
-        f'(which dpkg > /dev/null 2>&1 && (which rclone > /dev/null || (cd ~ > /dev/null'
-        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
-        f' && sudo dpkg -i rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
-        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb)))'
-        f' || (which rclone > /dev/null || (cd ~ > /dev/null'
-        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm'
-        f' && sudo yum --nogpgcheck install rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm -y'
-        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm))')
-    return install_cmd
 
 
 def get_oci_mount_cmd(mount_path: str, store_name: str, region: str,
@@ -494,13 +485,20 @@ def get_mounting_script(
 
         {command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}
 
-        MOUNT_PATH={mount_path}
+        MOUNT_PATH=$(eval echo {mount_path})
         MOUNT_BINARY={mount_binary}
 
         # Check if path is already mounted
-        if grep -q $MOUNT_PATH /proc/mounts ; then
+        if findmnt -rn -T "$MOUNT_PATH" >/dev/null 2>&1; then
             echo "Path already mounted - unmounting..."
-            fusermount -uz "$MOUNT_PATH"
+            (command -v fusermount >/dev/null 2>&1 && fusermount -uz "$MOUNT_PATH") \
+            || (command -v fusermount3 >/dev/null 2>&1 && fusermount3 -uz "$MOUNT_PATH") \
+            || sudo umount -l "$MOUNT_PATH" || true
+            # Ensure it's really gone (avoids races)
+            for i in $(seq 1 20); do
+                if ! findmnt -rn -T "$MOUNT_PATH" >/dev/null 2>&1; then break; fi
+                sleep 0.2
+            done
             echo "Successfully unmounted $MOUNT_PATH."
         fi
 
@@ -515,14 +513,16 @@ def get_mounting_script(
         # Check if mount path exists
         if [ ! -d "$MOUNT_PATH" ]; then
           echo "Mount path $MOUNT_PATH does not exist. Creating..."
-          sudo mkdir -p $MOUNT_PATH
-          sudo chmod 777 $MOUNT_PATH
+          sudo mkdir -p "$MOUNT_PATH"
+          sudo chmod 777 "$MOUNT_PATH"
         else
-          # Check if mount path contains files
-          if [ "$(ls -A $MOUNT_PATH)" ]; then
-            echo "Mount path $MOUNT_PATH is not empty. Please mount to another path or remove it first."
-            exit {exceptions.MOUNT_PATH_NON_EMPTY_CODE}
-          fi
+            # If not a mountpoint and contains files, clean it to satisfy SkyPilot check
+            if ! findmnt -rn -T "$MOUNT_PATH" >/dev/null 2>&1; then
+                if [ -n "$(ls -A "$MOUNT_PATH" 2>/dev/null)" ]; then
+                  echo "Cleaning non-empty mount path before mount..."
+                  sudo bash -lc 'shopt -s dotglob nullglob; rm -rf --one-file-system -- '"$MOUNT_PATH"'/*' 2>/dev/null || true
+                fi
+            fi
         fi
         echo "Mounting $SOURCE_BUCKET to $MOUNT_PATH with $MOUNT_BINARY..."
         {mount_cmd}

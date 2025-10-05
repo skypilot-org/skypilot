@@ -7,12 +7,12 @@ import time
 import traceback
 
 import psutil
-import yaml
 
 from sky import clouds
 from sky import sky_logging
 from sky.backends import cloud_vm_ray_backend
-from sky.jobs import scheduler as managed_job_scheduler
+from sky.jobs import constants as managed_job_constants
+from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.serve import serve_utils
@@ -21,9 +21,10 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
-from sky.utils import common_utils
 from sky.utils import registry
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 # Seconds of sleep between the processing of skylet events.
 EVENT_CHECKING_INTERVAL_SECONDS = 20
@@ -75,17 +76,49 @@ class ManagedJobEvent(SkyletEvent):
     EVENT_INTERVAL_SECONDS = 300
 
     def _run(self):
+        if not os.path.exists(
+                os.path.expanduser(
+                    managed_job_constants.JOB_CONTROLLER_INDICATOR_FILE)):
+            # Note: since the skylet is started before the user setup (in
+            # jobs-controller.yaml.j2) runs, it's possible that we hit this
+            # before the indicator file is written. However, since we will wait
+            # EVENT_INTERVAL_SECONDS before the first run, this should be very
+            # unlikely.
+            logger.info('No jobs controller indicator file found.')
+            all_job_ids = managed_job_state.get_all_job_ids_by_name(None)
+            if not all_job_ids:
+                logger.info('No jobs running. Stopping controllers.')
+                # TODO(cooperc): Move this to a shared function also called by
+                # sdk.api_stop(). (#7229)
+                try:
+                    with open(os.path.expanduser(
+                            scheduler.JOB_CONTROLLER_PID_PATH),
+                              'r',
+                              encoding='utf-8') as f:
+                        pids = f.read().split('\n')[:-1]
+                        for pid in pids:
+                            if subprocess_utils.is_process_alive(
+                                    int(pid.strip())):
+                                subprocess_utils.kill_children_processes(
+                                    parent_pids=[int(pid.strip())], force=True)
+                    os.remove(
+                        os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH))
+                except FileNotFoundError:
+                    # its fine we will create it
+                    pass
+                except Exception as e:  # pylint: disable=broad-except
+                    # in case we get perm issues or something is messed up, just
+                    # ignore it and assume the process is dead
+                    logger.error(
+                        f'Error looking at job controller pid file: {e}')
+                    pass
+            logger.info(f'{len(all_job_ids)} jobs running. Assuming the '
+                        'indicator file hasn\'t been written yet.')
+            return
+
         logger.info('=== Updating managed job status ===')
         managed_job_utils.update_managed_jobs_statuses()
-
-
-class ManagedJobSchedulingEvent(SkyletEvent):
-    """Skylet event for scheduling managed jobs."""
-    EVENT_INTERVAL_SECONDS = 20
-
-    def _run(self):
-        logger.info('=== Scheduling next jobs ===')
-        managed_job_scheduler.maybe_schedule_next_jobs()
+        scheduler.maybe_start_controllers()
 
 
 class ServiceUpdateEvent(SkyletEvent):
@@ -181,7 +214,7 @@ class AutostopEvent(SkyletEvent):
 
             config_path = os.path.abspath(
                 os.path.expanduser(cluster_utils.SKY_CLUSTER_YAML_REMOTE_PATH))
-            config = common_utils.read_yaml(config_path)
+            config = yaml_utils.read_yaml(config_path)
             provider_name = cluster_utils.get_provider_name(config)
             cloud = registry.CLOUD_REGISTRY.from_str(provider_name)
             assert cloud is not None, f'Unknown cloud: {provider_name}'
@@ -309,7 +342,7 @@ class AutostopEvent(SkyletEvent):
         else:
             yaml_str = self._CATCH_NODES.sub(r'cache_stopped_nodes: true',
                                              yaml_str)
-        config = yaml.safe_load(yaml_str)
+        config = yaml_utils.safe_load(yaml_str)
         # Set the private key with the existed key on the remote instance.
         config['auth']['ssh_private_key'] = '~/ray_bootstrap_key.pem'
         # NOTE: We must do this, otherwise with ssh_proxy_command still under
@@ -326,5 +359,5 @@ class AutostopEvent(SkyletEvent):
         config['auth'].pop('ssh_proxy_command', None)
         # Empty the file_mounts.
         config['file_mounts'] = {}
-        common_utils.dump_yaml(yaml_path, config)
+        yaml_utils.dump_yaml(yaml_path, config)
         logger.debug('Replaced upscaling speed to 0.')

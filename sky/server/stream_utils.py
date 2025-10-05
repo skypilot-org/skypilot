@@ -8,10 +8,12 @@ from typing import AsyncGenerator, Deque, List, Optional
 import aiofiles
 import fastapi
 
+from sky import global_user_state
 from sky import sky_logging
 from sky.server.requests import requests as requests_lib
 from sky.utils import message_utils
 from sky.utils import rich_utils
+from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -22,6 +24,7 @@ logger = sky_logging.init_logger(__name__)
 _BUFFER_SIZE = 8 * 1024  # 8KB
 _BUFFER_TIMEOUT = 0.02  # 20ms
 _HEARTBEAT_INTERVAL = 30
+_CLUSTER_STATUS_INTERVAL = 1
 
 
 async def _yield_log_file_with_payloads_skipped(
@@ -37,11 +40,13 @@ async def _yield_log_file_with_payloads_skipped(
         yield line_str
 
 
-async def log_streamer(request_id: Optional[str],
-                       log_path: pathlib.Path,
-                       plain_logs: bool = False,
-                       tail: Optional[int] = None,
-                       follow: bool = True) -> AsyncGenerator[str, None]:
+async def log_streamer(
+        request_id: Optional[str],
+        log_path: pathlib.Path,
+        plain_logs: bool = False,
+        tail: Optional[int] = None,
+        follow: bool = True,
+        cluster_name: Optional[str] = None) -> AsyncGenerator[str, None]:
     """Streams the logs of a request.
 
     Args:
@@ -51,12 +56,14 @@ async def log_streamer(request_id: Optional[str],
         plain_logs: Whether to show plain logs.
         tail: The number of lines to tail. If None, tail the whole file.
         follow: Whether to follow the log file.
+        cluster_name: The cluster name to check status for provision logs.
+            If provided and cluster status is UP, streaming will terminate.
     """
 
     if request_id is not None:
         status_msg = rich_utils.EncodedStatusMessage(
             f'[dim]Checking request: {request_id}[/dim]')
-        request_task = requests_lib.get_request(request_id)
+        request_task = await requests_lib.get_request_async(request_id)
 
         if request_task is None:
             raise fastapi.HTTPException(
@@ -75,8 +82,10 @@ async def log_streamer(request_id: Optional[str],
         last_waiting_msg = ''
         waiting_msg = (f'Waiting for {request_task.name!r} request to be '
                        f'scheduled: {request_id}')
-        while request_task.status < requests_lib.RequestStatus.RUNNING:
-            if request_task.status_msg is not None:
+        req_status = request_task.status
+        req_msg = request_task.status_msg
+        while req_status < requests_lib.RequestStatus.RUNNING:
+            if req_msg is not None:
                 waiting_msg = request_task.status_msg
             if show_request_waiting_spinner:
                 yield status_msg.update(f'[dim]{waiting_msg}[/dim]')
@@ -86,10 +95,15 @@ async def log_streamer(request_id: Optional[str],
                 # Use smaller padding (1024 bytes) to force browser rendering
                 yield f'{waiting_msg}' + ' ' * 4096 + '\n'
             # Sleep shortly to avoid storming the DB and CPU and allow other
-            # coroutines to run. This busy waiting loop is performance critical
-            # for short-running requests, so we do not want to yield too long.
+            # coroutines to run.
+            # TODO(aylei): we should use a better mechanism to avoid busy
+            # polling the DB, which can be a bottleneck for high-concurrency
+            # requests.
             await asyncio.sleep(0.1)
-            request_task = requests_lib.get_request(request_id)
+            status_with_msg = await requests_lib.get_request_status_async(
+                request_id, include_msg=True)
+            req_status = status_with_msg.status
+            req_msg = status_with_msg.status_msg
             if not follow:
                 break
         if show_request_waiting_spinner:
@@ -97,15 +111,17 @@ async def log_streamer(request_id: Optional[str],
 
     async with aiofiles.open(log_path, 'rb') as f:
         async for chunk in _tail_log_file(f, request_id, plain_logs, tail,
-                                          follow):
+                                          follow, cluster_name):
             yield chunk
 
 
-async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
-                         request_id: Optional[str] = None,
-                         plain_logs: bool = False,
-                         tail: Optional[int] = None,
-                         follow: bool = True) -> AsyncGenerator[str, None]:
+async def _tail_log_file(
+        f: aiofiles.threadpool.binary.AsyncBufferedReader,
+        request_id: Optional[str] = None,
+        plain_logs: bool = False,
+        tail: Optional[int] = None,
+        follow: bool = True,
+        cluster_name: Optional[str] = None) -> AsyncGenerator[str, None]:
     """Tail the opened log file, buffer the lines and flush in chunks."""
 
     if tail is not None:
@@ -121,6 +137,7 @@ async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
             yield line_str
 
     last_heartbeat_time = asyncio.get_event_loop().time()
+    last_cluster_status_check_time = asyncio.get_event_loop().time()
 
     # Buffer the lines in memory and flush them in chunks to improve log
     # tailing throughput.
@@ -151,10 +168,13 @@ async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
         line: Optional[bytes] = await f.readline()
         if not line:
             if request_id is not None:
-                request_task = requests_lib.get_request(request_id)
-                if request_task.status > requests_lib.RequestStatus.RUNNING:
-                    if (request_task.status ==
+                req_status = await requests_lib.get_request_status_async(
+                    request_id)
+                if req_status.status > requests_lib.RequestStatus.RUNNING:
+                    if (req_status.status ==
                             requests_lib.RequestStatus.CANCELLED):
+                        request_task = await requests_lib.get_request_async(
+                            request_id)
                         if request_task.should_retry:
                             buffer.append(
                                 message_utils.encode_payload(
@@ -166,7 +186,19 @@ async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
                     break
             if not follow:
                 break
-
+            # Provision logs pass in cluster_name, check cluster status
+            # periodically to see if provisioning is done. We only
+            # check once a second to avoid overloading the DB.
+            check_status = (current_time - last_cluster_status_check_time
+                           ) >= _CLUSTER_STATUS_INTERVAL
+            if cluster_name is not None and check_status:
+                cluster_record = await (
+                    global_user_state.get_status_from_cluster_name_async(
+                        cluster_name))
+                if (cluster_record is None or
+                        cluster_record != status_lib.ClusterStatus.INIT):
+                    break
+                last_cluster_status_check_time = current_time
             if current_time - last_heartbeat_time >= _HEARTBEAT_INTERVAL:
                 # Currently just used to keep the connection busy, refer to
                 # https://github.com/skypilot-org/skypilot/issues/5750 for

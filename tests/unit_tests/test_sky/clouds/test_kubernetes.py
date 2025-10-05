@@ -1,8 +1,9 @@
 """Tests for Kubernetes cloud implementation."""
 
+import copy
+import os
 import unittest
 from unittest import mock
-from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import pytest
@@ -73,6 +74,95 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
             keys=('allowed_contexts',),
             region=None,
             default_value=None)
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_global_allowed_all_contexts_in_config_when_no_workspace_config(
+            self, mock_get_cloud_config_value, mock_get_workspace_cloud,
+            mock_get_all_contexts):
+        """Test using global allowed_contexts=all in config when workspace config is None."""
+        mock_get_all_contexts.return_value = ['ctx1', 'ctx2', 'ctx3']
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_get_cloud_config_value.return_value = 'all'
+
+        result = kubernetes.Kubernetes.existing_allowed_contexts()
+
+        self.assertEqual(set(result), {'ctx1', 'ctx2', 'ctx3'})
+        mock_get_cloud_config_value.assert_called_once_with(
+            cloud='kubernetes',
+            keys=('allowed_contexts',),
+            region=None,
+            default_value=None)
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_env_ignored_when_global_allowed_contexts_is_set(
+            self, mock_get_cloud_config_value, mock_get_workspace_cloud,
+            mock_get_all_contexts):
+        """Env var should NOT override when global allowed_contexts is set (even empty)."""
+        mock_get_all_contexts.return_value = ['ctx1', 'ctx2', 'ctx3']
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        # Global config present but empty list means no contexts allowed; env should be ignored.
+        mock_get_cloud_config_value.return_value = []
+
+        with patch.dict(os.environ,
+                        {'SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS': 'true'},
+                        clear=False):
+            result = kubernetes.Kubernetes.existing_allowed_contexts()
+
+        # Since global allowed_contexts is explicitly set (empty), env is ignored -> no contexts.
+        self.assertEqual(result, [])
+        mock_get_cloud_config_value.assert_called_once_with(
+            cloud='kubernetes',
+            keys=('allowed_contexts',),
+            region=None,
+            default_value=None)
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_env_does_not_override_global_when_present(
+            self, mock_get_cloud_config_value, mock_get_workspace_cloud,
+            mock_get_all_contexts):
+        """Env var should NOT override global allowed_contexts when present."""
+        mock_get_all_contexts.return_value = ['ctx1', 'ctx2', 'ctx3']
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_get_cloud_config_value.return_value = ['ctx1']
+
+        with patch.dict(os.environ,
+                        {'SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS': 'true'},
+                        clear=False):
+            result = kubernetes.Kubernetes.existing_allowed_contexts()
+
+        # Global allowed_contexts is set; env should be ignored -> only ctx1 allowed.
+        self.assertEqual(result, ['ctx1'])
+        mock_get_cloud_config_value.assert_called_once_with(
+            cloud='kubernetes',
+            keys=('allowed_contexts',),
+            region=None,
+            default_value=None)
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_env_does_not_override_workspace_when_present(
+            self, mock_get_cloud_config_value, mock_get_workspace_cloud,
+            mock_get_all_contexts):
+        """Env var should NOT override workspace/global allowed_contexts when present."""
+        mock_get_all_contexts.return_value = ['ctx1', 'ctx2', 'ctx3']
+        # Workspace config present
+        mock_get_workspace_cloud.return_value.get.return_value = ['ctx1']
+        # Global config also present but should be ignored due to env override
+        mock_get_cloud_config_value.return_value = ['ctx1', 'ctx2']
+
+        with patch.dict(os.environ,
+                        {'SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS': 'true'},
+                        clear=False):
+            result = kubernetes.Kubernetes.existing_allowed_contexts()
+        # Workspace allowed_contexts takes precedence; env ignored -> only ctx1 allowed.
+        self.assertEqual(result, ['ctx1'])
 
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
@@ -305,12 +395,10 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.skypilot_config.get_effective_region_config')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
-    @patch('sky.provision.kubernetes.network_utils.get_networking_mode')
     @patch('sky.catalog.get_image_id_from_tag')
     @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
     def test_ipc_lock_capability_enabled_with_user_security_context(
-            self, mock_detect_network_type, mock_get_image,
-            mock_get_networking_mode, mock_get_port_mode,
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_cloud_config_value,
             mock_is_exec_auth, mock_get_accelerator_label_keys,
             mock_get_namespace, mock_get_current_context, mock_get_k8s_nodes):
@@ -341,10 +429,6 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         mock_port_mode = mock.MagicMock()
         mock_port_mode.value = "portforward"
         mock_get_port_mode.return_value = mock_port_mode
-
-        mock_networking_mode = mock.MagicMock()
-        mock_networking_mode.value = "portforward"
-        mock_get_networking_mode.return_value = mock_networking_mode
 
         # Mock image
         mock_get_image.return_value = "test-image:latest"
@@ -380,12 +464,10 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.skypilot_config.get_effective_region_config')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
-    @patch('sky.provision.kubernetes.network_utils.get_networking_mode')
     @patch('sky.catalog.get_image_id_from_tag')
     @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
     def test_ipc_lock_capability_disabled_when_no_high_perf_networking(
-            self, mock_detect_network_type, mock_get_image,
-            mock_get_networking_mode, mock_get_port_mode,
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_cloud_config_value,
             mock_is_exec_auth, mock_get_accelerator_label_keys,
             mock_get_namespace, mock_get_current_context, mock_get_k8s_nodes):
@@ -414,10 +496,6 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         mock_port_mode = mock.MagicMock()
         mock_port_mode.value = "portforward"
         mock_get_port_mode.return_value = mock_port_mode
-
-        mock_networking_mode = mock.MagicMock()
-        mock_networking_mode.value = "portforward"
-        mock_get_networking_mode.return_value = mock_networking_mode
 
         # Mock image
         mock_get_image.return_value = "test-image:latest"
@@ -451,12 +529,10 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.skypilot_config.get_effective_region_config')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
-    @patch('sky.provision.kubernetes.network_utils.get_networking_mode')
     @patch('sky.catalog.get_image_id_from_tag')
     @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
     def test_ipc_lock_capability_disabled_when_network_tier_not_best(
-            self, mock_detect_network_type, mock_get_image,
-            mock_get_networking_mode, mock_get_port_mode,
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_cloud_config_value,
             mock_is_exec_auth, mock_get_accelerator_label_keys,
             mock_get_namespace, mock_get_current_context, mock_get_k8s_nodes):
@@ -490,10 +566,6 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         mock_port_mode.value = "portforward"
         mock_get_port_mode.return_value = mock_port_mode
 
-        mock_networking_mode = mock.MagicMock()
-        mock_networking_mode.value = "portforward"
-        mock_get_networking_mode.return_value = mock_networking_mode
-
         # Mock image
         mock_get_image.return_value = "test-image:latest"
 
@@ -523,12 +595,10 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.skypilot_config.get_effective_region_config')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
-    @patch('sky.provision.kubernetes.network_utils.get_networking_mode')
     @patch('sky.catalog.get_image_id_from_tag')
     @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
     def test_nebius_network_tier_with_gpu_environment_variables(
-            self, mock_detect_network_type, mock_get_image,
-            mock_get_networking_mode, mock_get_port_mode,
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_cloud_config_value,
             mock_is_exec_auth, mock_get_gpu_resource_key,
             mock_get_accelerator_label_key_values,
@@ -584,10 +654,6 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         mock_port_mode.value = "portforward"
         mock_get_port_mode.return_value = mock_port_mode
 
-        mock_networking_mode = mock.MagicMock()
-        mock_networking_mode.value = "portforward"
-        mock_get_networking_mode.return_value = mock_networking_mode
-
         # Mock image
         mock_get_image.return_value = "test-gpu-image:latest"
 
@@ -625,11 +691,9 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         self.assertEqual(deploy_vars['k8s_resource_key'], 'nvidia.com/gpu')
         self.assertFalse(deploy_vars['tpu_requested'])  # H100 is GPU, not TPU
 
-    @patch('yaml.safe_load')
-    @patch('sky.utils.common_utils.dump_yaml')
     @patch('sky.skypilot_config.get_effective_region_config')
     def test_user_security_context_merged_with_ipc_lock_capability(
-            self, mock_get_cloud_config_value, mock_dump_yaml, mock_safe_load):
+            self, mock_get_cloud_config_value):
         """Test that user-specified securityContext is correctly merged with IPC_LOCK capability."""
 
         # Create a YAML structure with IPC_LOCK capability set
@@ -672,53 +736,35 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         }
 
         # Set up mocks
-        mock_safe_load.return_value = cluster_yaml_with_ipc_lock
         mock_get_cloud_config_value.return_value = user_pod_config
 
-        # Use a temporary file to avoid file not found error
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', delete=False,
-                                         suffix='.yaml') as tmp_file:
-            tmp_path = tmp_file.name
+        # Call the combine_pod_config_fields function
+        combined_yaml_obj = kubernetes_utils.combine_pod_config_fields(
+            cluster_yaml_with_ipc_lock, {}, None)
 
-        try:
-            # Call the combine_pod_config_fields function
-            kubernetes_utils.combine_pod_config_fields(tmp_path, {}, None)
+        # Get the modified YAML
+        container = combined_yaml_obj['available_node_types'][
+            'ray_head_default']['node_config']['spec']['containers'][0]
 
-            # Verify the YAML was loaded and written
-            mock_safe_load.assert_called_once()
-            mock_dump_yaml.assert_called_once()
+        # Verify that both IPC_LOCK and user-specified capabilities are present
+        security_context = container['securityContext']
 
-            # Get the modified YAML
-            modified_yaml = mock_dump_yaml.call_args[0][1]
-            container = modified_yaml['available_node_types'][
-                'ray_head_default']['node_config']['spec']['containers'][0]
+        # Check that runAsUser and runAsGroup from user config are preserved
+        self.assertEqual(security_context['runAsUser'], 1000)
+        self.assertEqual(security_context['runAsGroup'], 1000)
 
-            # Verify that both IPC_LOCK and user-specified capabilities are present
-            security_context = container['securityContext']
+        # Check that capabilities are merged correctly
+        add_capabilities = security_context['capabilities']['add']
+        self.assertIn('IPC_LOCK', add_capabilities)  # From template
+        self.assertIn('SYS_ADMIN', add_capabilities)  # From user config
 
-            # Check that runAsUser and runAsGroup from user config are preserved
-            self.assertEqual(security_context['runAsUser'], 1000)
-            self.assertEqual(security_context['runAsGroup'], 1000)
+        # Check that drop capabilities from user config are preserved
+        drop_capabilities = security_context['capabilities']['drop']
+        self.assertIn('NET_RAW', drop_capabilities)
 
-            # Check that capabilities are merged correctly
-            add_capabilities = security_context['capabilities']['add']
-            self.assertIn('IPC_LOCK', add_capabilities)  # From template
-            self.assertIn('SYS_ADMIN', add_capabilities)  # From user config
-
-            # Check that drop capabilities from user config are preserved
-            drop_capabilities = security_context['capabilities']['drop']
-            self.assertIn('NET_RAW', drop_capabilities)
-        finally:
-            import os
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-
-    @patch('yaml.safe_load')
-    @patch('sky.utils.common_utils.dump_yaml')
     @patch('sky.skypilot_config.get_effective_region_config')
     def test_user_security_context_without_ipc_lock_capability(
-            self, mock_get_cloud_config_value, mock_dump_yaml, mock_safe_load):
+            self, mock_get_cloud_config_value):
         """Test that user-specified securityContext works when IPC_LOCK capability is not needed."""
 
         # Create a YAML structure without IPC_LOCK capability
@@ -756,42 +802,156 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         }
 
         # Set up mocks
-        mock_safe_load.return_value = cluster_yaml_without_ipc_lock
         mock_get_cloud_config_value.return_value = user_pod_config
 
-        # Use a temporary file to avoid file not found error
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', delete=False,
-                                         suffix='.yaml') as tmp_file:
-            tmp_path = tmp_file.name
+        # Call the combine_pod_config_fields function
+        combined_yaml_obj = kubernetes_utils.combine_pod_config_fields(
+            cluster_yaml_without_ipc_lock, {}, None)
 
-        try:
-            # Call the combine_pod_config_fields function
-            kubernetes_utils.combine_pod_config_fields(tmp_path, {}, None)
+        # Get the modified YAML
+        container = combined_yaml_obj['available_node_types'][
+            'ray_head_default']['node_config']['spec']['containers'][0]
 
-            # Get the modified YAML
-            modified_yaml = mock_dump_yaml.call_args[0][1]
-            container = modified_yaml['available_node_types'][
-                'ray_head_default']['node_config']['spec']['containers'][0]
+        # Verify that only user-specified securityContext is present
+        security_context = container['securityContext']
 
-            # Verify that only user-specified securityContext is present
-            security_context = container['securityContext']
+        # Check that runAsUser from user config is preserved
+        self.assertEqual(security_context['runAsUser'], 1000)
 
-            # Check that runAsUser from user config is preserved
-            self.assertEqual(security_context['runAsUser'], 1000)
+        # Check that only user capabilities are present (no IPC_LOCK)
+        add_capabilities = security_context['capabilities']['add']
+        self.assertIn('SYS_ADMIN', add_capabilities)
+        self.assertNotIn('IPC_LOCK', add_capabilities)
 
-            # Check that only user capabilities are present (no IPC_LOCK)
-            add_capabilities = security_context['capabilities']['add']
-            self.assertIn('SYS_ADMIN', add_capabilities)
-            self.assertNotIn('IPC_LOCK', add_capabilities)
+        # Check that drop capabilities from user config are preserved
+        drop_capabilities = security_context['capabilities']['drop']
+        self.assertIn('NET_RAW', drop_capabilities)
 
-            # Check that drop capabilities from user config are preserved
-            drop_capabilities = security_context['capabilities']['drop']
-            self.assertIn('NET_RAW', drop_capabilities)
-        finally:
-            import os
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
+
+class TestKubernetesVolumeMerging(unittest.TestCase):
+    """Test cases for merging user-specified volume mounts and volumes with pod_config."""
+
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_user_volume_mounts_merged_correctly(self,
+                                                 mock_get_cloud_config_value):
+        """Test that user-specified volume mounts and volumes are correctly merged."""
+
+        # Based on kubernetes-ray.yml.j2
+        cluster_yaml_with_system_volumes = {
+            'available_node_types': {
+                'ray_head_default': {
+                    'node_config': {
+                        'apiVersion': 'v1',
+                        'kind': 'Pod',
+                        'spec': {
+                            'volumes': [{
+                                'name': 'dshm',
+                                'emptyDir': {
+                                    'medium': 'Memory'
+                                }
+                            }],
+                            'containers': [{
+                                'name': 'ray-node',
+                                'image': 'test-image',
+                                'volumeMounts': [{
+                                    'mountPath': '/dev/shm',
+                                    'name': 'dshm'
+                                }]
+                            }]
+                        }
+                    }
+                }
+            }
+        }
+
+        # User config with additional volume mounts and volumes
+        user_pod_config = {
+            'spec': {
+                'containers': [{
+                    'volumeMounts': [{
+                        'name': 'data-volume',
+                        'mountPath': '/data',
+                        'readOnly': False
+                    }, {
+                        'name': 'logs-volume',
+                        'mountPath': '/logs',
+                        'readOnly': False
+                    }]
+                }],
+                'volumes': [{
+                    'name': 'data-volume',
+                    'persistentVolumeClaim': {
+                        'claimName': 'data-pvc',
+                        'readOnly': False
+                    }
+                }, {
+                    'name': 'logs-volume',
+                    'persistentVolumeClaim': {
+                        'claimName': 'logs-pvc',
+                        'readOnly': False
+                    }
+                }]
+            }
+        }
+
+        mock_get_cloud_config_value.return_value = user_pod_config
+
+        combined_yaml_obj = kubernetes_utils.combine_pod_config_fields(
+            cluster_yaml_with_system_volumes, {}, None)
+
+        # Get the modified YAML
+        container = combined_yaml_obj['available_node_types'][
+            'ray_head_default']['node_config']['spec']['containers'][0]
+        pod_spec = combined_yaml_obj['available_node_types'][
+            'ray_head_default']['node_config']['spec']
+
+        # Verify that both system and user volume mounts are present
+        volume_mounts = container['volumeMounts']
+        self.assertEqual(len(volume_mounts), 3)  # 1 system + 2 user
+
+        # Check system volume mounts are preserved
+        dshm_mount = next((vm for vm in volume_mounts if vm['name'] == 'dshm'),
+                          None)
+        self.assertIsNotNone(dshm_mount)
+        self.assertEqual(dshm_mount['mountPath'], '/dev/shm')
+
+        # Check user volume mounts are added
+        data_mount = next(
+            (vm for vm in volume_mounts if vm['name'] == 'data-volume'), None)
+        self.assertIsNotNone(data_mount)
+        self.assertEqual(data_mount['mountPath'], '/data')
+        self.assertFalse(data_mount['readOnly'])
+
+        logs_mount = next(
+            (vm for vm in volume_mounts if vm['name'] == 'logs-volume'), None)
+        self.assertIsNotNone(logs_mount)
+        self.assertEqual(logs_mount['mountPath'], '/logs')
+        self.assertFalse(logs_mount['readOnly'])
+
+        # Verify that both system and user volumes are present
+        volumes = pod_spec['volumes']
+        self.assertEqual(len(volumes), 3)  # 1 system + 2 user
+
+        # Check system volumes are preserved
+        dshm_volume = next((v for v in volumes if v['name'] == 'dshm'), None)
+        self.assertIsNotNone(dshm_volume)
+        self.assertIn('emptyDir', dshm_volume)
+        self.assertEqual(dshm_volume['emptyDir']['medium'], 'Memory')
+
+        # Check user volumes are added
+        data_volume = next((v for v in volumes if v['name'] == 'data-volume'),
+                           None)
+        self.assertIsNotNone(data_volume)
+        self.assertIn('persistentVolumeClaim', data_volume)
+        self.assertEqual(data_volume['persistentVolumeClaim']['claimName'],
+                         'data-pvc')
+
+        logs_volume = next((v for v in volumes if v['name'] == 'logs-volume'),
+                           None)
+        self.assertIsNotNone(logs_volume)
+        self.assertIn('persistentVolumeClaim', logs_volume)
+        self.assertEqual(logs_volume['persistentVolumeClaim']['claimName'],
+                         'logs-pvc')
 
 
 class TestGKEDWSConfig(unittest.TestCase):
@@ -874,6 +1034,47 @@ class TestGKEDWSConfig(unittest.TestCase):
             keys=('dws',),
             default_value={},
             override_configs=cluster_overrides)
+
+
+class TestKubernetesVolumeNameValidation(unittest.TestCase):
+
+    def test_valid_volume_names(self):
+        valid_names = [
+            'data',
+            'data1',
+            'data-1',
+            'data-1.volume',
+            'a-b.c-d',
+            'a' * 10 + '.' + 'b' * 10,
+        ]
+        for name in valid_names:
+            ok, reason = kubernetes.Kubernetes.is_volume_name_valid(name)
+            self.assertTrue(ok, msg=f'{name} should be valid, got: {reason}')
+
+    def test_invalid_due_to_length(self):
+        too_long = 'a' * 254  # > 253
+        ok, reason = kubernetes.Kubernetes.is_volume_name_valid(too_long)
+        self.assertFalse(ok)
+        self.assertIn('maximum length', reason or '')
+
+    def test_invalid_characters(self):
+        # Uppercase and underscore are invalid
+        for name in ['Data', 'data_volume', 'data@vol', 'data+vol']:
+            ok, _ = kubernetes.Kubernetes.is_volume_name_valid(name)
+            self.assertFalse(ok, msg=f'{name} should be invalid')
+
+    def test_invalid_start_or_end(self):
+        for name in ['-data', 'data-', '.data', 'data.']:
+            ok, _ = kubernetes.Kubernetes.is_volume_name_valid(name)
+            self.assertFalse(ok, msg=f'{name} should be invalid')
+
+    def test_invalid_double_dot(self):
+        ok, _ = kubernetes.Kubernetes.is_volume_name_valid('a..b')
+        self.assertFalse(ok)
+
+    def test_empty_string_invalid(self):
+        ok, _ = kubernetes.Kubernetes.is_volume_name_valid('')
+        self.assertFalse(ok)
 
 
 if __name__ == '__main__':

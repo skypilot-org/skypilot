@@ -8,11 +8,13 @@ import functools
 import io
 import multiprocessing.pool
 import os
+import queue as queue_lib
 import shlex
 import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 from typing import (Deque, Dict, Iterable, Iterator, List, Optional, TextIO,
                     Tuple, Union)
@@ -38,6 +40,11 @@ PEEK_HEAD_LINES_FOR_START_STREAM = 20
 logger = sky_logging.init_logger(__name__)
 
 LOG_FILE_START_STREAMING_AT = 'Waiting for task resources on '
+
+# 16-64KiB seems to be the sweet spot:
+# https://github.com/grpc/grpc.github.io/issues/371
+# TODO(kevin): Benchmark this ourselves and verify.
+DEFAULT_LOG_CHUNK_SIZE = 16 * 1024  # 16KiB
 
 
 class _ProcessingArgs:
@@ -354,6 +361,17 @@ def run_bash_command_with_log(bash_command: str,
                             shell=True)
 
 
+def run_bash_command_with_log_and_return_pid(
+        bash_command: str,
+        log_path: str,
+        env_vars: Optional[Dict[str, str]] = None,
+        stream_logs: bool = False,
+        with_ray: bool = False):
+    return_code = run_bash_command_with_log(bash_command, log_path, env_vars,
+                                            stream_logs, with_ray)
+    return {'return_code': return_code, 'pid': os.getpid()}
+
+
 def _follow_job_logs(file,
                      job_id: int,
                      start_streaming: bool,
@@ -395,9 +413,9 @@ def _follow_job_logs(file,
                     wait_last_logs = False
                     continue
                 status_str = status.value if status is not None else 'None'
-                print(ux_utils.finishing_message(
-                    f'Job finished (status: {status_str}).'),
-                      flush=True)
+                finish = ux_utils.finishing_message(
+                    f'Job finished (status: {status_str}).')
+                yield finish + '\n'
                 return
 
             time.sleep(SKY_LOG_TAILING_GAP_SECONDS)
@@ -552,3 +570,207 @@ def tail_logs(job_id: Optional[int],
         except FileNotFoundError:
             print(f'{colorama.Fore.RED}ERROR: Logs for job {job_id} (status:'
                   f' {status.value}) does not exist.{colorama.Style.RESET_ALL}')
+
+
+def tail_logs_iter(job_id: Optional[int],
+                   log_dir: Optional[str],
+                   managed_job_id: Optional[int] = None,
+                   follow: bool = True,
+                   tail: int = 0) -> Iterator[str]:
+    """Tail the logs of a job. This is mostly the same as tail_logs, but
+    returns an iterator instead of printing to stdout/stderr."""
+    if job_id is None:
+        # This only happens when job_lib.get_latest_job_id() returns None,
+        # which means no job has been submitted to this cluster. See
+        # sky.skylet.job_lib.JobLibCodeGen.tail_logs for more details.
+        logger.info('Skip streaming logs as no job has been submitted.')
+        return
+    job_str = f'job {job_id}'
+    if managed_job_id is not None:
+        job_str = f'managed job {managed_job_id}'
+    if log_dir is None:
+        msg = f'{job_str.capitalize()} not found (see `sky queue`).'
+        yield msg + '\n'
+        return
+    logger.debug(f'Tailing logs for job, real job_id {job_id}, managed_job_id '
+                 f'{managed_job_id}.')
+    log_path = os.path.join(log_dir, 'run.log')
+    log_path = os.path.expanduser(log_path)
+
+    status = job_lib.update_job_status([job_id], silent=True)[0]
+
+    # Wait for the log to be written. This is needed due to the `ray submit`
+    # will take some time to start the job and write the log.
+    retry_cnt = 0
+    while status is not None and not status.is_terminal():
+        retry_cnt += 1
+        if os.path.exists(log_path) and status != job_lib.JobStatus.INIT:
+            break
+        if retry_cnt >= SKY_LOG_WAITING_MAX_RETRY:
+            err = (f'{colorama.Fore.RED}ERROR: Logs for '
+                   f'{job_str} (status: {status.value}) does not exist '
+                   f'after retrying {retry_cnt} times.'
+                   f'{colorama.Style.RESET_ALL}')
+            yield err + '\n'
+            return
+        waiting = (f'INFO: Waiting {SKY_LOG_WAITING_GAP_SECONDS}s for the logs '
+                   'to be written...')
+        yield waiting + '\n'
+        time.sleep(SKY_LOG_WAITING_GAP_SECONDS)
+        status = job_lib.update_job_status([job_id], silent=True)[0]
+
+    start_stream_at = LOG_FILE_START_STREAMING_AT
+    # Explicitly declare the type to avoid mypy warning.
+    lines: Iterable[str] = []
+    if follow and status in [
+            job_lib.JobStatus.SETTING_UP,
+            job_lib.JobStatus.PENDING,
+            job_lib.JobStatus.RUNNING,
+    ]:
+        # Not using `ray job logs` because it will put progress bar in
+        # multiple lines.
+        with open(log_path, 'r', newline='', encoding='utf-8') as log_file:
+            # Using `_follow` instead of `tail -f` to streaming the whole
+            # log and creating a new process for tail.
+            start_streaming = False
+            if tail > 0:
+                head_lines_of_log_file = _peek_head_lines(log_file)
+                lines = collections.deque(log_file, maxlen=tail)
+                start_streaming = _should_stream_the_whole_tail_lines(
+                    head_lines_of_log_file, lines, start_stream_at)
+                for line in lines:
+                    if start_stream_at in line:
+                        start_streaming = True
+                    if start_streaming:
+                        yield line
+            # Now, the cursor is at the end of the last lines
+            # if tail > 0
+            for line in _follow_job_logs(log_file,
+                                         job_id=job_id,
+                                         start_streaming=start_streaming,
+                                         start_streaming_at=start_stream_at):
+                yield line
+    else:
+        try:
+            start_streaming = False
+            with open(log_path, 'r', encoding='utf-8') as log_file:
+                if tail > 0:
+                    # If tail > 0, we need to read the last n lines.
+                    # We use double ended queue to rotate the last n lines.
+                    head_lines_of_log_file = _peek_head_lines(log_file)
+                    lines = collections.deque(log_file, maxlen=tail)
+                    start_streaming = _should_stream_the_whole_tail_lines(
+                        head_lines_of_log_file, lines, start_stream_at)
+                else:
+                    lines = log_file
+                for line in lines:
+                    if start_stream_at in line:
+                        start_streaming = True
+                    if start_streaming:
+                        yield line
+                status_str = status.value if status is not None else 'None'
+                # Only show "Job finished" for actually terminal states
+                if status is not None and status.is_terminal():
+                    finish = ux_utils.finishing_message(
+                        f'Job finished (status: {status_str}).')
+                    yield finish + '\n'
+            return
+        except FileNotFoundError:
+            err = (
+                f'{colorama.Fore.RED}ERROR: Logs for job {job_id} (status:'
+                f' {status.value}) does not exist.{colorama.Style.RESET_ALL}')
+            yield err + '\n'
+
+
+class LogBuffer:
+    """In-memory buffer for chunking log lines for streaming."""
+
+    def __init__(self, max_chars: int = DEFAULT_LOG_CHUNK_SIZE):
+        """Initialize the log buffer.
+
+        Args:
+            max_chars: Maximum buffer size (in characters, not bytes) before
+                       flushing. The actual amount of bytes (UTF-8 encoding)
+                       could be more than this, depending on the characters,
+                       i.e. ASCII characters take 1 byte, while others
+                       may take 2-4 bytes. But this is fine as our default
+                       chunk size is well below the default value of
+                       grpc.max_receive_message_length which is 4MB.
+        """
+        self.max_chars = max_chars
+        self._buffer = io.StringIO()
+
+    def _should_flush(self) -> bool:
+        return self._buffer.tell() >= self.max_chars
+
+    def flush(self) -> str:
+        """Get the current buffered content and clear the buffer.
+
+        Returns:
+            The buffered log lines as a single string
+        """
+        if not self._buffer.tell():
+            return ''
+        chunk = self._buffer.getvalue()
+        self._buffer.truncate(0)
+        self._buffer.seek(0)
+        return chunk
+
+    def write(self, line: str) -> bool:
+        """Add a line to the buffer.
+
+        Args:
+            line: The log line to add
+
+        Returns:
+            True if buffer should be flushed after adding the line
+        """
+        self._buffer.write(line)
+        return self._should_flush()
+
+    def close(self):
+        self._buffer.close()
+
+
+def buffered_iter_with_timeout(buffer: LogBuffer, iterable: Iterable[str],
+                               timeout: float) -> Iterable[str]:
+    """Iterates over an iterable, writing each item to a buffer,
+        and flushing the buffer when it is full or no item is
+        yielded within the timeout duration."""
+    # TODO(kevin): Simplify this using asyncio.timeout, once we move
+    # the skylet event loop and gRPC server to asyncio.
+    # https://docs.python.org/3/library/asyncio-task.html#timeouts
+
+    queue: queue_lib.Queue = queue_lib.Queue()
+    sentinel = object()
+
+    def producer():
+        try:
+            for item in iterable:
+                queue.put(item)
+        finally:
+            queue.put(sentinel)
+
+    thread = threading.Thread(target=producer, daemon=True)
+    thread.start()
+
+    while True:
+        try:
+            item = queue.get(timeout=timeout)
+        except queue_lib.Empty:
+            out = buffer.flush()
+            if out:
+                yield out
+            continue
+
+        if item is sentinel:
+            thread.join()
+            out = buffer.flush()
+            if out:
+                yield out
+            return
+
+        if buffer.write(item):
+            out = buffer.flush()
+            if out:
+                yield out

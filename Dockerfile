@@ -1,5 +1,5 @@
 # Stage 1: Install Google Cloud SDK using APT
-FROM python:3.10-slim AS gcloud-apt-install
+FROM python:3.10.18-slim AS gcloud-apt-install
 
 RUN apt-get update && \
     apt-get install -y curl gnupg lsb-release && \
@@ -12,8 +12,45 @@ RUN apt-get update && \
     apt-get clean && rm -rf /usr/lib/google-cloud-sdk/platform/bundledpythonunix \
     /var/lib/apt/lists/*
 
-# Stage 2: Main image
-FROM python:3.10-slim
+
+# Stage 2: Process the source code for INSTALL_FROM_SOURCE
+FROM python:3.10.18-slim AS process-source
+
+# Control installation method - default to install from source
+ARG INSTALL_FROM_SOURCE=true
+ARG NEXT_BASE_PATH=/dashboard
+
+COPY . /skypilot
+
+RUN cd /skypilot && \
+    if [ "$INSTALL_FROM_SOURCE" != "true" ]; then \
+        echo "Removing source code (wheel installation)" && \
+        # Retain an /skypilot/dist dir to keep the compatibility in stage 3 and reduce the final image size
+        mv /skypilot/dist /dist.backup && cd .. && rm -rf /skypilot && mkdir /skypilot && mv /dist.backup /skypilot/dist; \
+    else \
+        echo "Installing NPM and Node.js for dashboard build" && \
+        apt-get update -y && \
+        apt-get install --no-install-recommends -y git curl ca-certificates gnupg && \
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+        apt-get install -y nodejs && \
+        npm install -g npm@latest && \
+        echo "Building dashboard in Stage 2" && \
+        npm --prefix sky/dashboard install && \
+        NEXT_BASE_PATH=${NEXT_BASE_PATH} npm --prefix sky/dashboard run build && \
+        echo "Cleaning up dashboard build-time dependencies" && \
+        rm -rf sky/dashboard/node_modules ~/.npm /root/.npm && \
+        apt-get clean && rm -rf /var/lib/apt/lists/* && \
+        echo "Keeping source code and record commit sha (editable installation)" && \
+        python -c "import setup; setup.replace_commit_hash()" && \
+        # Remove .git dir to reduce the final image size
+        rm -rf .git; \
+    fi
+
+
+# Stage 3: Main image
+FROM python:3.10.18-slim
+
+ARG INSTALL_FROM_SOURCE=true
 
 # Copy Google Cloud SDK from Stage 1
 COPY --from=gcloud-apt-install /usr/lib/google-cloud-sdk /opt/google-cloud-sdk
@@ -27,9 +64,6 @@ ARG TARGETARCH
 # Control Next.js basePath for staging deployments
 ARG NEXT_BASE_PATH=/dashboard
 
-# Control installation method - default to install from source
-ARG INSTALL_FROM_SOURCE=true
-
 # Install system packages
 RUN apt-get update -y && \
     apt-get install --no-install-recommends -y \
@@ -37,13 +71,24 @@ RUN apt-get update -y && \
         pciutils nano fuse socat netcat-openbsd curl tini autossh jq && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Install the session manager plugin for AWS CLI.
+RUN ARCH=$(case "${TARGETARCH:-$(uname -m)}" in \
+        "amd64"|"x86_64") echo "64bit" ;; \
+        "aarch64") echo "arm64" ;; \
+        *) echo "${TARGETARCH:-$(uname -m)}" ;; \
+    esac) && \
+    echo "Installing session manager plugin for AWS CLI for ${ARCH}" && \
+    curl "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_${ARCH}/session-manager-plugin.deb" -o "session-manager-plugin.deb" && \
+    sudo dpkg -i session-manager-plugin.deb && \
+    rm session-manager-plugin.deb
+
 # Install kubectl based on architecture
 RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
         "x86_64") echo "amd64" ;; \
         "aarch64") echo "arm64" ;; \
         *) echo "$(uname -m)" ;; \
     esac)} && \
-    curl -LO "https://dl.k8s.io/release/v1.31.6/bin/linux/$ARCH/kubectl" && \
+    curl -LO "https://dl.k8s.io/release/v1.33.5/bin/linux/$ARCH/kubectl" && \
     install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
     rm kubectl
 
@@ -52,28 +97,21 @@ RUN curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh | NEBIUS_INS
 # Install uv
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     ~/.local/bin/uv pip install --prerelease allow azure-cli --system && \
-    if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
-        echo "Installing NPM and Node.js for dashboard build" && \
-        curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-        apt-get install -y nodejs && \
-        npm install -g npm@latest; \
-    fi && \
+    # Upgrade setuptools in base image to mitigate CVE-2024-6345
+    ~/.local/bin/uv pip install --system --upgrade setuptools==78.1.1 && \
     ~/.local/bin/uv cache clean && \
     rm -rf ~/.cache/pip ~/.cache/uv && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 # Add source code
-COPY . /skypilot
+COPY --from=process-source /skypilot /skypilot
 
 # Install SkyPilot and set up dashboard based on installation method
 RUN cd /skypilot && \
     if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
         echo "Installing from source in editable mode" && \
-        ~/.local/bin/uv pip install -e ".[all]" --system && \
-        echo "Building dashboard" && \
-        npm --prefix sky/dashboard install && \
-        NEXT_BASE_PATH=${NEXT_BASE_PATH} npm --prefix sky/dashboard run build; \
+        ~/.local/bin/uv pip install -e ".[all]" --system; \
     else \
         echo "Installing from wheel file" && \
         WHEEL_FILE=$(ls dist/*skypilot*.whl 2>/dev/null | head -1) && \
@@ -90,10 +128,7 @@ RUN cd /skypilot && \
     rm -rf ~/.cache/pip ~/.cache/uv && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
-    # Remove source code if installed from wheel (not needed for wheel installs)
+    # Remove the empty /skypilot dir for backward compatibility
     if [ "$INSTALL_FROM_SOURCE" != "true" ]; then \
-        echo "Removing source code (wheel installation)" && \
         rm -rf /skypilot; \
-    else \
-        echo "Keeping source code (editable installation)"; \
     fi

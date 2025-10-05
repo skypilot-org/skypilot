@@ -19,6 +19,7 @@ from sky.adaptors import common as adaptors_common
 from sky.client import service_account_auth
 from sky.data import data_utils
 from sky.data import storage_utils
+from sky.schemas.api import responses as api_responses
 from sky.server import common as server_common
 from sky.server.requests import payloads
 from sky.skylet import constants
@@ -43,8 +44,10 @@ logger = sky_logging.init_logger(__name__)
 _DOWNLOAD_CHUNK_BYTES = 8192
 # The chunk size for the zip file to be uploaded to the API server. We split
 # the zip file into chunks to avoid network issues for large request body that
-# can be caused by NGINX's client_max_body_size.
-_UPLOAD_CHUNK_BYTES = 512 * 1024 * 1024
+# can be caused by NGINX's client_max_body_size or Cloudflare's upload limit.
+# As of 09/25/2025, the upload limit for Cloudflare's free plan is 100MiB:
+# https://developers.cloudflare.com/support/troubleshooting/http-status-codes/4xx-client-error/error-413/
+_UPLOAD_CHUNK_BYTES = 100 * 1024 * 1024
 
 FILE_UPLOAD_LOGS_DIR = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                     'file_uploads')
@@ -81,10 +84,11 @@ def download_logs_from_api_server(
             local_machine_prefix) for remote_path in paths_on_api_server
     }
     body = payloads.DownloadBody(folder_paths=list(paths_on_api_server),)
-    response = requests.post(f'{server_common.get_server_url()}/download',
-                             json=json.loads(body.model_dump_json()),
-                             stream=True,
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/download',
+        json=json.loads(body.model_dump_json()),
+        stream=True)
     if response.status_code == 200:
         remote_home_path = response.headers.get('X-Home-Path')
         assert remote_home_path is not None, response.headers
@@ -165,8 +169,12 @@ class UploadChunkParams:
     log_file: str
 
 
-def _upload_chunk_with_retry(params: UploadChunkParams) -> None:
-    """Uploads a chunk of a zip file to the API server."""
+def _upload_chunk_with_retry(params: UploadChunkParams) -> str:
+    """Uploads a chunk of a zip file to the API server.
+
+    Returns:
+        Status of the upload.
+    """
     upload_logger = params.upload_logger
     upload_logger.info(
         f'Uploading chunk: {params.chunk_index + 1} / {params.total_chunks}')
@@ -195,13 +203,14 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> None:
                 data = response.json()
                 status = data.get('status')
                 msg = ('Uploaded chunk: '
-                       f'{params.chunk_index + 1} / {params.total_chunks}')
-                if status == 'uploading':
+                       f'{params.chunk_index + 1} / {params.total_chunks} '
+                       f'(Status: {status})')
+                if status == api_responses.UploadStatus.UPLOADING.value:
                     missing_chunks = data.get('missing_chunks')
                     if missing_chunks:
                         msg += f' - Waiting for chunks: {missing_chunks}'
                 upload_logger.info(msg)
-                return
+                return status
             elif attempt < max_attempts - 1:
                 upload_logger.error(
                     f'Failed to upload chunk: '
@@ -209,7 +218,12 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> None:
                     f'{response.content.decode("utf-8")}')
                 upload_logger.info(
                     f'Retrying... ({attempt + 1} / {max_attempts})')
-                time.sleep(1)
+                if response.status_code == 503:
+                    # If the server is temporarily unavailable,
+                    # wait a little longer before retrying.
+                    time.sleep(10)
+                else:
+                    time.sleep(1)
             else:
                 try:
                     response_details = response.json().get('detail')
@@ -225,6 +239,8 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> None:
                         ux_utils.error_message(error_msg + '\n',
                                                params.log_file,
                                                is_local=True))
+    # If we reach here, the upload failed.
+    return 'failed'
 
 
 @contextlib.contextmanager
@@ -347,15 +363,29 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
                     log_file,
                     is_local=True))
 
+            upload_completed = False
             with httpx.Client(timeout=timeout) as client:
-                chunk_params = [
-                    UploadChunkParams(client, upload_id, chunk_index,
-                                      total_chunks, temp_zip_file.name,
-                                      upload_logger, log_file)
-                    for chunk_index in range(total_chunks)
-                ]
-                subprocess_utils.run_in_parallel(_upload_chunk_with_retry,
-                                                 chunk_params)
+                total_retries = 3
+                for retry in range(total_retries):
+                    chunk_params = [
+                        UploadChunkParams(client, upload_id, chunk_index,
+                                          total_chunks, temp_zip_file.name,
+                                          upload_logger, log_file)
+                        for chunk_index in range(total_chunks)
+                    ]
+                    statuses = subprocess_utils.run_in_parallel(
+                        _upload_chunk_with_retry, chunk_params)
+                    if any(status == api_responses.UploadStatus.COMPLETED.value
+                           for status in statuses):
+                        upload_completed = True
+                        break
+                    else:
+                        upload_logger.info(
+                            f'No chunk upload returned completed status. '
+                            'Retrying entire upload... '
+                            f'({retry + 1} / {total_retries})')
+            if not upload_completed:
+                raise RuntimeError('Failed to upload files to API server.')
         os.unlink(temp_zip_file.name)
         upload_logger.info(f'Uploaded files: {upload_list}')
         logger.info(

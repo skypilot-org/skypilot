@@ -1,9 +1,11 @@
 """SDK functions for managed jobs."""
+import ipaddress
 import os
 import pathlib
 import tempfile
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
+from urllib import parse as urlparse
 import uuid
 
 import colorama
@@ -17,13 +19,17 @@ from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
+from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
+from sky.backends import cloud_vm_ray_backend
 from sky.catalog import common as service_catalog_common
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
+from sky.metrics import utils as metrics_lib
 from sky.provision import common as provision_common
+from sky.schemas.api import responses
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.serve.server import impl
@@ -42,8 +48,15 @@ from sky.utils import ux_utils
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
+    from google.protobuf import json_format
+
     import sky
-    from sky.backends import cloud_vm_ray_backend
+    from sky.schemas.generated import managed_jobsv1_pb2
+else:
+    json_format = adaptors_common.LazyImport('google.protobuf.json_format')
+
+    managed_jobsv1_pb2 = adaptors_common.LazyImport(
+        'sky.schemas.generated.managed_jobsv1_pb2')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -188,11 +201,12 @@ def launch(
 
     dag_uuid = str(uuid.uuid4().hex[:4])
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
-    dag.resolve_and_validate_volumes()
+
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(dag)
+    dag.resolve_and_validate_volumes()
     if not dag.is_chain():
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Only single-task or chain DAG is '
@@ -201,6 +215,21 @@ def launch(
     # TODO(aylei): use consolidated job controller instead of performing
     # pre-mount operations when submitting jobs.
     dag.pre_mount_volumes()
+
+    # If there is a local postgres db, when the api server tries launching on
+    # the remote jobs controller it will fail. therefore, we should remove this
+    # before sending the config to the jobs controller.
+    # TODO(luca) there are a lot of potential problems with postgres being sent
+    # to the jobs controller. for example if the postgres is whitelisted to
+    # only the API server, this will then break. the simple solution to that is
+    # telling the user to add the jobs controller to the postgres whitelist.
+    if not managed_job_utils.is_consolidation_mode():
+        db_path = mutated_user_config.get('db', None)
+        if db_path is not None:
+            parsed = urlparse.urlparse(db_path)
+            if ((parsed.hostname == 'localhost' or
+                 ipaddress.ip_address(parsed.hostname).is_loopback)):
+                mutated_user_config.pop('db', None)
 
     user_dag_str_user_specified = dag_utils.dump_chain_dag_to_yaml_str(
         dag, use_user_specified_yaml=True)
@@ -263,15 +292,13 @@ def launch(
         # Check whether cached jobs controller cluster is accessible
         cluster_name = (
             controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name)
-        record = global_user_state.get_cluster_from_name(cluster_name)
-        if record is not None:
+        if global_user_state.cluster_with_name_exists(cluster_name):
             # there is a cached jobs controller cluster
             try:
                 # TODO: do something with returned status?
                 _, _ = backend_utils.refresh_cluster_status_handle(
                     cluster_name=cluster_name,
-                    force_refresh_statuses=set(status_lib.ClusterStatus),
-                    acquire_per_cluster_status_lock=False)
+                    force_refresh_statuses=set(status_lib.ClusterStatus))
             except (exceptions.ClusterOwnerIdentityMismatchError,
                     exceptions.CloudUserIdentityError,
                     exceptions.ClusterStatusFetchingError) as e:
@@ -351,6 +378,8 @@ def launch(
                 'priority': priority,
                 'consolidation_mode_job_id': consolidation_mode_job_id,
                 'pool': pool,
+                'job_controller_indicator_file':
+                    managed_job_constants.JOB_CONTROLLER_INDICATOR_FILE,
                 **controller_utils.shared_controller_vars_to_fill(
                     controller,
                     remote_user_config_path=remote_user_config_path,
@@ -424,10 +453,8 @@ def launch(
                     ]
                     run_script = '\n'.join(env_cmds + [run_script])
                     # Dump script for high availability recovery.
-                    if controller_utils.high_availability_specified(
-                            controller_name):
-                        managed_job_state.set_ha_recovery_script(
-                            consolidation_mode_job_id, run_script)
+                    managed_job_state.set_ha_recovery_script(
+                        consolidation_mode_job_id, run_script)
                     backend.run_on_head(local_handle, run_script)
                     return consolidation_mode_job_id, local_handle
 
@@ -514,7 +541,7 @@ def queue_from_kubernetes_pod(
     except exceptions.CommandError as e:
         raise RuntimeError(str(e)) from e
 
-    jobs, _, result_type = managed_job_utils.load_managed_job_queue(
+    jobs, _, result_type, _, _ = managed_job_utils.load_managed_job_queue(
         job_table_payload)
 
     if result_type == managed_job_utils.ManagedJobQueueResultType.DICT:
@@ -575,19 +602,13 @@ def _maybe_restart_controller(
     return handle
 
 
+# For backwards compatibility
+# TODO(hailong): Remove before 0.12.0.
 @usage_lib.entrypoint
-def queue(
-    refresh: bool,
-    skip_finished: bool = False,
-    all_users: bool = False,
-    job_ids: Optional[List[int]] = None,
-    user_match: Optional[str] = None,
-    workspace_match: Optional[str] = None,
-    name_match: Optional[str] = None,
-    pool_match: Optional[str] = None,
-    page: Optional[int] = None,
-    limit: Optional[int] = None,
-) -> Tuple[List[Dict[str, Any]], int]:
+def queue(refresh: bool,
+          skip_finished: bool = False,
+          all_users: bool = False,
+          job_ids: Optional[List[int]] = None) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets statuses of managed jobs.
 
@@ -617,6 +638,82 @@ def queue(
             does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
+    jobs, _, _, _ = queue_v2(refresh, skip_finished, all_users, job_ids, None,
+                             None, None, None, None, None, None)
+
+    return jobs
+
+
+@usage_lib.entrypoint
+def queue_v2_api(
+    refresh: bool,
+    skip_finished: bool = False,
+    all_users: bool = False,
+    job_ids: Optional[List[int]] = None,
+    user_match: Optional[str] = None,
+    workspace_match: Optional[str] = None,
+    name_match: Optional[str] = None,
+    pool_match: Optional[str] = None,
+    page: Optional[int] = None,
+    limit: Optional[int] = None,
+    statuses: Optional[List[str]] = None,
+) -> Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int]:
+    """Gets statuses of managed jobs and parse the
+    jobs to responses.ManagedJobRecord."""
+    jobs, total, status_counts, total_no_filter = queue_v2(
+        refresh, skip_finished, all_users, job_ids, user_match, workspace_match,
+        name_match, pool_match, page, limit, statuses)
+    return [responses.ManagedJobRecord(**job) for job in jobs
+           ], total, status_counts, total_no_filter
+
+
+@metrics_lib.time_me
+def queue_v2(
+    refresh: bool,
+    skip_finished: bool = False,
+    all_users: bool = False,
+    job_ids: Optional[List[int]] = None,
+    user_match: Optional[str] = None,
+    workspace_match: Optional[str] = None,
+    name_match: Optional[str] = None,
+    pool_match: Optional[str] = None,
+    page: Optional[int] = None,
+    limit: Optional[int] = None,
+    statuses: Optional[List[str]] = None,
+) -> Tuple[List[Dict[str, Any]], int, Dict[str, int], int]:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Gets statuses of managed jobs with filtering.
+
+    Please refer to sky.cli.job_queue for documentation.
+
+    Returns:
+        jobs: List[Dict[str, Any]]
+            [
+                {
+                    'job_id': int,
+                    'job_name': str,
+                    'resources': str,
+                    'submitted_at': (float) timestamp of submission,
+                    'end_at': (float) timestamp of end,
+                    'job_duration': (float) duration in seconds,
+                    'recovery_count': (int) Number of retries,
+                    'status': (sky.jobs.ManagedJobStatus) of the job,
+                    'cluster_resources': (str) resources of the cluster,
+                    'region': (str) region of the cluster,
+                    'user_name': (Optional[str]) job creator's user name,
+                    'user_hash': (str) job creator's user hash,
+                    'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                    'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                }
+            ]
+        total: int, total number of jobs after filter
+        status_counts: Dict[str, int], status counts after filter
+        total_no_filter: int, total number of jobs before filter
+    Raises:
+        sky.exceptions.ClusterNotUpError: the jobs controller is not up or
+            does not exist.
+        RuntimeError: if failed to get the managed jobs with ssh.
+    """
     if limit is not None:
         if limit < 1:
             raise ValueError(f'Limit must be at least 1, got {limit}')
@@ -628,88 +725,131 @@ def queue(
         if page is not None:
             raise ValueError('Limit must be specified when page is specified')
 
-    handle = _maybe_restart_controller(refresh,
-                                       stopped_message='No in-progress '
-                                       'managed jobs.',
-                                       spinner_message='Checking '
-                                       'managed jobs')
+    with metrics_lib.time_it('jobs.queue.restart_controller', group='jobs'):
+        handle = _maybe_restart_controller(refresh,
+                                           stopped_message='No in-progress '
+                                           'managed jobs.',
+                                           spinner_message='Checking '
+                                           'managed jobs')
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
     user_hashes: Optional[List[Optional[str]]] = None
+    show_jobs_without_user_hash = False
     if not all_users:
         user_hashes = [common_utils.get_user_hash()]
         # For backwards compatibility, we show jobs that do not have a
         # user_hash. TODO(cooperc): Remove before 0.12.0.
         user_hashes.append(None)
+        show_jobs_without_user_hash = True
     elif user_match is not None:
         users = global_user_state.get_user_by_name_match(user_match)
         if not users:
-            return [], 0
+            return [], 0, {}, 0
         user_hashes = [user.id for user in users]
 
     accessible_workspaces = list(workspaces_core.get_workspaces().keys())
-    code = managed_job_utils.ManagedJobCodeGen.get_job_table(
-        skip_finished, accessible_workspaces, job_ids, workspace_match,
-        name_match, pool_match, page, limit, user_hashes)
-    returncode, job_table_payload, stderr = backend.run_on_head(
-        handle,
-        code,
-        require_outputs=True,
-        stream_logs=False,
-        separate_stderr=True)
+
+    if handle.is_grpc_enabled_with_flag:
+        try:
+            request = managed_jobsv1_pb2.GetJobTableRequest(
+                skip_finished=skip_finished,
+                accessible_workspaces=accessible_workspaces,
+                job_ids=managed_jobsv1_pb2.JobIds(
+                    ids=job_ids) if job_ids is not None else None,
+                workspace_match=workspace_match,
+                name_match=name_match,
+                pool_match=pool_match,
+                page=page,
+                limit=limit,
+                # Remove None from user_hashes, as the gRPC server uses the
+                # show_jobs_without_user_hash flag instead.
+                user_hashes=managed_jobsv1_pb2.UserHashes(hashes=[
+                    user_hash for user_hash in user_hashes
+                    if user_hash is not None
+                ]) if user_hashes is not None else None,
+                statuses=managed_jobsv1_pb2.Statuses(
+                    statuses=statuses) if statuses is not None else None,
+                show_jobs_without_user_hash=show_jobs_without_user_hash,
+            )
+            response = backend_utils.invoke_skylet_with_retries(
+                lambda: cloud_vm_ray_backend.SkyletClient(
+                    handle.get_grpc_channel()).get_managed_job_table(request))
+            jobs = managed_job_utils.decode_managed_job_protos(response.jobs)
+            return jobs, response.total, dict(
+                response.status_counts), response.total_no_filter
+        except exceptions.SkyletMethodNotImplementedError:
+            pass
+
+    with metrics_lib.time_it('jobs.queue.generate_code', group='jobs'):
+        code = managed_job_utils.ManagedJobCodeGen.get_job_table(
+            skip_finished, accessible_workspaces, job_ids, workspace_match,
+            name_match, pool_match, page, limit, user_hashes, statuses)
+    with metrics_lib.time_it('jobs.queue.run_on_head', group='jobs'):
+        returncode, job_table_payload, stderr = backend.run_on_head(
+            handle,
+            code,
+            require_outputs=True,
+            stream_logs=False,
+            separate_stderr=True)
 
     if returncode != 0:
         logger.error(job_table_payload + stderr)
         raise RuntimeError('Failed to fetch managed jobs with returncode: '
                            f'{returncode}.\n{job_table_payload + stderr}')
 
-    jobs, total, result_type = managed_job_utils.load_managed_job_queue(
-        job_table_payload)
+    with metrics_lib.time_it('jobs.queue.load_job_queue', group='jobs'):
+        (jobs, total, result_type, total_no_filter, status_counts
+        ) = managed_job_utils.load_managed_job_queue(job_table_payload)
 
     if result_type == managed_job_utils.ManagedJobQueueResultType.DICT:
-        return jobs, total
+        return jobs, total, status_counts, total_no_filter
 
     # Backward compatibility for old jobs controller without filtering
     # TODO(hailong): remove this after 0.12.0
-    if not all_users:
+    with metrics_lib.time_it('jobs.queue.filter_and_process', group='jobs'):
+        if not all_users:
 
-        def user_hash_matches_or_missing(job: Dict[str, Any]) -> bool:
-            user_hash = job.get('user_hash', None)
-            if user_hash is None:
-                # For backwards compatibility, we show jobs that do not have a
-                # user_hash. TODO(cooperc): Remove before 0.12.0.
-                return True
-            return user_hash == common_utils.get_user_hash()
+            def user_hash_matches_or_missing(job: Dict[str, Any]) -> bool:
+                user_hash = job.get('user_hash', None)
+                if user_hash is None:
+                    # For backwards compatibility, we show jobs that do not have
+                    # a user_hash. TODO(cooperc): Remove before 0.12.0.
+                    return True
+                return user_hash == common_utils.get_user_hash()
 
-        jobs = list(filter(user_hash_matches_or_missing, jobs))
+            jobs = list(filter(user_hash_matches_or_missing, jobs))
 
-    jobs = list(
-        filter(
-            lambda job: job.get('workspace', skylet_constants.
-                                SKYPILOT_DEFAULT_WORKSPACE) in
-            accessible_workspaces, jobs))
-
-    if skip_finished:
-        # Filter out the finished jobs. If a multi-task job is partially
-        # finished, we will include all its tasks.
-        non_finished_tasks = list(
-            filter(lambda job: not job['status'].is_terminal(), jobs))
-        non_finished_job_ids = {job['job_id'] for job in non_finished_tasks}
         jobs = list(
-            filter(lambda job: job['job_id'] in non_finished_job_ids, jobs))
+            filter(
+                lambda job: job.get('workspace', skylet_constants.
+                                    SKYPILOT_DEFAULT_WORKSPACE) in
+                accessible_workspaces, jobs))
 
-    if job_ids:
-        jobs = [job for job in jobs if job['job_id'] in job_ids]
+        if skip_finished:
+            # Filter out the finished jobs. If a multi-task job is partially
+            # finished, we will include all its tasks.
+            non_finished_tasks = list(
+                filter(lambda job: not job['status'].is_terminal(), jobs))
+            non_finished_job_ids = {job['job_id'] for job in non_finished_tasks}
+            jobs = list(
+                filter(lambda job: job['job_id'] in non_finished_job_ids, jobs))
 
-    return managed_job_utils.filter_jobs(jobs,
-                                         workspace_match,
-                                         name_match,
-                                         pool_match,
-                                         page=page,
-                                         limit=limit,
-                                         user_match=user_match,
-                                         enable_user_match=True)
+        if job_ids:
+            jobs = [job for job in jobs if job['job_id'] in job_ids]
+
+        filtered_jobs, total, status_counts = managed_job_utils.filter_jobs(
+            jobs,
+            workspace_match,
+            name_match,
+            pool_match,
+            page=page,
+            limit=limit,
+            user_match=user_match,
+            enable_user_match=True,
+            statuses=statuses,
+        )
+    return filtered_jobs, total, status_counts, total_no_filter
 
 
 @usage_lib.entrypoint
@@ -751,33 +891,60 @@ def cancel(name: Optional[str] = None,
                     'Can only specify one of JOB_IDS, name, pool, or all/'
                     f'all_users. Provided {" ".join(arguments)!r}.')
 
+        job_ids = None if (all_users or all) else job_ids
+
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
-        if all_users:
-            code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
-                None, all_users=True)
-        elif all:
-            code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(None)
-        elif job_ids:
-            code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
-                job_ids)
-        elif name is not None:
-            code = managed_job_utils.ManagedJobCodeGen.cancel_job_by_name(name)
-        else:
-            assert pool is not None, (job_ids, name, pool, all)
-            code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_pool(pool)
-        # The stderr is redirected to stdout
-        returncode, stdout, stderr = backend.run_on_head(handle,
-                                                         code,
-                                                         require_outputs=True,
-                                                         stream_logs=False)
-        try:
-            subprocess_utils.handle_returncode(returncode, code,
-                                               'Failed to cancel managed job',
-                                               stdout + stderr)
-        except exceptions.CommandError as e:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(e.error_msg) from e
+
+        use_legacy = not handle.is_grpc_enabled_with_flag
+
+        if not use_legacy:
+            current_workspace = skypilot_config.get_active_workspace()
+            try:
+                request = managed_jobsv1_pb2.CancelJobsRequest(
+                    current_workspace=current_workspace)
+
+                if all_users or all or job_ids:
+                    request.all_users = all_users
+                    if all:
+                        request.user_hash = common_utils.get_user_hash()
+                    if job_ids is not None:
+                        request.job_ids.CopyFrom(
+                            managed_jobsv1_pb2.JobIds(ids=job_ids))
+                elif name is not None:
+                    request.job_name = name
+                else:
+                    assert pool is not None, (job_ids, name, pool, all)
+                    request.pool_name = pool
+
+                response = backend_utils.invoke_skylet_with_retries(
+                    lambda: cloud_vm_ray_backend.SkyletClient(
+                        handle.get_grpc_channel()).cancel_managed_jobs(request))
+                stdout = response.message
+            except exceptions.SkyletMethodNotImplementedError:
+                use_legacy = True
+
+        if use_legacy:
+            if all_users or all or job_ids:
+                code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
+                    job_ids, all_users=all_users)
+            elif name is not None:
+                code = managed_job_utils.ManagedJobCodeGen.cancel_job_by_name(
+                    name)
+            else:
+                assert pool is not None, (job_ids, name, pool, all)
+                code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_pool(
+                    pool)
+            # The stderr is redirected to stdout
+            returncode, stdout, stderr = backend.run_on_head(
+                handle, code, require_outputs=True, stream_logs=False)
+            try:
+                subprocess_utils.handle_returncode(
+                    returncode, code, 'Failed to cancel managed job',
+                    stdout + stderr)
+            except exceptions.CommandError as e:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(e.error_msg) from e
 
         logger.info(stdout)
         if 'Multiple jobs found with name' in stdout:
@@ -892,9 +1059,10 @@ def pool_apply(
     task: 'sky.Task',
     pool_name: str,
     mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
+    workers: Optional[int] = None,
 ) -> None:
     """Apply a config to a pool."""
-    return impl.apply(task, pool_name, mode, pool=True)
+    return impl.apply(task, workers, pool_name, mode, pool=True)
 
 
 @usage_lib.entrypoint

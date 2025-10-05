@@ -16,17 +16,20 @@ export async function getManagedJobs(options = {}) {
   try {
     const {
       allUsers = true,
+      skipFinished = false,
       nameMatch,
       userMatch,
       workspaceMatch,
       poolMatch,
       page,
       limit,
+      statuses,
     } = options;
 
     const body = {
       all_users: allUsers,
       verbose: true,
+      skip_finished: skipFinished,
     };
     if (nameMatch !== undefined) body.name_match = nameMatch;
     if (userMatch !== undefined) body.user_match = userMatch;
@@ -34,8 +37,9 @@ export async function getManagedJobs(options = {}) {
     if (poolMatch !== undefined) body.pool_match = poolMatch;
     if (page !== undefined) body.page = page;
     if (limit !== undefined) body.limit = limit;
+    if (statuses !== undefined && statuses.length > 0) body.statuses = statuses;
 
-    const response = await apiClient.post(`/jobs/queue`, body);
+    const response = await apiClient.post(`/jobs/queue/v2`, body);
     const id = response.headers.get('X-Skypilot-Request-ID');
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
     if (fetchedData.status === 500) {
@@ -64,6 +68,8 @@ export async function getManagedJobs(options = {}) {
     const total = Array.isArray(parsed)
       ? managedJobs.length
       : (parsed?.total ?? managedJobs.length);
+    const totalNoFilter = parsed?.total_no_filter || total;
+    const statusCounts = parsed?.status_counts || {};
 
     // Process jobs data
     const jobData = managedJobs.map((job) => {
@@ -159,10 +165,22 @@ export async function getManagedJobs(options = {}) {
       };
     });
 
-    return { jobs: jobData, total, controllerStopped: false };
+    return {
+      jobs: jobData,
+      total,
+      totalNoFilter,
+      controllerStopped: false,
+      statusCounts,
+    };
   } catch (error) {
     console.error('Error fetching managed job data:', error);
-    return { jobs: [], total: 0, controllerStopped: false };
+    return {
+      jobs: [],
+      total: 0,
+      totalNoFilter: 0,
+      controllerStopped: false,
+      statusCounts: {},
+    };
   }
 }
 
@@ -180,7 +198,7 @@ export async function getManagedJobs(options = {}) {
  * @param {boolean} options.useClientPagination - Whether to use client-side pagination (default: true)
  * @returns {Promise<{jobs: Array, total: number, controllerStopped: boolean}>}
  */
-export async function getManagedJobsWithClientPagination(options = {}) {
+export async function getManagedJobsWithClientPagination(options) {
   const {
     allUsers = true,
     nameMatch,
@@ -190,7 +208,7 @@ export async function getManagedJobsWithClientPagination(options = {}) {
     page = 1,
     limit = 10,
     useClientPagination = true,
-  } = options;
+  } = options || {};
 
   try {
     // If client pagination is disabled, fall back to server-side pagination
@@ -270,7 +288,10 @@ export async function getPoolStatus() {
     // Also fetch managed jobs to get job counts by pool
     let jobsData = { jobs: [] };
     try {
-      const jobsResponse = await getManagedJobs({ allUsers: true });
+      const jobsResponse = await getManagedJobs({
+        allUsers: true,
+        skipFinished: true,
+      });
       if (!jobsResponse.controllerStopped) {
         jobsData = jobsResponse;
       }
@@ -525,7 +546,7 @@ export async function handleJobAction(action, jobId, cluster) {
     case 'restartcontroller':
       logStarter = 'Restarting';
       logMiddle = 'restarted';
-      apiPath = 'jobs/queue';
+      apiPath = 'jobs/queue/v2';
       requestBody = { all_users: true, refresh: true };
       jobId = 'controller';
       break;
@@ -624,5 +645,61 @@ export async function handleJobAction(action, jobId, cluster) {
       `Critical error ${logStarter} job ${jobId}: ${outerError.message}`,
       'error'
     );
+  }
+}
+
+/**
+ * Downloads managed job logs as a zip via the API server.
+ * Flow:
+ * 1) POST /jobs/download_logs to fetch logs from the remote cluster to API server
+ * 2) POST /download to stream a zip back to the browser and trigger download
+ */
+export async function downloadManagedJobLogs({
+  jobId = null,
+  name = null,
+  controller = false,
+}) {
+  try {
+    // Step 1: schedule server-side download; result is a mapping job_id -> folder path on API server
+    const mapping = await apiClient.fetch('/jobs/download_logs', {
+      job_id: jobId,
+      name: name,
+      controller: controller,
+      refresh: false,
+    });
+
+    const folderPaths = Object.values(mapping || {});
+    if (!folderPaths.length) {
+      showToast('No logs found to download.', 'warning');
+      return;
+    }
+
+    // Step 2: request the zip and trigger browser download
+    const baseUrl = window.location.origin;
+    const fullUrl = `${baseUrl}${ENDPOINT}/download`;
+    const resp = await fetch(`${fullUrl}?relative=items`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folder_paths: folderPaths }),
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Download failed: ${resp.status} ${text}`);
+    }
+    const blob = await resp.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const namePart = jobId ? `job-${jobId}` : name ? `job-${name}` : 'job';
+    const logType = controller ? 'controller-logs' : 'logs';
+    a.href = url;
+    a.download = `managed-${namePart}-${logType}-${ts}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  } catch (error) {
+    console.error('Error downloading managed job logs:', error);
+    showToast(`Error downloading managed job logs: ${error.message}`, 'error');
   }
 }

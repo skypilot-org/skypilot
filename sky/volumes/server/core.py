@@ -11,6 +11,7 @@ from sky import global_user_state
 from sky import models
 from sky import provision
 from sky import sky_logging
+from sky.schemas.api import responses
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import rich_utils
@@ -56,7 +57,7 @@ def volume_refresh():
                         volume_name, status=status_lib.VolumeStatus.IN_USE)
 
 
-def volume_list() -> List[Dict[str, Any]]:
+def volume_list() -> List[responses.VolumeRecord]:
     """Gets the volumes.
 
     Returns:
@@ -83,6 +84,25 @@ def volume_list() -> List[Dict[str, Any]]:
     """
     with rich_utils.safe_status(ux_utils.spinner_message('Listing volumes')):
         volumes = global_user_state.get_volumes()
+        cloud_to_configs: Dict[str, List[models.VolumeConfig]] = {}
+        for volume in volumes:
+            config = volume.get('handle')
+            if config is None:
+                volume_name = volume.get('name')
+                logger.warning(f'Volume {volume_name} has no handle.')
+                continue
+            cloud = config.cloud
+            if cloud not in cloud_to_configs:
+                cloud_to_configs[cloud] = []
+            cloud_to_configs[cloud].append(config)
+
+        cloud_to_used_by_pods, cloud_to_used_by_clusters = {}, {}
+        for cloud, configs in cloud_to_configs.items():
+            used_by_pods, used_by_clusters = provision.get_all_volumes_usedby(
+                cloud, configs)
+            cloud_to_used_by_pods[cloud] = used_by_pods
+            cloud_to_used_by_clusters[cloud] = used_by_clusters
+
         all_users = global_user_state.get_all_users()
         user_map = {user.id: user.name for user in all_users}
         records = []
@@ -109,8 +129,12 @@ def volume_list() -> List[Dict[str, Any]]:
                 logger.warning(f'Volume {volume_name} has no handle.')
                 continue
             cloud = config.cloud
-            usedby_pods, usedby_clusters = provision.get_volume_usedby(
-                cloud, config)
+            usedby_pods, usedby_clusters = provision.map_all_volumes_usedby(
+                cloud,
+                cloud_to_used_by_pods[cloud],
+                cloud_to_used_by_clusters[cloud],
+                config,
+            )
             record['type'] = config.type
             record['cloud'] = config.cloud
             record['region'] = config.region
@@ -120,7 +144,7 @@ def volume_list() -> List[Dict[str, Any]]:
             record['name_on_cloud'] = config.name_on_cloud
             record['usedby_pods'] = usedby_pods
             record['usedby_clusters'] = usedby_clusters
-            records.append(record)
+            records.append(responses.VolumeRecord(**record))
         return records
 
 
@@ -162,9 +186,16 @@ def volume_delete(names: List[str]) -> None:
                 global_user_state.delete_volume(name)
 
 
-def volume_apply(name: str, volume_type: str, cloud: str, region: Optional[str],
-                 zone: Optional[str], size: Optional[str],
-                 config: Dict[str, Any]) -> None:
+def volume_apply(
+    name: str,
+    volume_type: str,
+    cloud: str,
+    region: Optional[str],
+    zone: Optional[str],
+    size: Optional[str],
+    config: Dict[str, Any],
+    labels: Optional[Dict[str, str]] = None,
+) -> None:
     """Creates or registers a volume.
 
     Args:
@@ -175,6 +206,7 @@ def volume_apply(name: str, volume_type: str, cloud: str, region: Optional[str],
         zone: The zone of the volume.
         size: The size of the volume.
         config: The configuration of the volume.
+        labels: The labels of the volume.
 
     """
     with rich_utils.safe_status(ux_utils.spinner_message('Creating volume')):
@@ -182,6 +214,7 @@ def volume_apply(name: str, volume_type: str, cloud: str, region: Optional[str],
         # generate the storage name on cloud.
         cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud)
         assert cloud_obj is not None
+        region, zone = cloud_obj.validate_region_zone(region, zone)
         name_uuid = str(uuid.uuid4())[:6]
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, max_length=cloud_obj.max_cluster_name_length())
@@ -195,6 +228,7 @@ def volume_apply(name: str, volume_type: str, cloud: str, region: Optional[str],
             size=size,
             config=config,
             name_on_cloud=name_on_cloud,
+            labels=labels,
         )
         logger.debug(
             f'Creating volume {name} on cloud {cloud} with config {config}')
