@@ -11,6 +11,7 @@ import enum
 import logging
 import os
 import pathlib
+import re
 import shlex
 import textwrap
 import time
@@ -299,8 +300,10 @@ async def get_job_status(
                 job_logger.info(f'Job status: {status}')
             job_logger.info('=' * 34)
             return status
-        except (exceptions.CommandError, grpc.RpcError,
-                grpc.FutureTimeoutError) as e:
+        except (exceptions.CommandError, grpc.RpcError, grpc.FutureTimeoutError,
+                ValueError, TypeError) as e:
+            # Note: Each of these exceptions has some additional conditions to
+            # limit how we handle it and whether or not we catch it.
             # Retry on k8s transient network errors. This is useful when using
             # coreweave which may have transient network issue sometimes.
             is_transient_error = False
@@ -319,6 +322,20 @@ async def get_job_status(
                     is_transient_error = True
             elif isinstance(e, grpc.FutureTimeoutError):
                 detailed_reason = 'Timeout'
+            # TODO(cooperc): Gracefully handle these exceptions in the backend.
+            elif isinstance(e, ValueError):
+                if re.search(r'Cluster yaml .* not found', str(e)):
+                    detailed_reason = 'Cluster yaml was deleted'
+                else:
+                    raise
+            elif isinstance(e, TypeError):
+                error_msg_to_check = (
+                    'SSHCommandRunner.__init__() missing 2 required positional '
+                    'arguments: \'ssh_user\' and \'ssh_private_key\'')
+                if str(e) == error_msg_to_check:
+                    detailed_reason = 'SSH credentials were already cleaned up'
+                else:
+                    raise
             if is_transient_error:
                 logger.info('Failed to connect to the cluster. Retrying '
                             f'({i + 1}/{_JOB_STATUS_FETCH_MAX_RETRIES})...')
