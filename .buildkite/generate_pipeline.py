@@ -39,9 +39,9 @@ DEFAULT_CLOUDS_TO_RUN = default_clouds_to_run
 PYTEST_TO_CLOUD_KEYWORD = {v: k for k, v in cloud_to_pytest_keyword.items()}
 
 QUEUE_GENERIC_CLOUD = 'generic_cloud'
-QUEUE_KUBERNETES = 'kubernetes'
 QUEUE_EKS = 'eks'
 QUEUE_GKE = 'gke'
+QUEUE_KIND = 'kind'
 # We use a separate queue for generic cloud tests on remote servers because:
 # - generic_cloud queue has high concurrency on a single VM
 # - remote-server requires launching a docker container per test
@@ -60,7 +60,7 @@ CLOUD_QUEUE_MAP = {
     'gcp': QUEUE_GENERIC_CLOUD,
     'azure': QUEUE_GENERIC_CLOUD,
     'nebius': QUEUE_GENERIC_CLOUD,
-    'kubernetes': QUEUE_KUBERNETES
+    'kubernetes': QUEUE_KIND
 }
 
 GENERATED_FILE_HEAD = ('# This is an auto-generated Buildkite pipeline by '
