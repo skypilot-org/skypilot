@@ -49,12 +49,22 @@ class TestScale:
         if self.test_cluster_names:
             try:
                 placeholders = ', '.join(['?' for _ in self.test_cluster_names])
+
+                # Delete from cluster_yaml table first
+                cursor.execute(
+                    f"DELETE FROM cluster_yaml WHERE cluster_name IN ({placeholders})",
+                    self.test_cluster_names)
+                yaml_deleted = cursor.rowcount
+
+                # Delete from clusters table
                 cursor.execute(
                     f"DELETE FROM clusters WHERE name IN ({placeholders})",
                     self.test_cluster_names)
+                clusters_deleted = cursor.rowcount
+
                 conn.commit()
-                print(
-                    f"Cleaned up {len(self.test_cluster_names)} test clusters")
+                print(f"Cleaned up {clusters_deleted} test clusters")
+                print(f"Cleaned up {yaml_deleted} cluster_yaml entries")
             except Exception as e:
                 print(f"Active clusters cleanup failed: {e}")
 
@@ -109,12 +119,31 @@ class TestScale:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
 
+            # Load cluster YAML for the sample cluster
+            cursor.execute(
+                "SELECT yaml FROM cluster_yaml WHERE cluster_name = ?",
+                (self.generator.active_cluster_name,))
+            sample_yaml_row = cursor.fetchone()
+            sample_yaml = sample_yaml_row[0] if sample_yaml_row else None
+
+            if not sample_yaml:
+                print(
+                    f"Warning: No cluster_yaml found for {self.generator.active_cluster_name}. "
+                    "Cluster YAML will not be injected.")
+
             # Get column names from first cluster dict
             cluster_columns = list(clusters[0].keys())
             columns_str = ', '.join(cluster_columns)
             placeholders = ', '.join(['?' for _ in cluster_columns])
 
             insert_sql = f"INSERT INTO clusters ({columns_str}) VALUES ({placeholders})"
+
+            # Prepare cluster_yaml insert
+            yaml_insert_sql = """
+                INSERT INTO cluster_yaml (cluster_name, yaml)
+                VALUES (?, ?)
+                ON CONFLICT(cluster_name) DO UPDATE SET yaml = excluded.yaml
+            """
 
             # Insert in batches for performance
             batch_size = 100
@@ -132,11 +161,23 @@ class TestScale:
                 cursor.executemany(insert_sql, batch_data)
                 conn.commit()
 
+                # Also insert cluster_yaml entries if we have sample YAML
+                if sample_yaml:
+                    yaml_batch_data = [
+                        (cluster['name'], sample_yaml) for cluster in batch
+                    ]
+                    cursor.executemany(yaml_insert_sql, yaml_batch_data)
+                    conn.commit()
+
                 total_inserted += len(batch_data)
 
             # Store names for cleanup
             self.test_cluster_names.extend(
                 [cluster['name'] for cluster in clusters])
+
+            print(f"Injected {total_inserted} clusters")
+            if sample_yaml:
+                print(f"Injected {total_inserted} cluster_yaml entries")
 
             cursor.close()
             conn.close()

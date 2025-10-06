@@ -167,53 +167,78 @@ For manual testing and debugging, you can inject test data without automatic cle
 ### Inject Test Clusters
 
 ```bash
-# Inject 5 test clusters (default count)
-python tests/scale_tests/inject_test_clusters.py
+# Inject test clusters (default: 5 clusters)
+python tests/load_tests/db_scale_tests/inject_test_clusters.py
+
+# Inject with custom count and template cluster
+python tests/load_tests/db_scale_tests/inject_test_clusters.py \
+  --count 2000 \
+  --active-cluster scale-test-active
 
 # Verify with sky status
 sky status
 
 # Clean up when done
-python tests/scale_tests/cleanup_test_clusters.py
+python tests/load_tests/db_scale_tests/cleanup_test_clusters.py
 ```
 
-You can modify the `count` variable in `inject_test_clusters.py` to inject more clusters.
+**Options:**
+- `--count N` - Number of test clusters to inject (default: 5)
+- `--active-cluster NAME` - Name of active cluster to use as template (default: scale-test-active)
 
 ### Inject Test Cluster History
 
 ```bash
-# Inject test cluster history (5 recent + 5 old by default)
-python tests/scale_tests/inject_test_cluster_history.py
+# Inject test cluster history (default: 5 recent + 5 old)
+python tests/load_tests/db_scale_tests/inject_test_cluster_history.py
+
+# Inject with custom counts and template cluster
+python tests/load_tests/db_scale_tests/inject_test_cluster_history.py \
+  --recent-count 2000 \
+  --old-count 8000 \
+  --terminated-cluster scale-test-terminated
 
 # Verify programmatically
 python -c "from sky import global_user_state; print(len(global_user_state.get_clusters_from_history(days=10)))"
 
 # Clean up when done
-python tests/scale_tests/cleanup_test_cluster_history.py
+python tests/load_tests/db_scale_tests/cleanup_test_cluster_history.py
 ```
 
-You can modify the `recent_count` and `old_count` variables to inject more entries.
+**Options:**
+- `--recent-count N` - Number of recent terminated clusters to inject (default: 5)
+- `--old-count N` - Number of old terminated clusters to inject (default: 5)
+- `--terminated-cluster NAME` - Name of terminated cluster to use as template (default: scale-test-terminated)
 
 ### Inject Test Managed Jobs
 
 ```bash
-# Inject 10 test managed jobs (default count)
-python tests/scale_tests/inject_test_managed_jobs.py
+# Inject test managed jobs (default: 10 jobs)
+python tests/load_tests/db_scale_tests/inject_test_managed_jobs.py
+
+# Inject with custom count and template job
+python tests/load_tests/db_scale_tests/inject_test_managed_jobs.py \
+  --count 10000 \
+  --managed-job-id 2
 
 # Verify with sky jobs queue
 sky jobs queue
 
-# Clean up when done
-python tests/scale_tests/cleanup_test_managed_jobs.py
+# Clean up when done (deletes all jobs with ID > 2)
+python tests/load_tests/db_scale_tests/cleanup_test_managed_jobs.py --managed-job-id 2
 ```
 
-You can modify the `count` variable in `inject_test_managed_jobs.py` to inject more jobs.
+**Options:**
+- `--count N` - Number of test managed jobs to inject (default: 10)
+- `--managed-job-id ID` - Job ID of managed job to use as template (default: 1)
+
+**Cleanup:**
+- `--managed-job-id ID` (required) - Deletes all jobs with job_id > this value
 
 **Note**: These scripts inject data but do not clean it up automatically, allowing you to manually test SkyPilot commands against a scaled database. Remember to run the cleanup scripts when you're done testing.
 
 ## Future Enhancements
 
 - Remote PostgreSQL testing support
-- Configurable dataset sizes via command-line arguments for injection scripts
 - Integration with CI/CD performance benchmarking
 - Memory usage profiling
