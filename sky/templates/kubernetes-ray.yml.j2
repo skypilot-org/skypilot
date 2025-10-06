@@ -632,6 +632,9 @@ available_node_types:
           command: ["/bin/bash", "-c", "--"]
           args:
             - |
+              # Set -x to print the commands and their arguments as they are executed.
+              # Useful for debugging.
+              set -x
               # Helper function to conditionally use sudo
               # TODO(zhwu): consolidate the two prefix_cmd and sudo replacements
               prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
@@ -1086,6 +1089,8 @@ available_node_types:
 
               touch {{k8s_high_availability_deployment_volume_mount_path}}/k8s_container_ready
               {% endif %}
+              # Set +x to stop printing the commands and their arguments as they are executed.
+              set +x
 
               trap : TERM INT; log_tail || sleep infinity & wait
 
