@@ -479,10 +479,11 @@ class TestBackwardCompatibility:
         # This is a regression test for https://github.com/skypilot-org/skypilot/pull/7278
         # and https://github.com/skypilot-org/skypilot/pull/7494
         check_controller_process_count = [
-            'jobs_controller=$(sky status -u | grep sky-jobs-controller- | awk \'{print $1}\')',
+            's=$(sky status -u) && echo "$s"',
+            'jobs_controller=$(echo "$s" | grep sky-jobs-controller- | awk \'{print $1}\')',
             'if [ -z "$jobs_controller" ]; then echo "ERROR: jobs controller not found in sky status"; exit 1; fi',
             'echo "Jobs controller: $jobs_controller"',
-            'num_controllers=$(ssh $jobs_controller pgrep -f "msky.jobs.controller" | wc -l)',
+            'num_controllers=$(ssh $jobs_controller "pgrep -f \'msky.jobs.controller\' | wc -l")',
             'if [ -z "$num_controllers" ]; then echo "ERROR: failed to get controller process count"; exit 1; fi',
             'echo "Controller process count: $num_controllers"',
             'if [ "$num_controllers" -ne 1 ]; then echo "ERROR: num_controllers is $num_controllers, expected 1"; exit 1; fi',
