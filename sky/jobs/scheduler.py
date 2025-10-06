@@ -91,18 +91,24 @@ JOB_MEMORY_MB = 400
 LAUNCHES_PER_WORKER = 8
 # this can probably be increased to around 300-400 but keeping it lower to just
 # to be safe
-JOBS_PER_WORKER = 200
-
-# keep 1GB reserved after the controllers
-MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB = 2048
-
-CURRENT_HASH = os.path.expanduser('~/.sky/wheels/current_sky_wheel_hash')
-
+MAX_JOBS_PER_WORKER = 200
+# Maximum number of controllers that can be running. Hard to handle more than
+# 512 launches at once.
+MAX_CONTROLLERS = 512 // LAUNCHES_PER_WORKER
+# Limit the number of jobs that can be running at once on the entire jobs
+# controller cluster. It's hard to handle cancellation of more than 2000 jobs at
+# once.
+MAX_TOTAL_JOBS = 2000
 # Maximum values for above constants. There will start to be lagging issues
 # at these numbers already.
 # JOB_MEMORY_MB = 200
 # LAUNCHES_PER_WORKER = 16
 # JOBS_PER_WORKER = 400
+
+# keep 1GB reserved after the controllers
+MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB = 2048
+
+CURRENT_HASH = os.path.expanduser('~/.sky/wheels/current_sky_wheel_hash')
 
 
 def get_number_of_controllers() -> int:
@@ -136,13 +142,16 @@ def get_number_of_controllers() -> int:
                     config.short_worker_config.burstable_parallelism) * \
             server_config.SHORT_WORKER_MEM_GB * 1024
 
-        return max(1, int((total_memory_mb - used) // JOB_MEMORY_MB))
+        return min(MAX_CONTROLLERS,
+                   max(1, int((total_memory_mb - used) // JOB_MEMORY_MB)))
     else:
-        return max(
-            1,
-            int((total_memory_mb - MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB) /
-                ((LAUNCHES_PER_WORKER * server_config.LONG_WORKER_MEM_GB) * 1024
-                 + JOB_MEMORY_MB)))
+        return min(
+            MAX_CONTROLLERS,
+            max(
+                1,
+                int((total_memory_mb - MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB) /
+                    ((LAUNCHES_PER_WORKER * server_config.LONG_WORKER_MEM_GB) *
+                     1024 + JOB_MEMORY_MB))))
 
 
 def start_controller() -> None:
