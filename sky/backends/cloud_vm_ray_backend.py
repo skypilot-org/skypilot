@@ -3634,7 +3634,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     global_user_state.ClusterEventType.STATUS_CHANGE)
 
                 cluster_info = provisioner.post_provision_runtime_setup(
-                    repr(handle.launched_resources.cloud),
+                    handle.launched_resources,
                     resources_utils.ClusterName(handle.cluster_name,
                                                 handle.cluster_name_on_cloud),
                     handle.cluster_yaml,

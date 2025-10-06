@@ -123,7 +123,16 @@ def get_number_of_controllers() -> int:
     consolidation_mode = skypilot_config.get_nested(
         ('jobs', 'controller', 'consolidation_mode'), default_value=False)
 
-    total_memory_mb = common_utils.get_mem_size_gb() * 1024
+    try:
+        with open(
+                os.path.expanduser(
+                    managed_job_constants.JOB_CONTROLLER_MEMORY_FILE),
+                'r') as f:
+            memory_limit_gb = float(f.read())
+    except FileNotFoundError:
+        memory_limit_gb = common_utils.get_mem_size_gb()
+
+    total_memory_mb = memory_limit_gb * 1024
     if consolidation_mode:
         config = server_config.compute_server_config(deploy=True, quiet=True)
 

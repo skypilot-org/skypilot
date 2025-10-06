@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from sky import exceptions
 from sky import logs
 from sky import provision
+from sky import resources as resources_lib
 from sky import sky_logging
 from sky.provision import common
 from sky.provision import docker_utils
@@ -90,12 +91,6 @@ def _set_usage_run_id_cmd() -> str:
         # launch operation.
         f'echo "{usage_lib.messages.usage.run_id}" > '
         f'{usage_constants.USAGE_RUN_ID_FILE}')
-
-
-def _set_skypilot_env_var_cmd() -> str:
-    """Sets the skypilot environment variables on the remote machine."""
-    env_vars = env_options.Options.all_options()
-    return '; '.join([f'export {k}={v}' for k, v in env_vars.items()])
 
 
 def _auto_retry(should_retry: Callable[[Exception], bool] = lambda _: True):
@@ -482,11 +477,31 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
 @common.log_function_start_end
 @_auto_retry()
 @timeline.event
-def start_skylet_on_head_node(cluster_name: str,
-                              cluster_info: common.ClusterInfo,
-                              ssh_credentials: Dict[str, Any]) -> None:
+def start_skylet_on_head_node(
+        cluster_name: resources_utils.ClusterName, cluster_info: common.ClusterInfo,
+        ssh_credentials: Dict[str, Any],
+        launched_resources: resources_lib.Resources) -> None:
     """Start skylet on the head node."""
-    del cluster_name
+    # Avoid circular import.
+    from sky.utils import controller_utils
+
+    def _set_skypilot_env_var_cmd() -> str:
+        """Sets the skypilot environment variables on the remote machine."""
+        env_vars = {
+            k: str(v) for (k, v) in env_options.Options.all_options().items()
+        }
+        is_controller = controller_utils.Controllers.from_name(
+            cluster_name.display_name) is not None
+        is_kubernetes = cluster_info.provider_name == 'kubernetes'
+        if is_controller and is_kubernetes:
+            if launched_resources.cpus is not None:
+                env_vars['SKYPILOT_POD_CPU_CORE_LIMIT'] = (
+                    launched_resources.cpus)
+            if launched_resources.memory is not None:
+                env_vars['SKYPILOT_POD_MEMORY_GB_LIMIT'] = (
+                    launched_resources.memory)
+        return '; '.join([f'export {k}={v}' for k, v in env_vars.items()])
+
     runners = provision.get_command_runners(cluster_info.provider_name,
                                             cluster_info, **ssh_credentials)
     head_runner = runners[0]
