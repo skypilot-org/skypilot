@@ -61,15 +61,28 @@ jobs:
       DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
       HELM_DEPLOY_KEY: ${{ secrets.HELM_DEPLOY_KEY }}
 
-  smoke-tests:
+  smoke-tests-gke:
     needs: [set-package, docker-build, publish-helm]
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
       commit: ${{ github.sha }}
       branch: ${{ github.ref_name }}
-      message: "helm-docker-release deploy tests ${{ needs.set-package.outputs.package_name }} ${{ needs.docker-build.outputs.version }}"
+      message: "helm-docker-release deploy tests GKE ${{ needs.set-package.outputs.package_name }} ${{ needs.docker-build.outputs.version }}"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--gcp --helm-package ${{ needs.set-package.outputs.package_name }} --helm-version ${{ needs.docker-build.outputs.version }} -k test_helm_deploy_gke"}'
-      timeout_minutes: 30
+      timeout_minutes: 60
+    secrets:
+      BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+
+  smoke-tests-eks:
+    needs: [set-package, docker-build, publish-helm]
+    uses: ./.github/workflows/buildkite-trigger-wait.yml
+    with:
+      commit: ${{ github.sha }}
+      branch: ${{ github.ref_name }}
+      message: "helm-docker-release deploy tests EKS ${{ needs.set-package.outputs.package_name }} ${{ needs.docker-build.outputs.version }}"
+      pipeline: "smoke-tests"
+      build_env_vars: '{"ARGS": "--aws --helm-package ${{ needs.set-package.outputs.package_name }} --helm-version ${{ needs.docker-build.outputs.version }} -k test_helm_deploy_eks"}'
+      timeout_minutes: 60
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}

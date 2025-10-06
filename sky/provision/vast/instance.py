@@ -44,9 +44,10 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
+    del cluster_name  # unused
     pending_status = ['CREATED', 'RESTARTING']
 
     created_instance_ids = []

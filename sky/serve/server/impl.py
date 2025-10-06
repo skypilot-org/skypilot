@@ -5,6 +5,7 @@ import shlex
 import signal
 import tempfile
 import threading
+import typing
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import uuid
 
@@ -17,10 +18,12 @@ from sky import execution
 from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
+from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.catalog import common as service_catalog_common
 from sky.data import storage as storage_lib
 from sky.serve import constants as serve_constants
+from sky.serve import serve_rpc_utils
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import constants
@@ -35,6 +38,11 @@ from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
+
+if typing.TYPE_CHECKING:
+    import grpc
+else:
+    grpc = adaptors_common.LazyImport('grpc')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -78,24 +86,35 @@ def _get_service_record(
     """Get the service record."""
     noun = 'pool' if pool else 'service'
 
-    code = serve_utils.ServeCodeGen.get_service_status([service_name],
-                                                       pool=pool)
-    returncode, serve_status_payload, stderr = backend.run_on_head(
-        handle,
-        code,
-        require_outputs=True,
-        stream_logs=False,
-        separate_stderr=True)
-    try:
-        subprocess_utils.handle_returncode(returncode,
-                                           code,
-                                           f'Failed to get {noun} status',
-                                           stderr,
-                                           stream_logs=True)
-    except exceptions.CommandError as e:
-        raise RuntimeError(e.error_msg) from e
+    assert isinstance(handle, backends.CloudVmRayResourceHandle)
+    use_legacy = not handle.is_grpc_enabled_with_flag
 
-    service_statuses = serve_utils.load_service_status(serve_status_payload)
+    if not use_legacy:
+        try:
+            service_statuses = serve_rpc_utils.RpcRunner.get_service_status(
+                handle, [service_name], pool)
+        except exceptions.SkyletMethodNotImplementedError:
+            use_legacy = True
+
+    if use_legacy:
+        code = serve_utils.ServeCodeGen.get_service_status([service_name],
+                                                           pool=pool)
+        returncode, serve_status_payload, stderr = backend.run_on_head(
+            handle,
+            code,
+            require_outputs=True,
+            stream_logs=False,
+            separate_stderr=True)
+        try:
+            subprocess_utils.handle_returncode(returncode,
+                                               code,
+                                               f'Failed to get {noun} status',
+                                               stderr,
+                                               stream_logs=True)
+        except exceptions.CommandError as e:
+            raise RuntimeError(e.error_msg) from e
+
+        service_statuses = serve_utils.load_service_status(serve_status_payload)
 
     assert len(service_statuses) <= 1, service_statuses
     if not service_statuses:
@@ -287,30 +306,44 @@ def up(
         fore = colorama.Fore
 
         assert controller_job_id is not None and controller_handle is not None
+        assert isinstance(controller_handle, backends.CloudVmRayResourceHandle)
+        backend = backend_utils.get_backend_from_handle(controller_handle)
+        assert isinstance(backend, backends.CloudVmRayBackend)
         # TODO(tian): Cache endpoint locally to speedup. Endpoint won't
         # change after the first time, so there is no consistency issue.
-        with rich_utils.safe_status(
-                ux_utils.spinner_message(
-                    f'Waiting for the {noun} to register')):
-            # This function will check the controller job id in the database
-            # and return the endpoint if the job id matches. Otherwise it will
-            # return None.
-            code = serve_utils.ServeCodeGen.wait_service_registration(
-                service_name, controller_job_id, pool)
-            backend = backend_utils.get_backend_from_handle(controller_handle)
-            assert isinstance(backend, backends.CloudVmRayBackend)
-            assert isinstance(controller_handle,
-                              backends.CloudVmRayResourceHandle)
-            returncode, lb_port_payload, _ = backend.run_on_head(
-                controller_handle,
-                code,
-                require_outputs=True,
-                stream_logs=False)
         try:
-            subprocess_utils.handle_returncode(
-                returncode, code, f'Failed to wait for {noun} initialization',
-                lb_port_payload)
-        except exceptions.CommandError:
+            with rich_utils.safe_status(
+                    ux_utils.spinner_message(
+                        f'Waiting for the {noun} to register')):
+                # This function will check the controller job id in the database
+                # and return the endpoint if the job id matches. Otherwise it
+                # will return None.
+                use_legacy = not controller_handle.is_grpc_enabled_with_flag
+
+                if controller_handle.is_grpc_enabled_with_flag:
+                    try:
+                        lb_port = serve_rpc_utils.RpcRunner.wait_service_registration(  # pylint: disable=line-too-long
+                            controller_handle, service_name, controller_job_id,
+                            pool)
+                    except exceptions.SkyletMethodNotImplementedError:
+                        use_legacy = True
+
+                if use_legacy:
+                    code = serve_utils.ServeCodeGen.wait_service_registration(
+                        service_name, controller_job_id, pool)
+                    returncode, lb_port_payload, _ = backend.run_on_head(
+                        controller_handle,
+                        code,
+                        require_outputs=True,
+                        stream_logs=False)
+                    subprocess_utils.handle_returncode(
+                        returncode, code,
+                        f'Failed to wait for {noun} initialization',
+                        lb_port_payload)
+                    lb_port = serve_utils.load_service_initialization_result(
+                        lb_port_payload)
+        except (exceptions.CommandError, grpc.FutureTimeoutError,
+                grpc.RpcError):
             if serve_utils.is_consolidation_mode(pool):
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
@@ -344,8 +377,6 @@ def up(
                         'Failed to spin up the service. Please '
                         'check the logs above for more details.') from None
         else:
-            lb_port = serve_utils.load_service_initialization_result(
-                lb_port_payload)
             if not serve_utils.is_consolidation_mode(pool) and not pool:
                 socket_endpoint = backend_utils.get_endpoints(
                     controller_handle.cluster_name,
@@ -380,6 +411,9 @@ def up(
                 f'\n{ux_utils.INDENT_LAST_SYMBOL}To terminate the pool:\t'
                 f'{ux_utils.BOLD}sky jobs pool down {service_name}'
                 f'{ux_utils.RESET_BOLD}'
+                f'\n{ux_utils.INDENT_SYMBOL}To update the number of workers:\t'
+                f'{ux_utils.BOLD}sky jobs pool apply --pool {service_name} '
+                f'--workers 5{ux_utils.RESET_BOLD}'
                 '\n\n' + ux_utils.finishing_message('Successfully created pool '
                                                     f'{service_name!r}.'))
         else:
@@ -417,17 +451,91 @@ def up(
 
 
 def update(
-    task: 'task_lib.Task',
+    task: Optional['task_lib.Task'],
     service_name: str,
     mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
     pool: bool = False,
+    workers: Optional[int] = None,
 ) -> None:
     """Updates an existing service or pool."""
     noun = 'pool' if pool else 'service'
     capnoun = noun.capitalize()
+
+    controller_type = controller_utils.get_controller_for_pool(pool)
+    handle = backend_utils.is_controller_accessible(
+        controller=controller_type,
+        stopped_message=
+        'Service controller is stopped. There is no service to update. '
+        f'To spin up a new service, use {ux_utils.BOLD}'
+        f'sky serve up{ux_utils.RESET_BOLD}',
+        non_existent_message='Service does not exist. '
+        'To spin up a new service, '
+        f'use {ux_utils.BOLD}sky serve up{ux_utils.RESET_BOLD}',
+    )
+
+    assert isinstance(handle, backends.CloudVmRayResourceHandle)
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+
+    service_record = _get_service_record(service_name, pool, handle, backend)
+
+    if service_record is None:
+        cmd = 'sky jobs pool up' if pool else 'sky serve up'
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(f'Cannot find {noun} {service_name!r}.'
+                               f'To spin up a {noun}, use {ux_utils.BOLD}'
+                               f'{cmd}{ux_utils.RESET_BOLD}')
+
+    # If task is None and workers is specified, load existing configuration
+    # and update replica count.
+    if task is None:
+        if workers is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cannot update {noun} without specifying '
+                    f'task or workers. Please provide either a task '
+                    f'or specify the number of workers.')
+
+        if not pool:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Non-pool service, trying to update replicas to '
+                    f'{workers} is not supported. Ignoring the update.')
+
+        # Load the existing task configuration from the service's YAML file
+        latest_yaml_path = serve_utils.generate_task_yaml_file_name(
+            service_name, service_record['version'], expand_user=False)
+
+        logger.debug('Loading existing task configuration from '
+                     f'{latest_yaml_path} to create a new modified task.')
+
+        # Get the path locally.
+        with tempfile.NamedTemporaryFile(
+                prefix=f'service-task-{service_name}-',
+                mode='w',
+        ) as service_file:
+            try:
+                backend.download_file(handle, latest_yaml_path,
+                                      service_file.name)
+            except exceptions.CommandError as e:
+                raise RuntimeError(
+                    f'Failed to download the old task configuration from '
+                    f'{latest_yaml_path}: {e.error_msg}') from e
+
+            # Load the existing task configuration
+            existing_config = yaml_utils.read_yaml(service_file.name)
+            task = task_lib.Task.from_yaml_config(existing_config)
+
+        if task.service is None:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('No service configuration found in '
+                                   f'existing {noun} {service_name!r}')
+        task.set_service(task.service.copy(min_replicas=workers))
+
     task.validate()
     serve_utils.validate_service_task(task, pool=pool)
 
+    # Now apply the policy and handle task-specific logic
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
@@ -448,30 +556,6 @@ def update(
                        'Any updates to the keyfile and certfile will not take '
                        'effect. To update TLS keyfile and certfile, please '
                        'tear down the service and spin up a new one.')
-
-    controller_type = controller_utils.get_controller_for_pool(pool)
-    handle = backend_utils.is_controller_accessible(
-        controller=controller_type,
-        stopped_message=
-        'Service controller is stopped. There is no service to update. '
-        f'To spin up a new service, use {ux_utils.BOLD}'
-        f'sky serve up{ux_utils.RESET_BOLD}',
-        non_existent_message='Service does not exist. '
-        'To spin up a new service, '
-        f'use {ux_utils.BOLD}sky serve up{ux_utils.RESET_BOLD}',
-    )
-
-    backend = backend_utils.get_backend_from_handle(handle)
-    assert isinstance(backend, backends.CloudVmRayBackend)
-
-    service_record = _get_service_record(service_name, pool, handle, backend)
-
-    if service_record is None:
-        cmd = 'sky jobs pool up' if pool else 'sky serve up'
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(f'Cannot find {noun} {service_name!r}.'
-                               f'To spin up a {noun}, use {ux_utils.BOLD}'
-                               f'{cmd}{ux_utils.RESET_BOLD}')
 
     prompt = None
     if (service_record['status'] == serve_state.ServiceStatus.CONTROLLER_FAILED
@@ -503,29 +587,39 @@ def update(
         controller_utils.maybe_translate_local_file_mounts_and_sync_up(
             task, task_type='serve')
 
-    code = serve_utils.ServeCodeGen.add_version(service_name)
-    returncode, version_string_payload, stderr = backend.run_on_head(
-        handle,
-        code,
-        require_outputs=True,
-        stream_logs=False,
-        separate_stderr=True)
-    try:
-        subprocess_utils.handle_returncode(returncode,
-                                           code,
-                                           'Failed to add version',
-                                           stderr,
-                                           stream_logs=True)
-    except exceptions.CommandError as e:
-        raise RuntimeError(e.error_msg) from e
+    use_legacy = not handle.is_grpc_enabled_with_flag
 
-    version_string = serve_utils.load_version_string(version_string_payload)
-    try:
-        current_version = int(version_string)
-    except ValueError as e:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Failed to parse version: {version_string}; '
-                             f'Returncode: {returncode}') from e
+    if not use_legacy:
+        try:
+            current_version = serve_rpc_utils.RpcRunner.add_version(
+                handle, service_name)
+        except exceptions.SkyletMethodNotImplementedError:
+            use_legacy = True
+
+    if use_legacy:
+        code = serve_utils.ServeCodeGen.add_version(service_name)
+        returncode, version_string_payload, stderr = backend.run_on_head(
+            handle,
+            code,
+            require_outputs=True,
+            stream_logs=False,
+            separate_stderr=True)
+        try:
+            subprocess_utils.handle_returncode(returncode,
+                                               code,
+                                               'Failed to add version',
+                                               stderr,
+                                               stream_logs=True)
+        except exceptions.CommandError as e:
+            raise RuntimeError(e.error_msg) from e
+
+        version_string = serve_utils.load_version_string(version_string_payload)
+        try:
+            current_version = int(version_string)
+        except ValueError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Failed to parse version: {version_string}; '
+                                 f'Returncode: {returncode}') from e
 
     with tempfile.NamedTemporaryFile(
             prefix=f'{service_name}-v{current_version}',
@@ -540,23 +634,33 @@ def update(
                                      {remote_task_yaml_path: service_file.name},
                                      storage_mounts=None)
 
-        code = serve_utils.ServeCodeGen.update_service(service_name,
-                                                       current_version,
-                                                       mode=mode.value,
-                                                       pool=pool)
-        returncode, _, stderr = backend.run_on_head(handle,
-                                                    code,
-                                                    require_outputs=True,
-                                                    stream_logs=False,
-                                                    separate_stderr=True)
-        try:
-            subprocess_utils.handle_returncode(returncode,
-                                               code,
-                                               f'Failed to update {noun}s',
-                                               stderr,
-                                               stream_logs=True)
-        except exceptions.CommandError as e:
-            raise RuntimeError(e.error_msg) from e
+        use_legacy = not handle.is_grpc_enabled_with_flag
+
+        if not use_legacy:
+            try:
+                serve_rpc_utils.RpcRunner.update_service(
+                    handle, service_name, current_version, mode, pool)
+            except exceptions.SkyletMethodNotImplementedError:
+                use_legacy = True
+
+        if use_legacy:
+            code = serve_utils.ServeCodeGen.update_service(service_name,
+                                                           current_version,
+                                                           mode=mode.value,
+                                                           pool=pool)
+            returncode, _, stderr = backend.run_on_head(handle,
+                                                        code,
+                                                        require_outputs=True,
+                                                        stream_logs=False,
+                                                        separate_stderr=True)
+            try:
+                subprocess_utils.handle_returncode(returncode,
+                                                   code,
+                                                   f'Failed to update {noun}s',
+                                                   stderr,
+                                                   stream_logs=True)
+            except exceptions.CommandError as e:
+                raise RuntimeError(e.error_msg) from e
 
     cmd = 'sky jobs pool status' if pool else 'sky serve status'
     logger.info(
@@ -573,6 +677,7 @@ def update(
 
 def apply(
     task: 'task_lib.Task',
+    workers: Optional[int],
     service_name: str,
     mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
     pool: bool = False,
@@ -588,7 +693,7 @@ def apply(
             service_record = _get_service_record(service_name, pool, handle,
                                                  backend)
             if service_record is not None:
-                return update(task, service_name, mode, pool)
+                return update(task, service_name, mode, pool, workers)
         except exceptions.ClusterNotUpError:
             pass
         up(task, service_name, pool)
@@ -619,29 +724,44 @@ def down(
         raise ValueError(f'Can only specify one of {noun}_names or all. '
                          f'Provided {argument_str!r}.')
 
-    backend = backend_utils.get_backend_from_handle(handle)
-    assert isinstance(backend, backends.CloudVmRayBackend)
     service_names = None if all else service_names
-    code = serve_utils.ServeCodeGen.terminate_services(service_names, purge,
-                                                       pool)
 
     try:
-        returncode, stdout, _ = backend.run_on_head(handle,
-                                                    code,
-                                                    require_outputs=True,
-                                                    stream_logs=False)
+        assert isinstance(handle, backends.CloudVmRayResourceHandle)
+        use_legacy = not handle.is_grpc_enabled_with_flag
+
+        if not use_legacy:
+            try:
+                stdout = serve_rpc_utils.RpcRunner.terminate_services(
+                    handle, service_names, purge, pool)
+            except exceptions.SkyletMethodNotImplementedError:
+                use_legacy = True
+
+        if use_legacy:
+            backend = backend_utils.get_backend_from_handle(handle)
+            assert isinstance(backend, backends.CloudVmRayBackend)
+            code = serve_utils.ServeCodeGen.terminate_services(
+                service_names, purge, pool)
+
+            returncode, stdout, _ = backend.run_on_head(handle,
+                                                        code,
+                                                        require_outputs=True,
+                                                        stream_logs=False)
+
+            subprocess_utils.handle_returncode(returncode, code,
+                                               f'Failed to terminate {noun}',
+                                               stdout)
     except exceptions.FetchClusterInfoError as e:
         raise RuntimeError(
             'Failed to fetch controller IP. Please refresh controller status '
-            f'by `sky status -r {controller_type.value.cluster_name}` '
-            'and try again.') from e
-
-    try:
-        subprocess_utils.handle_returncode(returncode, code,
-                                           f'Failed to terminate {noun}',
-                                           stdout)
+            f'by `sky status -r {controller_type.value.cluster_name}` and try '
+            'again.') from e
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
+    except grpc.RpcError as e:
+        raise RuntimeError(f'{e.details()} ({e.code()})') from e
+    except grpc.FutureTimeoutError as e:
+        raise RuntimeError('gRPC timed out') from e
 
     logger.info(stdout)
 
@@ -669,27 +789,40 @@ def status(
         stopped_message=controller_type.value.default_hint_if_non_existent.
         replace('service', noun))
 
-    backend = backend_utils.get_backend_from_handle(handle)
-    assert isinstance(backend, backends.CloudVmRayBackend)
+    assert isinstance(handle, backends.CloudVmRayResourceHandle)
+    use_legacy = not handle.is_grpc_enabled_with_flag
 
-    code = serve_utils.ServeCodeGen.get_service_status(service_names, pool=pool)
-    returncode, serve_status_payload, stderr = backend.run_on_head(
-        handle,
-        code,
-        require_outputs=True,
-        stream_logs=False,
-        separate_stderr=True)
+    if not use_legacy:
+        try:
+            service_records = serve_rpc_utils.RpcRunner.get_service_status(
+                handle, service_names, pool)
+        except exceptions.SkyletMethodNotImplementedError:
+            use_legacy = True
 
-    try:
-        subprocess_utils.handle_returncode(returncode,
-                                           code,
-                                           f'Failed to fetch {noun}s',
-                                           stderr,
-                                           stream_logs=True)
-    except exceptions.CommandError as e:
-        raise RuntimeError(e.error_msg) from e
+    if use_legacy:
+        backend = backend_utils.get_backend_from_handle(handle)
+        assert isinstance(backend, backends.CloudVmRayBackend)
 
-    service_records = serve_utils.load_service_status(serve_status_payload)
+        code = serve_utils.ServeCodeGen.get_service_status(service_names,
+                                                           pool=pool)
+        returncode, serve_status_payload, stderr = backend.run_on_head(
+            handle,
+            code,
+            require_outputs=True,
+            stream_logs=False,
+            separate_stderr=True)
+
+        try:
+            subprocess_utils.handle_returncode(returncode,
+                                               code,
+                                               f'Failed to fetch {noun}s',
+                                               stderr,
+                                               stream_logs=True)
+        except exceptions.CommandError as e:
+            raise RuntimeError(e.error_msg) from e
+
+        service_records = serve_utils.load_service_status(serve_status_payload)
+
     # Get the endpoint for each service
     for service_record in service_records:
         service_record['endpoint'] = None
@@ -792,25 +925,37 @@ def _get_all_replica_targets(
         handle: backends.CloudVmRayResourceHandle,
         pool: bool) -> Set[serve_utils.ServiceComponentTarget]:
     """Helper function to get targets for all live replicas."""
-    code = serve_utils.ServeCodeGen.get_service_status([service_name],
-                                                       pool=pool)
-    returncode, serve_status_payload, stderr = backend.run_on_head(
-        handle,
-        code,
-        require_outputs=True,
-        stream_logs=False,
-        separate_stderr=True)
+    assert isinstance(handle, backends.CloudVmRayResourceHandle)
+    use_legacy = not handle.is_grpc_enabled_with_flag
 
-    try:
-        subprocess_utils.handle_returncode(returncode,
-                                           code,
-                                           'Failed to fetch services',
-                                           stderr,
-                                           stream_logs=True)
-    except exceptions.CommandError as e:
-        raise RuntimeError(e.error_msg) from e
+    if not use_legacy:
+        try:
+            service_records = serve_rpc_utils.RpcRunner.get_service_status(
+                handle, [service_name], pool)
+        except exceptions.SkyletMethodNotImplementedError:
+            use_legacy = True
 
-    service_records = serve_utils.load_service_status(serve_status_payload)
+    if use_legacy:
+        code = serve_utils.ServeCodeGen.get_service_status([service_name],
+                                                           pool=pool)
+        returncode, serve_status_payload, stderr = backend.run_on_head(
+            handle,
+            code,
+            require_outputs=True,
+            stream_logs=False,
+            separate_stderr=True)
+
+        try:
+            subprocess_utils.handle_returncode(returncode,
+                                               code,
+                                               'Failed to fetch services',
+                                               stderr,
+                                               stream_logs=True)
+        except exceptions.CommandError as e:
+            raise RuntimeError(e.error_msg) from e
+
+        service_records = serve_utils.load_service_status(serve_status_payload)
+
     if not service_records:
         raise ValueError(f'Service {service_name!r} not found.')
     assert len(service_records) == 1

@@ -53,6 +53,12 @@ file_mounts:
     mode: MOUNT_CACHED
   {% endif %}
 
+  # Mounting empty workdir
+  /mount_empty_workdir:
+    name: {{empty_storage_name}}
+    source: ~/empty-workdir
+    mode: MOUNT
+
 run: |
   set -ex
 

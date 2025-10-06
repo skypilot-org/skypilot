@@ -11,9 +11,9 @@ import pytest
 import uvicorn
 
 from sky.server import server
+from sky.server.requests import executor
 from sky.utils import common_utils
 from sky.utils import config_utils
-from sky.utils import context
 
 
 @mock.patch('uvicorn.run')
@@ -165,7 +165,7 @@ async def test_logs():
     """Test the logs endpoint."""
     mock_cluster_job_body = mock.MagicMock()
     mock_cluster_job_body.cluster_name = 'test-cluster'
-    mock_background_tasks = mock.MagicMock()
+    background_tasks = fastapi.BackgroundTasks()
 
     # Create an event to track when logs streaming starts
     streaming_started = threading.Event()
@@ -179,10 +179,11 @@ async def test_logs():
 
     def slow_execute(*args, **kwargs):
         # Simulate slow execution
-        time.sleep(1)
+        task = asyncio.create_task(asyncio.sleep(0.1))
+        return executor.CoroutineTask(task)
 
     with mock.patch('sky.server.requests.executor.prepare_request') as mock_prepare, \
-         mock.patch('sky.server.requests.executor.execute_request_coroutine',
+         mock.patch('sky.server.requests.executor.execute_request_in_coroutine',
                    side_effect=slow_execute) as mock_execute, \
          mock.patch('sky.server.stream_utils.stream_response',
                    side_effect=mock_stream_response) as mock_stream:
@@ -195,7 +196,7 @@ async def test_logs():
         # Start logs endpoint in background
         logs_task = asyncio.create_task(
             server.logs(mock.MagicMock(), mock_cluster_job_body,
-                        mock_background_tasks))
+                        background_tasks))
 
         # Execute should be run in background and does not block streaming start
         streaming_started.wait(timeout=0.1)
@@ -204,6 +205,7 @@ async def test_logs():
         response = await logs_task
         assert isinstance(response, fastapi.responses.StreamingResponse)
         assert response.media_type == 'text/plain'
+        await background_tasks()
 
         # Verify the executor calls
         mock_prepare.assert_called_once()
@@ -211,7 +213,7 @@ async def test_logs():
         mock_stream.assert_called_once_with(
             request_id=mock.ANY,
             logs_path=mock_request_task.log_path,
-            background_tasks=mock_background_tasks)
+            background_tasks=mock.ANY)
 
 
 @mock.patch('sky.utils.context_utils.hijack_sys_attrs')

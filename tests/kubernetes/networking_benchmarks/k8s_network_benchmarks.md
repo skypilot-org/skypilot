@@ -2,11 +2,11 @@
 
 A SkyPilot pod in Kubernetes can be accessed via three methods:
 1. `direct`: NodePort service directly exposing the pod's SSH port
-2. `sshjump`: NodePort service exposing a SSH jump pod that connects to the SkyPilot pod
+2. `sshjump` (DEPRECATED): NodePort service exposing a SSH jump pod that connects to the SkyPilot pod
 3. `port-forward`: Uses `kubectl port-forward` to connect to ClusterIP service pointing to a SSH jump pod that connects to the SkyPilot pod
 
-`direct` requires opening a large range of ports on the cluster's firewall. 
-`sshjump` requires opening only one port on the cluster's firewall, but requires an additional SSH connection to the jump pod. 
+`direct` requires opening a large range of ports on the cluster's firewall.
+`sshjump` requires opening only one port on the cluster's firewall, but requires an additional SSH connection to the jump pod.
 `port-forward` does not require opening any ports on the cluster's firewall, but routes all traffic over the kubernetes control plane.
 
 This document benchmarks the three approaches on a Kind cluster and a GKE cluster.

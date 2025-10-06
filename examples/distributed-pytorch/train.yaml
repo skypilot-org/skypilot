@@ -2,7 +2,7 @@ name: minGPT-ddp
 
 resources:
     cpus: 4+
-    accelerators: L4
+    accelerators: L4:2
 
 num_nodes: 2
 

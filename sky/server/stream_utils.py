@@ -8,10 +8,12 @@ from typing import AsyncGenerator, Deque, List, Optional
 import aiofiles
 import fastapi
 
+from sky import global_user_state
 from sky import sky_logging
 from sky.server.requests import requests as requests_lib
 from sky.utils import message_utils
 from sky.utils import rich_utils
+from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -22,6 +24,7 @@ logger = sky_logging.init_logger(__name__)
 _BUFFER_SIZE = 8 * 1024  # 8KB
 _BUFFER_TIMEOUT = 0.02  # 20ms
 _HEARTBEAT_INTERVAL = 30
+_CLUSTER_STATUS_INTERVAL = 1
 
 
 async def _yield_log_file_with_payloads_skipped(
@@ -37,11 +40,13 @@ async def _yield_log_file_with_payloads_skipped(
         yield line_str
 
 
-async def log_streamer(request_id: Optional[str],
-                       log_path: pathlib.Path,
-                       plain_logs: bool = False,
-                       tail: Optional[int] = None,
-                       follow: bool = True) -> AsyncGenerator[str, None]:
+async def log_streamer(
+        request_id: Optional[str],
+        log_path: pathlib.Path,
+        plain_logs: bool = False,
+        tail: Optional[int] = None,
+        follow: bool = True,
+        cluster_name: Optional[str] = None) -> AsyncGenerator[str, None]:
     """Streams the logs of a request.
 
     Args:
@@ -51,6 +56,8 @@ async def log_streamer(request_id: Optional[str],
         plain_logs: Whether to show plain logs.
         tail: The number of lines to tail. If None, tail the whole file.
         follow: Whether to follow the log file.
+        cluster_name: The cluster name to check status for provision logs.
+            If provided and cluster status is UP, streaming will terminate.
     """
 
     if request_id is not None:
@@ -104,15 +111,17 @@ async def log_streamer(request_id: Optional[str],
 
     async with aiofiles.open(log_path, 'rb') as f:
         async for chunk in _tail_log_file(f, request_id, plain_logs, tail,
-                                          follow):
+                                          follow, cluster_name):
             yield chunk
 
 
-async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
-                         request_id: Optional[str] = None,
-                         plain_logs: bool = False,
-                         tail: Optional[int] = None,
-                         follow: bool = True) -> AsyncGenerator[str, None]:
+async def _tail_log_file(
+        f: aiofiles.threadpool.binary.AsyncBufferedReader,
+        request_id: Optional[str] = None,
+        plain_logs: bool = False,
+        tail: Optional[int] = None,
+        follow: bool = True,
+        cluster_name: Optional[str] = None) -> AsyncGenerator[str, None]:
     """Tail the opened log file, buffer the lines and flush in chunks."""
 
     if tail is not None:
@@ -128,6 +137,7 @@ async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
             yield line_str
 
     last_heartbeat_time = asyncio.get_event_loop().time()
+    last_cluster_status_check_time = asyncio.get_event_loop().time()
 
     # Buffer the lines in memory and flush them in chunks to improve log
     # tailing throughput.
@@ -176,7 +186,19 @@ async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
                     break
             if not follow:
                 break
-
+            # Provision logs pass in cluster_name, check cluster status
+            # periodically to see if provisioning is done. We only
+            # check once a second to avoid overloading the DB.
+            check_status = (current_time - last_cluster_status_check_time
+                           ) >= _CLUSTER_STATUS_INTERVAL
+            if cluster_name is not None and check_status:
+                cluster_record = await (
+                    global_user_state.get_status_from_cluster_name_async(
+                        cluster_name))
+                if (cluster_record is None or
+                        cluster_record != status_lib.ClusterStatus.INIT):
+                    break
+                last_cluster_status_check_time = current_time
             if current_time - last_heartbeat_time >= _HEARTBEAT_INTERVAL:
                 # Currently just used to keep the connection busy, refer to
                 # https://github.com/skypilot-org/skypilot/issues/5750 for

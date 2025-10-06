@@ -87,36 +87,56 @@ class JobsCacheManager {
       const localCacheStatus = this._getCacheStatus(filterKey);
       if (localCacheStatus.isCached && localCacheStatus.hasData) {
         const cachedData = localCacheStatus.data;
-        const startIndex = (page - 1) * limit;
-        const endIndex = startIndex + limit;
-        const paginatedJobs = cachedData.jobs.slice(startIndex, endIndex);
+        const isEmptyFullCache =
+          !cachedData.jobs ||
+          (Array.isArray(cachedData.jobs) && cachedData.jobs.length === 0);
 
-        // Background refresh when stale or older than half TTL
-        if (
-          !this.prefetching.has(filterKey) &&
-          (!localCacheStatus.isFresh ||
-            localCacheStatus.age > localCacheStatus.maxAge / 2)
-        ) {
-          const prefetchPromise = this._loadFullDataset(
-            filterOptions,
-            filterKey
-          )
-            .catch(() => {})
-            .finally(() => this.prefetching.delete(filterKey));
-          this.prefetching.set(filterKey, prefetchPromise);
+        // If the cached full dataset is empty, do not short-circuit.
+        // Kick off an immediate full-dataset prefetch (if not running),
+        // and fall through to server-side page fetch to get fresh data now.
+        if (isEmptyFullCache) {
+          if (!this.prefetching.has(filterKey)) {
+            const prefetchPromise = this._loadFullDataset(
+              filterOptions,
+              filterKey
+            )
+              .catch(() => {})
+              .finally(() => this.prefetching.delete(filterKey));
+            this.prefetching.set(filterKey, prefetchPromise);
+          }
+          // fall through to server fetch below
+        } else {
+          const startIndex = (page - 1) * limit;
+          const endIndex = startIndex + limit;
+          const paginatedJobs = cachedData.jobs.slice(startIndex, endIndex);
+
+          // Background refresh when stale or older than half TTL
+          if (
+            !this.prefetching.has(filterKey) &&
+            (!localCacheStatus.isFresh ||
+              localCacheStatus.age > localCacheStatus.maxAge / 2)
+          ) {
+            const prefetchPromise = this._loadFullDataset(
+              filterOptions,
+              filterKey
+            )
+              .catch(() => {})
+              .finally(() => this.prefetching.delete(filterKey));
+            this.prefetching.set(filterKey, prefetchPromise);
+          }
+
+          return {
+            jobs: paginatedJobs,
+            total: cachedData.total,
+            totalNoFilter: cachedData.totalNoFilter || cachedData.total,
+            controllerStopped: cachedData.controllerStopped,
+            statusCounts: cachedData.statusCounts || {},
+            fromCache: true,
+            cacheStatus: localCacheStatus.isFresh
+              ? 'local_cache_hit'
+              : 'local_cache_stale_hit',
+          };
         }
-
-        return {
-          jobs: paginatedJobs,
-          total: cachedData.total,
-          totalNoFilter: cachedData.totalNoFilter || cachedData.total,
-          controllerStopped: cachedData.controllerStopped,
-          statusCounts: cachedData.statusCounts || {},
-          fromCache: true,
-          cacheStatus: localCacheStatus.isFresh
-            ? 'local_cache_hit'
-            : 'local_cache_stale_hit',
-        };
       }
 
       // 2) No local cache: fetch current page only to keep UI responsive

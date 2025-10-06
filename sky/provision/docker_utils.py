@@ -3,7 +3,7 @@
 import dataclasses
 import shlex
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 from sky.skylet import constants
@@ -15,10 +15,14 @@ logger = sky_logging.init_logger(__name__)
 # Configure environment variables. A docker image can have environment variables
 # set in the Dockerfile with `ENV``. We need to export these variables to the
 # shell environment, so that our ssh session can access them.
+# Filter out RAY_RUNTIME_ENV_HOOK to prevent Ray version conflicts.
+# Docker images with Ray 2.48.0+ set this for UV package manager support,
+# but it causes FAILED_DRIVER errors with SkyPilot's Ray 2.9.3.
+# See: https://github.com/skypilot-org/skypilot/pull/7181
 SETUP_ENV_VARS_CMD = (
     'prefix_cmd() '
     '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
-    'export -p > ~/container_env_var.sh && '
+    'export -p | grep -v RAY_RUNTIME_ENV_HOOK > ~/container_env_var.sh && '
     '$(prefix_cmd) '
     'mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh;')
 
@@ -188,12 +192,16 @@ class DockerInitializer:
         self.docker_cmd = 'podman' if use_podman else 'docker'
         self.log_path = log_path
 
-    def _run(self,
-             cmd,
-             run_env='host',
-             wait_for_docker_daemon: bool = False,
-             separate_stderr: bool = False,
-             log_err_when_fail: bool = True) -> str:
+    def _run(
+        self,
+        cmd,
+        run_env='host',
+        wait_for_docker_daemon: bool = False,
+        separate_stderr: bool = False,
+        log_err_when_fail: bool = True,
+        flock_name: Optional[str] = None,
+        flock_args: Optional[str] = None,
+    ) -> str:
 
         if run_env == 'docker':
             cmd = self._docker_expand_user(cmd, any_char=True)
@@ -202,8 +210,13 @@ class DockerInitializer:
             # an error: `the input device is not a TTY`, and it works without
             # `-it` flag.
             # TODO(zhwu): ray use the `-it` flag, we need to check why.
-            cmd = (f'{self.docker_cmd} exec {self.container_name} /bin/bash -c'
-                   f' {shlex.quote(cmd)} ')
+            cmd = (f'{self.docker_cmd} exec -u 0 {self.container_name}'
+                   f' /bin/bash -c {shlex.quote(cmd)} ')
+
+        if flock_name is not None:
+            flock_args = flock_args or ''
+            cmd = (f'flock {flock_args} /tmp/{flock_name} '
+                   f'-c {shlex.quote(cmd)}')
 
         logger.debug(f'+ {cmd}')
         start = time.time()
@@ -255,7 +268,10 @@ class DockerInitializer:
         if self._check_container_exited():
             self.initialized = True
             self._run(f'{self.docker_cmd} start {self.container_name}')
-            self._run('sudo service ssh start', run_env='docker')
+            self._run('sudo service ssh start',
+                      run_env='docker',
+                      flock_name=f'{self.container_name}.sky.lifecycle.lock',
+                      flock_args='-s -w 1')
             return self._run('whoami', run_env='docker')
 
         # SkyPilot: Docker login if user specified a private docker registry.
@@ -354,7 +370,9 @@ class DockerInitializer:
                     self._auto_configure_shm(user_docker_run_options)),
                 self.docker_cmd,
             )
-            self._run(f'{remove_container_cmd}; {start_command}')
+            self._run(f'{remove_container_cmd} && {start_command}',
+                      flock_name=f'{self.container_name}.sky.lifecycle.lock',
+                      flock_args='-x -w 10')
 
         # SkyPilot: Setup Commands.
         # TODO(zhwu): the following setups should be aligned with the kubernetes
@@ -372,14 +390,18 @@ class DockerInitializer:
             'echo "export DEBIAN_FRONTEND=noninteractive" >> ~/.bashrc;',
             run_env='docker')
         # Install dependencies.
-        self._run(
-            'sudo apt-get update; '
+        cmd = (
+            'bash -lc \''
+            'exec 200>/var/tmp/sky_apt.lock; '
+            'flock -x -w 120 200 || exit 1; '
+            'export DEBIAN_FRONTEND=noninteractive; '
+            'apt-get -yq update && '
             # Our mount script will install gcsfuse without fuse package.
             # We need to install fuse package first to enable storage mount.
             # The dpkg option is to suppress the prompt for fuse installation.
-            'sudo apt-get -o DPkg::Options::="--force-confnew" install -y '
-            'rsync curl wget patch openssh-server python3-pip fuse;',
-            run_env='docker')
+            'apt-get -o DPkg::Options::=--force-confnew install -y '
+            'rsync curl wget patch openssh-server python3-pip fuse\'')
+        self._run(cmd, run_env='docker')
 
         # Copy local authorized_keys to docker container.
         # Stop and disable jupyter service. This is to avoid port conflict on
@@ -455,9 +477,13 @@ class DockerInitializer:
         user_pos = string.find('~')
         if user_pos > -1:
             if self.home_dir is None:
-                cmd = (f'{self.docker_cmd} exec {self.container_name} '
-                       'printenv HOME')
-                self.home_dir = self._run(cmd, separate_stderr=True)
+                cmd = (f'{self.docker_cmd} exec {self.container_name}'
+                       ' printenv HOME')
+                self.home_dir = self._run(
+                    cmd,
+                    separate_stderr=True,
+                    flock_name=f'{self.container_name}.sky.lifecycle.lock',
+                    flock_args='-s -w 1')
                 # Check for unexpected newline in home directory, which can be
                 # a common issue when the output is mixed with stderr.
                 assert '\n' not in self.home_dir, (

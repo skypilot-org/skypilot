@@ -94,10 +94,10 @@ message JobInfo {
   double submitted_at = 4;
   JobStatus status = 5;
   string run_timestamp = 6;
-  double start_at = 7;
-  double end_at = 8;
+  optional double start_at = 7;
+  optional double end_at = 8;
   string resources = 9;
-  int64 pid = 10;
+  optional int64 pid = 10;
   string log_path = 11;
   string metadata = 12;
 }

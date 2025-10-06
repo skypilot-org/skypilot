@@ -420,3 +420,106 @@ Volumes provide several key benefits:
        echo "Hello, World!" > /mnt/data/hello.txt
 
 Refer to :ref:`volumes-on-kubernetes` for more details.
+
+.. _api-server-gpu-metrics-setup-nebius:
+
+Setup GPU metrics in Nebius Kubernetes cluster
+----------------------------------------------
+
+If you are using Nebius Kubernetes cluster, you can setup GPU metrics in the cluster to get real-time GPU metrics in the SkyPilot dashboard.
+
+1. Install the Prometheus operator.
+
+On Nebius console, in the detail page of the Nebius Kubernetes cluster, go to ``Applications`` -> Search for ``Prometheus Operator`` -> ``Deploy`` -> Enter ``skypilot`` for the ``Namespace`` -> ``Deploy application``.
+
+.. image:: ../../../images/metrics/search-prom-operator.png
+    :alt: Search for Prometheus Operator
+    :align: center
+    :width: 60%
+
+.. image:: ../../../images/metrics/deploy-prom-operator.png
+    :alt: Deploy Prometheus Operator
+    :align: center
+    :width: 60%
+
+Wait for the Prometheus operator to be installed, the status badge will become ``Deployed``.
+
+.. image:: ../../../images/metrics/status-prom-operator.png
+    :alt: Status of Prometheus Operator
+    :align: center
+    :width: 60%
+
+You can also check the Pod status to verify the installation.
+
+.. code-block:: bash
+
+  kubectl get pods -n skypilot
+
+By default, the CPU and memory metrics exported by node exporter do not include the ``node`` label, which is required for the SkyPilot dashboard to display the metrics. You can add the ``node`` label to the metrics by applying the following config to the node exporter service monitor resource:
+
+.. code-block:: bash
+
+  kubectl apply -f https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/examples/metrics/kube_prometheus_node_exporter_service_monitor.yaml -n skypilot
+
+2. Install the Nvidia Device Plugin.
+
+On Nebius console, in the detail page of the Nebius Kubernetes cluster, go to ``Applications`` -> Search for ``Nvidia Device Plugin`` -> ``Deploy`` -> Make sure to check the ``Enable GPU metrics monitoring`` -> ``Deploy application``.
+
+.. image:: ../../../images/metrics/search-device-plugin.png
+    :alt: Search for Nvidia Device Plugin
+    :align: center
+    :width: 60%
+
+.. image:: ../../../images/metrics/deploy-device-plugin.png
+    :alt: Deploy Nvidia Device Plugin
+    :align: center
+    :width: 60%
+
+Wait for the Nvidia Device Plugin to be installed, the status badge will become ``Deployed``.
+
+.. image:: ../../../images/metrics/status-device-plugin.png
+    :alt: Status of Nvidia Device Plugin
+    :align: center
+    :width: 60%
+
+You can also check the Pod status to verify the installation.
+
+.. code-block:: bash
+
+  kubectl get pods -n nvidia-device-plugin
+
+The dcgm exporter will be installed automatically.
+
+3. Create the Prometheus service for SkyPilot API server to retrieve the GPU metrics:
+
+   .. code-block:: bash
+
+     kubectl create -f https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/examples/metrics/skypilot_prometheus_server_service.yaml -n skypilot
+
+Confirm that the service endpoint is created by running the following command:
+
+.. code-block:: bash
+
+  kubectl get endpoints skypilot-prometheus-server -n skypilot
+  NAME                         ENDPOINTS           AGE
+  skypilot-prometheus-server   10.24.20.128:9090   62s
+
+4. If you are using multiple Kubernetes clusters, you will need to add the context names to ``allowed_contexts`` in the SkyPilot config.
+
+An example config file that allows using the hosting Kubernetes cluster and two additional Kubernetes clusters is shown below:
+
+.. code-block:: yaml
+
+  kubernetes:
+    allowed_contexts:
+    # The hosting Kubernetes cluster, you cannot set this if the hosting cluster is disabled by kubernetesCredentials.useApiServerCluster=false
+    - in-cluster
+    # The additional Kubernetes context names in the kubeconfig you configured
+    - context1
+    - context2
+
+Refer to :ref:`config-yaml-kubernetes-allowed-contexts` for how to set the SkyPilot config in Helm chart values.
+
+5. Refer to :ref:`api-server-setup-dcgm-metrics-scraping` to upgrade the API server to scrape the GPU metrics.
+
+Now you should be able to see the GPU metrics in the SkyPilot dashboard.

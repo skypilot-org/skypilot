@@ -13,8 +13,9 @@ Training
    Finetuning Llama 3 <llama-3_1-finetuning.md>
    Finetuning Llama 2 <llama-2-finetuning.md>
    NeMo <nemo.md>
+   NeMo RL <nemorl.md>
    Ray <ray.md>
-   TorchTitan <torchtitan/README.md>
+   TorchTitan <torchtitan.md>
    Training on TPUs <tpu.md>
    Unsloth <unsloth.md>
    Verl (RLHF) <verl.md>

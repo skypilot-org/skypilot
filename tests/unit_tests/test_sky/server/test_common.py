@@ -70,6 +70,57 @@ def test_unhealthy_server(mock_get_status):
         common.check_server_healthy()
 
 
+@mock.patch('sky.server.common._start_api_server')
+@mock.patch('sky.server.common.set_api_cookie_jar')
+@mock.patch('sky.server.common.versions.check_compatibility_at_client')
+@mock.patch('sky.server.common.make_authenticated_request')
+@mock.patch('sky.server.common.filelock.FileLock')
+@mock.patch('sky.server.common.is_api_server_local', return_value=True)
+@mock.patch('sky.server.common.get_server_url',
+            return_value='http://127.0.0.1:1111')
+def test_check_server_healthy_or_start_rechecks_status(
+        unused_mock_server_url, unused_mock_is_local, mock_filelock,
+        mock_make_request, mock_check_compat, unused_set_cookie,
+        mock_start_server):
+    """Re-check should observe the fresh server status before starting.
+
+    The test keeps the real `get_api_server_status` cache in place to ensure
+    the cache is cleared before re-fetching the server status.
+    """
+    healthy_response = mock.Mock()
+    healthy_response.status_code = 200
+    healthy_response.headers = {}
+    healthy_response.history = []
+    healthy_response.cookies = requests.cookies.RequestsCookieJar()
+    healthy_response.json.return_value = {
+        'status': ApiServerStatus.HEALTHY.value,
+        'api_version': server_constants.API_VERSION,
+        'version': sky.__version__,
+        'version_on_disk': sky.__version__,
+        'commit': sky.__commit__,
+        'user': {},
+        'basic_auth_enabled': False,
+    }
+
+    mock_make_request.side_effect = [
+        requests.exceptions.ConnectionError(), healthy_response
+    ]
+    mock_check_compat.return_value = mock.Mock(error=None)
+    mock_filelock.return_value.__enter__.return_value = None
+    mock_filelock.return_value.__exit__.return_value = None
+
+    with mock.patch.object(
+            common.get_api_server_status,
+            'cache_clear',
+            wraps=common.get_api_server_status.cache_clear) as mock_cache_clear:
+        common.check_server_healthy_or_start_fn()
+
+    assert mock_cache_clear.call_count == 1
+    assert mock_make_request.call_count == 2
+    mock_start_server.assert_not_called()
+    common.get_api_server_status.cache_clear()
+
+
 @mock.patch('sky.server.common.get_api_server_status')
 @mock.patch('sky.server.common.is_api_server_local')
 def test_local_client_server_mismatch(mock_is_local, mock_get_status):
@@ -350,3 +401,114 @@ def test_cookies_set_with_file(monkeypatch):
     assert found_cookie_jar['test-cookie-2'] == expected_cookie.value
 
     temp_cookie_dir.cleanup()
+
+
+def test_process_mounts_removes_file_mounts_mapping(tmp_path, monkeypatch):
+    """Test that file_mounts_mapping is removed after processing.
+
+    This is a regression test for the bug where file_mounts_mapping would
+    persist in the task config after translation, causing KeyError when the
+    task is submitted again (e.g., in jobs scenarios).
+    """
+    from sky.skylet import constants as skylet_constants
+    from sky.utils import yaml_utils
+
+    # Mock the API_SERVER_CLIENT_DIR to use tmp_path
+    api_server_dir = tmp_path / 'api_server_clients'
+    monkeypatch.setattr('sky.server.common.API_SERVER_CLIENT_DIR',
+                        api_server_dir)
+
+    # Create a task YAML with file_mounts_mapping
+    task_yaml = '''
+name: test-task
+resources:
+  cloud: aws
+workdir: /local/workdir
+file_mounts:
+  /remote/script.py: /local/script.py
+  /remote/data:
+    source: /local/data
+file_mounts_mapping:
+  /local/workdir: uploaded/workdir
+  /local/script.py: uploaded/script.py
+  /local/data: uploaded/data
+run: python /remote/script.py
+'''
+
+    env_vars = {skylet_constants.USER_ID_ENV_VAR: 'test-user'}
+
+    # Call the function
+    dag = common.process_mounts_in_task_on_api_server(task=task_yaml,
+                                                      env_vars=env_vars,
+                                                      workdir_only=False)
+
+    # Find the translated YAML file
+    user_hash = 'test-user'
+    client_dir = api_server_dir / user_hash
+
+    # Find the translated file (it has _translated.yaml suffix)
+    translated_files = list(client_dir.glob('**/*_translated.yaml'))
+    assert len(translated_files) == 1, \
+        f'Expected 1 translated file, found {len(translated_files)}'
+
+    translated_file = translated_files[0]
+
+    # Read the translated YAML and verify file_mounts_mapping is removed
+    translated_configs = yaml_utils.read_yaml_all(str(translated_file))
+
+    for task_config in translated_configs:
+        if task_config is None:
+            continue
+        # The critical assertion: file_mounts_mapping should be removed
+        assert 'file_mounts_mapping' not in task_config, \
+            'file_mounts_mapping should be removed after processing'
+
+        # Verify the paths were actually translated (workdir should be updated)
+        if 'workdir' in task_config:
+            assert 'uploaded/workdir' in task_config['workdir'], \
+                f'workdir should be translated: {task_config["workdir"]}'
+
+        # Verify file_mounts were translated
+        if 'file_mounts' in task_config:
+            file_mounts = task_config['file_mounts']
+            for dst, src in file_mounts.items():
+                if isinstance(src, str):
+                    assert 'uploaded/' in src, \
+                        f'file_mount should be translated: {src}'
+                elif isinstance(src, dict) and 'source' in src:
+                    source = src['source']
+                    if isinstance(source, str):
+                        assert 'uploaded/' in source, \
+                            f'file_mount source should be translated: {source}'
+
+
+def test_process_mounts_without_mapping(tmp_path, monkeypatch):
+    """Test processing a task without file_mounts_mapping.
+
+    Tasks without file_mounts_mapping should be processed without error.
+    """
+    from sky.skylet import constants as skylet_constants
+
+    # Mock the API_SERVER_CLIENT_DIR to use tmp_path
+    api_server_dir = tmp_path / 'api_server_clients'
+    monkeypatch.setattr('sky.server.common.API_SERVER_CLIENT_DIR',
+                        api_server_dir)
+
+    # Create a simple task YAML without file_mounts_mapping
+    task_yaml = '''
+name: test-task
+resources:
+  cloud: aws
+run: echo "hello world"
+'''
+
+    env_vars = {skylet_constants.USER_ID_ENV_VAR: 'test-user'}
+
+    # Call the function - should not raise any errors
+    dag = common.process_mounts_in_task_on_api_server(task=task_yaml,
+                                                      env_vars=env_vars,
+                                                      workdir_only=False)
+
+    # Verify the dag was created successfully
+    assert dag is not None
+    assert len(dag.tasks) == 1

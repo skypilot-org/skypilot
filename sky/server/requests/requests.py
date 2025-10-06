@@ -25,10 +25,10 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
+from sky.metrics import utils as metrics_lib
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server import daemons
-from sky.server import metrics as metrics_lib
 from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
@@ -449,9 +449,15 @@ def init_db_async(func):
 
 def reset_db_and_logs():
     """Create the database."""
+    logger.debug('clearing local API server database')
     server_common.clear_local_api_server_database()
+    logger.debug(
+        f'clearing local API server logs directory at {REQUEST_LOG_PATH_PREFIX}'
+    )
     shutil.rmtree(pathlib.Path(REQUEST_LOG_PATH_PREFIX).expanduser(),
                   ignore_errors=True)
+    logger.debug('clearing local API server client directory at '
+                 f'{server_common.API_SERVER_CLIENT_DIR.expanduser()}')
     shutil.rmtree(server_common.API_SERVER_CLIENT_DIR.expanduser(),
                   ignore_errors=True)
 

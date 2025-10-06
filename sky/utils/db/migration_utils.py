@@ -17,7 +17,7 @@ logger = sky_logging.init_logger(__name__)
 DB_INIT_LOCK_TIMEOUT_SECONDS = 10
 
 GLOBAL_USER_STATE_DB_NAME = 'state_db'
-GLOBAL_USER_STATE_VERSION = '008'
+GLOBAL_USER_STATE_VERSION = '009'
 GLOBAL_USER_STATE_LOCK_PATH = '~/.sky/locks/.state_db.lock'
 
 SPOT_JOBS_DB_NAME = 'spot_jobs_db'
@@ -85,12 +85,16 @@ def needs_upgrade(engine: sqlalchemy.engine.Engine, section: str,
             connection, opts={'version_table': version_table})
         current_rev = context.get_current_revision()
 
+    target_rev_num = int(target_revision)
     if current_rev is None:
+        logger.info(f'{section} database currently uninitialized, '
+                    f'targeting revision {target_rev_num}')
         return True
 
     # Compare revisions - assuming they are numeric strings like '001', '002'
     current_rev_num = int(current_rev)
-    target_rev_num = int(target_revision)
+    logger.info(f'{section} database currently at revision {current_rev_num}, '
+                f'targeting revision {target_rev_num}')
 
     return current_rev_num < target_rev_num
 

@@ -204,8 +204,18 @@ class Example:
         if not self.other_files:
             return content
 
+        # Binary file extensions to skip
+        BINARY_EXTENSIONS = {
+            '.png', '.jpg', '.jpeg', '.gif', '.mp4', '.avi', '.mov', '.pdf',
+            '.zip', '.tar', '.gz', '.bz2'
+        }
+
         content += '## Included files\n\n'
         for file in sorted(self.other_files):
+            # Skip binary files
+            if file.suffix.lower() in BINARY_EXTENSIONS:
+                continue
+
             include = 'include' if file.suffix == '.md' else 'literalinclude'
             content += f':::{{admonition}} {file.relative_to(self.path)}\n'
             content += ':class: dropdown\n\n'
@@ -231,8 +241,11 @@ def _work(example_dir: pathlib.Path):
     globs = [example_dir.glob(pattern) for pattern in _GLOB_PATTERNS]
     for path in itertools.chain(*globs):
         examples.append(Example(path))
-    # Find examples in subdirectories
+    # Find examples in subdirectories (search up to 2 levels deep)
     for path in example_dir.glob("*/*.md"):
+        examples.append(Example(path.parent))
+    # Also search 2 levels deep for nested examples like training/torchtitan
+    for path in example_dir.glob("*/*/*.md"):
         examples.append(Example(path.parent))
 
     # Check for stem collisions using full directory names
@@ -254,3 +267,7 @@ def _work(example_dir: pathlib.Path):
         doc_path = EXAMPLE_DOC_DIR / f'{example.path.stem}.md'
         with open(doc_path, 'w+') as f:
             f.write(example.generate())
+
+
+if __name__ == '__main__':
+    generate_examples()

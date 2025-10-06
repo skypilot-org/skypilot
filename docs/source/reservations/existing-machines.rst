@@ -342,4 +342,4 @@ Details: Prerequisites
 * Debian-based OS (tested on Debian 11)
 * SSH access from SkyPilot API server host to all remote machines
 * All nodes within a SSH Node Pool must have access to port 6443 to its peers (e.g., same VPC). Port 6443 doesn't have to be open to machines outside of the network.
-* Nodes should not be part of an existing Kubernetes cluster (use :ref:`Kubernetes Support <kubernetes-overview>`) instead)
+* Nodes should not be part of an existing Kubernetes cluster (use :ref:`Kubernetes Support <kubernetes-overview>` instead)

@@ -55,27 +55,6 @@ def get_port_mode(
     return port_mode
 
 
-def get_networking_mode(
-    mode_str: Optional[str],
-    context: Optional[str],
-) -> kubernetes_enums.KubernetesNetworkingMode:
-    """Get the networking mode from the provider config."""
-    mode_str = mode_str or skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
-        region=context,
-        keys=('networking_mode',),
-        default_value=kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.
-        value)
-    try:
-        networking_mode = kubernetes_enums.KubernetesNetworkingMode.from_str(
-            mode_str)
-    except ValueError as e:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(str(e) +
-                             ' Please check: ~/.sky/config.yaml.') from None
-    return networking_mode
-
-
 def fill_loadbalancer_template(namespace: str, context: Optional[str],
                                service_name: str, ports: List[int],
                                selector_key: str, selector_value: str) -> Dict:

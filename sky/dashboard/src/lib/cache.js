@@ -20,6 +20,7 @@ class DashboardCache {
   constructor() {
     this.cache = new Map();
     this.backgroundJobs = new Map(); // Track ongoing background refresh jobs
+    this.pendingRequests = new Map(); // Track in-flight requests to deduplicate concurrent calls
     this.debugMode = false; // Added for debug mode
     this.preloader = null; // Reference to cache preloader for coordination
   }
@@ -83,30 +84,50 @@ class DashboardCache {
       return cachedItem.data;
     }
 
-    // If data is stale or doesn't exist, fetch fresh data
-    try {
-      const freshData = await fetchFunction(...args);
-
-      // Update cache with fresh data
-      this.cache.set(key, {
-        data: freshData,
-        lastUpdated: now,
-      });
-
-      return freshData;
-    } catch (error) {
-      // If fetch fails and we have stale data, return stale data
-      if (cachedItem) {
-        console.warn(
-          `Failed to fetch fresh data for ${key}, returning stale data:`,
-          error
-        );
-        return cachedItem.data;
-      }
-
-      // If no cached data and fetch fails, re-throw the error
-      throw error;
+    // Check if there's already a pending request for this key
+    // If so, wait for it to complete instead of making a duplicate request
+    if (this.pendingRequests.has(key)) {
+      this._debug(
+        `Request deduplication: Waiting for pending request for ${functionName}`
+      );
+      return this.pendingRequests.get(key);
     }
+
+    // If data is stale or doesn't exist, fetch fresh data
+    // Create a promise for this request and store it
+    const requestPromise = (async () => {
+      try {
+        const freshData = await fetchFunction(...args);
+
+        // Update cache with fresh data
+        this.cache.set(key, {
+          data: freshData,
+          lastUpdated: Date.now(),
+        });
+
+        return freshData;
+      } catch (error) {
+        // If fetch fails and we have stale data, return stale data
+        if (cachedItem) {
+          console.warn(
+            `Failed to fetch fresh data for ${key}, returning stale data:`,
+            error
+          );
+          return cachedItem.data;
+        }
+
+        // If no cached data and fetch fails, re-throw the error
+        throw error;
+      } finally {
+        // Remove the pending request marker
+        this.pendingRequests.delete(key);
+      }
+    })();
+
+    // Store the promise so concurrent requests can reuse it
+    this.pendingRequests.set(key, requestPromise);
+
+    return requestPromise;
   }
 
   /**
@@ -119,6 +140,8 @@ class DashboardCache {
     this.cache.delete(key);
     // Also cancel any ongoing background job for this key
     this.backgroundJobs.delete(key);
+    // Also remove any pending requests
+    this.pendingRequests.delete(key);
   }
 
   /**
@@ -126,12 +149,13 @@ class DashboardCache {
    * @param {Function} fetchFunction - The function to invalidate all entries for
    */
   invalidateFunction(fetchFunction) {
-    const functionName = fetchFunction.name || 'anonymous';
+    const functionString = fetchFunction.toString();
+    const functionHash = simpleHash(functionString);
     const keysToDelete = [];
 
-    // Find all keys that start with the function name
+    // Find all keys that start with the function hash
     for (const key of this.cache.keys()) {
-      if (key.startsWith(`${functionName}_`)) {
+      if (key.startsWith(`${functionHash}_`)) {
         keysToDelete.push(key);
       }
     }
@@ -140,6 +164,7 @@ class DashboardCache {
     keysToDelete.forEach((key) => {
       this.cache.delete(key);
       this.backgroundJobs.delete(key);
+      this.pendingRequests.delete(key);
     });
   }
 
@@ -149,6 +174,7 @@ class DashboardCache {
   clear() {
     this.cache.clear();
     this.backgroundJobs.clear();
+    this.pendingRequests.clear();
   }
 
   /**
@@ -158,6 +184,7 @@ class DashboardCache {
     return {
       cacheSize: this.cache.size,
       backgroundJobs: this.backgroundJobs.size,
+      pendingRequests: this.pendingRequests.size,
       keys: Array.from(this.cache.keys()),
     };
   }
@@ -176,12 +203,14 @@ class DashboardCache {
         age: Math.round(age / 1000), // Age in seconds
         lastUpdated: new Date(item.lastUpdated).toISOString(),
         hasBackgroundJob: this.backgroundJobs.has(key),
+        hasPendingRequest: this.pendingRequests.has(key),
       });
     }
 
     return {
       cacheSize: this.cache.size,
       backgroundJobs: this.backgroundJobs.size,
+      pendingRequests: this.pendingRequests.size,
       entries: entries.sort((a, b) => a.age - b.age),
     };
   }

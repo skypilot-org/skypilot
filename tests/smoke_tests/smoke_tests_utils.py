@@ -8,8 +8,8 @@ import shlex
 import subprocess
 import sys
 import tempfile
-from typing import (Any, Dict, Generator, List, NamedTuple, Optional, Sequence,
-                    Set, Tuple)
+from typing import (Any, BinaryIO, Dict, Generator, List, NamedTuple, Optional,
+                    Sequence, Set, Tuple)
 import uuid
 
 import colorama
@@ -51,9 +51,9 @@ SCP_TYPE = '--infra scp'
 SCP_GPU_V100 = '--gpus V100-32GB'
 
 STORAGE_SETUP_COMMANDS = [
-    'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir',
-    r'touch ~/tmp-workdir/tmp\ file', r'touch ~/tmp-workdir/tmp\ file2',
-    'touch ~/tmp-workdir/foo',
+    'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir', 'rm -rf ~/empty-workdir',
+    'mkdir -p ~/empty-workdir', r'touch ~/tmp-workdir/tmp\ file',
+    r'touch ~/tmp-workdir/tmp\ file2', 'touch ~/tmp-workdir/foo',
     '[ ! -e ~/tmp-workdir/circle-link ] && ln -s ~/tmp-workdir/ ~/tmp-workdir/circle-link || true',
     'touch ~/.ssh/id_rsa.pub'
 ]
@@ -115,6 +115,12 @@ WAIT_FOR_API = (
     'sleep 1; done')
 
 SKY_API_RESTART = f'sky api stop || true && sky api start && {WAIT_FOR_API}'
+
+AWS_GET_INSTANCE_ID = (
+    '`aws ec2 describe-instances --region {region} --filters '
+    'Name=tag:ray-cluster-name,Values={name_on_cloud} '
+    '--query Reservations[].Instances[].InstanceId '
+    '--output text`')
 
 # Cluster functions
 _ALL_JOB_STATUSES = "|".join([status.value for status in sky.JobStatus])
@@ -329,6 +335,8 @@ class Test(NamedTuple):
     timeout: int = DEFAULT_CMD_TIMEOUT
     # Environment variables to set for each command.
     env: Optional[Dict[str, str]] = None
+    # Config dictionary to override the skypilot config.
+    config_dict: Optional[Dict[str, Any]] = None
 
     def echo(self, message: str):
         # pytest's xdist plugin captures stdout; print to stderr so that the
@@ -425,6 +433,8 @@ def override_sky_config(
         env_dict[constants.SKY_API_SERVER_URL_ENV_VAR] = endpoint
         # Clear the get_server_url cache
         server_common.get_server_url.cache_clear()
+        # Clear the is_api_server_local cache
+        server_common.is_api_server_local.cache_clear()
         echo(
             f'Overriding API server endpoint: '
             f'{override_sky_config_dict.get_nested(("api_server", "endpoint"), "UNKNOWN")}'
@@ -502,7 +512,7 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
     if test.env:
         env_dict.update(test.env)
 
-    with override_sky_config(test, env_dict):
+    with override_sky_config(test, env_dict, config_dict=test.config_dict):
         for command in test.commands:
             write(f'+ {command}\n')
             flush()
@@ -830,6 +840,13 @@ def get_api_server_url() -> str:
     return server_common.get_server_url()
 
 
+def get_metrics_server_url() -> str:
+    """Get the metrics server URL in the test environment."""
+    if is_remote_server_test():
+        return docker_utils.get_metrics_endpoint_inside_docker()
+    return 'http://127.0.0.1:9090'
+
+
 def is_non_docker_remote_api_server() -> bool:
     if is_remote_server_test():
         return 'host.docker.internal' not in get_api_server_url()
@@ -994,3 +1011,14 @@ def get_enabled_cloud_storages() -> List[clouds.Cloud]:
                     pass
         return enabled_clouds
     return [clouds.AWS()]
+
+
+def write_blob(file: BinaryIO, total_size: int):
+    """Create a large file."""
+    chunk_size = 1024 * 1024  # 1MB chunks
+    for _ in range(total_size // chunk_size):
+        file.write(os.urandom(chunk_size))
+    remaining_size = total_size % chunk_size
+    if remaining_size > 0:
+        file.write(os.urandom(remaining_size))
+    file.flush()

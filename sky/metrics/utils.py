@@ -1,11 +1,165 @@
 """Utilities for processing GPU metrics from Kubernetes clusters."""
+import contextlib
+import functools
 import os
 import re
+import select
 import subprocess
 import time
 from typing import List, Optional, Tuple
 
 import httpx
+import prometheus_client as prom
+
+from sky.skylet import constants
+from sky.utils import context_utils
+
+_SELECT_TIMEOUT = 1
+_SELECT_BUFFER_SIZE = 4096
+
+_KB = 2**10
+_MB = 2**20
+_MEM_BUCKETS = [
+    _KB,
+    256 * _KB,
+    512 * _KB,
+    _MB,
+    2 * _MB,
+    4 * _MB,
+    8 * _MB,
+    16 * _MB,
+    32 * _MB,
+    64 * _MB,
+    128 * _MB,
+    256 * _MB,
+    float('inf'),
+]
+
+# Whether the metrics are enabled, cannot be changed at runtime.
+METRICS_ENABLED = os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED,
+                                 'false').lower() == 'true'
+
+# Time spent processing a piece of code, refer to time_it().
+SKY_APISERVER_CODE_DURATION_SECONDS = prom.Histogram(
+    'sky_apiserver_code_duration_seconds',
+    'Time spent processing code',
+    ['name', 'group'],
+    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 30.0,
+             60.0, 120.0, float('inf')),
+)
+
+# Total number of API server requests, grouped by path, method, and status.
+SKY_APISERVER_REQUESTS_TOTAL = prom.Counter(
+    'sky_apiserver_requests_total',
+    'Total number of API server requests',
+    ['path', 'method', 'status'],
+)
+
+# Time spent processing API server requests, grouped by path, method, and
+# status.
+SKY_APISERVER_REQUEST_DURATION_SECONDS = prom.Histogram(
+    'sky_apiserver_request_duration_seconds',
+    'Time spent processing API server requests',
+    ['path', 'method', 'status'],
+    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 30.0,
+             60.0, 120.0, float('inf')),
+)
+
+SKY_APISERVER_EVENT_LOOP_LAG_SECONDS = prom.Histogram(
+    'sky_apiserver_event_loop_lag_seconds',
+    'Scheduling delay of the server event loop',
+    ['pid'],
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 20.0,
+             60.0, float('inf')),
+)
+
+SKY_APISERVER_WEBSOCKET_CONNECTIONS = prom.Gauge(
+    'sky_apiserver_websocket_connections',
+    'Number of websocket connections',
+    ['pid'],
+    multiprocess_mode='livesum',
+)
+
+SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL = prom.Counter(
+    'sky_apiserver_websocket_closed_total',
+    'Number of websocket closed',
+    ['pid', 'reason'],
+)
+
+# The number of execution starts in each worker process, we do not record
+# histogram here as the duration has been measured in
+# SKY_APISERVER_CODE_DURATION_SECONDS without the worker label (process id).
+# Recording histogram WITH worker label will cause high cardinality.
+SKY_APISERVER_PROCESS_EXECUTION_START_TOTAL = prom.Counter(
+    'sky_apiserver_process_execution_start_total',
+    'Total number of execution starts in each worker process',
+    ['request', 'pid'],
+)
+
+SKY_APISERVER_PROCESS_PEAK_RSS = prom.Gauge(
+    'sky_apiserver_process_peak_rss',
+    'Peak RSS we saw in each process in last 30 seconds',
+    ['pid', 'type'],
+)
+
+SKY_APISERVER_PROCESS_CPU_TOTAL = prom.Gauge(
+    'sky_apiserver_process_cpu_total',
+    'Total CPU times a worker process has been running',
+    ['pid', 'type', 'mode'],
+)
+
+SKY_APISERVER_REQUEST_MEMORY_USAGE_BYTES = prom.Histogram(
+    'sky_apiserver_request_memory_usage_bytes',
+    'Peak memory usage of requests', ['name'],
+    buckets=_MEM_BUCKETS)
+
+SKY_APISERVER_REQUEST_RSS_INCR_BYTES = prom.Histogram(
+    'sky_apiserver_request_rss_incr_bytes',
+    'RSS increment after requests', ['name'],
+    buckets=_MEM_BUCKETS)
+
+
+@contextlib.contextmanager
+def time_it(name: str, group: str = 'default'):
+    """Context manager to measure and record code execution duration."""
+    if not METRICS_ENABLED:
+        yield
+    else:
+        start_time = time.time()
+        try:
+            yield
+        finally:
+            duration = time.time() - start_time
+            SKY_APISERVER_CODE_DURATION_SECONDS.labels(
+                name=name, group=group).observe(duration)
+
+
+def time_me(func):
+    """Measure the duration of decorated function."""
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        if not METRICS_ENABLED:
+            return func(*args, **kwargs)
+        name = f'{func.__module__}/{func.__name__}'
+        with time_it(name, group='function'):
+            return func(*args, **kwargs)
+
+    return wrapper
+
+
+def time_me_async(func):
+    """Measure the duration of decorated async function."""
+
+    @functools.wraps(func)
+    async def async_wrapper(*args, **kwargs):
+        if not METRICS_ENABLED:
+            return await func(*args, **kwargs)
+        name = f'{func.__module__}/{func.__name__}'
+        with time_it(name, group='function'):
+            return await func(*args, **kwargs)
+
+    return async_wrapper
 
 
 def start_svc_port_forward(context: str, namespace: str, service: str,
@@ -44,6 +198,7 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
     local_port = None
     start_time = time.time()
 
+    buffer = ''
     # wait for the port forward to start and extract the local port
     while time.time() - start_time < start_port_forward_timeout:
         if port_forward_process.poll() is not None:
@@ -56,10 +211,16 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
 
         # read output line by line to find the local port
         if port_forward_process.stdout:
-            line = port_forward_process.stdout.readline()
-            if line:
-                # look for 'Forwarding from 127.0.0.1:XXXXX -> service_port'
-                match = re.search(r'Forwarding from 127\.0\.0\.1:(\d+)', line)
+            # Wait up to 1s for data to be available without blocking
+            r, _, _ = select.select([port_forward_process.stdout], [], [],
+                                    _SELECT_TIMEOUT)
+            if r:
+                # Read available bytes from the FD without blocking
+                fd = port_forward_process.stdout.fileno()
+                raw = os.read(fd, _SELECT_BUFFER_SIZE)
+                chunk = raw.decode(errors='ignore')
+                buffer += chunk
+                match = re.search(r'Forwarding from 127\.0\.0\.1:(\d+)', buffer)
                 if match:
                     local_port = int(match.group(1))
                     break
@@ -122,8 +283,8 @@ async def send_metrics_request_with_port_forward(
     port_forward_process = None
     try:
         # Start port forward
-        port_forward_process, local_port = start_svc_port_forward(
-            context, namespace, service, service_port)
+        port_forward_process, local_port = await context_utils.to_thread(
+            start_svc_port_forward, context, namespace, service, service_port)
 
         # Build endpoint URL
         endpoint = f'http://localhost:{local_port}{endpoint_path}'
@@ -143,7 +304,8 @@ async def send_metrics_request_with_port_forward(
     finally:
         # Always clean up port forward
         if port_forward_process:
-            stop_svc_port_forward(port_forward_process)
+            await context_utils.to_thread(stop_svc_port_forward,
+                                          port_forward_process)
 
 
 async def add_cluster_name_label(metrics_text: str, context: str) -> str:
@@ -193,7 +355,11 @@ async def get_metrics_for_context(context: str) -> str:
     """
     # Query both DCGM metrics and kube_pod_labels metrics
     # This ensures the dashboard can perform joins to filter by skypilot cluster
-    match_patterns = ['{__name__=~"DCGM_.*"}', 'kube_pod_labels']
+    match_patterns = [
+        '{__name__=~"node_memory_MemAvailable_bytes|node_memory_MemTotal_bytes|DCGM_.*"}',  # pylint: disable=line-too-long
+        'kube_pod_labels',
+        'node_cpu_seconds_total{mode="idle"}'
+    ]
 
     # TODO(rohan): don't hardcode the namespace and service name
     metrics_text = await send_metrics_request_with_port_forward(

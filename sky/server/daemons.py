@@ -8,7 +8,6 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.server import constants as server_constants
 from sky.utils import annotations
-from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import subprocess_utils
@@ -94,13 +93,13 @@ class InternalRequestDaemon:
 def refresh_cluster_status_event():
     """Periodically refresh the cluster status."""
     # pylint: disable=import-outside-toplevel
-    from sky import core
+    from sky.backends import backend_utils
 
     logger.info('=== Refreshing cluster status ===')
     # This periodically refresh will hold the lock for the cluster being
     # refreshed, but it is OK because other operations will just wait for
     # the lock and get the just refreshed status without refreshing again.
-    core.status(refresh=common.StatusRefreshMode.FORCE, all_users=True)
+    backend_utils.refresh_cluster_records()
     logger.info('Status refreshed. Sleeping '
                 f'{server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS}'
                 ' seconds for the next refresh...\n')

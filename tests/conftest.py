@@ -34,7 +34,9 @@ from common_test_fixtures import mock_job_table_one_job
 from common_test_fixtures import mock_queue
 from common_test_fixtures import mock_redirect_log_file
 from common_test_fixtures import mock_services_no_service
+from common_test_fixtures import mock_services_no_service_grpc
 from common_test_fixtures import mock_services_one_service
+from common_test_fixtures import mock_services_one_service_grpc
 from common_test_fixtures import mock_stream_utils
 from common_test_fixtures import reset_global_state
 from common_test_fixtures import skyignore_dir
@@ -60,8 +62,8 @@ from sky.server import common as server_common
 # --managed-jobs.
 all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci', 'do',
-    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod',
-    'vast', 'nebius', 'hyperbolic', 'seeweb'
+    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace',
+    'primeintellect', 'runpod', 'vast', 'nebius', 'hyperbolic', 'seeweb'
 ]
 default_clouds_to_run = ['aws', 'azure']
 
@@ -83,6 +85,7 @@ cloud_to_pytest_keyword = {
     'fluidstack': 'fluidstack',
     'cudo': 'cudo',
     'paperspace': 'paperspace',
+    'primeintellect': 'primeintellect',
     'do': 'do',
     'vast': 'vast',
     'runpod': 'runpod',
@@ -212,6 +215,16 @@ def pytest_addoption(parser):
         default=None,
         help=
         'Use existing cluster for backend integration tests instead of creating a new one',
+    )
+    parser.addoption(
+        '--dependency',
+        type=str,
+        default='all',
+        help=
+        'Dependency for package install. For example, --dependency=aws will run '
+        'pip install "skypilot[aws]". --dependency=aws,azure will run '
+        'pip install "skypilot[aws,azure]". This parameter only works in the '
+        'Buildkite CI environment and will be ignored if run locally.',
     )
 
 
@@ -624,8 +637,10 @@ def setup_docker_container(request):
         # Use create_and_setup_new_container to create and start the container
         docker_utils.create_and_setup_new_container(
             target_container_name=docker_utils.get_container_name(),
-            host_port=docker_utils.get_host_port(),
-            container_port=46580,
+            api_server_host_port=docker_utils.get_api_server_host_port(),
+            api_server_container_port=46580,
+            metrics_host_port=docker_utils.get_metrics_host_port(),
+            metrics_container_port=9090,
             username=default_user)
 
         logger.info(f'Container {docker_utils.get_container_name()} started')

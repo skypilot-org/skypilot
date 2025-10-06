@@ -7,6 +7,7 @@ resources:
 """
 import asyncio
 import logging
+import os
 import traceback
 import typing
 from typing import Optional, Set
@@ -16,16 +17,19 @@ from sky import dag as dag_lib
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.client import sdk
 from sky.jobs import scheduler
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
 from sky.serve import serve_utils
+from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import context_utils
+from sky.utils import env_options
 from sky.utils import registry
 from sky.utils import status_lib
 from sky.utils import ux_utils
@@ -44,6 +48,13 @@ MAX_JOB_CHECKING_RETRY = 10
 # managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS, to avoid tearing down the
 # cluster before its status can be updated by the job controller.
 _AUTODOWN_MINUTES = 10
+
+ENV_VARS_TO_CLEAR = [
+    skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+    constants.USER_ID_ENV_VAR,
+    constants.USER_ENV_VAR,
+    env_options.Options.SHOW_DEBUG_INFO.env_key,
+]
 
 
 class StrategyExecutor:
@@ -213,6 +224,7 @@ class StrategyExecutor:
                 **kwargs,
                 _try_cancel_if_cluster_is_init=True,
             )
+            self._logger.debug(f'sdk.cancel request ID: {request_id}')
             await context_utils.to_thread(
                 sdk.get,
                 request_id,
@@ -371,6 +383,31 @@ class StrategyExecutor:
                         usage_lib.messages.usage.set_internal()
                         if self.pool is None:
                             assert self.cluster_name is not None
+
+                            # sdk.launch will implicitly start the API server,
+                            # but then the API server will inherit the current
+                            # env vars/user, which we may not want.
+                            # Instead, clear env vars here and call api_start
+                            # explicitly.
+                            vars_to_restore = {}
+                            try:
+                                for env_var in ENV_VARS_TO_CLEAR:
+                                    vars_to_restore[env_var] = os.environ.pop(
+                                        env_var, None)
+                                    self._logger.debug('Cleared env var: '
+                                                       f'{env_var}')
+                                self._logger.debug('Env vars for api_start: '
+                                                   f'{os.environ}')
+                                await context_utils.to_thread(sdk.api_start)
+                                self._logger.info('API server started.')
+                            finally:
+                                for env_var, value in vars_to_restore.items():
+                                    if value is not None:
+                                        self._logger.debug(
+                                            'Restored env var: '
+                                            f'{env_var}: {value}')
+                                        os.environ[env_var] = value
+
                             log_file = _get_logger_file(self._logger)
                             request_id = None
                             try:
@@ -392,6 +429,8 @@ class StrategyExecutor:
                                     # down=True,
                                     _is_launched_by_jobs_controller=True,
                                 )
+                                self._logger.debug('sdk.launch request ID: '
+                                                   f'{request_id}')
                                 if log_file is None:
                                     raise OSError('Log file is None')
                                 with open(log_file, 'a', encoding='utf-8') as f:
@@ -404,6 +443,8 @@ class StrategyExecutor:
                                 if request_id:
                                     req = await context_utils.to_thread(
                                         sdk.api_cancel, request_id)
+                                    self._logger.debug('sdk.api_cancel request '
+                                                       f'ID: {req}')
                                     try:
                                         await context_utils.to_thread(
                                             sdk.get, req)
@@ -427,6 +468,8 @@ class StrategyExecutor:
                                     self.dag,
                                     cluster_name=self.cluster_name,
                                 )
+                                self._logger.debug('sdk.exec request ID: '
+                                                   f'{request_id}')
                                 job_id_on_pool_cluster, _ = (
                                     await context_utils.to_thread(
                                         sdk.get, request_id))
@@ -434,6 +477,8 @@ class StrategyExecutor:
                                 if request_id:
                                     req = await context_utils.to_thread(
                                         sdk.api_cancel, request_id)
+                                    self._logger.debug('sdk.api_cancel request '
+                                                       f'ID: {req}')
                                     try:
                                         await context_utils.to_thread(
                                             sdk.get, req)

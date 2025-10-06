@@ -1897,7 +1897,7 @@ export function GPUs() {
     };
 
     initializeData();
-  }, [fetchData]); // Include fetchData dependency
+  }, []);
 
   // Effect for interval refresh.
   useEffect(() => {

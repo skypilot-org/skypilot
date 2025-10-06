@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package serve.v1;
+
+service ServeService {
+    // Get status of service.
+    rpc GetServiceStatus(GetServiceStatusRequest) returns (GetServiceStatusResponse);
+    // Add version to service.
+    rpc AddVersion(AddVersionRequest) returns (AddVersionResponse);
+    // Terminate services.
+    rpc TerminateServices(TerminateServicesRequest) returns (TerminateServicesResponse);
+    // Terminate replica.
+    rpc TerminateReplica(TerminateReplicaRequest) returns (TerminateReplicaResponse);
+    // Wait for service registration.
+    rpc WaitServiceRegistration(WaitServiceRegistrationRequest) returns (WaitServiceRegistrationResponse);
+    // Update service.
+    rpc UpdateService(UpdateServiceRequest) returns (UpdateServiceResponse);
+}
+
+message ServiceNames {
+    repeated string names = 1;
+}
+
+message ServiceStatus {
+    map<string, string> status = 1;
+}
+
+message GetServiceStatusRequest {
+    optional ServiceNames service_names = 1;
+    bool pool = 2;
+}
+
+message GetServiceStatusResponse {
+    repeated ServiceStatus statuses = 1;
+}
+
+message AddVersionRequest {
+    string service_name = 1;
+}
+
+message AddVersionResponse {
+    int64 version = 1;
+}
+
+message TerminateServicesRequest {
+    optional ServiceNames service_names = 1;
+    bool purge = 2;
+    bool pool = 3;
+}
+
+message TerminateServicesResponse {
+    string message = 1;
+}
+
+message TerminateReplicaRequest {
+    string service_name = 1;
+    int64 replica_id = 2;
+    bool purge = 3;
+}
+
+message TerminateReplicaResponse {
+    string message = 1;
+}
+
+message WaitServiceRegistrationRequest {
+    string service_name = 1;
+    int64 job_id = 2;
+    bool pool = 3;
+}
+
+message WaitServiceRegistrationResponse {
+    int64 lb_port = 1;
+}
+
+message UpdateServiceRequest {
+    string service_name = 1;
+    int64 version = 2;
+    string mode = 3;
+    bool pool = 4;
+}
+
+message UpdateServiceResponse {
+    // TODO (kyuds): the return value of UpdateService is not
+    // used in the current codepath. We should add it in this
+    // protobuf message after it starts getting used.
+}

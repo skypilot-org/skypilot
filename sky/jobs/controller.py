@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import pathlib
 import resource
 import shutil
 import sys
@@ -17,6 +18,7 @@ import sky
 from sky import core
 from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.data import data_utils
@@ -56,6 +58,7 @@ async def create_background_task(coro: typing.Coroutine) -> None:
     async with _background_tasks_lock:
         task = asyncio.create_task(coro)
         _background_tasks.add(task)
+        # TODO(cooperc): Discard needs a lock?
         task.add_done_callback(_background_tasks.discard)
 
 
@@ -360,6 +363,21 @@ class JobsController:
             cluster_name, job_id_on_pool_cluster = (
                 await
                 managed_job_state.get_pool_submit_info_async(self._job_id))
+        if cluster_name is None:
+            # Check if we have been cancelled here, in the case where a user
+            # quickly cancels the job we want to gracefully handle it here,
+            # otherwise we will end up in the FAILED_CONTROLLER state.
+            self._logger.info(f'Cluster name is None for job {self._job_id}, '
+                              f'task {task_id}. Checking if we have been '
+                              'cancelled.')
+            status = await (managed_job_state.get_job_status_with_task_id_async(
+                job_id=self._job_id, task_id=task_id))
+            self._logger.debug(f'Status for job {self._job_id}, task {task_id}:'
+                               f'{status}')
+            if status == managed_job_state.ManagedJobStatus.CANCELLED:
+                self._logger.info(f'Job {self._job_id}, task {task_id} has '
+                                  'been quickly cancelled.')
+                raise asyncio.CancelledError()
         assert cluster_name is not None, (cluster_name, job_id_on_pool_cluster)
 
         if not is_resume:
@@ -896,6 +914,9 @@ class Controller:
             # some data here.
             raise error
 
+    # Use context.contextual to enable per-job output redirection and env var
+    # isolation.
+    @context.contextual
     async def run_job_loop(self,
                            job_id: int,
                            dag_yaml: str,
@@ -904,13 +925,9 @@ class Controller:
                            env_file_path: Optional[str] = None,
                            pool: Optional[str] = None):
         """Background task that runs the job loop."""
-        # Replace os.environ with ContextualEnviron to enable per-job
-        # environment isolation. This allows each job to have its own
-        # environment variables without affecting other jobs or the main
-        # process.
-        context.initialize()
         ctx = context.get()
-        ctx.redirect_log(log_file)  # type: ignore
+        assert ctx is not None, 'Context is not initialized'
+        ctx.redirect_log(pathlib.Path(log_file))
 
         # Load and apply environment variables from the job's environment file
         if env_file_path and os.path.exists(env_file_path):
@@ -921,13 +938,15 @@ class Controller:
                                 f'{list(env_vars.keys())}')
 
                 # Apply environment variables to the job's context
-                ctx = context.get()
                 if ctx is not None:
                     for key, value in env_vars.items():
                         if value is not None:
                             ctx.override_envs({key: value})
                             job_logger.debug(
                                 f'Set environment variable: {key}={value}')
+                    # Reload the skypilot config for this context to make sure
+                    # the latest config is used.
+                    skypilot_config.reload_config()
                 else:
                     job_logger.error(
                         'Context is None, cannot set environment variables')

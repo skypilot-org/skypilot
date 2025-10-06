@@ -2,12 +2,12 @@
 // This utility manages background preloading of cache data to improve page switching performance
 
 import dashboardCache from './cache';
-import { getClusters, getClusterHistory } from '@/data/connectors/clusters';
+import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobsWithClientPagination } from '@/data/connectors/jobs';
 import { getWorkspaces, getEnabledClouds } from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
 import { getVolumes } from '@/data/connectors/volumes';
-import { getGPUs, getCloudInfrastructure } from '@/data/connectors/infra';
+import { getCloudInfrastructure } from '@/data/connectors/infra';
 import { getSSHNodePools } from '@/data/connectors/ssh-node-pools';
 
 /**
@@ -17,14 +17,12 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
   // Base functions used across multiple pages (no arguments)
   base: {
     getClusters: { fn: getClusters, args: [] },
-    getClusterHistory: { fn: getClusterHistory, args: [] },
     getManagedJobs: {
       fn: getManagedJobsWithClientPagination,
       args: [{ allUsers: true }],
     },
     getWorkspaces: { fn: getWorkspaces, args: [] },
     getUsers: { fn: getUsers, args: [] },
-    getGPUs: { fn: getGPUs, args: [] },
     getCloudInfrastructure: {
       fn: getCloudInfrastructure,
       args: [false],
@@ -40,12 +38,11 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
 
   // Page-specific function requirements
   pages: {
-    clusters: ['getClusters', 'getClusterHistory', 'getWorkspaces'],
+    clusters: ['getClusters', 'getWorkspaces'],
     jobs: ['getManagedJobs', 'getClusters', 'getWorkspaces', 'getUsers'],
     infra: [
       'getClusters',
       'getManagedJobs',
-      'getGPUs',
       'getCloudInfrastructure',
       'getSSHNodePools',
     ],

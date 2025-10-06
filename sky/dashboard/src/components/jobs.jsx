@@ -216,9 +216,6 @@ export function ManagedJobs() {
     dashboardCache.invalidate(getWorkspaces);
     dashboardCache.invalidate(getUsers);
 
-    // Refresh parent component data (including poolsData for link matching)
-    fetchData(true); // Pass true to indicate it's a refresh button click
-
     // Trigger a re-fetch in both tables via their refreshDataRef
     if (jobsRefreshRef.current) {
       jobsRefreshRef.current();
@@ -341,6 +338,8 @@ export function ManagedJobsTable({
     onConfirm: null,
   });
   const isMobile = useMobile();
+  // Guards multiple concurrent fetches: only latest response should commit
+  const requestSeqRef = useRef(0);
 
   const handleRestartController = async () => {
     setConfirmationModal({
@@ -367,6 +366,9 @@ export function ManagedJobsTable({
   const fetchData = React.useCallback(
     async (options = {}) => {
       const includeStatus = options.includeStatus !== false;
+      // Bump request sequence and capture a version for this fetch
+      const version = requestSeqRef.current + 1;
+      requestSeqRef.current = version;
       setLocalLoading(true);
       setLoading(true); // Set parent loading state
       try {
@@ -451,13 +453,16 @@ export function ManagedJobsTable({
           }
         }
 
-        setData(jobs);
-        setTotalCount(total || 0);
-        setTotalNoFilter(totalNoFilter || 0);
-        setControllerStopped(!!isControllerStopped);
-        setControllerLaunching(!!isLaunching);
-        setApiStatusCounts(statusCounts);
-        setIsInitialLoad(false);
+        // Only commit if this is still the latest request
+        if (version === requestSeqRef.current) {
+          setData(jobs);
+          setTotalCount(total || 0);
+          setTotalNoFilter(totalNoFilter || 0);
+          setControllerStopped(!!isControllerStopped);
+          setControllerLaunching(!!isLaunching);
+          setApiStatusCounts(statusCounts);
+          setIsInitialLoad(false);
+        }
 
         // Log cache status for debugging
         if (process.env.NODE_ENV === 'development') {
@@ -473,12 +478,16 @@ export function ManagedJobsTable({
       } catch (err) {
         console.error('Error fetching data:', err);
         // Still set data to empty array on error to show proper UI
-        setData([]);
-        setControllerStopped(false);
-        setIsInitialLoad(false);
+        if (version === requestSeqRef.current) {
+          setData([]);
+          setControllerStopped(false);
+          setIsInitialLoad(false);
+        }
       } finally {
-        setLocalLoading(false);
-        setLoading(false); // Clear parent loading state
+        if (version === requestSeqRef.current) {
+          setLocalLoading(false);
+          setLoading(false); // Clear parent loading state
+        }
       }
     },
     [
@@ -505,24 +514,42 @@ export function ManagedJobsTable({
     fetchDataRef.current = fetchData;
   }, [fetchData]);
 
-  // Initial load
+  // Prevent duplicate API requests on first load/page refresh
+  // Multiple useEffects below would normally all fire on mount with their default values,
+  // causing redundant requests to the same API server endpoints.
+  // This ref ensures only the initial fetch effect runs, and subsequent effects
+  // only trigger on actual user interactions (page change, filter change, etc.)
+  const isInitialFetch = React.useRef(true);
+
+  // Initial load - only runs once on mount
   React.useEffect(() => {
     fetchData({ includeStatus: true });
+    // Mark that initial fetch is complete so other effects can run
+    isInitialFetch.current = false;
   }, []);
 
   // Fetch on pagination (page) changes without status request
+  // Skip on initial fetch (page defaults to 1)
   React.useEffect(() => {
-    fetchData({ includeStatus: false });
+    if (!isInitialFetch.current) {
+      fetchData({ includeStatus: false });
+    }
   }, [currentPage]);
 
   // Fetch on filters or page size changes with status request
+  // Skip on initial fetch (filters default to [] and pageSize to 10)
   React.useEffect(() => {
-    fetchData({ includeStatus: true });
+    if (!isInitialFetch.current) {
+      fetchData({ includeStatus: true });
+    }
   }, [filters, pageSize]);
 
   // Fetch on status filter changes (activeTab, selectedStatuses, showAllMode)
+  // Skip on initial fetch (these have default values)
   React.useEffect(() => {
-    fetchData({ includeStatus: true });
+    if (!isInitialFetch.current) {
+      fetchData({ includeStatus: true });
+    }
   }, [activeTab, selectedStatuses, showAllMode]);
 
   useEffect(() => {
@@ -784,10 +811,6 @@ export function ManagedJobsTable({
                 // Call the refresh function passed from parent
                 if (onRefresh) {
                   onRefresh();
-                }
-                // Also call the local refresh function to ensure loading state is set
-                if (refreshDataRef && refreshDataRef.current) {
-                  refreshDataRef.current();
                 }
               }}
               disabled={loading}

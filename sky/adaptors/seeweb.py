@@ -1,6 +1,10 @@
 """ Seeweb Adaptor """
 import configparser
-from pathlib import Path
+import pathlib
+from typing import Optional
+
+import pydantic
+import requests  # type: ignore
 
 from sky.adaptors import common
 from sky.utils import annotations
@@ -43,7 +47,7 @@ def check_compute_credentials() -> bool:
     Returns True if credentials are valid; otherwise raises a SeewebError.
     """
     # Read API key from standard Seeweb configuration file
-    key_path = Path('~/.seeweb_cloud/seeweb_keys').expanduser()
+    key_path = pathlib.Path('~/.seeweb_cloud/seeweb_keys').expanduser()
     if not key_path.exists():
         raise SeewebCredentialsFileNotFound(
             'Missing Seeweb API key file ~/.seeweb_cloud/seeweb_keys')
@@ -84,7 +88,7 @@ def check_storage_credentials() -> bool:
 def client():
     """Returns an authenticated ecsapi.Api object."""
     # Create authenticated client using the same credential pattern
-    key_path = Path('~/.seeweb_cloud/seeweb_keys').expanduser()
+    key_path = pathlib.Path('~/.seeweb_cloud/seeweb_keys').expanduser()
     if not key_path.exists():
         raise SeewebCredentialsFileNotFound(
             'Missing Seeweb API key file ~/.seeweb_cloud/seeweb_keys')
@@ -100,4 +104,64 @@ def client():
         raise SeewebApiKeyMissing(
             'Empty api_key in ~/.seeweb_cloud/seeweb_keys')
 
-    return ecsapi.Api(token=api_key)
+    api = ecsapi.Api(token=api_key)
+
+    # Monkey-patch fetch_servers to be tolerant to API schema mismatches.
+    orig_fetch_servers = api.fetch_servers
+    orig_delete_server = api.delete_server
+
+    def _tolerant_fetch_servers(
+            timeout: Optional[int] = None):  # type: ignore[override]
+        try:
+            return orig_fetch_servers(timeout=timeout)
+        except pydantic.ValidationError:
+            # Fallback path: fetch raw JSON, drop snapshot fields, then validate
+            # pylint: disable=protected-access
+            base_url = api._Api__generate_base_url()  # type: ignore
+            headers = api._Api__generate_authentication_headers(
+            )  # type: ignore
+            url = f'{base_url}/servers'
+            resp = requests.get(url, headers=headers, timeout=timeout or 15)
+            resp.raise_for_status()
+            data = resp.json()
+            try:
+                servers = data.get('server', [])
+                for s in servers:
+                    s.pop('last_restored_snapshot', None)
+            except (KeyError, TypeError, ValueError):
+                pass
+            server_list_response_cls = ecsapi._server._ServerListResponse
+            servers_response = server_list_response_cls.model_validate(data)
+            return servers_response.server
+
+    api.fetch_servers = _tolerant_fetch_servers  # type: ignore[assignment]
+
+    def _tolerant_delete_server(server_name: str,
+                                timeout: Optional[int] = None):
+        try:
+            return orig_delete_server(server_name, timeout=timeout)
+        except pydantic.ValidationError:
+            # Fallback: perform raw DELETE and interpret not_found as success
+            # pylint: disable=protected-access
+            base_url = api._Api__generate_base_url()  # type: ignore
+            headers = api._Api__generate_authentication_headers(
+            )  # type: ignore
+            url = f'{base_url}/servers/{server_name}'
+            resp = requests.delete(url, headers=headers, timeout=timeout or 15)
+            # Treat 404 as idempotent success
+            if resp.status_code == 404:
+                return None
+            # Some APIs return {status: 'not_found', message: ...}
+            try:
+                data = resp.json()
+                if isinstance(data, dict) and data.get('status') == 'not_found':
+                    return None
+            except (ValueError, TypeError):
+                pass
+            # If not clearly not_found, re-raise original behavior
+            resp.raise_for_status()
+            # Best-effort: return None to indicate deletion requested
+            return None
+
+    api.delete_server = _tolerant_delete_server  # type: ignore[assignment]
+    return api

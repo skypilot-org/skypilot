@@ -200,7 +200,10 @@ class TestQueue:
                 return 0, code, ''
 
         class DummyHandle:
-            pass
+
+            @property
+            def is_grpc_enabled_with_flag(self) -> bool:
+                return False
 
         def fake_maybe_restart_controller(refresh, stopped_message,
                                           spinner_message):

@@ -12,6 +12,7 @@ execute_sky_cleanup() {
     sky storage delete -a -y
     sky jobs cancel -a -y -u
     sky serve down -a -y
+    sky jobs pool down -a -y
 }
 
 execute_sky_cleanup

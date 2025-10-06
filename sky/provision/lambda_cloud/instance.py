@@ -68,9 +68,10 @@ def _get_private_ip(instance_info: Dict[str, Any], single_node: bool) -> str:
     return private_ip
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster"""
+    del cluster_name  # unused
     lambda_client = _get_lambda_client()
     pending_status = ['booting']
     while True:

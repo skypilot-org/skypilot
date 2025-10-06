@@ -1,11 +1,11 @@
 """Instrumentation for the API server."""
 
-import contextlib
-import functools
+import asyncio
 import multiprocessing
 import os
 import threading
 import time
+from typing import List
 
 import fastapi
 from prometheus_client import generate_latest
@@ -15,111 +15,11 @@ import psutil
 import starlette.middleware.base
 import uvicorn
 
+from sky import core
 from sky import sky_logging
-from sky.skylet import constants
-
-# Whether the metrics are enabled, cannot be changed at runtime.
-METRICS_ENABLED = os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED,
-                                 'false').lower() == 'true'
-
-_KB = 2**10
-_MB = 2**20
-_MEM_BUCKETS = [
-    _KB,
-    256 * _KB,
-    512 * _KB,
-    _MB,
-    2 * _MB,
-    4 * _MB,
-    8 * _MB,
-    16 * _MB,
-    32 * _MB,
-    64 * _MB,
-    128 * _MB,
-    256 * _MB,
-    float('inf'),
-]
+from sky.metrics import utils as metrics_utils
 
 logger = sky_logging.init_logger(__name__)
-
-# Total number of API server requests, grouped by path, method, and status.
-SKY_APISERVER_REQUESTS_TOTAL = prom.Counter(
-    'sky_apiserver_requests_total',
-    'Total number of API server requests',
-    ['path', 'method', 'status'],
-)
-
-# Time spent processing API server requests, grouped by path, method, and
-# status.
-SKY_APISERVER_REQUEST_DURATION_SECONDS = prom.Histogram(
-    'sky_apiserver_request_duration_seconds',
-    'Time spent processing API server requests',
-    ['path', 'method', 'status'],
-    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 30.0,
-             60.0, 120.0, float('inf')),
-)
-
-# Time spent processing a piece of code, refer to time_it().
-SKY_APISERVER_CODE_DURATION_SECONDS = prom.Histogram(
-    'sky_apiserver_code_duration_seconds',
-    'Time spent processing code',
-    ['name', 'group'],
-    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 30.0,
-             60.0, 120.0, float('inf')),
-)
-
-SKY_APISERVER_EVENT_LOOP_LAG_SECONDS = prom.Histogram(
-    'sky_apiserver_event_loop_lag_seconds',
-    'Scheduling delay of the server event loop',
-    ['pid'],
-    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 20.0,
-             60.0, float('inf')),
-)
-
-SKY_APISERVER_WEBSOCKET_CONNECTIONS = prom.Gauge(
-    'sky_apiserver_websocket_connections',
-    'Number of websocket connections',
-    ['pid'],
-    multiprocess_mode='livesum',
-)
-
-SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL = prom.Counter(
-    'sky_apiserver_websocket_closed_total',
-    'Number of websocket closed',
-    ['pid', 'reason'],
-)
-
-# The number of execution starts in each worker process, we do not record
-# histogram here as the duration has been measured in
-# SKY_APISERVER_CODE_DURATION_SECONDS without the worker label (process id).
-# Recording histogram WITH worker label will cause high cardinality.
-SKY_APISERVER_PROCESS_EXECUTION_START_TOTAL = prom.Counter(
-    'sky_apiserver_process_execution_start_total',
-    'Total number of execution starts in each worker process',
-    ['request', 'pid'],
-)
-
-SKY_APISERVER_PROCESS_PEAK_RSS = prom.Gauge(
-    'sky_apiserver_process_peak_rss',
-    'Peak RSS we saw in each process in last 30 seconds',
-    ['pid', 'type'],
-)
-
-SKY_APISERVER_PROCESS_CPU_TOTAL = prom.Gauge(
-    'sky_apiserver_process_cpu_total',
-    'Total CPU times a worker process has been running',
-    ['pid', 'type', 'mode'],
-)
-
-SKY_APISERVER_REQUEST_MEMORY_USAGE_BYTES = prom.Histogram(
-    'sky_apiserver_request_memory_usage_bytes',
-    'Peak memory usage of requests', ['name'],
-    buckets=_MEM_BUCKETS)
-
-SKY_APISERVER_REQUEST_RSS_INCR_BYTES = prom.Histogram(
-    'sky_apiserver_request_rss_incr_bytes',
-    'RSS increment after requests', ['name'],
-    buckets=_MEM_BUCKETS)
 
 metrics_app = fastapi.FastAPI()
 
@@ -137,6 +37,42 @@ async def metrics() -> fastapi.Response:
     return fastapi.Response(content=data,
                             media_type=prom.CONTENT_TYPE_LATEST,
                             headers={'Cache-Control': 'no-cache'})
+
+
+@metrics_app.get('/gpu-metrics')
+async def gpu_metrics() -> fastapi.Response:
+    """Gets the GPU metrics from multiple external k8s clusters"""
+    contexts = core.get_all_contexts()
+    all_metrics: List[str] = []
+    successful_contexts = 0
+
+    tasks = [
+        asyncio.create_task(metrics_utils.get_metrics_for_context(context))
+        for context in contexts
+        if context != 'in-cluster'
+    ]
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for i, result in enumerate(results):
+        if isinstance(result, Exception):
+            logger.error(
+                f'Failed to get metrics for context {contexts[i]}: {result}')
+        elif isinstance(result, BaseException):
+            # Avoid changing behavior for non-Exception BaseExceptions
+            # like KeyboardInterrupt/SystemExit: re-raise them.
+            raise result
+        else:
+            metrics_text = result
+            all_metrics.append(metrics_text)
+            successful_contexts += 1
+
+    combined_metrics = '\n\n'.join(all_metrics)
+
+    # Return as plain text for Prometheus compatibility
+    return fastapi.Response(
+        content=combined_metrics,
+        media_type='text/plain; version=0.0.4; charset=utf-8')
 
 
 def build_metrics_server(host: str, port: int) -> uvicorn.Server:
@@ -182,59 +118,15 @@ class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             status_code_group = '5xx'
             raise
         finally:
-            SKY_APISERVER_REQUESTS_TOTAL.labels(path=path,
-                                                method=method,
-                                                status=status_code_group).inc()
+            metrics_utils.SKY_APISERVER_REQUESTS_TOTAL.labels(
+                path=path, method=method, status=status_code_group).inc()
             if not streaming:
                 duration = time.time() - start_time
-                SKY_APISERVER_REQUEST_DURATION_SECONDS.labels(
+                metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS.labels(
                     path=path, method=method,
                     status=status_code_group).observe(duration)
 
         return response
-
-
-@contextlib.contextmanager
-def time_it(name: str, group: str = 'default'):
-    """Context manager to measure and record code execution duration."""
-    if not METRICS_ENABLED:
-        yield
-    else:
-        start_time = time.time()
-        try:
-            yield
-        finally:
-            duration = time.time() - start_time
-            SKY_APISERVER_CODE_DURATION_SECONDS.labels(
-                name=name, group=group).observe(duration)
-
-
-def time_me(func):
-    """Measure the duration of decorated function."""
-
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        if not METRICS_ENABLED:
-            return func(*args, **kwargs)
-        name = f'{func.__module__}/{func.__name__}'
-        with time_it(name, group='function'):
-            return func(*args, **kwargs)
-
-    return wrapper
-
-
-def time_me_async(func):
-    """Measure the duration of decorated async function."""
-
-    @functools.wraps(func)
-    async def async_wrapper(*args, **kwargs):
-        if not METRICS_ENABLED:
-            return await func(*args, **kwargs)
-        name = f'{func.__module__}/{func.__name__}'
-        with time_it(name, group='function'):
-            return await func(*args, **kwargs)
-
-    return async_wrapper
 
 
 peak_rss_bytes = 0
@@ -252,13 +144,15 @@ def process_monitor(process_type: str, stop: threading.Event):
             last_bucket_end = time.time()
             bucket_peak = 0
         peak_rss_bytes = max(bucket_peak, proc.memory_info().rss)
-        SKY_APISERVER_PROCESS_PEAK_RSS.labels(
+        metrics_utils.SKY_APISERVER_PROCESS_PEAK_RSS.labels(
             pid=pid, type=process_type).set(peak_rss_bytes)
         ctimes = proc.cpu_times()
-        SKY_APISERVER_PROCESS_CPU_TOTAL.labels(pid=pid,
-                                               type=process_type,
-                                               mode='user').set(ctimes.user)
-        SKY_APISERVER_PROCESS_CPU_TOTAL.labels(pid=pid,
-                                               type=process_type,
-                                               mode='system').set(ctimes.system)
+        metrics_utils.SKY_APISERVER_PROCESS_CPU_TOTAL.labels(pid=pid,
+                                                             type=process_type,
+                                                             mode='user').set(
+                                                                 ctimes.user)
+        metrics_utils.SKY_APISERVER_PROCESS_CPU_TOTAL.labels(pid=pid,
+                                                             type=process_type,
+                                                             mode='system').set(
+                                                                 ctimes.system)
         time.sleep(1)

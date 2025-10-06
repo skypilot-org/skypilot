@@ -64,8 +64,9 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
     return next(iter(instances.keys()))
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
+    del cluster_name  # unused
     logger.info(f'Starting run_instances with region={region}, '
                 f'cluster={cluster_name_on_cloud}')
     logger.debug(f'Config: {config}')

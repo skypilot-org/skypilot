@@ -98,7 +98,7 @@ async def tail_logs(
     request: fastapi.Request, log_body: payloads.ServeLogsBody,
     background_tasks: fastapi.BackgroundTasks
 ) -> fastapi.responses.StreamingResponse:
-    executor.schedule_request(
+    request_task = executor.prepare_request(
         request_id=request.state.request_id,
         request_name='serve.logs',
         request_body=log_body,
@@ -106,10 +106,9 @@ async def tail_logs(
         schedule_type=api_requests.ScheduleType.SHORT,
         request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
     )
-
-    request_task = await api_requests.get_request_async(request.state.request_id
-                                                       )
-
+    task = executor.execute_request_in_coroutine(request_task)
+    # Cancel the coroutine after the request is done or client disconnects
+    background_tasks.add_task(task.cancel)
     return stream_utils.stream_response(
         request_id=request_task.request_id,
         logs_path=request_task.log_path,

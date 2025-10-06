@@ -1,0 +1,4 @@
+# Available as us-docker.pkg.dev/sky-dev-465/buildkite-test-images/test-root-pyproject:latest
+FROM ubuntu:latest
+
+COPY pyproject.toml /

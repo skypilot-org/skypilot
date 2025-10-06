@@ -44,8 +44,10 @@ logger = sky_logging.init_logger(__name__)
 _DOWNLOAD_CHUNK_BYTES = 8192
 # The chunk size for the zip file to be uploaded to the API server. We split
 # the zip file into chunks to avoid network issues for large request body that
-# can be caused by NGINX's client_max_body_size.
-_UPLOAD_CHUNK_BYTES = 512 * 1024 * 1024
+# can be caused by NGINX's client_max_body_size or Cloudflare's upload limit.
+# As of 09/25/2025, the upload limit for Cloudflare's free plan is 100MiB:
+# https://developers.cloudflare.com/support/troubleshooting/http-status-codes/4xx-client-error/error-413/
+_UPLOAD_CHUNK_BYTES = 100 * 1024 * 1024
 
 FILE_UPLOAD_LOGS_DIR = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                     'file_uploads')

@@ -25,6 +25,7 @@ from sky.provision.kubernetes.utils import normalize_tpu_accelerator_name
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import env_options
 from sky.utils import kubernetes_enums
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -47,9 +48,6 @@ _FUSERMOUNT_SHARED_DIR = '/var/run/fusermount'
 class Kubernetes(clouds.Cloud):
     """Kubernetes."""
 
-    SKY_SSH_KEY_SECRET_NAME = 'sky-ssh-keys'
-    SKY_SSH_JUMP_NAME = 'sky-ssh-jump-pod'
-
     # Limit the length of the cluster name to avoid exceeding the limit of 63
     # characters for Kubernetes resources. We limit to 42 characters (63-21) to
     # allow additional characters for creating ingress services to expose ports.
@@ -62,6 +60,7 @@ class Kubernetes(clouds.Cloud):
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
 
     _DEFAULT_NUM_VCPUS = 2
+    _DEFAULT_NUM_VCPUS_WITH_GPU = 4
     _DEFAULT_MEMORY_CPU_RATIO = 1
     _DEFAULT_MEMORY_CPU_RATIO_WITH_GPU = 4  # Allocate more memory for GPU tasks
     _REPR = 'Kubernetes'
@@ -96,14 +95,6 @@ class Kubernetes(clouds.Cloud):
 
     # Set of contexts that has logged as temporarily unreachable
     logged_unreachable_contexts: Set[str] = set()
-
-    @property
-    def ssh_key_secret_field_name(self):
-        # Use a fresh user hash to avoid conflicts in the secret object naming.
-        # This can happen when the controller is reusing the same user hash
-        # through USER_ID_ENV_VAR but has a different SSH key.
-        fresh_user_hash = common_utils.generate_user_hash()
-        return f'ssh-publickey-{fresh_user_hash}'
 
     @classmethod
     def _unsupported_features_for_resources(
@@ -186,6 +177,12 @@ class Kubernetes(clouds.Cloud):
         all_contexts = [
             ctx for ctx in all_contexts if not ctx.startswith('ssh-')
         ]
+
+        allow_all_contexts = allowed_contexts == 'all' or (
+            allowed_contexts is None and
+            env_options.Options.ALLOW_ALL_KUBERNETES_CONTEXTS.get())
+        if allow_all_contexts:
+            allowed_contexts = all_contexts
 
         if allowed_contexts is None:
             # Try kubeconfig if present
@@ -516,9 +513,6 @@ class Kubernetes(clouds.Cloud):
             return image_id
 
         image_id = _get_image_id(resources)
-        # TODO(romilb): Create a lightweight image for SSH jump host
-        ssh_jump_image = catalog.get_image_id_from_tag(self.IMAGE_CPU,
-                                                       clouds='kubernetes')
 
         # Set environment variables for the pod. Note that SkyPilot env vars
         # are set separately when the task is run. These env vars are
@@ -692,13 +686,8 @@ class Kubernetes(clouds.Cloud):
             'accelerator_count': str(acc_count),
             'timeout': str(timeout),
             'k8s_port_mode': port_mode.value,
-            'k8s_networking_mode': network_utils.get_networking_mode(
-                None, context=context).value,
-            'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_values': k8s_acc_label_values,
-            'k8s_ssh_jump_name': self.SKY_SSH_JUMP_NAME,
-            'k8s_ssh_jump_image': ssh_jump_image,
             'k8s_service_account_name': k8s_service_account_name,
             'k8s_automount_sa_token': 'true',
             'k8s_fuse_device_required': fuse_device_required,
@@ -842,7 +831,7 @@ class Kubernetes(clouds.Cloud):
 
             gpu_task_cpus = k8s_instance_type.cpus
             if resources.cpus is None:
-                gpu_task_cpus = gpu_task_cpus * acc_count
+                gpu_task_cpus = self._DEFAULT_NUM_VCPUS_WITH_GPU * acc_count
             # Special handling to bump up memory multiplier for GPU instances
             gpu_task_memory = (float(resources.memory.strip('+')) if
                                resources.memory is not None else gpu_task_cpus *
