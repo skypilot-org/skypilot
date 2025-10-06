@@ -1123,8 +1123,7 @@ function UsersTable({
           );
           const activeJobCount = (jobsData || []).filter(
             (j) =>
-              j.user_hash === user.userId &&
-              ACTIVE_JOB_STATUSES.has(j.status)
+              j.user_hash === user.userId && ACTIVE_JOB_STATUSES.has(j.status)
           ).length;
           return {
             ...user,
