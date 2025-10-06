@@ -478,16 +478,16 @@ class TestBackwardCompatibility:
         # Check that for a 4GB memory jobs controller, there is only one controller process spawned.
         # This is a regression test for https://github.com/skypilot-org/skypilot/pull/7278
         # and https://github.com/skypilot-org/skypilot/pull/7494
-        check_controller_process_count = [
-            's=$(sky status -u) && echo "$s"',
-            'jobs_controller=$(echo "$s" | grep sky-jobs-controller- | awk \'{print $1}\')',
-            'if [ -z "$jobs_controller" ]; then echo "ERROR: jobs controller not found in sky status"; exit 1; fi',
-            'echo "Jobs controller: $jobs_controller"',
-            'num_controllers=$(ssh $jobs_controller "pgrep -f \'msky.jobs.controller\' | wc -l")',
-            'if [ -z "$num_controllers" ]; then echo "ERROR: failed to get controller process count"; exit 1; fi',
-            'echo "Controller process count: $num_controllers"',
-            'if [ "$num_controllers" -ne 1 ]; then echo "ERROR: num_controllers is $num_controllers, expected 1"; exit 1; fi',
-        ]
+        check_controller_process_count = (
+            's=$(sky status -u) && echo "$s" && '
+            'jobs_controller=$(echo "$s" | grep sky-jobs-controller- | awk \'{print $1}\') && '
+            'if [ -z "$jobs_controller" ]; then echo "ERROR: jobs controller not found in sky status"; exit 1; fi && '
+            'echo "Jobs controller: $jobs_controller" && '
+            'num_controllers=$(ssh $jobs_controller "pgrep -f \'msky.jobs.controller\' | wc -l") && '
+            'if [ -z "$num_controllers" ]; then echo "ERROR: failed to get controller process count"; exit 1; fi && '
+            'echo "Controller process count: $num_controllers" && '
+            'if [ "$num_controllers" -ne 1 ]; then echo "ERROR: num_controllers is $num_controllers, expected 1"; exit 1; fi'
+        )
 
         commands = [
             *self._switch_to_base(
@@ -514,7 +514,7 @@ class TestBackwardCompatibility:
                                 [sky.ManagedJobStatus.RUNNING]),
             ),
             *self._switch_to_current(*current_commands),
-            *check_controller_process_count,
+            check_controller_process_count,
         ]
         teardown = f'{self.ACTIVATE_CURRENT} && sky jobs cancel -n {managed_job_name}* -y'
         self.run_compatibility_test(managed_job_name, commands, teardown)
