@@ -475,6 +475,16 @@ class TestBackwardCompatibility:
         # Combine all commands
         current_commands = common_initial_commands + version_specific_commands
 
+        # Check that for a 4GB memory jobs controller, there is only one controller process spawned.
+        # This is a regression test for https://github.com/skypilot-org/skypilot/pull/7278
+        # and https://github.com/skypilot-org/skypilot/pull/7494
+        check_controller_process_count = [
+            'jobs_controller=$(sky status -u | grep sky-jobs-controller- | awk \'{print $1}\')',
+            'num_controllers=$(ssh $jobs_controller pgrep -f "msky.jobs.controller" | wc -l)',
+            'echo "num_controllers: $num_controllers"',
+            'if [ "$num_controllers" -ne 1 ]; then echo "ERROR: num_controllers is not 1"; exit 1; fi',
+        ]
+
         commands = [
             *self._switch_to_base(
                 # Cover jobs launched in the old version and ran to terminal states
@@ -500,6 +510,7 @@ class TestBackwardCompatibility:
                                 [sky.ManagedJobStatus.RUNNING]),
             ),
             *self._switch_to_current(*current_commands),
+            *check_controller_process_count,
         ]
         teardown = f'{self.ACTIVATE_CURRENT} && sky jobs cancel -n {managed_job_name}* -y'
         self.run_compatibility_test(managed_job_name, commands, teardown)
