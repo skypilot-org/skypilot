@@ -124,10 +124,10 @@ def get_number_of_controllers() -> int:
         ('jobs', 'controller', 'consolidation_mode'), default_value=False)
 
     try:
-        with open(
-                os.path.expanduser(
-                    managed_job_constants.JOB_CONTROLLER_MEMORY_FILE),
-                'r') as f:
+        with open(os.path.expanduser(
+                managed_job_constants.JOB_CONTROLLER_MEMORY_FILE),
+                  'r',
+                  encoding='utf-8') as f:
             memory_limit_gb = float(f.read())
     except FileNotFoundError:
         memory_limit_gb = common_utils.get_mem_size_gb()
