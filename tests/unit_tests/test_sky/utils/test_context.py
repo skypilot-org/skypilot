@@ -270,3 +270,30 @@ async def test_async_cancellation():
     ctx.cancel()
     await asyncio.wait_for(task, timeout=1.0)
     assert cancel_called
+
+
+def test_contextual_decorator():
+    """Test that @contextual copies and decouples the context."""
+    # Prepare an original context with an override
+    context.initialize()
+    parent = context.get()
+    parent.override_envs({'K': 'v1'})
+
+    @context.contextual
+    def inner():
+        child = context.get()
+        # Child context should be a different instance
+        assert child is not parent
+        # Child should inherit parent's overrides at creation time
+        assert child.env_overrides.get('K') == 'v1'
+        # Mutating child should not affect parent
+        child.override_envs({'K': 'v2', 'NEW': 'n'})
+        assert parent.env_overrides.get('K') == 'v1'
+        assert 'NEW' not in parent.env_overrides
+
+    inner()
+    # After returning, the active context should be restored to parent
+    assert context.get() is parent
+    # Parent remains unchanged by child's mutations
+    assert parent.env_overrides.get('K') == 'v1'
+    assert 'NEW' not in parent.env_overrides

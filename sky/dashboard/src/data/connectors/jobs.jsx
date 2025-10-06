@@ -198,7 +198,7 @@ export async function getManagedJobs(options = {}) {
  * @param {boolean} options.useClientPagination - Whether to use client-side pagination (default: true)
  * @returns {Promise<{jobs: Array, total: number, controllerStopped: boolean}>}
  */
-export async function getManagedJobsWithClientPagination(options = {}) {
+export async function getManagedJobsWithClientPagination(options) {
   const {
     allUsers = true,
     nameMatch,
@@ -208,7 +208,7 @@ export async function getManagedJobsWithClientPagination(options = {}) {
     page = 1,
     limit = 10,
     useClientPagination = true,
-  } = options;
+  } = options || {};
 
   try {
     // If client pagination is disabled, fall back to server-side pagination

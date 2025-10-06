@@ -29,6 +29,7 @@ SKY_REMOTE_RAY_PORT_FILE = '~/.sky/ray_port.json'
 SKY_REMOTE_RAY_TEMPDIR = '/tmp/ray_skypilot'
 SKY_REMOTE_RAY_VERSION = '2.9.3'
 
+SKY_UNSET_PYTHONPATH = 'env -u PYTHONPATH'
 # We store the absolute path of the python executable (/opt/conda/bin/python3)
 # in this file, so that any future internal commands that need to use python
 # can use this path. This is useful for the case where the user has a custom
@@ -40,7 +41,7 @@ SKY_GET_PYTHON_PATH_CMD = (f'[ -s {SKY_PYTHON_PATH_FILE} ] && '
                            f'cat {SKY_PYTHON_PATH_FILE} 2> /dev/null || '
                            'which python3')
 # Python executable, e.g., /opt/conda/bin/python3
-SKY_PYTHON_CMD = f'$({SKY_GET_PYTHON_PATH_CMD})'
+SKY_PYTHON_CMD = f'{SKY_UNSET_PYTHONPATH} $({SKY_GET_PYTHON_PATH_CMD})'
 # Prefer SKY_UV_PIP_CMD, which is faster.
 # TODO(cooperc): remove remaining usage (GCP TPU setup).
 SKY_PIP_CMD = f'{SKY_PYTHON_CMD} -m pip'
@@ -56,14 +57,18 @@ SKY_REMOTE_PYTHON_ENV: str = f'~/{SKY_REMOTE_PYTHON_ENV_NAME}'
 ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
 # uv is used for venv and pip, much faster than python implementations.
 SKY_UV_INSTALL_DIR = '"$HOME/.local/bin"'
-SKY_UV_CMD = f'UV_SYSTEM_PYTHON=false {SKY_UV_INSTALL_DIR}/uv'
+# set UV_SYSTEM_PYTHON to false in case the
+# user provided docker image set it to true.
+# unset PYTHONPATH in case the user provided docker image set it.
+SKY_UV_CMD = ('UV_SYSTEM_PYTHON=false '
+              f'{SKY_UNSET_PYTHONPATH} {SKY_UV_INSTALL_DIR}/uv')
 # This won't reinstall uv if it's already installed, so it's safe to re-run.
 SKY_UV_INSTALL_CMD = (f'{SKY_UV_CMD} -V >/dev/null 2>&1 || '
                       'curl -LsSf https://astral.sh/uv/install.sh '
                       f'| UV_INSTALL_DIR={SKY_UV_INSTALL_DIR} sh')
 SKY_UV_PIP_CMD: str = (f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} pip')
-SKY_UV_RUN_CMD: str = (
-    f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} run --active')
+SKY_UV_RUN_CMD: str = (f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} run '
+                       '--no-project --no-config')
 # Deleting the SKY_REMOTE_PYTHON_ENV_NAME from the PATH and unsetting relevant
 # VIRTUAL_ENV envvars to deactivate the environment. `deactivate` command does
 # not work when conda is used.
@@ -95,7 +100,7 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '18'
+SKYLET_VERSION = '21'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
