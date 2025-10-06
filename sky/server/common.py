@@ -950,6 +950,7 @@ def clear_local_api_server_database() -> None:
     db_path = os.path.expanduser(server_constants.API_SERVER_REQUEST_DB_PATH)
     for extension in ['', '-shm', '-wal']:
         try:
+            logger.debug(f'Removing database file {db_path}{extension}')
             os.remove(f'{db_path}{extension}')
         except FileNotFoundError:
             logger.debug(f'Database file {db_path}{extension} not found.')
