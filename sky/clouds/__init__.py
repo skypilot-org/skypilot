@@ -26,6 +26,7 @@ from sky.clouds.lambda_cloud import Lambda
 from sky.clouds.nebius import Nebius
 from sky.clouds.oci import OCI
 from sky.clouds.paperspace import Paperspace
+from sky.clouds.primeintellect import PrimeIntellect
 from sky.clouds.runpod import RunPod
 from sky.clouds.scp import SCP
 from sky.clouds.seeweb import Seeweb
@@ -44,6 +45,7 @@ __all__ = [
     'Lambda',
     'DO',
     'Paperspace',
+    'PrimeIntellect',
     'SCP',
     'RunPod',
     'Vast',

@@ -1,7 +1,8 @@
 name: nightly-build
 on:
   schedule:
-    - cron: '35 8 * * *' # 8:35am UTC, 1:35am PST, 4:35am EST
+    - cron: '35 8 * * *' # 08:35 UTC (01:35 PST / 04:35 EST) — original nightly
+    - cron: '0 0 * * *'  # 00:00 UTC (~5:00 PM PT during DST) — tests-only preflight
   workflow_dispatch:
     inputs:
       skip_buildkite:
@@ -115,7 +116,7 @@ jobs:
           sed -i "s/__version__ = '.*'/__version__ = '1.0.0.dev${RELEASE_VERSION}'/g" sky/__init__.py
           sed -i "s/name='skypilot',/name='skypilot-nightly',/g" sky/setup_files/setup.py
           echo "version=1.0.0.dev${RELEASE_VERSION}" >> $GITHUB_OUTPUT
-          echo "Version: $version"
+          echo "Version: 1.0.0.dev${RELEASE_VERSION}"
       - name: Build a binary wheel and a source tarball
         run: >-
           python -m
@@ -218,7 +219,9 @@ jobs:
 
   publish-and-validate-both:
     needs: [gate-tests, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-remote-server-kubernetes, backward-compat-test-nightly, backward-compat-test-stable]
-    if: ${{ always() && needs.nightly-build-pypi.result == 'success' && (needs.gate-tests.outputs.publish_without_tests == 'true' || (needs.gate-tests.outputs.run_tests == 'true' && needs.smoke-tests-aws.result == 'success' && needs.smoke-tests-kubernetes-resource-heavy.result == 'success' && needs.smoke-tests-kubernetes-no-resource-heavy.result == 'success' && needs.smoke-tests-remote-server-kubernetes.result == 'success' && needs.backward-compat-test-nightly.result == 'success' && needs.backward-compat-test-stable.result == 'success')) }}
+    # Allow publish/validate for manual dispatch or the original nightly cron; skip for the 5PM PT preflight
+    # Use always() so this job evaluates even if some test jobs were skipped when skip_buildkite is selected
+    if: ${{ always() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.event.schedule == '35 8 * * *')) && needs.nightly-build-pypi.result == 'success' && (needs.gate-tests.outputs.publish_without_tests == 'true' || (needs.gate-tests.outputs.run_tests == 'true' && needs.smoke-tests-aws.result == 'success' && needs.smoke-tests-kubernetes-resource-heavy.result == 'success' && needs.smoke-tests-kubernetes-no-resource-heavy.result == 'success' && needs.smoke-tests-remote-server-kubernetes.result == 'success' && needs.backward-compat-test-nightly.result == 'success' && needs.backward-compat-test-stable.result == 'success')) }}
     uses: ./.github/workflows/publish-and-validate-both.yml
     with:
       package_name: skypilot-nightly
@@ -228,7 +231,8 @@ jobs:
 
   trigger-helm-release:
     needs: [publish-and-validate-both]
-    if: ${{ always() && needs.publish-and-validate-both.result == 'success' }}
+    # Allow helm release for manual dispatch or the original nightly cron; skip for the 5PM PT preflight
+    if: ${{ always() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.event.schedule == '35 8 * * *')) && needs.publish-and-validate-both.result == 'success' }}
     uses: ./.github/workflows/helm-docker-release.yaml
     with:
       package_name: skypilot-nightly

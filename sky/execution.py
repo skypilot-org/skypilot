@@ -5,7 +5,7 @@ See `Stage` for a Task's life cycle.
 import enum
 import logging
 import typing
-from typing import List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple, Union
 
 import colorama
 
@@ -31,6 +31,7 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import sky
+    from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -265,8 +266,10 @@ def _execute_dag(
 
     cluster_exists = False
     if cluster_name is not None:
-        cluster_record = global_user_state.get_cluster_from_name(cluster_name)
-        cluster_exists = cluster_record is not None
+        # We use launched_at to check if the cluster exists, because this
+        # db query is faster than get_cluster_from_name.
+        cluster_exists = global_user_state.cluster_with_name_exists(
+            cluster_name)
         # TODO(woosuk): If the cluster exists, print a warning that
         # `cpus` and `memory` are not used as a job scheduling constraint,
         # unlike `gpus`.
@@ -398,6 +401,26 @@ def _execute_dag(
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
 
+    # Note on race vs. lock: OPTIMIZE typically runs outside the per-cluster
+    # lock. After the backend acquires the lock and refreshes state, the
+    # original "do we need to optimize?" decision may be stale (e.g., the
+    # cluster just got terminated). To compensate without moving the optimizer
+    # into the backend, we inject a small planner the backend can call under
+    # the lock only when no reusable snapshot and no caller plan exist.
+    planner: Optional[Callable[['sky.Task'], 'resources_lib.Resources']] = None
+    if isinstance(backend,
+                  backends.CloudVmRayBackend) and Stage.OPTIMIZE in stages:
+
+        def _planner(_t: 'sky.Task'):
+            new_dag = optimizer.Optimizer.optimize(dag,
+                                                   minimize=optimize_target,
+                                                   quiet=_quiet_optimizer)
+            new_task = new_dag.tasks[0]
+            assert new_task.best_resources is not None, new_task
+            return new_task.best_resources.assert_launchable()
+
+        planner = _planner
+
     backend.register_info(
         dag=dag,
         optimize_target=optimize_target,
@@ -406,7 +429,8 @@ def _execute_dag(
         # after K8S pod recovers from a crash.
         # See `kubernetes-ray.yml.j2` for more details.
         dump_final_script=is_controller_high_availability_supported,
-        is_managed=is_managed)
+        is_managed=is_managed,
+        planner=planner)
 
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket
@@ -671,7 +695,6 @@ def launch(
     # see the setup logs when inspecting the launch process to know
     # excatly what the job is waiting for.
     detach_setup = controller_utils.Controllers.from_name(cluster_name) is None
-
     return _execute(
         entrypoint=entrypoint,
         dryrun=dryrun,

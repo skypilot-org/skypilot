@@ -825,7 +825,8 @@ def _compose_cli_config(cli_config: Optional[List[str]]) -> config_utils.Config:
     except ValueError as e:
         raise ValueError(f'Invalid config override: {cli_config}. '
                          f'Check if config file exists or if the dotlist '
-                         f'is formatted as: key1=value1,key2=value2') from e
+                         f'is formatted as: key1=value1,key2=value2.\n'
+                         f'Details: {e}') from e
     logger.debug('CLI overrides config syntax check passed.')
 
     return parsed_config

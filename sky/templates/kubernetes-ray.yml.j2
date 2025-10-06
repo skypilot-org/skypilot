@@ -33,13 +33,10 @@ provider:
     networking_mode: {{k8s_networking_mode}}
 
     # We use internal IPs since we set up a port-forward between the kubernetes
-    # cluster and the local machine, or directly use NodePort to reach the
-    # head node.
+    # cluster and the local machine.
     use_internal_ips: true
 
     timeout: {{timeout}}
-
-    ssh_jump_image: {{k8s_ssh_jump_image}}
 
     # Namespace used to host SkyPilot system components, such as fuse device
     # manager.
@@ -276,8 +273,6 @@ available_node_types:
             parent: skypilot
             # component will be set for the head node pod to be the same as the head node service selector above if a
             skypilot-cluster: {{cluster_name_on_cloud}}
-            # Identifies the SSH jump pod used by this pod. Used in life cycle management of the ssh jump pod.
-            skypilot-ssh-jump: {{k8s_ssh_jump_name}}
             skypilot-user: {{ user }}
             # Custom tags for the pods
             {%- for label_key, label_value in labels.items() %}
@@ -444,9 +439,6 @@ available_node_types:
         # object store. If you do not provide this, Ray will fall back to
         # /tmp which cause slowdowns if is not a shared memory volume.
         volumes:
-        - name: secret-volume
-          secret:
-            secretName: {{k8s_ssh_key_secret_name}}
         - name: dshm
           emptyDir:
             medium: Memory
@@ -510,6 +502,16 @@ available_node_types:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.labels['ray-node-type']
+            - name: SKYPILOT_POD_CPU_CORE_LIMIT
+              valueFrom:
+                resourceFieldRef:
+                  containerName: ray-node
+                  resource: requests.cpu
+            - name: SKYPILOT_POD_MEMORY_BYTES_LIMIT
+              valueFrom:
+                resourceFieldRef:
+                  containerName: ray-node
+                  resource: requests.memory
             {% for key, value in k8s_env_vars.items() if k8s_env_vars is not none %}
             - name: {{ key }}
               value: {{ value }}
@@ -630,13 +632,6 @@ available_node_types:
           command: ["/bin/bash", "-c", "--"]
           args:
             - |
-              # For backwards compatibility, we put a marker file in the pod
-              # to indicate that the pod is running with the changes introduced
-              # in project nimbus: https://github.com/skypilot-org/skypilot/pull/4393
-              # TODO: Remove this marker file and it's usage in setup_commands
-              # after v0.10.0 release.
-              touch /tmp/skypilot_is_nimbus
-
               # Helper function to conditionally use sudo
               # TODO(zhwu): consolidate the two prefix_cmd and sudo replacements
               prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
@@ -823,7 +818,8 @@ available_node_types:
                 fi
                 $(prefix_cmd) cp -p "$FUSERMOUNT_PATH" "${FUSERMOUNT_PATH}-original"
                 $(prefix_cmd) ln -sf {{k8s_fusermount_shared_dir}}/fusermount-shim "$FUSERMOUNT_PATH"
-                FUSERMOUNT3_PATH=$(which fusermount3)
+                # "|| true" because fusermount3 is not always available
+                FUSERMOUNT3_PATH=$(which fusermount3) || true
                 if [ -z "$FUSERMOUNT3_PATH" ]; then
                     FUSERMOUNT3_PATH="${FUSERMOUNT_PATH}3"
                 fi
@@ -865,18 +861,23 @@ available_node_types:
                 $(prefix_cmd) mkdir -p ~/.ssh;
                 $(prefix_cmd) chown -R $(whoami) ~/.ssh;
                 $(prefix_cmd) chmod 700 ~/.ssh;
-                $(prefix_cmd) cat /etc/secret-volume/ssh-publickey* > ~/.ssh/authorized_keys;
+                $(prefix_cmd) cat > ~/.ssh/authorized_keys <<'SKYPILOT_SSH_KEY_EOF'
+              skypilot:ssh_public_key_content
+              SKYPILOT_SSH_KEY_EOF
                 $(prefix_cmd) chmod 644 ~/.ssh/authorized_keys;
                 $(prefix_cmd) service ssh restart;
                 $(prefix_cmd) sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;
 
                 touch /tmp/apt_ssh_setup_complete
                 echo "=== SSH setup completed ==="
-                ) > /tmp/${STEPS[0]}.log 2>&1 || {
-                  echo "Error: ${STEPS[0]} failed. Continuing anyway..." > /tmp/${STEPS[0]}.failed
+                ) > /tmp/${STEPS[0]}.log 2>&1
+                if [ "$?" -ne "0" ]; then
+                  {
+                  echo "Error: ${STEPS[0]} failed. Continuing anyway..." > /tmp/${STEPS[0]}.failed 2>&1
                   cat /tmp/${STEPS[0]}.log
                   exit 1
-                }
+                  }
+                fi
               ) &
 
               # STEP 2: Install conda, ray and skypilot (for dependencies); start
@@ -894,15 +895,20 @@ available_node_types:
                 {{ conda_installation_commands }}
                 {{ ray_installation_commands }}
 
-                VIRTUAL_ENV=~/skypilot-runtime ~/.local/bin/uv pip install skypilot[kubernetes,remote]
+                # set UV_SYSTEM_PYTHON to false in case the user provided docker image set it to true.
+                # unset PYTHONPATH in case the user provided docker image set it.
+                VIRTUAL_ENV=~/skypilot-runtime UV_SYSTEM_PYTHON=false env -u PYTHONPATH ~/.local/bin/uv pip install skypilot[kubernetes,remote]
                 # Wait for `patch` package to be installed before applying ray patches
                 until dpkg -l | grep -q "^ii  patch "; do
                   sleep 0.1
                   echo "Waiting for patch package to be installed..."
                 done
                 # Apply Ray patches for progress bar fix
-                ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
-                  VIRTUAL_ENV=~/skypilot-runtime python -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
+                # set UV_SYSTEM_PYTHON to false in case the user provided docker image set it to true.
+                # unset PYTHONPATH in case the user provided docker image set it.
+                # ~/.sky/python_path is seeded by conda_installation_commands
+                VIRTUAL_ENV=~/skypilot-runtime UV_SYSTEM_PYTHON=false env -u PYTHONPATH ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
+                  $(cat ~/.sky/python_path) -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
                 }
                 touch /tmp/ray_skypilot_installation_complete
                 echo "=== Ray and skypilot installation completed ==="
@@ -931,11 +937,14 @@ available_node_types:
                   set +e
                   {{ ray_worker_start_command }}
                 fi
-                ) > /tmp/${STEPS[1]}.log 2>&1 || {
-                  echo "Error: ${STEPS[1]} failed. Continuing anyway..." > /tmp/${STEPS[1]}.failed
+                ) > /tmp/${STEPS[1]}.log 2>&1
+                if [ "$?" -ne "0" ]; then
+                  {
+                  echo "Error: ${STEPS[1]} failed. Continuing anyway..." > /tmp/${STEPS[1]}.failed 2>&1
                   cat /tmp/${STEPS[1]}.log
                   exit 1
-                }
+                  }
+                fi
               ) &
 
 
@@ -953,11 +962,14 @@ available_node_types:
                   fi;
                 fi;
                 export -p > ~/container_env_var.sh && $(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh
-                ) > /tmp/${STEPS[2]}.log 2>&1 || {
-                  echo "Error: ${STEPS[2]} failed. Continuing anyway..." > /tmp/${STEPS[2]}.failed
+                ) > /tmp/${STEPS[2]}.log 2>&1
+                if [ "$?" -ne "0" ]; then
+                  {
+                  echo "Error: ${STEPS[2]} failed. Continuing anyway..." > /tmp/${STEPS[2]}.failed 2>&1
                   cat /tmp/${STEPS[2]}.log
                   exit 1
-                }
+                  }
+                fi
               ) &
 
               function mylsof { p=$(for pid in /proc/{0..9}*; do i=$(basename "$pid"); for file in "$pid"/fd/*; do link=$(readlink -e "$file"); if [ "$link" = "$1" ]; then echo "$i"; fi; done; done); echo "$p"; };
@@ -1087,9 +1099,6 @@ available_node_types:
           # object store. If you do not provide this, Ray will fall back to
           # /tmp which cause slowdowns if is not a shared memory volume.
           volumeMounts:
-          - name: secret-volume
-            readOnly: true
-            mountPath: "/etc/secret-volume"
           - mountPath: /dev/shm
             name: dshm
           {% if k8s_enable_gpudirect_tcpx %}
@@ -1323,18 +1332,16 @@ setup_commands:
     # Wait for SSH setup to complete before proceeding
     if [ -f /tmp/apt_ssh_setup_started ]; then
       echo "=== Logs for asynchronous SSH setup ===";
-      [ -f /tmp/apt_ssh_setup_complete ] && cat /tmp/${STEPS[0]}.log ||
-      { tail -f -n +1 /tmp/${STEPS[0]}.log & TAIL_PID=$!; echo "Tail PID: $TAIL_PID"; until [ -f /tmp/apt_ssh_setup_complete ] || [ -f /tmp/${STEPS[0]}.failed ]; do sleep 0.5; done; kill $TAIL_PID || true; };
+      ([ -f /tmp/apt_ssh_setup_complete ]|| [ -f /tmp/${STEPS[0]}.failed ]) && cat /tmp/${STEPS[0]}.log ||
+      { tail -f -n +1 /tmp/${STEPS[0]}.log & TAIL_PID=$!; echo "Tail PID: $TAIL_PID"; sleep 0.5; until [ -f /tmp/apt_ssh_setup_complete ] || [ -f /tmp/${STEPS[0]}.failed ]; do sleep 0.5; done; kill $TAIL_PID || true; };
       [ -f /tmp/${STEPS[0]}.failed ] && { echo "Error: ${STEPS[0]} failed. Exiting."; exit 1; } || true;
     fi
 
     echo "=== Logs for asynchronous ray and skypilot installation ===";
-    if [ -f /tmp/skypilot_is_nimbus ]; then
-      echo "=== Logs for asynchronous ray and skypilot installation ===";
-      [ -f /tmp/ray_skypilot_installation_complete ] && cat /tmp/${STEPS[1]}.log ||
-      { tail -f -n +1 /tmp/${STEPS[1]}.log & TAIL_PID=$!; echo "Tail PID: $TAIL_PID"; until [ -f /tmp/ray_skypilot_installation_complete ] || [ -f /tmp/${STEPS[1]}.failed ]; do sleep 0.5; done; kill $TAIL_PID || true; };
-      [ -f /tmp/${STEPS[1]}.failed ] && { echo "Error: ${STEPS[1]} failed. Exiting."; exit 1; } || true;
-    fi
+    ([ -f /tmp/ray_skypilot_installation_complete ]|| [ -f /tmp/${STEPS[1]}.failed ]) && cat /tmp/${STEPS[1]}.log ||
+    { tail -f -n +1 /tmp/${STEPS[1]}.log & TAIL_PID=$!; echo "Tail PID: $TAIL_PID"; sleep 0.5; until [ -f /tmp/ray_skypilot_installation_complete ] || [ -f /tmp/${STEPS[1]}.failed ]; do sleep 0.5; done; kill $TAIL_PID || true; };
+    [ -f /tmp/${STEPS[1]}.failed ] && { echo "Error: ${STEPS[1]} failed. Exiting."; exit 1; } || true;
+
     end_epoch=$(date +%s);
     echo "=== Ray and skypilot dependencies installation completed in $(($end_epoch - $start_epoch)) secs ===";
     start_epoch=$(date +%s);

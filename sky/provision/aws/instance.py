@@ -311,9 +311,10 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
     return head_instance_id
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
+    del cluster_name  # unused
     ec2 = _default_ec2_resource(region)
     # NOTE: We set max_attempts=0 for fast failing when the resource is not
     # available (although the doc says it will only retry for network
