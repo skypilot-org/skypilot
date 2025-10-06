@@ -3,6 +3,7 @@
 Simple script to inject test managed jobs without cleanup for manual verification.
 """
 
+import argparse
 import os
 import sys
 
@@ -14,9 +15,22 @@ from scale_test_utils import TestScale
 
 def main():
     """Inject test managed jobs without cleanup."""
-    count = 10
+    parser = argparse.ArgumentParser(
+        description='Inject test managed jobs for manual verification')
+    parser.add_argument(
+        '--managed-job-id',
+        type=int,
+        default=1,
+        help='Job ID of the managed job to use as template (default: 1)')
+    parser.add_argument(
+        '--count',
+        type=int,
+        default=10,
+        help='Number of test managed jobs to inject (default: 10)')
 
-    print(f"Injecting {count} test managed jobs (no cleanup)...")
+    args = parser.parse_args()
+
+    print(f"Injecting {args.count} test managed jobs (no cleanup)...")
     print("=" * 60)
 
     # Create test instance
@@ -24,12 +38,12 @@ def main():
     test.initialize(
         active_cluster_name='scale-test-active',
         terminated_cluster_name='scale-test-terminated',
-        managed_job_id=1  # Required - must exist
+        managed_job_id=args.managed_job_id
     )
 
     try:
         # Inject managed jobs
-        injected = test.inject_managed_jobs(count)
+        injected = test.inject_managed_jobs(args.count)
         print(f"\nSuccessfully injected {injected} test managed jobs!")
         print(f"Job IDs: {min(test.test_job_ids)} - {max(test.test_job_ids)}")
 
