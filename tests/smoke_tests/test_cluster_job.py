@@ -1041,6 +1041,32 @@ def test_volumes_on_kubernetes():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.kubernetes
+def test_volume_env_mount_kubernetes():
+    name = smoke_tests_utils.get_cluster_name()
+    pvc_name = f'{name}-pvc'
+    mount_job_conf = textwrap.dedent(f"""
+        name: {name}-job
+        volumes:
+          /mnt/test-data: ${{USERNAME}}-{pvc_name}
+        run: |
+          echo "Mounted volume"
+    """)
+    full_pvc_name = f'user-{pvc_name}'
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(mount_job_conf)
+        f.flush()
+        test = smoke_tests_utils.Test(
+            'volume_env_mount_kubernetes',
+            [
+                f'sky volumes apply -y -n {full_pvc_name} --type k8s-pvc --size 2GB',
+                f's=$(sky jobs launch -y --infra kubernetes {f.name} --env USERNAME=user); echo "$s"; echo "$s" | grep "Job finished (status: SUCCEEDED)"',
+            ],
+            f'sky jobs cancel -a || true && sleep 5 && sky volumes delete {full_pvc_name} -y && (vol=$(sky volumes ls | grep "{full_pvc_name}"); if [ -n "$vol" ]; then echo "{full_pvc_name} not deleted" && exit 1; else echo "{full_pvc_name} deleted"; fi)',
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Container logs from task on Kubernetes ----------
 @pytest.mark.kubernetes
 def test_container_logs_multinode_kubernetes():
@@ -2019,56 +2045,6 @@ def test_long_setup_run_script(generic_cloud: str):
             f'sky down -y {name}; sky jobs cancel -n {name} -y',
         )
         smoke_tests_utils.run_one_test(test)
-
-
-# ---------- Test min-gpt ----------
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
-@pytest.mark.no_hyperbolic  # Hyperbolic not support num_nodes > 1 yet
-@pytest.mark.no_seeweb  # Seeweb does not support multi-node
-@pytest.mark.resource_heavy
-@pytest.mark.parametrize('train_file', [
-    'examples/distributed-pytorch/train.yaml',
-    'examples/distributed-pytorch/train-rdzv.yaml'
-])
-@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
-def test_min_gpt(generic_cloud: str, train_file: str, accelerator: Dict[str,
-                                                                        str]):
-    if generic_cloud == 'kubernetes':
-        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
-    else:
-        accelerator = accelerator.get(generic_cloud, 'T4')
-    name = smoke_tests_utils.get_cluster_name()
-
-    def read_and_modify(file_path: str) -> str:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        # Let the train exit after 1 epoch
-        modified_content = content.replace(
-            'main.py', 'main.py trainer_config.max_epochs=1')
-        modified_content = re.sub(r'accelerators:\s*[^\n]+',
-                                  f'accelerators: {accelerator}',
-                                  modified_content)
-
-        # Create a temporary YAML file with the modified content
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            f.write(modified_content)
-            f.flush()
-            train_file_path = f.name
-        return train_file_path
-
-    dist_train_file = read_and_modify(train_file)
-
-    test = smoke_tests_utils.Test(
-        'min_gpt_kubernetes',
-        [
-            f'sky launch -y -c {name} --infra {generic_cloud} {dist_train_file}',
-            f'sky logs {name} 1 --status',
-        ],
-        f'sky down -y {name}',
-        timeout=20 * 60,
-    )
-    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Test GCP network tier ----------

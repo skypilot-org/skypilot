@@ -20,7 +20,7 @@ def test_zip_files_and_folders(skyignore_dir):
             actual_zipped_files = zipf.namelist()
 
         expected_zipped_files = [
-            'ln-keep.py', 'ln-dir-keep.py', 'dir/subdir/ln-keep.py',
+            '', 'ln-keep.py', 'ln-dir-keep.py', 'dir/subdir/ln-keep.py',
             constants.SKY_IGNORE_FILE, 'dir/subdir/remove.py', 'keep.py',
             'dir/keep.txt', 'dir/keep.a', 'dir/subdir/keep.b', 'ln-folder',
             'empty-folder/', 'dir/', 'dir/subdir/', 'dir/subdir/remove_dir/'
