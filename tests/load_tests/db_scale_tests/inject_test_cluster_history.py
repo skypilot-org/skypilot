@@ -21,7 +21,8 @@ def main():
         '--terminated-cluster',
         type=str,
         default='scale-test-terminated',
-        help='Name of the terminated cluster to use as template (default: scale-test-terminated)'
+        help=
+        'Name of the terminated cluster to use as template (default: scale-test-terminated)'
     )
     parser.add_argument(
         '--recent-count',

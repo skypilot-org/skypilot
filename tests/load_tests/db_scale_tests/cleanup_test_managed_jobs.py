@@ -15,12 +15,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 def main():
     """Cleanup test managed jobs from database."""
     parser = argparse.ArgumentParser(
-        description='Cleanup test managed jobs injected after a specific job ID')
+        description='Cleanup test managed jobs injected after a specific job ID'
+    )
     parser.add_argument(
         '--managed-job-id',
         type=int,
         required=True,
-        help='Job ID of the template managed job. All jobs with ID > this will be deleted.'
+        help=
+        'Job ID of the template managed job. All jobs with ID > this will be deleted.'
     )
 
     args = parser.parse_args()
@@ -35,7 +37,8 @@ def main():
         cursor = conn.cursor()
 
         # Find test jobs - all jobs with job_id greater than the template job
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT job_id, run_timestamp
             FROM spot
             WHERE job_id > ?
@@ -44,7 +47,9 @@ def main():
         jobs = cursor.fetchall()
 
         if not jobs:
-            print(f"No test managed jobs found with job_id > {args.managed_job_id}.")
+            print(
+                f"No test managed jobs found with job_id > {args.managed_job_id}."
+            )
             return
 
         print(f"Found {len(jobs)} test managed jobs to delete")

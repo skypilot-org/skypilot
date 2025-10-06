@@ -21,13 +21,13 @@ def main():
         '--active-cluster',
         type=str,
         default='scale-test-active',
-        help='Name of the active cluster to use as template (default: scale-test-active)'
+        help=
+        'Name of the active cluster to use as template (default: scale-test-active)'
     )
-    parser.add_argument(
-        '--count',
-        type=int,
-        default=5,
-        help='Number of test clusters to inject (default: 5)')
+    parser.add_argument('--count',
+                        type=int,
+                        default=5,
+                        help='Number of test clusters to inject (default: 5)')
 
     args = parser.parse_args()
 

@@ -35,11 +35,9 @@ def main():
 
     # Create test instance
     test = TestScale()
-    test.initialize(
-        active_cluster_name='scale-test-active',
-        terminated_cluster_name='scale-test-terminated',
-        managed_job_id=args.managed_job_id
-    )
+    test.initialize(active_cluster_name='scale-test-active',
+                    terminated_cluster_name='scale-test-terminated',
+                    managed_job_id=args.managed_job_id)
 
     try:
         # Inject managed jobs
