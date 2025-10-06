@@ -18,12 +18,7 @@ def run_command(cmd, description):
     print(f"{'='*60}")
     print(f"Running: {cmd}")
 
-    result = subprocess.run(
-        cmd,
-        shell=True,
-        capture_output=True,
-        text=True
-    )
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
 
     if result.stdout:
         print(result.stdout)
@@ -40,16 +35,14 @@ def run_command(cmd, description):
 def copy_script_to_pod(script_path, pod_name, namespace, dest_filename):
     """Copy a script to the pod using stdin."""
     if not run_command(
-        f"cat {script_path} | kubectl exec -i -n {namespace} {pod_name} -- sh -c 'cat > /tmp/{dest_filename}'",
-        f"Copying {dest_filename} to pod"
-    ):
+            f"cat {script_path} | kubectl exec -i -n {namespace} {pod_name} -- sh -c 'cat > /tmp/{dest_filename}'",
+            f"Copying {dest_filename} to pod"):
         return False
 
     # Verify the script was copied correctly
     if not run_command(
-        f"kubectl exec -n {namespace} {pod_name} -- ls -lh /tmp/{dest_filename}",
-        f"Verifying {dest_filename} was copied"
-    ):
+            f"kubectl exec -n {namespace} {pod_name} -- ls -lh /tmp/{dest_filename}",
+            f"Verifying {dest_filename} was copied"):
         return False
 
     return True
@@ -58,21 +51,18 @@ def copy_script_to_pod(script_path, pod_name, namespace, dest_filename):
 def main():
     """Main function to run the cleanup."""
     parser = argparse.ArgumentParser(
-        description='Run PostgreSQL scale test cleanup (clusters + managed jobs) in a Kubernetes pod'
+        description=
+        'Run PostgreSQL scale test cleanup (clusters + managed jobs) in a Kubernetes pod'
     )
-    parser.add_argument(
-        '--pod',
-        type=str,
-        required=True,
-        help='Pod name (required)'
-    )
-    parser.add_argument(
-        '--namespace',
-        '-n',
-        type=str,
-        default='skypilot',
-        help='Namespace (default: skypilot)'
-    )
+    parser.add_argument('--pod',
+                        type=str,
+                        required=True,
+                        help='Pod name (required)')
+    parser.add_argument('--namespace',
+                        '-n',
+                        type=str,
+                        default='skypilot',
+                        help='Namespace (default: skypilot)')
 
     args = parser.parse_args()
     pod_name = args.pod
@@ -90,27 +80,27 @@ def main():
     clusters_script = os.path.join(script_dir, "cleanup_postgres_clusters.py")
     jobs_script = os.path.join(script_dir, "cleanup_postgres_managed_jobs.py")
 
-    if not copy_script_to_pod(clusters_script, pod_name, namespace, "cleanup_postgres_clusters.py"):
+    if not copy_script_to_pod(clusters_script, pod_name, namespace,
+                              "cleanup_postgres_clusters.py"):
         print("Failed to copy clusters cleanup script. Exiting.")
         return 1
 
-    if not copy_script_to_pod(jobs_script, pod_name, namespace, "cleanup_postgres_managed_jobs.py"):
+    if not copy_script_to_pod(jobs_script, pod_name, namespace,
+                              "cleanup_postgres_managed_jobs.py"):
         print("Failed to copy managed jobs cleanup script. Exiting.")
         return 1
 
     # Step 2: Run the clusters cleanup script in the pod
     if not run_command(
-        f"kubectl exec -n {namespace} {pod_name} -- python3 /tmp/cleanup_postgres_clusters.py",
-        "Running clusters cleanup script in pod"
-    ):
+            f"kubectl exec -n {namespace} {pod_name} -- python3 /tmp/cleanup_postgres_clusters.py",
+            "Running clusters cleanup script in pod"):
         print("Failed to run clusters cleanup script. Exiting.")
         return 1
 
     # Step 3: Run the managed jobs cleanup script in the pod
     if not run_command(
-        f"kubectl exec -n {namespace} {pod_name} -- python3 /tmp/cleanup_postgres_managed_jobs.py",
-        "Running managed jobs cleanup script in pod"
-    ):
+            f"kubectl exec -n {namespace} {pod_name} -- python3 /tmp/cleanup_postgres_managed_jobs.py",
+            "Running managed jobs cleanup script in pod"):
         print("Failed to run managed jobs cleanup script. Exiting.")
         return 1
 

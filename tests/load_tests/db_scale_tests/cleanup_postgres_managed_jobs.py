@@ -7,7 +7,9 @@ This script should be run from within the skypilot-api-server pod.
 try:
     import psycopg2
 except ImportError:
-    print("Error: psycopg2 not installed. Install with: pip install psycopg2-binary")
+    print(
+        "Error: psycopg2 not installed. Install with: pip install psycopg2-binary"
+    )
     exit(1)
 
 
@@ -35,16 +37,11 @@ def cleanup_managed_jobs(conn):
     job_ids = [job[0] for job in jobs]
 
     # Delete from both tables
-    cursor.execute(
-        "DELETE FROM spot WHERE job_id = ANY(%s)",
-        (job_ids,)
-    )
+    cursor.execute("DELETE FROM spot WHERE job_id = ANY(%s)", (job_ids,))
     deleted_spot = cursor.rowcount
 
-    cursor.execute(
-        "DELETE FROM job_info WHERE spot_job_id = ANY(%s)",
-        (job_ids,)
-    )
+    cursor.execute("DELETE FROM job_info WHERE spot_job_id = ANY(%s)",
+                   (job_ids,))
     deleted_job_info = cursor.rowcount
 
     conn.commit()

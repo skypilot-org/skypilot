@@ -37,8 +37,9 @@ def main():
 
         # Delete from cluster_yaml table first
         placeholders = ', '.join(['?' for _ in cluster_names])
-        cursor.execute(f"DELETE FROM cluster_yaml WHERE cluster_name IN ({placeholders})",
-                       cluster_names)
+        cursor.execute(
+            f"DELETE FROM cluster_yaml WHERE cluster_name IN ({placeholders})",
+            cluster_names)
         yaml_deleted = cursor.rowcount
 
         # Delete from clusters table

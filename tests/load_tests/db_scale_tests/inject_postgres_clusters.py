@@ -15,7 +15,9 @@ try:
     import psycopg2
     from psycopg2.extras import execute_batch
 except ImportError:
-    print("Error: psycopg2 not installed. Install with: pip install psycopg2-binary")
+    print(
+        "Error: psycopg2 not installed. Install with: pip install psycopg2-binary"
+    )
     exit(1)
 
 
@@ -30,8 +32,7 @@ def load_active_cluster_sample(conn, cluster_name='scale-test-active'):
     if not row:
         raise ValueError(
             f"Active cluster '{cluster_name}' not found in database. "
-            f"Please create it first."
-        )
+            f"Please create it first.")
 
     sample = dict(zip(columns, row))
     cursor.close()
@@ -43,15 +44,15 @@ def load_terminated_cluster_sample(conn, cluster_name='scale-test-terminated'):
     """Load a terminated cluster from cluster_history as a template."""
     cursor = conn.cursor()
 
-    cursor.execute("SELECT * FROM cluster_history WHERE name = %s", (cluster_name,))
+    cursor.execute("SELECT * FROM cluster_history WHERE name = %s",
+                   (cluster_name,))
     columns = [desc[0] for desc in cursor.description]
     row = cursor.fetchone()
 
     if not row:
         raise ValueError(
             f"Terminated cluster '{cluster_name}' not found in cluster_history. "
-            f"Please create and terminate it first."
-        )
+            f"Please create and terminate it first.")
 
     sample = dict(zip(columns, row))
     cursor.close()
@@ -113,7 +114,8 @@ def generate_cluster_data(active_cluster_sample, count):
     return clusters
 
 
-def generate_cluster_history_data(terminated_cluster_sample, recent_count, old_count):
+def generate_cluster_history_data(terminated_cluster_sample, recent_count,
+                                  old_count):
     """Generate cluster history data by cloning the terminated cluster sample."""
     history_clusters = []
     current_time = int(time.time())
@@ -126,7 +128,8 @@ def generate_cluster_history_data(terminated_cluster_sample, recent_count, old_c
         cluster = deep_copy_cluster(terminated_cluster_sample)
 
         # Modify unique fields
-        cluster['name'] = f"test-cluster-recent-{i+1:04d}-{uuid.uuid4().hex[:8]}"
+        cluster[
+            'name'] = f"test-cluster-recent-{i+1:04d}-{uuid.uuid4().hex[:8]}"
         cluster['cluster_hash'] = str(uuid.uuid4())
 
         # Random timestamp 1-9 days ago
@@ -166,18 +169,20 @@ def inject_clusters(conn, count, active_cluster_name='scale-test-active'):
     # Load sample data
     print("Loading active cluster sample...")
     active_cluster_sample, cluster_columns = load_active_cluster_sample(
-        conn, active_cluster_name
-    )
+        conn, active_cluster_name)
 
     # Load cluster YAML for the sample
     print("Loading cluster YAML...")
     cursor = conn.cursor()
-    cursor.execute("SELECT yaml FROM cluster_yaml WHERE cluster_name = %s", (active_cluster_name,))
+    cursor.execute("SELECT yaml FROM cluster_yaml WHERE cluster_name = %s",
+                   (active_cluster_name,))
     sample_yaml_row = cursor.fetchone()
     sample_yaml = sample_yaml_row[0] if sample_yaml_row else None
 
     if not sample_yaml:
-        print(f"Warning: No cluster_yaml found for {active_cluster_name}. Cluster YAML will not be injected.")
+        print(
+            f"Warning: No cluster_yaml found for {active_cluster_name}. Cluster YAML will not be injected."
+        )
 
     print(f"Generating {count} test clusters...")
     clusters = generate_cluster_data(active_cluster_sample, count)
@@ -201,14 +206,18 @@ def inject_clusters(conn, count, active_cluster_name='scale-test-active'):
     print(f"Inserting clusters in batches of {batch_size}...")
     for i in range(0, len(clusters), batch_size):
         batch = clusters[i:i + batch_size]
-        batch_data = [tuple(cluster[col] for col in cluster_columns) for cluster in batch]
+        batch_data = [
+            tuple(cluster[col] for col in cluster_columns) for cluster in batch
+        ]
 
         execute_batch(cursor, insert_sql, batch_data)
         conn.commit()
 
         # Also insert cluster_yaml entries if we have sample YAML
         if sample_yaml:
-            yaml_batch_data = [(cluster['name'], sample_yaml) for cluster in batch]
+            yaml_batch_data = [
+                (cluster['name'], sample_yaml) for cluster in batch
+            ]
             execute_batch(cursor, yaml_insert_sql, yaml_batch_data)
             conn.commit()
 
@@ -225,7 +234,9 @@ def inject_clusters(conn, count, active_cluster_name='scale-test-active'):
     return total_inserted
 
 
-def inject_cluster_history(conn, recent_count, old_count,
+def inject_cluster_history(conn,
+                           recent_count,
+                           old_count,
                            terminated_cluster_name='scale-test-terminated'):
     """Inject test cluster history entries into PostgreSQL database."""
     total_count = recent_count + old_count
@@ -236,13 +247,11 @@ def inject_cluster_history(conn, recent_count, old_count,
     # Load sample data
     print("Loading terminated cluster sample...")
     terminated_cluster_sample, history_columns = load_terminated_cluster_sample(
-        conn, terminated_cluster_name
-    )
+        conn, terminated_cluster_name)
 
     print(f"Generating {total_count} test cluster history entries...")
-    history_clusters = generate_cluster_history_data(
-        terminated_cluster_sample, recent_count, old_count
-    )
+    history_clusters = generate_cluster_history_data(terminated_cluster_sample,
+                                                     recent_count, old_count)
 
     # Prepare insert statement
     columns_str = ', '.join(history_columns)
@@ -258,18 +267,23 @@ def inject_cluster_history(conn, recent_count, old_count,
     print(f"Inserting cluster history in batches of {batch_size}...")
     for i in range(0, len(history_clusters), batch_size):
         batch = history_clusters[i:i + batch_size]
-        batch_data = [tuple(cluster[col] for col in history_columns) for cluster in batch]
+        batch_data = [
+            tuple(cluster[col] for col in history_columns) for cluster in batch
+        ]
 
         execute_batch(cursor, insert_sql, batch_data)
         conn.commit()
 
         total_inserted += len(batch_data)
         if total_inserted % 1000 == 0:
-            print(f"  Inserted {total_inserted}/{total_count} history entries...")
+            print(
+                f"  Inserted {total_inserted}/{total_count} history entries...")
 
     cursor.close()
 
-    print(f"\nSuccessfully injected {total_inserted} test cluster history entries!")
+    print(
+        f"\nSuccessfully injected {total_inserted} test cluster history entries!"
+    )
 
     return total_inserted
 
@@ -279,27 +293,60 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description='Inject test clusters into PostgreSQL database for scale testing'
+        description=
+        'Inject test clusters into PostgreSQL database for scale testing')
+    parser.add_argument(
+        '--cluster-count',
+        type=int,
+        default=2000,
+        help='Number of active clusters to inject (default: 2000)')
+    parser.add_argument(
+        '--recent-history',
+        type=int,
+        default=2000,
+        help=
+        'Number of recent cluster history entries (1-10 days old) (default: 2000)'
     )
-    parser.add_argument('--cluster-count', type=int, default=2000,
-                        help='Number of active clusters to inject (default: 2000)')
-    parser.add_argument('--recent-history', type=int, default=2000,
-                        help='Number of recent cluster history entries (1-10 days old) (default: 2000)')
-    parser.add_argument('--old-history', type=int, default=8000,
-                        help='Number of old cluster history entries (15-30 days old) (default: 8000)')
-    parser.add_argument('--active-cluster', type=str, default='scale-test-active',
-                        help='Name of active cluster to use as template (default: scale-test-active)')
-    parser.add_argument('--terminated-cluster', type=str, default='scale-test-terminated',
-                        help='Name of terminated cluster to use as template (default: scale-test-terminated)')
-    parser.add_argument('--host', type=str, default='localhost',
+    parser.add_argument(
+        '--old-history',
+        type=int,
+        default=8000,
+        help=
+        'Number of old cluster history entries (15-30 days old) (default: 8000)'
+    )
+    parser.add_argument(
+        '--active-cluster',
+        type=str,
+        default='scale-test-active',
+        help=
+        'Name of active cluster to use as template (default: scale-test-active)'
+    )
+    parser.add_argument(
+        '--terminated-cluster',
+        type=str,
+        default='scale-test-terminated',
+        help=
+        'Name of terminated cluster to use as template (default: scale-test-terminated)'
+    )
+    parser.add_argument('--host',
+                        type=str,
+                        default='localhost',
                         help='Database host (default: localhost)')
-    parser.add_argument('--port', type=int, default=5432,
+    parser.add_argument('--port',
+                        type=int,
+                        default=5432,
                         help='Database port (default: 5432)')
-    parser.add_argument('--database', type=str, default='skypilot',
+    parser.add_argument('--database',
+                        type=str,
+                        default='skypilot',
                         help='Database name (default: skypilot)')
-    parser.add_argument('--user', type=str, default='skypilot',
+    parser.add_argument('--user',
+                        type=str,
+                        default='skypilot',
                         help='Database user (default: skypilot)')
-    parser.add_argument('--password', type=str, default='skypilot',
+    parser.add_argument('--password',
+                        type=str,
+                        default='skypilot',
                         help='Database password (default: skypilot)')
 
     args = parser.parse_args()
@@ -337,12 +384,13 @@ def main():
         print("Connected successfully!")
 
         # Inject active clusters
-        clusters_injected = inject_clusters(conn, cluster_count, active_cluster_name)
+        clusters_injected = inject_clusters(conn, cluster_count,
+                                            active_cluster_name)
 
         # Inject cluster history
-        history_injected = inject_cluster_history(
-            conn, recent_history_count, old_history_count, terminated_cluster_name
-        )
+        history_injected = inject_cluster_history(conn, recent_history_count,
+                                                  old_history_count,
+                                                  terminated_cluster_name)
 
         # Close connection
         conn.close()

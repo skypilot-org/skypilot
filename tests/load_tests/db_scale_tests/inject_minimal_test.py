@@ -74,7 +74,8 @@ def main():
             'metadata': '{}',
             'owner': sample_dict.get('owner'),
             'cluster_hash': sample_dict.get('cluster_hash'),
-            'storage_mounts_metadata': sample_dict.get('storage_mounts_metadata'),
+            'storage_mounts_metadata':
+                sample_dict.get('storage_mounts_metadata'),
             'cluster_ever_up': 1,
             'status_updated_at': int(time.time()),
             'config_hash': sample_dict.get('config_hash'),
@@ -84,7 +85,8 @@ def main():
             'last_creation_command': sample_dict.get('last_creation_command'),
             'is_managed': 0,
             'provision_log_path': sample_dict.get('provision_log_path'),
-            'skylet_ssh_tunnel_metadata': sample_dict.get('skylet_ssh_tunnel_metadata'),
+            'skylet_ssh_tunnel_metadata':
+                sample_dict.get('skylet_ssh_tunnel_metadata'),
         }
 
         test_clusters.append(cluster)
@@ -109,7 +111,8 @@ def main():
     print("\nChecking cluster_yaml table:")
     for i in range(1, 3):
         cluster_name = f'test-yaml-missing-{i}'
-        cursor.execute("SELECT * FROM cluster_yaml WHERE cluster_name = ?", (cluster_name,))
+        cursor.execute("SELECT * FROM cluster_yaml WHERE cluster_name = ?",
+                       (cluster_name,))
         result = cursor.fetchone()
         print(f"  {cluster_name}: {'FOUND' if result else 'NOT FOUND'}")
 
@@ -121,9 +124,13 @@ def main():
     print("\nTo reproduce the error, run:")
     print("  sky status")
     print("\nExpected error:")
-    print("  ValueError: Cluster yaml ~/.sky/generated/test-yaml-missing-X.yml not found.")
+    print(
+        "  ValueError: Cluster yaml ~/.sky/generated/test-yaml-missing-X.yml not found."
+    )
     print("\nTo clean up:")
-    print("  sqlite3 ~/.sky/state.db \"DELETE FROM clusters WHERE name LIKE 'test-yaml-missing-%';\"")
+    print(
+        "  sqlite3 ~/.sky/state.db \"DELETE FROM clusters WHERE name LIKE 'test-yaml-missing-%';\""
+    )
 
 
 if __name__ == "__main__":

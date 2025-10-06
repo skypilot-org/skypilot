@@ -13,7 +13,9 @@ try:
     import psycopg2
     from psycopg2.extras import execute_batch
 except ImportError:
-    print("Error: psycopg2 not installed. Install with: pip install psycopg2-binary")
+    print(
+        "Error: psycopg2 not installed. Install with: pip install psycopg2-binary"
+    )
     exit(1)
 
 
@@ -29,8 +31,7 @@ def load_managed_job_sample(conn, managed_job_id=9):
     if not spot_row:
         raise ValueError(
             f"Managed job with ID {managed_job_id} not found in spot table. "
-            f"Please create a sample job first."
-        )
+            f"Please create a sample job first.")
 
     spot_sample = dict(zip(spot_columns, spot_row))
 
@@ -42,8 +43,7 @@ def load_managed_job_sample(conn, managed_job_id=9):
 
     if not job_info_row:
         raise ValueError(
-            f"Job info for spot_job_id {spot_sample['spot_job_id']} not found."
-        )
+            f"Job info for spot_job_id {spot_sample['spot_job_id']} not found.")
 
     job_info_sample = dict(zip(job_info_columns, job_info_row))
     cursor.close()
@@ -81,7 +81,8 @@ def generate_managed_job_data(spot_sample, job_info_sample, count, max_job_id):
         # Update run_timestamp to be unique
         timestamp_str = time.strftime('%Y-%m-%d-%H-%M-%S',
                                       time.localtime(base_time))
-        spot_job['run_timestamp'] = f'sky-{timestamp_str}-{random.randint(100000, 999999)}'
+        spot_job[
+            'run_timestamp'] = f'sky-{timestamp_str}-{random.randint(100000, 999999)}'
 
         # Update controller_pid to be unique
         job_info['controller_pid'] = -(random.randint(1000, 99999))
@@ -89,9 +90,12 @@ def generate_managed_job_data(spot_sample, job_info_sample, count, max_job_id):
         # Update file paths to be unique
         home_dir = os.path.expanduser('~')
         job_hash = f'{i+1:04d}'
-        job_info['dag_yaml_path'] = f'{home_dir}/.sky/managed_jobs/test-job-{job_hash}.yaml'
-        job_info['env_file_path'] = f'{home_dir}/.sky/managed_jobs/test-job-{job_hash}.env'
-        job_info['original_user_yaml_path'] = f'{home_dir}/.sky/managed_jobs/test-job-{job_hash}.original_user_yaml'
+        job_info[
+            'dag_yaml_path'] = f'{home_dir}/.sky/managed_jobs/test-job-{job_hash}.yaml'
+        job_info[
+            'env_file_path'] = f'{home_dir}/.sky/managed_jobs/test-job-{job_hash}.env'
+        job_info[
+            'original_user_yaml_path'] = f'{home_dir}/.sky/managed_jobs/test-job-{job_hash}.original_user_yaml'
 
         spot_jobs.append(spot_job)
         job_infos.append(job_info)
@@ -106,8 +110,7 @@ def inject_managed_jobs(conn, count=10000, managed_job_id=9):
     # Load sample data
     print("Loading sample managed job...")
     spot_sample, job_info_sample, spot_columns, job_info_columns = load_managed_job_sample(
-        conn, managed_job_id
-    )
+        conn, managed_job_id)
 
     # Find max job_id
     cursor = conn.cursor()
@@ -116,12 +119,14 @@ def inject_managed_jobs(conn, count=10000, managed_job_id=9):
     cursor.close()
 
     print(f"Current max job_id: {max_job_id}")
-    print(f"Generating {count} test jobs starting from job_id {max_job_id + 1}...")
+    print(
+        f"Generating {count} test jobs starting from job_id {max_job_id + 1}..."
+    )
 
     # Generate test data
-    spot_jobs, job_infos = generate_managed_job_data(
-        spot_sample, job_info_sample, count, max_job_id
-    )
+    spot_jobs, job_infos = generate_managed_job_data(spot_sample,
+                                                     job_info_sample, count,
+                                                     max_job_id)
 
     # Prepare insert statements
     spot_columns_str = ', '.join(spot_columns)
@@ -144,8 +149,14 @@ def inject_managed_jobs(conn, count=10000, managed_job_id=9):
         job_info_batch = job_infos[i:i + batch_size]
 
         # Convert dicts to tuples in column order
-        spot_batch_data = [tuple(job[col] for col in spot_columns) for job in spot_batch]
-        job_info_batch_data = [tuple(job[col] for col in job_info_columns) for job in job_info_batch]
+        spot_batch_data = [
+            tuple(job[col] for col in spot_columns) for job in spot_batch
+        ]
+        job_info_batch_data = [
+            tuple(job[col]
+                  for col in job_info_columns)
+            for job in job_info_batch
+        ]
 
         # Use execute_batch for better performance
         execute_batch(cursor, spot_insert_sql, spot_batch_data)
@@ -169,21 +180,36 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description='Inject test managed jobs into PostgreSQL database for scale testing'
-    )
-    parser.add_argument('--count', type=int, default=10000,
-                        help='Number of managed jobs to inject (default: 10000)')
-    parser.add_argument('--job-id', type=int, default=9,
+        description=
+        'Inject test managed jobs into PostgreSQL database for scale testing')
+    parser.add_argument(
+        '--count',
+        type=int,
+        default=10000,
+        help='Number of managed jobs to inject (default: 10000)')
+    parser.add_argument('--job-id',
+                        type=int,
+                        default=9,
                         help='Job ID of template managed job (default: 9)')
-    parser.add_argument('--host', type=str, default='localhost',
+    parser.add_argument('--host',
+                        type=str,
+                        default='localhost',
                         help='Database host (default: localhost)')
-    parser.add_argument('--port', type=int, default=5432,
+    parser.add_argument('--port',
+                        type=int,
+                        default=5432,
                         help='Database port (default: 5432)')
-    parser.add_argument('--database', type=str, default='skypilot',
+    parser.add_argument('--database',
+                        type=str,
+                        default='skypilot',
                         help='Database name (default: skypilot)')
-    parser.add_argument('--user', type=str, default='skypilot',
+    parser.add_argument('--user',
+                        type=str,
+                        default='skypilot',
                         help='Database user (default: skypilot)')
-    parser.add_argument('--password', type=str, default='skypilot',
+    parser.add_argument('--password',
+                        type=str,
+                        default='skypilot',
                         help='Database password (default: skypilot)')
 
     args = parser.parse_args()

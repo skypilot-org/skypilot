@@ -120,14 +120,16 @@ class TestScale:
             cursor = conn.cursor()
 
             # Load cluster YAML for the sample cluster
-            cursor.execute("SELECT yaml FROM cluster_yaml WHERE cluster_name = ?",
-                          (self.generator.active_cluster_name,))
+            cursor.execute(
+                "SELECT yaml FROM cluster_yaml WHERE cluster_name = ?",
+                (self.generator.active_cluster_name,))
             sample_yaml_row = cursor.fetchone()
             sample_yaml = sample_yaml_row[0] if sample_yaml_row else None
 
             if not sample_yaml:
-                print(f"Warning: No cluster_yaml found for {self.generator.active_cluster_name}. "
-                      "Cluster YAML will not be injected.")
+                print(
+                    f"Warning: No cluster_yaml found for {self.generator.active_cluster_name}. "
+                    "Cluster YAML will not be injected.")
 
             # Get column names from first cluster dict
             cluster_columns = list(clusters[0].keys())
@@ -161,7 +163,9 @@ class TestScale:
 
                 # Also insert cluster_yaml entries if we have sample YAML
                 if sample_yaml:
-                    yaml_batch_data = [(cluster['name'], sample_yaml) for cluster in batch]
+                    yaml_batch_data = [
+                        (cluster['name'], sample_yaml) for cluster in batch
+                    ]
                     cursor.executemany(yaml_insert_sql, yaml_batch_data)
                     conn.commit()
 
