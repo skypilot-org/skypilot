@@ -224,13 +224,16 @@ python tests/load_tests/db_scale_tests/inject_test_managed_jobs.py \
 # Verify with sky jobs queue
 sky jobs queue
 
-# Clean up when done
-python tests/load_tests/db_scale_tests/cleanup_test_managed_jobs.py
+# Clean up when done (deletes all jobs with ID > 2)
+python tests/load_tests/db_scale_tests/cleanup_test_managed_jobs.py --managed-job-id 2
 ```
 
 **Options:**
 - `--count N` - Number of test managed jobs to inject (default: 10)
 - `--managed-job-id ID` - Job ID of managed job to use as template (default: 1)
+
+**Cleanup:**
+- `--managed-job-id ID` (required) - Deletes all jobs with job_id > this value
 
 **Note**: These scripts inject data but do not clean it up automatically, allowing you to manually test SkyPilot commands against a scaled database. Remember to run the cleanup scripts when you're done testing.
 
