@@ -95,7 +95,7 @@ install_requires = [
 
 # The grpc version at runtime has to be newer than the version
 # used to generate the code.
-GRPC = 'grpcio>=1.63.0'
+GRPCIO = 'grpcio>=1.63.0'
 # >= 5.26.1 because the runtime version can't be older than the version
 # used to generate the code.
 # < 7.0.0 because code generated for a major version V will be supported by
@@ -123,8 +123,8 @@ local_ray = [
     'ray[default] >= 2.6.1',
 ]
 
-remote = [
-    GRPC,
+grpc = [
+    GRPCIO,
     PROTOBUF,
 ]
 
@@ -189,7 +189,8 @@ extras_require: Dict[str, List[str]] = {
         'kubernetes>=20.0.0,!=32.0.0', 'websockets', 'python-dateutil'
     ],
     'ssh': ['kubernetes>=20.0.0,!=32.0.0', 'websockets', 'python-dateutil'],
-    'remote': remote,
+    # TODO(kevin): Deprecate [remote] extras. It's still being used in kubernetes-ray.yml.j2
+    'remote': grpc,
     # For the container registry auth api. Reference:
     # https://github.com/runpod/runpod-python/releases/tag/1.6.1
     # RunPod needs a TOML parser to read ~/.runpod/config.toml. On Python 3.11+
@@ -217,8 +218,7 @@ extras_require: Dict[str, List[str]] = {
 }
 
 for extra, deps in extras_require.items():
-    if extra != 'remote':
-        deps.extend(remote)
+    deps.extend(grpc)
 
 # Calculate which clouds should be included in the [all] installation.
 clouds_for_all = set(extras_require)
