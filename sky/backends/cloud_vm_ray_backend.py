@@ -2264,8 +2264,6 @@ class RetryingVmProvisioner(object):
                 # terminated by _retry_zones().
                 assert (prev_cluster_status == status_lib.ClusterStatus.INIT
                        ), prev_cluster_status
-                assert global_user_state.get_handle_from_cluster_name(
-                    cluster_name) is None, cluster_name
                 logger.info(
                     ux_utils.retry_message(
                         f'Retrying provisioning with requested resources: '
@@ -5358,8 +5356,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 cloud = launched_resources.cloud
                 config = global_user_state.get_cluster_yaml_dict(
                     handle.cluster_yaml)
-                ports_cleaned_up = False
-                custom_multi_network_cleaned_up = False
                 try:
                     cloud.check_features_are_supported(
                         launched_resources,
@@ -5368,9 +5364,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                 cluster_name_on_cloud,
                                                 handle.launched_resources.ports,
                                                 config['provider'])
-                    ports_cleaned_up = True
                 except exceptions.NotSupportedError:
-                    ports_cleaned_up = True
+                    pass
                 except exceptions.PortDoesNotExistError:
                     logger.debug('Ports do not exist. Skipping cleanup.')
                 except Exception as e:  # pylint: disable=broad-except
@@ -5393,9 +5388,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     provision_lib.cleanup_custom_multi_network(
                         repr(cloud), cluster_name_on_cloud, config['provider'],
                         failover)
-                    custom_multi_network_cleaned_up = True
                 except exceptions.NotSupportedError:
-                    custom_multi_network_cleaned_up = True
+                    pass
                 except Exception as e:  # pylint: disable=broad-except
                     if purge:
                         msg = common_utils.format_exception(e, use_bracket=True)
@@ -5405,18 +5399,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     else:
                         raise
 
-                if ports_cleaned_up and custom_multi_network_cleaned_up:
-                    try:
-                        self.remove_cluster_config(handle)
-                    except Exception as e:  # pylint: disable=broad-except
-                        if purge:
-                            msg = common_utils.format_exception(
-                                e, use_bracket=True)
-                            logger.warning(
-                                f'Failed to remove cluster config. Skipping '
-                                f'since purge is set. Details: {msg}')
-                        else:
-                            raise
+                try:
+                    self.remove_cluster_config(handle)
+                except Exception as e:  # pylint: disable=broad-except
+                    if purge:
+                        msg = common_utils.format_exception(e, use_bracket=True)
+                        logger.warning(
+                            f'Failed to remove cluster config. Skipping '
+                            f'since purge is set. Details: {msg}')
+                    else:
+                        raise
 
         cluster_utils.SSHConfigHelper.remove_cluster(handle.cluster_name)
 

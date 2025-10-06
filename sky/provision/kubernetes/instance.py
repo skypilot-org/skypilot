@@ -1142,10 +1142,20 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         pods = created_resources
 
     created_pods = {}
+    valid_pods = []
     for pod in pods:
+        # In case Pod is not created
+        if pod is None:
+            continue
+        valid_pods.append(pod)
         created_pods[pod.metadata.name] = pod
         if head_pod_name is None and _is_head(pod):
             head_pod_name = pod.metadata.name
+    pods = valid_pods
+
+    # If there are running pods, add them to the pods list
+    if running_pods:
+        pods = pods + list(running_pods.values())
 
     provision_timeout = provider_config['timeout']
 
