@@ -1,17 +1,103 @@
-"""Volume utils."""
+"""Utilities for formatting tables for CLI output."""
 import abc
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 import prettytable
 
 from sky import sky_logging
+from sky.jobs import utils as managed_jobs
+from sky.schemas.api import responses
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import volume
 
 logger = sky_logging.init_logger(__name__)
+
+
+def format_job_queue(jobs: List[responses.ClusterJobRecord]):
+    """Format the job queue for display.
+
+    Usage:
+        jobs = get_job_queue()
+        print(format_job_queue(jobs))
+    """
+    job_table = log_utils.create_table([
+        'ID', 'NAME', 'USER', 'SUBMITTED', 'STARTED', 'DURATION', 'RESOURCES',
+        'STATUS', 'LOG', 'GIT COMMIT'
+    ])
+    for job in jobs:
+        job_table.add_row([
+            job.job_id,
+            job.job_name,
+            job.username,
+            log_utils.readable_time_duration(job.submitted_at),
+            log_utils.readable_time_duration(job.start_at),
+            log_utils.readable_time_duration(job.start_at,
+                                             job.end_at,
+                                             absolute=True),
+            job.resources,
+            job.status.colored_str(),
+            job.log_path,
+            job.metadata.get('git_commit', '-'),
+        ])
+    return job_table
+
+
+def format_storage_table(storages: List[responses.StorageRecord],
+                         show_all: bool = False) -> str:
+    """Format the storage table for display.
+
+    Args:
+        storage_table (dict): The storage table.
+
+    Returns:
+        str: The formatted storage table.
+    """
+    storage_table = log_utils.create_table([
+        'NAME',
+        'UPDATED',
+        'STORE',
+        'COMMAND',
+        'STATUS',
+    ])
+
+    for row in storages:
+        launched_at = row.launched_at
+        if show_all:
+            command = row.last_use
+        else:
+            command = common_utils.truncate_long_string(
+                row.last_use, constants.LAST_USE_TRUNC_LENGTH)
+        storage_table.add_row([
+            # NAME
+            row.name,
+            # LAUNCHED
+            log_utils.readable_time_duration(launched_at),
+            # CLOUDS
+            ', '.join([s.value for s in row.store]),
+            # COMMAND,
+            command,
+            # STATUS
+            row.status.value,
+        ])
+    if storages:
+        return str(storage_table)
+    else:
+        return 'No existing storage.'
+
+
+def format_job_table(jobs: List[responses.ManagedJobRecord],
+                     show_all: bool,
+                     show_user: bool,
+                     max_jobs: Optional[int] = None):
+    jobs = [job.model_dump() for job in jobs]
+    return managed_jobs.format_job_table(jobs,
+                                         show_all=show_all,
+                                         show_user=show_user,
+                                         max_jobs=max_jobs)
+
 
 _BASIC_COLUMNS = [
     'NAME',
@@ -43,13 +129,15 @@ def _get_infra_str(cloud: Optional[str], region: Optional[str],
 class VolumeTable(abc.ABC):
     """The volume table."""
 
-    def __init__(self, volumes: List[Dict[str, Any]], show_all: bool = False):
+    def __init__(self,
+                 volumes: List[responses.VolumeRecord],
+                 show_all: bool = False):
         super().__init__()
         self.table = self._create_table(show_all)
         self._add_rows(volumes, show_all)
 
     def _get_row_base_columns(self,
-                              row: Dict[str, Any],
+                              row: responses.VolumeRecord,
                               show_all: bool = False) -> List[str]:
         """Get the base columns for a row."""
         # Convert last_attached_at timestamp to human readable string
@@ -94,7 +182,7 @@ class VolumeTable(abc.ABC):
         raise NotImplementedError
 
     def _add_rows(self,
-                  volumes: List[Dict[str, Any]],
+                  volumes: List[responses.VolumeRecord],
                   show_all: bool = False) -> None:
         """Add rows to the volume table."""
         raise NotImplementedError
@@ -131,7 +219,7 @@ class PVCVolumeTable(VolumeTable):
         return table
 
     def _add_rows(self,
-                  volumes: List[Dict[str, Any]],
+                  volumes: List[responses.VolumeRecord],
                   show_all: bool = False) -> None:
         """Add rows to the PVC volume table."""
         for row in volumes:
@@ -170,7 +258,7 @@ class RunPodVolumeTable(VolumeTable):
         return table
 
     def _add_rows(self,
-                  volumes: List[Dict[str, Any]],
+                  volumes: List[responses.VolumeRecord],
                   show_all: bool = False) -> None:
         """Add rows to the RunPod volume table."""
         for row in volumes:
@@ -185,7 +273,7 @@ class RunPodVolumeTable(VolumeTable):
         return 'RunPod Network Volumes:\n' + str(self.table)
 
 
-def format_volume_table(volumes: List[Dict[str, Any]],
+def format_volume_table(volumes: List[responses.VolumeRecord],
                         show_all: bool = False) -> str:
     """Format the volume table for display.
 
@@ -195,7 +283,7 @@ def format_volume_table(volumes: List[Dict[str, Any]],
     Returns:
         str: The formatted volume table.
     """
-    volumes_per_type: Dict[str, List[Dict[str, Any]]] = {}
+    volumes_per_type: Dict[str, List[responses.VolumeRecord]] = {}
     supported_volume_types = [
         volume_type.value for volume_type in volume.VolumeType
     ]

@@ -34,7 +34,7 @@
 
 NAMESPACE=skypilot
 NODEPORT=30082
-HTTPS_NODEPORT=30100
+HTTPS_NODEPORT=30099
 RELEASE_NAME=skypilot
 
 # Cleanup function to delete namespace and resources

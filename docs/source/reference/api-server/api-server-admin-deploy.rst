@@ -683,6 +683,14 @@ To modify your SkyPilot config, use the SkyPilot dashboard: ``http://<api-server
 
         ``apiService.config`` will be IGNORED during an ``helm upgrade`` if there is an existing config, due to the potential accidental loss of existing config. Use the SkyPilot dashboard instead.
 
+    .. note::
+
+        If remote database is configured (by setting either
+        :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>`
+        or :ref:`apiService.dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>`),
+        Skypilot configuration cannot be specified in the helm chart.
+        Use the dashboard once the API server is deployed to set the config.
+
 Optional: Set up GPU monitoring and metrics
 -------------------------------------------
 
@@ -915,7 +923,7 @@ To reuse an existing ingress controller, you can set :ref:`ingress-nginx.enabled
 
     # The first API server, with niginx-ingress controller deployed
     # It is assumed that the first API server is already deployed. If it is not deployed yet,
-    # add neccessary values instead of specifying --reuse-values
+    # add necessary values instead of specifying --reuse-values
     helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
         --namespace $NAMESPACE \
         --reuse-values \

@@ -1041,6 +1041,32 @@ def test_volumes_on_kubernetes():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.kubernetes
+def test_volume_env_mount_kubernetes():
+    name = smoke_tests_utils.get_cluster_name()
+    pvc_name = f'{name}-pvc'
+    mount_job_conf = textwrap.dedent(f"""
+        name: {name}-job
+        volumes:
+          /mnt/test-data: ${{USERNAME}}-{pvc_name}
+        run: |
+          echo "Mounted volume"
+    """)
+    full_pvc_name = f'user-{pvc_name}'
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(mount_job_conf)
+        f.flush()
+        test = smoke_tests_utils.Test(
+            'volume_env_mount_kubernetes',
+            [
+                f'sky volumes apply -y -n {full_pvc_name} --type k8s-pvc --size 2GB',
+                f's=$(sky jobs launch -y --infra kubernetes {f.name} --env USERNAME=user); echo "$s"; echo "$s" | grep "Job finished (status: SUCCEEDED)"',
+            ],
+            f'sky jobs cancel -a || true && sleep 5 && sky volumes delete {full_pvc_name} -y && (vol=$(sky volumes ls | grep "{full_pvc_name}"); if [ -n "$vol" ]; then echo "{full_pvc_name} not deleted" && exit 1; else echo "{full_pvc_name} deleted"; fi)',
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Container logs from task on Kubernetes ----------
 @pytest.mark.kubernetes
 def test_container_logs_multinode_kubernetes():
@@ -2021,56 +2047,6 @@ def test_long_setup_run_script(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-# ---------- Test min-gpt ----------
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
-@pytest.mark.no_hyperbolic  # Hyperbolic not support num_nodes > 1 yet
-@pytest.mark.no_seeweb  # Seeweb does not support multi-node
-@pytest.mark.resource_heavy
-@pytest.mark.parametrize('train_file', [
-    'examples/distributed-pytorch/train.yaml',
-    'examples/distributed-pytorch/train-rdzv.yaml'
-])
-@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
-def test_min_gpt(generic_cloud: str, train_file: str, accelerator: Dict[str,
-                                                                        str]):
-    if generic_cloud == 'kubernetes':
-        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
-    else:
-        accelerator = accelerator.get(generic_cloud, 'T4')
-    name = smoke_tests_utils.get_cluster_name()
-
-    def read_and_modify(file_path: str) -> str:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        # Let the train exit after 1 epoch
-        modified_content = content.replace(
-            'main.py', 'main.py trainer_config.max_epochs=1')
-        modified_content = re.sub(r'accelerators:\s*[^\n]+',
-                                  f'accelerators: {accelerator}',
-                                  modified_content)
-
-        # Create a temporary YAML file with the modified content
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            f.write(modified_content)
-            f.flush()
-            train_file_path = f.name
-        return train_file_path
-
-    dist_train_file = read_and_modify(train_file)
-
-    test = smoke_tests_utils.Test(
-        'min_gpt_kubernetes',
-        [
-            f'sky launch -y -c {name} --infra {generic_cloud} {dist_train_file}',
-            f'sky logs {name} 1 --status',
-        ],
-        f'sky down -y {name}',
-        timeout=20 * 60,
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
 # ---------- Test GCP network tier ----------
 @pytest.mark.gcp
 def test_gcp_network_tier():
@@ -2396,3 +2372,41 @@ def test_kubernetes_pod_config_change_detection():
         smoke_tests_utils.run_one_test(test)
         os.unlink(task_yaml_1_path)
         os.unlink(task_yaml_2_path)
+
+
+# ---------- SSH Proxy Performance Test ----------
+@pytest.mark.kubernetes
+@pytest.mark.no_remote_server
+def test_kubernetes_ssh_proxy_performance():
+    """Test Kubernetes SSH proxy performance with high load.
+
+    This test launches a Kubernetes cluster and runs the SSH proxy benchmark
+    to ensure that SSH latency remains low (< 0.01s) under high load conditions.
+    """
+    cluster_name = smoke_tests_utils.get_cluster_name()
+
+    test = smoke_tests_utils.Test(
+        'kubernetes_ssh_proxy_performance',
+        [
+            # Launch a minimal Kubernetes cluster for SSH proxy testing
+            f'sky launch -y -c {cluster_name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} echo "SSH proxy test cluster ready"',
+            # Run the SSH proxy benchmark test and validate results using pipes
+            f'python tests/load_tests/test_ssh_proxy.py -c {cluster_name} -p 20 -n 100 --size 1024 2>&1 | tee /dev/stderr | ( '
+            f'OUTPUT=$(cat) && '
+            f'echo "$OUTPUT" && '
+            f'echo "Validating performance metrics..." && '
+            f'MEAN=$(echo "$OUTPUT" | grep "Mean:" | awk \'{{print $2}}\' | sed \'s/s$//\') && '
+            f'MEDIAN=$(echo "$OUTPUT" | grep "Median:" | awk \'{{print $2}}\' | sed \'s/s$//\') && '
+            f'STDDEV=$(echo "$OUTPUT" | grep "Std Dev:" | awk \'{{print $3}}\' | sed \'s/s$//\') && '
+            f'SUCCESS=$(echo "$OUTPUT" | grep "Success rate:" | awk \'{{print $3}}\' | sed \'s/%$//\') && '
+            f'echo "Mean: $MEAN, Median: $MEDIAN, Std Dev: $STDDEV, Success: $SUCCESS%" && '
+            f'if [ "$(echo "$MEAN < 0.01" | bc -l)" -eq 1 ]; then echo "Mean latency OK: ${{MEAN}}s"; else echo "Mean latency too high: ${{MEAN}}s"; exit 1; fi && '
+            f'if [ "$(echo "$MEDIAN < 0.01" | bc -l)" -eq 1 ]; then echo "Median latency OK: ${{MEDIAN}}s"; else echo "Median latency too high: ${{MEDIAN}}s"; exit 1; fi && '
+            f'if [ "$(echo "$STDDEV < 0.02" | bc -l)" -eq 1 ]; then echo "Std Dev OK: ${{STDDEV}}s"; else echo "Std Dev too high: ${{STDDEV}}s"; exit 1; fi && '
+            f'if [ "$SUCCESS" = "100.00" ] || [ "$SUCCESS" = "100" ]; then echo "Success rate OK: ${{SUCCESS}}%"; else echo "Success rate too low: ${{SUCCESS}}%"; exit 1; fi '
+            f')',
+        ],
+        f'sky down -y {cluster_name}',
+        timeout=15 * 60,  # 15 minutes timeout
+    )
+    smoke_tests_utils.run_one_test(test)

@@ -7,7 +7,7 @@
 # This config requires at least 2 nodes with 8x H100 GPUs each.
 
 envs:
-  HF_TOKEN: 
+  HF_TOKEN:
 
 resources:
   infra: k8s
@@ -19,8 +19,10 @@ resources:
 
 num_nodes: 2
 
-# Optional: configure buckets for dataset and checkpoints. You can then use the /outputs directory to write checkpoints.
-# file_mounts:
+# Optional: configure buckets for dataset and checkpoints. You can then use the
+# /checkpoints directory to write checkpoints, which writes to local disk first
+# and asynchronously uploads to the cloud bucket. Pass /checkpoints to the main
+# training script.
 #  /dataset:
 #    source: s3://my-dataset-bucket
 #    mode: COPY  # COPY mode will prefetch the dataset to the node for faster access

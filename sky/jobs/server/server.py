@@ -68,7 +68,7 @@ async def queue_v2(request: fastapi.Request,
         request_id=request.state.request_id,
         request_name='jobs.queue_v2',
         request_body=jobs_queue_body_v2,
-        func=core.queue_v2,
+        func=core.queue_v2_api,
         schedule_type=(api_requests.ScheduleType.LONG
                        if jobs_queue_body_v2.refresh else
                        api_requests.ScheduleType.SHORT),
