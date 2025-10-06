@@ -114,6 +114,7 @@ def safe_alembic_upgrade(engine: sqlalchemy.engine.Engine, section: str,
     alembic_logger.setLevel(logging.WARNING)
 
     alembic_config = get_alembic_config(engine, section)
+
     # only acquire lock if db needs upgrade
     if needs_upgrade(engine, section, target_revision):
         with db_lock(section):
