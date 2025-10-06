@@ -24,7 +24,6 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.utils import common_utils
-from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import subprocess_utils
 from sky.utils.db import db_utils
@@ -612,8 +611,8 @@ def get_job_submitted_or_ended_timestamp_payload(job_id: int,
     PENDING state.
 
     The normal job duration will use `start_at` instead of `submitted_at` (in
-    `format_job_queue()`), because the job may stay in PENDING if the cluster is
-    busy.
+    `table_utils.format_job_queue()`), because the job may stay in PENDING if
+    the cluster is busy.
     """
     return message_utils.encode_payload(
         get_job_submitted_or_ended_timestamp(job_id, get_ended_time))
@@ -939,35 +938,6 @@ def is_cluster_idle() -> bool:
     for (count,) in rows:
         return count == 0
     assert False, 'Should not reach here'
-
-
-def format_job_queue(jobs: List[Dict[str, Any]]):
-    """Format the job queue for display.
-
-    Usage:
-        jobs = get_job_queue()
-        print(format_job_queue(jobs))
-    """
-    job_table = log_utils.create_table([
-        'ID', 'NAME', 'USER', 'SUBMITTED', 'STARTED', 'DURATION', 'RESOURCES',
-        'STATUS', 'LOG', 'GIT COMMIT'
-    ])
-    for job in jobs:
-        job_table.add_row([
-            job['job_id'],
-            job['job_name'],
-            job['username'],
-            log_utils.readable_time_duration(job['submitted_at']),
-            log_utils.readable_time_duration(job['start_at']),
-            log_utils.readable_time_duration(job['start_at'],
-                                             job['end_at'],
-                                             absolute=True),
-            job['resources'],
-            job['status'].colored_str(),
-            job['log_path'],
-            job.get('metadata', {}).get('git_commit', '-'),
-        ])
-    return job_table
 
 
 def dump_job_queue(user_hash: Optional[str], all_jobs: bool) -> str:

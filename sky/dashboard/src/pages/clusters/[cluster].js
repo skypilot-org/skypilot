@@ -463,15 +463,18 @@ function ActiveTab({
                   Cluster
                 </div>
                 <div className="text-base mt-1">
-                  {clusterData.cluster || clusterData.name}
-                </div>
-              </div>
-              <div>
-                <div className="text-gray-600 font-medium text-base">
-                  Cluster Name on Cloud
-                </div>
-                <div className="text-base mt-1">
-                  {clusterData.cluster_name_on_cloud || '-'}
+                  {clusterData.cluster_name_on_cloud ? (
+                    <NonCapitalizedTooltip
+                      content={`Name on ${clusterData.cloud || clusterData.infra?.split('(')[0]?.trim() || 'cloud'}: ${clusterData.cluster_name_on_cloud}`}
+                      className="text-sm text-muted-foreground"
+                    >
+                      <span className="border-b border-dotted border-gray-400 cursor-help">
+                        {clusterData.cluster || clusterData.name}
+                      </span>
+                    </NonCapitalizedTooltip>
+                  ) : (
+                    clusterData.cluster || clusterData.name
+                  )}
                 </div>
               </div>
               <div>

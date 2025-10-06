@@ -1,0 +1,26 @@
+file_mounts:
+  # Mounting private buckets in MOUNT_CACHED mode
+  /mount_private_mount_cached:
+    name: {{storage_name}}
+    source: ~/tmp-workdir
+    mode: MOUNT_CACHED
+
+run: |
+  set -ex
+
+  {% if write_files | default(True) %}
+  # Write 10 10MB files to the mounted directory in parallel.
+  # Since the commands are executed asynchronously (using '&'),
+  # this script tests skypilot's ability to delay task completion until the
+  # files are written to the remote storage.
+  for (( i=1; i<=10; i++ )); do
+    dd if=/dev/urandom of=/mount_private_mount_cached/10mb_${i} bs=1M count=10 &
+  done
+  {% endif %}
+
+  {% if check_files | default(False) %}
+  # Check the 10 10MB files are present.
+  for (( i=1; i<=10; i++ )); do
+    ls -l /mount_private_mount_cached/10mb_${i} | grep "10485760"
+  done
+  {% endif %}
