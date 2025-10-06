@@ -66,7 +66,18 @@ def check_compute_credentials() -> bool:
     # Test connection by fetching servers list to validate the key
     try:
         seeweb_client = ecsapi.Api(token=api_key)
-        seeweb_client.fetch_servers()
+        try:
+            seeweb_client.fetch_servers()
+        except pydantic.ValidationError:
+            # Fallback: fetch raw JSON to validate authentication
+            # pylint: disable=protected-access
+            base_url = seeweb_client._Api__generate_base_url()  # type: ignore
+            headers = seeweb_client._Api__generate_authentication_headers(
+            )  # type: ignore
+            url = f'{base_url}/servers'
+            resp = requests.get(url, headers=headers, timeout=15)
+            resp.raise_for_status()
+            # If we get here, authentication worked even if schema mismatches
     except Exception as e:  # pylint: disable=broad-except
         raise SeewebAuthenticationError(
             f'Unable to authenticate with Seeweb API: {e}') from e
