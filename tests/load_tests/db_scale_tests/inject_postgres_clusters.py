@@ -276,20 +276,48 @@ def inject_cluster_history(conn, recent_count, old_count,
 
 def main():
     """Main function to inject test clusters into PostgreSQL."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description='Inject test clusters into PostgreSQL database for scale testing'
+    )
+    parser.add_argument('--cluster-count', type=int, default=2000,
+                        help='Number of active clusters to inject (default: 2000)')
+    parser.add_argument('--recent-history', type=int, default=2000,
+                        help='Number of recent cluster history entries (1-10 days old) (default: 2000)')
+    parser.add_argument('--old-history', type=int, default=8000,
+                        help='Number of old cluster history entries (15-30 days old) (default: 8000)')
+    parser.add_argument('--active-cluster', type=str, default='scale-test-active',
+                        help='Name of active cluster to use as template (default: scale-test-active)')
+    parser.add_argument('--terminated-cluster', type=str, default='scale-test-terminated',
+                        help='Name of terminated cluster to use as template (default: scale-test-terminated)')
+    parser.add_argument('--host', type=str, default='localhost',
+                        help='Database host (default: localhost)')
+    parser.add_argument('--port', type=int, default=5432,
+                        help='Database port (default: 5432)')
+    parser.add_argument('--database', type=str, default='skypilot',
+                        help='Database name (default: skypilot)')
+    parser.add_argument('--user', type=str, default='skypilot',
+                        help='Database user (default: skypilot)')
+    parser.add_argument('--password', type=str, default='skypilot',
+                        help='Database password (default: skypilot)')
+
+    args = parser.parse_args()
+
     # Database connection parameters
     db_params = {
-        'host': 'localhost',
-        'port': 5432,
-        'database': 'skypilot',
-        'user': 'skypilot',
-        'password': 'skypilot'
+        'host': args.host,
+        'port': args.port,
+        'database': args.database,
+        'user': args.user,
+        'password': args.password
     }
 
-    cluster_count = 2000
-    recent_history_count = 2000
-    old_history_count = 8000
-    active_cluster_name = 'scale-test-active'
-    terminated_cluster_name = 'scale-test-terminated'
+    cluster_count = args.cluster_count
+    recent_history_count = args.recent_history
+    old_history_count = args.old_history
+    active_cluster_name = args.active_cluster
+    terminated_cluster_name = args.terminated_cluster
 
     print("=" * 60)
     print(f"PostgreSQL Cluster Injection Test")

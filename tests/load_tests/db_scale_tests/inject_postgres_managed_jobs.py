@@ -166,17 +166,39 @@ def inject_managed_jobs(conn, count=10000, managed_job_id=9):
 
 def main():
     """Main function to inject test managed jobs into PostgreSQL."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description='Inject test managed jobs into PostgreSQL database for scale testing'
+    )
+    parser.add_argument('--count', type=int, default=10000,
+                        help='Number of managed jobs to inject (default: 10000)')
+    parser.add_argument('--job-id', type=int, default=9,
+                        help='Job ID of template managed job (default: 9)')
+    parser.add_argument('--host', type=str, default='localhost',
+                        help='Database host (default: localhost)')
+    parser.add_argument('--port', type=int, default=5432,
+                        help='Database port (default: 5432)')
+    parser.add_argument('--database', type=str, default='skypilot',
+                        help='Database name (default: skypilot)')
+    parser.add_argument('--user', type=str, default='skypilot',
+                        help='Database user (default: skypilot)')
+    parser.add_argument('--password', type=str, default='skypilot',
+                        help='Database password (default: skypilot)')
+
+    args = parser.parse_args()
+
     # Database connection parameters
     db_params = {
-        'host': 'localhost',
-        'port': 5432,
-        'database': 'skypilot',
-        'user': 'skypilot',
-        'password': 'skypilot'
+        'host': args.host,
+        'port': args.port,
+        'database': args.database,
+        'user': args.user,
+        'password': args.password
     }
 
-    count = 10000
-    managed_job_id = 9  # Template job ID
+    count = args.count
+    managed_job_id = args.job_id
 
     print("=" * 60)
     print(f"PostgreSQL Managed Job Injection Test")
