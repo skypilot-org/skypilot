@@ -242,7 +242,43 @@ if READTHEDOCS_VERSION_TYPE == "tag":
         os.remove(header_file)
 
 
+def copy_example_assets(app, exception):
+    """Copy example assets to the build directory after HTML build."""
+    if exception is not None:
+        return
+
+    import glob
+    import shutil
+
+    # Only copy assets for HTML builds
+    if app.builder.name != 'html':
+        return
+
+    # Find the examples directory relative to docs/source
+    examples_dir = os.path.abspath(os.path.join(app.srcdir, '../../examples'))
+
+    if os.path.exists(examples_dir):
+        # Find all assets directories in examples
+        for assets_dir in glob.glob(os.path.join(examples_dir, '*/assets')):
+            if os.path.exists(assets_dir):
+                # Destination directory in the built HTML
+                dest_dir = os.path.join(app.outdir, 'examples', 'applications',
+                                        'assets')
+                os.makedirs(dest_dir, exist_ok=True)
+
+                # Copy all files from assets directory
+                for file in os.listdir(assets_dir):
+                    src = os.path.join(assets_dir, file)
+                    dst = os.path.join(dest_dir, file)
+                    if os.path.isfile(src):
+                        shutil.copy2(src, dst)
+                        print(f'Copied asset: {file}')
+
+
 def setup(app):
     # Run generate_examples directly during setup instead of connecting to builder-inited
     # This ensures it completes fully before any build steps start
     generate_examples.generate_examples(app)
+
+    # Connect the asset copying to the build-finished event
+    app.connect('build-finished', copy_example_assets)

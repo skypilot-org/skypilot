@@ -237,7 +237,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && sky autostop -i 10 -y {cluster_name}',
             f'{self.ACTIVATE_BASE} && sky exec -d --cloud {generic_cloud} --num-nodes 2 {cluster_name} sleep 120',
             # Must restart API server after switch the code base to ensure the client and server run in same version.
-            # Test coverage for client and server run in differnet verions should be done in test_client_server_compatibility.
+            # Test coverage for client and server run in differnet versions should be done in test_client_server_compatibility.
             f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && result="$(sky status {cluster_name})"; echo "$result"; echo "$result" | grep UP',
             f'{self.ACTIVATE_CURRENT} && result="$(sky status -r {cluster_name})"; echo "$result"; echo "$result" | grep UP',
             need_launch_cmd,
@@ -386,7 +386,10 @@ class TestBackwardCompatibility:
         # Dynamically inspect versions from both environments
         base_version = self._get_base_skylet_version()
         current_version = skylet_constants.SKYLET_VERSION
-        expect_version_mismatch = base_version != current_version
+        # After SKYLET_VERSION 17, we should gracefully handle the version
+        # mismatch.
+        expect_version_mismatch = int(
+            base_version) <= 17 and base_version != current_version
 
         # Build the current environment commands with version mismatch handling
         # Common initial commands
@@ -590,6 +593,21 @@ class TestBackwardCompatibility:
         ]
 
         teardown = f'{self.ACTIVATE_BASE} && sky down {cluster_name} -y && sky serve down {cluster_name}* -y'
+
+        if generic_cloud == 'kubernetes':
+            commands.extend([
+                # volume test
+                f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
+                f'sky volumes apply -y -n {cluster_name}-0 --infra {generic_cloud} --type k8s-pvc --size 1Gi',
+                # No restart on switch to current, cli in current, server in bases
+                f'{self.ACTIVATE_CURRENT} && sky volumes apply -y -n {cluster_name}-1 --type k8s-pvc --size 1Gi',
+                f'{self.ACTIVATE_CURRENT} && sky volumes ls | grep "{cluster_name}-0"',
+                f'{self.ACTIVATE_CURRENT} && sky volumes ls | grep "{cluster_name}-1"',
+                f'{self.ACTIVATE_CURRENT} && sky volumes delete {cluster_name}-0 -y',
+                f'{self.ACTIVATE_CURRENT} && sky volumes delete {cluster_name}-1 -y',
+            ])
+            teardown += ' && sky volumes delete {cluster_name}* -y'
+
         self.run_compatibility_test(cluster_name, commands, teardown)
 
     def test_client_server_compatibility_new_server(self, generic_cloud: str):
@@ -659,6 +677,22 @@ class TestBackwardCompatibility:
         ]
 
         teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name} -y && sky serve down {cluster_name}* -y'
+
+        if generic_cloud == 'kubernetes':
+            commands.extend([
+                # volume test
+                f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
+                f'sky volumes apply -y -n {cluster_name}-0 --infra {generic_cloud} --type k8s-pvc --size 1Gi',
+                # No restart on switch to base, cli in base, server in current
+                # Base version might contain the bug in https://github.com/skypilot-org/skypilot/issues/7380, so we need to specify --infra
+                f'{self.ACTIVATE_BASE} && sky volumes apply -y -n {cluster_name}-1 --infra {generic_cloud} --type k8s-pvc --size 1Gi',
+                f'{self.ACTIVATE_BASE} && sky volumes ls | grep "{cluster_name}-0"',
+                f'{self.ACTIVATE_BASE} && sky volumes ls | grep "{cluster_name}-1"',
+                f'{self.ACTIVATE_BASE} && sky volumes delete {cluster_name}-0 -y',
+                f'{self.ACTIVATE_BASE} && sky volumes delete {cluster_name}-1 -y',
+            ])
+            teardown += ' && sky volumes delete {cluster_name}* -y'
+
         self.run_compatibility_test(cluster_name, commands, teardown)
 
     def test_sdk_compatibility(self, generic_cloud: str):
@@ -737,6 +771,7 @@ class TestBackwardCompatibility:
             commands = [
                 # Create volume in base version
                 f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
+                # Base version might contain the bug in https://github.com/skypilot-org/skypilot/issues/7380, so we need to specify --infra
                 f'sky volumes apply -y -n {volume_name} --infra k8s --type k8s-pvc --size 1Gi',
                 f'{self.ACTIVATE_BASE} && sky volumes ls | grep "{volume_name}"',
 
