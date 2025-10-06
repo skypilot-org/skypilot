@@ -1089,6 +1089,8 @@ available_node_types:
 
               touch {{k8s_high_availability_deployment_volume_mount_path}}/k8s_container_ready
               {% endif %}
+              # Set +x to stop printing the commands and their arguments as they are executed.
+              set +x
 
               trap : TERM INT; log_tail || sleep infinity & wait
 
