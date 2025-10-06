@@ -683,8 +683,9 @@ class LocalUpBody(RequestBody):
     ssh_key: Optional[str] = None
     cleanup: bool = False
     context_name: Optional[str] = None
-    name: Optional[str] = None
     password: Optional[str] = None
+    name: Optional[str] = None
+    port_start: Optional[int] = None
 
 
 class LocalDownBody(RequestBody):

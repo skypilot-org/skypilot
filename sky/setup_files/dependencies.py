@@ -48,6 +48,7 @@ install_requires = [
     # (https://github.com/yaml/pyyaml/issues/601)
     # <= 3.13 may encounter https://github.com/ultralytics/yolov5/issues/414
     'pyyaml > 3.13, != 5.4.*',
+    'ijson',
     'requests',
     # SkyPilot inherits from uvicorn.Server to customize the behavior of
     # uvicorn, so we need to pin uvicorn version to avoid potential break
@@ -79,7 +80,7 @@ install_requires = [
     # Required for API server metrics
     'prometheus_client>=0.8.0',
     'passlib',
-    'bcrypt',
+    'bcrypt==4.0.1',
     'pyjwt',
     'gitpython',
     'types-paramiko',

@@ -53,6 +53,8 @@ setup: |
     uv venv ~/deepspeed-venv --seed --python=3.10
     source ~/deepspeed-venv/bin/activate
   fi
+  
+  uv pip install torch==2.5.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
   uv pip install deepspeed==0.14.4
 
   cd applications/DeepSpeed-Chat

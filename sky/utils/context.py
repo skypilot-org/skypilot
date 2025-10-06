@@ -205,7 +205,8 @@ class ContextualEnviron(MutableMapping[str, str]):
             for key, value in ctx.env_overrides.items():
                 if value is None:
                     deleted_keys.add(key)
-                yield key
+                else:
+                    yield key
             for key in self._environ:
                 # Deduplicate the keys
                 if key not in ctx.env_overrides and key not in deleted_keys:
@@ -230,13 +231,17 @@ class ContextualEnviron(MutableMapping[str, str]):
     def __delitem__(self, key: str) -> None:
         ctx = get()
         if ctx is not None:
-            if key in ctx.env_overrides:
-                del ctx.env_overrides[key]
-            elif key in self._environ:
-                # If the key is not set in the context but set in the environ
-                # of the process, we mark it as deleted in the context by
-                # setting the value to None.
+            if key in self._environ:
+                # If the key is set in the environ of the process, we mark it as
+                # deleted in the context by setting the value to None.
+                # Note: we must do this even if it was also set in the context,
+                # since it could be set in both, and deleting should delete it
+                # from both.
                 ctx.env_overrides[key] = None
+            elif key in ctx.env_overrides:
+                # If the key is set in the context, but not the original
+                # environ, we can just delete the override.
+                del ctx.env_overrides[key]
             else:
                 # The key is not set in the context nor the process.
                 raise KeyError(key)
