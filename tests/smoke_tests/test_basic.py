@@ -1533,7 +1533,7 @@ def test_loopback_access_with_basic_auth(generic_cloud: str):
     )
     smoke_tests_utils.run_one_test(test)
 
-    
+
 @pytest.mark.gcp
 def test_cluster_setup_num_gpus():
     """Test that the number of GPUs is set correctly in the setup script."""
