@@ -1943,6 +1943,7 @@ if __name__ == '__main__':
 
     from sky.server import uvicorn as skyuvicorn
 
+    logger.info('Initializing SkyPilot API server')
     skyuvicorn.add_timestamp_prefix_for_server_logs()
 
     parser = argparse.ArgumentParser()
@@ -1954,6 +1955,7 @@ if __name__ == '__main__':
     parser.add_argument('--metrics-port', default=9090, type=int)
     cmd_args = parser.parse_args()
     if cmd_args.port == cmd_args.metrics_port:
+        logger.error('port and metrics-port cannot be the same, exiting.')
         raise ValueError('port and metrics-port cannot be the same')
 
     # Show the privacy policy if it is not already shown. We place it here so
@@ -1962,12 +1964,17 @@ if __name__ == '__main__':
 
     # Initialize global user state db
     db_utils.set_max_connections(1)
+    logger.info('Initializing database engine')
     global_user_state.initialize_and_get_db()
+    logger.info('Database engine initialized')
     # Initialize request db
     requests_lib.reset_db_and_logs()
     # Restore the server user hash
+    logger.info('Initializing server user hash')
     _init_or_restore_server_user_hash()
+
     max_db_connections = global_user_state.get_max_db_connections()
+    logger.info(f'Max db connections: {max_db_connections}')
     config = server_config.compute_server_config(cmd_args.deploy,
                                                  max_db_connections)
 

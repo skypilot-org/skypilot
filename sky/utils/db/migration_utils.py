@@ -85,12 +85,16 @@ def needs_upgrade(engine: sqlalchemy.engine.Engine, section: str,
             connection, opts={'version_table': version_table})
         current_rev = context.get_current_revision()
 
+    target_rev_num = int(target_revision)
     if current_rev is None:
+        logger.info(f'{section} database currently uninitialized, '
+                    f'targeting revision {target_rev_num}')
         return True
 
     # Compare revisions - assuming they are numeric strings like '001', '002'
     current_rev_num = int(current_rev)
-    target_rev_num = int(target_revision)
+    logger.info(f'{section} database currently at revision {current_rev_num}, '
+                f'targeting revision {target_rev_num}')
 
     return current_rev_num < target_rev_num
 
@@ -110,7 +114,6 @@ def safe_alembic_upgrade(engine: sqlalchemy.engine.Engine, section: str,
     alembic_logger.setLevel(logging.WARNING)
 
     alembic_config = get_alembic_config(engine, section)
-
     # only acquire lock if db needs upgrade
     if needs_upgrade(engine, section, target_revision):
         with db_lock(section):
