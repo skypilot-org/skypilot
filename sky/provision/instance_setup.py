@@ -478,11 +478,12 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
 @_auto_retry()
 @timeline.event
 def start_skylet_on_head_node(
-        cluster_name: resources_utils.ClusterName, cluster_info: common.ClusterInfo,
-        ssh_credentials: Dict[str, Any],
+        cluster_name: resources_utils.ClusterName,
+        cluster_info: common.ClusterInfo, ssh_credentials: Dict[str, Any],
         launched_resources: resources_lib.Resources) -> None:
     """Start skylet on the head node."""
     # Avoid circular import.
+    # pylint: disable=import-outside-toplevel
     from sky.utils import controller_utils
 
     def _set_skypilot_env_var_cmd() -> str:
@@ -494,12 +495,13 @@ def start_skylet_on_head_node(
             cluster_name.display_name) is not None
         is_kubernetes = cluster_info.provider_name == 'kubernetes'
         if is_controller and is_kubernetes:
-            if launched_resources.cpus is not None:
-                env_vars['SKYPILOT_POD_CPU_CORE_LIMIT'] = (
-                    launched_resources.cpus)
-            if launched_resources.memory is not None:
-                env_vars['SKYPILOT_POD_MEMORY_GB_LIMIT'] = (
-                    launched_resources.memory)
+            resources = launched_resources.assert_launchable()
+            vcpus, mem = resources.cloud.get_vcpus_mem_from_instance_type(
+                resources.instance_type)
+            if vcpus is not None:
+                env_vars['SKYPILOT_POD_CPU_CORE_LIMIT'] = str(vcpus)
+            if mem is not None:
+                env_vars['SKYPILOT_POD_MEMORY_GB_LIMIT'] = str(mem)
         return '; '.join([f'export {k}={v}' for k, v in env_vars.items()])
 
     runners = provision.get_command_runners(cluster_info.provider_name,
