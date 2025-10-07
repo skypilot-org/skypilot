@@ -276,7 +276,8 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     # created in the centralus region when getting the storage account. We
     # should set the cluster to be launched in the same region.
     region_str = f'/centralus' if generic_cloud == 'azure' else ''
-    if smoke_tests_utils.is_non_docker_remote_api_server():
+    if smoke_tests_utils.is_non_docker_remote_api_server(
+    ) or smoke_tests_utils.is_dependency_test():
         enabled_cloud_storages = smoke_tests_utils.get_enabled_cloud_storages()
         include_s3_mount = clouds.cloud_in_iterable(clouds.AWS(),
                                                     enabled_cloud_storages)
