@@ -473,10 +473,13 @@ def request_lock_path(request_id: str) -> str:
 @metrics_lib.time_me
 def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
     """Get and update a SkyPilot API request."""
-    request = _get_request_no_lock(request_id)
-    yield request
-    if request is not None:
-        _add_or_update_request_no_lock(request)
+    # Acquire the lock to avoid race conditions between multiple request
+    # operations, e.g. execute and cancel.
+    with filelock.FileLock(request_lock_path(request_id)):
+        request = _get_request_no_lock(request_id)
+        yield request
+        if request is not None:
+            _add_or_update_request_no_lock(request)
 
 
 @init_db
@@ -491,12 +494,15 @@ def update_request_async(
 
     @contextlib.asynccontextmanager
     async def _cm():
-        request = await _get_request_no_lock_async(request_id)
-        try:
-            yield request
-        finally:
-            if request is not None:
-                await _add_or_update_request_no_lock_async(request)
+        # Acquire the lock to avoid race conditions between multiple request
+        # operations, e.g. execute and cancel.
+        async with filelock.AsyncFileLock(request_lock_path(request_id)):
+            request = await _get_request_no_lock_async(request_id)
+            try:
+                yield request
+            finally:
+                if request is not None:
+                    await _add_or_update_request_no_lock_async(request)
 
     return _cm()
 
