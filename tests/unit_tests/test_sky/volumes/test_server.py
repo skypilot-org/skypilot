@@ -19,8 +19,8 @@ class TestVolumeServer:
 
     def test_volume_list_success(self, monkeypatch):
         """Test volume_list endpoint with successful request."""
-        # Mock executor.schedule_request
-        mock_schedule = mock.MagicMock()
+        # Mock await executor.schedule_request
+        mock_schedule = mock.AsyncMock()
         monkeypatch.setattr(executor, 'schedule_request', mock_schedule)
 
         # Create test client
@@ -50,8 +50,8 @@ class TestVolumeServer:
 
     def test_volume_delete_success(self, monkeypatch):
         """Test volume_delete endpoint with successful request."""
-        # Mock executor.schedule_request
-        mock_schedule = mock.MagicMock()
+        # Mock await executor.schedule_request
+        mock_schedule = mock.AsyncMock()
         monkeypatch.setattr(executor, 'schedule_request', mock_schedule)
 
         # Create test client
@@ -85,8 +85,8 @@ class TestVolumeServer:
 
     def test_volume_apply_success_pvc(self, monkeypatch):
         """Test volume_apply endpoint with successful PVC volume creation."""
-        # Mock executor.schedule_request
-        mock_schedule = mock.MagicMock()
+        # Mock await executor.schedule_request
+        mock_schedule = mock.AsyncMock()
         monkeypatch.setattr(executor, 'schedule_request', mock_schedule)
 
         # Mock cloud registry
@@ -139,8 +139,8 @@ class TestVolumeServer:
 
     def test_volume_apply_success_pvc_default_access_mode(self, monkeypatch):
         """Test volume_apply endpoint with PVC volume using default access mode."""
-        # Mock executor.schedule_request
-        mock_schedule = mock.MagicMock()
+        # Mock await executor.schedule_request
+        mock_schedule = mock.AsyncMock()
         monkeypatch.setattr(executor, 'schedule_request', mock_schedule)
 
         # Mock cloud registry
@@ -189,8 +189,8 @@ class TestVolumeServer:
 
     def test_volume_apply_success_pvc_none_config(self, monkeypatch):
         """Test volume_apply endpoint with PVC volume and None config."""
-        # Mock executor.schedule_request
-        mock_schedule = mock.MagicMock()
+        # Mock await executor.schedule_request
+        mock_schedule = mock.AsyncMock()
         monkeypatch.setattr(executor, 'schedule_request', mock_schedule)
 
         # Mock cloud registry
@@ -370,8 +370,8 @@ class TestVolumeServer:
 
     def test_volume_apply_non_pvc_volume_type(self, monkeypatch):
         """Test volume_apply endpoint with non-PVC volume type."""
-        # Mock executor.schedule_request
-        mock_schedule = mock.MagicMock()
+        # Mock await executor.schedule_request
+        mock_schedule = mock.AsyncMock()
         monkeypatch.setattr(executor, 'schedule_request', mock_schedule)
 
         # Mock cloud registry
@@ -411,8 +411,8 @@ class TestVolumeServer:
 
     def test_volume_delete_empty_volume_names(self, monkeypatch):
         """Test volume_delete endpoint with empty volume names list."""
-        # Mock executor.schedule_request
-        mock_schedule = mock.MagicMock()
+        # Mock await executor.schedule_request
+        mock_schedule = mock.AsyncMock()
         monkeypatch.setattr(executor, 'schedule_request', mock_schedule)
 
         # Create test client

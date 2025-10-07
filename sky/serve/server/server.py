@@ -23,7 +23,7 @@ async def up(
     request: fastapi.Request,
     up_body: payloads.ServeUpBody,
 ) -> None:
-    executor.schedule_request(
+    await executor.schedule_request(
         request_id=request.state.request_id,
         request_name='serve.up',
         request_body=up_body,
@@ -38,7 +38,7 @@ async def update(
     request: fastapi.Request,
     update_body: payloads.ServeUpdateBody,
 ) -> None:
-    executor.schedule_request(
+    await executor.schedule_request(
         request_id=request.state.request_id,
         request_name='serve.update',
         request_body=update_body,
@@ -53,7 +53,7 @@ async def down(
     request: fastapi.Request,
     down_body: payloads.ServeDownBody,
 ) -> None:
-    executor.schedule_request(
+    await executor.schedule_request(
         request_id=request.state.request_id,
         request_name='serve.down',
         request_body=down_body,
@@ -68,7 +68,7 @@ async def terminate_replica(
     request: fastapi.Request,
     terminate_replica_body: payloads.ServeTerminateReplicaBody,
 ) -> None:
-    executor.schedule_request(
+    await executor.schedule_request(
         request_id=request.state.request_id,
         request_name='serve.terminate_replica',
         request_body=terminate_replica_body,
@@ -83,7 +83,7 @@ async def status(
     request: fastapi.Request,
     status_body: payloads.ServeStatusBody,
 ) -> None:
-    executor.schedule_request(
+    await executor.schedule_request(
         request_id=request.state.request_id,
         request_name='serve.status',
         request_body=status_body,
@@ -98,7 +98,7 @@ async def tail_logs(
     request: fastapi.Request, log_body: payloads.ServeLogsBody,
     background_tasks: fastapi.BackgroundTasks
 ) -> fastapi.responses.StreamingResponse:
-    request_task = executor.prepare_request(
+    request_task = await executor.prepare_request(
         request_id=request.state.request_id,
         request_name='serve.logs',
         request_body=log_body,
@@ -130,7 +130,7 @@ async def download_logs(
     # We should reuse the original request body, so that the env vars, such as
     # user hash, are kept the same.
     download_logs_body.local_dir = str(logs_dir_on_api_server)
-    executor.schedule_request(
+    await executor.schedule_request(
         request_id=request.state.request_id,
         request_name='serve.sync_down_logs',
         request_body=download_logs_body,

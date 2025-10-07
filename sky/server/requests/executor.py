@@ -603,7 +603,7 @@ async def _execute_request_coroutine(request: api_requests.Request):
         raise
 
 
-def prepare_request(
+async def prepare_request(
     request_id: str,
     request_name: str,
     request_body: payloads.RequestBody,
@@ -629,7 +629,7 @@ def prepare_request(
                                    user_id=user_id,
                                    cluster_name=request_cluster_name)
 
-    if not api_requests.create_if_not_exists(request):
+    if not await api_requests.create_if_not_exists_async(request):
         raise exceptions.RequestAlreadyExistsError(
             f'Request {request_id} already exists.')
 
@@ -637,17 +637,18 @@ def prepare_request(
     return request
 
 
-def schedule_request(request_id: str,
-                     request_name: str,
-                     request_body: payloads.RequestBody,
-                     func: Callable[P, Any],
-                     request_cluster_name: Optional[str] = None,
-                     ignore_return_value: bool = False,
-                     schedule_type: api_requests.ScheduleType = (
-                         api_requests.ScheduleType.LONG),
-                     is_skypilot_system: bool = False,
-                     precondition: Optional[preconditions.Precondition] = None,
-                     retryable: bool = False) -> None:
+async def schedule_request(request_id: str,
+                           request_name: str,
+                           request_body: payloads.RequestBody,
+                           func: Callable[P, Any],
+                           request_cluster_name: Optional[str] = None,
+                           ignore_return_value: bool = False,
+                           schedule_type: api_requests.ScheduleType = (
+                               api_requests.ScheduleType.LONG),
+                           is_skypilot_system: bool = False,
+                           precondition: Optional[
+                               preconditions.Precondition] = None,
+                           retryable: bool = False) -> None:
     """Enqueue a request to the request queue.
 
     Args:
@@ -668,9 +669,9 @@ def schedule_request(request_id: str,
             The precondition is waited asynchronously and does not block the
             caller.
     """
-    request_task = prepare_request(request_id, request_name, request_body, func,
-                                   request_cluster_name, schedule_type,
-                                   is_skypilot_system)
+    request_task = await prepare_request(request_id, request_name, request_body,
+                                         func, request_cluster_name,
+                                         schedule_type, is_skypilot_system)
     schedule_prepared_request(request_task, ignore_return_value, precondition,
                               retryable)
 
@@ -693,6 +694,7 @@ def schedule_prepared_request(request_task: api_requests.Request,
         retryable: Whether the request should be retried if it fails.
     """
 
+    @metrics_utils.time_me
     def enqueue():
         input_tuple = (request_task.request_id, ignore_return_value, retryable)
         logger.info(f'Queuing request: {request_task.request_id}')

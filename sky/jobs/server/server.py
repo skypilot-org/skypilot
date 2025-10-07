@@ -35,7 +35,7 @@ async def launch(request: fastapi.Request,
     consolidation_mode = managed_jobs_utils.is_consolidation_mode()
     schedule_type = (api_requests.ScheduleType.SHORT
                      if consolidation_mode else api_requests.ScheduleType.LONG)
-    executor.schedule_request(
+    await executor.schedule_request(
         request_id=request.state.request_id,
         request_name='jobs.launch',
         request_body=jobs_launch_body,
@@ -50,7 +50,7 @@ async def launch(request: fastapi.Request,
 @router.post('/queue')
 async def queue(request: fastapi.Request,
                 jobs_queue_body: payloads.JobsQueueBody) -> None:
-    executor.schedule_request(
+    await executor.schedule_request(
         request_id=request.state.request_id,
         request_name='jobs.queue',
         request_body=jobs_queue_body,
@@ -64,7 +64,7 @@ async def queue(request: fastapi.Request,
 @router.post('/queue/v2')
 async def queue_v2(request: fastapi.Request,
                    jobs_queue_body_v2: payloads.JobsQueueV2Body) -> None:
-    executor.schedule_request(
+    await executor.schedule_request(
         request_id=request.state.request_id,
         request_name='jobs.queue_v2',
         request_body=jobs_queue_body_v2,
@@ -79,7 +79,7 @@ async def queue_v2(request: fastapi.Request,
 @router.post('/cancel')
 async def cancel(request: fastapi.Request,
                  jobs_cancel_body: payloads.JobsCancelBody) -> None:
-    executor.schedule_request(
+    await executor.schedule_request(
         request_id=request.state.request_id,
         request_name='jobs.cancel',
         request_body=jobs_cancel_body,
@@ -99,7 +99,7 @@ async def logs(
         # When refresh is specified, the job controller might be restarted,
         # which takes longer time to finish. We schedule it to long executor.
         schedule_type = api_requests.ScheduleType.LONG
-    request_task = executor.prepare_request(
+    request_task = await executor.prepare_request(
         request_id=request.state.request_id,
         request_name='jobs.logs',
         request_body=jobs_logs_body,
@@ -134,7 +134,7 @@ async def download_logs(
     # We should reuse the original request body, so that the env vars, such as
     # user hash, are kept the same.
     jobs_download_logs_body.local_dir = str(logs_dir_on_api_server)
-    executor.schedule_request(
+    await executor.schedule_request(
         request_id=request.state.request_id,
         request_name='jobs.download_logs',
         request_body=jobs_download_logs_body,
@@ -148,7 +148,7 @@ async def download_logs(
 @router.post('/pool_apply')
 async def pool_apply(request: fastapi.Request,
                      jobs_pool_apply_body: payloads.JobsPoolApplyBody) -> None:
-    executor.schedule_request(
+    await executor.schedule_request(
         request_id=request.state.request_id,
         request_name='jobs.pool_apply',
         request_body=jobs_pool_apply_body,
@@ -161,7 +161,7 @@ async def pool_apply(request: fastapi.Request,
 @router.post('/pool_down')
 async def pool_down(request: fastapi.Request,
                     jobs_pool_down_body: payloads.JobsPoolDownBody) -> None:
-    executor.schedule_request(
+    await executor.schedule_request(
         request_id=request.state.request_id,
         request_name='jobs.pool_down',
         request_body=jobs_pool_down_body,
@@ -175,7 +175,7 @@ async def pool_down(request: fastapi.Request,
 async def pool_status(
         request: fastapi.Request,
         jobs_pool_status_body: payloads.JobsPoolStatusBody) -> None:
-    executor.schedule_request(
+    await executor.schedule_request(
         request_id=request.state.request_id,
         request_name='jobs.pool_status',
         request_body=jobs_pool_status_body,
@@ -190,7 +190,7 @@ async def pool_tail_logs(
     request: fastapi.Request, log_body: payloads.JobsPoolLogsBody,
     background_tasks: fastapi.BackgroundTasks
 ) -> fastapi.responses.StreamingResponse:
-    executor.schedule_request(
+    await executor.schedule_request(
         request_id=request.state.request_id,
         request_name='jobs.pool_logs',
         request_body=log_body,
@@ -222,7 +222,7 @@ async def pool_download_logs(
     # We should reuse the original request body, so that the env vars, such as
     # user hash, are kept the same.
     download_logs_body.local_dir = str(logs_dir_on_api_server)
-    executor.schedule_request(
+    await executor.schedule_request(
         request_id=request.state.request_id,
         request_name='jobs.pool_sync_down_logs',
         request_body=download_logs_body,

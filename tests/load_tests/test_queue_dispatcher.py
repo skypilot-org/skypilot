@@ -1,3 +1,4 @@
+import asyncio
 import multiprocessing
 import threading
 import time
@@ -67,13 +68,13 @@ def benchmark_queue_dispatcher(queue_backend: str,
     else:
         raise RuntimeError(f'Invalid queue backend: {queue_backend}')
 
-    def enqueue_requests():
+    async def enqueue_requests():
         for _ in range(num_requests):
             body = payloads.StatusBody()
             body.env_vars = dict({
                 constants.USER_ID_ENV_VAR: common_utils.generate_user_hash(),
             })
-            executor.schedule_request(
+            await executor.schedule_request(
                 request_id=str(uuid.uuid4()),
                 request_name='status',
                 is_skypilot_system=False,
@@ -81,7 +82,8 @@ def benchmark_queue_dispatcher(queue_backend: str,
                 func=dummy_func,
                 schedule_type=api_requests.ScheduleType.LONG)
 
-    enqueue_thread = threading.Thread(target=enqueue_requests)
+    enqueue_thread = threading.Thread(target=asyncio.run,
+                                      args=(enqueue_requests(),))
     enqueue_thread.start()
     enqueue_thread.join()
 
