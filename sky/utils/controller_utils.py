@@ -506,6 +506,9 @@ def shared_controller_vars_to_fill(
         # before popping allowed_contexts. If it is not on Kubernetes,
         # we may be able to use allowed_contexts.
         local_user_config.pop('allowed_contexts', None)
+        # Remove api_server config so that the controller does not try to use
+        # a remote API server.
+        local_user_config.pop('api_server', None)
         with tempfile.NamedTemporaryFile(
                 delete=False,
                 suffix=_LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX) as temp_file:
