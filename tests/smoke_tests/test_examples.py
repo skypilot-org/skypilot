@@ -138,8 +138,6 @@ def test_nemorl(generic_cloud: str, accelerator: Dict[str, str]) -> None:
     memory = '60+'
     if generic_cloud == 'kubernetes':
         accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
-        cpu = '7+'
-        memory = '30+'
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
 
