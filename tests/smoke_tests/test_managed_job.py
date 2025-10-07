@@ -1468,3 +1468,34 @@ def test_managed_jobs_ha_kill_starting(generic_cloud: str):
         second_timeout=600,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+def test_managed_jobs_controller_uses_local_api_server(generic_cloud: str):
+    """Test that jobs controller uses local API server, and ignores api_server.endpoint from the user's config.
+
+    This test is to guard against regressions where the remote jobs controller would read the api_server.endpoint
+    config and launch clusters with that instead of its local API server.
+    """
+    if not smoke_tests_utils.is_remote_server_test():
+        pytest.skip('This test is only relevant in remote API server case')
+
+    name = smoke_tests_utils.get_cluster_name()
+    override_api_server_cmd = 'SKYPILOT_API_SERVER_ENDPOINT=http://localhost:46580'
+    test = smoke_tests_utils.Test(
+        'managed_jobs_controller_local_api_server',
+        [
+            # Override the API server endpoint from ~/.sky/config.yaml and use local API server instead
+            f'{override_api_server_cmd} sky jobs launch -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi" -y -d',
+            f'{override_api_server_cmd} {smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(job_name=name,job_status=[sky.ManagedJobStatus.SUCCEEDED],timeout=300)}',
+            f'{override_api_server_cmd} JOB_ROW=$(sky jobs queue | grep {name} | head -n1) && '
+            'echo "$JOB_ROW" && '
+            'JOB_ID=$(echo "$JOB_ROW" | awk \'{print $1}\') && '
+            'echo "JOB_ID=$JOB_ID" && '
+            'sky jobs logs $JOB_ID && echo "Jobs logs exit code: $?"',
+        ],
+        f'{override_api_server_cmd} sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
