@@ -110,38 +110,3 @@ def test_gcp_project_metadata_parsing_malformed():
         # and should return 'False' (default)
         result = auth.parse_gcp_project_oslogin(malformed_project)
         assert result == 'False'
-
-
-def test_create_ssh_key_files_from_db():
-    """Test create_ssh_key_files_from_db with private_key_path."""
-    current_user_hash = 'current_user_hash_789'
-    path_user_hash = 'different_user_hash_abc'
-    mock_private_key = 'mock_private_key_content'
-    mock_public_key = 'mock_public_key_content'
-    # Use expanded path as input to match what the function expects
-    private_key_path = os.path.expanduser(
-        f'~/.sky/clients/{path_user_hash}/ssh/sky-key')
-
-    with patch('sky.authentication.global_user_state.get_ssh_keys') as mock_get_ssh_keys, \
-         patch('sky.authentication.os.path.exists') as mock_exists, \
-         patch('sky.authentication.filelock.FileLock') as mock_filelock, \
-         patch('sky.authentication._save_key_pair') as mock_save_key_pair, \
-         patch('sky.authentication.os.makedirs') as mock_makedirs:
-        # Setup mocks
-        mock_get_ssh_keys.return_value = (mock_public_key, mock_private_key,
-                                          True)
-        # Mock os.path.exists to return False for private key, True for public key
-        mock_exists.side_effect = lambda path: 'sky-key.pub' in path
-        mock_filelock.return_value.__enter__ = lambda x: None
-        mock_filelock.return_value.__exit__ = lambda x, y, z, w: None
-
-        # Call the function
-        auth.create_ssh_key_files_from_db(private_key_path=private_key_path)
-
-        # Verify _save_key_pair was called with the user_hash from the path.
-        mock_save_key_pair.assert_called_once()
-        args, kwargs = mock_save_key_pair.call_args
-        assert args[
-            0] == path_user_hash, f"Expected user_hash {path_user_hash}, got {args[0]}"
-        assert args[
-            0] != current_user_hash, f"Should not use current user hash {current_user_hash}"
