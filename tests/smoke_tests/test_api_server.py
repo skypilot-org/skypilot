@@ -476,21 +476,28 @@ def test_tail_jobs_logs_blocks_ssh(generic_cloud: str):
     """
     name = smoke_tests_utils.get_cluster_name()
     job_name = name + '-job'
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
 
     test = smoke_tests_utils.Test(
         'test_tail_jobs_logs_blocks_ssh',
         [
             # Launch a kubernetes cluster that we will ssh into.
-            f's=(sky launch -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y) && echo "$s" && echo "$s" | grep Cluster launched',
+            f's=$(sky launch -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y) && echo "$s" && echo "$s" | grep "Cluster launched"',
             # Launch a problematic job wih infinte logs.
-            f's=$(sky jobs launch -n {job_name} \'for i in {{1..10000}}; do echo "Hello, world! $i"; sleep 1; done\' --cpus 2 -d --infra {generic_cloud} -y) && echo "$s" && echo "$s" | grep Job launched',
-            # # Launch enough tail log requests to block the workers.
-            # f'pids=(); PROCS=$(nproc); PROCS=$(( PROCS + 4 < 32 ? PROCS + 4 : 32 )); for i in $(seq 1 $PROCS); do sky jobs logs 1 & pids+=($!); done; sleep 5; for pid in "${{pids[@]}}"; do kill -0 "$pid" || exit 1; done',
-            # # Now attempt to ssh in.
-            # f'timeout 10s ssh -o ConnectTimeout=10 -o BatchMode=yes {name} "echo hi"',
-            f'pids=(); PROCS=$(nproc); PROCS=$(( PROCS + 4 < 32 ? PROCS + 4 : 32 )); for i in $(seq 1 $PROCS); do sky jobs logs 1 & pids+=($!); done; sleep 5; for pid in "${{pids[@]}}"; do kill -0 "$pid" || exit 1; done; timeout 10s ssh -o ConnectTimeout=10 -o BatchMode=yes {name} "echo hi"; rc=$?; for pid in "${{pids[@]}}"; do kill "$pid" 2>/dev/null || true; done; exit $rc'
-            
+            f'sky jobs launch -n {job_name} \'for i in {{1..10000}}; do echo "Hello, world! $i"; sleep 1; done\' --cpus 2 -d --infra {generic_cloud} -y',
+            # Wait for the job to start.
+            smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=f'{job_name}',
+                    job_status=[
+                        sky.ManagedJobStatus.RUNNING
+                    ],
+                    timeout=120),
+            # Launch enough tail log requests to block the workers.
+            # Then attempt to ssh in.
+            f'pids=(); PROCS=$(nproc); PROCS=$(( PROCS + 4 < 32 ? PROCS + 4 : 32 )); for i in $(seq 1 $PROCS); do sky jobs logs -n {job_name} & pids+=($!); done; sleep 5; for pid in "${{pids[@]}}"; do kill -0 "$pid" || exit 1; done; ssh -o ConnectTimeout=10 -o BatchMode=yes {name} "echo hi"; rc=$?; for pid in "${{pids[@]}}"; do kill "$pid" 2>/dev/null || true; done; exit $rc' 
         ],
-        f'sky jobs cancel -y -n {name} || true && sky down -y {name}',
+        teardown=f'sky jobs cancel -y -n {job_name} || true && sky down -y {name}',
+        timeout=timeout,
     )
     smoke_tests_utils.run_one_test(test)
