@@ -130,11 +130,16 @@ def test_ray_train(generic_cloud: str, accelerator: Dict[str, str]) -> None:
 @pytest.mark.parametrize('accelerator', [{
     'do': 'H100',
     'nebius': 'L40S',
-    'aws': 'L4'
+    'aws': 'L4',
+    'gcp': 'L4'
 }])
 def test_nemorl(generic_cloud: str, accelerator: Dict[str, str]) -> None:
+    cpu = '10+'
+    memory = '60+'
     if generic_cloud == 'kubernetes':
         accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
+        cpu = '7+'
+        memory = '30+'
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
 
@@ -162,7 +167,7 @@ def test_nemorl(generic_cloud: str, accelerator: Dict[str, str]) -> None:
         test = smoke_tests_utils.Test(
             'nemorl',
             [
-                f'HF_TOKEN="" sky launch -y -c {name} --infra {infra} --gpus {accelerator} --cpus 10+ --memory 60+ --secret HF_TOKEN {f.name}',
+                f'HF_TOKEN="" sky launch -y -c {name} --infra {infra} --gpus {accelerator} --cpus {cpu} --memory {memory} --secret HF_TOKEN {f.name}',
                 f'sky logs {name} 1 --status',
             ],
             f'sky down -y {name}',
