@@ -247,7 +247,6 @@ This will produce a summary like:
     vSphere: enabled
     Cloudflare (for R2 object store): enabled
     Kubernetes: enabled
-    Seeweb: enabled
 
 If any cloud's credentials or dependencies are missing, ``sky check`` will
 output hints on how to resolve them. You can also refer to the cloud setup
