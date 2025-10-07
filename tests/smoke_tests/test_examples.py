@@ -126,12 +126,11 @@ def test_ray_train(generic_cloud: str, accelerator: Dict[str, str]) -> None:
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
+@pytest.mark.no_kubernetes  # No enough resources in Kubernetes yet
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{
     'do': 'H100',
     'nebius': 'L40S',
-    'aws': 'L4',
-    'gcp': 'L4'
 }])
 def test_nemorl(generic_cloud: str, accelerator: Dict[str, str]) -> None:
     cpu = '10+'
@@ -139,7 +138,7 @@ def test_nemorl(generic_cloud: str, accelerator: Dict[str, str]) -> None:
     if generic_cloud == 'kubernetes':
         accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
     else:
-        accelerator = accelerator.get(generic_cloud, 'T4')
+        accelerator = accelerator.get(generic_cloud, 'L4')
 
     infra = generic_cloud
     if generic_cloud == 'aws':
