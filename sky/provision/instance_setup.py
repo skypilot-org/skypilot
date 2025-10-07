@@ -495,6 +495,11 @@ def start_skylet_on_head_node(
             cluster_name.display_name) is not None
         is_kubernetes = cluster_info.provider_name == 'kubernetes'
         if is_controller and is_kubernetes:
+            # For jobs/serve controller, we pass in the CPU and memory limits
+            # when starting the skylet to handle cases where these env vars
+            # are not set on the cluster's pod spec. The skylet will read
+            # these env vars when starting (ManagedJobEvent.start()) and write
+            # it to disk.
             resources = launched_resources.assert_launchable()
             vcpus, mem = resources.cloud.get_vcpus_mem_from_instance_type(
                 resources.instance_type)

@@ -331,6 +331,14 @@ FILE_MOUNTS_LOCAL_TMP_BASE_PATH = '~/.sky/tmp/'
 # controller_utils.translate_local_file_mounts_to_two_hop().
 FILE_MOUNTS_CONTROLLER_TMP_BASE_PATH = '~/.sky/tmp/controller'
 
+# For passing in CPU and memory limits to the controller pod when running
+# in k8s. Right now, we only use this for the jobs controller, but we may
+# use this for the serve controller as well in the future.
+# These files are written to disk by the skylet, who reads it from env vars
+# passed by the backend when starting the skylet (start_skylet_on_head_node).
+CONTROLLER_K8S_CPU_FILE = '~/.sky/_internal_k8s_pod_cpu'
+CONTROLLER_K8S_MEMORY_FILE = '~/.sky/_internal_k8s_pod_memory'
+
 # Used when an managed jobs are created and
 # files are synced up to the cloud.
 FILE_MOUNTS_WORKDIR_SUBPATH = 'job-{run_id}/workdir'
