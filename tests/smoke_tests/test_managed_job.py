@@ -1488,11 +1488,11 @@ def test_managed_jobs_controller_uses_local_api_server(generic_cloud: str):
             # Override the API server endpoint from ~/.sky/config.yaml and use local API server instead
             f'{override_api_server_cmd} sky jobs launch -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi" -y -d',
             f'{override_api_server_cmd} {smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(job_name=name,job_status=[sky.ManagedJobStatus.SUCCEEDED],timeout=300)}',
-            f'{override_api_server_cmd} JOB_ROW=$(sky jobs queue | grep {name} | head -n1) && '
+            f'JOB_ROW=$({override_api_server_cmd} sky jobs queue | grep {name} | head -n1) && '
             'echo "$JOB_ROW" && '
             'JOB_ID=$(echo "$JOB_ROW" | awk \'{print $1}\') && '
             'echo "JOB_ID=$JOB_ID" && '
-            'sky jobs logs $JOB_ID && echo "Jobs logs exit code: $?"',
+            f'{override_api_server_cmd} sky jobs logs $JOB_ID && echo "Jobs logs exit code: $?"',
         ],
         f'{override_api_server_cmd} sky jobs cancel -y -n {name}',
         timeout=15 * 60,
