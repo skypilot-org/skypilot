@@ -147,7 +147,7 @@ def get_or_generate_keys() -> Tuple[str, str]:
             _save_key_pair(private_key_path, public_key_path, ssh_private_key,
                            ssh_public_key)
     assert os.path.exists(public_key_path), (
-        f'Private key found, but associated public key '
+        'Private key found, but associated public key '
         f'{public_key_path} does not exist.')
     return private_key_path, public_key_path
 
