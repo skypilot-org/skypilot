@@ -25,7 +25,7 @@ import re
 import socket
 import subprocess
 import sys
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 import uuid
 
 import colorama
@@ -152,22 +152,20 @@ def get_or_generate_keys() -> Tuple[str, str]:
     return private_key_path, public_key_path
 
 
-def create_ssh_key_files_from_db(private_key_path: Optional[str] = None):
-    if private_key_path is None:
-        user_hash = common_utils.get_user_hash()
-    else:
-        # Assume private key path is in the format of
-        # ~/.sky/clients/<user_hash>/ssh/sky-key
-        separated_path = os.path.normpath(private_key_path).split(os.path.sep)
-        assert separated_path[-1] == 'sky-key'
-        assert separated_path[-2] == 'ssh'
-        user_hash = separated_path[-3]
+def create_ssh_key_files_from_db(private_key_path: str):
+    # Assume private key path is in the format of
+    # ~/.sky/clients/<user_hash>/ssh/sky-key
+    separated_path = os.path.normpath(private_key_path).split(os.path.sep)
+    assert separated_path[-1] == 'sky-key'
+    assert separated_path[-2] == 'ssh'
+    user_hash = separated_path[-3]
 
     private_key_path_generated, public_key_path, lock_path = (
         get_ssh_key_and_lock_path(user_hash))
     assert private_key_path == os.path.expanduser(private_key_path_generated), (
         f'Private key path {private_key_path} does not '
-        f'match the generated path {private_key_path_generated}')
+        'match the generated path '
+        f'{os.path.expanduser(private_key_path_generated)}')
     private_key_path = os.path.expanduser(private_key_path)
     public_key_path = os.path.expanduser(public_key_path)
     lock_path = os.path.expanduser(lock_path)
