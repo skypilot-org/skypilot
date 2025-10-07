@@ -292,6 +292,8 @@ def pytest_collection_modifyitems(config, items):
     skip_marks['resource_heavy'] = pytest.mark.skip(
         reason=
         'skip tests not marked as resource_heavy if --resource-heavy is set')
+    skip_marks['no_dependency'] = pytest.mark.skip(
+        reason='skip tests marked as no_dependency if --dependency is set')
     for cloud in all_clouds_in_smoke_tests:
         skip_marks[cloud] = pytest.mark.skip(
             reason=f'tests for {cloud} is skipped, try setting --{cloud}')
@@ -351,6 +353,9 @@ def pytest_collection_modifyitems(config, items):
             has_api_server, _ = _get_and_check_env_file(env_file)
             if has_api_server and 'no_remote_server' in marks:
                 item.add_marker(skip_marks['no_remote_server'])
+        # Skip tests marked as no_dependency if --dependency is set
+        if 'no_dependency' in marks and config.getoption('--dependency'):
+            item.add_marker(skip_marks['no_dependency'])
 
     # Check if tests need to be run serially for Kubernetes and Lambda Cloud
     # We run Lambda Cloud tests serially because Lambda Cloud rate limits its

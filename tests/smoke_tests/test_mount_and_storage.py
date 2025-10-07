@@ -392,6 +392,7 @@ def test_azure_storage_mounts_with_stop():
 
 
 @pytest.mark.kubernetes
+@pytest.mark.no_dependency  # Storage tests required full dependency installed
 @pytest.mark.parametrize(
     'storage_name_prefix',
     [
@@ -1584,6 +1585,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
+    @pytest.mark.no_dependency  # Storage tests required full dependency installed
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
@@ -1607,6 +1609,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
+    @pytest.mark.no_dependency  # Storage tests required full dependency installed
     @pytest.mark.parametrize(
         'tmp_public_storage_obj, store_type',
         [('s3://tcga-2-open', storage_lib.StoreType.S3),
@@ -1629,6 +1632,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_dependency  # Storage tests required full dependency installed
     @pytest.mark.parametrize(
         'nonexist_bucket_url',
         [
@@ -1718,6 +1722,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
+    @pytest.mark.no_dependency  # Storage tests required full dependency installed
     @pytest.mark.parametrize(
         'private_bucket',
         [
@@ -1748,6 +1753,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
+    @pytest.mark.no_dependency  # Storage tests required full dependency installed
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
                               ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
@@ -1819,6 +1825,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
+    @pytest.mark.no_dependency  # Storage tests required full dependency installed
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
@@ -1885,6 +1892,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
+    @pytest.mark.no_dependency  # Storage tests required full dependency installed
     @pytest.mark.parametrize(
         'gitignore_structure, store_type',
         [(GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.S3),
@@ -1933,6 +1941,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
+    @pytest.mark.no_dependency  # Storage tests required full dependency installed
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
                               ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
