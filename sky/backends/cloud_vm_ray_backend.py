@@ -5356,6 +5356,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 cloud = launched_resources.cloud
                 config = global_user_state.get_cluster_yaml_dict(
                     handle.cluster_yaml)
+                ports_cleaned_up = False
+                custom_multi_network_cleaned_up = False
                 try:
                     cloud.check_features_are_supported(
                         launched_resources,
@@ -5364,8 +5366,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                 cluster_name_on_cloud,
                                                 handle.launched_resources.ports,
                                                 config['provider'])
+                    ports_cleaned_up = True
                 except exceptions.NotSupportedError:
-                    pass
+                    ports_cleaned_up = True
                 except exceptions.PortDoesNotExistError:
                     logger.debug('Ports do not exist. Skipping cleanup.')
                 except Exception as e:  # pylint: disable=broad-except
@@ -5388,8 +5391,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     provision_lib.cleanup_custom_multi_network(
                         repr(cloud), cluster_name_on_cloud, config['provider'],
                         failover)
+                    custom_multi_network_cleaned_up = True
                 except exceptions.NotSupportedError:
-                    pass
+                    custom_multi_network_cleaned_up = True
                 except Exception as e:  # pylint: disable=broad-except
                     if purge:
                         msg = common_utils.format_exception(e, use_bracket=True)
@@ -5399,16 +5403,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     else:
                         raise
 
-                try:
-                    self.remove_cluster_config(handle)
-                except Exception as e:  # pylint: disable=broad-except
-                    if purge:
-                        msg = common_utils.format_exception(e, use_bracket=True)
-                        logger.warning(
-                            f'Failed to remove cluster config. Skipping '
-                            f'since purge is set. Details: {msg}')
-                    else:
-                        raise
+                if ports_cleaned_up and custom_multi_network_cleaned_up:
+                    try:
+                        self.remove_cluster_config(handle)
+                    except Exception as e:  # pylint: disable=broad-except
+                        if purge:
+                            msg = common_utils.format_exception(
+                                e, use_bracket=True)
+                            logger.warning(
+                                f'Failed to remove cluster config. Skipping '
+                                f'since purge is set. Details: {msg}')
+                        else:
+                            raise
 
         cluster_utils.SSHConfigHelper.remove_cluster(handle.cluster_name)
 
