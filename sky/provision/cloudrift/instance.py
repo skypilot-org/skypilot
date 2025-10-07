@@ -18,14 +18,7 @@ MAX_POLLS_FOR_UP_OR_STOP = MAX_POLLS * 8
 logger = sky_logging.init_logger(__name__)
 
 
-_cloudrift_client = None
 
-
-def _get_cloudrift_client():
-    global _cloudrift_client
-    if _cloudrift_client is None:
-        _cloudrift_client = utils.RiftClient()
-    return _cloudrift_client
 
 def _get_head_instance(
         instances: Dict[str, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -38,7 +31,7 @@ def _get_head_instance(
 def _filter_instances(
         cluster_name_on_cloud: str,
         status_filters: Optional[List[str]]) -> Dict[str, Dict[str, Any]]:
-    cloudrift_client = _get_cloudrift_client()
+    cloudrift_client = utils.get_cloudrift_client()
     instances = cloudrift_client.list_instances()
     possible_names = [
         f'{cluster_name_on_cloud}-head',
@@ -58,7 +51,7 @@ def _filter_instances(
 def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
-    cloudrift_client = _get_cloudrift_client()
+    cloudrift_client = utils.get_cloudrift_client()
     del cluster_name  # unused
     pending_status = ['Initializing']
     while True:
@@ -102,16 +95,19 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     def launch_node(node_type: str) -> str:
         try:
             suffix = uuid.uuid4().hex[:8]
-            instance_ids = cloudrift_client.deploy_instance(
-                instance_type=config.node_config['InstanceType'],
-                region=region,
-                name = f'{cluster_name_on_cloud}-{suffix}-{node_type}',
-                ssh_keys=[config.node_config['PublicKey']],
-                cmd = ""
-            )
-            logger.info(f'Launched {node_type} node, '
-                        f'instance_id: {instance_ids[0]}')
-            return instance_ids[0]
+            ssh_public_key_file = config.authentication_config['ssh_public_key']
+            with open(ssh_public_key_file, 'r', encoding='utf-8') as f:
+                ssh_public_key = f.read().strip()
+                instance_ids = cloudrift_client.deploy_instance(
+                    instance_type=config.node_config['InstanceType'],
+                    region=region,
+                    name = f'{cluster_name_on_cloud}-{suffix}-{node_type}',
+                    ssh_keys=[ssh_public_key],
+                    cmd = ""
+                )
+                logger.info(f'Launched {node_type} node, '
+                            f'instance_id: {instance_ids[0]}')
+                return instance_ids[0]
         except Exception as e:
             logger.warning(f'run_instances error: {e}')
             raise

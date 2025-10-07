@@ -18,7 +18,7 @@ if typing.TYPE_CHECKING:
 _CREDENTIAL_FILE = 'config.yaml'
 
 
-@registry.CLOUD_REGISTRY.register(aliases=['cloudrift'])
+@registry.CLOUD_REGISTRY.register()
 class CloudRift(clouds.Cloud):
     """CloudRift Cloud Provider"""
 
@@ -82,7 +82,7 @@ class CloudRift(clouds.Cloud):
         assert zone is None, 'CloudRift does not support zones.'
         del zone  # unused
         regions = catalog.get_region_zones_for_instance_type(
-            instance_type, use_spot, 'CloudRift')
+            instance_type, use_spot, 'cloudrift')
         if region is not None:
             regions = [r for r in regions if r.name == region]
         return regions
@@ -93,7 +93,7 @@ class CloudRift(clouds.Cloud):
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
         return catalog.get_vcpus_mem_from_instance_type(instance_type,
-                                                        clouds='CloudRift')
+                                                        clouds='cloudrift')
 
     @classmethod
     def zones_provision_loop(
@@ -127,7 +127,7 @@ class CloudRift(clouds.Cloud):
             use_spot=use_spot,
             region=region,
             zone=zone,
-            clouds='CloudRift',
+            clouds='cloudrift',
         )
 
     def accelerators_to_hourly_cost(
@@ -163,13 +163,13 @@ class CloudRift(clouds.Cloud):
                                                  disk_tier=disk_tier,
                                                  region=region,
                                                  zone=zone,
-                                                 clouds='CloudRift')
+                                                 clouds='cloudrift')
 
     @classmethod
     def get_accelerators_from_instance_type(
             cls, instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
         return catalog.get_accelerators_from_instance_type(instance_type,
-                                                           clouds='CloudRift')
+                                                           clouds='cloudrift')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -309,7 +309,7 @@ class CloudRift(clouds.Cloud):
         return 10.0  # Default size in GB
 
     def instance_type_exists(self, instance_type: str) -> bool:
-        return catalog.instance_type_exists(instance_type, 'CloudRift')
+        return catalog.instance_type_exists(instance_type, 'cloudrift')
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return catalog.validate_region_zone(region, zone, clouds='CloudRift')
+        return catalog.validate_region_zone(region, zone, clouds='cloudrift')

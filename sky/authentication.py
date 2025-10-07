@@ -44,6 +44,7 @@ from sky.provision.fluidstack import fluidstack_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.lambda_cloud import lambda_utils
 from sky.provision.primeintellect import utils as primeintellect_utils
+from sky.provision.cloudrift import utils as cloudrift_utils
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -585,6 +586,9 @@ def setup_cloudrift_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = get_or_generate_keys()
     with open(public_key_path, 'r', encoding='UTF-8') as pub_key_file:
         public_key = pub_key_file.read().strip()
-        runpod.runpod().cli.groups.ssh.functions.add_ssh_key(public_key)
+        cloudrift_utils.get_cloudrift_client().add_ssh_key(public_key)
 
+    # Default username for Prime Intellect images
+    config['auth']['ssh_user'] = 'riftuser'
+    config['auth']['ssh_public_key'] = public_key_path
     return configure_ssh_info(config)

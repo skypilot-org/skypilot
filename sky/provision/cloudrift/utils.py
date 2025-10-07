@@ -131,7 +131,7 @@ class RiftClient:
         return None
 
     def deploy_instance(
-        self, instance_type: str, name:str, region: str, ssh_key_name: str, cmd: str
+        self, instance_type: str, name:str, region: str, ssh_keys: List[str], cmd: str
     ) -> List[str]:
         image_url = self.get_vm_image_url()
         if not image_url:
@@ -143,7 +143,7 @@ class RiftClient:
                     "cloudinit_url": "https://storage.googleapis.com/cloudrift-vm-disks/cloudinit/ubuntu-base.cloudinit", # TODO FIX
                     #"cloudinit_commands": cmd, # TODO FIX
                     "image_url": image_url,
-                    "ssh_key": {"ByName": [ssh_key_name]},
+                    "ssh_key": {"PublicKeys": ssh_keys},
                 }
             },
             "selector": {
@@ -214,6 +214,19 @@ class RiftClient:
 
         return False
 
+
+    # def add_ssh_key(self, name: str, public_key: str) -> bool:
+
+    #     request_data = {
+    #         "name": name,
+    #         "public_key": public_key,
+    #     }
+    #     response_data = self._make_request("ssh-keys/add", request_data)
+    #     if isinstance(response_data, dict):
+    #         return response_data.get("ssh_key", {}).get("id", None) is not None
+
+    #     return False
+
     def _make_request(
         self,
         endpoint: str,
@@ -260,3 +273,13 @@ class RiftClient:
             ):
                 raise RuntimeError(e.response.text)
             raise
+
+
+_cloudrift_client = None
+
+
+def get_cloudrift_client():
+    global _cloudrift_client
+    if _cloudrift_client is None:
+        _cloudrift_client = utils.RiftClient()
+    return _cloudrift_client

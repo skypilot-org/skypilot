@@ -231,6 +231,7 @@ def _get_cluster_config_template(cloud):
     cloud_to_template = {
         clouds.AWS: 'aws-ray.yml.j2',
         clouds.Azure: 'azure-ray.yml.j2',
+        clouds.CloudRift: 'cloudrift-ray.yml.j2',
         clouds.Cudo: 'cudo-ray.yml.j2',
         clouds.GCP: 'gcp-ray.yml.j2',
         clouds.Lambda: 'lambda-ray.yml.j2',

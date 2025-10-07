@@ -1128,6 +1128,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
         config = auth.setup_primeintellect_authentication(config)
     elif isinstance(cloud, clouds.Seeweb):
         config = auth.setup_seeweb_authentication(config)
+    elif isinstance(cloud, clouds.CloudRift):
+        config = auth.setup_cloudrift_authentication(config)
     else:
         assert False, cloud
     yaml_utils.dump_yaml(tmp_yaml_path, config)
