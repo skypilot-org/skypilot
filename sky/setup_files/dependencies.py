@@ -38,8 +38,8 @@ install_requires = [
     'tabulate',
     # Light weight requirement, can be replaced with "typing" once
     # we deprecate Python 3.7 (this will take a while).
-    # Need >=4.6.0 to use Sentinel, used by pydantic.
-    'typing_extensions>=4.6.0',
+    # Need >=4.14.0 to use Sentinel, used by pydantic.
+    'typing_extensions>=4.14.0',
     # filelock 3.15.0 or higher is required for async file locking.
     'filelock >= 3.15.0',
     'packaging',
