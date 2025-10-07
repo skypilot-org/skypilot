@@ -1068,6 +1068,20 @@ def test_volume_env_mount_kubernetes():
 
 
 # ---------- Container logs from task on Kubernetes ----------
+
+
+def _check_container_logs(name, logs, range_start, range_end, count):
+    """Check if the container logs contain the expected number of 
+    logging lines. Each line should be only one number in the given range.
+    and should show up count number of times."""
+    return [
+        smoke_tests_utils.run_cloud_cmd_on_cluster(
+            name,
+            f'{logs} | grep -x "{num}" | wc -l | grep {count}',
+        ) for num in range(range_start, range_end + 1)
+    ]
+
+
 @pytest.mark.kubernetes
 def test_container_logs_multinode_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
@@ -1089,14 +1103,8 @@ def test_container_logs_multinode_kubernetes():
                 smoke_tests_utils.launch_cluster_for_cloud_cmd(
                     'kubernetes', name),
                 f'sky launch -y -c {name} {task_yaml} --num-nodes 2',
-                smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    f'{head_logs} | wc -l | grep 9',
-                ),
-                smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    f'{worker_logs} | wc -l | grep 9',
-                ),
+                *_check_container_logs(name, head_logs, 1, 9, 1),
+                *_check_container_logs(name, worker_logs, 1, 9, 1),
             ],
             f'sky down -y {name} && '
             f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
@@ -1122,51 +1130,8 @@ def test_container_logs_two_jobs_kubernetes():
                 smoke_tests_utils.launch_cluster_for_cloud_cmd(
                     'kubernetes', name),
                 f'sky launch -y -c {name} {task_yaml}',
-                smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    f'{pod_logs} | wc -l | grep 9',
-                ),
                 f'sky launch -y -c {name} {task_yaml}',
-                smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    f'{pod_logs} | wc -l | grep 18',
-                ),
-                smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    f'{pod_logs} | grep 1 | wc -l | grep 2',
-                ),
-                smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    f'{pod_logs} | grep 2 | wc -l | grep 2',
-                ),
-                smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    f'{pod_logs} | grep 3 | wc -l | grep 2',
-                ),
-                smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    f'{pod_logs} | grep 4 | wc -l | grep 2',
-                ),
-                smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    f'{pod_logs} | grep 5 | wc -l | grep 2',
-                ),
-                smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    f'{pod_logs} | grep 6 | wc -l | grep 2',
-                ),
-                smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    f'{pod_logs} | grep 7 | wc -l | grep 2',
-                ),
-                smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    f'{pod_logs} | grep 8 | wc -l | grep 2',
-                ),
-                smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    f'{pod_logs} | grep 9 | wc -l | grep 2',
-                ),
+                *_check_container_logs(name, pod_logs, 1, 9, 2),
             ],
             f'sky down -y {name} && '
             f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
@@ -1195,46 +1160,7 @@ def test_container_logs_two_simultaneous_jobs_kubernetes():
                 f'sky exec -c {name} -d {task_yaml}',
                 f'sky exec -c {name} -d {task_yaml}',
                 'sleep 30',
-                smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    f'{pod_logs} | wc -l | grep 18',
-                ),
-                smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    f'{pod_logs} | grep 1 | wc -l | grep 2',
-                ),
-                smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    f'{pod_logs} | grep 2 | wc -l | grep 2',
-                ),
-                smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    f'{pod_logs} | grep 3 | wc -l | grep 2',
-                ),
-                smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    f'{pod_logs} | grep 4 | wc -l | grep 2',
-                ),
-                smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    f'{pod_logs} | grep 5 | wc -l | grep 2',
-                ),
-                smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    f'{pod_logs} | grep 6 | wc -l | grep 2',
-                ),
-                smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    f'{pod_logs} | grep 7 | wc -l | grep 2',
-                ),
-                smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    f'{pod_logs} | grep 8 | wc -l | grep 2',
-                ),
-                smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    f'{pod_logs} | grep 9 | wc -l | grep 2',
-                ),
+                *_check_container_logs(name, pod_logs, 1, 9, 2),
             ],
             f'sky down -y {name} && '
             f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
