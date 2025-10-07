@@ -787,9 +787,12 @@ def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
 
 
 def set_request_cancelled(request_id: str) -> None:
-    """Set a request to cancelled."""
+    """Set a pending or running request to cancelled."""
     with update_request(request_id) as request_task:
         assert request_task is not None, request_id
+        # Already finished or cancelled.
+        if request_task.status > RequestStatus.RUNNING:
+            return
         request_task.finished_at = time.time()
         request_task.status = RequestStatus.CANCELLED
 
