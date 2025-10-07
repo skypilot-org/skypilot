@@ -54,7 +54,8 @@ def aws_config_region(monkeypatch: pytest.MonkeyPatch) -> str:
 
 @pytest.fixture
 def mock_client_requests(monkeypatch: pytest.MonkeyPatch, mock_queue,
-                         mock_stream_utils, mock_redirect_log_file) -> None:
+                         mock_stream_utils, mock_redirect_log_file,
+                         mock_execute_in_coroutine) -> None:
     """Fixture to mock HTTP requests using FastAPI's TestClient."""
     # This fixture automatically replaces `requests.get` and `requests.post`
     # with mocked versions that route requests through a FastAPI TestClient.
@@ -414,6 +415,22 @@ def mock_queue(monkeypatch):
 
     # Return the mock_queue_instance for use in tests
     return mock_queue_instance
+
+
+@pytest.fixture
+def mock_execute_in_coroutine(monkeypatch):
+
+    class MockCoroutineTask:
+
+        def cancel(self):
+            return
+
+    def mock_execute_in_coroutine(*args, **kwargs):
+        return MockCoroutineTask()
+
+    monkeypatch.setattr(
+        'sky.server.requests.executor.execute_request_in_coroutine',
+        mock_execute_in_coroutine)
 
 
 @pytest.fixture
