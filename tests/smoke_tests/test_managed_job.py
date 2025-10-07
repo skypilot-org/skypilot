@@ -1480,11 +1480,13 @@ def test_managed_jobs_controller_uses_local_api_server(generic_cloud: str):
     if not smoke_tests_utils.is_remote_server_test():
         pytest.skip('This test is only relevant in remote API server case')
 
+    remote_server_url = smoke_tests_utils.get_api_server_url()
     name = smoke_tests_utils.get_cluster_name()
     override_api_server_cmd = 'SKYPILOT_API_SERVER_ENDPOINT=http://localhost:46580'
     test = smoke_tests_utils.Test(
         'managed_jobs_controller_local_api_server',
         [
+            f'sky api login -e {remote_server_url}',
             # Override the API server endpoint from ~/.sky/config.yaml and use local API server instead
             f'{override_api_server_cmd} sky jobs launch -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi" -y -d',
             f'{override_api_server_cmd} {smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(job_name=name,job_status=[sky.ManagedJobStatus.SUCCEEDED],timeout=300)}',
@@ -1495,6 +1497,7 @@ def test_managed_jobs_controller_uses_local_api_server(generic_cloud: str):
             f'{override_api_server_cmd} sky jobs logs $JOB_ID && echo "Jobs logs exit code: $?"',
         ],
         f'{override_api_server_cmd} sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=15 * 60,
     )
     smoke_tests_utils.run_one_test(test)
