@@ -112,7 +112,6 @@ def _execute(
     stages: Optional[List[Stage]] = None,
     cluster_name: Optional[str] = None,
     detach_setup: bool = False,
-    detach_run: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
@@ -157,8 +156,6 @@ def _execute(
         job itself. You can safely ctrl-c to detach from logging, and it will
         not interrupt the setup process. To see the logs again after detaching,
         use `sky logs`. To cancel setup, cancel the job via `sky cancel`.
-      detach_run: If True, as soon as a job is submitted, return from this
-        function and do not stream execution logs.
       idle_minutes_to_autostop: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
       no_setup: bool; whether to skip setup commands or not when (re-)launching.
@@ -217,7 +214,6 @@ def _execute(
             stages=stages,
             cluster_name=cluster_name,
             detach_setup=detach_setup,
-            detach_run=detach_run,
             no_setup=no_setup,
             clone_disk_from=clone_disk_from,
             skip_unnecessary_provisioning=skip_unnecessary_provisioning,
@@ -239,7 +235,6 @@ def _execute_dag(
     stages: Optional[List[Stage]],
     cluster_name: Optional[str],
     detach_setup: bool,
-    detach_run: bool,
     no_setup: bool,
     clone_disk_from: Optional[str],
     skip_unnecessary_provisioning: bool,
@@ -507,10 +502,7 @@ def _execute_dag(
         if Stage.EXEC in stages:
             try:
                 global_user_state.update_last_use(handle.get_cluster_name())
-                job_id = backend.execute(handle,
-                                         task,
-                                         detach_run,
-                                         dryrun=dryrun)
+                job_id = backend.execute(handle, task, dryrun=dryrun)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
                 backend.post_execute(handle, down)
@@ -707,7 +699,6 @@ def launch(
         stages=stages,
         cluster_name=cluster_name,
         detach_setup=detach_setup,
-        detach_run=True,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
@@ -802,6 +793,5 @@ def exec(  # pylint: disable=redefined-builtin
             Stage.EXEC,
         ],
         cluster_name=cluster_name,
-        detach_run=True,
         job_logger=job_logger,
     )
