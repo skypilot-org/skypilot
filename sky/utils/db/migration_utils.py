@@ -11,6 +11,7 @@ import filelock
 import sqlalchemy
 
 from sky import sky_logging
+from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)
 
@@ -87,14 +88,17 @@ def needs_upgrade(engine: sqlalchemy.engine.Engine, section: str,
 
     target_rev_num = int(target_revision)
     if current_rev is None:
-        logger.info(f'{section} database currently uninitialized, '
-                    f'targeting revision {target_rev_num}')
+        if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+            logger.debug(f'{section} database currently uninitialized, '
+                        f'targeting revision {target_rev_num}')
         return True
 
     # Compare revisions - assuming they are numeric strings like '001', '002'
     current_rev_num = int(current_rev)
-    logger.info(f'{section} database currently at revision {current_rev_num}, '
-                f'targeting revision {target_rev_num}')
+    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+        logger.debug(
+            f'{section} database currently at revision {current_rev_num}, '
+            f'targeting revision {target_rev_num}')
 
     return current_rev_num < target_rev_num
 
