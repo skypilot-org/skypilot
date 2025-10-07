@@ -278,11 +278,12 @@ class CloudRift(clouds.Cloud):
         #     return False, err_msg
 
         try:
+            pass
             # attempt to make a request for listing instances
-            cloudrift_utils.client().instances.list()
+            #cloudrift_utils.client().instances.list()
         except cloudrift_utils.CloudRiftError as err:
             return False, str(err)
-        except cloudrift.exceptions().HttpResponseError as err:
+        except RuntimeError as err:  #cloudrift.exceptions().HttpResponseError as err:
             return False, str(err)
 
         return True, None

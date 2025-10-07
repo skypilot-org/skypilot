@@ -14,10 +14,10 @@ import requests
 from packaging import version
 from requests import Response
 
-from dstack._internal.core.errors import BackendError, BackendInvalidCredentialsError
-from dstack._internal.utils.logging import get_logger
+# from dstack._internal.core.errors import BackendError, BackendInvalidCredentialsError
+# from dstack._internal.utils.logging import get_logger
 
-logger = get_logger(__name__)
+# logger = get_logger(__name__)
 
 # CloudRift credentials environment variable
 _CLOUDRIFT_CREDENTIALS_PATH = 'CLOUDRIFT_CREDENTIALS_PATH'
@@ -65,10 +65,10 @@ class RiftClient:
             if isinstance(response, dict):
                 return response.get("email", False)
             return False
-        except BackendInvalidCredentialsError:
-            return False
+        # except BackendInvalidCredentialsError:
+        #     return False
         except Exception as e:
-            logger.error(f"Error validating API key: {e}")
+            #logger.error(f"Error validating API key: {e}")
             return False
 
     def get_instance_types(self) -> List[Dict]:
@@ -131,11 +131,11 @@ class RiftClient:
         return None
 
     def deploy_instance(
-        self, instance_type: str, name:str, region: str, ssh_keys: List[str], cmd: str
+        self, instance_type: str, name:str, region: str, ssh_key_name: str, cmd: str
     ) -> List[str]:
         image_url = self.get_vm_image_url()
         if not image_url:
-            raise BackendError("No suitable VM image found.")
+            raise RuntimeError("No suitable VM image found.")
 
         request_data = {
             "config": {
@@ -143,7 +143,7 @@ class RiftClient:
                     "cloudinit_url": "https://storage.googleapis.com/cloudrift-vm-disks/cloudinit/ubuntu-base.cloudinit", # TODO FIX
                     #"cloudinit_commands": cmd, # TODO FIX
                     "image_url": image_url,
-                    "ssh_key": {"PublicKeys": ssh_keys},
+                    "ssh_key": {"ByName": [ssh_key_name]},
                 }
             },
             "selector": {
@@ -154,7 +154,7 @@ class RiftClient:
             },
             "with_public_ip": True,
         }
-        logger.debug("Deploying instance with request data: %s", request_data)
+        #logger.debug("Deploying instance with request data: %s", request_data)
         print(request_data)
 
         response_data = self._make_request("instances/rent", request_data)
@@ -178,7 +178,7 @@ class RiftClient:
 
     def get_instance_by_id(self, instance_id: str) -> Optional[Dict]:
         request_data = {"selector": {"ById": [instance_id]}}
-        logger.debug("Getting instance with request data: %s", request_data)
+        #logger.debug("Getting instance with request data: %s", request_data)
         response_data = self._make_request("instances/list", request_data)
         if isinstance(response_data, dict):
             instances = response_data.get("instances", [])
@@ -206,7 +206,7 @@ class RiftClient:
 
     def terminate_instance(self, instance_id: str) -> bool:
         request_data = {"selector": {"ById": [instance_id]}}
-        logger.debug("Terminating instance with request data: %s", request_data)
+        #logger.debug("Terminating instance with request data: %s", request_data)
         response_data = self._make_request("instances/terminate", request_data)
         if isinstance(response_data, dict):
             info = response_data.get("terminated", [])
@@ -244,12 +244,12 @@ class RiftClient:
                 response_json = response.json()
                 if isinstance(response_json, str):
                     return response_json
-                if version is not None and version < response_json["version"]:
-                    logger.warning(
-                        "The API version %s is lower than the server version %s. ",
-                        version,
-                        response_json["version"],
-                    )
+                #if version is not None and version < response_json["version"]:
+                    # logger.warning(
+                    #     "The API version %s is lower than the server version %s. ",
+                    #     version,
+                    #     response_json["version"],
+                    # )
                 return response_json["data"]
             except requests.exceptions.JSONDecodeError:
                 return response
@@ -258,102 +258,5 @@ class RiftClient:
                 requests.codes.forbidden,
                 requests.codes.unauthorized,
             ):
-                raise BackendInvalidCredentialsError(e.response.text)
+                raise RuntimeError(e.response.text)
             raise
-
-
-
-def create_instance(
-    region: str,
-    cluster_name_on_cloud: str,
-    instance_type: str,
-    config: common.ProvisionConfig
-) -> Dict[str, Any]:
-    """Create an instance.
-
-    Args:
-        region: The region to create the instance in.
-        cluster_name_on_cloud: The name of the cluster on cloud.
-        instance_type: Either 'head' or 'worker'.
-        config: The provision config.
-
-    Returns:
-        The created instance metadata.
-    """
-    # Generate a unique suffix for the instance name
-    suffix = uuid.uuid4().hex[:8]
-    name = f'{cluster_name_on_cloud}-{suffix}-{instance_type}'
-    
-    # Create the instance using CloudRift API
-    response = client().instances.create(
-        instance_type=config.instance_type,
-        region=region,
-        zone=None  # CloudRift doesn't use zones
-    )
-    
-    # Extract the instance from the response
-    instance = response.get('instance', {})
-    # Add the name to the instance metadata
-    instance['name'] = name
-    # Set status to running
-    instance['status'] = 'running'
-    # Dummy public IP
-    instance['public_ip'] = f'10.0.0.{uuid.uuid4().hex[:2]}'
-    
-    return instance
-
-
-def start_instance(instance: Dict[str, Any]) -> None:
-    """Start an instance.
-
-    Args:
-        instance: The instance to start.
-    """
-    # Set the status to running
-    instance['status'] = 'running'
-
-
-def stop_instance(instance: Dict[str, Any]) -> None:
-    """Stop an instance.
-
-    Args:
-        instance: The instance to stop.
-    """
-    # Set the status to stopped
-    instance['status'] = 'stopped'
-
-
-def down_instance(instance: Dict[str, Any]) -> None:
-    """Terminate an instance.
-
-    Args:
-        instance: The instance to terminate.
-    """
-    # Call CloudRift API to delete the instance
-    client().instances.delete(instance_id=instance['id'])
-    # Set the status to terminated
-    instance['status'] = 'terminated'
-
-
-def rename_instance(instance: Dict[str, Any], new_name: str) -> None:
-    """Rename an instance.
-
-    Args:
-        instance: The instance to rename.
-        new_name: The new name for the instance.
-    """
-    old_name = instance['name']
-    instance['name'] = new_name
-
-
-def open_ports_instance(instance: Dict[str, Any], ports: List[str]) -> None:
-    """Open ports for an instance.
-
-    Args:
-        instance: The instance to open ports for.
-        ports: The ports to open.
-    """
-    # In a real implementation, this would call CloudRift API to open ports
-    # For now, we just log the action
-    pass
-

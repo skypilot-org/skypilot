@@ -90,7 +90,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         logger.info(f'Cluster {cluster_name_on_cloud} already has '
                     f'{len(exist_instances)} nodes, no need to start more.')
         return common.ProvisionRecord(
-            provider_name='cloudrift',
+            provider_name='CloudRift',
             cluster_name=cluster_name_on_cloud,
             region=region,
             zone=None,
@@ -152,7 +152,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         raise RuntimeError(msg)
     assert head_instance is not None, 'head_instance should not be None'
     return common.ProvisionRecord(
-        provider_name='cloudrift',
+        provider_name='CloudRift',
         cluster_name=cluster_name_on_cloud,
         region=region,
         zone=None,

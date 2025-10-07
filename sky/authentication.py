@@ -574,3 +574,17 @@ def setup_seeweb_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     config['auth']['remote_key_name'] = remote_name
 
     return config
+
+
+# ---------------------------------- RunPod ---------------------------------- #
+def setup_cloudrift_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sets up SSH authentication for RunPod.
+    - Generates a new SSH key pair if one does not exist.
+    - Adds the public SSH key to the user's RunPod account.
+    """
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r', encoding='UTF-8') as pub_key_file:
+        public_key = pub_key_file.read().strip()
+        runpod.runpod().cli.groups.ssh.functions.add_ssh_key(public_key)
+
+    return configure_ssh_info(config)
