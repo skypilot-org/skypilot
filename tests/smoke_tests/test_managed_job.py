@@ -837,6 +837,7 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
 @pytest.mark.no_seeweb  # Seeweb does not support spot instances
 @pytest.mark.managed_jobs
+@pytest.mark.no_dependency  # Storage tests required full dependency installed
 def test_managed_jobs_storage(generic_cloud: str):
     """Test storage with managed job"""
     timeout = 215

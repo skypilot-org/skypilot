@@ -807,10 +807,6 @@ def is_grpc_enabled_test() -> bool:
     return os.environ.get('PYTEST_SKYPILOT_GRPC_ENABLED', None) is not None
 
 
-def is_dependency_test() -> bool:
-    return os.environ.get('PYTEST_DEPENDENCY_ARG', None) is not None
-
-
 def pytest_config_file_override() -> Optional[str]:
     return os.environ.get('PYTEST_SKYPILOT_CONFIG_FILE_OVERRIDE', None)
 
