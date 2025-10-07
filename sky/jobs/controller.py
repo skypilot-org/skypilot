@@ -1149,7 +1149,7 @@ class Controller:
             # run on each controller, to achieve a total of 2000 jobs across all
             # controllers.
             max_jobs = min(scheduler.MAX_JOBS_PER_WORKER,
-                           (scheduler.MAX_TOTAL_JOBS //
+                           (scheduler.MAX_TOTAL_RUNNING_JOBS //
                             scheduler.get_number_of_controllers()))
 
             if len(running_tasks) >= max_jobs:
