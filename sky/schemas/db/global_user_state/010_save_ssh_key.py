@@ -42,11 +42,14 @@ def upgrade():
                                  user_hash, 'ssh')
         public_key_path = os.path.join(match_dir, 'sky-key.pub')
         private_key_path = os.path.join(match_dir, 'sky-key')
-
-        with open(public_key_path, 'r', encoding='utf-8') as f:
-            public_key = f.read().strip()
-        with open(private_key_path, 'r', encoding='utf-8') as f:
-            private_key = f.read().strip()
+        try:
+            with open(public_key_path, 'r', encoding='utf-8') as f:
+                public_key = f.read().strip()
+            with open(private_key_path, 'r', encoding='utf-8') as f:
+                private_key = f.read().strip()
+        except FileNotFoundError:
+            # Skip if the key files are not found
+            continue
         connection.execute(
             sa.text('INSERT INTO ssh_key '
                     '(user_hash, ssh_public_key, ssh_private_key) '
