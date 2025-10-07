@@ -984,12 +984,18 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     def _create_resource_thread(i: int):
         pod_spec_copy = copy.deepcopy(pod_spec)
-        if head_pod_name is None and i == 0:
-            # First pod should be head if no head exists
-            pod_spec_copy['metadata']['labels'].update(constants.HEAD_NODE_TAGS)
-            head_selector = _head_service_selector(cluster_name_on_cloud)
-            pod_spec_copy['metadata']['labels'].update(head_selector)
-            pod_spec_copy['metadata']['name'] = f'{cluster_name_on_cloud}-head'
+        if i == 0:
+            if head_pod_name is None:
+                # First pod should be head if no head exists
+                pod_spec_copy['metadata']['labels'].update(
+                    constants.HEAD_NODE_TAGS)
+                head_selector = _head_service_selector(cluster_name_on_cloud)
+                pod_spec_copy['metadata']['labels'].update(head_selector)
+                pod_spec_copy['metadata'][
+                    'name'] = f'{cluster_name_on_cloud}-head'
+            else:
+                # If head pod already exists, we skip creating it.
+                return
         else:
             # Worker pods
             pod_spec_copy['metadata']['labels'].update(
@@ -1130,9 +1136,11 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 'and then up the cluster again.')
             raise exceptions.InconsistentHighAvailabilityError(message)
 
-    # Create pods in parallel
-    created_resources = subprocess_utils.run_in_parallel(
-        _create_resource_thread, list(range(to_start_count)), _NUM_THREADS)
+    created_resources = []
+    if to_start_count > 0:
+        # Create pods in parallel
+        created_resources = subprocess_utils.run_in_parallel(
+            _create_resource_thread, list(range(config.count)), _NUM_THREADS)
 
     if to_create_deployment:
         deployments = copy.deepcopy(created_resources)
