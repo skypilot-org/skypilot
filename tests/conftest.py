@@ -769,3 +769,14 @@ def prepare_env_file(request):
     if has_api_server:
         os.environ['PYTEST_SKYPILOT_REMOTE_SERVER_TEST'] = '1'
     yield local_file_path
+
+
+@pytest.fixture(scope='session', autouse=True)
+def setup_dependency_env(request):
+    """Setup dependency environment variable if --dependency is specified."""
+    if not request.config.getoption('--dependency'):
+        yield
+        return
+    os.environ['PYTEST_DEPENDENCY_ARG'] = request.config.getoption(
+        '--dependency')
+    yield

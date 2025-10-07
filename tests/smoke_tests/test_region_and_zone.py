@@ -269,25 +269,30 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     gsutil_command = (
         f'{{ {smoke_tests_utils.ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL} '
         f'ls gs://{storage_name}/hello.txt; }}')
-    azure_blob_command = test_mount_and_storage.TestStorageWithCredentials.cli_ls_cmd(
-        storage_lib.StoreType.AZURE, storage_name, suffix='hello.txt')
+
+    enabled_cloud_storages = smoke_tests_utils.get_enabled_cloud_storages()
+    azure_enabled = clouds.cloud_in_iterable(clouds.Azure(),
+                                             enabled_cloud_storages)
+    if azure_enabled:
+        azure_blob_command = test_mount_and_storage.TestStorageWithCredentials.cli_ls_cmd(
+            storage_lib.StoreType.AZURE, storage_name, suffix='hello.txt')
+    else:
+        azure_blob_command = ''
     # TODO(zpoint): this is a temporary fix. We should make it more robust.
     # If azure is used, the azure blob storage checking assumes the bucket is
     # created in the centralus region when getting the storage account. We
     # should set the cluster to be launched in the same region.
     region_str = f'/centralus' if generic_cloud == 'azure' else ''
-    if smoke_tests_utils.is_non_docker_remote_api_server():
-        enabled_cloud_storages = smoke_tests_utils.get_enabled_cloud_storages()
+    if smoke_tests_utils.is_non_docker_remote_api_server(
+    ) or smoke_tests_utils.is_dependency_test():
         include_s3_mount = clouds.cloud_in_iterable(clouds.AWS(),
                                                     enabled_cloud_storages)
         include_gcs_mount = clouds.cloud_in_iterable(clouds.GCP(),
                                                      enabled_cloud_storages)
-        include_azure_mount = clouds.cloud_in_iterable(clouds.Azure(),
-                                                       enabled_cloud_storages)
         content = template.render(storage_name=storage_name,
                                   include_s3_mount=include_s3_mount,
                                   include_gcs_mount=include_gcs_mount,
-                                  include_azure_mount=include_azure_mount,
+                                  include_azure_mount=azure_enabled,
                                   empty_storage_name=empty_storage_name)
     elif azure_mount_unsupported_ubuntu_version in image_id:
         # The store for mount_private_mount is not specified in the template.
