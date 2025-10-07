@@ -90,12 +90,13 @@ def needs_upgrade(engine: sqlalchemy.engine.Engine, section: str,
     if current_rev is None:
         if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
             logger.debug(f'{section} database currently uninitialized, '
-                        f'targeting revision {target_rev_num}')
+                         f'targeting revision {target_rev_num}')
         return True
 
     # Compare revisions - assuming they are numeric strings like '001', '002'
     current_rev_num = int(current_rev)
-    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+    if (current_rev_num < target_rev_num and
+            os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None):
         logger.debug(
             f'{section} database currently at revision {current_rev_num}, '
             f'targeting revision {target_rev_num}')
