@@ -466,3 +466,31 @@ def test_big_file_upload_memory_usage(generic_cloud: str):
             assert len(actual_metrics) > 0, "No actual metrics collected"
 
             compare_rss_metrics(baseline_metrics, actual_metrics)
+
+
+@pytest.mark.kubernetes # We only run this test on Kubernetes to test its ssh.
+@pytest.mark.no_remote_server # We need to know the number of cpus in the cluster.
+def test_tail_jobs_logs_blocks_ssh(generic_cloud: str):
+    """Test that we don't block ssh when we do a large amount 
+    of tail logs requests.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    job_name = name + '-job'
+
+    test = smoke_tests_utils.Test(
+        'test_tail_jobs_logs_blocks_ssh',
+        [
+            # Launch a kubernetes cluster that we will ssh into.
+            f's=(sky launch -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y) && echo "$s" && echo "$s" | grep Cluster launched',
+            # Launch a problematic job wih infinte logs.
+            f's=$(sky jobs launch -n {job_name} \'for i in {{1..10000}}; do echo "Hello, world! $i"; sleep 1; done\' --cpus 2 -d --infra {generic_cloud} -y) && echo "$s" && echo "$s" | grep Job launched',
+            # # Launch enough tail log requests to block the workers.
+            # f'pids=(); PROCS=$(nproc); PROCS=$(( PROCS + 4 < 32 ? PROCS + 4 : 32 )); for i in $(seq 1 $PROCS); do sky jobs logs 1 & pids+=($!); done; sleep 5; for pid in "${{pids[@]}}"; do kill -0 "$pid" || exit 1; done',
+            # # Now attempt to ssh in.
+            # f'timeout 10s ssh -o ConnectTimeout=10 -o BatchMode=yes {name} "echo hi"',
+            f'pids=(); PROCS=$(nproc); PROCS=$(( PROCS + 4 < 32 ? PROCS + 4 : 32 )); for i in $(seq 1 $PROCS); do sky jobs logs 1 & pids+=($!); done; sleep 5; for pid in "${{pids[@]}}"; do kill -0 "$pid" || exit 1; done; timeout 10s ssh -o ConnectTimeout=10 -o BatchMode=yes {name} "echo hi"; rc=$?; for pid in "${{pids[@]}}"; do kill "$pid" 2>/dev/null || true; done; exit $rc'
+            
+        ],
+        f'sky jobs cancel -y -n {name} || true && sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
