@@ -415,6 +415,8 @@ def test_kubernetes_storage_mounts(storage_name_prefix: str):
         storage_lib.StoreType.GCS, storage_name, 'hello.txt')
     azure_ls_cmd = TestStorageWithCredentials.cli_ls_cmd(
         storage_lib.StoreType.AZURE, storage_name, 'hello.txt')
+    nebius_ls_cmd = TestStorageWithCredentials.cli_ls_cmd(
+        storage_lib.StoreType.NEBIUS, storage_name, 'hello.txt')
 
     # For Azure, we need to check if the output is empty list, as it returns []
     # instead of a non-zero exit code when the file doesn't exist
@@ -425,7 +427,8 @@ def test_kubernetes_storage_mounts(storage_name_prefix: str):
 
     ls_hello_command = (f'{s3_ls_cmd} || {{ '
                         f'{gcs_ls_cmd}; }} || {{ '
-                        f'{azure_check_cmd}; }}')
+                        f'{azure_check_cmd}; }} || {{ '
+                        f'{nebius_ls_cmd}; }}')
     cloud_cmd_cluster_setup_cmd_list = controller_utils._get_cloud_dependencies_installation_commands(
         controller_utils.Controllers.JOBS_CONTROLLER)
     cloud_cmd_cluster_setup_cmd = ' && '.join(cloud_cmd_cluster_setup_cmd_list)
