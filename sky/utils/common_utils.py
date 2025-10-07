@@ -973,14 +973,6 @@ def is_port_available(port: int, reuse_addr: bool = True) -> bool:
 
 def get_cpu_count() -> int:
     """Get the number of CPUs, with cgroup awareness."""
-    try:
-        with open(os.path.expanduser(constants.CONTROLLER_K8S_CPU_FILE),
-                  'r',
-                  encoding='utf-8') as f:
-            return int(float(f.read()))
-    except FileNotFoundError:
-        pass
-
     # This env-var is kept since it is still useful for limiting the resource
     # of SkyPilot in non-containerized environments.
     cpu_count = os.getenv('SKYPILOT_POD_CPU_CORE_LIMIT')
@@ -997,14 +989,6 @@ def get_cpu_count() -> int:
 
 def get_mem_size_gb() -> float:
     """Get the memory size in GB, with cgroup awareness."""
-    try:
-        with open(os.path.expanduser(constants.CONTROLLER_K8S_MEMORY_FILE),
-                  'r',
-                  encoding='utf-8') as f:
-            return float(f.read())
-    except FileNotFoundError:
-        pass
-
     mem_size = os.getenv('SKYPILOT_POD_MEMORY_GB_LIMIT')
     if mem_size is not None:
         try:
