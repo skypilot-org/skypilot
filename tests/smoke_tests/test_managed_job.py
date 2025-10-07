@@ -1495,7 +1495,6 @@ def test_managed_jobs_controller_uses_local_api_server(generic_cloud: str):
             'sky jobs logs $JOB_ID && echo "Jobs logs exit code: $?"',
         ],
         f'{override_api_server_cmd} sky jobs cancel -y -n {name}',
-        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=15 * 60,
     )
     smoke_tests_utils.run_one_test(test)
