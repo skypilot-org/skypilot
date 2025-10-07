@@ -169,30 +169,8 @@ def stop_instances(
     provider_config: Optional[Dict[str, Any]] = None,
     worker_only: bool = False,
 ) -> None:
-    del provider_config  # unused
-    all_instances = utils.filter_instances(cluster_name_on_cloud,
-                                           status_filters=None)
-    num_instances = len(all_instances)
-
-    # Request a stop on all instances
-    for instance_name, instance_meta in all_instances.items():
-        if worker_only and instance_name.endswith('-head'):
-            num_instances -= 1
-            continue
-        utils.stop_instance(instance_meta)
-
-    # Wait for instances to stop
-    for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
-        all_instances = utils.filter_instances(cluster_name_on_cloud, ['stopped'])
-        if len(all_instances) >= num_instances:
-            break
-        time.sleep(constants.POLL_INTERVAL)
-    else:
-        raise RuntimeError(f'Maximum number of polls: '
-                           f'{MAX_POLLS_FOR_UP_OR_STOP} reached. '
-                           f'Instance {all_instances} is still not in '
-                           'STOPPED status.')
-
+    raise NotImplementedError(
+        'stop_instances is not supported for CloudRift')
 
 def terminate_instances(
     cluster_name_on_cloud: str,
@@ -201,23 +179,16 @@ def terminate_instances(
 ) -> None:
     """See sky/provision/__init__.py"""
     del provider_config  # unused
-    instances = utils.filter_instances(cluster_name_on_cloud,
-                                       status_filters=None)
-    for instance_name, instance_meta in instances.items():
-        logger.debug(f'Terminating instance {instance_name}')
-        if worker_only and instance_name.endswith('-head'):
-            continue
-        utils.down_instance(instance_meta)
 
-    for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
-        instances = utils.filter_instances(cluster_name_on_cloud,
-                                           status_filters=None)
-        if len(instances) == 0 or len(instances) <= 1 and worker_only:
-            break
-        time.sleep(constants.POLL_INTERVAL)
-    else:
-        logger.warning(f'terminate_instances: Failed to terminate all instances '
-                       f'for {cluster_name_on_cloud}. Remaining: {instances}')
+    cloudrift_client = utils.get_cloudrift_client()
+    exist_instances = _filter_instances(cluster_name_on_cloud,
+                                             status_filters=['Active', "Initializing"])
+    for instance_id in exist_instances:
+        logger.info(f'Terminating instance {instance_id}')
+        try:
+            cloudrift_client.terminate_instance(instance_id)
+        except Exception as e:
+            logger.warning(f'Failed to terminate instance {instance_id}: {e}')
 
 
 def get_cluster_info(
@@ -238,7 +209,7 @@ def get_cluster_info(
     del provider_config, region  # Unused
     head_ip = None
     worker_ips = []
-    instances = utils.filter_instances(cluster_name_on_cloud, ['running'])
+    instances = _filter_instances(cluster_name_on_cloud, ['Active', "Initializing"])
     for instance_name, instance_meta in instances.items():
         if instance_name.endswith('-head'):
             head_ip = instance_meta.get('public_ip')
@@ -257,7 +228,7 @@ def query_instances(
 ) -> List[Dict[str, Any]]:
     """See sky/provision/__init__.py"""
     del cluster_name, provider_config  # unused
-    instances = utils.filter_instances(cluster_name_on_cloud, status_filters=None)
+    instances = _filter_instances(cluster_name_on_cloud, status_filters=None)
     ret = []
     for instance_name, instance_meta in instances.items():
         status = instance_meta.get('status')

@@ -112,7 +112,7 @@ class CloudRift(clouds.Cloud):
                                             region=region,
                                             zone=None)
         for r in regions:
-            assert r.zones is None, r
+            assert r
             yield r.zones
 
     def instance_type_to_hourly_cost(

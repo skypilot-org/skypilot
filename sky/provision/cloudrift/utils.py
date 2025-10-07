@@ -3,7 +3,7 @@
 import os
 import uuid
 from typing import Any, Dict, List, Optional, Mapping, Union
-
+from sky import sky_logging
 from sky.provision import common
 from sky.utils import common_utils
 import os
@@ -17,7 +17,8 @@ from requests import Response
 # from dstack._internal.core.errors import BackendError, BackendInvalidCredentialsError
 # from dstack._internal.utils.logging import get_logger
 
-# logger = get_logger(__name__)
+
+logger = sky_logging.init_logger(__name__)
 
 # CloudRift credentials environment variable
 _CLOUDRIFT_CREDENTIALS_PATH = 'CLOUDRIFT_CREDENTIALS_PATH'
@@ -281,5 +282,5 @@ _cloudrift_client = None
 def get_cloudrift_client():
     global _cloudrift_client
     if _cloudrift_client is None:
-        _cloudrift_client = utils.RiftClient()
+        _cloudrift_client = RiftClient()
     return _cloudrift_client

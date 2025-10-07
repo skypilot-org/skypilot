@@ -584,9 +584,9 @@ def setup_cloudrift_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     - Adds the public SSH key to the user's RunPod account.
     """
     _, public_key_path = get_or_generate_keys()
-    with open(public_key_path, 'r', encoding='UTF-8') as pub_key_file:
-        public_key = pub_key_file.read().strip()
-        cloudrift_utils.get_cloudrift_client().add_ssh_key(public_key)
+    # with open(public_key_path, 'r', encoding='UTF-8') as pub_key_file:
+    #     public_key = pub_key_file.read().strip()
+    #     cloudrift_utils.get_cloudrift_client().add_ssh_key(public_key)
 
     # Default username for Prime Intellect images
     config['auth']['ssh_user'] = 'riftuser'
