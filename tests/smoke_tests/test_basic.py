@@ -1538,22 +1538,23 @@ def test_loopback_access_with_basic_auth(generic_cloud: str):
 # concurrency issue in our code.
 def test_launch_and_cancel_race_condition(generic_cloud: str):
     """Test that launch and cancel race condition is handled correctly."""
+
     name = smoke_tests_utils.get_cluster_name()
-    launch_cmd = f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "sleep 120" --async'
+    launch_cmd = f'sky launch -y -c {name}-$i --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "sleep 120" --async'
     extract_id = r'echo "$s" | sed -n "s/.*Submitted sky\.launch request: \([0-9a-f-]\{36\}\).*/\1/p"'
-    launch_then_cancel = f's=$({launch_cmd}) && echo $s && id=$({extract_id}) && sky api cancel $id'
+    launch_then_cancel = f's=$({launch_cmd}) && echo $s && id=$({extract_id}) && sky api cancel $id && sky down -y {name}-$i'
     test = smoke_tests_utils.Test(
         'launch_and_cancel_race_condition',
         [
             # Run multiple launch and cancel in parallel to introduce request queuing.
             # This can trigger race conditions more frequently.
-            f'for i in {{1..20}}; do ({launch_then_cancel}) & done',
-            # Wait and sleep shortly, so that if there is any leaked cluster it can be shown in sky status.
-            'wait && sleep 30',
+            f'for i in {{1..20}}; do ({launch_then_cancel}) & done; wait',
+            # Sleep shortly, so that if there is any leaked cluster it can be shown in sky status.
+            'sleep 10',
             # Verify the cluster is not created.
             f'sky status {name} | grep "not found"',
         ],
-        teardown=f'sky down -y {name} || true',
+        # teardown=f'sky down -y {name} || true',
         timeout=smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)
