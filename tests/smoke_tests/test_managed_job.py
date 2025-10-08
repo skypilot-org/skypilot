@@ -1486,6 +1486,7 @@ def test_managed_jobs_controller_uses_local_api_server(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'managed_jobs_controller_local_api_server',
         [
+            'unset SKYPILOT_API_SERVER_ENDPOINT',
             f'sky api login -e {remote_server_url}',
             # Override the API server endpoint from ~/.sky/config.yaml and use local API server instead
             f'{override_api_server_cmd} sky jobs launch -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi" -y -d',
