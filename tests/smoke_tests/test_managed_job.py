@@ -1529,7 +1529,7 @@ def test_managed_jobs_failed_precheck_storage_spec_error(
                     generic_cloud, name),
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name, cmd=create_bucket_cmd),
-                f'sky jobs launch -n {name} {infra_arg} {smoke_tests_utils.LOW_RESOURCE_ARG} {file_path} -y',
+                f'sky jobs launch -n {name} {infra_arg} {smoke_tests_utils.LOW_RESOURCE_ARG} {file_path} -y -d',
                 smoke_tests_utils.
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=name,
