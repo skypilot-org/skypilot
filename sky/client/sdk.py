@@ -2298,11 +2298,11 @@ def api_stop() -> None:
     # Acquire the api server creation lock to prevent multiple processes from
     # stopping and starting the API server at the same time.
     with filelock.FileLock(
-        os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
+            os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
         try:
             with open(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH),
-                    'r',
-                    encoding='utf-8') as f:
+                      'r',
+                      encoding='utf-8') as f:
                 pids = f.read().split('\n')[:-1]
                 for pid in pids:
                     if subprocess_utils.is_process_alive(int(pid.strip())):
