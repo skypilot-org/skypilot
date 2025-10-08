@@ -3277,6 +3277,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._requested_features = set()
         self._dump_final_script = False
         self._is_managed = False
+        # Optional planner (via register_info): used under the per-cluster lock
+        # to produce a fresh concrete plan when neither a reusable snapshot nor
+        # a caller plan is available.
+        self._planner = None
 
         # Command for running the setup script. It is only set when the
         # setup needs to be run outside the self._setup() and as part of
@@ -3294,6 +3298,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                               self._requested_features)
         self._dump_final_script = kwargs.pop('dump_final_script', False)
         self._is_managed = kwargs.pop('is_managed', False)
+        # Optional planner callback for a fresh plan under lock when no
+        # reusable snapshot/caller plan exists. Keeps optimizer in upper layer.
+        self._planner = kwargs.pop('planner', self._planner)
         assert not kwargs, f'Unexpected kwargs: {kwargs}'
 
     def check_resources_fit_cluster(
@@ -3627,7 +3634,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     global_user_state.ClusterEventType.STATUS_CHANGE)
 
                 cluster_info = provisioner.post_provision_runtime_setup(
-                    repr(handle.launched_resources.cloud),
+                    handle.launched_resources,
                     resources_utils.ClusterName(handle.cluster_name,
                                                 handle.cluster_name_on_cloud),
                     handle.cluster_yaml,
@@ -4168,7 +4175,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         handle: CloudVmRayResourceHandle,
         codegen: str,
         job_id: int,
-        detach_run: bool = False,
         managed_job_dag: Optional['dag.Dag'] = None,
         remote_log_dir: Optional[str] = None,
     ) -> None:
@@ -4336,14 +4342,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.info(
                 ux_utils.starting_message(f'Job submitted, ID: {job_id}'))
         rich_utils.stop_safe_status()
-        if not detach_run:
-            if (handle.cluster_name == controller_utils.Controllers.
-                    JOBS_CONTROLLER.value.cluster_name):
-                self.tail_managed_job_logs(handle, job_id)
-            else:
-                # Sky logs. Not using subprocess.run since it will make the
-                # ssh keep connected after ctrl-c.
-                self.tail_logs(handle, job_id)
 
     def _add_job(self, handle: CloudVmRayResourceHandle,
                  job_name: Optional[str], resources_str: str,
@@ -4412,7 +4410,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self,
         handle: CloudVmRayResourceHandle,
         task: task_lib.Task,
-        detach_run: bool,
         dryrun: bool = False,
     ) -> Optional[int]:
         """Executes the task on the cluster.
@@ -4464,12 +4461,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
         if num_actual_nodes > 1:
-            self._execute_task_n_nodes(handle, task_copy, job_id, detach_run,
-                                       log_dir)
+            self._execute_task_n_nodes(handle, task_copy, job_id, log_dir)
         else:
             # Case: task_lib.Task(run, num_nodes=1)
-            self._execute_task_one_node(handle, task_copy, job_id, detach_run,
-                                        log_dir)
+            self._execute_task_one_node(handle, task_copy, job_id, log_dir)
 
         return job_id
 
@@ -5490,7 +5485,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster_yaml_path = handle.cluster_yaml
         handle.cluster_yaml = None
         global_user_state.update_cluster_handle(handle.cluster_name, handle)
-        global_user_state.remove_cluster_yaml(handle.cluster_name)
+        # Removing the cluster YAML can cause some unexpected stability issues.
+        # See #5011.
+        # global_user_state.remove_cluster_yaml(handle.cluster_name)
         common_utils.remove_file_if_exists(cluster_yaml_path)
 
     def set_autostop(self,
@@ -5843,33 +5840,41 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         common_utils.check_cluster_name_is_valid(cluster_name)
 
         if to_provision is None:
-            # The cluster is recently terminated either by autostop or manually
-            # terminated on the cloud. We should use the previously terminated
-            # resources to provision the cluster.
-            #
-            # FIXME(zongheng): this assert can be hit by using two terminals.
-            # First, create a 'dbg' cluster. Then:
-            #   Terminal 1: sky down dbg -y
-            #   Terminal 2: sky launch -c dbg -- echo
-            # Run it in order. Terminal 2 will show this error after terminal 1
-            # succeeds in downing the cluster and releasing the lock.
-            assert isinstance(
-                handle_before_refresh, CloudVmRayResourceHandle), (
-                    f'Trying to launch cluster {cluster_name!r} recently '
-                    'terminated on the cloud, but the handle is not a '
-                    f'CloudVmRayResourceHandle ({handle_before_refresh}).')
-            status_before_refresh_str = None
-            if status_before_refresh is not None:
-                status_before_refresh_str = status_before_refresh.value
-
-            logger.info(
-                f'The cluster {cluster_name!r} (status: '
-                f'{status_before_refresh_str}) was not found on the cloud: it '
-                'may be autodowned, manually terminated, or its launch never '
-                'succeeded. Provisioning a new cluster by using the same '
-                'resources as its original launch.')
-            to_provision = handle_before_refresh.launched_resources
-            self.check_resources_fit_cluster(handle_before_refresh, task)
+            # Recently terminated after refresh. OPTIMIZE usually ran outside
+            # the lock, so that decision may be stale by now. Under the lock,
+            # ensure we always have a concrete plan via the following order:
+            #   1) Reuse last placement snapshot (if available);
+            #   2) Else, call injected planner for a fresh plan.
+            # If we still have a pre-refresh handle snapshot with a concrete
+            # placement, prefer reusing it.
+            if (isinstance(handle_before_refresh, CloudVmRayResourceHandle) and
+                    handle_before_refresh.launched_resources is not None):
+                to_provision = handle_before_refresh.launched_resources
+                # Ensure the requested task fits the previous placement.
+                self.check_resources_fit_cluster(handle_before_refresh, task)
+                # Mirror the original message for reuse path.
+                status_before_refresh_str = None
+                if status_before_refresh is not None:
+                    status_before_refresh_str = status_before_refresh.value
+                logger.info(
+                    f'The cluster {cluster_name!r} (status: '
+                    f'{status_before_refresh_str}) was not found on the cloud: '
+                    'it may be autodowned, manually terminated, or its launch '
+                    'never succeeded. Provisioning a new cluster by using the '
+                    'same resources as its original launch.')
+            elif self._planner is not None:
+                to_provision = self._planner(task)
+                logger.info(
+                    'Previous placement snapshot missing; computing a fresh '
+                    'plan for provisioning.')
+            else:
+                # Without a snapshot or planner, we cannot proceed safely.
+                # Surface a user-friendly error without a long traceback.
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        'No concrete launch plan available after recent cloud '
+                        f'termination of cluster {cluster_name!r}. Ensure the '
+                        'OPTIMIZE stage runs or provide concrete resources.')
 
         return RetryingVmProvisioner.ToProvisionConfig(
             cluster_name,
@@ -6232,7 +6237,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
                                task: task_lib.Task, job_id: int,
-                               detach_run: bool, remote_log_dir: str) -> None:
+                               remote_log_dir: str) -> None:
         # Launch the command as a Ray task.
         log_dir = os.path.join(remote_log_dir, 'tasks')
 
@@ -6271,13 +6276,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._exec_code_on_head(handle,
                                 codegen.build(),
                                 job_id,
-                                detach_run=detach_run,
                                 managed_job_dag=task.managed_job_dag,
                                 remote_log_dir=remote_log_dir)
 
     def _execute_task_n_nodes(self, handle: CloudVmRayResourceHandle,
                               task: task_lib.Task, job_id: int,
-                              detach_run: bool, remote_log_dir: str) -> None:
+                              remote_log_dir: str) -> None:
         # Strategy:
         #   ray.init(...)
         #   for node:
@@ -6327,6 +6331,5 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._exec_code_on_head(handle,
                                 codegen.build(),
                                 job_id,
-                                detach_run=detach_run,
                                 managed_job_dag=task.managed_job_dag,
                                 remote_log_dir=remote_log_dir)

@@ -887,6 +887,7 @@ def unreachable_context():
 
 
 @pytest.mark.kubernetes
+@pytest.mark.no_dependency
 def test_kubernetes_context_failover(unreachable_context):
     """Test if the kubernetes context failover works.
 
@@ -989,6 +990,56 @@ def test_kubernetes_context_failover(unreachable_context):
             },
         )
         smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.no_dependency
+def test_kubernetes_get_nodes_and_pods():
+    """Test the correctness of get_kubernetes_nodes and get_all_pods_in_kubernetes_cluster,
+    as we parse the JSON ourselves and not using the Kubernetes Python client deserializer.
+    """
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip('Skipping test because the Kubernetes configs and '
+                    'credentials are located on the remote API server '
+                    'and not the machine where the test is running')
+    from sky.adaptors import kubernetes
+    from sky.provision.kubernetes import utils as kubernetes_utils
+
+    nodes = kubernetes_utils.get_kubernetes_nodes(context=None)
+    preloaded_nodes = kubernetes.core_api().list_node().items
+
+    for node, preloaded_node in zip(nodes, preloaded_nodes):
+        assert node.metadata.name == preloaded_node.metadata.name
+        assert node.metadata.labels == preloaded_node.metadata.labels
+
+        assert node.status.allocatable == preloaded_node.status.allocatable
+        assert node.status.capacity == preloaded_node.status.capacity
+        node_addresses = [{
+            'type': addr.type,
+            'address': addr.address
+        } for addr in node.status.addresses]
+        preloaded_addresses = [{
+            'type': addr.type,
+            'address': addr.address
+        } for addr in preloaded_node.status.addresses]
+        assert node_addresses == preloaded_addresses
+
+    pods = kubernetes_utils.get_all_pods_in_kubernetes_cluster(context=None)
+    preloaded_pods = kubernetes.core_api().list_pod_for_all_namespaces().items
+
+    for pod, preloaded_pod in zip(pods, preloaded_pods):
+        assert pod.metadata.name == preloaded_pod.metadata.name
+        assert pod.metadata.labels == preloaded_pod.metadata.labels
+        assert pod.metadata.namespace == preloaded_pod.metadata.namespace
+
+        assert pod.status.phase == preloaded_pod.status.phase
+
+        assert pod.spec.node_name == preloaded_pod.spec.node_name
+        assert len(pod.spec.containers) == len(preloaded_pod.spec.containers)
+
+        for container, preloaded_container in zip(
+                pod.spec.containers, preloaded_pod.spec.containers):
+            assert container.resources.requests == preloaded_container.resources.requests
 
 
 @pytest.mark.no_seeweb  # Seeweb fails to provision resources
@@ -1445,3 +1496,68 @@ def test_launch_with_failing_setup(generic_cloud: str):
             timeout=smoke_tests_utils.get_timeout(generic_cloud),
         )
         smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency
+def test_loopback_access_with_basic_auth(generic_cloud: str):
+    """Test that loopback access works."""
+    server_config_content = textwrap.dedent(f"""\
+        jobs:
+            controller:
+                consolidation_mode: true
+    """)
+    with tempfile.NamedTemporaryFile(prefix='server_config_',
+                                     delete=False,
+                                     mode='w') as f:
+        f.write(server_config_content)
+        server_config_path = f.name
+
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'loopback_access',
+        [
+            # Without consolidation mode, loopback access should not be allowed.
+            f'export {constants.ENV_VAR_ENABLE_BASIC_AUTH}=true && {smoke_tests_utils.SKY_API_RESTART}',
+            f's=$(SKYPILOT_DEBUG=0 sky status 2>&1 || true) && echo "$s" | grep "401 Client Error: Unauthorized for url: http://127.0.0.1:46580"',
+            # With consolidation mode, loopback access should be allowed.
+            f'export {constants.ENV_VAR_ENABLE_BASIC_AUTH}=true && export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={server_config_path} && {smoke_tests_utils.SKY_API_RESTART}',
+            f's=$(SKYPILOT_DEBUG=0 sky status) && echo "$s" | grep "Clusters"',
+            f'sky jobs launch -y -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} echo hi',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}',
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=120),
+            f'sky jobs logs --no-follow | grep "hi"',
+        ],
+        teardown=f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# TODO(aylei): this test should not be retried in buildkite, failure indicates a
+# concurrency issue in our code.
+def test_launch_and_cancel_race_condition(generic_cloud: str):
+    """Test that launch and cancel race condition is handled correctly."""
+
+    name = smoke_tests_utils.get_cluster_name()
+    launch_cmd = f'sky launch -y -c {name}-$i --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "sleep 120" --async'
+    extract_id = r'echo "$s" | sed -n "s/.*Submitted sky\.launch request: \([0-9a-f-]\{36\}\).*/\1/p"'
+    launch_then_cancel = f's=$({launch_cmd}) && echo $s && id=$({extract_id}) && sky api cancel $id && sky down -y {name}-$i'
+    test = smoke_tests_utils.Test(
+        'launch_and_cancel_race_condition',
+        [
+            # Run multiple launch and cancel in parallel to introduce request queuing.
+            # This can trigger race conditions more frequently.
+            f'for i in {{1..20}}; do ({launch_then_cancel}) & done; wait',
+            # Sleep shortly, so that if there is any leaked cluster it can be shown in sky status.
+            'sleep 10',
+            # Verify the cluster is not created.
+            f'sky status {name} | grep "not found"',
+        ],
+        # teardown=f'sky down -y {name} || true',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)

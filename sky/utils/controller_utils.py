@@ -506,6 +506,9 @@ def shared_controller_vars_to_fill(
         # before popping allowed_contexts. If it is not on Kubernetes,
         # we may be able to use allowed_contexts.
         local_user_config.pop('allowed_contexts', None)
+        # Remove api_server config so that the controller does not try to use
+        # a remote API server.
+        local_user_config.pop('api_server', None)
         with tempfile.NamedTemporaryFile(
                 delete=False,
                 suffix=_LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX) as temp_file:
@@ -728,6 +731,17 @@ def get_controller_resources(
     if not result:
         return {controller_resources_to_use}
     return result
+
+
+def get_controller_mem_size_gb() -> float:
+    try:
+        with open(os.path.expanduser(constants.CONTROLLER_K8S_MEMORY_FILE),
+                  'r',
+                  encoding='utf-8') as f:
+            return float(f.read())
+    except FileNotFoundError:
+        pass
+    return common_utils.get_mem_size_gb()
 
 
 def _setup_proxy_command_on_controller(
@@ -1219,7 +1233,16 @@ LAUNCHES_PER_WORKER = 8
 JOB_WORKER_MEMORY_MB = 400
 # this can probably be increased to around 300-400 but keeping it lower to just
 # to be safe
-JOBS_PER_WORKER = 200
+MAX_JOBS_PER_WORKER = 200
+# Maximum number of controllers that can be running. Hard to handle more than
+# 512 launches at once.
+MAX_CONTROLLERS = 512 // LAUNCHES_PER_WORKER
+# Limit the number of jobs that can be running at once on the entire jobs
+# controller cluster. It's hard to handle cancellation of more than 2000 jobs at
+# once.
+# TODO(cooperc): Once we eliminate static bottlenecks (e.g. sqlite), remove this
+# hardcoded max limit.
+MAX_TOTAL_RUNNING_JOBS = 2000
 
 
 def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
@@ -1284,8 +1307,9 @@ def _get_parallelism(pool: bool, raw_resource_per_unit: float) -> int:
 
 
 def get_number_of_jobs_controllers() -> int:
-    return _get_parallelism(pool=True,
-                            raw_resource_per_unit=JOB_WORKER_MEMORY_MB)
+    return min(
+        MAX_CONTROLLERS,
+        _get_parallelism(pool=True, raw_resource_per_unit=JOB_WORKER_MEMORY_MB))
 
 
 @annotations.lru_cache(scope='global', maxsize=1)

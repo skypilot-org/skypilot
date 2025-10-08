@@ -38,6 +38,7 @@ from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky.data import storage_utils
+from sky.jobs import utils as managed_job_utils
 from sky.jobs.server import server as jobs_rest
 from sky.metrics import utils as metrics_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -52,6 +53,7 @@ from sky.server import state
 from sky.server import stream_utils
 from sky.server import versions
 from sky.server.auth import authn
+from sky.server.auth import loopback
 from sky.server.auth import oauth2_proxy
 from sky.server.requests import executor
 from sky.server.requests import payloads
@@ -192,6 +194,10 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle HTTP Basic Auth."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
+        if managed_job_utils.is_consolidation_mode(
+        ) and loopback.is_loopback_request(request):
+            return await call_next(request)
+
         if request.url.path.startswith('/api/health'):
             # Try to set the auth user from basic auth
             _try_set_basic_auth_user(request)
@@ -1938,6 +1944,7 @@ if __name__ == '__main__':
 
     from sky.server import uvicorn as skyuvicorn
 
+    logger.info('Initializing SkyPilot API server')
     skyuvicorn.add_timestamp_prefix_for_server_logs()
 
     parser = argparse.ArgumentParser()
@@ -1949,7 +1956,17 @@ if __name__ == '__main__':
     parser.add_argument('--metrics-port', default=9090, type=int)
     cmd_args = parser.parse_args()
     if cmd_args.port == cmd_args.metrics_port:
+        logger.error('port and metrics-port cannot be the same, exiting.')
         raise ValueError('port and metrics-port cannot be the same')
+
+    # Fail fast if the port is not available to avoid corrupt the state
+    # of potential running server instance.
+    # We might reach here because the running server is currently not
+    # responding, thus the healthz check fails and `sky api start` think
+    # we should start a new server instance.
+    if not common_utils.is_port_available(cmd_args.port):
+        logger.error(f'Port {cmd_args.port} is not available, exiting.')
+        raise RuntimeError(f'Port {cmd_args.port} is not available')
 
     # Show the privacy policy if it is not already shown. We place it here so
     # that it is shown only when the API server is started.
@@ -1957,12 +1974,17 @@ if __name__ == '__main__':
 
     # Initialize global user state db
     db_utils.set_max_connections(1)
+    logger.info('Initializing database engine')
     global_user_state.initialize_and_get_db()
+    logger.info('Database engine initialized')
     # Initialize request db
     requests_lib.reset_db_and_logs()
     # Restore the server user hash
+    logger.info('Initializing server user hash')
     _init_or_restore_server_user_hash()
+
     max_db_connections = global_user_state.get_max_db_connections()
+    logger.info(f'Max db connections: {max_db_connections}')
 
     # Reserve memory for jobs and serve/pool controller in consolidation mode.
     reserved_memory_mb = None

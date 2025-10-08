@@ -5,7 +5,7 @@ import pathlib
 import shlex
 import stat
 import subprocess
-from typing import Any, Dict, List, Optional, Set, TextIO, Union
+from typing import List, Optional, Set, TextIO, Union
 import warnings
 import zipfile
 
@@ -15,55 +15,11 @@ from sky import exceptions
 from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import common_utils
-from sky.utils import log_utils
 
 logger = sky_logging.init_logger(__name__)
 
 _USE_SKYIGNORE_HINT = (
     'To avoid using .gitignore, you can create a .skyignore file instead.')
-
-
-def format_storage_table(storages: List[Dict[str, Any]],
-                         show_all: bool = False) -> str:
-    """Format the storage table for display.
-
-    Args:
-        storage_table (dict): The storage table.
-
-    Returns:
-        str: The formatted storage table.
-    """
-    storage_table = log_utils.create_table([
-        'NAME',
-        'UPDATED',
-        'STORE',
-        'COMMAND',
-        'STATUS',
-    ])
-
-    for row in storages:
-        launched_at = row['launched_at']
-        if show_all:
-            command = row['last_use']
-        else:
-            command = common_utils.truncate_long_string(
-                row['last_use'], constants.LAST_USE_TRUNC_LENGTH)
-        storage_table.add_row([
-            # NAME
-            row['name'],
-            # LAUNCHED
-            log_utils.readable_time_duration(launched_at),
-            # CLOUDS
-            ', '.join([s.value for s in row['store']]),
-            # COMMAND,
-            command,
-            # STATUS
-            row['status'].value,
-        ])
-    if storages:
-        return str(storage_table)
-    else:
-        return 'No existing storage.'
 
 
 def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
@@ -295,6 +251,15 @@ def zip_files_and_folders(items: List[str],
                     archive_name = _get_archive_name(item, item)
                     zipf.write(item, archive_name)
                 elif os.path.isdir(item):
+                    # Include root dir
+                    archive_name = _get_archive_name(item, item)
+                    # If it's a symlink, store it as a symlink
+                    if os.path.islink(item):
+                        _store_symlink(zipf, item, archive_name, is_dir=True)
+                    else:
+                        zipf.write(item, archive_name)
+
+                    # Include dir contents recursively
                     excluded_files = set([
                         os.path.join(item, f.rstrip('/'))
                         for f in get_excluded_files(item)

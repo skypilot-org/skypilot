@@ -220,7 +220,8 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
                                 common_utils.get_user_hash(), priority)
     if state.get_ha_recovery_script(job_id) is None:
         # the run command is just the command that called scheduler
-        run = (f'{sys.executable} -m sky.jobs.scheduler {dag_yaml_path} '
+        run = (f'source {env_file_path} && '
+               f'{sys.executable} -m sky.jobs.scheduler {dag_yaml_path} '
                f'--job-id {job_id} --env-file {env_file_path} '
                f'--user-yaml-path {original_user_yaml_path} '
                f'--priority {priority}')

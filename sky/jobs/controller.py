@@ -1144,7 +1144,15 @@ class Controller:
                 await asyncio.sleep(30)
                 continue
 
-            if len(running_tasks) >= controller_utils.JOBS_PER_WORKER:
+            # Normally, 200 jobs can run on each controller. But if we have a
+            # ton of controllers, we need to limit the number of jobs that can
+            # run on each controller, to achieve a total of 2000 jobs across all
+            # controllers.
+            max_jobs = min(controller_utils.MAX_JOBS_PER_WORKER,
+                           (controller_utils.MAX_TOTAL_RUNNING_JOBS //
+                            controller_utils.get_number_of_jobs_controllers()))
+
+            if len(running_tasks) >= max_jobs:
                 await asyncio.sleep(60)
                 continue
 

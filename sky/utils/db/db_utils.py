@@ -410,6 +410,8 @@ def get_engine(
                 conn_string, poolclass=sqlalchemy.NullPool)
         with _db_creation_lock:
             if conn_string not in _postgres_engine_cache:
+                logger.debug('Creating a new postgres engine with '
+                             f'maximum {_max_connections} connections')
                 if _max_connections == 0:
                     _postgres_engine_cache[conn_string] = (
                         sqlalchemy.create_engine(

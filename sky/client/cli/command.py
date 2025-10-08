@@ -60,7 +60,6 @@ from sky.adaptors import common as adaptors_common
 from sky.client import sdk
 from sky.client.cli import flags
 from sky.client.cli import table_utils
-from sky.data import storage_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
@@ -91,7 +90,6 @@ from sky.utils import ux_utils
 from sky.utils import volume as volume_utils
 from sky.utils import yaml_utils
 from sky.utils.cli_utils import status_utils
-from sky.volumes import utils as volumes_utils
 from sky.volumes.client import sdk as volumes_sdk
 
 if typing.TYPE_CHECKING:
@@ -1323,7 +1321,7 @@ def exec(
 
 
 def _handle_jobs_queue_request(
-        request_id: server_common.RequestId[List[Dict[str, Any]]],
+        request_id: server_common.RequestId[List[responses.ManagedJobRecord]],
         show_all: bool,
         show_user: bool,
         max_num_jobs_to_show: Optional[int],
@@ -1396,10 +1394,10 @@ def _handle_jobs_queue_request(
         msg += ('Failed to query managed jobs: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
     else:
-        msg = managed_jobs.format_job_table(managed_jobs_,
-                                            show_all=show_all,
-                                            show_user=show_user,
-                                            max_jobs=max_num_jobs_to_show)
+        msg = table_utils.format_job_table(managed_jobs_,
+                                           show_all=show_all,
+                                           show_user=show_user,
+                                           max_jobs=max_num_jobs_to_show)
     return num_in_progress_jobs, msg
 
 
@@ -1514,9 +1512,9 @@ def _status_kubernetes(show_all: bool):
         click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'Managed jobs'
                    f'{colorama.Style.RESET_ALL}')
-        msg = managed_jobs.format_job_table(all_jobs,
-                                            show_all=show_all,
-                                            show_user=False)
+        msg = table_utils.format_job_table(all_jobs,
+                                           show_all=show_all,
+                                           show_user=False)
         click.echo(msg)
     if any(['sky-serve-controller' in c.cluster_name for c in all_clusters]):
         # TODO: Parse serve controllers and show services separately.
@@ -1805,17 +1803,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
             return None
 
     def submit_workspace() -> Optional[server_common.RequestId[Dict[str, Any]]]:
-        try:
-            return sdk.workspaces()
-        except RuntimeError:
-            # Backward compatibility for API server before #5660.
-            # TODO(zhwu): remove this after 0.10.0.
-            logger.warning(f'{colorama.Style.DIM}SkyPilot API server is '
-                           'in an old version, and may miss feature: '
-                           'workspaces. Update with: sky api stop; '
-                           'sky api start'
-                           f'{colorama.Style.RESET_ALL}')
-            return None
+        return sdk.workspaces()
 
     active_workspace = skypilot_config.get_active_workspace()
 
@@ -2964,9 +2952,9 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
            'jobs (output of `sky jobs queue`) will be lost.')
     click.echo(msg)
     if managed_jobs_:
-        job_table = managed_jobs.format_job_table(managed_jobs_,
-                                                  show_all=False,
-                                                  show_user=True)
+        job_table = table_utils.format_job_table(managed_jobs_,
+                                                 show_all=False,
+                                                 show_user=True)
         msg = controller.value.decline_down_for_dirty_controller_hint
         # Add prefix to each line to align with the bullet point.
         msg += '\n'.join(
@@ -4028,8 +4016,7 @@ def storage_ls(verbose: bool):
     """List storage objects managed by SkyPilot."""
     request_id = sdk.storage_ls()
     storages = sdk.stream_and_get(request_id)
-    storage_table = storage_utils.format_storage_table(storages,
-                                                       show_all=verbose)
+    storage_table = table_utils.format_storage_table(storages, show_all=verbose)
     click.echo(storage_table)
 
 
@@ -4242,8 +4229,8 @@ def volumes_ls(verbose: bool):
     """List volumes managed by SkyPilot."""
     request_id = volumes_sdk.ls()
     all_volumes = sdk.stream_and_get(request_id)
-    volume_table = volumes_utils.format_volume_table(all_volumes,
-                                                     show_all=verbose)
+    volume_table = table_utils.format_volume_table(all_volumes,
+                                                   show_all=verbose)
     click.echo(volume_table)
 
 
