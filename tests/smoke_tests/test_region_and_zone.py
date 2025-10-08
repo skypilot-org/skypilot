@@ -277,6 +277,15 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     # created in the centralus region when getting the storage account. We
     # should set the cluster to be launched in the same region.
     region_str = f'/centralus' if generic_cloud == 'azure' else ''
+
+    # Determine store type based on generic_cloud
+    if generic_cloud == 'aws':
+        store_type = 's3'
+    elif generic_cloud == 'gcp':
+        store_type = 'gcs'
+    else:
+        store_type = 'azure'
+
     if smoke_tests_utils.is_non_docker_remote_api_server():
         enabled_cloud_storages = smoke_tests_utils.get_enabled_cloud_storages()
         include_s3_mount = clouds.cloud_in_iterable(clouds.AWS(),
@@ -289,7 +298,8 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
                                   include_s3_mount=include_s3_mount,
                                   include_gcs_mount=include_gcs_mount,
                                   include_azure_mount=include_azure_mount,
-                                  empty_storage_name=empty_storage_name)
+                                  empty_storage_name=empty_storage_name,
+                                  store_type=store_type)
     elif azure_mount_unsupported_ubuntu_version in image_id:
         # The store for mount_private_mount is not specified in the template.
         # If we're running on Azure, the private mount will be created on
@@ -298,15 +308,16 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
         # not being able to access the mount point. That will not be supported on
         # the ubuntu 18.04 image and thus fail. For other clouds, the private mount
         # on other storage types (GCS/S3) should succeed.
-        include_private_mount = False if (
-            generic_cloud == 'azure' or generic_cloud == 'kubernetes') else True
+        if store_type == 'azure':
+            store_type = 's3'
         content = template.render(storage_name=storage_name,
                                   include_azure_mount=False,
-                                  include_private_mount=include_private_mount,
-                                  empty_storage_name=empty_storage_name)
+                                  empty_storage_name=empty_storage_name,
+                                  store_type=store_type)
     else:
         content = template.render(storage_name=storage_name,
-                                  empty_storage_name=empty_storage_name)
+                                  empty_storage_name=empty_storage_name,
+                                  store_type=store_type)
     cloud_dependencies_setup_cmd = ' && '.join(
         controller_utils._get_cloud_dependencies_installation_commands(
             controller_utils.Controllers.JOBS_CONTROLLER))
