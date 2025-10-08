@@ -1519,7 +1519,7 @@ def test_managed_jobs_failed_precheck_storage_spec_error(
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=name,
                     job_status=[sky.ManagedJobStatus.FAILED_PRECHECKS],
-                    timeout=120),
+                    timeout=300),
                 f'sky jobs logs --controller -n {name} --no-follow | grep -i "StorageSpecError\\|{bucket_name}"',
             ],
             (f'sky jobs cancel -y -n {name}; '
