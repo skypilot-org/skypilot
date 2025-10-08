@@ -1783,11 +1783,16 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
 
 
 @app.websocket('/kubernetes-pod-ssh-proxy')
-async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
-                                   cluster_name: str) -> None:
+async def kubernetes_pod_ssh_proxy(
+        websocket: fastapi.WebSocket,
+        cluster_name: str,
+        client_version: Optional[int] = None) -> None:
     """Proxies SSH to the Kubernetes pod with websocket."""
     await websocket.accept()
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
+
+    timestamps_supported = client_version is not None and client_version > 20
+    logger.info(f'Websocket timestamps supported: {timestamps_supported}')
 
     # Run core.status in another thread to avoid blocking the event loop.
     with ThreadPoolExecutor(max_workers=1) as thread_pool_executor:
@@ -1843,13 +1848,15 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
         async def websocket_to_ssh():
             try:
                 async for message in websocket.iter_bytes():
-                    timestamp_ms = struct.unpack('!Q', message[:8])[0]
-                    message = message[8:]
+                    if timestamps_supported:
+                        timestamp_ms = struct.unpack('!Q', message[:8])[0]
+                        message = message[8:]
                     writer.write(message)
                     try:
                         await writer.drain()
-                        time_to_send = time.time() - timestamp_ms / 1000
-                        metrics_utils.SKY_APISERVER_WEBSOCKET_SSH_TIME_TO_SEND.labels(pid=os.getpid()).observe(time_to_send)  # pylint: disable=line-too-long
+                        if timestamps_supported:
+                            time_to_send = time.time() - timestamp_ms / 1000
+                            metrics_utils.SKY_APISERVER_WEBSOCKET_SSH_TIME_TO_SEND.labels(pid=os.getpid()).observe(time_to_send)  # pylint: disable=line-too-long
                     except Exception as e:  # pylint: disable=broad-except
                         # Typically we will not reach here, if the ssh to pod
                         # is disconnected, ssh_to_websocket will exit first.
