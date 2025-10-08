@@ -887,6 +887,7 @@ def unreachable_context():
 
 
 @pytest.mark.kubernetes
+@pytest.mark.no_dependency
 def test_kubernetes_context_failover(unreachable_context):
     """Test if the kubernetes context failover works.
 
@@ -985,7 +986,7 @@ def test_kubernetes_context_failover(unreachable_context):
             env={
                 skypilot_config.ENV_VAR_GLOBAL_CONFIG: f.name,
                 constants.SKY_API_SERVER_URL_ENV_VAR:
-                    sky.server.common.get_server_url()
+                    smoke_tests_utils.get_api_server_url()
             },
         )
         smoke_tests_utils.run_one_test(test)
