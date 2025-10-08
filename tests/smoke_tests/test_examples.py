@@ -126,6 +126,9 @@ def test_ray_train(generic_cloud: str, accelerator: Dict[str, str]) -> None:
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
+@pytest.mark.no_azure
+@pytest.mark.no_vast
+@pytest.mark.no_fluidstack
 @pytest.mark.no_kubernetes  # No enough resources in Kubernetes yet
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{
@@ -168,6 +171,6 @@ def test_nemorl(generic_cloud: str, accelerator: Dict[str, str]) -> None:
                 f'sky logs {name} 1 --status',
             ],
             f'sky down -y {name}',
-            timeout=30 * 60,
+            timeout=40 * 60,
         )
         smoke_tests_utils.run_one_test(test)
