@@ -442,27 +442,29 @@ class TestCloudVmRayBackendGetGrpcChannel:
 class TestIsMessageTooLong:
     """Tests for _is_message_too_long function."""
 
-    @pytest.mark.parametrize('returncode,message,expected', [
-        # Valid matches with correct returncode
-        (255, 'too long', True),
-        (255, 'Argument list too long', True),
-        (1, 'request-uri too large', True),
-        (1, '414 Request-URI Too Large', True),
-        (1, 'request header fields too large', True),
-        (1, '431 Request Header Fields Too Large', True),
-        # Case insensitivity
-        (255, 'TOO LONG', True),
-        (1, 'REQUEST HEADER FIELDS TOO LARGE', True),
-        # Wrong returncode
-        (1, 'too long', False),
-        (255, 'request-uri too large', False),
-        (127, 'too long', False),
-        # Wrong message
-        (255, 'command not found', False),
-        (1, 'some other error', False),
-        # Empty output
-        (255, '', False),
-    ])
+    @pytest.mark.parametrize(
+        'returncode,message,expected',
+        [
+            # Valid matches with correct returncode
+            (255, 'too long', True),
+            (255, 'Argument list too long', True),
+            (1, 'request-uri too large', True),
+            (1, '414 Request-URI Too Large', True),
+            (1, 'request header fields too large', True),
+            (1, '431 Request Header Fields Too Large', True),
+            # Case insensitivity
+            (255, 'TOO LONG', True),
+            (1, 'REQUEST HEADER FIELDS TOO LARGE', True),
+            # Wrong returncode
+            (1, 'too long', False),
+            (255, 'request-uri too large', False),
+            (127, 'too long', False),
+            # Wrong message
+            (255, 'command not found', False),
+            (1, 'some other error', False),
+            # Empty output
+            (255, '', False),
+        ])
     def test_detection_with_output(self, returncode, message, expected):
         """Test message detection with various returncode/message combinations."""
         assert cloud_vm_ray_backend._is_message_too_long(
@@ -472,12 +474,12 @@ class TestIsMessageTooLong:
         """Test detection when reading from file."""
         log_file = tmp_path / "test.log"
         log_file.write_text("Error: command too long")
-        assert cloud_vm_ray_backend._is_message_too_long(255,
-                                                          file_path=str(log_file))
+        assert cloud_vm_ray_backend._is_message_too_long(
+            255, file_path=str(log_file))
 
         log_file.write_text("431 Request Header Fields Too Large")
-        assert cloud_vm_ray_backend._is_message_too_long(1,
-                                                          file_path=str(log_file))
+        assert cloud_vm_ray_backend._is_message_too_long(
+            1, file_path=str(log_file))
 
     def test_file_read_error_returns_true(self, tmp_path):
         """Test that file read errors return True for safety."""
@@ -501,15 +503,16 @@ class TestIsMessageTooLong:
             cloud_vm_ray_backend._is_message_too_long(255)
         with pytest.raises(AssertionError):
             cloud_vm_ray_backend._is_message_too_long(255,
-                                                       output="test",
-                                                       file_path="/tmp/test")
+                                                      output="test",
+                                                      file_path="/tmp/test")
 
     def test_partial_match_in_long_output(self):
         """Test that partial matches in longer messages are detected."""
         long_output = """Error executing command on remote server:
         bash: /usr/bin/ssh: Argument list too long
         Failed to run setup script"""
-        assert cloud_vm_ray_backend._is_message_too_long(255, output=long_output)
+        assert cloud_vm_ray_backend._is_message_too_long(255,
+                                                         output=long_output)
 
         http_error = "<html><h1>414 Request-URI Too Large</h1></html>"
         assert cloud_vm_ray_backend._is_message_too_long(1, output=http_error)

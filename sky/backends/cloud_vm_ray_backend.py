@@ -232,7 +232,9 @@ def _is_command_length_over_limit(command: str) -> bool:
     return quoted_length > _MAX_INLINE_SCRIPT_LENGTH
 
 
-def _is_message_too_long(returncode: int, output: Optional[str]=None, file_path: Optional[str]=None) -> bool:
+def _is_message_too_long(returncode: int,
+                         output: Optional[str] = None,
+                         file_path: Optional[str] = None) -> bool:
     """Check if the message sent to the remote is too long.
 
     We use inline script to run the setup or run command, i.e. the script will
@@ -252,9 +254,11 @@ def _is_message_too_long(returncode: int, output: Optional[str]=None, file_path:
         output: The output of the setup command.
         file_path: The path to the setup log file.
     """
-    assert (output is not None) ^ (file_path is not None), 'Either output or file_path must be provided.'
+    assert (output is None) != (file_path is None), (
+        'Either output or file_path must be provided.', output, file_path)
     to_check = []
-    for match_str, desired_rc in _EXCEPTION_MSG_AND_RETURNCODE_FOR_DUMP_INLINE_SCRIPT:
+    for (match_str,
+         desired_rc) in _EXCEPTION_MSG_AND_RETURNCODE_FOR_DUMP_INLINE_SCRIPT:
         if desired_rc == returncode:
             to_check.append(match_str)
     if not to_check:
@@ -268,20 +272,20 @@ def _is_message_too_long(returncode: int, output: Optional[str]=None, file_path:
 
     if file_path is not None:
         try:
-            with open(os.path.expanduser(file_path),
-                        'r',
-                        encoding='utf-8') as f:
+            with open(os.path.expanduser(file_path), 'r',
+                      encoding='utf-8') as f:
                 content = f.read()
                 return _check_output_for_match_str(content)
         except Exception as e:  # pylint: disable=broad-except
             # We don't crash the setup if we cannot read the log file.
             # Instead, we should retry the setup with dumping the script
             # to a file to be safe.
-            logger.debug(
-                f'Failed to read setup log file {file_path}: {e}')
+            logger.debug(f'Failed to read setup log file {file_path}: {e}')
             return True
     else:
+        assert output is not None, (output, file_path)
         return _check_output_for_match_str(output)
+
 
 def _get_cluster_config_template(cloud):
     cloud_to_template = {
@@ -4127,8 +4131,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 return returncode
 
             returncode = _run_setup(f'{create_script_code} && {setup_cmd}',)
-
-
 
             if _is_message_too_long(returncode, file_path=setup_log_path):
                 # If the setup script is too long, we need to retry it
