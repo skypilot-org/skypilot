@@ -11,7 +11,9 @@ This script is useful for users who do not have local Kubernetes credentials.
 import asyncio
 from http.cookiejar import MozillaCookieJar
 import os
+import struct
 import sys
+import time
 from typing import Dict
 from urllib.request import Request
 
@@ -96,7 +98,10 @@ async def stdin_to_websocket(reader: asyncio.StreamReader,
             data = await reader.read(BUFFER_SIZE)
             if not data:
                 break
-            await websocket.send(data)
+            timestamp_ms = int(time.time() * 1000)
+            ts_bytes = struct.pack('!Q', timestamp_ms)
+            payload = ts_bytes + data
+            await websocket.send(payload)
     except Exception as e:  # pylint: disable=broad-except
         print(f'Error in stdin_to_websocket: {e}', file=sys.stderr)
     finally:
