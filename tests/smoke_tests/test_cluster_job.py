@@ -1072,9 +1072,11 @@ def test_volume_env_mount_kubernetes():
 
 def _check_container_logs(name, logs, range_start, range_end, count):
     """Check if the container logs contain the expected number of logging lines.
+
     Each line should be only one number in the given range and should show up 
     count number of times. We skip the messages that we see in the job from
-    running setup with set -x."""
+    running setup with set -x.
+    """
     output_cmd = f's=$({logs});'
     for num in range(range_start, range_end + 1):
         output_cmd += f' echo "$s" | grep -x "{num}" | wc -l | grep {count};'
