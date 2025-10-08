@@ -52,7 +52,15 @@ async def gpu_metrics() -> fastapi.Response:
         if context != 'in-cluster'
     ]
 
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    try:
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+    except asyncio.CancelledError:
+        # Cancel all tasks explicitly
+        for task in tasks:
+            task.cancel()
+        # Wait for tasks to finish cancelling
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
 
     for i, result in enumerate(results):
         if isinstance(result, Exception):
