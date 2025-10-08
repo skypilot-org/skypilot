@@ -131,7 +131,11 @@ def wait_process(ctx: context.Context,
             # Kill the process despite the caller's callback, the utility
             # function gracefully handles the case where the process is
             # already terminated.
-            subprocess_utils.kill_process_with_grace_period(proc)
+            # Bash script typically does not forward SIGTERM to childs, thus
+            # cannot be killed gracefully, shorten the grace period for faster
+            # termination.
+            subprocess_utils.kill_process_with_grace_period(proc,
+                                                            grace_period=1)
             raise asyncio.CancelledError()
         try:
             proc.wait(poll_interval)

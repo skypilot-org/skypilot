@@ -472,6 +472,21 @@ def test_big_file_upload_memory_usage(generic_cloud: str):
             compare_rss_metrics(baseline_metrics, actual_metrics)
 
 
+# TODO(aylei): this case should not be retried in buildkite.
+def test_api_server_start_stop(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+
+    test = smoke_tests_utils.Test(
+        'test_managed_jobs_force_disable_cloud_bucket',
+        [
+            # To avoid interference with other tests, we launch a separate API server for this test.
+            f'sky launch -n {name} --cloud {generic_cloud} tests/test_yamls/apiserver-start-stop.yaml -y {smoke_tests_utils.LOW_RESOURCE_ARG}'
+        ],
+        f'sky down -y {name} || true',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.kubernetes  # We only run this test on Kubernetes to test its ssh.
 @pytest.mark.no_remote_server  # All blocking testing has been done for local server.
 def test_tail_jobs_logs_blocks_ssh(generic_cloud: str):

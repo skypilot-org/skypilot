@@ -208,9 +208,9 @@ jobs:
     with:
       commit: ${{ github.sha }}
       branch: ${{ github.ref_name }}
-      message: "nightly-build-pypi --kubernetes --no-resource-heavy --dependency kubernetes"
+      message: "nightly-build-pypi --kubernetes --no-resource-heavy --dependency"
       pipeline: "smoke-tests"
-      build_env_vars: '{"ARGS": "--kubernetes --no-resource-heavy --dependency kubernetes"}'
+      build_env_vars: '{"ARGS": "--kubernetes --no-resource-heavy --dependency"}'
       timeout_minutes: 60
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
