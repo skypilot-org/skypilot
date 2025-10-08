@@ -1,6 +1,9 @@
+import os
+import subprocess
 import sys
 import tempfile
 import threading
+import time
 from typing import Dict, List, Optional, Tuple, TypeVar
 
 import pytest
@@ -8,6 +11,7 @@ from smoke_tests import metrics_utils
 from smoke_tests import smoke_tests_utils
 
 import sky
+from sky import jobs
 from sky.client import common as client_common
 from sky.server import common as server_common
 from sky.skylet import constants
@@ -466,3 +470,111 @@ def test_big_file_upload_memory_usage(generic_cloud: str):
             assert len(actual_metrics) > 0, "No actual metrics collected"
 
             compare_rss_metrics(baseline_metrics, actual_metrics)
+
+
+@pytest.mark.kubernetes  # We only run this test on Kubernetes to test its ssh.
+@pytest.mark.no_remote_server  # All blocking testing has been done for local server.
+def test_tail_jobs_logs_blocks_ssh(generic_cloud: str):
+    """Test that we don't block ssh when we do a large amount 
+    of tail logs requests.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    job_name = name + '-job'
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+
+    num_cpus = os.cpu_count()
+    # Use the asyncio logic to get the number of threads that the executor uses
+    # so that we can attempt to block them.
+    num_threads = min(num_cpus + 4, 32)
+
+    threads = [None for _ in range(num_threads)]
+    try:
+        # Launch cluster, use the command line because the sdk doesn't
+        # lead to websocket_proxy.
+        print("Launching cluster...")
+        subprocess.Popen([
+            'sky launch -c ' + name + ' --infra ' + generic_cloud + ' ' +
+            smoke_tests_utils.LOW_RESOURCE_ARG + ' -y'
+        ],
+                         shell=True)
+        print("Cluster launched.")
+
+        # Launch a problematic job with infinite logs.
+        task = sky.Task(
+            run=
+            'for i in {{1..10000}}; do echo "Hello, world! $i"; sleep 1; done')
+        task.set_resources(
+            sky.Resources(infra=generic_cloud,
+                          **smoke_tests_utils.LOW_RESOURCE_PARAM))
+        req_id = jobs.launch(task, name=job_name)
+        job_id, _ = sky.stream_and_get(req_id)
+
+        # Wait for the job to start.
+        def is_job_started(job_id: int):
+            req_id = jobs.queue(refresh=True, job_ids=[job_id])
+            job_records = sky.stream_and_get(req_id)
+            assert len(job_records) == 1
+            return job_records[0]['status'] == sky.ManagedJobStatus.RUNNING
+
+        start_time = time.time()
+        while not is_job_started(job_id):
+            if time.time() - start_time > timeout:
+                raise Exception("Job failed to start.")
+            time.sleep(1)
+        print("Job started.")
+
+        def log_thread(worker_id: int):
+            try:
+                jobs.client.sdk.tail_logs(job_id=job_id, follow=True)
+            except Exception as e:
+                print(f"Error in log thread {worker_id}: {e}")
+
+        # Tail job logs.
+        print(
+            f"Launching {num_threads} tail log requests to block the workers.")
+        for worker_id in range(num_threads):
+            threads[worker_id] = threading.Thread(target=log_thread,
+                                                  args=(worker_id,))
+            threads[worker_id].start()
+        print("Requests launched.")
+
+        # Give time for requests to start.
+        time.sleep(10)
+
+        print("Attempting to ssh in.")
+
+        # Now attempt to ssh in.
+        ssh_cmd = f'ssh -o ConnectTimeout=10 -o BatchMode=yes {name} "echo hi"'
+        ssh_ret = subprocess.Popen(ssh_cmd, shell=True)
+        if ssh_ret.wait(timeout=10) != 0:
+            raise Exception("SSH failed.")
+
+        print("SSH completed.")
+    except Exception:
+        # Stop and start the api server to unblock it.
+        cmd_one = subprocess.Popen(['sky api stop'], shell=True)
+        cmd_one.wait(timeout=15)
+        cmd_two = subprocess.Popen(['sky api start'], shell=True)
+        cmd_two.wait(timeout=15)
+    finally:
+        # Tear down cluster.
+        try:
+            print("Tearing down cluster...")
+            req_id = sky.down(name)
+            sky.stream_and_get(req_id)
+            print("Cluster torn down.")
+        except Exception:
+            pass
+
+        # Cancel job.
+        try:
+            print(f"Cancelling job {job_id}...")
+            req_id = jobs.cancel(job_ids=[job_id])
+            sky.stream_and_get(req_id)
+            print("Job cancelled.")
+        except Exception:
+            pass
+
+        # Join threads.
+        for thread in threads:
+            thread.join()

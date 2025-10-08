@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import contextlib
 import datetime
 import hashlib
@@ -1717,9 +1718,9 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
 
     # Run core.status in another thread to avoid blocking the event loop.
-    cluster_records = await context_utils.to_thread(core.status,
-                                                    cluster_name,
-                                                    all_users=True)
+    with ThreadPoolExecutor(max_workers=1) as thread_pool_executor:
+        cluster_records = await context_utils.to_thread_with_executor(
+            thread_pool_executor, core.status, cluster_name, all_users=True)
     cluster_record = cluster_records[0]
     if cluster_record['status'] != status_lib.ClusterStatus.UP:
         raise fastapi.HTTPException(

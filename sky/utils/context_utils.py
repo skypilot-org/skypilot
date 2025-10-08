@@ -1,5 +1,6 @@
 """Utilities for SkyPilot context."""
 import asyncio
+import concurrent.futures
 import contextvars
 import functools
 import io
@@ -187,14 +188,17 @@ def to_thread(func: Callable[P, T], /, *args: P.args,
 
     This is same as asyncio.to_thread added in python 3.9
     """
+    return to_thread_with_executor(None, func, *args, **kwargs)
+
+
+def to_thread_with_executor(executor: Optional[concurrent.futures.Executor],
+                            func: Callable[P, T], /, *args: P.args,
+                            **kwargs: P.kwargs) -> 'asyncio.Future[T]':
+    """Asynchronously run function *func* in a separate thread with
+    a custom executor."""
+
     loop = asyncio.get_running_loop()
-    # This is critical to pass the current coroutine context to the new thread
     pyctx = contextvars.copy_context()
-    func_call: Callable[..., T] = functools.partial(
-        # partial deletes arguments type and thus can't figure out the return
-        # type of pyctx.run
-        pyctx.run,  # type: ignore
-        func,
-        *args,
-        **kwargs)
-    return loop.run_in_executor(None, func_call)
+    func_call: Callable[..., T] = functools.partial(pyctx.run, func, *args,
+                                                    **kwargs)
+    return loop.run_in_executor(executor, func_call)
