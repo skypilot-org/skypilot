@@ -283,8 +283,9 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
                                                     enabled_cloud_storages)
         include_gcs_mount = clouds.cloud_in_iterable(clouds.GCP(),
                                                      enabled_cloud_storages)
-        include_azure_mount = clouds.cloud_in_iterable(clouds.Azure(),
-                                                       enabled_cloud_storages)
+        include_azure_mount = (
+            clouds.cloud_in_iterable(clouds.Azure(), enabled_cloud_storages) and
+            azure_mount_unsupported_ubuntu_version not in image_id)
         content = template.render(storage_name=storage_name,
                                   include_s3_mount=include_s3_mount,
                                   include_gcs_mount=include_gcs_mount,
