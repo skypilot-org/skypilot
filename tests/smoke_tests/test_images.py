@@ -719,6 +719,6 @@ def test_helm_deploy_eks(request):
 @pytest.mark.no_dependency  # This test is not related to dependency
 def test_helm_deploy_okta():
     test = smoke_tests_utils.Test('helm_deploy_okta', [
-        f'bash tests/kubernetes/scripts/helm_okta.sh',
+        f'output=$(bash tests/kubernetes/scripts/helm_okta.sh 2>&1); echo "$output"; [ $? -eq 0 ] || exit 1',
     ])
     smoke_tests_utils.run_one_test(test)
