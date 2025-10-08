@@ -354,7 +354,8 @@ def pytest_collection_modifyitems(config, items):
             if has_api_server and 'no_remote_server' in marks:
                 item.add_marker(skip_marks['no_remote_server'])
         # Skip tests marked as no_dependency if --dependency is set
-        if 'no_dependency' in marks and config.getoption('--dependency') != 'all':
+        if 'no_dependency' in marks and config.getoption(
+                '--dependency') != 'all':
             item.add_marker(skip_marks['no_dependency'])
 
     # Check if tests need to be run serially for Kubernetes and Lambda Cloud
