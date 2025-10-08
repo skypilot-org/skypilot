@@ -65,6 +65,7 @@ from sky.server import config as server_config
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
@@ -133,7 +134,7 @@ def get_number_of_controllers() -> int:
     consolidation_mode = skypilot_config.get_nested(
         ('jobs', 'controller', 'consolidation_mode'), default_value=False)
 
-    total_memory_mb = common_utils.get_mem_size_gb() * 1024
+    total_memory_mb = controller_utils.get_controller_mem_size_gb() * 1024
     if consolidation_mode:
         config = server_config.compute_server_config(deploy=True, quiet=True)
 

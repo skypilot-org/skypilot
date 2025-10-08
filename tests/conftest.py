@@ -220,12 +220,16 @@ def pytest_addoption(parser):
     parser.addoption(
         '--dependency',
         type=str,
+        nargs='?',
+        const='',
         default='all',
         help=
-        'Dependency for package install. For example, --dependency=aws will run '
-        'pip install "skypilot[aws]". --dependency=aws,azure will run '
-        'pip install "skypilot[aws,azure]". This parameter only works in the '
-        'Buildkite CI environment and will be ignored if run locally.',
+        ('Dependency for client-side package install. '
+         'E.g., --dependency=aws runs pip install "skypilot[aws]" on client. '
+         '--dependency=aws,azure runs pip install "skypilot[aws,azure]" on client. '
+         '--dependency (no value) installs base package only (no extras) on client. '
+         'This only affects client side; server side always installs all dependencies. '
+         'Only works in Buildkite CI; ignored if run locally.'),
     )
 
 
@@ -293,6 +297,8 @@ def pytest_collection_modifyitems(config, items):
     skip_marks['resource_heavy'] = pytest.mark.skip(
         reason=
         'skip tests not marked as resource_heavy if --resource-heavy is set')
+    skip_marks['no_dependency'] = pytest.mark.skip(
+        reason='skip tests marked as no_dependency if --dependency is set')
     for cloud in all_clouds_in_smoke_tests:
         skip_marks[cloud] = pytest.mark.skip(
             reason=f'tests for {cloud} is skipped, try setting --{cloud}')
@@ -352,6 +358,10 @@ def pytest_collection_modifyitems(config, items):
             has_api_server, _ = _get_and_check_env_file(env_file)
             if has_api_server and 'no_remote_server' in marks:
                 item.add_marker(skip_marks['no_remote_server'])
+        # Skip tests marked as no_dependency if --dependency is set
+        if 'no_dependency' in marks and config.getoption(
+                '--dependency') != 'all':
+            item.add_marker(skip_marks['no_dependency'])
 
     # Check if tests need to be run serially for Kubernetes and Lambda Cloud
     # We run Lambda Cloud tests serially because Lambda Cloud rate limits its
@@ -770,14 +780,3 @@ def prepare_env_file(request):
     if has_api_server:
         os.environ['PYTEST_SKYPILOT_REMOTE_SERVER_TEST'] = '1'
     yield local_file_path
-
-
-@pytest.fixture(scope='session', autouse=True)
-def setup_dependency_env(request):
-    """Setup dependency environment variable if --dependency is specified."""
-    if not request.config.getoption('--dependency'):
-        yield
-        return
-    os.environ['PYTEST_DEPENDENCY_ARG'] = request.config.getoption(
-        '--dependency')
-    yield

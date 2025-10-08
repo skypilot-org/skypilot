@@ -25,7 +25,7 @@ import re
 import socket
 import subprocess
 import sys
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 import uuid
 
 import colorama
@@ -102,7 +102,7 @@ def _generate_rsa_key_pair() -> Tuple[str, str]:
     return public_key, private_key
 
 
-def _save_key_pair(user_hash: str, private_key_path: str, public_key_path: str,
+def _save_key_pair(private_key_path: str, public_key_path: str,
                    private_key: str, public_key: str) -> None:
     key_dir = os.path.dirname(private_key_path)
     os.makedirs(key_dir, exist_ok=True, mode=0o700)
@@ -120,8 +120,6 @@ def _save_key_pair(user_hash: str, private_key_path: str, public_key_path: str,
               encoding='utf-8',
               opener=functools.partial(os.open, mode=0o644)) as f:
         f.write(public_key)
-
-    global_user_state.set_ssh_keys(user_hash, public_key, private_key)
 
 
 def get_or_generate_keys() -> Tuple[str, str]:
@@ -141,33 +139,33 @@ def get_or_generate_keys() -> Tuple[str, str]:
     with filelock.FileLock(lock_path, timeout=10):
         if not os.path.exists(private_key_path):
             ssh_public_key, ssh_private_key, exists = (
-                global_user_state.get_ssh_keys(common_utils.get_user_hash()))
+                global_user_state.get_ssh_keys(user_hash))
             if not exists:
                 ssh_public_key, ssh_private_key = _generate_rsa_key_pair()
-            _save_key_pair(user_hash, private_key_path, public_key_path,
-                           ssh_private_key, ssh_public_key)
+                global_user_state.set_ssh_keys(user_hash, ssh_public_key,
+                                               ssh_private_key)
+            _save_key_pair(private_key_path, public_key_path, ssh_private_key,
+                           ssh_public_key)
     assert os.path.exists(public_key_path), (
         'Private key found, but associated public key '
         f'{public_key_path} does not exist.')
     return private_key_path, public_key_path
 
 
-def create_ssh_key_files_from_db(private_key_path: Optional[str] = None):
-    if private_key_path is None:
-        user_hash = common_utils.get_user_hash()
-    else:
-        # Assume private key path is in the format of
-        # ~/.sky/clients/<user_hash>/ssh/sky-key
-        separated_path = os.path.normpath(private_key_path).split(os.path.sep)
-        assert separated_path[-1] == 'sky-key'
-        assert separated_path[-2] == 'ssh'
-        user_hash = separated_path[-3]
+def create_ssh_key_files_from_db(private_key_path: str):
+    # Assume private key path is in the format of
+    # ~/.sky/clients/<user_hash>/ssh/sky-key
+    separated_path = os.path.normpath(private_key_path).split(os.path.sep)
+    assert separated_path[-1] == 'sky-key'
+    assert separated_path[-2] == 'ssh'
+    user_hash = separated_path[-3]
 
     private_key_path_generated, public_key_path, lock_path = (
         get_ssh_key_and_lock_path(user_hash))
     assert private_key_path == os.path.expanduser(private_key_path_generated), (
         f'Private key path {private_key_path} does not '
-        f'match the generated path {private_key_path_generated}')
+        'match the generated path '
+        f'{os.path.expanduser(private_key_path_generated)}')
     private_key_path = os.path.expanduser(private_key_path)
     public_key_path = os.path.expanduser(public_key_path)
     lock_path = os.path.expanduser(lock_path)
@@ -183,8 +181,8 @@ def create_ssh_key_files_from_db(private_key_path: Optional[str] = None):
                 global_user_state.get_ssh_keys(user_hash))
             if not exists:
                 raise RuntimeError(f'SSH keys not found for user {user_hash}')
-            _save_key_pair(user_hash, private_key_path, public_key_path,
-                           ssh_private_key, ssh_public_key)
+            _save_key_pair(private_key_path, public_key_path, ssh_private_key,
+                           ssh_public_key)
     assert os.path.exists(public_key_path), (
         'Private key found, but associated public key '
         f'{public_key_path} does not exist.')
