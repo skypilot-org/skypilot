@@ -79,7 +79,7 @@ def test_managed_jobs_basic(generic_cloud: str):
                 timeout=230),
             # Test the functionality for logging.
             'sky jobs queue',
-            'sleep 10'
+            'sleep 10',
             'sky jobs queue',
             f'sky jobs logs -n {name}-2 --no-follow',
             f's=$(sky jobs logs -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "start counting"',
