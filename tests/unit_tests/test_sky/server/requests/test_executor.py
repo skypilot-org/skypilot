@@ -1,4 +1,6 @@
 """Unit tests for sky.server.requests.executor module."""
+import asyncio
+import time
 from unittest import mock
 
 import pytest
@@ -6,13 +8,6 @@ import pytest
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
-
-CALLED_FLAG = [False]
-
-
-def dummy_entrypoint(called_flag):
-    CALLED_FLAG[0] = True
-    return 'ok'
 
 
 @pytest.fixture()
@@ -29,6 +24,53 @@ def isolated_database(tmp_path):
             requests_lib._DB = None
             yield
             requests_lib._DB = None
+
+
+def dummy_entrypoint(*args, **kwargs):
+    """Dummy entrypoint function for testing."""
+    time.sleep(2)
+    return 'success'
+
+
+@pytest.mark.asyncio
+async def test_execute_request_coroutine_ctx_cancelled_on_cancellation(
+        isolated_database):
+    """Test that context is always cancelled when execute_request_coroutine
+    is cancelled."""
+    # Create a mock request
+    request = requests_lib.Request(
+        request_id='test-request-id',
+        name='test-request-name',
+        status=requests_lib.RequestStatus.PENDING,
+        created_at=time.time(),
+        user_id='test-user-id',
+        entrypoint=dummy_entrypoint,
+        request_body=payloads.RequestBody(),
+    )
+    requests_lib.create_if_not_exists(request)
+
+    # Mock the context and its methods
+    mock_ctx = mock.Mock()
+    mock_ctx.is_canceled.return_value = False
+
+    with mock.patch('sky.utils.context.initialize'), \
+         mock.patch('sky.utils.context.get', return_value=mock_ctx):
+
+        task = executor.execute_request_in_coroutine(request)
+
+        await asyncio.sleep(0.1)
+        task.cancel()
+        await task.task
+        # Verify the context is actually cancelled
+        mock_ctx.cancel.assert_called()
+
+
+CALLED_FLAG = [False]
+
+
+def dummy_entrypoint(called_flag):
+    CALLED_FLAG[0] = True
+    return 'ok'
 
 
 def test_api_cancel_race_condition(isolated_database):
