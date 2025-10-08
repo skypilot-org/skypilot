@@ -506,13 +506,32 @@ def _record_memory_metrics(request_name: str, proc: psutil.Process,
         name=request_name).observe(max(peak_rss - rss_begin, 0))
 
 
+class CoroutineTask:
+    """Wrapper of a background task runs in coroutine"""
+
+    def __init__(self, task: asyncio.Task):
+        self.task = task
+
+    async def cancel(self):
+        try:
+            self.task.cancel()
+            await self.task
+        except asyncio.CancelledError:
+            pass
+
+
 def execute_request_in_coroutine(
-        request: api_requests.Request) -> 'typing.Coroutine[Any, Any, None]':
+        request: api_requests.Request) -> CoroutineTask:
     """Execute a request in current event loop.
 
-    Returns a coroutine suitable for ``asyncio.create_task``.
+    Args:
+        request: The request to execute.
+
+    Returns:
+        A CoroutineTask handle to operate the background task.
     """
-    return _execute_request_coroutine(request)
+    task = asyncio.create_task(_execute_request_coroutine(request))
+    return CoroutineTask(task)
 
 
 async def _execute_request_coroutine(request: api_requests.Request):
