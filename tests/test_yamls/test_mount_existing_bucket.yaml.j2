@@ -1,0 +1,9 @@
+file_mounts:
+  /test-mount:
+    # This will trigger StorageSpecError when the bucket already exists.
+    name: {{ bucket_name }}
+    mode: MOUNT
+
+run: |
+  ls /test-mount
+  echo hello > /test-mount/$(date +%s).txt

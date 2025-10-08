@@ -1486,9 +1486,9 @@ def test_managed_jobs_failed_precheck_storage_spec_error(
         region = aws_config_region
         infra_arg = f'--infra aws/{region}'
         create_bucket_cmd = (
-            f'aws s3api create-bucket --bucket {bucket_name} --region {region} '
+            f'aws s3api create-bucket --bucket {bucket_name} --region {region}'
             + ('' if region == 'us-east-1' else
-               f'--create-bucket-configuration LocationConstraint={region}'))
+               f' --create-bucket-configuration LocationConstraint={region}'))
         delete_bucket_cmd = f'aws s3 rb s3://{bucket_name} --force'
     elif generic_cloud == 'gcp':
         infra_arg = '--infra gcp'
