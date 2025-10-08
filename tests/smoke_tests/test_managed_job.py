@@ -1474,9 +1474,12 @@ def test_managed_jobs_ha_kill_starting(generic_cloud: str):
 @pytest.mark.parametrize(
     'bucket_name',
     [
-        None,  # generate a unique bucket name in the test
-        'ab',  # too short
-        'not-my-bucket'  # access denied (as of writing, this bucket exists on both S3 and GCS but is private)
+        # generate a unique bucket name in the test
+        None,
+        # too short
+        'ab',
+        # access denied (as of time of writing, this bucket happens to exist on both S3 and GCS but is private)
+        'not-my-bucket'
     ])
 def test_managed_jobs_failed_precheck_storage_spec_error(
         generic_cloud: str, aws_config_region, bucket_name):
@@ -1508,7 +1511,7 @@ def test_managed_jobs_failed_precheck_storage_spec_error(
         delete_bucket_cmd = f'gsutil rm -r gs://{bucket_name}'
 
     template_str = pathlib.Path(
-        'tests/test_yamls/test_mount_existing_bucket.yaml.j2').read_text()
+        'tests/test_yamls/test_storage_mount.yaml.j2').read_text()
     template = jinja2.Template(template_str)
     content = template.render(bucket_name=bucket_name, store=store)
 
@@ -1541,7 +1544,7 @@ def test_managed_jobs_failed_precheck_storage_spec_error(
                 job_name=name,
                 job_status=[sky.ManagedJobStatus.FAILED_PRECHECKS],
                 timeout=300),
-            f'sky jobs logs --controller -n {name} --no-follow | grep -i "Storage.*Error"',
+            f'logs=$(sky jobs logs --controller -n {name} --no-follow); echo "$logs"; echo "$logs" | grep -i "Storage.*Error"',
         ]
 
         commands = base_commands
