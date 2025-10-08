@@ -179,6 +179,10 @@ def mock_restore_output(*_, **__):
     return None
 
 
+def mock_get_current_output(*_, **__):
+    return (None, None)
+
+
 @pytest.fixture
 def enable_all_clouds(monkeypatch, request, mock_client_requests):
     """Create mock context managers for cloud configurations."""
@@ -439,6 +443,8 @@ def mock_redirect_log_file(monkeypatch):
                         mock_redirect_output)
     monkeypatch.setattr('sky.server.requests.executor._restore_output',
                         mock_restore_output)
+    monkeypatch.setattr('sky.server.requests.executor._get_current_output',
+                        mock_get_current_output)
 
 
 @pytest.fixture
