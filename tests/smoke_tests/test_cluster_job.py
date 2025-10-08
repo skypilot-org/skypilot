@@ -1694,7 +1694,7 @@ def test_aws_custom_image():
         'docker:nvcr.io/nvidia/quantum/cuda-quantum:cu12-0.10.0',
         # Test image with PYTHONPATH set and with pyproject.toml.
         # Update this image periodically, nemo does not support :latest tag.
-        'docker:nvcr.io/nvidia/nemo:25.09.00'
+        'docker:nvcr.io/nvidia/nemo:25.09'
     ])
 def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
