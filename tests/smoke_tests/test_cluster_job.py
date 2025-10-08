@@ -1693,8 +1693,7 @@ def test_aws_custom_image():
         # SSH user/rsync path detection.
         'docker:nvcr.io/nvidia/quantum/cuda-quantum:cu12-0.10.0',
         'docker:nvcr.io/nvidia/nemo:25.09'
-    ]
-)
+    ])
 def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
     accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
