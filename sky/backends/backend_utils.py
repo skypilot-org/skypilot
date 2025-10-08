@@ -3119,8 +3119,9 @@ def refresh_cluster_records() -> None:
     exclude_managed_clusters = True
     if env_options.Options.SHOW_DEBUG_INFO.get():
         exclude_managed_clusters = False
-    cluster_names = global_user_state.get_cluster_names(
-        exclude_managed_clusters=exclude_managed_clusters,)
+    cluster_names = set(
+        global_user_state.get_cluster_names(
+            exclude_managed_clusters=exclude_managed_clusters,))
 
     # TODO(syang): we should try not to leak
     # request info in backend_utils.py.
@@ -3129,15 +3130,12 @@ def refresh_cluster_records() -> None:
     request = requests_lib.get_request_tasks(
         req_filter=requests_lib.RequestTaskFilter(
             status=[requests_lib.RequestStatus.RUNNING],
-            cluster_names=cluster_names,
             include_request_names=['sky.launch']))
     cluster_names_with_launch_request = {
         request.cluster_name for request in request
     }
-    cluster_names_without_launch_request = [
-        cluster_name for cluster_name in cluster_names
-        if cluster_name not in cluster_names_with_launch_request
-    ]
+    cluster_names_without_launch_request = list(
+        cluster_names - cluster_names_with_launch_request)
 
     def _refresh_cluster_record(cluster_name):
         return _refresh_cluster(cluster_name,
@@ -3146,7 +3144,7 @@ def refresh_cluster_records() -> None:
                                 include_user_info=False,
                                 summary_response=True)
 
-    if len(cluster_names) > 0:
+    if len(cluster_names_without_launch_request) > 0:
         # Do not refresh the clusters that have an active launch request.
         subprocess_utils.run_in_parallel(_refresh_cluster_record,
                                          cluster_names_without_launch_request)
