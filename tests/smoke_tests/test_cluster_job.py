@@ -1692,7 +1692,9 @@ def test_aws_custom_image():
         # Test image with custom MOTD that can potentially interfere with
         # SSH user/rsync path detection.
         'docker:nvcr.io/nvidia/quantum/cuda-quantum:cu12-0.10.0',
-        'docker:nvcr.io/nvidia/nemo:25.09'
+        # Test image with PYTHONPATH set and with pyproject.toml.
+        # Update this image periodically, nemo does not support :latest tag.
+        'docker:nvcr.io/nvidia/nemo:25.09.00'
     ])
 def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
