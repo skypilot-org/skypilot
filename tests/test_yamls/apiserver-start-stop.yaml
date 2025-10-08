@@ -11,6 +11,8 @@ setup: |
   uv pip install --system -e '.[all]'
 
 run: |
+  set -euo pipefail
+  set -x
   for i in {1..20}; do
     sky api start &
     sky api stop &
@@ -19,8 +21,12 @@ run: |
     wait
     # We now either in a clean stopped state or in a clean running state
     sky api start
-    # Thus the following command should always s[ucceed
-    sky launch --dryrun
+    # Thus the following command should always succeed
     sky api status
+    if sky api status | grep -q "PENDING"; then
+      echo "Found request pending"
+      exit 1
+    fi
+    sky launch --dryrun -y
     sky api stop
   done
