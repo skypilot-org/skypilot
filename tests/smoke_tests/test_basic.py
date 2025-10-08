@@ -986,7 +986,7 @@ def test_kubernetes_context_failover(unreachable_context):
             env={
                 skypilot_config.ENV_VAR_GLOBAL_CONFIG: f.name,
                 constants.SKY_API_SERVER_URL_ENV_VAR:
-                    smoke_tests_utils.get_api_server_url()
+                    sky.server.common.get_server_url()
             },
         )
         smoke_tests_utils.run_one_test(test)
