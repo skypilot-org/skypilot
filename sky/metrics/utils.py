@@ -143,6 +143,14 @@ SKY_APISERVER_REQUEST_RSS_INCR_BYTES = prom.Histogram(
     'RSS increment after requests', ['name'],
     buckets=_MEM_BUCKETS)
 
+SKY_APISERVER_WEBSOCKET_SSH_TIME_TO_SEND = prom.Histogram(
+    'sky_apiserver_websocket_ssh_time_to_send',
+    'Time to send data to pod through port-forward connection for ssh',
+    ['pid'],
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 20.0,
+             60.0, float('inf')),
+)
+
 
 @contextlib.contextmanager
 def time_it(name: str, group: str = 'default'):
