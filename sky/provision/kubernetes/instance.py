@@ -1156,7 +1156,8 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             head_pod_name = pod.metadata.name
     pods = valid_pods
 
-    # If there are running pods, add them to the pods list
+    # The running_pods may include Pending Pods, so we add them to the pods
+    # list to wait for scheduling and running
     if running_pods:
         pods = pods + list(running_pods.values())
 
