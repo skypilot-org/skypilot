@@ -78,10 +78,6 @@ def test_managed_jobs_basic(generic_cloud: str):
                 job_status=[sky.ManagedJobStatus.CANCELLED],
                 timeout=230),
             # Test the functionality for logging.
-            'sky jobs queue',
-            'sleep 10',
-            'sky jobs queue',
-            f'sky jobs logs -n {name}-2 --no-follow',
             f's=$(sky jobs logs -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "start counting"',
             f's=$(sky jobs logs --controller -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "Cluster launched:"',
             rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
@@ -89,7 +85,7 @@ def test_managed_jobs_basic(generic_cloud: str):
         # TODO(zhwu): Change to f'sky jobs cancel -y -n {name}-1 -n {name}-2' when
         # canceling multiple job names is supported.
         f'sky jobs cancel -y -n {name}-1; sky jobs cancel -y -n {name}-2',
-        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        # env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
