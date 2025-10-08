@@ -468,6 +468,7 @@ def test_big_file_upload_memory_usage(generic_cloud: str):
             compare_rss_metrics(baseline_metrics, actual_metrics)
 
 
+# TODO(aylei): this case should not be retried in buildkite.
 def test_api_server_start_stop(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
 
