@@ -14,9 +14,13 @@ run: |
   for i in {1..20}; do
     sky api start &
     sky api stop &
+    sky api start &
+    sky api stop &
+    wait
+    # We now either in a clean stopped state or in a clean running state
+    sky api start
+    # Thus the following command should always s[ucceed
+    sky launch --dryrun
+    sky api status
+    sky api stop
   done
-  wait
-  sky api start
-  sky launch --dryrun
-  sky api status
-  sky api stop
