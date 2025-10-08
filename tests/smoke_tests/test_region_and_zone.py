@@ -308,8 +308,8 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
         # not being able to access the mount point. That will not be supported on
         # the ubuntu 18.04 image and thus fail. For other clouds, the private mount
         # on other storage types (GCS/S3) should succeed.
-        if store_type == 'azure':
-            store_type = 's3'
+        # if store_type == 'azure':
+        #     store_type = 's3'
         content = template.render(storage_name=storage_name,
                                   include_azure_mount=False,
                                   empty_storage_name=empty_storage_name,
