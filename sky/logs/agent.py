@@ -88,6 +88,8 @@ class FluentbitAgent(LoggingAgent):
                     # for this: the VM might be autodown within a minute
                     # right after the job completion.
                     'refresh_interval': 1,
+                    # Set memory buffer limit to 20MB to prevent excessive memory usage
+                    'mem_buf_limit': '20MB',
                 }],
                 'filters': [{
                     'name': 'parser',
