@@ -17,9 +17,12 @@ import time
 from typing import Dict
 from urllib.request import Request
 
+import requests
 import websockets
 from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect
+
+from sky.server import constants
 
 BUFFER_SIZE = 2**16  # 64KB
 
@@ -51,7 +54,7 @@ def _get_cookie_header(url: str) -> Dict[str, str]:
     return {'Cookie': cookie_header}
 
 
-async def main(url: str) -> None:
+async def main(url: str, timestamps_supported: bool) -> None:
     cookie_header = _get_cookie_header(url)
     async with connect(url,
                        ping_interval=None,
@@ -78,8 +81,10 @@ async def main(url: str) -> None:
             stdout_writer = asyncio.StreamWriter(transport, protocol, None,
                                                  loop)
 
-            await asyncio.gather(stdin_to_websocket(stdin_reader, websocket),
-                                 websocket_to_stdout(websocket, stdout_writer))
+            await asyncio.gather(
+                stdin_to_websocket(stdin_reader, websocket,
+                                   timestamps_supported),
+                websocket_to_stdout(websocket, stdout_writer))
         finally:
             if old_settings:
                 termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN,
@@ -87,7 +92,8 @@ async def main(url: str) -> None:
 
 
 async def stdin_to_websocket(reader: asyncio.StreamReader,
-                             websocket: ClientConnection):
+                             websocket: ClientConnection,
+                             timestamps_supported: bool):
     try:
         while True:
             # Read at most BUFFER_SIZE bytes, this not affect
@@ -96,12 +102,14 @@ async def stdin_to_websocket(reader: asyncio.StreamReader,
             # The BUFFER_SIZE is chosen to be large enough to improve
             # throughput.
             data = await reader.read(BUFFER_SIZE)
+
             if not data:
                 break
-            timestamp_ms = int(time.time() * 1000)
-            ts_bytes = struct.pack('!Q', timestamp_ms)
-            payload = ts_bytes + data
-            await websocket.send(payload)
+            if timestamps_supported:
+                timestamp_ms = int(time.time() * 1000)
+                ts_bytes = struct.pack('!Q', timestamp_ms)
+                data = ts_bytes + data
+            await websocket.send(data)
     except Exception as e:  # pylint: disable=broad-except
         print(f'Error in stdin_to_websocket: {e}', file=sys.stderr)
     finally:
@@ -128,11 +136,21 @@ if __name__ == '__main__':
         # TODO(aylei): Remove this after 0.10.0
         server_url = f'http://{server_url}'
 
+    health_url = f'{server_url}/api/health'
+    health_response = requests.get(health_url)
+    health_data = health_response.json()
+    timestamps_are_supported = int(health_data['api_version']) > 20
+
     server_proto, server_fqdn = server_url.split('://')
     websocket_proto = 'ws'
     if server_proto == 'https':
         websocket_proto = 'wss'
     server_url = f'{websocket_proto}://{server_fqdn}'
+
+    client_version_str = (f'&client_version={constants.API_VERSION}'
+                          if timestamps_are_supported else '')
+
     websocket_url = (f'{server_url}/kubernetes-pod-ssh-proxy'
-                     f'?cluster_name={sys.argv[2]}')
-    asyncio.run(main(websocket_url))
+                     f'?cluster_name={sys.argv[2]}'
+                     f'{client_version_str}')
+    asyncio.run(main(websocket_url, timestamps_are_supported))
