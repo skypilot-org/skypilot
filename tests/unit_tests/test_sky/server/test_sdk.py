@@ -535,7 +535,7 @@ def test_stream_response_non_resumable():
 
 
 def test_stream_response_resumable_no_previous_lines():
-    """Test stream_response when resumable=True with no previously 
+    """Test stream_response when resumable=True with no previously
     processed lines."""
     test_lines = ['Line 1\n', 'Line 2\n', 'Line 3\n']
     mock_response = mock.MagicMock()
@@ -566,7 +566,7 @@ def test_stream_response_resumable_no_previous_lines():
 
 
 def test_stream_response_resumable_with_previous_lines():
-    """Test stream_response when resumable=True with some previously 
+    """Test stream_response when resumable=True with some previously
     processed lines."""
     test_lines = ['Line 1\n', 'Line 2\n', 'Line 3\n', 'Line 4\n', 'Line 5\n']
     mock_response = mock.MagicMock()
@@ -598,7 +598,7 @@ def test_stream_response_resumable_with_previous_lines():
 
 
 def test_stream_response_resumable_all_lines_processed():
-    """Test stream_response when resumable=True and all lines were already 
+    """Test stream_response when resumable=True and all lines were already
     processed."""
     test_lines = ['Line 1\n', 'Line 2\n', 'Line 3\n']
     mock_response = mock.MagicMock()
@@ -714,7 +714,7 @@ def test_reload_config():
 
 
 def test_get_request_id():
-    """Test that get_request_id returns the request id from the correct 
+    """Test that get_request_id returns the request id from the correct
     header."""
     mock_response = mock.MagicMock()
     mock_response.headers = {
@@ -728,4 +728,3 @@ def test_get_request_id():
 
 
 def test_api_stop_start_race_condition():
-    
