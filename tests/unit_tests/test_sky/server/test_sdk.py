@@ -725,3 +725,7 @@ def test_get_request_id():
     mock_response.reason = 'OK'
     request_id = server_common.get_request_id(mock_response)
     assert request_id == 'test_request_id'
+
+
+def test_api_stop_start_race_condition():
+    
