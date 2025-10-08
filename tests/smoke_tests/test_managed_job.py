@@ -1468,3 +1468,62 @@ def test_managed_jobs_ha_kill_starting(generic_cloud: str):
         second_timeout=600,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+def test_managed_jobs_failed_precheck_storage_spec_error(
+        generic_cloud: str, aws_config_region):
+    """Test that managed jobs fail fast with FAILED_PRECHECKS on StorageSpecError."""
+    supported_clouds = {'aws', 'gcp'}
+    if generic_cloud not in supported_clouds:
+        pytest.skip(
+            f'Unsupported cloud {generic_cloud} for storage spec error test.')
+
+    name = smoke_tests_utils.get_cluster_name()
+    bucket_name = f'{name}-{int(time.time())}'
+
+    if generic_cloud == 'aws':
+        region = aws_config_region
+        infra_arg = f'--infra aws/{region}'
+        create_bucket_cmd = (
+            f'aws s3api create-bucket --bucket {bucket_name} --region {region} '
+            + ('' if region == 'us-east-1' else
+               f'--create-bucket-configuration LocationConstraint={region}'))
+        delete_bucket_cmd = f'aws s3 rb s3://{bucket_name} --force'
+    elif generic_cloud == 'gcp':
+        infra_arg = '--infra gcp'
+        create_bucket_cmd = f'gsutil mb gs://{bucket_name}'
+        delete_bucket_cmd = f'gsutil rm -r gs://{bucket_name}'
+
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_mount_existing_bucket.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(bucket_name=bucket_name)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+
+        test = smoke_tests_utils.Test(
+            'managed_jobs_failed_precheck_storage_spec_error',
+            [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                    generic_cloud, name),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name, cmd=create_bucket_cmd),
+                f'sky jobs launch -n {name} {infra_arg} {smoke_tests_utils.LOW_RESOURCE_ARG} {file_path} -y -d',
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=name,
+                    job_status=[sky.ManagedJobStatus.FAILED_PRECHECKS],
+                    timeout=120),
+                f'sky jobs logs --controller -n {name} --no-follow | grep -i "StorageSpecError\\|{bucket_name}"',
+            ],
+            (f'sky jobs cancel -y -n {name}; '
+             f'{smoke_tests_utils.run_cloud_cmd_on_cluster(name, cmd=delete_bucket_cmd)}; '
+             f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}'),
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=15 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
