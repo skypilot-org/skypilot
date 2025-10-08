@@ -207,6 +207,11 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
 # We use 100KB as a threshold to be safe for other arguments that
 # might be added during ssh.
 _MAX_INLINE_SCRIPT_LENGTH = 100 * 1024
+_EXCEPTION_MSG_AND_RETURNCODE_FOR_DUMP_INLINE_SCRIPT = [
+    ('too long', 255),
+    ('request-uri too large', 1),
+    ('request header fields too large', 1),
+]
 
 _RESOURCES_UNAVAILABLE_LOG = (
     'Reasons for provision failures (for details, please check the log above):')
@@ -226,6 +231,57 @@ def _is_command_length_over_limit(command: str) -> bool:
     quoted_length = len(shlex.quote(shlex.quote(command)))
     return quoted_length > _MAX_INLINE_SCRIPT_LENGTH
 
+
+def _is_message_too_long(returncode: int, output: Optional[str]=None, file_path: Optional[str]=None) -> bool:
+    """Check if the message sent to the remote is too long.
+
+    We use inline script to run the setup or run command, i.e. the script will
+    be part of the message sent to the remote cluster. There is a chance that
+    the command is too long, when people has very long run or setup commands, or
+    there is a cloudflare proxy in front of the remote blocking the long
+    message. Several common causes are:
+    - SSH returning: `too long` in the error message.
+    - Cloudflare proxy returning: `414 Request-URI Too Large` or
+      `431 Request Header Fields Too Large` error.
+
+    We use a general length limit check before but it could be inaccurate on
+    some systems, e.g. cloudflare proxy, so this is necessary.
+
+    Args:
+        returncode: The return code of the setup command.
+        output: The output of the setup command.
+        file_path: The path to the setup log file.
+    """
+    assert (output is not None) ^ (file_path is not None), 'Either output or file_path must be provided.'
+    to_check = []
+    for match_str, desired_rc in _EXCEPTION_MSG_AND_RETURNCODE_FOR_DUMP_INLINE_SCRIPT:
+        if desired_rc == returncode:
+            to_check.append(match_str)
+    if not to_check:
+        return False
+
+    def _check_output_for_match_str(output: str) -> bool:
+        for match_str in to_check:
+            if match_str.lower() in output.lower():
+                return True
+        return False
+
+    if file_path is not None:
+        try:
+            with open(os.path.expanduser(file_path),
+                        'r',
+                        encoding='utf-8') as f:
+                content = f.read()
+                return _check_output_for_match_str(content)
+        except Exception as e:  # pylint: disable=broad-except
+            # We don't crash the setup if we cannot read the log file.
+            # Instead, we should retry the setup with dumping the script
+            # to a file to be safe.
+            logger.debug(
+                f'Failed to read setup log file {file_path}: {e}')
+            return True
+    else:
+        return _check_output_for_match_str(output)
 
 def _get_cluster_config_template(cloud):
     cloud_to_template = {
@@ -4072,29 +4128,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             returncode = _run_setup(f'{create_script_code} && {setup_cmd}',)
 
-            def _load_setup_log_and_match(match_str: str) -> bool:
-                try:
-                    with open(os.path.expanduser(setup_log_path),
-                              'r',
-                              encoding='utf-8') as f:
-                        return match_str.lower() in f.read().lower()
-                except Exception as e:  # pylint: disable=broad-except
-                    # We don't crash the setup if we cannot read the log file.
-                    # Instead, we should retry the setup with dumping the script
-                    # to a file to be safe.
-                    logger.debug(
-                        f'Failed to read setup log file {setup_log_path}: {e}')
-                    return True
 
-            if ((returncode == 255 and _load_setup_log_and_match('too long')) or
-                (returncode == 1 and
-                 _load_setup_log_and_match('request-uri too large'))):
-                # If the setup script is too long, we retry it with dumping
-                # the script to a file and running it with SSH. We use a
-                # general length limit check before but it could be
-                # inaccurate on some systems.
-                # When there is a cloudflare proxy in front of the remote, it
-                # could cause `414 Request-URI Too Large` error.
+
+            if _is_message_too_long(returncode, file_path=setup_log_path):
+                # If the setup script is too long, we need to retry it
+                # with dumping the script to a file and running it the script
+                # on remote cluster instead.
                 logger.debug('Failed to run setup command inline due to '
                              'command length limit. Dumping setup script to '
                              'file and running it with SSH.')
@@ -4307,15 +4346,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             backend_utils.check_stale_runtime_on_remote(returncode, stderr,
                                                         handle.cluster_name)
             output = stdout + stderr
-            if ((returncode == 255 and 'too long' in output.lower()) or
-                (returncode == 1 and
-                 'request-uri too large' in output.lower())):
-                # If the generated script is too long, we retry it with dumping
-                # the script to a file and running it with SSH. We use a general
-                # length limit check before but it could be inaccurate on some
-                # systems.
-                # When there is a cloudflare proxy in front of the remote, it
-                # could cause `414 Request-URI Too Large` error.
+            if _is_message_too_long(returncode, output=output):
+                # If the job submit script is too long, we need to retry it
+                # with dumping the script to a file and running it the script
+                # on remote cluster instead.
                 logger.debug(
                     'Failed to submit job due to command length limit. '
                     'Dumping job to file and running it with SSH. '
