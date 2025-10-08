@@ -111,7 +111,9 @@ def compute_server_config(deploy: bool,
     process after API server was introduced.
     """
     cpu_count = common_utils.get_cpu_count()
+    logger.debug(f'CPU count: {cpu_count}')
     mem_size_gb = common_utils.get_mem_size_gb()
+    logger.debug(f'Memory size: {mem_size_gb}GB')
     max_parallel_for_long = _max_long_worker_parallism(cpu_count,
                                                        mem_size_gb,
                                                        local=not deploy)

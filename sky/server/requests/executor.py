@@ -399,6 +399,10 @@ def _request_execution_wrapper(request_id: str,
     logger.info(f'Running request {request_id} with pid {pid}')
     with api_requests.update_request(request_id) as request_task:
         assert request_task is not None, request_id
+        if request_task.status != api_requests.RequestStatus.PENDING:
+            logger.debug(f'Request is already {request_task.status.value}, '
+                         f'skipping execution')
+            return
         log_path = request_task.log_path
         request_task.pid = pid
         request_task.status = api_requests.RequestStatus.RUNNING

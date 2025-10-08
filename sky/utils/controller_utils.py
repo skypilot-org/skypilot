@@ -726,6 +726,17 @@ def get_controller_resources(
     return result
 
 
+def get_controller_mem_size_gb() -> float:
+    try:
+        with open(os.path.expanduser(constants.CONTROLLER_K8S_MEMORY_FILE),
+                  'r',
+                  encoding='utf-8') as f:
+            return float(f.read())
+    except FileNotFoundError:
+        pass
+    return common_utils.get_mem_size_gb()
+
+
 def _setup_proxy_command_on_controller(
         controller_launched_cloud: 'clouds.Cloud',
         user_config: Dict[str, Any]) -> config_utils.Config:

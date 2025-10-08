@@ -120,3 +120,57 @@ def test_ray_train(generic_cloud: str, accelerator: Dict[str, str]) -> None:
             timeout=20 * 60,
         )
         smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Test NeMo RL ----------
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_hyperbolic  # Hyperbolic not support num_nodes > 1 yet
+@pytest.mark.no_seeweb  # Seeweb does not support multi-node
+@pytest.mark.no_azure
+@pytest.mark.no_vast
+@pytest.mark.no_fluidstack
+@pytest.mark.no_kubernetes  # No enough resources in Kubernetes yet
+@pytest.mark.resource_heavy
+@pytest.mark.parametrize('accelerator', [{
+    'do': 'H100',
+    'nebius': 'L40S',
+}])
+def test_nemorl(generic_cloud: str, accelerator: Dict[str, str]) -> None:
+    cpu = '10+'
+    memory = '60+'
+    if generic_cloud == 'kubernetes':
+        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
+    else:
+        accelerator = accelerator.get(generic_cloud, 'L4')
+
+    infra = generic_cloud
+    if generic_cloud == 'aws':
+        infra = 'aws/ap-northeast-1'
+
+    name = smoke_tests_utils.get_cluster_name()
+    original_yaml_path = 'llm/nemorl/nemorl.sky.yaml'
+
+    with open(original_yaml_path, 'r') as f:
+        content = f.read()
+
+    modified_content = re.sub(
+        r'(?m)^(\s*)dpo\.val_global_batch_size=.*\\\s*$',
+        r'\1dpo.val_global_batch_size=1 \\\n\1dpo.max_num_steps=1 \\\n\1policy.model_name="Qwen/Qwen3-0.6B" \\\n\1policy.tokenizer.name="Qwen/Qwen3-0.6B" \\',
+        content,
+    )
+
+    # Create a temporary YAML file with the modified content
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as f:
+        f.write(modified_content)
+        f.flush()
+
+        test = smoke_tests_utils.Test(
+            'nemorl',
+            [
+                f'HF_TOKEN="" sky launch -y -c {name} --infra {infra} --gpus {accelerator} --cpus {cpu} --memory {memory} --secret HF_TOKEN {f.name}',
+                f'sky logs {name} 1 --status',
+            ],
+            f'sky down -y {name}',
+            timeout=40 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)

@@ -241,6 +241,7 @@ def test_gcp_zone():
 @pytest.mark.no_vast  # Requires AWS
 @pytest.mark.no_hyperbolic  # Requires AWS
 @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
+@pytest.mark.no_dependency  # Requires full dependency installed
 @pytest.mark.parametrize(
     'image_id',
     [

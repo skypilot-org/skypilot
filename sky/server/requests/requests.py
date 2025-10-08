@@ -449,9 +449,15 @@ def init_db_async(func):
 
 def reset_db_and_logs():
     """Create the database."""
+    logger.debug('clearing local API server database')
     server_common.clear_local_api_server_database()
+    logger.debug(
+        f'clearing local API server logs directory at {REQUEST_LOG_PATH_PREFIX}'
+    )
     shutil.rmtree(pathlib.Path(REQUEST_LOG_PATH_PREFIX).expanduser(),
                   ignore_errors=True)
+    logger.debug('clearing local API server client directory at '
+                 f'{server_common.API_SERVER_CLIENT_DIR.expanduser()}')
     shutil.rmtree(server_common.API_SERVER_CLIENT_DIR.expanduser(),
                   ignore_errors=True)
 
@@ -467,10 +473,13 @@ def request_lock_path(request_id: str) -> str:
 @metrics_lib.time_me
 def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
     """Get and update a SkyPilot API request."""
-    request = _get_request_no_lock(request_id)
-    yield request
-    if request is not None:
-        _add_or_update_request_no_lock(request)
+    # Acquire the lock to avoid race conditions between multiple request
+    # operations, e.g. execute and cancel.
+    with filelock.FileLock(request_lock_path(request_id)):
+        request = _get_request_no_lock(request_id)
+        yield request
+        if request is not None:
+            _add_or_update_request_no_lock(request)
 
 
 @init_db
@@ -485,12 +494,15 @@ def update_request_async(
 
     @contextlib.asynccontextmanager
     async def _cm():
-        request = await _get_request_no_lock_async(request_id)
-        try:
-            yield request
-        finally:
-            if request is not None:
-                await _add_or_update_request_no_lock_async(request)
+        # Acquire the lock to avoid race conditions between multiple request
+        # operations, e.g. execute and cancel.
+        async with filelock.AsyncFileLock(request_lock_path(request_id)):
+            request = await _get_request_no_lock_async(request_id)
+            try:
+                yield request
+            finally:
+                if request is not None:
+                    await _add_or_update_request_no_lock_async(request)
 
     return _cm()
 
@@ -775,9 +787,12 @@ def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
 
 
 def set_request_cancelled(request_id: str) -> None:
-    """Set a request to cancelled."""
+    """Set a pending or running request to cancelled."""
     with update_request(request_id) as request_task:
         assert request_task is not None, request_id
+        # Already finished or cancelled.
+        if request_task.status > RequestStatus.RUNNING:
+            return
         request_task.finished_at = time.time()
         request_task.status = RequestStatus.CANCELLED
 

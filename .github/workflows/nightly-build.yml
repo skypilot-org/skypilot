@@ -198,7 +198,6 @@ jobs:
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--kubernetes --no-resource-heavy"}'
       timeout_minutes: 60
-      sleep_seconds: 1200  # 20-minute delay to reduce buildkite resource usage
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -209,11 +208,10 @@ jobs:
     with:
       commit: ${{ github.sha }}
       branch: ${{ github.ref_name }}
-      message: "nightly-build-pypi --kubernetes --no-resource-heavy --dependency kubernetes"
+      message: "nightly-build-pypi --kubernetes --no-resource-heavy --dependency"
       pipeline: "smoke-tests"
-      build_env_vars: '{"ARGS": "--kubernetes --no-resource-heavy --dependency kubernetes"}'
+      build_env_vars: '{"ARGS": "--kubernetes --no-resource-heavy --dependency"}'
       timeout_minutes: 60
-      sleep_seconds: 1800  # 30-minute delay to reduce buildkite resource usage
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -228,7 +226,7 @@ jobs:
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--remote-server --kubernetes"}'
       timeout_minutes: 60
-      sleep_seconds: 1500  # 25-minute delay to reduce buildkite resource usage
+      sleep_seconds: 600  # 10 minute delay to reduce buildkite resource usage
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
