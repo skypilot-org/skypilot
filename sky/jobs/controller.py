@@ -874,7 +874,7 @@ class Controller:
                 for storage in task.storage_mounts.values():
                     storage.construct()
             except (exceptions.StorageSpecError, exceptions.StorageError) as e:
-                job_logger.debug(
+                job_logger.warning(
                     f'Failed to construct storage object for teardown: {e}\n'
                     'This may happen because storage construction already '
                     'failed during launch, in which case there\'s nothing to '
