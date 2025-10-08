@@ -480,7 +480,7 @@ class TestBackwardCompatibility:
         # and https://github.com/skypilot-org/skypilot/pull/7494
         check_controller_process_count = (
             's=$(sky status -u) && echo "$s" && '
-            'jobs_controller=$(echo "$s" | grep sky-jobs-controller- | awk \'{print $1}\') && '
+            'jobs_controller=$(echo "$s" | grep -oE \'sky-jobs-controller-[0-9a-f]+\' | head -n1) && '
             'if [ -z "$jobs_controller" ]; then echo "ERROR: jobs controller not found in sky status"; exit 1; fi && '
             'echo "Jobs controller: $jobs_controller" && '
             'num_controllers=$(ssh $jobs_controller "pgrep -f msky\\.jobs\\.controller | wc -l") && '
