@@ -219,12 +219,16 @@ def pytest_addoption(parser):
     parser.addoption(
         '--dependency',
         type=str,
+        nargs='?',
+        const='',
         default='all',
         help=
-        'Dependency for package install. For example, --dependency=aws will run '
-        'pip install "skypilot[aws]". --dependency=aws,azure will run '
-        'pip install "skypilot[aws,azure]". This parameter only works in the '
-        'Buildkite CI environment and will be ignored if run locally.',
+        ('Dependency for client-side package install. '
+         'E.g., --dependency=aws runs pip install "skypilot[aws]" on client. '
+         '--dependency=aws,azure runs pip install "skypilot[aws,azure]" on client. '
+         '--dependency (no value) installs base package only (no extras) on client. '
+         'This only affects client side; server side always installs all dependencies. '
+         'Only works in Buildkite CI; ignored if run locally.'),
     )
 
 
