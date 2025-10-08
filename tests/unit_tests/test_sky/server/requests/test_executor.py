@@ -46,12 +46,11 @@ async def test_execute_request_coroutine_ctx_cancelled_on_cancellation():
         never_completing_future = asyncio.Future()
         mock_to_thread.return_value = never_completing_future
 
-        task = asyncio.create_task(
-            executor.execute_request_in_coroutine(request))
+        task = executor.execute_request_in_coroutine(request)
 
         await asyncio.sleep(0.1)
-        task.cancel()
-        await task
+        await task.cancel()
+        await task.task
         # Verify the context is actually cancelled
         mock_ctx.cancel.assert_called()
 
