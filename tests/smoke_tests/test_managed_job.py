@@ -1475,7 +1475,7 @@ def test_managed_jobs_ha_kill_starting(generic_cloud: str):
     'bucket_name',
     [
         None,  # generate a unique bucket name in the test
-        'a',  # too short
+        'ab',  # too short
         'not-my-bucket'  # access denied (as of writing, this bucket exists on both S3 and GCS but is private)
     ])
 def test_managed_jobs_failed_precheck_storage_spec_error(
@@ -1526,7 +1526,7 @@ def test_managed_jobs_failed_precheck_storage_spec_error(
 
     with tempfile.NamedTemporaryFile(suffix='.yaml',
                                       mode='w') as f_config, \
-         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         yaml_utils.dump_yaml(f_config.name, config_dict)
         f_config.flush()
 
@@ -1541,7 +1541,7 @@ def test_managed_jobs_failed_precheck_storage_spec_error(
                 job_name=name,
                 job_status=[sky.ManagedJobStatus.FAILED_PRECHECKS],
                 timeout=300),
-            f'sky jobs logs --controller -n {name} --no-follow | grep -i "StorageSpecError\\|{bucket_name}"',
+            f'sky jobs logs --controller -n {name} --no-follow | grep -i "Storage.*Error\\"',
         ]
 
         commands = base_commands

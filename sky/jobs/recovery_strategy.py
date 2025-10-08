@@ -495,7 +495,9 @@ class StrategyExecutor:
                         self._logger.info('Managed job cluster launched.')
                     except (exceptions.InvalidClusterNameError,
                             exceptions.NoCloudAccessError,
-                            exceptions.ResourcesMismatchError) as e:
+                            exceptions.ResourcesMismatchError,
+                            exceptions.StorageSpecError,
+                            exceptions.StorageError) as e:
                         self._logger.error(
                             'Failure happened before provisioning. '
                             f'{common_utils.format_exception(e)}')
