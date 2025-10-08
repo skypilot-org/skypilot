@@ -220,7 +220,7 @@ extras_require: Dict[str, List[str]] = {
         PROTOBUF,
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
-    'seeweb': ['ecsapi>=0.2.0'],
+    'seeweb': ['ecsapi==0.4.0'],
     'server': server_dependencies,
 }
 
