@@ -63,7 +63,7 @@ install_requires = [
     # setup.py:
     # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L254
     # We need pydantic>=2.0.0 for API server and client.
-    'pydantic!=2.0.*,!=2.1.*,!=2.2.*,!=2.3.*,!=2.4.*,<3,>2',
+    'pydantic!=2.0.*,!=2.1.*,!=2.2.*,!=2.3.*,!=2.4.*,<2.11,>2',
     # Required for Form data by pydantic
     'python-multipart',
     'aiofiles',
