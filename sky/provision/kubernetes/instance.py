@@ -1383,8 +1383,9 @@ def get_cluster_info(
             assert head_spec is not None, pod
             cpu_request = head_spec.containers[0].resources.requests['cpu']
 
-    assert cpu_request is not None, ('cpu_request should not be None, check '
-                                     'the Pod status')
+    assert cpu_request is not None, (f'Pod {cluster_name_on_cloud}-head not '
+                                     'found or not Running, check the Pod '
+                                     'status')
 
     ssh_user = 'sky'
     # Use pattern matching to extract SSH user, handling MOTD contamination.
