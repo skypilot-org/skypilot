@@ -11,7 +11,9 @@ from typing import List, Optional, Tuple
 import httpx
 import prometheus_client as prom
 
+from sky import sky_logging
 from sky.skylet import constants
+from sky.utils import common_utils
 from sky.utils import context_utils
 
 _SELECT_TIMEOUT = 1
@@ -34,6 +36,8 @@ _MEM_BUCKETS = [
     256 * _MB,
     float('inf'),
 ]
+
+logger = sky_logging.init_logger(__name__)
 
 # Whether the metrics are enabled, cannot be changed at runtime.
 METRICS_ENABLED = os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED,
@@ -310,6 +314,10 @@ async def send_metrics_request_with_port_forward(
             response.raise_for_status()
             return response.text
 
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.error(f'Failed to send metrics request with port forward: '
+                     f'{common_utils.format_exception(e)}')
+        raise
     finally:
         # Always clean up port forward
         if port_forward_process:
