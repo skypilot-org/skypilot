@@ -202,7 +202,7 @@ def _validate_consolidation_mode_config(
 # API Server. Under the hood, we submit the job monitoring logic as processes
 # directly in the API Server.
 # Use LRU Cache so that the check is only done once.
-# @annotations.lru_cache(scope='request', maxsize=1)
+@annotations.lru_cache(scope='request', maxsize=1)
 def is_consolidation_mode() -> bool:
     if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
         return True
