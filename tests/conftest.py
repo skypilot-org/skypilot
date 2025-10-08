@@ -29,6 +29,7 @@ from common_test_fixtures import enable_all_clouds
 from common_test_fixtures import mock_aws_backend
 from common_test_fixtures import mock_client_requests
 from common_test_fixtures import mock_controller_accessible
+from common_test_fixtures import mock_execute_in_coroutine
 from common_test_fixtures import mock_job_table_no_job
 from common_test_fixtures import mock_job_table_one_job
 from common_test_fixtures import mock_queue
