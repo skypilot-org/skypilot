@@ -550,13 +550,12 @@ def test_tail_jobs_logs_blocks_ssh(generic_cloud: str):
             raise Exception("SSH failed.")
 
         print("SSH completed.")
-    except Exception:
+    finally:
         # Stop and start the api server to unblock it.
         cmd_one = subprocess.Popen(['sky api stop'], shell=True)
-        cmd_one.wait(timeout=15)
+        cmd_one.wait(timeout=timeout)
         cmd_two = subprocess.Popen(['sky api start'], shell=True)
-        cmd_two.wait(timeout=15)
-    finally:
+        cmd_two.wait(timeout=timeout)
         # Tear down cluster.
         try:
             print("Tearing down cluster...")
