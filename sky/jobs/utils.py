@@ -206,7 +206,11 @@ def _validate_consolidation_mode_config(
 def is_consolidation_mode() -> bool:
     if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
         return True
+    logger.info(f'get_server_config: {skypilot_config.get_server_config()}')
 
+    logger.info(
+        f'get_user_config_path: {skypilot_config.get_user_config_path()}')
+    logger.info(f'get_user_config: {skypilot_config.get_user_config()}')
     consolidation_mode = skypilot_config.get_nested(
         ('jobs', 'controller', 'consolidation_mode'), default_value=False)
     # We should only do this check on API server, as the controller will not
