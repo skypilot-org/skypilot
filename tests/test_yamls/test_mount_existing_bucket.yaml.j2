@@ -2,6 +2,7 @@ file_mounts:
   /test-mount:
     # This will trigger StorageSpecError when the bucket already exists.
     name: {{ bucket_name }}
+    store: {{ store }}
     mode: MOUNT
 
 run: |
