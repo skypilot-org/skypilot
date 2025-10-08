@@ -1500,7 +1500,24 @@ def test_managed_jobs_failed_precheck_storage_spec_error(
     template = jinja2.Template(template_str)
     content = template.render(bucket_name=bucket_name)
 
-    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+    config_dict = {
+        'jobs': {
+            'force_disable_cloud_bucket': True,
+            'controller': {
+                'resources': {
+                    'cpus': '2+',
+                    'memory': '4+'
+                }
+            }
+        }
+    }
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml',
+                                      mode='w') as f_config, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        yaml_utils.dump_yaml(f_config.name, config_dict)
+        f_config.flush()
+
         f.write(content)
         f.flush()
         file_path = f.name
@@ -1512,7 +1529,7 @@ def test_managed_jobs_failed_precheck_storage_spec_error(
                     generic_cloud, name),
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name, cmd=create_bucket_cmd),
-                f'sky jobs launch -n {name} {infra_arg} {smoke_tests_utils.LOW_RESOURCE_ARG} {file_path} -y -d',
+                f'sky jobs launch -n {name} {infra_arg} {smoke_tests_utils.LOW_RESOURCE_ARG} {file_path} -y',
                 smoke_tests_utils.
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=name,
@@ -1523,7 +1540,9 @@ def test_managed_jobs_failed_precheck_storage_spec_error(
             (f'sky jobs cancel -y -n {name}; '
              f'{smoke_tests_utils.run_cloud_cmd_on_cluster(name, cmd=delete_bucket_cmd)}; '
              f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}'),
-            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            env={
+                skypilot_config.ENV_VAR_GLOBAL_CONFIG: f_config.name,
+            },
             timeout=15 * 60,
         )
         smoke_tests_utils.run_one_test(test)
