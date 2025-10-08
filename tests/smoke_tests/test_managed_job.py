@@ -1541,7 +1541,7 @@ def test_managed_jobs_failed_precheck_storage_spec_error(
                 job_name=name,
                 job_status=[sky.ManagedJobStatus.FAILED_PRECHECKS],
                 timeout=300),
-            f'sky jobs logs --controller -n {name} --no-follow | grep -i "Storage.*Error\\"',
+            f'sky jobs logs --controller -n {name} --no-follow | grep -i "Storage.*Error"',
         ]
 
         commands = base_commands
