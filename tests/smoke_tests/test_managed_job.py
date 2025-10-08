@@ -1474,11 +1474,17 @@ def test_managed_jobs_ha_kill_starting(generic_cloud: str):
 @pytest.mark.parametrize(
     'bucket_name',
     [
-        # generate a unique bucket name in the test
+        # Generate a unique bucket name in the test
+        # Fails with:
+        # [sky.exceptions.StorageSpecError] Attempted to mount a non-sky managed bucket '...' without specifying the storage source. Bucket '...' already exists.
         None,
-        # too short
+        # Too short
+        # Fails with:
+        # [sky.exceptions.StorageNameError] Invalid store name: name ab must be between 3 (min) and 63 (max) characters long.
         'ab',
-        # access denied (as of time of writing, this bucket happens to exist on both S3 and GCS but is private)
+        # Access denied (as of time of writing, this bucket happens to exist on both S3 and GCS but is private)
+        # Fails with:
+        # [sky.exceptions.StorageBucketGetError] Failed to access existing bucket 'not-my-bucket'. This is likely because it is a private bucket you do not have access to.
         'not-my-bucket'
     ])
 def test_managed_jobs_failed_precheck_storage_spec_error(
