@@ -3134,8 +3134,8 @@ def refresh_cluster_records() -> None:
     cluster_names_with_launch_request = {
         request.cluster_name for request in request
     }
-    cluster_names_without_launch_request = list(
-        cluster_names - cluster_names_with_launch_request)
+    cluster_names_without_launch_request = (cluster_names -
+                                            cluster_names_with_launch_request)
 
     def _refresh_cluster_record(cluster_name):
         return _refresh_cluster(cluster_name,
