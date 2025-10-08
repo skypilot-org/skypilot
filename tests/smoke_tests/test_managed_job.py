@@ -85,7 +85,7 @@ def test_managed_jobs_basic(generic_cloud: str):
         # TODO(zhwu): Change to f'sky jobs cancel -y -n {name}-1 -n {name}-2' when
         # canceling multiple job names is supported.
         f'sky jobs cancel -y -n {name}-1; sky jobs cancel -y -n {name}-2',
-        # env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
