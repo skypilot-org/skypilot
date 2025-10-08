@@ -102,7 +102,7 @@ def _generate_rsa_key_pair() -> Tuple[str, str]:
     return public_key, private_key
 
 
-def _save_key_pair(user_hash: str, private_key_path: str, public_key_path: str,
+def _save_key_pair(private_key_path: str, public_key_path: str,
                    private_key: str, public_key: str) -> None:
     key_dir = os.path.dirname(private_key_path)
     os.makedirs(key_dir, exist_ok=True, mode=0o700)
@@ -120,8 +120,6 @@ def _save_key_pair(user_hash: str, private_key_path: str, public_key_path: str,
               encoding='utf-8',
               opener=functools.partial(os.open, mode=0o644)) as f:
         f.write(public_key)
-
-    global_user_state.set_ssh_keys(user_hash, public_key, private_key)
 
 
 def get_or_generate_keys() -> Tuple[str, str]:
@@ -141,11 +139,13 @@ def get_or_generate_keys() -> Tuple[str, str]:
     with filelock.FileLock(lock_path, timeout=10):
         if not os.path.exists(private_key_path):
             ssh_public_key, ssh_private_key, exists = (
-                global_user_state.get_ssh_keys(common_utils.get_user_hash()))
+                global_user_state.get_ssh_keys(user_hash))
             if not exists:
                 ssh_public_key, ssh_private_key = _generate_rsa_key_pair()
-            _save_key_pair(user_hash, private_key_path, public_key_path,
-                           ssh_private_key, ssh_public_key)
+                global_user_state.set_ssh_keys(user_hash, ssh_public_key,
+                                               ssh_private_key)
+            _save_key_pair(private_key_path, public_key_path, ssh_private_key,
+                           ssh_public_key)
     assert os.path.exists(public_key_path), (
         'Private key found, but associated public key '
         f'{public_key_path} does not exist.')
@@ -181,8 +181,8 @@ def create_ssh_key_files_from_db(private_key_path: str):
                 global_user_state.get_ssh_keys(user_hash))
             if not exists:
                 raise RuntimeError(f'SSH keys not found for user {user_hash}')
-            _save_key_pair(user_hash, private_key_path, public_key_path,
-                           ssh_private_key, ssh_public_key)
+            _save_key_pair(private_key_path, public_key_path, ssh_private_key,
+                           ssh_public_key)
     assert os.path.exists(public_key_path), (
         'Private key found, but associated public key '
         f'{public_key_path} does not exist.')
