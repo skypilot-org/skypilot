@@ -183,7 +183,7 @@ export function ManagedJobs() {
   const [poolsData, setPoolsData] = useState([]);
   const [filters, setFilters] = useState([]);
 
-  const fetchData = async (isRefreshButton = false) => {
+  const fetchData = React.useCallback(async (isRefreshButton = false) => {
     setLoading(true);
     // Only set poolsLoading on initial load, not on refresh button clicks
     if (!isRefreshButton && isInitialLoad) {
@@ -203,11 +203,11 @@ export function ManagedJobs() {
         setIsInitialLoad(false);
       }
     }
-  };
+  }, [isInitialLoad]);
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
 
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched for both jobs and pools
@@ -543,7 +543,7 @@ export function ManagedJobsTable({
     fetchData({ includeStatus: true });
     // Mark that initial fetch is complete so other effects can run
     isInitialFetch.current = false;
-  }, []);
+  }, [fetchData]);
 
   // Fetch on pagination (page) changes without status request
   // Skip on initial fetch (page defaults to 1)
@@ -551,7 +551,7 @@ export function ManagedJobsTable({
     if (!isInitialFetch.current) {
       fetchData({ includeStatus: false });
     }
-  }, [currentPage]);
+  }, [currentPage, fetchData]);
 
   // Fetch on filters or page size changes with status request
   // Skip on initial fetch (filters default to [] and pageSize to 10)
@@ -559,7 +559,7 @@ export function ManagedJobsTable({
     if (!isInitialFetch.current) {
       fetchData({ includeStatus: true });
     }
-  }, [filters, pageSize]);
+  }, [filters, pageSize, fetchData]);
 
   // Fetch on status filter changes (activeTab, selectedStatuses, showAllMode)
   // Skip on initial fetch (these have default values)
@@ -567,7 +567,7 @@ export function ManagedJobsTable({
     if (!isInitialFetch.current) {
       fetchData({ includeStatus: true });
     }
-  }, [activeTab, selectedStatuses, showAllMode]);
+  }, [activeTab, selectedStatuses, showAllMode, fetchData]);
 
   useEffect(() => {
     const interval = setInterval(() => {
