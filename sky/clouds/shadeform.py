@@ -90,6 +90,8 @@ class Shadeform(clouds.Cloud):
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
         """Get regions that offer the requested instance type."""
+        assert zone is None, 'Shadeform does not support zones.'
+        del zone  # unused
         if use_spot:
             return []  # No spot support
 
