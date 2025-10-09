@@ -870,8 +870,16 @@ class Controller:
             # because when SkyPilot API server machine sends the yaml config to
             # the controller machine, only storage metadata is sent, not the
             # storage object itself.
-            for storage in task.storage_mounts.values():
-                storage.construct()
+            try:
+                for storage in task.storage_mounts.values():
+                    storage.construct()
+            except (exceptions.StorageSpecError, exceptions.StorageError) as e:
+                job_logger.warning(
+                    f'Failed to construct storage object for teardown: {e}\n'
+                    'This may happen because storage construction already '
+                    'failed during launch, storage was deleted externally, '
+                    'credentials expired/changed, or network connectivity '
+                    'issues.')
             try:
                 backend.teardown_ephemeral_storage(task)
             except Exception as e:  # pylint: disable=broad-except
