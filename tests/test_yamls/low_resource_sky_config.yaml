@@ -1,6 +1,5 @@
 jobs:
   controller:
-    consolidation_mode: true
     resources:
       cpus: 2+
       memory: 4+
