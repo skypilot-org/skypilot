@@ -887,6 +887,7 @@ def unreachable_context():
 
 
 @pytest.mark.kubernetes
+@pytest.mark.no_dependency
 def test_kubernetes_context_failover(unreachable_context):
     """Test if the kubernetes context failover works.
 
@@ -992,6 +993,7 @@ def test_kubernetes_context_failover(unreachable_context):
 
 
 @pytest.mark.kubernetes
+@pytest.mark.no_dependency
 def test_kubernetes_get_nodes_and_pods():
     """Test the correctness of get_kubernetes_nodes and get_all_pods_in_kubernetes_cluster,
     as we parse the JSON ourselves and not using the Kubernetes Python client deserializer.
@@ -1497,6 +1499,7 @@ def test_launch_with_failing_setup(generic_cloud: str):
 
 
 @pytest.mark.no_remote_server
+@pytest.mark.no_dependency
 def test_loopback_access_with_basic_auth(generic_cloud: str):
     """Test that loopback access works."""
     server_config_content = textwrap.dedent(f"""\
@@ -1529,6 +1532,32 @@ def test_loopback_access_with_basic_auth(generic_cloud: str):
             f'sky jobs logs --no-follow | grep "hi"',
         ],
         teardown=f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# TODO(aylei): this test should not be retried in buildkite, failure indicates a
+# concurrency issue in our code.
+def test_launch_and_cancel_race_condition(generic_cloud: str):
+    """Test that launch and cancel race condition is handled correctly."""
+
+    name = smoke_tests_utils.get_cluster_name()
+    launch_cmd = f'sky launch -y -c {name}-$i --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "sleep 120" --async'
+    extract_id = r'echo "$s" | sed -n "s/.*Submitted sky\.launch request: \([0-9a-f-]\{36\}\).*/\1/p"'
+    launch_then_cancel = f's=$({launch_cmd}) && echo $s && id=$({extract_id}) && sky api cancel $id && sky down -y {name}-$i'
+    test = smoke_tests_utils.Test(
+        'launch_and_cancel_race_condition',
+        [
+            # Run multiple launch and cancel in parallel to introduce request queuing.
+            # This can trigger race conditions more frequently.
+            f'for i in {{1..20}}; do ({launch_then_cancel}) & done; wait',
+            # Sleep shortly, so that if there is any leaked cluster it can be shown in sky status.
+            'sleep 10',
+            # Verify the cluster is not created.
+            f'sky status {name} | grep "not found"',
+        ],
+        # teardown=f'sky down -y {name} || true',
         timeout=smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)

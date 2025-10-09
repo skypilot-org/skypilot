@@ -2324,8 +2324,6 @@ class RetryingVmProvisioner(object):
                 # terminated by _retry_zones().
                 assert (prev_cluster_status == status_lib.ClusterStatus.INIT
                        ), prev_cluster_status
-                assert global_user_state.get_handle_from_cluster_name(
-                    cluster_name) is None, cluster_name
                 logger.info(
                     ux_utils.retry_message(
                         f'Retrying provisioning with requested resources: '
@@ -3694,7 +3692,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     global_user_state.ClusterEventType.STATUS_CHANGE)
 
                 cluster_info = provisioner.post_provision_runtime_setup(
-                    repr(handle.launched_resources.cloud),
+                    handle.launched_resources,
                     resources_utils.ClusterName(handle.cluster_name,
                                                 handle.cluster_name_on_cloud),
                     handle.cluster_yaml,
@@ -5521,7 +5519,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster_yaml_path = handle.cluster_yaml
         handle.cluster_yaml = None
         global_user_state.update_cluster_handle(handle.cluster_name, handle)
-        global_user_state.remove_cluster_yaml(handle.cluster_name)
+        # Removing the cluster YAML can cause some unexpected stability issues.
+        # See #5011.
+        # global_user_state.remove_cluster_yaml(handle.cluster_name)
         common_utils.remove_file_if_exists(cluster_yaml_path)
 
     def set_autostop(self,
