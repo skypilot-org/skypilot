@@ -5181,22 +5181,22 @@ def jobs_pool_logs(
     .. code-block:: bash
 
         # Tail the controller logs of a pool
-        sky pool logs --controller [POOL_NAME]
+        sky jobs pool logs --controller [POOL_NAME]
         \b
         # Print the worker logs so far and exit
-        sky pool logs --no-follow [POOL_NAME]
+        sky jobs pool logs --no-follow [POOL_NAME] 1
         \b
         # Tail the logs of worker 1
-        sky pool logs [POOL_NAME] 1
+        sky jobs pool logs [POOL_NAME] 1
         \b
         # Show the last 100 lines of the controller logs
-        sky pool logs --controller --tail 100 [POOL_NAME]
+        sky jobs pool logs --controller --tail 100 [POOL_NAME]
         \b
         # Sync down all logs of the pool (controller, all workers)
-        sky pool logs [POOL_NAME] --sync-down
+        sky jobs pool logs [POOL_NAME] --sync-down
         \b
         # Sync down controller logs and logs for workers 1 and 3
-        sky pool logs [POOL_NAME] 1 3 --controller --sync-down
+        sky jobs pool logs [POOL_NAME] 1 3 --controller --sync-down
     """
     _handle_serve_logs(pool_name,
                        follow=follow,

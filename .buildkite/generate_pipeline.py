@@ -444,7 +444,7 @@ def _convert_quick_tests_core(test_files: List[str], args: str,
                         branch != 'master'):
                     continue
                 pipeline = _generate_pipeline(test_file,
-                                              args + f'--base-branch {branch}',
+                                              args + f' --base-branch {branch}',
                                               auto_retry=True)
                 output_file_pipelines.append(pipeline)
         else:

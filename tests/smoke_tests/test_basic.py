@@ -887,6 +887,7 @@ def unreachable_context():
 
 
 @pytest.mark.kubernetes
+@pytest.mark.no_dependency
 def test_kubernetes_context_failover(unreachable_context):
     """Test if the kubernetes context failover works.
 
@@ -992,6 +993,7 @@ def test_kubernetes_context_failover(unreachable_context):
 
 
 @pytest.mark.kubernetes
+@pytest.mark.no_dependency
 def test_kubernetes_get_nodes_and_pods():
     """Test the correctness of get_kubernetes_nodes and get_all_pods_in_kubernetes_cluster,
     as we parse the JSON ourselves and not using the Kubernetes Python client deserializer.
@@ -1497,6 +1499,7 @@ def test_launch_with_failing_setup(generic_cloud: str):
 
 
 @pytest.mark.no_remote_server
+@pytest.mark.no_dependency
 def test_loopback_access_with_basic_auth(generic_cloud: str):
     """Test that loopback access works."""
     server_config_content = textwrap.dedent(f"""\

@@ -1958,6 +1958,15 @@ if __name__ == '__main__':
         logger.error('port and metrics-port cannot be the same, exiting.')
         raise ValueError('port and metrics-port cannot be the same')
 
+    # Fail fast if the port is not available to avoid corrupt the state
+    # of potential running server instance.
+    # We might reach here because the running server is currently not
+    # responding, thus the healthz check fails and `sky api start` think
+    # we should start a new server instance.
+    if not common_utils.is_port_available(cmd_args.port):
+        logger.error(f'Port {cmd_args.port} is not available, exiting.')
+        raise RuntimeError(f'Port {cmd_args.port} is not available')
+
     # Show the privacy policy if it is not already shown. We place it here so
     # that it is shown only when the API server is started.
     usage_lib.maybe_show_privacy_policy()
