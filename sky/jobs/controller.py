@@ -877,8 +877,9 @@ class Controller:
                 job_logger.warning(
                     f'Failed to construct storage object for teardown: {e}\n'
                     'This may happen because storage construction already '
-                    'failed during launch, in which case there\'s nothing to '
-                    'clean up.')
+                    'failed during launch, storage was deleted externally, '
+                    'credentials expired/changed, or network connectivity '
+                    'issues.')
             try:
                 backend.teardown_ephemeral_storage(task)
             except Exception as e:  # pylint: disable=broad-except
