@@ -241,7 +241,7 @@ def normalize_tpu_accelerator_name(accelerator: str) -> Tuple[str, int]:
 def _is_cloudflare_transient_error(exception: Exception) -> bool:
     """Check if an exception is a transient CloudFlare error.
 
-    CloudFlare proxy errors (400, 401, 403, 429, 503) with CF-specific headers are
+    CloudFlare proxy errors (400, 401, 403, 503) with CF-specific headers are
     transient and should be retried, unlike real RBAC 403 or auth 401 errors.
 
     Args:
@@ -254,7 +254,7 @@ def _is_cloudflare_transient_error(exception: Exception) -> bool:
         return False
 
     # Check if this is a status code that CloudFlare uses for rate limiting/proxy errors
-    if exception.status not in (400, 401, 403, 429, 503):
+    if exception.status not in (400, 401, 403, 503):
         return False
 
     # Check for CloudFlare-specific headers
@@ -314,7 +314,7 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                     # Don't retry on permanent errors like 401 (Unauthorized)
                     # or 403 (Forbidden), unless it's a CloudFlare transient error
                     if (isinstance(e, kubernetes.api_exception()) and
-                            e.status in (400, 401, 403, 429, 503) and
+                            e.status in (400, 401, 403, 503) and
                             not is_cloudflare_error):
                         # Raise KubeAPIUnreachableError exception so that the
                         # optimizer/provisioner can failover to other clouds.

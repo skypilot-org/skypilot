@@ -1116,18 +1116,28 @@ class TestCloudFlareErrorDetection(unittest.TestCase):
 
         self.assertTrue(result)
 
-    def test_cloudflare_429_rate_limit(self):
-        """Test that 429 with CloudFlare headers is detected."""
+    def test_429_rate_limit_not_checked_for_cloudflare(self):
+        """Test that 429 is NOT checked for CloudFlare (always retried).
+        
+        429 errors are always transient rate limit errors, so they should be
+        retried regardless of whether they come from CloudFlare or not.
+        """
+        # 429 without CloudFlare headers should return False from CloudFlare check
+        # because 429s are handled separately (always retried)
         mock_exception = mock.Mock()
         mock_exception.status = 429
-        mock_exception.headers = {'CF-RAY': '12345-IAD', 'Server': 'cloudflare'}
+        mock_exception.headers = {
+            'Date': 'Wed, 08 Oct 2025 19:26:17 GMT',
+            'Content-Type': 'application/json'
+        }
 
         with patch('sky.adaptors.kubernetes.api_exception',
                    return_value=type(mock_exception)):
             result = kubernetes_utils._is_cloudflare_transient_error(
                 mock_exception)
 
-        self.assertTrue(result)
+        # Should return False because 429 is not in the CloudFlare check list
+        self.assertFalse(result)
 
     def test_real_rbac_403_not_cloudflare(self):
         """Test that real RBAC 403 without CloudFlare headers is NOT detected."""
@@ -1311,6 +1321,60 @@ class TestCloudFlareErrorDetection(unittest.TestCase):
 
             # Verify it was only called once (no retry)
             self.assertEqual(call_count['count'], 1)
+
+    def test_429_always_retried_without_cloudflare_headers(self):
+        """Test that 429 errors are retried even without CloudFlare headers.
+        
+        Unlike 403, 429 (Too Many Requests) is always a transient error
+        regardless of the source, so it should always be retried.
+        """
+
+        # Create a 429 exception without CloudFlare headers
+        class RateLimitException(Exception):
+
+            def __init__(self):
+                self.status = 429
+                self.headers = {
+                    'Date': 'Wed, 08 Oct 2025 19:26:17 GMT',
+                    'Content-Type': 'application/json',
+                    'Retry-After': '60'
+                }
+                super().__init__('Too Many Requests')
+
+        # Create a successful response
+        mock_runtime_class = mock.Mock()
+        mock_runtime_class.metadata.name = 'nvidia'
+        successful_response = mock.Mock()
+        successful_response.items = [mock_runtime_class]
+
+        call_count = {'count': 0}
+
+        def mock_list_runtime_class():
+            call_count['count'] += 1
+            if call_count['count'] == 1:
+                # First call: raise 429 error (no CloudFlare headers)
+                raise RateLimitException()
+            else:
+                # Second call: return success
+                return successful_response
+
+        mock_node_api = mock.Mock()
+        mock_node_api.list_runtime_class = mock_list_runtime_class
+
+        with patch('sky.adaptors.kubernetes.node_api',
+                   return_value=mock_node_api), \
+             patch('sky.adaptors.kubernetes.api_exception', return_value=RateLimitException), \
+             patch('time.sleep'):  # Skip sleep delays in test
+
+            # This should succeed after retry (429 always retried)
+            result = kubernetes_utils.check_nvidia_runtime_class(
+                context='test-context')
+
+            # Verify it succeeded
+            self.assertTrue(result)
+
+            # Verify it was called twice (first failed, second succeeded)
+            self.assertEqual(call_count['count'], 2)
 
 
 if __name__ == '__main__':
