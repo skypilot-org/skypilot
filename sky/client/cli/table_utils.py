@@ -1,7 +1,7 @@
 """Utilities for formatting tables for CLI output."""
 import abc
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import prettytable
 
@@ -89,11 +89,13 @@ def format_storage_table(storages: List[responses.StorageRecord],
 
 
 def format_job_table(jobs: List[responses.ManagedJobRecord],
-                     show_all: bool,
-                     show_user: bool,
+                     pool_status: Optional[List[Dict[str, Any]]] = None,
+                     show_all: bool = False,
+                     show_user: bool = False,
                      max_jobs: Optional[int] = None):
     jobs = [job.model_dump() for job in jobs]
     return managed_jobs.format_job_table(jobs,
+                                         pool_status=pool_status,
                                          show_all=show_all,
                                          show_user=show_user,
                                          max_jobs=max_jobs)
