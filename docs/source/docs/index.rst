@@ -1,5 +1,5 @@
-Welcome to SkyPilot!
-====================
+SkyPilot: Run AI on Any Infrastructure
+======================================
 
 .. image:: /_static/SkyPilot_wide_dark.svg
   :width: 50%
@@ -13,10 +13,6 @@ Welcome to SkyPilot!
   :class: no-scaled-link, only-light
 
 .. raw:: html
-
-   <p style="text-align:center">
-   <strong>Simplify & scale any AI infrastructure</strong>
-   </p>
 
    <p></p>
 
