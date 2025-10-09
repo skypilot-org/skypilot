@@ -1401,6 +1401,13 @@ def get_cluster_info(
     logger.debug(
         f'Using ssh user {ssh_user} for cluster {cluster_name_on_cloud}')
 
+    # cpu_request may be a string like `100m`, need to parse and convert
+    num_cpus = kubernetes_utils.parse_float_cpu_or_gpu_resource(cpu_request)
+    # 'num-cpus' for ray must be an integer, but we should not set it to 0 if
+    # cpus is <1.
+    # Keep consistent with the logic in clouds/kubernetes.py
+    str_cpus = str(max(int(num_cpus), 1))
+
     return common.ClusterInfo(
         instances=pods,
         head_instance_id=head_pod_name,
@@ -1410,7 +1417,7 @@ def get_cluster_info(
         # problems for other pods.
         custom_ray_options={
             'object-store-memory': 500000000,
-            'num-cpus': cpu_request,
+            'num-cpus': str_cpus,
         },
         provider_name='kubernetes',
         provider_config=provider_config)

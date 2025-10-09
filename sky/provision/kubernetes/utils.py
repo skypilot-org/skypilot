@@ -2241,6 +2241,16 @@ def get_kube_config_context_namespace(
         return DEFAULT_NAMESPACE
 
 
+def parse_float_cpu_or_gpu_resource(resource_qty_str: str) -> float:
+    resource_str = str(resource_qty_str)
+    if not resource_str:
+        return 0.0
+    if resource_str[-1] == 'm':
+        return float(resource_str[:-1]) / 1000
+    else:
+        return float(resource_str)
+
+
 def parse_cpu_or_gpu_resource(resource_qty_str: str) -> Union[int, float]:
     resource_str = str(resource_qty_str)
     if resource_str[-1] == 'm':
