@@ -70,7 +70,9 @@ class InternalRequestDaemon:
                     sky_logging.set_sky_logging_levels(level):
                     sky_logging.reload_logger()
                     level = self.refresh_log_level()
-                    self.event_fn()
+                    continue_running = self.event_fn()
+                    if not continue_running:
+                        break
                 # Clear request level cache after each run to avoid
                 # using too much memory.
                 annotations.clear_request_level_cache()
@@ -91,7 +93,7 @@ class InternalRequestDaemon:
                 time.sleep(server_constants.DAEMON_RESTART_INTERVAL_SECONDS)
 
 
-def refresh_cluster_status_event():
+def refresh_cluster_status_event() -> bool:
     """Periodically refresh the cluster status."""
     # pylint: disable=import-outside-toplevel
     from sky.backends import backend_utils
@@ -105,9 +107,9 @@ def refresh_cluster_status_event():
                 f'{server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS}'
                 ' seconds for the next refresh...\n')
     time.sleep(server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS)
+    return True
 
-
-def refresh_volume_status_event():
+def refresh_volume_status_event() -> bool:
     """Periodically refresh the volume status."""
     # pylint: disable=import-outside-toplevel
     from sky.volumes.server import core
@@ -122,9 +124,9 @@ def refresh_volume_status_event():
                 f'{server_constants.VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS}'
                 ' seconds for the next refresh...\n')
     time.sleep(server_constants.VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS)
+    return True
 
-
-def managed_job_status_refresh_event():
+def managed_job_status_refresh_event() -> bool:
     """Refresh the managed job status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
     from sky.jobs import utils as managed_job_utils
@@ -139,7 +141,7 @@ def managed_job_status_refresh_event():
     logger.info('=== Running managed job event ===')
     refresh_event.run()
     time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
-
+    return True
 
 def should_skip_managed_job_status_refresh():
     """Check if the managed job status refresh event should be skipped."""
@@ -173,23 +175,25 @@ def _should_skip_serve_status_refresh_event(pool: bool):
     return not serve_utils.is_consolidation_mode(pool=pool)
 
 
-def sky_serve_status_refresh_event():
+def sky_serve_status_refresh_event() -> bool:
     _serve_status_refresh_event(pool=False)
+    return True
 
 
 def should_skip_sky_serve_status_refresh():
     return _should_skip_serve_status_refresh_event(pool=False)
 
 
-def pool_status_refresh_event():
+def pool_status_refresh_event() -> bool:
     _serve_status_refresh_event(pool=True)
+    return True
 
 
 def should_skip_pool_status_refresh():
     return _should_skip_serve_status_refresh_event(pool=True)
 
 
-def deployment_update_event():
+def deployment_update_event() -> bool:
     """Trigger the deployment update event.
     - Find out the memory utilization percentage of the current pod.
     """
@@ -198,12 +202,14 @@ def deployment_update_event():
     memory_usage = common_utils.get_current_memory_usage_gb()
     memory_utilization = memory_usage / memory_limit
     if memory_utilization <= 0.8:
-        logger.debug(
+        logger.info(
             f'Currently using {memory_usage:.3f}GB of {memory_limit:.3f}GB. '
             f'Memory utilization {memory_utilization:.3f} is less than 0.8.')
-        # Nothing to do, return.
-        return
+        # Nothing to do, return and continue running the daemon.
+        return True
     config_map_utils.trigger_deployment_update()
+    # Deployment update event is done, return and stop running the daemon.
+    return False
 
 
 def should_skip_deployment_update():
