@@ -3330,7 +3330,9 @@ def get_clusters(
                                   force_refresh_statuses=force_refresh_statuses,
                                   include_user_info=True,
                                   summary_response=summary_response)
-        if 'error' not in record:
+        # record may be None if the cluster is deleted during refresh,
+        # e.g. all the Pods have been deleted before refresh.
+        if record is not None and 'error' not in record:
             _update_records_with_handle_info([record])
             if include_credentials:
                 _update_records_with_credentials([record])
