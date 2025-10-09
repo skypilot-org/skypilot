@@ -263,15 +263,14 @@ def _is_cloudflare_transient_error(exception: Exception) -> bool:
         return False
 
     # CloudFlare errors have CF-RAY header and/or Server: cloudflare
-    has_cf_ray = False
-    has_cf_server = False
+    is_cloudflare_error = False
     for k, v in headers.items():
         if 'cf-ray' in k.lower():
-            has_cf_ray = True
+            is_cloudflare_error = True
         if 'server' in k.lower() and 'cloudflare' in str(v).lower():
-            has_cf_server = True
+            is_cloudflare_error = True
 
-    return has_cf_ray or has_cf_server
+    return is_cloudflare_error
 
 
 def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
