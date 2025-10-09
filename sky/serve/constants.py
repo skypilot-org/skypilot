@@ -76,6 +76,9 @@ CONTROLLER_AUTOSTOP = {
 # A period of time to initialize your service. Any readiness probe failures
 # during this period will be ignored.
 DEFAULT_INITIAL_DELAY_SECONDS = 1200
+# For pool, we shrink the initial delay to 300s to make the pool more
+# responsive to the failure that setup command starts a long-running server.
+DEFAULT_INITIAL_DELAY_SECONDS_POOL = 300
 DEFAULT_MIN_REPLICAS = 1
 
 # Default port range start for controller and load balancer. Ports will be
