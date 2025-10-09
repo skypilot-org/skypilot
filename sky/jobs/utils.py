@@ -101,6 +101,13 @@ _JOB_CANCELLED_MESSAGE = (
 # update the state.
 _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 120
 
+# After enabling consolidation mode, we need to restart the API server to get
+# the jobs refresh deamon and correct number of executors. We use this file to
+# indicate that the API server has been restarted after enabling consolidation
+# mode.
+_JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE = (
+    '~/.sky/.jobs_controller_consolidation_reloaded_signal')
+
 
 class ManagedJobQueueResultType(enum.Enum):
     """The type of the managed job queue result."""
@@ -202,13 +209,38 @@ def _validate_consolidation_mode_config(
 # API Server. Under the hood, we submit the job monitoring logic as processes
 # directly in the API Server.
 # Use LRU Cache so that the check is only done once.
-@annotations.lru_cache(scope='request', maxsize=1)
-def is_consolidation_mode() -> bool:
+@annotations.lru_cache(scope='request', maxsize=2)
+def is_consolidation_mode(on_api_restart: bool = False) -> bool:
     if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
         return True
 
-    consolidation_mode = skypilot_config.get_nested(
+    config_consolidation_mode = skypilot_config.get_nested(
         ('jobs', 'controller', 'consolidation_mode'), default_value=False)
+
+    signal_file = pathlib.Path(
+        _JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE).expanduser()
+
+    restart_signal_file_exists = signal_file.exists()
+    consolidation_mode = (config_consolidation_mode and
+                          restart_signal_file_exists)
+
+    if on_api_restart:
+        if config_consolidation_mode:
+            signal_file.touch()
+    else:
+        if not restart_signal_file_exists:
+            if config_consolidation_mode:
+                logger.warning('Consolidation mode for managed jobs is enabled '
+                               'in ~/.sky/config.yaml, but the API server has '
+                               'not been restarted yet. Please restart the API '
+                               'server to enable it.')
+                return False
+        elif not config_consolidation_mode:
+            # Cleanup the signal file if the consolidation mode is disabled in
+            # the config. This allow the user to disable the consolidation mode
+            # without restarting the API server.
+            signal_file.unlink()
+
     # We should only do this check on API server, as the controller will not
     # have related config and will always seemingly disabled for consolidation
     # mode. Check #6611 for more details.

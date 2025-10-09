@@ -554,8 +554,8 @@ def _start_api_server(deploy: bool = False,
         # pylint: disable=import-outside-toplevel
         import sky.jobs.utils as job_utils
         max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
-                      if job_utils.is_consolidation_mode() else
-                      server_constants.MIN_AVAIL_MEM_GB)
+                      if job_utils.is_consolidation_mode(on_api_restart=True)
+                      else server_constants.MIN_AVAIL_MEM_GB)
         if avail_mem_size_gb <= max_memory:
             logger.warning(
                 f'{colorama.Fore.YELLOW}Your SkyPilot API server machine only '
@@ -571,6 +571,8 @@ def _start_api_server(deploy: bool = False,
             args += [f'--host={host}']
         if metrics_port is not None:
             args += [f'--metrics-port={metrics_port}']
+        # Use this argument to disable the internal signal file check.
+        args += ['--start-with-python']
 
         if foreground:
             # Replaces the current process with the API server

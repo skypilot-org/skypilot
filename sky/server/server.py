@@ -1953,6 +1953,7 @@ if __name__ == '__main__':
     # Serve metrics on a separate port to isolate it from the application APIs:
     # metrics port will not be exposed to the public network typically.
     parser.add_argument('--metrics-port', default=9090, type=int)
+    parser.add_argument('--start-with-python', action='store_true')
     cmd_args = parser.parse_args()
     if cmd_args.port == cmd_args.metrics_port:
         logger.error('port and metrics-port cannot be the same, exiting.')
@@ -1966,6 +1967,10 @@ if __name__ == '__main__':
     if not common_utils.is_port_available(cmd_args.port):
         logger.error(f'Port {cmd_args.port} is not available, exiting.')
         raise RuntimeError(f'Port {cmd_args.port} is not available')
+
+    if not cmd_args.start_with_python:
+        # Maybe touch the signal file on API server startup.
+        managed_job_utils.is_consolidation_mode(on_api_restart=True)
 
     # Show the privacy policy if it is not already shown. We place it here so
     # that it is shown only when the API server is started.
