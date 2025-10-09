@@ -195,6 +195,8 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
     port_forward_process = None
     port_forward_exit = False
     local_port = None
+    poller = None
+    fd = None
 
     try:
         # start the port forward process
@@ -204,8 +206,13 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
                                                 text=True,
                                                 env=env)
 
-        start_time = time.time()
+        # Use poll() instead of select() to avoid FD_SETSIZE limit
+        poller = select.poll()
+        assert port_forward_process.stdout is not None
+        fd = port_forward_process.stdout.fileno()
+        poller.register(fd, select.POLLIN)
 
+        start_time = time.time()
         buffer = ''
         # wait for the port forward to start and extract the local port
         while time.time() - start_time < start_port_forward_timeout:
@@ -215,30 +222,19 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
                     port_forward_exit = True
                 break
 
-            # read output line by line to find the local port
-            if port_forward_process.stdout:
-                fd = port_forward_process.stdout.fileno()
-                # Use poll() instead of select() to avoid FD_SETSIZE limit
-                poller = select.poll()
-                poller.register(fd, select.POLLIN)
+            # Wait up to 1000ms for data to be available without blocking
+            # poll() takes timeout in milliseconds
+            events = poller.poll(_SELECT_TIMEOUT * 1000)
 
-                # Wait up to 1000ms for data to be available without blocking
-                # poll() takes timeout in milliseconds
-                events = poller.poll(_SELECT_TIMEOUT * 1000)
-
-                if events:
-                    # Read available bytes from the FD without blocking
-                    raw = os.read(fd, _SELECT_BUFFER_SIZE)
-                    chunk = raw.decode(errors='ignore')
-                    buffer += chunk
-                    match = re.search(r'Forwarding from 127\.0\.0\.1:(\d+)',
-                                      buffer)
-                    if match:
-                        local_port = int(match.group(1))
-                        poller.unregister(fd)
-                        break
-
-                poller.unregister(fd)
+            if events:
+                # Read available bytes from the FD without blocking
+                raw = os.read(fd, _SELECT_BUFFER_SIZE)
+                chunk = raw.decode(errors='ignore')
+                buffer += chunk
+                match = re.search(r'Forwarding from 127\.0\.0\.1:(\d+)', buffer)
+                if match:
+                    local_port = int(match.group(1))
+                    break
 
             # sleep for 100ms to avoid busy-waiting
             time.sleep(0.1)
@@ -247,6 +243,13 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
             stop_svc_port_forward(port_forward_process,
                                   timeout=terminate_port_forward_timeout)
         raise
+    finally:
+        if poller and fd is not None:
+            try:
+                poller.unregister(fd)
+            except (OSError, ValueError):
+                # FD may already be unregistered or invalid
+                pass
     if port_forward_exit:
         raise RuntimeError(f'Port forward failed for service {service} in '
                            f'namespace {namespace} on context {context}')
