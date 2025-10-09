@@ -434,8 +434,15 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
         # use the external IP of the head node.
         use_external_ip = cluster_info.custom_ray_options.pop(
             'use_external_ip', False)
-    head_ip = (head_instance.internal_ip
-               if not use_external_ip else head_instance.external_ip)
+
+    if use_external_ip:
+        head_ip = head_instance.external_ip
+    else:
+        # For Kubernetes, use the internal service address of the head node.
+        if head_instance.internal_svc:
+            head_ip = head_instance.internal_svc
+        else:
+            head_ip = head_instance.internal_ip
 
     ray_cmd = ray_worker_start_command(custom_resource,
                                        cluster_info.custom_ray_options,

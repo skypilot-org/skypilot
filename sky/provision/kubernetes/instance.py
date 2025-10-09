@@ -1363,6 +1363,9 @@ def get_cluster_info(
                 external_ip=None,
                 ssh_port=port,
                 tags=pod.metadata.labels,
+                # TODO(hailong): `cluster.local` may need to be configurable
+                # Service name is same as the pod name for now.
+                internal_svc=f'{pod_name}.{namespace}.svc.cluster.local',
             )
         ]
         if _is_head(pod):
