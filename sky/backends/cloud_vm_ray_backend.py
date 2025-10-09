@@ -212,7 +212,6 @@ _EXCEPTION_MSG_AND_RETURNCODE_FOR_DUMP_INLINE_SCRIPT = [
     ('request-uri too large', 1),
     ('request header fields too large', 1),
     ('400 bad request', 1),  # CloudFlare 400 error
-    ('unable to upgrade connection', 1),  # K8s port-forward with CloudFlare
 ]
 
 _RESOURCES_UNAVAILABLE_LOG = (
