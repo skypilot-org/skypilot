@@ -583,31 +583,6 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
         time.sleep(1)
 
 
-def _run_function_with_retries(func: Callable,
-                               operation_name: str,
-                               max_retries: int = _MAX_RETRIES,
-                               retry_delay: int = 5) -> Any:
-    """Runs a function with retries on Kubernetes errors.
-    Args:
-        func: Function to retry
-        operation_name: Name of the operation for logging
-        max_retries: Maximum number of retry attempts
-        retry_delay: Delay between retries in seconds
-    Raises:
-        The last exception encountered if all retries fail.
-    """
-    for attempt in range(max_retries + 1):
-        try:
-            return func()
-        except config_lib.KubernetesError:
-            if attempt < max_retries:
-                logger.warning(f'Failed to {operation_name} - '
-                               f'retrying in {retry_delay} seconds.')
-                time.sleep(retry_delay)
-            else:
-                raise
-
-
 @timeline.event
 def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
     """Pre-initialization step for SkyPilot pods.
