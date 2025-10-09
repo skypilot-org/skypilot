@@ -14,11 +14,14 @@ def test_start_svc_port_forward_terminates_on_exception():
     mock_process.stdout = mock.MagicMock()
     mock_process.stdout.fileno.return_value = 1
 
+    mock_poller = mock.MagicMock()
+    mock_poller.poll.side_effect = Exception('Test error')
+
     with mock.patch('subprocess.Popen',
                     return_value=mock_process), \
          mock.patch('time.time', side_effect=[0, 1, 2]), \
-         mock.patch('select.select',
-                    side_effect=Exception('Test error')), \
+         mock.patch('select.poll',
+                    return_value=mock_poller), \
          mock.patch('time.sleep'):
 
         with pytest.raises(Exception, match='Test error'):
@@ -39,11 +42,15 @@ def test_start_svc_port_forward_terminates_on_timeout():
     mock_process.stdout = mock.MagicMock()
     mock_process.stdout.fileno.return_value = 1
 
+    mock_poller = mock.MagicMock()
+    mock_poller.poll.return_value = []  # No events (timeout)
+
     # Simulate timeout by advancing time past the timeout threshold
     with mock.patch('subprocess.Popen',
                     return_value=mock_process), \
          mock.patch('time.time', side_effect=[0] + [11] * 10), \
-         mock.patch('select.select', return_value=([], [], [])), \
+         mock.patch('select.poll',
+                    return_value=mock_poller), \
          mock.patch('time.sleep'):
 
         with pytest.raises(RuntimeError, match='Failed to extract local port'):
