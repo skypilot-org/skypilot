@@ -171,18 +171,6 @@ def check_quota_available_mock(*_, **__):
     return True
 
 
-def mock_redirect_output(*_, **__):
-    return (None, None)
-
-
-def mock_restore_output(*_, **__):
-    return None
-
-
-def mock_get_current_output(*_, **__):
-    return (None, None)
-
-
 @pytest.fixture
 def enable_all_clouds(monkeypatch, request, mock_client_requests):
     """Create mock context managers for cloud configurations."""
@@ -439,12 +427,70 @@ def mock_execute_in_coroutine(monkeypatch):
 
 @pytest.fixture
 def mock_redirect_log_file(monkeypatch):
-    monkeypatch.setattr('sky.server.requests.executor._redirect_output',
-                        mock_redirect_output)
-    monkeypatch.setattr('sky.server.requests.executor._restore_output',
-                        mock_restore_output)
-    monkeypatch.setattr('sky.server.requests.executor._get_current_output',
-                        mock_get_current_output)
+    import os
+    import pathlib
+
+    import click.testing
+
+    original_close = os.close
+    original_path_open = pathlib.Path.open
+    fake_stdout_fd = 996
+    fake_stderr_fd = 997
+    fake_saved_fd = 998
+    fake_file_fd = 999
+
+    # Click's CliRunner replaces sys.stdout/stderr with _NamedTextIOWrapper objects
+    # that don't support fileno(). We need to patch these wrapper objects to add
+    # fileno() support.
+    original_wrapper_init = click.testing._NamedTextIOWrapper.__init__
+
+    def patched_wrapper_init(self, *args, **kwargs):
+        original_wrapper_init(self, *args, **kwargs)
+        # Add a fileno() method to the wrapper that returns a fake fd
+        # Check if this is stdout or stderr based on the name attribute
+        if hasattr(self, 'name') and 'stdout' in str(self.name):
+            self.fileno = lambda: fake_stdout_fd
+        else:
+            self.fileno = lambda: fake_stderr_fd
+
+    monkeypatch.setattr(click.testing._NamedTextIOWrapper, '__init__',
+                        patched_wrapper_init)
+    # Mock os.dup to return a fake file descriptor
+    monkeypatch.setattr(os, 'dup', lambda fd: fake_saved_fd)
+    # Mock os.dup2 to be a no-op
+    monkeypatch.setattr(os, 'dup2', lambda fd, fd2: None)
+
+    # Mock os.close to ignore our fake fds but preserve original behavior for real fds
+    def selective_close(fd):
+        if fd not in (fake_stdout_fd, fake_stderr_fd, fake_saved_fd,
+                      fake_file_fd):
+            original_close(fd)
+
+    monkeypatch.setattr(os, 'close', selective_close)
+
+    # Mock pathlib.Path.open() to return a file object with a mocked fileno() method
+    class FileWrapper:
+
+        def __init__(self, file_obj):
+            self._file = file_obj
+
+        def fileno(self):
+            return fake_file_fd
+
+        def __getattr__(self, name):
+            return getattr(self._file, name)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return self._file.__exit__(*args)
+
+    def mock_path_open(self, *args, **kwargs):
+        file_obj = original_path_open(self, *args, **kwargs)
+        return FileWrapper(file_obj)
+
+    monkeypatch.setattr(pathlib.Path, 'open', mock_path_open)
 
 
 @pytest.fixture
