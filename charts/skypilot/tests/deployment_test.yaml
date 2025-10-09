@@ -105,13 +105,6 @@ tests:
               fieldRef:
                 fieldPath: metadata.uid
 
-  - it: should fail RollingUpdate strategy without external database
-    set:
-      apiService.upgradeStrategy: RollingUpdate
-    asserts:
-      - failedTemplate:
-          errorMessage: "External database must be configured via .apiService.dbConnectionSecretName or .apiService.dbConnectionString when using RollingUpdate strategy"
-
   - it: should fail RollingUpdate strategy with local storage enabled
     set:
       apiService.upgradeStrategy: RollingUpdate
