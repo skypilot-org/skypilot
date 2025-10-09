@@ -217,12 +217,17 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
 
             # read output line by line to find the local port
             if port_forward_process.stdout:
-                # Wait up to 1s for data to be available without blocking
-                r, _, _ = select.select([port_forward_process.stdout], [], [],
-                                        _SELECT_TIMEOUT)
-                if r:
+                fd = port_forward_process.stdout.fileno()
+                # Use poll() instead of select() to avoid FD_SETSIZE limit
+                poller = select.poll()
+                poller.register(fd, select.POLLIN)
+
+                # Wait up to 1000ms for data to be available without blocking
+                # poll() takes timeout in milliseconds
+                events = poller.poll(_SELECT_TIMEOUT * 1000)
+
+                if events:
                     # Read available bytes from the FD without blocking
-                    fd = port_forward_process.stdout.fileno()
                     raw = os.read(fd, _SELECT_BUFFER_SIZE)
                     chunk = raw.decode(errors='ignore')
                     buffer += chunk
@@ -230,7 +235,10 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
                                       buffer)
                     if match:
                         local_port = int(match.group(1))
+                        poller.unregister(fd)
                         break
+
+                poller.unregister(fd)
 
             # sleep for 100ms to avoid busy-waiting
             time.sleep(0.1)
