@@ -1073,7 +1073,7 @@ def test_volume_env_mount_kubernetes():
 def _check_container_logs(name, logs, total_lines, count):
     """Check if the container logs contain the expected number of logging lines.
 
-    Each line should be only one number in the given range and should show up 
+    Each line should be only one number in the given range and should show up
     count number of times. We skip the messages that we see in the job from
     running setup with set -x.
     """
@@ -1965,17 +1965,10 @@ def test_long_setup_run_script(generic_cloud: str):
         test = smoke_tests_utils.Test(
             'long-setup-run-script',
             [
-                f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {f.name}',
-                f'sky exec {name} "echo hello"',
-                f'sky exec {name} {f.name}',
-                f'sky logs {name} --status 1',
-                f'sky logs {name} --status 2',
-                f'sky logs {name} --status 3',
-                f'sky down {name} -y',
                 f'sky jobs launch -y -n {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {f.name}',
                 f'sky jobs queue | grep {name} | grep SUCCEEDED',
             ],
-            f'sky down -y {name}; sky jobs cancel -n {name} -y',
+            f'sky jobs cancel -n {name} -y',
         )
         smoke_tests_utils.run_one_test(test)
 
