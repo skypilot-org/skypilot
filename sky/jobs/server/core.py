@@ -336,6 +336,7 @@ def launch(
     def _submit_one(
         consolidation_mode_job_id: Optional[int] = None,
         job_rank: Optional[int] = None,
+        num_jobs: Optional[int] = None,
     ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
         rank_suffix = '' if job_rank is None else f'-{job_rank}'
         remote_original_user_yaml_path = (
@@ -355,9 +356,11 @@ def launch(
         ) as original_user_yaml_path:
             original_user_yaml_path.write(user_dag_str_user_specified)
             original_user_yaml_path.flush()
+
             for task_ in dag.tasks:
                 if job_rank is not None:
                     task_.update_envs({'SKYPILOT_JOB_RANK': str(job_rank)})
+                    task_.update_envs({'SKYPILOT_NUM_JOBS': str(num_jobs)})
 
             dag_utils.dump_chain_dag_to_yaml(dag, f.name)
 
@@ -474,7 +477,7 @@ def launch(
     for job_rank in range(num_jobs):
         job_id = (consolidation_mode_job_ids[job_rank]
                   if consolidation_mode_job_ids is not None else None)
-        jid, handle = _submit_one(job_id, job_rank)
+        jid, handle = _submit_one(job_id, job_rank, num_jobs=num_jobs)
         assert jid is not None, (job_id, handle)
         ids.append(jid)
         all_handle = handle

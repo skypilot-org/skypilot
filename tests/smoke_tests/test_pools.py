@@ -29,6 +29,12 @@ _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME = (
     'echo; echo; echo "$s" | grep "Job submitted"; '
     'sleep 5')
 
+_LAUNCH_JOB_AND_CHECK_OUTPUT = (
+    's=$(sky jobs launch --pool {pool_name} {job_yaml} -d -y); '
+    'echo "$s"; '
+    'echo; echo; echo "$s" | grep "Job submitted"; echo "$s" | grep "{output}"; '
+    'sleep 5')
+
 _POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS = (
     's=$(sky jobs pool apply -p {pool_name} --workers {num_workers} -y); '
     'echo "$s"; '
@@ -977,3 +983,30 @@ def test_heterogeneous_pool_counts(generic_cloud: str):
             timeout=smoke_tests_utils.get_timeout(generic_cloud),
         )
         smoke_tests_utils.run_one_test(test)
+
+
+def test_pools_num_jobs(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+    pool_config = basic_pool_conf(num_workers=3, infra=generic_cloud)
+    job_config = basic_job_conf(
+        job_name=f'{name}-job',
+        run_cmd='echo "Running with $SKYPILOT_NUM_JOBS jobs"')
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
+            write_yaml(pool_yaml, pool_config)
+            write_yaml(job_yaml, job_config)
+            test = smoke_tests_utils.Test(
+                'test_pools_num_jobs',
+                [
+                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, pool_yaml=pool_yaml.name),
+                    _LAUNCH_JOB_AND_CHECK_OUTPUT.format(
+                        pool_name=pool_name,
+                        job_yaml=job_yaml.name,
+                        output='Running with 3 jobs')
+                ],
+                timeout=smoke_tests_utils.get_timeout(generic_cloud),
+                teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
+            )
+            smoke_tests_utils.run_one_test(test)
