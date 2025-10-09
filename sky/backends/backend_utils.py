@@ -2949,6 +2949,9 @@ def is_controller_accessible(
         exceptions.ClusterNotUpError: if the controller is not accessible, or
           failed to be connected.
     """
+    logger.info('os.environ:')
+    for k, v in os.environ.items():
+        logger.info(f'{k}: {v}')
     logger.info(
         f'is_consolidation_mode: {managed_job_utils.is_consolidation_mode()}')
     if (managed_job_utils.is_consolidation_mode() and
