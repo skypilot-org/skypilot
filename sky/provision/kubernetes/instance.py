@@ -934,8 +934,11 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     running_pods = kubernetes_utils.filter_pods(namespace, context, tags,
                                                 ['Pending', 'Running'])
     head_pod_name = _get_head_pod_name(running_pods)
+    running_pod_statuses = [{
+        pod.metadata.name: pod.status.phase
+    } for pod in running_pods.values()]
     logger.debug(f'Found {len(running_pods)} existing pods: '
-                 f'{list(running_pods.keys())}')
+                 f'{running_pod_statuses}')
 
     to_start_count = config.count - len(running_pods)
     if to_start_count < 0:
@@ -1142,10 +1145,21 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         pods = created_resources
 
     created_pods = {}
+    valid_pods = []
     for pod in pods:
+        # In case Pod is not created
+        if pod is None:
+            continue
+        valid_pods.append(pod)
         created_pods[pod.metadata.name] = pod
         if head_pod_name is None and _is_head(pod):
             head_pod_name = pod.metadata.name
+    pods = valid_pods
+
+    # The running_pods may include Pending Pods, so we add them to the pods
+    # list to wait for scheduling and running
+    if running_pods:
+        pods = pods + list(running_pods.values())
 
     provision_timeout = provider_config['timeout']
 
@@ -1369,8 +1383,9 @@ def get_cluster_info(
             assert head_spec is not None, pod
             cpu_request = head_spec.containers[0].resources.requests['cpu']
 
-    assert cpu_request is not None, ('cpu_request should not be None, check '
-                                     'the Pod status')
+    if cpu_request is None:
+        raise RuntimeError(f'Pod {cluster_name_on_cloud}-head not found'
+                           ' or not Running, check the Pod status')
 
     ssh_user = 'sky'
     # Use pattern matching to extract SSH user, handling MOTD contamination.
