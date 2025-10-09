@@ -52,7 +52,7 @@ Create the name of the service account to use
 {{- if .Values.rbac.serviceAccountName -}}
 {{ .Values.rbac.serviceAccountName }}
 {{- else -}}
-{{ .Release.Name }}-api-sa
+{{ include "skypilot.fullname" . }}-api-sa
 {{- end -}}
 {{- end -}} 
 
@@ -85,7 +85,7 @@ false
 {{- if .Values.apiService.initialBasicAuthSecret -}}
 {{ .Values.apiService.initialBasicAuthSecret }}
 {{- else if .Values.apiService.initialBasicAuthCredentials -}}
-{{ printf "%s-initial-basic-auth" .Release.Name }}
+{{ printf "%s-initial-basic-auth" (include "skypilot.fullname" .) }}
 {{- else -}}
 {{- /* Return empty string */ -}}
 {{ "" }}
@@ -98,7 +98,7 @@ false
 {{- end -}}
 
 {{- define "skypilot.oauth2ProxyURL" -}}
-http://{{ .Release.Name }}-oauth2-proxy:4180
+http://{{ include "skypilot.fullname" . }}-oauth2-proxy:4180
 {{- end -}}
 
 {{- define "skypilot.serviceAccountAuthEnabled" -}}
@@ -137,5 +137,30 @@ false
 
 {{- if and $authOAuthEnabled $ingressOAuthEnabled -}}
   {{- fail "Error\nauth.oauth.enabled cannot be used together with ingress OAuth2 proxy authentication (ingress.oauth2-proxy.enabled). These authentication methods are mutually exclusive. Please:\n1. Disable auth.oauth.enabled, OR\n2. Set ingress.oauth2-proxy.enabled to false\nThen try again." -}}
+{{- end -}}
+{{- end -}}
+
+{{- /*
+Create a default app name. Truncates at 63 chars per DNS naming rules.
+*/ -}}
+{{- define "skypilot.name" -}}
+{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- /*
+Create a default fully qualified app name.
+We truncate at 63 chars because some Kubernetes name fields are limited to this.
+If release name contains chart name it will be used as a full name.
+*/ -}}
+{{- define "skypilot.fullname" -}}
+{{- if .Values.fullnameOverride -}}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- $name := default .Chart.Name .Values.nameOverride -}}
+{{- if contains $name .Release.Name -}}
+{{- .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}

@@ -241,6 +241,9 @@
                 "type": "object"
             }
         },
+        "fullnameOverride": {
+            "type": "string"
+        },
         "gcpCredentials": {
             "type": "object",
             "properties": {
@@ -437,6 +440,9 @@
                     "type": "string"
                 }
             }
+        },
+        "nameOverride": {
+            "type": "string"
         },
         "nebiusCredentials": {
             "type": "object",
