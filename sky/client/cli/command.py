@@ -1347,6 +1347,8 @@ def _handle_jobs_queue_request(
     request_id: server_common.RequestId[Union[
         List[responses.ManagedJobRecord],
         Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int]]],
+    pool_status_request_id: Optional[server_common.RequestId[List[Dict[
+            str, Any]]]],
     show_all: bool,
     show_user: bool,
     max_num_jobs_to_show: Optional[int],
@@ -1356,6 +1358,8 @@ def _handle_jobs_queue_request(
     """Get the in-progress managed jobs.
 
     Args:
+        request_id: The request ID for managed jobs.
+        pool_status_request_id: The request ID for pool status, or None.
         show_all: Show all information of each job (e.g., region, price).
         show_user: Show the user who submitted the job.
         max_num_jobs_to_show: If not None, limit the number of jobs to show to
@@ -1375,6 +1379,7 @@ def _handle_jobs_queue_request(
     num_in_progress_jobs = None
     msg = ''
     status_counts: Optional[Dict[str, int]] = None
+    pool_status_result = None
     try:
         if not is_called_by_user:
             usage_lib.messages.usage.set_internal()
@@ -1395,6 +1400,13 @@ def _handle_jobs_queue_request(
             managed_jobs_ = result
             num_in_progress_jobs = len(
                 set(job['job_id'] for job in managed_jobs_))
+        # Try to get pool status if request was made
+        if pool_status_request_id is not None:
+            try:
+                pool_status_result = sdk.stream_and_get(pool_status_request_id)
+            except Exception:  # pylint: disable=broad-except
+                # If getting pool status fails, just continue without it
+                pool_status_result = None
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
         msg = str(e)
@@ -1440,6 +1452,7 @@ def _handle_jobs_queue_request(
     else:
         msg = table_utils.format_job_table(
             managed_jobs_,
+            pool_status=pool_status_result,
             show_all=show_all,
             show_user=show_user,
             max_jobs=max_num_jobs_to_show,
@@ -1945,6 +1958,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
             try:
                 num_in_progress_jobs, msg = _handle_jobs_queue_request(
                     managed_jobs_queue_request_id,
+                    pool_status_request_id,
                     show_all=False,
                     show_user=all_users,
                     max_num_jobs_to_show=_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS,
@@ -4621,21 +4635,6 @@ def jobs_launch(
 
     job_ids = [job_id_handle[0]] if isinstance(job_id_handle[0],
                                                int) else job_id_handle[0]
-    if pool:
-        # Display the worker assignment for the jobs.
-        logger.debug(f'Getting service records for pool: {pool}')
-        records_request_id = managed_jobs.pool_status(pool_names=pool)
-        service_records = _async_call_or_wait(records_request_id, async_call,
-                                              'sky.jobs.pool_status')
-        logger.debug(f'Pool status: {service_records}')
-        replica_infos = service_records[0]['replica_info']
-        for replica_info in replica_infos:
-            job_id = replica_info.get('used_by', None)
-            if job_id in job_ids:
-                worker_id = replica_info['replica_id']
-                version = replica_info['version']
-                logger.info(f'Job ID: {job_id} assigned to pool {pool} '
-                            f'(worker: {worker_id}, version: {version})')
 
     if not detach_run:
         if len(job_ids) == 1:
@@ -4768,8 +4767,16 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
             all_users=all_users,
             limit=max_num_jobs_to_show,
             fields=fields)
+        # Try to get pool status for worker information
+        pool_status_request_id = None
+        try:
+            pool_status_request_id = managed_jobs.pool_status(pool_names=None)
+        except Exception:  # pylint: disable=broad-except
+            # If pool_status fails, we'll just skip the worker information
+            pass
         num_jobs, msg = _handle_jobs_queue_request(
             managed_jobs_request_id,
+            pool_status_request_id,
             show_all=verbose,
             show_user=all_users,
             max_num_jobs_to_show=max_num_jobs_to_show,
