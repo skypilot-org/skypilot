@@ -262,9 +262,6 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
     template = jinja2.Template(template_str)
-    # ubuntu 18.04 does not support fuse3, and blobfuse2 depends on fuse3.
-    azure_mount_unsupported_ubuntu_version = '18.04'
-    include_azure_mount = True
     # Commands to verify bucket upload. We need to check all three
     # storage types because the optimizer may pick any of them.
     s3_command = f'aws s3 ls {storage_name}/hello.txt'
@@ -287,26 +284,14 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     else:
         store_type = 'azure'
 
-    if azure_mount_unsupported_ubuntu_version in image_id:
-        # The store for mount_private_mount is not specified in the template.
-        # If we're running on Azure, the private mount will be created on
-        # azure blob. Also, if we're running on Kubernetes, the private mount
-        # might be created on azure blob to avoid the issue of the fuse adapter
-        # not being able to access the mount point. That will not be supported on
-        # the ubuntu 18.04 image and thus fail. For other clouds, the private mount
-        # on other storage types (GCS/S3) should succeed.
-        include_azure_mount = False
-        if store_type == 'azure':
-            store_type = 's3'
-
     if smoke_tests_utils.is_non_docker_remote_api_server():
         enabled_cloud_storages = smoke_tests_utils.get_enabled_cloud_storages()
         include_s3_mount = clouds.cloud_in_iterable(clouds.AWS(),
                                                     enabled_cloud_storages)
         include_gcs_mount = clouds.cloud_in_iterable(clouds.GCP(),
                                                      enabled_cloud_storages)
-        include_azure_mount = (include_azure_mount and clouds.cloud_in_iterable(
-            clouds.Azure(), enabled_cloud_storages))
+        include_azure_mount = clouds.cloud_in_iterable(clouds.Azure(),
+                                                       enabled_cloud_storages)
         content = template.render(storage_name=storage_name,
                                   include_s3_mount=include_s3_mount,
                                   include_gcs_mount=include_gcs_mount,
@@ -316,7 +301,6 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     else:
         content = template.render(storage_name=storage_name,
                                   empty_storage_name=empty_storage_name,
-                                  include_azure_mount=include_azure_mount,
                                   store_type=store_type)
     cloud_dependencies_setup_cmd = ' && '.join(
         controller_utils._get_cloud_dependencies_installation_commands(
