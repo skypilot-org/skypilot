@@ -1093,6 +1093,26 @@ def _get_cgroup_memory_limit() -> Optional[int]:
         return None
 
 
+def get_current_memory_usage_gb() -> Optional[float]:
+    """Return current memory usage in GB."""
+    current = _get_cgroup_memory_current()
+    if current is None:
+        return None
+    return float(current) / (1024**3)
+
+
+def _get_cgroup_memory_current() -> Optional[int]:
+    """Return memory usage from cgroups in bytes."""
+    try:
+        # TODO test this works in cgroup v1, I've tested with cgroup v2.
+        path = ('/sys/fs/cgroup/memory.current'
+                if _is_cgroup_v2() else '/sys/fs/cgroup/memory/memory.current')
+        with open(path, 'r', encoding='utf-8') as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
 def _is_cgroup_v2() -> bool:
     """Return True if the environment is running cgroup v2."""
     return os.path.isfile('/sys/fs/cgroup/cgroup.controllers')

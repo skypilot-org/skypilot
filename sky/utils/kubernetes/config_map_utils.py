@@ -1,4 +1,5 @@
 """Utilities for Kubernetes ConfigMap operations in SkyPilot."""
+import datetime
 import os
 
 from sky import sky_logging
@@ -35,6 +36,12 @@ def _get_configmap_name() -> str:
     release_name = (os.getenv('HELM_RELEASE_NAME') or
                     os.getenv('SKYPILOT_RELEASE_NAME') or 'skypilot')
     return f'{release_name}-config'
+
+
+def _get_deployment_name() -> str:
+    release_name = (os.getenv('HELM_RELEASE_NAME') or
+                    os.getenv('SKYPILOT_RELEASE_NAME') or 'skypilot')
+    return f'{release_name}-api-server'
 
 
 def initialize_configmap_sync_on_startup(config_file_path: str) -> None:
@@ -131,3 +138,60 @@ def patch_configmap_with_config(config, config_file_path: str) -> None:
 
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to sync config to ConfigMap: {e}')
+
+
+def can_patch_deployment() -> bool:
+    """Check if the Kubernetes deployment can be patched."""
+    if not is_running_in_kubernetes():
+        return False
+    try:
+        namespace = _get_kubernetes_namespace()
+        deployment_name = _get_deployment_name()
+        kubernetes.apps_api().read_namespaced_deployment(name=deployment_name,
+                                                         namespace=namespace)
+        return True
+    except kubernetes.kubernetes.client.rest.ApiException as e:
+        if e.status == 404:
+            return False
+        raise
+
+
+def trigger_deployment_update():
+    """Patch the Kubernetes deployment with the updated config.
+
+    Args:
+        config: The updated config to sync to the deployment.
+    """
+    if not is_running_in_kubernetes():
+        return
+    try:
+        namespace = _get_kubernetes_namespace()
+        deployment_name = _get_deployment_name()
+        # Get the current deployment object
+        kubernetes.apps_api().read_namespaced_deployment(name=deployment_name,
+                                                         namespace=namespace)
+        # Add or update the restartedAt annotation with the current timestamp
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat('T') + 'Z'
+
+        # Create the patch body
+        patch_body = {
+            'spec': {
+                'template': {
+                    'metadata': {
+                        'annotations': {
+                            'kubectl.kubernetes.io/restartedAt': now
+                        }
+                    }
+                }
+            }
+        }
+
+        # Apply the patch
+        kubernetes.apps_api().patch_namespaced_deployment(name=deployment_name,
+                                                          namespace=namespace,
+                                                          body=patch_body)
+        logger.info(
+            f'Deployment "{deployment_name}" in namespace "{namespace}" '
+            'successfully restarted.')
+    except kubernetes.kubernetes.client.rest.ApiException as e:
+        logger.warning(f'Failed to patch deployment: {e}')

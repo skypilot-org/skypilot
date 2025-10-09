@@ -13,6 +13,7 @@ from sky.utils import env_options
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils.kubernetes import config_map_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -188,6 +189,42 @@ def should_skip_pool_status_refresh():
     return _should_skip_serve_status_refresh_event(pool=True)
 
 
+def deployment_update_event():
+    """Trigger the deployment update event.
+    - Find out the memory utilization percentage of the current pod.
+    """
+    time.sleep(60)
+    memory_limit = common_utils.get_mem_size_gb()
+    memory_usage = common_utils.get_current_memory_usage_gb()
+    memory_utilization = memory_usage / memory_limit
+    if memory_utilization <= 0.8:
+        logger.debug(
+            f'Currently using {memory_usage:.3f}GB of {memory_limit:.3f}GB. '
+            f'Memory utilization {memory_utilization:.3f} is less than 0.8.')
+        # Nothing to do, return.
+        return
+    config_map_utils.trigger_deployment_update()
+
+
+def should_skip_deployment_update():
+    """Check if the deployment update event should be skipped.
+
+    Skip the deployment update daemon if:
+    - the API server is not running in kubernetes
+    - The system memory environment variable is not set correctly.
+    - the daemon is not configured in config (TODO)
+    - the API server cannot locate the daemon using kubernetes API (TODO)
+    - the API server does not have permission to change the deployment (TODO)"""
+    if not config_map_utils.is_running_in_kubernetes():
+        logger.debug('API server is not running in Kubernetes.')
+        return True
+    if not config_map_utils.can_patch_deployment():
+        logger.debug(
+            'API server cannot patch the deployment using Kubernetes API.')
+        return True
+    return False
+
+
 # Register the events to run in the background.
 INTERNAL_REQUEST_DAEMONS = [
     # This status refresh daemon can cause the autostopp'ed/autodown'ed cluster
@@ -213,6 +250,10 @@ INTERNAL_REQUEST_DAEMONS = [
                           name='pool-status-refresh',
                           event_fn=pool_status_refresh_event,
                           should_skip=should_skip_pool_status_refresh),
+    InternalRequestDaemon(id='trigger-deployment-update-daemon',
+                          name='trigger-deployment-update',
+                          event_fn=deployment_update_event,
+                          should_skip=should_skip_deployment_update),
 ]
 
 
