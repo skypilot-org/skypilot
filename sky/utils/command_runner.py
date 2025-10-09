@@ -1042,12 +1042,12 @@ class KubernetesCommandRunner(CommandRunner):
 
         if ssh_mode == SshMode.LOGIN:
             assert isinstance(cmd, list), 'cmd must be a list for login mode.'
-            base_cmd = ['kubectl', 'exec', '-it', *kubectl_args, '--']
+            base_cmd = ['kubectl', 'exec', '--v=9', '-it', *kubectl_args, '--']
             command = base_cmd + cmd
             proc = subprocess_utils.run(command, shell=False, check=False)
             return proc.returncode, '', ''
 
-        kubectl_base_command = ['kubectl', 'exec']
+        kubectl_base_command = ['kubectl', 'exec', '--v=9']
 
         if ssh_mode == SshMode.INTERACTIVE:
             kubectl_base_command.append('-i')
