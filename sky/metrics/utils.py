@@ -244,7 +244,7 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
                                   timeout=terminate_port_forward_timeout)
         raise
     finally:
-        if poller and fd is not None:
+        if poller is not None and fd is not None:
             try:
                 poller.unregister(fd)
             except (OSError, ValueError):
