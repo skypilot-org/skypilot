@@ -5212,7 +5212,15 @@ def jobs_pool_logs(
 @flags.config_option(expose_value=False)
 @usage_lib.entrypoint
 def dashboard() -> None:
-    """Starts the dashboard for skypilot."""
+    """Opens the SkyPilot dashboard."""
+    sdk.dashboard()
+
+
+@cli.command(cls=_DocumentedCodeCommand, hidden=True)
+@flags.config_option(expose_value=False)
+@usage_lib.entrypoint
+def ui() -> None:
+    """Opens the SkyPilot dashboard."""
     sdk.dashboard()
 
 
