@@ -1275,3 +1275,139 @@ def test_should_be_blocked_by(r_kwargs, blocked_kwargs, expected):
     r = Resources(**r_kwargs)
     blocked = Resources(**blocked_kwargs)
     assert r.should_be_blocked_by(blocked) == expected
+
+
+def test_accelerators_list_of_dicts():
+    """Test Resources creation with accelerators as list of dicts."""
+    config = {'accelerators': [{'T4': 1}, {'L4': 2}]}
+    resources_set = Resources.from_yaml_config(config)
+    assert isinstance(resources_set, set)
+    assert len(resources_set) == 2
+
+    # Check that both accelerator types are present
+    all_accels = {}
+    for r in resources_set:
+        if r.accelerators:
+            all_accels.update(r.accelerators)
+    assert all_accels == {'T4': 1, 'L4': 2}
+
+
+def test_accelerators_mixed_list_format():
+    """Test Resources creation with mixed accelerator list format."""
+    config = {'accelerators': [{'T4': 1}, 'V100:2', {'A100': 1}]}
+    resources_set = Resources.from_yaml_config(config)
+    assert isinstance(resources_set, set)
+    assert len(resources_set) == 3
+
+    # Check all accelerator types are present
+    all_accels = {}
+    for r in resources_set:
+        if r.accelerators:
+            all_accels.update(r.accelerators)
+    assert all_accels == {'T4': 1, 'V100': 2, 'A100': 1}
+
+
+def test_accelerators_list_dicts_validation_errors():
+    """Test validation errors for list of dicts format."""
+
+    # Test null values are rejected
+    with pytest.raises(AssertionError) as exc_info:
+        Resources.from_yaml_config(
+            {'accelerators': [{
+                'T4': 1
+            }, {
+                'V100': None
+            }]})
+    assert 'Accelerator count cannot be null' in str(exc_info.value)
+
+    # Test empty dict is rejected
+    with pytest.raises(AssertionError) as exc_info:
+        Resources.from_yaml_config({'accelerators': [{'T4': 1}, {}]})
+    assert 'Each accelerator dict must have exactly one key' in str(
+        exc_info.value)
+
+    # Test multi-key dict is rejected
+    with pytest.raises(AssertionError) as exc_info:
+        Resources.from_yaml_config({'accelerators': [{'T4': 1, 'V100': 2}]})
+    assert 'Each accelerator dict must have exactly one key' in str(
+        exc_info.value)
+
+    # Test invalid item type is rejected
+    with pytest.raises(AssertionError) as exc_info:
+        Resources.from_yaml_config({'accelerators': [{'T4': 1}, 123]})
+    assert 'Invalid accelerators item type' in str(exc_info.value)
+    assert 'Expected str or dict' in str(exc_info.value)
+
+
+def test_accelerators_dict_consistency():
+    """Test that dict format now consistently rejects null values."""
+    # This tests the fixed inconsistency
+    with pytest.raises(AssertionError) as exc_info:
+        Resources.from_yaml_config({'accelerators': {'T4': 1, 'V100': None}})
+    assert 'Accelerator count cannot be null' in str(exc_info.value)
+
+
+def test_accelerators_type_validation():
+    """Test type validation for accelerator counts."""
+
+    # Test negative values in list format
+    with pytest.raises(AssertionError) as exc_info:
+        Resources.from_yaml_config({'accelerators': [{'T4': -1}]})
+    assert 'must be a positive number' in str(exc_info.value)
+
+    # Test zero values in list format
+    with pytest.raises(AssertionError) as exc_info:
+        Resources.from_yaml_config({'accelerators': [{'T4': 0}]})
+    assert 'must be a positive number' in str(exc_info.value)
+
+    # Test boolean values in list format
+    with pytest.raises(AssertionError) as exc_info:
+        Resources.from_yaml_config({'accelerators': [{'T4': True}]})
+    assert 'must be a positive number' in str(exc_info.value)
+
+    # Test string values in list format
+    with pytest.raises(AssertionError) as exc_info:
+        Resources.from_yaml_config({'accelerators': [{'T4': "2"}]})
+    assert 'must be a positive number' in str(exc_info.value)
+
+    # Test negative values in dict format
+    with pytest.raises(AssertionError) as exc_info:
+        Resources.from_yaml_config({'accelerators': {'T4': -1}})
+    assert 'must be a positive number' in str(exc_info.value)
+
+    # Test zero values in dict format
+    with pytest.raises(AssertionError) as exc_info:
+        Resources.from_yaml_config({'accelerators': {'T4': 0}})
+    assert 'must be a positive number' in str(exc_info.value)
+
+
+def test_accelerators_equivalence():
+    """Test that different formats produce equivalent results."""
+    # These should all be equivalent
+    config_dict = {'accelerators': {'T4': 1, 'V100': 2}}
+    config_list_str = {'accelerators': ['T4:1', 'V100:2']}
+    config_list_dict = {'accelerators': [{'T4': 1}, {'V100': 2}]}
+    config_mixed = {'accelerators': [{'T4': 1}, 'V100:2']}
+
+    resources_dict = Resources.from_yaml_config(config_dict)
+    resources_list_str = Resources.from_yaml_config(config_list_str)
+    resources_list_dict = Resources.from_yaml_config(config_list_dict)
+    resources_mixed = Resources.from_yaml_config(config_mixed)
+
+    # All should create sets of same size
+    assert len(resources_dict) == len(resources_list_str) == len(
+        resources_list_dict) == len(resources_mixed) == 2
+
+    # All should have same accelerators when combined
+    def get_all_accelerators(resources_set):
+        all_accels = {}
+        for r in resources_set:
+            if r.accelerators:
+                all_accels.update(r.accelerators)
+        return all_accels
+
+    expected = {'T4': 1, 'V100': 2}
+    assert get_all_accelerators(resources_dict) == expected
+    assert get_all_accelerators(resources_list_str) == expected
+    assert get_all_accelerators(resources_list_dict) == expected
+    assert get_all_accelerators(resources_mixed) == expected
