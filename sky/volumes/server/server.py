@@ -3,12 +3,13 @@
 import fastapi
 
 from sky import clouds
+from sky import exceptions
 from sky import sky_logging
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.utils import registry
-from sky.utils import volume
+from sky.utils import volume as volume_utils
 from sky.volumes.server import core
 
 logger = sky_logging.init_logger(__name__)
@@ -23,11 +24,11 @@ async def volume_list(request: fastapi.Request) -> None:
     auth_user_env_vars_kwargs = {
         'env_vars': auth_user.to_env_vars()
     } if auth_user else {}
-    volume_list_body = payloads.VolumeListBody(**auth_user_env_vars_kwargs)
+    request_body = payloads.RequestBody(**auth_user_env_vars_kwargs)
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='volume_list',
-        request_body=volume_list_body,
+        request_body=request_body,
         func=core.volume_list,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
@@ -46,6 +47,31 @@ async def volume_delete(request: fastapi.Request,
     )
 
 
+@router.post('/validate')
+async def volume_validate(
+        _: fastapi.Request,
+        volume_validate_body: payloads.VolumeValidateBody) -> None:
+    """Validates a volume."""
+    # pylint: disable=import-outside-toplevel
+    from sky.volumes import volume as volume_lib
+
+    try:
+        volume_config = {
+            'name': volume_validate_body.name,
+            'type': volume_validate_body.volume_type,
+            'infra': volume_validate_body.infra,
+            'size': volume_validate_body.size,
+            'labels': volume_validate_body.labels,
+            'config': volume_validate_body.config,
+            'resource_name': volume_validate_body.resource_name,
+        }
+        volume = volume_lib.Volume.from_yaml_config(volume_config)
+        volume.validate()
+    except Exception as e:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail=exceptions.serialize_exception(e))
+
+
 @router.post('/apply')
 async def volume_apply(request: fastapi.Request,
                        volume_apply_body: payloads.VolumeApplyBody) -> None:
@@ -55,7 +81,7 @@ async def volume_apply(request: fastapi.Request,
     volume_config = volume_apply_body.config
 
     supported_volume_types = [
-        volume_type.value for volume_type in volume.VolumeType
+        volume_type.value for volume_type in volume_utils.VolumeType
     ]
     if volume_type not in supported_volume_types:
         raise fastapi.HTTPException(
@@ -64,24 +90,24 @@ async def volume_apply(request: fastapi.Request,
     if cloud is None:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Invalid cloud: {volume_cloud}')
-    if volume_type == volume.VolumeType.PVC.value:
+    if volume_type == volume_utils.VolumeType.PVC.value:
         if not cloud.is_same_cloud(clouds.Kubernetes()):
             raise fastapi.HTTPException(
                 status_code=400,
                 detail='PVC storage is only supported on Kubernetes')
         supported_access_modes = [
-            access_mode.value for access_mode in volume.VolumeAccessMode
+            access_mode.value for access_mode in volume_utils.VolumeAccessMode
         ]
         if volume_config is None:
             volume_config = {}
         access_mode = volume_config.get('access_mode')
         if access_mode is None:
-            volume_config[
-                'access_mode'] = volume.VolumeAccessMode.READ_WRITE_ONCE.value
+            volume_config['access_mode'] = (
+                volume_utils.VolumeAccessMode.READ_WRITE_ONCE.value)
         elif access_mode not in supported_access_modes:
             raise fastapi.HTTPException(
                 status_code=400, detail=f'Invalid access mode: {access_mode}')
-    elif volume_type == volume.VolumeType.RUNPOD_NETWORK_VOLUME.value:
+    elif volume_type == volume_utils.VolumeType.RUNPOD_NETWORK_VOLUME.value:
         if not cloud.is_same_cloud(clouds.RunPod()):
             raise fastapi.HTTPException(
                 status_code=400,

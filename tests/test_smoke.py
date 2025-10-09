@@ -30,6 +30,7 @@ from smoke_tests.test_aws_logs import *
 from smoke_tests.test_basic import *
 from smoke_tests.test_cli import *
 from smoke_tests.test_cluster_job import *
+from smoke_tests.test_examples import *
 from smoke_tests.test_images import *
 from smoke_tests.test_logs import *
 from smoke_tests.test_managed_job import *

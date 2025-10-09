@@ -57,6 +57,9 @@ SKY_REMOTE_PYTHON_ENV: str = f'~/{SKY_REMOTE_PYTHON_ENV_NAME}'
 ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
 # uv is used for venv and pip, much faster than python implementations.
 SKY_UV_INSTALL_DIR = '"$HOME/.local/bin"'
+# set UV_SYSTEM_PYTHON to false in case the
+# user provided docker image set it to true.
+# unset PYTHONPATH in case the user provided docker image set it.
 SKY_UV_CMD = ('UV_SYSTEM_PYTHON=false '
               f'{SKY_UNSET_PYTHONPATH} {SKY_UV_INSTALL_DIR}/uv')
 # This won't reinstall uv if it's already installed, so it's safe to re-run.
@@ -97,7 +100,7 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '18'
+SKYLET_VERSION = '22'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -327,6 +330,14 @@ FILE_MOUNTS_LOCAL_TMP_BASE_PATH = '~/.sky/tmp/'
 # Base path for two-hop file mounts translation. See
 # controller_utils.translate_local_file_mounts_to_two_hop().
 FILE_MOUNTS_CONTROLLER_TMP_BASE_PATH = '~/.sky/tmp/controller'
+
+# For passing in CPU and memory limits to the controller pod when running
+# in k8s. Right now, we only use this for the jobs controller, but we may
+# use this for the serve controller as well in the future.
+# These files are written to disk by the skylet, who reads it from env vars
+# passed by the backend when starting the skylet (start_skylet_on_head_node).
+CONTROLLER_K8S_CPU_FILE = '~/.sky/_internal_k8s_pod_cpu'
+CONTROLLER_K8S_MEMORY_FILE = '~/.sky/_internal_k8s_pod_memory'
 
 # Used when an managed jobs are created and
 # files are synced up to the cloud.

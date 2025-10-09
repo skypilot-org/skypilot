@@ -33,13 +33,10 @@ provider:
     networking_mode: {{k8s_networking_mode}}
 
     # We use internal IPs since we set up a port-forward between the kubernetes
-    # cluster and the local machine, or directly use NodePort to reach the
-    # head node.
+    # cluster and the local machine.
     use_internal_ips: true
 
     timeout: {{timeout}}
-
-    ssh_jump_image: {{k8s_ssh_jump_image}}
 
     # Namespace used to host SkyPilot system components, such as fuse device
     # manager.
@@ -276,8 +273,6 @@ available_node_types:
             parent: skypilot
             # component will be set for the head node pod to be the same as the head node service selector above if a
             skypilot-cluster: {{cluster_name_on_cloud}}
-            # Identifies the SSH jump pod used by this pod. Used in life cycle management of the ssh jump pod.
-            skypilot-ssh-jump: {{k8s_ssh_jump_name}}
             skypilot-user: {{ user }}
             # Custom tags for the pods
             {%- for label_key, label_value in labels.items() %}
@@ -444,9 +439,6 @@ available_node_types:
         # object store. If you do not provide this, Ray will fall back to
         # /tmp which cause slowdowns if is not a shared memory volume.
         volumes:
-        - name: secret-volume
-          secret:
-            secretName: {{k8s_ssh_key_secret_name}}
         - name: dshm
           emptyDir:
             medium: Memory
@@ -640,6 +632,9 @@ available_node_types:
           command: ["/bin/bash", "-c", "--"]
           args:
             - |
+              # Set -x to print the commands and their arguments as they are executed.
+              # Useful for debugging.
+              set -x
               # Helper function to conditionally use sudo
               # TODO(zhwu): consolidate the two prefix_cmd and sudo replacements
               prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
@@ -869,7 +864,9 @@ available_node_types:
                 $(prefix_cmd) mkdir -p ~/.ssh;
                 $(prefix_cmd) chown -R $(whoami) ~/.ssh;
                 $(prefix_cmd) chmod 700 ~/.ssh;
-                $(prefix_cmd) cat /etc/secret-volume/ssh-publickey* > ~/.ssh/authorized_keys;
+                $(prefix_cmd) cat > ~/.ssh/authorized_keys <<'SKYPILOT_SSH_KEY_EOF'
+              skypilot:ssh_public_key_content
+              SKYPILOT_SSH_KEY_EOF
                 $(prefix_cmd) chmod 644 ~/.ssh/authorized_keys;
                 $(prefix_cmd) service ssh restart;
                 $(prefix_cmd) sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;
@@ -901,15 +898,20 @@ available_node_types:
                 {{ conda_installation_commands }}
                 {{ ray_installation_commands }}
 
-                VIRTUAL_ENV=~/skypilot-runtime ~/.local/bin/uv pip install skypilot[kubernetes,remote]
+                # set UV_SYSTEM_PYTHON to false in case the user provided docker image set it to true.
+                # unset PYTHONPATH in case the user provided docker image set it.
+                VIRTUAL_ENV=~/skypilot-runtime UV_SYSTEM_PYTHON=false env -u PYTHONPATH ~/.local/bin/uv pip install skypilot[kubernetes,remote]
                 # Wait for `patch` package to be installed before applying ray patches
                 until dpkg -l | grep -q "^ii  patch "; do
                   sleep 0.1
                   echo "Waiting for patch package to be installed..."
                 done
                 # Apply Ray patches for progress bar fix
-                ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
-                  VIRTUAL_ENV=~/skypilot-runtime python -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
+                # set UV_SYSTEM_PYTHON to false in case the user provided docker image set it to true.
+                # unset PYTHONPATH in case the user provided docker image set it.
+                # ~/.sky/python_path is seeded by conda_installation_commands
+                VIRTUAL_ENV=~/skypilot-runtime UV_SYSTEM_PYTHON=false env -u PYTHONPATH ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
+                  env -u PYTHONPATH $(cat ~/.sky/python_path) -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
                 }
                 touch /tmp/ray_skypilot_installation_complete
                 echo "=== Ray and skypilot installation completed ==="
@@ -1087,6 +1089,8 @@ available_node_types:
 
               touch {{k8s_high_availability_deployment_volume_mount_path}}/k8s_container_ready
               {% endif %}
+              # Set +x to stop printing the commands and their arguments as they are executed.
+              set +x
 
               trap : TERM INT; log_tail || sleep infinity & wait
 
@@ -1100,9 +1104,6 @@ available_node_types:
           # object store. If you do not provide this, Ray will fall back to
           # /tmp which cause slowdowns if is not a shared memory volume.
           volumeMounts:
-          - name: secret-volume
-            readOnly: true
-            mountPath: "/etc/secret-volume"
           - mountPath: /dev/shm
             name: dshm
           {% if k8s_enable_gpudirect_tcpx %}

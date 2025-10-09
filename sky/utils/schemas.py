@@ -1071,6 +1071,7 @@ _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
 }
 
 _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
+    # TODO(kevin): Remove 'networking' in v0.13.0.
     'networking': {
         'type': 'string',
         'case_insensitive_enum': [
@@ -1331,10 +1332,15 @@ def get_config_schema():
             'additionalProperties': False,
             'properties': {
                 'allowed_contexts': {
-                    'type': 'array',
-                    'items': {
+                    'oneOf': [{
+                        'type': 'array',
+                        'items': {
+                            'type': 'string',
+                        },
+                    }, {
                         'type': 'string',
-                    },
+                        'pattern': '^all$'
+                    }]
                 },
                 'context_configs': {
                     'type': 'object',
@@ -1656,10 +1662,15 @@ def get_config_schema():
                     'required': [],
                     'properties': {
                         'allowed_contexts': {
-                            'type': 'array',
-                            'items': {
+                            'oneOf': [{
+                                'type': 'array',
+                                'items': {
+                                    'type': 'string',
+                                },
+                            }, {
                                 'type': 'string',
-                            },
+                                'pattern': '^all$'
+                            }]
                         },
                         'disabled': {
                             'type': 'boolean'

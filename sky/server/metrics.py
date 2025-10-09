@@ -24,8 +24,10 @@ logger = sky_logging.init_logger(__name__)
 metrics_app = fastapi.FastAPI()
 
 
+# Serve /metrics in dedicated thread to avoid blocking the event loop
+# of metrics server.
 @metrics_app.get('/metrics')
-async def metrics() -> fastapi.Response:
+def metrics() -> fastapi.Response:
     """Expose aggregated Prometheus metrics from all worker processes."""
     if os.environ.get('PROMETHEUS_MULTIPROC_DIR'):
         # In multiprocess mode, we need to collect metrics from all processes.

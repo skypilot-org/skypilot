@@ -237,7 +237,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && sky autostop -i 10 -y {cluster_name}',
             f'{self.ACTIVATE_BASE} && sky exec -d --cloud {generic_cloud} --num-nodes 2 {cluster_name} sleep 120',
             # Must restart API server after switch the code base to ensure the client and server run in same version.
-            # Test coverage for client and server run in differnet verions should be done in test_client_server_compatibility.
+            # Test coverage for client and server run in differnet versions should be done in test_client_server_compatibility.
             f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && result="$(sky status {cluster_name})"; echo "$result"; echo "$result" | grep UP',
             f'{self.ACTIVATE_CURRENT} && result="$(sky status -r {cluster_name})"; echo "$result"; echo "$result" | grep UP',
             need_launch_cmd,
@@ -386,7 +386,10 @@ class TestBackwardCompatibility:
         # Dynamically inspect versions from both environments
         base_version = self._get_base_skylet_version()
         current_version = skylet_constants.SKYLET_VERSION
-        expect_version_mismatch = base_version != current_version
+        # After SKYLET_VERSION 17, we should gracefully handle the version
+        # mismatch.
+        expect_version_mismatch = int(
+            base_version) <= 17 and base_version != current_version
 
         # Build the current environment commands with version mismatch handling
         # Common initial commands
@@ -472,6 +475,20 @@ class TestBackwardCompatibility:
         # Combine all commands
         current_commands = common_initial_commands + version_specific_commands
 
+        # Check that for a 4GB memory jobs controller, there is only one controller process spawned.
+        # This is a regression test for https://github.com/skypilot-org/skypilot/pull/7278
+        # and https://github.com/skypilot-org/skypilot/pull/7494
+        check_controller_process_count = (
+            's=$(sky status -u) && echo "$s" && '
+            'jobs_controller=$(echo "$s" | grep -oE \'sky-jobs-controller-[0-9a-f]+\' | head -n1) && '
+            'if [ -z "$jobs_controller" ]; then echo "ERROR: jobs controller not found in sky status"; exit 1; fi && '
+            'echo "Jobs controller: $jobs_controller" && '
+            'num_controllers=$(ssh $jobs_controller "pgrep -f msky\\.jobs\\.controller | wc -l") && '
+            'if [ -z "$num_controllers" ]; then echo "ERROR: failed to get controller process count"; exit 1; fi && '
+            'echo "Controller process count: $num_controllers" && '
+            'if [ "$num_controllers" -ne 1 ]; then echo "ERROR: num_controllers is $num_controllers, expected 1"; exit 1; fi'
+        )
+
         commands = [
             *self._switch_to_base(
                 # Cover jobs launched in the old version and ran to terminal states
@@ -497,6 +514,7 @@ class TestBackwardCompatibility:
                                 [sky.ManagedJobStatus.RUNNING]),
             ),
             *self._switch_to_current(*current_commands),
+            check_controller_process_count,
         ]
         teardown = f'{self.ACTIVATE_CURRENT} && sky jobs cancel -n {managed_job_name}* -y'
         self.run_compatibility_test(managed_job_name, commands, teardown)
@@ -590,6 +608,21 @@ class TestBackwardCompatibility:
         ]
 
         teardown = f'{self.ACTIVATE_BASE} && sky down {cluster_name} -y && sky serve down {cluster_name}* -y'
+
+        if generic_cloud == 'kubernetes':
+            commands.extend([
+                # volume test
+                f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
+                f'sky volumes apply -y -n {cluster_name}-0 --infra {generic_cloud} --type k8s-pvc --size 1Gi',
+                # No restart on switch to current, cli in current, server in bases
+                f'{self.ACTIVATE_CURRENT} && sky volumes apply -y -n {cluster_name}-1 --type k8s-pvc --size 1Gi',
+                f'{self.ACTIVATE_CURRENT} && sky volumes ls | grep "{cluster_name}-0"',
+                f'{self.ACTIVATE_CURRENT} && sky volumes ls | grep "{cluster_name}-1"',
+                f'{self.ACTIVATE_CURRENT} && sky volumes delete {cluster_name}-0 -y',
+                f'{self.ACTIVATE_CURRENT} && sky volumes delete {cluster_name}-1 -y',
+            ])
+            teardown += ' && sky volumes delete {cluster_name}* -y'
+
         self.run_compatibility_test(cluster_name, commands, teardown)
 
     def test_client_server_compatibility_new_server(self, generic_cloud: str):
@@ -659,6 +692,22 @@ class TestBackwardCompatibility:
         ]
 
         teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name} -y && sky serve down {cluster_name}* -y'
+
+        if generic_cloud == 'kubernetes':
+            commands.extend([
+                # volume test
+                f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
+                f'sky volumes apply -y -n {cluster_name}-0 --infra {generic_cloud} --type k8s-pvc --size 1Gi',
+                # No restart on switch to base, cli in base, server in current
+                # Base version might contain the bug in https://github.com/skypilot-org/skypilot/issues/7380, so we need to specify --infra
+                f'{self.ACTIVATE_BASE} && sky volumes apply -y -n {cluster_name}-1 --infra {generic_cloud} --type k8s-pvc --size 1Gi',
+                f'{self.ACTIVATE_BASE} && sky volumes ls | grep "{cluster_name}-0"',
+                f'{self.ACTIVATE_BASE} && sky volumes ls | grep "{cluster_name}-1"',
+                f'{self.ACTIVATE_BASE} && sky volumes delete {cluster_name}-0 -y',
+                f'{self.ACTIVATE_BASE} && sky volumes delete {cluster_name}-1 -y',
+            ])
+            teardown += ' && sky volumes delete {cluster_name}* -y'
+
         self.run_compatibility_test(cluster_name, commands, teardown)
 
     def test_sdk_compatibility(self, generic_cloud: str):
@@ -737,6 +786,7 @@ class TestBackwardCompatibility:
             commands = [
                 # Create volume in base version
                 f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
+                # Base version might contain the bug in https://github.com/skypilot-org/skypilot/issues/7380, so we need to specify --infra
                 f'sky volumes apply -y -n {volume_name} --infra k8s --type k8s-pvc --size 1Gi',
                 f'{self.ACTIVATE_BASE} && sky volumes ls | grep "{volume_name}"',
 

@@ -19,8 +19,8 @@ import textwrap
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
-                    Union)
+from typing import (Any, Callable, Dict, Iterable, Iterator, List, Optional,
+                    Set, Tuple, Union)
 
 import colorama
 import psutil
@@ -91,6 +91,8 @@ if typing.TYPE_CHECKING:
     from sky.schemas.generated import autostopv1_pb2_grpc
     from sky.schemas.generated import jobsv1_pb2
     from sky.schemas.generated import jobsv1_pb2_grpc
+    from sky.schemas.generated import managed_jobsv1_pb2
+    from sky.schemas.generated import managed_jobsv1_pb2_grpc
     from sky.schemas.generated import servev1_pb2
     from sky.schemas.generated import servev1_pb2_grpc
 else:
@@ -111,6 +113,10 @@ else:
         'sky.schemas.generated.servev1_pb2')
     servev1_pb2_grpc = adaptors_common.LazyImport(
         'sky.schemas.generated.servev1_pb2_grpc')
+    managed_jobsv1_pb2 = adaptors_common.LazyImport(
+        'sky.schemas.generated.managed_jobsv1_pb2')
+    managed_jobsv1_pb2_grpc = adaptors_common.LazyImport(
+        'sky.schemas.generated.managed_jobsv1_pb2_grpc')
 
 Path = str
 
@@ -202,6 +208,11 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
 # We use 100KB as a threshold to be safe for other arguments that
 # might be added during ssh.
 _MAX_INLINE_SCRIPT_LENGTH = 100 * 1024
+_EXCEPTION_MSG_AND_RETURNCODE_FOR_DUMP_INLINE_SCRIPT = [
+    ('too long', 255),
+    ('request-uri too large', 1),
+    ('request header fields too large', 1),
+]
 
 _RESOURCES_UNAVAILABLE_LOG = (
     'Reasons for provision failures (for details, please check the log above):')
@@ -220,6 +231,61 @@ def _is_command_length_over_limit(command: str) -> bool:
 
     quoted_length = len(shlex.quote(shlex.quote(command)))
     return quoted_length > _MAX_INLINE_SCRIPT_LENGTH
+
+
+def _is_message_too_long(returncode: int,
+                         output: Optional[str] = None,
+                         file_path: Optional[str] = None) -> bool:
+    """Check if the message sent to the remote is too long.
+
+    We use inline script to run the setup or run command, i.e. the script will
+    be part of the message sent to the remote cluster. There is a chance that
+    the command is too long, when people has very long run or setup commands, or
+    there is a cloudflare proxy in front of the remote blocking the long
+    message. Several common causes are:
+    - SSH returning: `too long` in the error message.
+    - Cloudflare proxy returning: `414 Request-URI Too Large` or
+      `431 Request Header Fields Too Large` error.
+
+    We use a general length limit check before but it could be inaccurate on
+    some systems, e.g. cloudflare proxy, so this is necessary.
+
+    Args:
+        returncode: The return code of the setup command.
+        output: The output of the setup command.
+        file_path: The path to the setup log file.
+    """
+    assert (output is None) != (file_path is None), (
+        'Either output or file_path must be provided.', output, file_path)
+    to_check = []
+    for (match_str,
+         desired_rc) in _EXCEPTION_MSG_AND_RETURNCODE_FOR_DUMP_INLINE_SCRIPT:
+        if desired_rc == returncode:
+            to_check.append(match_str)
+    if not to_check:
+        return False
+
+    def _check_output_for_match_str(output: str) -> bool:
+        for match_str in to_check:
+            if match_str.lower() in output.lower():
+                return True
+        return False
+
+    if file_path is not None:
+        try:
+            with open(os.path.expanduser(file_path), 'r',
+                      encoding='utf-8') as f:
+                content = f.read()
+                return _check_output_for_match_str(content)
+        except Exception as e:  # pylint: disable=broad-except
+            # We don't crash the setup if we cannot read the log file.
+            # Instead, we should retry the setup with dumping the script
+            # to a file to be safe.
+            logger.debug(f'Failed to read setup log file {file_path}: {e}')
+            return True
+    else:
+        assert output is not None, (output, file_path)
+        return _check_output_for_match_str(output)
 
 
 def _get_cluster_config_template(cloud):
@@ -2260,8 +2326,6 @@ class RetryingVmProvisioner(object):
                 # terminated by _retry_zones().
                 assert (prev_cluster_status == status_lib.ClusterStatus.INIT
                        ), prev_cluster_status
-                assert global_user_state.get_handle_from_cluster_name(
-                    cluster_name) is None, cluster_name
                 logger.info(
                     ux_utils.retry_message(
                         f'Retrying provisioning with requested resources: '
@@ -2739,6 +2803,11 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             (tunnel.port, tunnel.pid) if tunnel is not None else None)
 
     def get_grpc_channel(self) -> 'grpc.Channel':
+        grpc_options = [
+            # The task YAMLs can be large, so the default
+            # max_receive_message_length of 4MB might not be enough.
+            ('grpc.max_receive_message_length', -1),
+        ]
         # It's fine to not grab the lock here, as we're only reading,
         # and writes are very rare.
         # It's acceptable to read while another process is opening a tunnel,
@@ -2755,7 +2824,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                     s.settimeout(0.5)
                     s.connect(('localhost', tunnel.port))
-                return grpc.insecure_channel(f'localhost:{tunnel.port}')
+                return grpc.insecure_channel(f'localhost:{tunnel.port}',
+                                             options=grpc_options)
             except socket.error as e:
                 logger.warning(
                     'Failed to connect to SSH tunnel for cluster '
@@ -2774,19 +2844,22 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                                  f'{self.cluster_name!r}, '
                                  'opening the tunnel')
                     tunnel = self._open_and_update_skylet_tunnel()
-                    return grpc.insecure_channel(f'localhost:{tunnel.port}')
+                    return grpc.insecure_channel(f'localhost:{tunnel.port}',
+                                                 options=grpc_options)
                 try:
                     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                         s.settimeout(0.5)
                         s.connect(('localhost', tunnel.port))
-                        return grpc.insecure_channel(f'localhost:{tunnel.port}')
+                        return grpc.insecure_channel(f'localhost:{tunnel.port}',
+                                                     options=grpc_options)
                 except socket.error as e:
                     logger.warning(
                         'Failed to connect to SSH tunnel for cluster '
                         f'{self.cluster_name!r} on port {tunnel.port} ({e}), '
                         'opening new tunnel')
                     tunnel = self._open_and_update_skylet_tunnel()
-                    return grpc.insecure_channel(f'localhost:{tunnel.port}')
+                    return grpc.insecure_channel(f'localhost:{tunnel.port}',
+                                                 options=grpc_options)
         except locks.LockTimeout as e:
             raise RuntimeError(
                 'Failed to get gRPC channel for cluster '
@@ -3062,6 +3135,8 @@ class SkyletClient:
         self._autostop_stub = autostopv1_pb2_grpc.AutostopServiceStub(channel)
         self._jobs_stub = jobsv1_pb2_grpc.JobsServiceStub(channel)
         self._serve_stub = servev1_pb2_grpc.ServeServiceStub(channel)
+        self._managed_jobs_stub = (
+            managed_jobsv1_pb2_grpc.ManagedJobsServiceStub(channel))
 
     def set_autostop(
         self,
@@ -3148,6 +3223,13 @@ class SkyletClient:
     ) -> 'jobsv1_pb2.GetLogDirsForJobsResponse':
         return self._jobs_stub.GetLogDirsForJobs(request, timeout=timeout)
 
+    def tail_logs(
+        self,
+        request: 'jobsv1_pb2.TailLogsRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> Iterator['jobsv1_pb2.TailLogsResponse']:
+        return self._jobs_stub.TailLogs(request, timeout=timeout)
+
     def get_service_status(
         self,
         request: 'servev1_pb2.GetServiceStatusRequest',
@@ -3196,6 +3278,35 @@ class SkyletClient:
     ) -> 'servev1_pb2.UpdateServiceResponse':
         return self._serve_stub.UpdateService(request, timeout=timeout)
 
+    def get_managed_job_controller_version(
+        self,
+        request: 'managed_jobsv1_pb2.GetVersionRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'managed_jobsv1_pb2.GetVersionResponse':
+        return self._managed_jobs_stub.GetVersion(request, timeout=timeout)
+
+    def get_managed_job_table(
+        self,
+        request: 'managed_jobsv1_pb2.GetJobTableRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'managed_jobsv1_pb2.GetJobTableResponse':
+        return self._managed_jobs_stub.GetJobTable(request, timeout=timeout)
+
+    def get_all_managed_job_ids_by_name(
+        self,
+        request: 'managed_jobsv1_pb2.GetAllJobIdsByNameRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'managed_jobsv1_pb2.GetAllJobIdsByNameResponse':
+        return self._managed_jobs_stub.GetAllJobIdsByName(request,
+                                                          timeout=timeout)
+
+    def cancel_managed_jobs(
+        self,
+        request: 'managed_jobsv1_pb2.CancelJobsRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'managed_jobsv1_pb2.CancelJobsResponse':
+        return self._managed_jobs_stub.CancelJobs(request, timeout=timeout)
+
 
 @registry.BACKEND_REGISTRY.type_register(name='cloudvmray')
 class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
@@ -3226,6 +3337,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._requested_features = set()
         self._dump_final_script = False
         self._is_managed = False
+        # Optional planner (via register_info): used under the per-cluster lock
+        # to produce a fresh concrete plan when neither a reusable snapshot nor
+        # a caller plan is available.
+        self._planner = None
 
         # Command for running the setup script. It is only set when the
         # setup needs to be run outside the self._setup() and as part of
@@ -3243,6 +3358,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                               self._requested_features)
         self._dump_final_script = kwargs.pop('dump_final_script', False)
         self._is_managed = kwargs.pop('is_managed', False)
+        # Optional planner callback for a fresh plan under lock when no
+        # reusable snapshot/caller plan exists. Keeps optimizer in upper layer.
+        self._planner = kwargs.pop('planner', self._planner)
         assert not kwargs, f'Unexpected kwargs: {kwargs}'
 
     def check_resources_fit_cluster(
@@ -3576,7 +3694,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     global_user_state.ClusterEventType.STATUS_CHANGE)
 
                 cluster_info = provisioner.post_provision_runtime_setup(
-                    repr(handle.launched_resources.cloud),
+                    handle.launched_resources,
                     resources_utils.ClusterName(handle.cluster_name,
                                                 handle.cluster_name_on_cloud),
                     handle.cluster_yaml,
@@ -3708,7 +3826,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     ux_utils.spinner_message('Preparing SkyPilot runtime')):
                 use_legacy = not handle.is_grpc_enabled_with_flag
 
-                if handle.is_grpc_enabled_with_flag:
+                if not use_legacy:
                     try:
                         request = jobsv1_pb2.UpdateStatusRequest()
                         backend_utils.invoke_skylet_with_retries(
@@ -3732,7 +3850,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # 2. On next `sky start`, it gets reset to FAILED.
             use_legacy = not handle.is_grpc_enabled_with_flag
 
-            if handle.is_grpc_enabled_with_flag:
+            if not use_legacy:
                 try:
                     fail_request = jobsv1_pb2.FailAllInProgressJobsRequest()
                     backend_utils.invoke_skylet_with_retries(
@@ -4014,29 +4132,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             returncode = _run_setup(f'{create_script_code} && {setup_cmd}',)
 
-            def _load_setup_log_and_match(match_str: str) -> bool:
-                try:
-                    with open(os.path.expanduser(setup_log_path),
-                              'r',
-                              encoding='utf-8') as f:
-                        return match_str.lower() in f.read().lower()
-                except Exception as e:  # pylint: disable=broad-except
-                    # We don't crash the setup if we cannot read the log file.
-                    # Instead, we should retry the setup with dumping the script
-                    # to a file to be safe.
-                    logger.debug(
-                        f'Failed to read setup log file {setup_log_path}: {e}')
-                    return True
-
-            if ((returncode == 255 and _load_setup_log_and_match('too long')) or
-                (returncode == 1 and
-                 _load_setup_log_and_match('request-uri too large'))):
-                # If the setup script is too long, we retry it with dumping
-                # the script to a file and running it with SSH. We use a
-                # general length limit check before but it could be
-                # inaccurate on some systems.
-                # When there is a cloudflare proxy in front of the remote, it
-                # could cause `414 Request-URI Too Large` error.
+            if _is_message_too_long(returncode, file_path=setup_log_path):
+                # If the setup script is too long, we need to retry it
+                # with dumping the script to a file and running it the script
+                # on remote cluster instead.
                 logger.debug('Failed to run setup command inline due to '
                              'command length limit. Dumping setup script to '
                              'file and running it with SSH.')
@@ -4117,7 +4216,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         handle: CloudVmRayResourceHandle,
         codegen: str,
         job_id: int,
-        detach_run: bool = False,
         managed_job_dag: Optional['dag.Dag'] = None,
         remote_log_dir: Optional[str] = None,
     ) -> None:
@@ -4167,7 +4265,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             _dump_code_to_file(job_submit_cmd,
                                constants.PERSISTENT_RUN_SCRIPT_DIR)
 
-        if handle.is_grpc_enabled_with_flag:
+        if not use_legacy:
             try:
                 managed_job_info: Optional[jobsv1_pb2.ManagedJobInfo] = None
                 if managed_job_dag is not None:
@@ -4250,15 +4348,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             backend_utils.check_stale_runtime_on_remote(returncode, stderr,
                                                         handle.cluster_name)
             output = stdout + stderr
-            if ((returncode == 255 and 'too long' in output.lower()) or
-                (returncode == 1 and
-                 'request-uri too large' in output.lower())):
-                # If the generated script is too long, we retry it with dumping
-                # the script to a file and running it with SSH. We use a general
-                # length limit check before but it could be inaccurate on some
-                # systems.
-                # When there is a cloudflare proxy in front of the remote, it
-                # could cause `414 Request-URI Too Large` error.
+            if _is_message_too_long(returncode, output=output):
+                # If the job submit script is too long, we need to retry it
+                # with dumping the script to a file and running it the script
+                # on remote cluster instead.
                 logger.debug(
                     'Failed to submit job due to command length limit. '
                     'Dumping job to file and running it with SSH. '
@@ -4285,21 +4378,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.info(
                 ux_utils.starting_message(f'Job submitted, ID: {job_id}'))
         rich_utils.stop_safe_status()
-        if not detach_run:
-            if (handle.cluster_name == controller_utils.Controllers.
-                    JOBS_CONTROLLER.value.cluster_name):
-                self.tail_managed_job_logs(handle, job_id)
-            else:
-                # Sky logs. Not using subprocess.run since it will make the
-                # ssh keep connected after ctrl-c.
-                self.tail_logs(handle, job_id)
 
     def _add_job(self, handle: CloudVmRayResourceHandle,
                  job_name: Optional[str], resources_str: str,
                  metadata: str) -> Tuple[int, str]:
         use_legacy = not handle.is_grpc_enabled_with_flag
 
-        if handle.is_grpc_enabled_with_flag:
+        if not use_legacy:
             try:
                 request = jobsv1_pb2.AddJobRequest(
                     job_name=job_name,
@@ -4361,7 +4446,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self,
         handle: CloudVmRayResourceHandle,
         task: task_lib.Task,
-        detach_run: bool,
         dryrun: bool = False,
     ) -> Optional[int]:
         """Executes the task on the cluster.
@@ -4413,12 +4497,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
         if num_actual_nodes > 1:
-            self._execute_task_n_nodes(handle, task_copy, job_id, detach_run,
-                                       log_dir)
+            self._execute_task_n_nodes(handle, task_copy, job_id, log_dir)
         else:
             # Case: task_lib.Task(run, num_nodes=1)
-            self._execute_task_one_node(handle, task_copy, job_id, detach_run,
-                                        log_dir)
+            self._execute_task_one_node(handle, task_copy, job_id, log_dir)
 
         return job_id
 
@@ -4569,7 +4651,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """
         use_legacy = not handle.is_grpc_enabled_with_flag
 
-        if handle.is_grpc_enabled_with_flag:
+        if not use_legacy:
             try:
                 request = jobsv1_pb2.CancelJobsRequest(job_ids=jobs,
                                                        cancel_all=cancel_all,
@@ -4612,7 +4694,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         job_to_dir: Dict[str, str] = {}
         use_legacy = not handle.is_grpc_enabled_with_flag
 
-        if handle.is_grpc_enabled_with_flag:
+        if not use_legacy:
             try:
                 int_job_ids = []
                 if job_ids:
@@ -4726,6 +4808,28 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             The exit code of the tail command. Returns code 100 if the job has
             failed. See exceptions.JobExitCode for possible return codes.
         """
+        if handle.is_grpc_enabled_with_flag:
+            last_exit_code = 0
+            try:
+                request = jobsv1_pb2.TailLogsRequest(
+                    job_id=job_id,
+                    managed_job_id=managed_job_id,
+                    follow=follow,
+                    tail=tail)
+                for resp in backend_utils.invoke_skylet_streaming_with_retries(
+                        lambda: SkyletClient(handle.get_grpc_channel()
+                                            ).tail_logs(request, timeout=None)):
+                    if resp.log_line:
+                        print(resp.log_line, end='', flush=True)
+                    last_exit_code = resp.exit_code
+                return last_exit_code
+            except exceptions.SkyletMethodNotImplementedError:
+                pass
+            except grpc.RpcError as e:
+                if e.code() == grpc.StatusCode.CANCELLED:
+                    return last_exit_code
+                raise e
+
         code = job_lib.JobLibCodeGen.tail_logs(job_id,
                                                managed_job_id=managed_job_id,
                                                follow=follow,
@@ -4763,6 +4867,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                               tail: Optional[int] = None) -> int:
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
+        # TODO(kevin): Migrate stream_logs to gRPC
         code = managed_jobs.ManagedJobCodeGen.stream_logs(
             job_name, job_id, follow, controller, tail)
 
@@ -4808,20 +4913,37 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         assert job_name is None or job_id is None, (job_name, job_id)
 
         if job_id is None:
-            # generate code to get the job_id
+            # get the job_id
             # if job_name is None, get all job_ids
             # TODO: Only get the latest job_id, since that's the only one we use
-            code = managed_jobs.ManagedJobCodeGen.get_all_job_ids_by_name(
-                job_name=job_name)
-            returncode, job_ids, stderr = self.run_on_head(handle,
-                                                           code,
-                                                           stream_logs=False,
-                                                           require_outputs=True,
-                                                           separate_stderr=True)
-            subprocess_utils.handle_returncode(returncode, code,
-                                               'Failed to sync down logs.',
-                                               stderr)
-            job_ids = message_utils.decode_payload(job_ids)
+
+            use_legacy = not handle.is_grpc_enabled_with_flag
+            logger.info(f'handle.is_grpc_enabled_with_flag: '
+                        f'{handle.is_grpc_enabled_with_flag}')
+            if not use_legacy:
+                try:
+                    request = managed_jobsv1_pb2.GetAllJobIdsByNameRequest(
+                        job_name=job_name)
+                    response = backend_utils.invoke_skylet_with_retries(
+                        lambda: SkyletClient(handle.get_grpc_channel(
+                        )).get_all_managed_job_ids_by_name(request))
+                    job_ids = list(response.job_ids)
+                except exceptions.SkyletMethodNotImplementedError:
+                    use_legacy = True
+
+            if use_legacy:
+                code = managed_jobs.ManagedJobCodeGen.get_all_job_ids_by_name(
+                    job_name=job_name)
+                returncode, job_ids_payload, stderr = self.run_on_head(
+                    handle,
+                    code,
+                    stream_logs=False,
+                    require_outputs=True,
+                    separate_stderr=True)
+                subprocess_utils.handle_returncode(returncode, code,
+                                                   'Failed to sync down logs.',
+                                                   stderr)
+                job_ids = message_utils.decode_payload(job_ids_payload)
             if not job_ids:
                 logger.info(f'{colorama.Fore.YELLOW}'
                             'No matching job found'
@@ -4849,18 +4971,39 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         else:
             # get the run_timestamp
             # the function takes in [job_id]
-            code = job_lib.JobLibCodeGen.get_log_dirs_for_jobs([str(job_id)])
-            returncode, run_timestamps_payload, stderr = self.run_on_head(
-                handle,
-                code,
-                stream_logs=False,
-                require_outputs=True,
-                separate_stderr=True)
-            subprocess_utils.handle_returncode(returncode, code,
-                                               'Failed to sync logs.', stderr)
-            # returns with a dict of {job_id: run_timestamp}
-            run_timestamps = message_utils.decode_payload(
-                run_timestamps_payload)
+            use_legacy = not handle.is_grpc_enabled_with_flag
+            if not use_legacy:
+                try:
+                    log_dirs_request = jobsv1_pb2.GetLogDirsForJobsRequest(
+                        job_ids=[job_id])
+                    log_dirs_response = (
+                        backend_utils.invoke_skylet_with_retries(
+                            lambda: SkyletClient(handle.get_grpc_channel(
+                            )).get_log_dirs_for_jobs(log_dirs_request)))
+                    job_log_dirs = log_dirs_response.job_log_dirs
+                    # Convert back to the expected format
+                    # {job_id: run_timestamp}
+                    run_timestamps = {}
+                    for jid, log_dir in job_log_dirs.items():
+                        run_timestamps[int(jid)] = log_dir
+                except exceptions.SkyletMethodNotImplementedError:
+                    use_legacy = True
+
+            if use_legacy:
+                code = job_lib.JobLibCodeGen.get_log_dirs_for_jobs(
+                    [str(job_id)])
+                returncode, run_timestamps_payload, stderr = self.run_on_head(
+                    handle,
+                    code,
+                    stream_logs=False,
+                    require_outputs=True,
+                    separate_stderr=True)
+                subprocess_utils.handle_returncode(returncode, code,
+                                                   'Failed to sync logs.',
+                                                   stderr)
+                # returns with a dict of {job_id: run_timestamp}
+                run_timestamps = message_utils.decode_payload(
+                    run_timestamps_payload)
         if not run_timestamps:
             logger.info(f'{colorama.Fore.YELLOW}'
                         'No matching log directories found'
@@ -4927,6 +5070,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         exist_ok=True)
             log_file = os.path.join(local_log_dir, 'run.log')
 
+            # TODO(kevin): Migrate stream_logs to gRPC
             code = managed_jobs.ManagedJobCodeGen.stream_logs(
                 job_name=None,
                 job_id=int(job_id),
@@ -5008,7 +5152,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         # observed in AWS. See also
                         # _LAUNCH_DOUBLE_CHECK_WINDOW in backend_utils.py.
                         force_refresh_statuses={status_lib.ClusterStatus.INIT},
-                        acquire_per_cluster_status_lock=False))
+                        cluster_lock_already_held=True))
                 cluster_status_fetched = True
             except exceptions.ClusterStatusFetchingError:
                 logger.warning(
@@ -5377,7 +5521,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster_yaml_path = handle.cluster_yaml
         handle.cluster_yaml = None
         global_user_state.update_cluster_handle(handle.cluster_name, handle)
-        global_user_state.remove_cluster_yaml(handle.cluster_name)
+        # Removing the cluster YAML can cause some unexpected stability issues.
+        # See #5011.
+        # global_user_state.remove_cluster_yaml(handle.cluster_name)
         common_utils.remove_file_if_exists(cluster_yaml_path)
 
     def set_autostop(self,
@@ -5591,7 +5737,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             exceptions.InvalidClusterNameError: If the cluster name is invalid.
             # TODO(zhwu): complete the list of exceptions.
         """
-        record = global_user_state.get_cluster_from_name(cluster_name)
+        record = global_user_state.get_cluster_from_name(
+            cluster_name, include_user_info=False, summary_response=True)
         if record is None:
             handle_before_refresh = None
             status_before_refresh = None
@@ -5611,7 +5758,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             record = backend_utils.refresh_cluster_record(
                 cluster_name,
                 force_refresh_statuses={status_lib.ClusterStatus.INIT},
-                acquire_per_cluster_status_lock=False,
+                cluster_lock_already_held=True,
+                include_user_info=False,
+                summary_response=True,
             )
             if record is not None:
                 prev_cluster_status = record['status']
@@ -5727,33 +5876,41 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         common_utils.check_cluster_name_is_valid(cluster_name)
 
         if to_provision is None:
-            # The cluster is recently terminated either by autostop or manually
-            # terminated on the cloud. We should use the previously terminated
-            # resources to provision the cluster.
-            #
-            # FIXME(zongheng): this assert can be hit by using two terminals.
-            # First, create a 'dbg' cluster. Then:
-            #   Terminal 1: sky down dbg -y
-            #   Terminal 2: sky launch -c dbg -- echo
-            # Run it in order. Terminal 2 will show this error after terminal 1
-            # succeeds in downing the cluster and releasing the lock.
-            assert isinstance(
-                handle_before_refresh, CloudVmRayResourceHandle), (
-                    f'Trying to launch cluster {cluster_name!r} recently '
-                    'terminated on the cloud, but the handle is not a '
-                    f'CloudVmRayResourceHandle ({handle_before_refresh}).')
-            status_before_refresh_str = None
-            if status_before_refresh is not None:
-                status_before_refresh_str = status_before_refresh.value
-
-            logger.info(
-                f'The cluster {cluster_name!r} (status: '
-                f'{status_before_refresh_str}) was not found on the cloud: it '
-                'may be autodowned, manually terminated, or its launch never '
-                'succeeded. Provisioning a new cluster by using the same '
-                'resources as its original launch.')
-            to_provision = handle_before_refresh.launched_resources
-            self.check_resources_fit_cluster(handle_before_refresh, task)
+            # Recently terminated after refresh. OPTIMIZE usually ran outside
+            # the lock, so that decision may be stale by now. Under the lock,
+            # ensure we always have a concrete plan via the following order:
+            #   1) Reuse last placement snapshot (if available);
+            #   2) Else, call injected planner for a fresh plan.
+            # If we still have a pre-refresh handle snapshot with a concrete
+            # placement, prefer reusing it.
+            if (isinstance(handle_before_refresh, CloudVmRayResourceHandle) and
+                    handle_before_refresh.launched_resources is not None):
+                to_provision = handle_before_refresh.launched_resources
+                # Ensure the requested task fits the previous placement.
+                self.check_resources_fit_cluster(handle_before_refresh, task)
+                # Mirror the original message for reuse path.
+                status_before_refresh_str = None
+                if status_before_refresh is not None:
+                    status_before_refresh_str = status_before_refresh.value
+                logger.info(
+                    f'The cluster {cluster_name!r} (status: '
+                    f'{status_before_refresh_str}) was not found on the cloud: '
+                    'it may be autodowned, manually terminated, or its launch '
+                    'never succeeded. Provisioning a new cluster by using the '
+                    'same resources as its original launch.')
+            elif self._planner is not None:
+                to_provision = self._planner(task)
+                logger.info(
+                    'Previous placement snapshot missing; computing a fresh '
+                    'plan for provisioning.')
+            else:
+                # Without a snapshot or planner, we cannot proceed safely.
+                # Surface a user-friendly error without a long traceback.
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        'No concrete launch plan available after recent cloud '
+                        f'termination of cluster {cluster_name!r}. Ensure the '
+                        'OPTIMIZE stage runs or provide concrete resources.')
 
         return RetryingVmProvisioner.ToProvisionConfig(
             cluster_name,
@@ -6116,7 +6273,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
                                task: task_lib.Task, job_id: int,
-                               detach_run: bool, remote_log_dir: str) -> None:
+                               remote_log_dir: str) -> None:
         # Launch the command as a Ray task.
         log_dir = os.path.join(remote_log_dir, 'tasks')
 
@@ -6155,13 +6312,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._exec_code_on_head(handle,
                                 codegen.build(),
                                 job_id,
-                                detach_run=detach_run,
                                 managed_job_dag=task.managed_job_dag,
                                 remote_log_dir=remote_log_dir)
 
     def _execute_task_n_nodes(self, handle: CloudVmRayResourceHandle,
                               task: task_lib.Task, job_id: int,
-                              detach_run: bool, remote_log_dir: str) -> None:
+                              remote_log_dir: str) -> None:
         # Strategy:
         #   ray.init(...)
         #   for node:
@@ -6211,6 +6367,5 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._exec_code_on_head(handle,
                                 codegen.build(),
                                 job_id,
-                                detach_run=detach_run,
                                 managed_job_dag=task.managed_job_dag,
                                 remote_log_dir=remote_log_dir)

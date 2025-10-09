@@ -59,6 +59,9 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
+import { statusGroups } from '@/components/jobs';
+
+const ACTIVE_JOB_STATUSES = new Set(statusGroups.active);
 
 // Helper functions for username parsing
 const parseUsername = (username, userId) => {
@@ -1118,15 +1121,16 @@ function UsersTable({
           const userClusters = (clustersData || []).filter(
             (c) => c.user_hash === user.userId
           );
-          const userJobs = (jobsData || []).filter(
-            (j) => j.user_hash === user.userId
-          );
+          const activeJobCount = (jobsData || []).filter(
+            (j) =>
+              j.user_hash === user.userId && ACTIVE_JOB_STATUSES.has(j.status)
+          ).length;
           return {
             ...user,
             usernameDisplay: parseUsername(user.username, user.userId),
             fullEmailID: getFullEmailID(user.username, user.userId),
             clusterCount: userClusters.length,
-            jobCount: userJobs.length,
+            jobCount: activeJobCount,
           };
         });
 
@@ -1423,7 +1427,7 @@ function UsersTable({
                           ? 'bg-green-100 text-green-600 hover:bg-green-200 hover:text-green-700'
                           : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
                       }`}
-                      title={`View ${user.jobCount} job${user.jobCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
+                      title={`View ${user.jobCount} active job${user.jobCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
                     >
                       {user.jobCount}
                     </Link>
@@ -1582,7 +1586,9 @@ function ServiceAccountTokensView({
 
         // Count jobs owned by this service account
         const serviceAccountJobs = jobsData.filter(
-          (job) => job.user_hash === serviceAccountId
+          (job) =>
+            job.user_hash === serviceAccountId &&
+            ACTIVE_JOB_STATUSES.has(job.status)
         );
 
         return {
@@ -1922,7 +1928,7 @@ function ServiceAccountTokensView({
                             ? 'bg-green-100 text-green-600 hover:bg-green-200 hover:text-green-700'
                             : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
                         }`}
-                        title={`View ${token.jobCount} job${token.jobCount !== 1 ? 's' : ''} for ${token.token_name}`}
+                        title={`View ${token.jobCount} active job${token.jobCount !== 1 ? 's' : ''} for ${token.token_name}`}
                       >
                         {token.jobCount}
                       </Link>

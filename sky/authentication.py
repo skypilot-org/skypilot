@@ -25,7 +25,7 @@ import re
 import socket
 import subprocess
 import sys
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 import uuid
 
 import colorama
@@ -35,10 +35,8 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
-from sky import skypilot_config
 from sky.adaptors import gcp
 from sky.adaptors import ibm
-from sky.adaptors import kubernetes
 from sky.adaptors import runpod
 from sky.adaptors import seeweb as seeweb_adaptor
 from sky.adaptors import shadeform as shadeform_adaptor
@@ -48,8 +46,6 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.lambda_cloud import lambda_utils
 from sky.provision.primeintellect import utils as primeintellect_utils
 from sky.utils import common_utils
-from sky.utils import config_utils
-from sky.utils import kubernetes_enums
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
@@ -70,10 +66,7 @@ MAX_TRIALS = 64
 _SSH_KEY_PATH_PREFIX = '~/.sky/clients/{user_hash}/ssh'
 
 
-def get_ssh_key_and_lock_path(
-        user_hash: Optional[str] = None) -> Tuple[str, str, str]:
-    if user_hash is None:
-        user_hash = common_utils.get_user_hash()
+def get_ssh_key_and_lock_path(user_hash: str) -> Tuple[str, str, str]:
     user_ssh_key_prefix = _SSH_KEY_PATH_PREFIX.format(user_hash=user_hash)
 
     os.makedirs(os.path.expanduser(user_ssh_key_prefix),
@@ -129,13 +122,12 @@ def _save_key_pair(private_key_path: str, public_key_path: str,
               opener=functools.partial(os.open, mode=0o644)) as f:
         f.write(public_key)
 
-    global_user_state.set_ssh_keys(common_utils.get_user_hash(), public_key,
-                                   private_key)
-
 
 def get_or_generate_keys() -> Tuple[str, str]:
     """Returns the absolute private and public key paths."""
-    private_key_path, public_key_path, lock_path = get_ssh_key_and_lock_path()
+    user_hash = common_utils.get_user_hash()
+    private_key_path, public_key_path, lock_path = get_ssh_key_and_lock_path(
+        user_hash)
     private_key_path = os.path.expanduser(private_key_path)
     public_key_path = os.path.expanduser(public_key_path)
     lock_path = os.path.expanduser(lock_path)
@@ -148,9 +140,11 @@ def get_or_generate_keys() -> Tuple[str, str]:
     with filelock.FileLock(lock_path, timeout=10):
         if not os.path.exists(private_key_path):
             ssh_public_key, ssh_private_key, exists = (
-                global_user_state.get_ssh_keys(common_utils.get_user_hash()))
+                global_user_state.get_ssh_keys(user_hash))
             if not exists:
                 ssh_public_key, ssh_private_key = _generate_rsa_key_pair()
+                global_user_state.set_ssh_keys(user_hash, ssh_public_key,
+                                               ssh_private_key)
             _save_key_pair(private_key_path, public_key_path, ssh_private_key,
                            ssh_public_key)
     assert os.path.exists(public_key_path), (
@@ -159,22 +153,20 @@ def get_or_generate_keys() -> Tuple[str, str]:
     return private_key_path, public_key_path
 
 
-def create_ssh_key_files_from_db(private_key_path: Optional[str] = None):
-    if private_key_path is None:
-        user_hash = common_utils.get_user_hash()
-    else:
-        # Assume private key path is in the format of
-        # ~/.sky/clients/<user_hash>/ssh/sky-key
-        separated_path = os.path.normpath(private_key_path).split(os.path.sep)
-        assert separated_path[-1] == 'sky-key'
-        assert separated_path[-2] == 'ssh'
-        user_hash = separated_path[-3]
+def create_ssh_key_files_from_db(private_key_path: str):
+    # Assume private key path is in the format of
+    # ~/.sky/clients/<user_hash>/ssh/sky-key
+    separated_path = os.path.normpath(private_key_path).split(os.path.sep)
+    assert separated_path[-1] == 'sky-key'
+    assert separated_path[-2] == 'ssh'
+    user_hash = separated_path[-3]
 
     private_key_path_generated, public_key_path, lock_path = (
         get_ssh_key_and_lock_path(user_hash))
     assert private_key_path == os.path.expanduser(private_key_path_generated), (
         f'Private key path {private_key_path} does not '
-        f'match the generated path {private_key_path_generated}')
+        'match the generated path '
+        f'{os.path.expanduser(private_key_path_generated)}')
     private_key_path = os.path.expanduser(private_key_path)
     public_key_path = os.path.expanduser(public_key_path)
     lock_path = os.path.expanduser(lock_path)
@@ -432,116 +424,30 @@ def setup_ibm_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     context = kubernetes_utils.get_context_from_config(config['provider'])
-
-    # Default ssh session is established with kubectl port-forwarding with
-    # ClusterIP service.
-    nodeport_mode = kubernetes_enums.KubernetesNetworkingMode.NODEPORT
-    port_forward_mode = kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD
-    network_mode_str = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
-        region=context,
-        keys=('networking',),
-        default_value=port_forward_mode.value)
-    try:
-        network_mode = kubernetes_enums.KubernetesNetworkingMode.from_str(
-            network_mode_str)
-    except ValueError as e:
-        # Add message saying "Please check: ~/.sky/config.yaml" to the error
-        # message.
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(str(e) +
-                             ' Please check: ~/.sky/config.yaml.') from None
-    _, public_key_path = get_or_generate_keys()
-
-    # Add the user's public key to the SkyPilot cluster.
-    secret_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
-    secret_field_name = clouds.Kubernetes().ssh_key_secret_field_name
     namespace = kubernetes_utils.get_namespace_from_config(config['provider'])
-    k8s = kubernetes.kubernetes
-    with open(public_key_path, 'r', encoding='utf-8') as f:
-        public_key = f.read()
-        if not public_key.endswith('\n'):
-            public_key += '\n'
-
-        # Generate metadata
-        secret_metadata = {
-            'name': secret_name,
-            'labels': {
-                'parent': 'skypilot'
-            }
-        }
-        custom_metadata = skypilot_config.get_effective_region_config(
-            cloud='kubernetes',
-            region=context,
-            keys=('custom_metadata',),
-            default_value={})
-        config_utils.merge_k8s_configs(secret_metadata, custom_metadata)
-
-        secret = k8s.client.V1Secret(
-            metadata=k8s.client.V1ObjectMeta(**secret_metadata),
-            string_data={secret_field_name: public_key})
-    try:
-        if kubernetes_utils.check_secret_exists(secret_name, namespace,
-                                                context):
-            logger.debug(f'Key {secret_name} exists in the cluster, '
-                         'patching it...')
-            kubernetes.core_api(context).patch_namespaced_secret(
-                secret_name, namespace, secret)
-        else:
-            logger.debug(f'Key {secret_name} does not exist in the cluster, '
-                         'creating it...')
-            kubernetes.core_api(context).create_namespaced_secret(
-                namespace, secret)
-    except kubernetes.api_exception() as e:
-        if e.status == 409 and e.reason == 'AlreadyExists':
-            logger.debug(f'Key {secret_name} was created concurrently, '
-                         'patching it...')
-            kubernetes.core_api(context).patch_namespaced_secret(
-                secret_name, namespace, secret)
-        else:
-            raise e
-
     private_key_path, _ = get_or_generate_keys()
-    if network_mode == nodeport_mode:
-        ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
-        service_type = kubernetes_enums.KubernetesServiceType.NODEPORT
-        # Setup service for SSH jump pod. We create the SSH jump service here
-        # because we need to know the service IP address and port to set the
-        # ssh_proxy_command in the autoscaler config.
-        kubernetes_utils.setup_ssh_jump_svc(ssh_jump_name, namespace, context,
-                                            service_type)
-        ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
-            ssh_jump_name,
-            nodeport_mode,
-            private_key_path=private_key_path,
-            context=context,
-            namespace=namespace)
-    elif network_mode == port_forward_mode:
-        # Using `kubectl port-forward` creates a direct tunnel to the pod and
-        # does not require a ssh jump pod.
-        kubernetes_utils.check_port_forward_mode_dependencies()
-        # TODO(romilb): This can be further optimized. Instead of using the
-        #   head node as a jump pod for worker nodes, we can also directly
-        #   set the ssh_target to the worker node. However, that requires
-        #   changes in the downstream code to return a mapping of node IPs to
-        #   pod names (to be used as ssh_target) and updating the upstream
-        #   SSHConfigHelper to use a different ProxyCommand for each pod.
-        #   This optimization can reduce SSH time from ~0.35s to ~0.25s, tested
-        #   on GKE.
-        ssh_target = config['cluster_name'] + '-head'
-        ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
-            ssh_target,
-            port_forward_mode,
-            private_key_path=private_key_path,
-            context=context,
-            namespace=namespace)
-    else:
-        # This should never happen because we check for this in from_str above.
-        raise ValueError(f'Unsupported networking mode: {network_mode_str}')
+    # Using `kubectl port-forward` creates a direct tunnel to the pod and
+    # does not require a ssh jump pod.
+    kubernetes_utils.check_port_forward_mode_dependencies()
+    # TODO(romilb): This can be further optimized. Instead of using the
+    #   head node as a jump pod for worker nodes, we can also directly
+    #   set the ssh_target to the worker node. However, that requires
+    #   changes in the downstream code to return a mapping of node IPs to
+    #   pod names (to be used as ssh_target) and updating the upstream
+    #   SSHConfigHelper to use a different ProxyCommand for each pod.
+    #   This optimization can reduce SSH time from ~0.35s to ~0.25s, tested
+    #   on GKE.
+    pod_name = config['cluster_name'] + '-head'
+    ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
+        pod_name,
+        private_key_path=private_key_path,
+        context=context,
+        namespace=namespace)
     config['auth']['ssh_proxy_command'] = ssh_proxy_cmd
     config['auth']['ssh_private_key'] = private_key_path
 
-    return config
+    # Add the user's public key to the SkyPilot cluster.
+    return configure_ssh_info(config)
 
 
 # ---------------------------------- RunPod ---------------------------------- #
