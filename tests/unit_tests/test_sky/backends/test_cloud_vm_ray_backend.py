@@ -301,16 +301,26 @@ class TestIsMessageTooLong:
             (1, '414 Request-URI Too Large', True),
             (1, 'request header fields too large', True),
             (1, '431 Request Header Fields Too Large', True),
+            # CloudFlare 400 Bad Request patterns
+            (1, '400 bad request', True),
+            (1, '400 Bad request', True),
+            (1, '400 Bad Request', True),
+            (1,
+             'error: unable to upgrade connection: <html><body><h1>400 Bad request</h1>',
+             True),
             # Case insensitivity
             (255, 'TOO LONG', True),
             (1, 'REQUEST HEADER FIELDS TOO LARGE', True),
+            (1, '400 BAD REQUEST', True),
             # Wrong returncode
             (1, 'too long', False),
             (255, 'request-uri too large', False),
             (127, 'too long', False),
+            (255, '400 bad request', False),
             # Wrong message
             (255, 'command not found', False),
             (1, 'some other error', False),
+            (1, 'unable to upgrade connection', False),
             # Empty output
             (255, '', False),
         ])

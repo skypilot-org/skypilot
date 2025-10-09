@@ -183,6 +183,7 @@ _EXCEPTION_MSG_AND_RETURNCODE_FOR_DUMP_INLINE_SCRIPT = [
     ('too long', 255),
     ('request-uri too large', 1),
     ('request header fields too large', 1),
+    ('400 bad request', 1),  # CloudFlare 400 error
 ]
 
 _RESOURCES_UNAVAILABLE_LOG = (
