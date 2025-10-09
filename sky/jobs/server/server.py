@@ -95,7 +95,6 @@ async def logs(
     background_tasks: fastapi.BackgroundTasks
 ) -> fastapi.responses.StreamingResponse:
     schedule_type = api_requests.ScheduleType.SHORT
-    # schedule_type = api_requests.ScheduleType.LONG
     if jobs_logs_body.refresh:
         # When refresh is specified, the job controller might be restarted,
         # which takes longer time to finish. We schedule it to long executor.
