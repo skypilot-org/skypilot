@@ -1073,7 +1073,7 @@ def test_volume_env_mount_kubernetes():
 def _check_container_logs(name, logs, total_lines, count):
     """Check if the container logs contain the expected number of logging lines.
 
-    Each line should be only one number in the given range and should show up 
+    Each line should be only one number in the given range and should show up
     count number of times. We skip the messages that we see in the job from
     running setup with set -x.
     """
@@ -1939,6 +1939,9 @@ def test_gcp_zero_quota_failover():
     smoke_tests_utils.run_one_test(test)
 
 
+# Skip this for kubernetes due to https://github.com/skypilot-org/skypilot/issues/7504#event-20180419521
+# TODO(aylei,zpoint): fix the infra issue and remove the mark
+@pytest.mark.no_kubernetes
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controller and auto-stop
 def test_long_setup_run_script(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
