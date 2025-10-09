@@ -542,7 +542,9 @@ class RayCodeGen:
                 # skip the scheduling step.
                 job_lib.scheduler.schedule_step()
 
-                total_num_nodes = len(ray.nodes())
+                # If some nodes are down and then new nodes are added, we need to get the alive nodes.
+                alive_nodes = [n for n in ray.nodes() if n["Alive"]]
+                total_num_nodes = len(alive_nodes)
                 setup_bundles = [{{"CPU": _SETUP_CPUS}} for _ in range(total_num_nodes)]
                 setup_pg = ray.util.placement_group(setup_bundles, strategy='STRICT_SPREAD')
                 setup_workers = [run_bash_command_with_log_and_return_pid \\
