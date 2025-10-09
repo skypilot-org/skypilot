@@ -1968,7 +1968,7 @@ def test_long_setup_run_script(generic_cloud: str):
                 f'sky jobs launch -y -n {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {f.name}',
                 f'sky jobs queue | grep {name} | grep SUCCEEDED',
             ],
-            f'sky jobs cancel -n {name} -y',
+            f'sky status -u; sky api status -a; sleep 600; sky jobs cancel -n {name} -y',
         )
         smoke_tests_utils.run_one_test(test)
 
