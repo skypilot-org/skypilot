@@ -230,10 +230,11 @@ def is_consolidation_mode(on_api_restart: bool = False) -> bool:
     else:
         if not restart_signal_file_exists:
             if config_consolidation_mode:
-                logger.warning('Consolidation mode for managed jobs is enabled '
-                               'in ~/.sky/config.yaml, but the API server has '
-                               'not been restarted yet. Please restart the API '
-                               'server to enable it.')
+                logger.warning(f'{colorama.Fore.YELLOW}Consolidation mode for '
+                               'managed jobs is enabled in ~/.sky/config.yaml, '
+                               'but the API server has not been restarted yet. '
+                               'Please restart the API server to enable it.'
+                               f'{colorama.Style.RESET_ALL}')
                 return False
         elif not config_consolidation_mode:
             # Cleanup the signal file if the consolidation mode is disabled in
