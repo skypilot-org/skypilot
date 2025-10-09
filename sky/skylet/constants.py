@@ -402,10 +402,17 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
 ]
 # When overriding the SkyPilot configs on the API server with the client one,
 # we skip the following keys because they are meant to be client-side configs.
-SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [('api_server',),
-                                                       ('allowed_clouds',),
-                                                       ('workspaces',), ('db',),
-                                                       ('daemons',)]
+# Also, we skip the consolidation mode config as those should be only set on
+# the API server side.
+SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
+    ('api_server',),
+    ('allowed_clouds',),
+    ('workspaces',),
+    ('db',),
+    ('daemons',),
+    ('jobs', 'controller', 'consolidation_mode'),
+    ('serve', 'controller', 'consolidation_mode'),
+]
 
 # Constants for Azure blob storage
 WAIT_FOR_STORAGE_ACCOUNT_CREATION = 60
