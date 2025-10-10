@@ -1243,7 +1243,7 @@ async def logs(
     background_tasks.add_task(task.cancel)
     # TODO(zhwu): This makes viewing logs in browser impossible. We should adopt
     # the same approach as /stream.
-    return stream_utils.stream_response(
+    return stream_utils.stream_response_for_long_request(
         request_id=request.state.request_id,
         logs_path=request_task.log_path,
         background_tasks=background_tasks,
@@ -1539,6 +1539,7 @@ async def stream(
                 'X-Accel-Buffering': 'no'
             })
 
+    polling_interval = stream_utils.DEFAULT_POLL_INTERVAL
     # Original plain text streaming logic
     if request_id is not None:
         request_task = await requests_lib.get_request_async(request_id)
@@ -1553,6 +1554,8 @@ async def stream(
             raise fastapi.HTTPException(
                 status_code=404,
                 detail=f'Log of request {request_id!r} has been deleted')
+        if request_task.schedule_type == requests_lib.ScheduleType.LONG:
+            polling_interval = stream_utils.LONG_REQUEST_POLL_INTERVAL
     else:
         assert log_path is not None, (request_id, log_path)
         if log_path == constants.API_SERVER_LOGS:
@@ -1600,7 +1603,8 @@ async def stream(
                                           log_path_to_stream,
                                           plain_logs=format == 'plain',
                                           tail=tail,
-                                          follow=follow),
+                                          follow=follow,
+                                          polling_interval=polling_interval),
         media_type='text/plain',
         headers=headers,
     )

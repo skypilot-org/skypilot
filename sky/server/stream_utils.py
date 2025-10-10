@@ -25,7 +25,9 @@ logger = sky_logging.init_logger(__name__)
 _BUFFER_SIZE = 8 * 1024  # 8KB
 _BUFFER_TIMEOUT = 0.02  # 20ms
 _HEARTBEAT_INTERVAL = 30
-_LOG_STATUS_CHECK_INTERVAL = 1
+
+LONG_REQUEST_POLL_INTERVAL = 1
+DEFAULT_POLL_INTERVAL = 0.1
 
 
 async def _yield_log_file_with_payloads_skipped(
@@ -42,12 +44,14 @@ async def _yield_log_file_with_payloads_skipped(
 
 
 async def log_streamer(
-        request_id: Optional[str],
-        log_path: pathlib.Path,
-        plain_logs: bool = False,
-        tail: Optional[int] = None,
-        follow: bool = True,
-        cluster_name: Optional[str] = None) -> AsyncGenerator[str, None]:
+    request_id: Optional[str],
+    log_path: pathlib.Path,
+    plain_logs: bool = False,
+    tail: Optional[int] = None,
+    follow: bool = True,
+    cluster_name: Optional[str] = None,
+    polling_interval: float = DEFAULT_POLL_INTERVAL
+) -> AsyncGenerator[str, None]:
     """Streams the logs of a request.
 
     Args:
@@ -87,7 +91,7 @@ async def log_streamer(
         req_msg = request_task.status_msg
         # Slowly back off the database polling up to every 1 second, to avoid
         # overloading the CPU and DB.
-        backoff = common_utils.Backoff(initial_backoff=0.1,
+        backoff = common_utils.Backoff(initial_backoff=polling_interval,
                                        max_backoff_factor=10,
                                        multiplier=1.2)
         while req_status < requests_lib.RequestStatus.RUNNING:
@@ -117,17 +121,20 @@ async def log_streamer(
 
     async with aiofiles.open(log_path, 'rb') as f:
         async for chunk in _tail_log_file(f, request_id, plain_logs, tail,
-                                          follow, cluster_name):
+                                          follow, cluster_name,
+                                          polling_interval):
             yield chunk
 
 
 async def _tail_log_file(
-        f: aiofiles.threadpool.binary.AsyncBufferedReader,
-        request_id: Optional[str] = None,
-        plain_logs: bool = False,
-        tail: Optional[int] = None,
-        follow: bool = True,
-        cluster_name: Optional[str] = None) -> AsyncGenerator[str, None]:
+    f: aiofiles.threadpool.binary.AsyncBufferedReader,
+    request_id: Optional[str] = None,
+    plain_logs: bool = False,
+    tail: Optional[int] = None,
+    follow: bool = True,
+    cluster_name: Optional[str] = None,
+    polling_interval: float = DEFAULT_POLL_INTERVAL
+) -> AsyncGenerator[str, None]:
     """Tail the opened log file, buffer the lines and flush in chunks."""
 
     if tail is not None:
@@ -175,8 +182,8 @@ async def _tail_log_file(
         if not line:
             # Avoid checking the status too frequently to avoid overloading the
             # DB.
-            should_check_status = (current_time - last_status_check_time
-                                  ) >= _LOG_STATUS_CHECK_INTERVAL
+            should_check_status = (current_time -
+                                   last_status_check_time) >= polling_interval
             if not follow:
                 # We will only hit this path once, but we should make sure to
                 # check the status so that we display the final request status
@@ -248,9 +255,22 @@ async def _tail_log_file(
         yield chunk
 
 
+def stream_response_for_long_request(
+    request_id: str,
+    logs_path: pathlib.Path,
+    background_tasks: fastapi.BackgroundTasks,
+) -> fastapi.responses.StreamingResponse:
+    return stream_response(request_id,
+                           logs_path,
+                           background_tasks,
+                           polling_interval=LONG_REQUEST_POLL_INTERVAL)
+
+
 def stream_response(
-    request_id: str, logs_path: pathlib.Path,
-    background_tasks: fastapi.BackgroundTasks
+    request_id: str,
+    logs_path: pathlib.Path,
+    background_tasks: fastapi.BackgroundTasks,
+    polling_interval: float = DEFAULT_POLL_INTERVAL
 ) -> fastapi.responses.StreamingResponse:
 
     async def on_disconnect():
@@ -263,7 +283,7 @@ def stream_response(
     background_tasks.add_task(on_disconnect)
 
     return fastapi.responses.StreamingResponse(
-        log_streamer(request_id, logs_path),
+        log_streamer(request_id, logs_path, polling_interval=polling_interval),
         media_type='text/plain',
         headers={
             'Cache-Control': 'no-cache, no-transform',
