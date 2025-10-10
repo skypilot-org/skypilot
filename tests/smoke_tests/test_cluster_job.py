@@ -1941,7 +1941,6 @@ def test_gcp_zero_quota_failover():
 
 # Skip this for kubernetes due to https://github.com/skypilot-org/skypilot/issues/7504#event-20180419521
 # TODO(aylei,zpoint): fix the infra issue and remove the mark
-@pytest.mark.no_kubernetes
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controller and auto-stop
 def test_long_setup_run_script(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
