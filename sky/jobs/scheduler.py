@@ -64,7 +64,6 @@ from sky.jobs import utils as managed_job_utils
 from sky.server import config as server_config
 from sky.skylet import constants
 from sky.utils import annotations
-from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import subprocess_utils
 
@@ -289,9 +288,8 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
             maybe_start_controllers(from_scheduler=True)
             return
 
-    state.scheduler_set_waiting(job_id, dag_yaml_path,
-                                original_user_yaml_path, env_file_path, 
-                                priority)
+    state.scheduler_set_waiting(job_id, dag_yaml_path, original_user_yaml_path,
+                                env_file_path, priority)
     if state.get_ha_recovery_script(job_id) is None:
         # the run command is just the command that called scheduler
         run = (f'source {env_file_path} && '
