@@ -183,27 +183,30 @@ export function ManagedJobs() {
   const [poolsData, setPoolsData] = useState([]);
   const [filters, setFilters] = useState([]);
 
-  const fetchData = React.useCallback(async (isRefreshButton = false) => {
-    setLoading(true);
-    // Only set poolsLoading on initial load, not on refresh button clicks
-    if (!isRefreshButton && isInitialLoad) {
-      setPoolsLoading(true);
-    }
-    try {
-      const [poolsResponse] = await Promise.all([
-        dashboardCache.get(getPoolStatus, [{}]),
-      ]);
-      setPoolsData(poolsResponse.pools || []);
-    } catch (error) {
-      console.error('Error fetching data:', error);
-    } finally {
-      setLoading(false);
+  const fetchData = React.useCallback(
+    async (isRefreshButton = false) => {
+      setLoading(true);
+      // Only set poolsLoading on initial load, not on refresh button clicks
       if (!isRefreshButton && isInitialLoad) {
-        setPoolsLoading(false);
-        setIsInitialLoad(false);
+        setPoolsLoading(true);
       }
-    }
-  }, [isInitialLoad]);
+      try {
+        const [poolsResponse] = await Promise.all([
+          dashboardCache.get(getPoolStatus, [{}]),
+        ]);
+        setPoolsData(poolsResponse.pools || []);
+      } catch (error) {
+        console.error('Error fetching data:', error);
+      } finally {
+        setLoading(false);
+        if (!isRefreshButton && isInitialLoad) {
+          setPoolsLoading(false);
+          setIsInitialLoad(false);
+        }
+      }
+    },
+    [isInitialLoad]
+  );
 
   useEffect(() => {
     fetchData();
@@ -345,11 +348,12 @@ export function ManagedJobsTable({
   // Only show if there are multiple workspaces or a workspace other than 'default'
   const shouldShowWorkspace = React.useMemo(() => {
     if (!data || data.length === 0) return false;
-    const workspaces = new Set(
-      data.map((job) => job.workspace || 'default')
-    );
+    const workspaces = new Set(data.map((job) => job.workspace || 'default'));
     // Show if there's more than one workspace, or if the only workspace is not 'default'
-    return workspaces.size > 1 || (workspaces.size === 1 && !workspaces.has('default'));
+    return (
+      workspaces.size > 1 ||
+      (workspaces.size === 1 && !workspaces.has('default'))
+    );
   }, [data]);
 
   // Determine if we should show the Worker Pool column
