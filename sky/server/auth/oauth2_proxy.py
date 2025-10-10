@@ -15,7 +15,9 @@ import starlette.middleware.base
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
+from sky.jobs import utils as managed_job_utils
 from sky.server.auth import authn
+from sky.server.auth import loopback
 from sky.users import permission
 from sky.utils import common_utils
 
@@ -106,6 +108,10 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     async def authenticate(self, request: fastapi.Request, call_next):
         if request.state.auth_user is not None:
             # Already authenticated
+            return await call_next(request)
+
+        if managed_job_utils.is_consolidation_mode(
+        ) and loopback.is_loopback_request(request):
             return await call_next(request)
 
         async with aiohttp.ClientSession() as session:

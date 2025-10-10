@@ -210,10 +210,10 @@ async def test_logs():
         # Verify the executor calls
         mock_prepare.assert_called_once()
         mock_execute.assert_called_once_with(mock_request_task)
-        mock_stream.assert_called_once_with(
-            request_id=mock.ANY,
-            logs_path=mock_request_task.log_path,
-            background_tasks=mock.ANY)
+        mock_stream.assert_called_once_with(mock.ANY,
+                                            mock_request_task.log_path,
+                                            mock.ANY,
+                                            polling_interval=1)
 
 
 @mock.patch('sky.utils.context_utils.hijack_sys_attrs')

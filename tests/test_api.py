@@ -1,8 +1,7 @@
+"""Unit tests for the SkyPilot API."""
 import asyncio
 import pathlib
 import tempfile
-import time
-from unittest import mock
 
 import sky
 from sky.clouds.cloud import Cloud

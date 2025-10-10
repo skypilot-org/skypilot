@@ -716,6 +716,7 @@ def test_helm_deploy_eks(request):
 
 @pytest.mark.kubernetes
 @pytest.mark.no_remote_server
+@pytest.mark.no_dependency  # This test is not related to dependency
 def test_helm_deploy_okta():
     test = smoke_tests_utils.Test('helm_deploy_okta', [
         f'bash tests/kubernetes/scripts/helm_okta.sh',

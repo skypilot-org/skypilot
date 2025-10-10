@@ -68,7 +68,7 @@ async def queue_v2(request: fastapi.Request,
         request_id=request.state.request_id,
         request_name='jobs.queue_v2',
         request_body=jobs_queue_body_v2,
-        func=core.queue_v2,
+        func=core.queue_v2_api,
         schedule_type=(api_requests.ScheduleType.LONG
                        if jobs_queue_body_v2.refresh else
                        api_requests.ScheduleType.SHORT),
@@ -116,7 +116,7 @@ async def logs(
         # Cancel the coroutine after the request is done or client disconnects
         background_tasks.add_task(task.cancel)
 
-    return stream_utils.stream_response(
+    return stream_utils.stream_response_for_long_request(
         request_id=request_task.request_id,
         logs_path=request_task.log_path,
         background_tasks=background_tasks,
@@ -201,7 +201,7 @@ async def pool_tail_logs(
 
     request_task = api_requests.get_request(request.state.request_id)
 
-    return stream_utils.stream_response(
+    return stream_utils.stream_response_for_long_request(
         request_id=request_task.request_id,
         logs_path=request_task.log_path,
         background_tasks=background_tasks,

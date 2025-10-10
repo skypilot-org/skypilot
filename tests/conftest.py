@@ -29,6 +29,7 @@ from common_test_fixtures import enable_all_clouds
 from common_test_fixtures import mock_aws_backend
 from common_test_fixtures import mock_client_requests
 from common_test_fixtures import mock_controller_accessible
+from common_test_fixtures import mock_execute_in_coroutine
 from common_test_fixtures import mock_job_table_no_job
 from common_test_fixtures import mock_job_table_one_job
 from common_test_fixtures import mock_queue
@@ -216,6 +217,20 @@ def pytest_addoption(parser):
         help=
         'Use existing cluster for backend integration tests instead of creating a new one',
     )
+    parser.addoption(
+        '--dependency',
+        type=str,
+        nargs='?',
+        const='',
+        default='all',
+        help=
+        ('Dependency for client-side package install. '
+         'E.g., --dependency=aws runs pip install "skypilot[aws]" on client. '
+         '--dependency=aws,azure runs pip install "skypilot[aws,azure]" on client. '
+         '--dependency (no value) installs base package only (no extras) on client. '
+         'This only affects client side; server side always installs all dependencies. '
+         'Only works in Buildkite CI; ignored if run locally.'),
+    )
 
 
 def pytest_configure(config):
@@ -282,6 +297,8 @@ def pytest_collection_modifyitems(config, items):
     skip_marks['resource_heavy'] = pytest.mark.skip(
         reason=
         'skip tests not marked as resource_heavy if --resource-heavy is set')
+    skip_marks['no_dependency'] = pytest.mark.skip(
+        reason='skip tests marked as no_dependency if --dependency is set')
     for cloud in all_clouds_in_smoke_tests:
         skip_marks[cloud] = pytest.mark.skip(
             reason=f'tests for {cloud} is skipped, try setting --{cloud}')
@@ -341,6 +358,10 @@ def pytest_collection_modifyitems(config, items):
             has_api_server, _ = _get_and_check_env_file(env_file)
             if has_api_server and 'no_remote_server' in marks:
                 item.add_marker(skip_marks['no_remote_server'])
+        # Skip tests marked as no_dependency if --dependency is set
+        if 'no_dependency' in marks and config.getoption(
+                '--dependency') != 'all':
+            item.add_marker(skip_marks['no_dependency'])
 
     # Check if tests need to be run serially for Kubernetes and Lambda Cloud
     # We run Lambda Cloud tests serially because Lambda Cloud rate limits its
@@ -627,8 +648,10 @@ def setup_docker_container(request):
         # Use create_and_setup_new_container to create and start the container
         docker_utils.create_and_setup_new_container(
             target_container_name=docker_utils.get_container_name(),
-            host_port=docker_utils.get_host_port(),
-            container_port=46580,
+            api_server_host_port=docker_utils.get_api_server_host_port(),
+            api_server_container_port=46580,
+            metrics_host_port=docker_utils.get_metrics_host_port(),
+            metrics_container_port=9090,
             username=default_user)
 
         logger.info(f'Container {docker_utils.get_container_name()} started')

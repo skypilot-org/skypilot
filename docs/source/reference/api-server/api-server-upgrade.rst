@@ -261,13 +261,41 @@ The SkyPilot helm chart automatically configures the ingress resource to achieve
 
 .. _sky-api-server-api-compatibility:
 
-API compatbility
-----------------
+API compatibility
+-----------------
 
-SkyPilot maintain an internal API version which will be bumped when an incompatible API change is introduced. Client and server can only communicate when they run on the same API version.
+Starting from ``0.10.0``, SkyPilot guarantees API compatibility between adjacent minor versions, which makes graceful upgrades across minor versions possible. 
 
-The version strategy of SkyPilot follows the following API compatbility guarantees:
+For example, assuming ``0.11.0`` is released, the following table shows one possible upgrade sequence that can upgrade the API server and clients from ``0.10.0`` to ``0.11.0`` without breaking API compatibility:
 
-* The API version will not be bumped within a minor version, i.e. upgrading patch version is guaranteed to be compatible;
-* The API version might be bumped between minior versions, i.e. upgrading minior version should be treated as operation that breaks API compatibility;
-* There is no guarantee about the API version in the nightly build;
+.. list-table:: Upgrade across minor versions
+   :widths: 25 25 10 35
+   :header-rows: 1
+
+   * - ``Client``
+     - ``Server``
+     - ``Compatible``
+     - ``Notes``
+   * - ``0.10.0``
+     - ``0.10.0``
+     - ``Yes``
+     - Initial state
+   * - ``0.10.0``
+     - ``0.11.0``
+     - ``Yes``
+     - Upgrade the API server first
+   * - ``0.11.0``
+     - ``0.11.0``
+     - ``Yes``
+     - Gradually upgrade all clients
+
+When the client and server are running on different minor versions, SkyPilot CLI will print an upgrade hint as a reminder to upgrade the client:
+
+.. code-block:: console
+
+    $ sky status
+    The SkyPilot API server is running in version X, which is newer than your client version Y. The compatibility for your current version might be dropped in the next server upgrade.
+    Consider upgrading your client with:
+    pip install -U skypilot==X.X.X
+
+For a nightly build, its API compatibility is equivalent to its previous minor version, e.g., all nightly builds after ``0.10.0`` and before ``0.11.0`` have the same API compatibility guarantee as ``0.10.0``.

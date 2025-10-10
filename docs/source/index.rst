@@ -1,5 +1,5 @@
-Welcome to SkyPilot!
-====================
+SkyPilot: Run AI on Any Infrastructure
+======================================
 
 
 .. raw:: html

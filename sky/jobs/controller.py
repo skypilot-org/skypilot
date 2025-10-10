@@ -363,6 +363,21 @@ class JobsController:
             cluster_name, job_id_on_pool_cluster = (
                 await
                 managed_job_state.get_pool_submit_info_async(self._job_id))
+        if cluster_name is None:
+            # Check if we have been cancelled here, in the case where a user
+            # quickly cancels the job we want to gracefully handle it here,
+            # otherwise we will end up in the FAILED_CONTROLLER state.
+            self._logger.info(f'Cluster name is None for job {self._job_id}, '
+                              f'task {task_id}. Checking if we have been '
+                              'cancelled.')
+            status = await (managed_job_state.get_job_status_with_task_id_async(
+                job_id=self._job_id, task_id=task_id))
+            self._logger.debug(f'Status for job {self._job_id}, task {task_id}:'
+                               f'{status}')
+            if status == managed_job_state.ManagedJobStatus.CANCELLED:
+                self._logger.info(f'Job {self._job_id}, task {task_id} has '
+                                  'been quickly cancelled.')
+                raise asyncio.CancelledError()
         assert cluster_name is not None, (cluster_name, job_id_on_pool_cluster)
 
         if not is_resume:
@@ -855,8 +870,16 @@ class Controller:
             # because when SkyPilot API server machine sends the yaml config to
             # the controller machine, only storage metadata is sent, not the
             # storage object itself.
-            for storage in task.storage_mounts.values():
-                storage.construct()
+            try:
+                for storage in task.storage_mounts.values():
+                    storage.construct()
+            except (exceptions.StorageSpecError, exceptions.StorageError) as e:
+                job_logger.warning(
+                    f'Failed to construct storage object for teardown: {e}\n'
+                    'This may happen because storage construction already '
+                    'failed during launch, storage was deleted externally, '
+                    'credentials expired/changed, or network connectivity '
+                    'issues.')
             try:
                 backend.teardown_ephemeral_storage(task)
             except Exception as e:  # pylint: disable=broad-except
@@ -1129,7 +1152,15 @@ class Controller:
                 await asyncio.sleep(30)
                 continue
 
-            if len(running_tasks) >= scheduler.JOBS_PER_WORKER:
+            # Normally, 200 jobs can run on each controller. But if we have a
+            # ton of controllers, we need to limit the number of jobs that can
+            # run on each controller, to achieve a total of 2000 jobs across all
+            # controllers.
+            max_jobs = min(scheduler.MAX_JOBS_PER_WORKER,
+                           (scheduler.MAX_TOTAL_RUNNING_JOBS //
+                            scheduler.get_number_of_controllers()))
+
+            if len(running_tasks) >= max_jobs:
                 await asyncio.sleep(60)
                 continue
 

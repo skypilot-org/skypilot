@@ -649,6 +649,10 @@ class Task:
             config['workdir'] = _fill_in_env_vars(config['workdir'],
                                                   env_and_secrets)
 
+        if config.get('volumes') is not None:
+            config['volumes'] = _fill_in_env_vars(config['volumes'],
+                                                  env_and_secrets)
+
         task = Task(
             config.pop('name', None),
             run=config.pop('run', None),

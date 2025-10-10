@@ -1065,6 +1065,22 @@ def get_handle_from_cluster_name(
     return pickle.loads(row.handle)
 
 
+@_init_db
+@metrics_lib.time_me
+def get_handles_from_cluster_names(
+        cluster_names: Set[str]
+) -> Dict[str, Optional['backends.ResourceHandle']]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(cluster_table.c.name,
+                             cluster_table.c.handle).filter(
+                                 cluster_table.c.name.in_(cluster_names)).all()
+        return {
+            row.name: pickle.loads(row.handle) if row is not None else None
+            for row in rows
+        }
+
+
 @_init_db_async
 @metrics_lib.time_me
 async def get_status_from_cluster_name_async(
@@ -2479,11 +2495,22 @@ def _set_cluster_yaml_from_file(cluster_yaml_path: str,
     # on the local file system and migrate it to the database.
     # TODO(syang): remove this check once we have a way to migrate the
     # cluster from file to database. Remove on v0.12.0.
-    if cluster_yaml_path is not None and os.path.exists(cluster_yaml_path):
-        with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
-            yaml_str = f.read()
-        set_cluster_yaml(cluster_name, yaml_str)
-        return yaml_str
+    if cluster_yaml_path is not None:
+        # First try the exact path
+        path_to_read = None
+        if os.path.exists(cluster_yaml_path):
+            path_to_read = cluster_yaml_path
+        # Fallback: try with .debug suffix (when debug logging was enabled)
+        # Debug logging causes YAML files to be saved with .debug suffix
+        # but the path stored in the handle doesn't include it
+        debug_path = cluster_yaml_path + '.debug'
+        if os.path.exists(debug_path):
+            path_to_read = debug_path
+        if path_to_read is not None:
+            with open(path_to_read, 'r', encoding='utf-8') as f:
+                yaml_str = f.read()
+            set_cluster_yaml(cluster_name, yaml_str)
+            return yaml_str
     return None
 
 

@@ -126,6 +126,12 @@ class SkyServiceSpec:
                 self.base_ondemand_fallback_replicas > 0)
 
     @staticmethod
+    def _get_initial_delay_seconds(pool: bool) -> int:
+        if pool:
+            return constants.DEFAULT_INITIAL_DELAY_SECONDS_POOL
+        return constants.DEFAULT_INITIAL_DELAY_SECONDS
+
+    @staticmethod
     def from_yaml_config(config: Dict[str, Any]) -> 'SkyServiceSpec':
         common_utils.validate_schema(config, schemas.get_service_schema(),
                                      'Invalid service YAML: ')
@@ -153,7 +159,8 @@ class SkyServiceSpec:
                 'timeout_seconds', None)
             readiness_headers = readiness_section.get('headers', None)
         if initial_delay_seconds is None:
-            initial_delay_seconds = constants.DEFAULT_INITIAL_DELAY_SECONDS
+            initial_delay_seconds = SkyServiceSpec._get_initial_delay_seconds(
+                config.get('pool', False))
         service_config['initial_delay_seconds'] = initial_delay_seconds
         if readiness_timeout_seconds is None:
             readiness_timeout_seconds = (

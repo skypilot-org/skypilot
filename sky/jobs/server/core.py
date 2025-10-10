@@ -27,7 +27,9 @@ from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
+from sky.metrics import utils as metrics_lib
 from sky.provision import common as provision_common
+from sky.schemas.api import responses
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.serve.server import impl
@@ -296,8 +298,7 @@ def launch(
                 # TODO: do something with returned status?
                 _, _ = backend_utils.refresh_cluster_status_handle(
                     cluster_name=cluster_name,
-                    force_refresh_statuses=set(status_lib.ClusterStatus),
-                    acquire_per_cluster_status_lock=False)
+                    force_refresh_statuses=set(status_lib.ClusterStatus))
             except (exceptions.ClusterOwnerIdentityMismatchError,
                     exceptions.CloudUserIdentityError,
                     exceptions.ClusterStatusFetchingError) as e:
@@ -406,9 +407,12 @@ def launch(
             job_identity = ''
             if job_rank is not None:
                 job_identity = f' (rank: {job_rank})'
-            logger.info(f'{colorama.Fore.YELLOW}'
-                        f'Launching managed job {dag.name!r}{job_identity} '
-                        f'from jobs controller...{colorama.Style.RESET_ALL}')
+            job_controller_postfix = (' from jobs controller' if
+                                      consolidation_mode_job_id is None else '')
+            logger.info(
+                f'{colorama.Fore.YELLOW}'
+                f'Launching managed job {dag.name!r}{job_identity}'
+                f'{job_controller_postfix}...{colorama.Style.RESET_ALL}')
 
             # Launch with the api server's user hash, so that sky status does
             # not show the owner of the controller as whatever user launched
@@ -455,6 +459,8 @@ def launch(
                     managed_job_state.set_ha_recovery_script(
                         consolidation_mode_job_id, run_script)
                     backend.run_on_head(local_handle, run_script)
+                    ux_utils.starting_message(
+                        f'Job submitted, ID: {consolidation_mode_job_id}')
                     return consolidation_mode_job_id, local_handle
 
     if pool is None:
@@ -644,6 +650,29 @@ def queue(refresh: bool,
 
 
 @usage_lib.entrypoint
+def queue_v2_api(
+    refresh: bool,
+    skip_finished: bool = False,
+    all_users: bool = False,
+    job_ids: Optional[List[int]] = None,
+    user_match: Optional[str] = None,
+    workspace_match: Optional[str] = None,
+    name_match: Optional[str] = None,
+    pool_match: Optional[str] = None,
+    page: Optional[int] = None,
+    limit: Optional[int] = None,
+    statuses: Optional[List[str]] = None,
+) -> Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int]:
+    """Gets statuses of managed jobs and parse the
+    jobs to responses.ManagedJobRecord."""
+    jobs, total, status_counts, total_no_filter = queue_v2(
+        refresh, skip_finished, all_users, job_ids, user_match, workspace_match,
+        name_match, pool_match, page, limit, statuses)
+    return [responses.ManagedJobRecord(**job) for job in jobs
+           ], total, status_counts, total_no_filter
+
+
+@metrics_lib.time_me
 def queue_v2(
     refresh: bool,
     skip_finished: bool = False,
@@ -701,11 +730,12 @@ def queue_v2(
         if page is not None:
             raise ValueError('Limit must be specified when page is specified')
 
-    handle = _maybe_restart_controller(refresh,
-                                       stopped_message='No in-progress '
-                                       'managed jobs.',
-                                       spinner_message='Checking '
-                                       'managed jobs')
+    with metrics_lib.time_it('jobs.queue.restart_controller', group='jobs'):
+        handle = _maybe_restart_controller(refresh,
+                                           stopped_message='No in-progress '
+                                           'managed jobs.',
+                                           spinner_message='Checking '
+                                           'managed jobs')
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
@@ -756,70 +786,74 @@ def queue_v2(
         except exceptions.SkyletMethodNotImplementedError:
             pass
 
-    code = managed_job_utils.ManagedJobCodeGen.get_job_table(
-        skip_finished, accessible_workspaces, job_ids, workspace_match,
-        name_match, pool_match, page, limit, user_hashes, statuses)
-    returncode, job_table_payload, stderr = backend.run_on_head(
-        handle,
-        code,
-        require_outputs=True,
-        stream_logs=False,
-        separate_stderr=True)
+    with metrics_lib.time_it('jobs.queue.generate_code', group='jobs'):
+        code = managed_job_utils.ManagedJobCodeGen.get_job_table(
+            skip_finished, accessible_workspaces, job_ids, workspace_match,
+            name_match, pool_match, page, limit, user_hashes, statuses)
+    with metrics_lib.time_it('jobs.queue.run_on_head', group='jobs'):
+        returncode, job_table_payload, stderr = backend.run_on_head(
+            handle,
+            code,
+            require_outputs=True,
+            stream_logs=False,
+            separate_stderr=True)
 
     if returncode != 0:
         logger.error(job_table_payload + stderr)
         raise RuntimeError('Failed to fetch managed jobs with returncode: '
                            f'{returncode}.\n{job_table_payload + stderr}')
 
-    (jobs, total, result_type, total_no_filter, status_counts
-    ) = managed_job_utils.load_managed_job_queue(job_table_payload)
+    with metrics_lib.time_it('jobs.queue.load_job_queue', group='jobs'):
+        (jobs, total, result_type, total_no_filter, status_counts
+        ) = managed_job_utils.load_managed_job_queue(job_table_payload)
 
     if result_type == managed_job_utils.ManagedJobQueueResultType.DICT:
         return jobs, total, status_counts, total_no_filter
 
     # Backward compatibility for old jobs controller without filtering
     # TODO(hailong): remove this after 0.12.0
-    if not all_users:
+    with metrics_lib.time_it('jobs.queue.filter_and_process', group='jobs'):
+        if not all_users:
 
-        def user_hash_matches_or_missing(job: Dict[str, Any]) -> bool:
-            user_hash = job.get('user_hash', None)
-            if user_hash is None:
-                # For backwards compatibility, we show jobs that do not have a
-                # user_hash. TODO(cooperc): Remove before 0.12.0.
-                return True
-            return user_hash == common_utils.get_user_hash()
+            def user_hash_matches_or_missing(job: Dict[str, Any]) -> bool:
+                user_hash = job.get('user_hash', None)
+                if user_hash is None:
+                    # For backwards compatibility, we show jobs that do not have
+                    # a user_hash. TODO(cooperc): Remove before 0.12.0.
+                    return True
+                return user_hash == common_utils.get_user_hash()
 
-        jobs = list(filter(user_hash_matches_or_missing, jobs))
+            jobs = list(filter(user_hash_matches_or_missing, jobs))
 
-    jobs = list(
-        filter(
-            lambda job: job.get('workspace', skylet_constants.
-                                SKYPILOT_DEFAULT_WORKSPACE) in
-            accessible_workspaces, jobs))
-
-    if skip_finished:
-        # Filter out the finished jobs. If a multi-task job is partially
-        # finished, we will include all its tasks.
-        non_finished_tasks = list(
-            filter(lambda job: not job['status'].is_terminal(), jobs))
-        non_finished_job_ids = {job['job_id'] for job in non_finished_tasks}
         jobs = list(
-            filter(lambda job: job['job_id'] in non_finished_job_ids, jobs))
+            filter(
+                lambda job: job.get('workspace', skylet_constants.
+                                    SKYPILOT_DEFAULT_WORKSPACE) in
+                accessible_workspaces, jobs))
 
-    if job_ids:
-        jobs = [job for job in jobs if job['job_id'] in job_ids]
+        if skip_finished:
+            # Filter out the finished jobs. If a multi-task job is partially
+            # finished, we will include all its tasks.
+            non_finished_tasks = list(
+                filter(lambda job: not job['status'].is_terminal(), jobs))
+            non_finished_job_ids = {job['job_id'] for job in non_finished_tasks}
+            jobs = list(
+                filter(lambda job: job['job_id'] in non_finished_job_ids, jobs))
 
-    filtered_jobs, total, status_counts = managed_job_utils.filter_jobs(
-        jobs,
-        workspace_match,
-        name_match,
-        pool_match,
-        page=page,
-        limit=limit,
-        user_match=user_match,
-        enable_user_match=True,
-        statuses=statuses,
-    )
+        if job_ids:
+            jobs = [job for job in jobs if job['job_id'] in job_ids]
+
+        filtered_jobs, total, status_counts = managed_job_utils.filter_jobs(
+            jobs,
+            workspace_match,
+            name_match,
+            pool_match,
+            page=page,
+            limit=limit,
+            user_match=user_match,
+            enable_user_match=True,
+            statuses=statuses,
+        )
     return filtered_jobs, total, status_counts, total_no_filter
 
 

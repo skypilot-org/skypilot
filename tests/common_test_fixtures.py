@@ -8,6 +8,7 @@ import unittest
 import uuid
 
 import boto3
+import click.testing
 import fastapi
 from fastapi import testclient
 import pandas as pd
@@ -54,7 +55,8 @@ def aws_config_region(monkeypatch: pytest.MonkeyPatch) -> str:
 
 @pytest.fixture
 def mock_client_requests(monkeypatch: pytest.MonkeyPatch, mock_queue,
-                         mock_stream_utils, mock_redirect_log_file) -> None:
+                         mock_stream_utils, mock_redirect_log_file,
+                         mock_execute_in_coroutine) -> None:
     """Fixture to mock HTTP requests using FastAPI's TestClient."""
     # This fixture automatically replaces `requests.get` and `requests.post`
     # with mocked versions that route requests through a FastAPI TestClient.
@@ -168,14 +170,6 @@ def regions_with_offering_mock(*_, **__):
 
 def check_quota_available_mock(*_, **__):
     return True
-
-
-def mock_redirect_output(*_, **__):
-    return (None, None)
-
-
-def mock_restore_output(*_, **__):
-    return None
 
 
 @pytest.fixture
@@ -417,11 +411,36 @@ def mock_queue(monkeypatch):
 
 
 @pytest.fixture
+def mock_execute_in_coroutine(monkeypatch):
+
+    class MockCoroutineTask:
+
+        def cancel(self):
+            return
+
+    def mock_execute_in_coroutine(*args, **kwargs):
+        return MockCoroutineTask()
+
+    monkeypatch.setattr(
+        'sky.server.requests.executor.execute_request_in_coroutine',
+        mock_execute_in_coroutine)
+
+
+@pytest.fixture
 def mock_redirect_log_file(monkeypatch):
-    monkeypatch.setattr('sky.server.requests.executor._redirect_output',
-                        mock_redirect_output)
-    monkeypatch.setattr('sky.server.requests.executor._restore_output',
-                        mock_restore_output)
+    # Click's CliRunner replaces sys.stdout/stderr with _NamedTextIOWrapper objects
+    # that don't support fileno(). We patch these wrapper objects to add fileno() support.
+    original_init = click.testing._NamedTextIOWrapper.__init__
+
+    def patched_wrapper_init(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        if hasattr(self, 'name') and 'stdout' in str(self.name):
+            self.fileno = lambda: 1
+        else:
+            self.fileno = lambda: 2
+
+    monkeypatch.setattr(click.testing._NamedTextIOWrapper, '__init__',
+                        patched_wrapper_init)
 
 
 @pytest.fixture

@@ -60,7 +60,6 @@ from sky.adaptors import common as adaptors_common
 from sky.client import sdk
 from sky.client.cli import flags
 from sky.client.cli import table_utils
-from sky.data import storage_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
@@ -88,9 +87,9 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import volume as volume_utils
 from sky.utils import yaml_utils
 from sky.utils.cli_utils import status_utils
-from sky.volumes import utils as volumes_utils
 from sky.volumes.client import sdk as volumes_sdk
 
 if typing.TYPE_CHECKING:
@@ -1322,7 +1321,7 @@ def exec(
 
 
 def _handle_jobs_queue_request(
-        request_id: server_common.RequestId[List[Dict[str, Any]]],
+        request_id: server_common.RequestId[List[responses.ManagedJobRecord]],
         show_all: bool,
         show_user: bool,
         max_num_jobs_to_show: Optional[int],
@@ -1395,10 +1394,10 @@ def _handle_jobs_queue_request(
         msg += ('Failed to query managed jobs: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
     else:
-        msg = managed_jobs.format_job_table(managed_jobs_,
-                                            show_all=show_all,
-                                            show_user=show_user,
-                                            max_jobs=max_num_jobs_to_show)
+        msg = table_utils.format_job_table(managed_jobs_,
+                                           show_all=show_all,
+                                           show_user=show_user,
+                                           max_jobs=max_num_jobs_to_show)
     return num_in_progress_jobs, msg
 
 
@@ -1513,9 +1512,9 @@ def _status_kubernetes(show_all: bool):
         click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'Managed jobs'
                    f'{colorama.Style.RESET_ALL}')
-        msg = managed_jobs.format_job_table(all_jobs,
-                                            show_all=show_all,
-                                            show_user=False)
+        msg = table_utils.format_job_table(all_jobs,
+                                           show_all=show_all,
+                                           show_user=False)
         click.echo(msg)
     if any(['sky-serve-controller' in c.cluster_name for c in all_clusters]):
         # TODO: Parse serve controllers and show services separately.
@@ -1804,17 +1803,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
             return None
 
     def submit_workspace() -> Optional[server_common.RequestId[Dict[str, Any]]]:
-        try:
-            return sdk.workspaces()
-        except RuntimeError:
-            # Backward compatibility for API server before #5660.
-            # TODO(zhwu): remove this after 0.10.0.
-            logger.warning(f'{colorama.Style.DIM}SkyPilot API server is '
-                           'in an old version, and may miss feature: '
-                           'workspaces. Update with: sky api stop; '
-                           'sky api start'
-                           f'{colorama.Style.RESET_ALL}')
-            return None
+        return sdk.workspaces()
 
     active_workspace = skypilot_config.get_active_workspace()
 
@@ -2963,9 +2952,9 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
            'jobs (output of `sky jobs queue`) will be lost.')
     click.echo(msg)
     if managed_jobs_:
-        job_table = managed_jobs.format_job_table(managed_jobs_,
-                                                  show_all=False,
-                                                  show_user=True)
+        job_table = table_utils.format_job_table(managed_jobs_,
+                                                 show_all=False,
+                                                 show_user=True)
         msg = controller.value.decline_down_for_dirty_controller_hint
         # Add prefix to each line to align with the bullet point.
         msg += '\n'.join(
@@ -4027,8 +4016,7 @@ def storage_ls(verbose: bool):
     """List storage objects managed by SkyPilot."""
     request_id = sdk.storage_ls()
     storages = sdk.stream_and_get(request_id)
-    storage_table = storage_utils.format_storage_table(storages,
-                                                       show_all=verbose)
+    storage_table = table_utils.format_storage_table(storages, show_all=verbose)
     click.echo(storage_table)
 
 
@@ -4123,13 +4111,15 @@ def volumes():
 @click.option('--infra',
               required=False,
               type=str,
-              help='Infra. Format: k8s, k8s/context-name. '
+              help='Infrastructure to use. '
+              'Format: cloud, cloud/region, cloud/region/zone, or '
+              'k8s/context-name.'
+              'Examples: k8s, k8s/my-context, runpod/US/US-CA-2. '
               'Override the infra defined in the YAML.')
-@click.option(
-    '--type',
-    required=False,
-    type=str,
-    help='Volume type. Format: pvc. Override the type defined in the YAML.')
+@click.option('--type',
+              required=False,
+              type=click.Choice(volume_utils.VolumeType.supported_types()),
+              help='Volume type. Override the type defined in the YAML.')
 @click.option('--size',
               required=False,
               type=str,
@@ -4160,7 +4150,7 @@ def volumes_apply(
         sky volumes apply volume.yaml
         \b
         # Apply a volume from a command.
-        sky volumes apply --name pvc1 --infra k8s --type pvc --size 100Gi
+        sky volumes apply --name pvc1 --infra k8s --type k8s-pvc --size 100Gi
     """
     # pylint: disable=import-outside-toplevel
     from sky.volumes import volume as volume_lib
@@ -4239,8 +4229,8 @@ def volumes_ls(verbose: bool):
     """List volumes managed by SkyPilot."""
     request_id = volumes_sdk.ls()
     all_volumes = sdk.stream_and_get(request_id)
-    volume_table = volumes_utils.format_volume_table(all_volumes,
-                                                     show_all=verbose)
+    volume_table = table_utils.format_volume_table(all_volumes,
+                                                   show_all=verbose)
     click.echo(volume_table)
 
 
@@ -4497,10 +4487,30 @@ def jobs_launch(
     job_id_handle = _async_call_or_wait(request_id, async_call,
                                         'sky.jobs.launch')
 
-    if not async_call and not detach_run:
-        job_ids = job_id_handle[0]
-        if isinstance(job_ids, int) or len(job_ids) == 1:
-            job_id = job_ids if isinstance(job_ids, int) else job_ids[0]
+    if async_call:
+        return
+
+    job_ids = [job_id_handle[0]] if isinstance(job_id_handle[0],
+                                               int) else job_id_handle[0]
+    if pool:
+        # Display the worker assignment for the jobs.
+        logger.debug(f'Getting service records for pool: {pool}')
+        records_request_id = managed_jobs.pool_status(pool_names=pool)
+        service_records = _async_call_or_wait(records_request_id, async_call,
+                                              'sky.jobs.pool_status')
+        logger.debug(f'Pool status: {service_records}')
+        replica_infos = service_records[0]['replica_info']
+        for replica_info in replica_infos:
+            job_id = replica_info.get('used_by', None)
+            if job_id in job_ids:
+                worker_id = replica_info['replica_id']
+                version = replica_info['version']
+                logger.info(f'Job ID: {job_id} assigned to pool {pool} '
+                            f'(worker: {worker_id}, version: {version})')
+
+    if not detach_run:
+        if len(job_ids) == 1:
+            job_id = job_ids[0]
             returncode = managed_jobs.tail_logs(name=None,
                                                 job_id=job_id,
                                                 follow=True,
@@ -5171,22 +5181,22 @@ def jobs_pool_logs(
     .. code-block:: bash
 
         # Tail the controller logs of a pool
-        sky pool logs --controller [POOL_NAME]
+        sky jobs pool logs --controller [POOL_NAME]
         \b
         # Print the worker logs so far and exit
-        sky pool logs --no-follow [POOL_NAME]
+        sky jobs pool logs --no-follow [POOL_NAME] 1
         \b
         # Tail the logs of worker 1
-        sky pool logs [POOL_NAME] 1
+        sky jobs pool logs [POOL_NAME] 1
         \b
         # Show the last 100 lines of the controller logs
-        sky pool logs --controller --tail 100 [POOL_NAME]
+        sky jobs pool logs --controller --tail 100 [POOL_NAME]
         \b
         # Sync down all logs of the pool (controller, all workers)
-        sky pool logs [POOL_NAME] --sync-down
+        sky jobs pool logs [POOL_NAME] --sync-down
         \b
         # Sync down controller logs and logs for workers 1 and 3
-        sky pool logs [POOL_NAME] 1 3 --controller --sync-down
+        sky jobs pool logs [POOL_NAME] 1 3 --controller --sync-down
     """
     _handle_serve_logs(pool_name,
                        follow=follow,
@@ -5202,7 +5212,15 @@ def jobs_pool_logs(
 @flags.config_option(expose_value=False)
 @usage_lib.entrypoint
 def dashboard() -> None:
-    """Starts the dashboard for skypilot."""
+    """Opens the SkyPilot dashboard."""
+    sdk.dashboard()
+
+
+@cli.command(cls=_DocumentedCodeCommand, hidden=True)
+@flags.config_option(expose_value=False)
+@usage_lib.entrypoint
+def ui() -> None:
+    """Opens the SkyPilot dashboard."""
     sdk.dashboard()
 
 
