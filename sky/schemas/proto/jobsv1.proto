@@ -59,6 +59,7 @@ message QueueJobRequest {
   string script_path = 3;
   string remote_log_dir = 4;
   optional ManagedJobInfo managed_job = 5;
+  optional string user_hash = 6;
 }
 
 message ManagedJobInfo {

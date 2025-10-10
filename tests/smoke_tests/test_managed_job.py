@@ -1582,3 +1582,51 @@ def test_managed_jobs_failed_precheck_storage_spec_error(
             timeout=15 * 60,
         )
         smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers
+def test_managed_job_user_hash_in_db(generic_cloud: str):
+    """Test that jobs submitted in detached mode have user_hash in the database."""
+    with smoke_tests_utils.override_sky_config():
+        with skypilot_config.override_skypilot_config(
+                smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG):
+            name = smoke_tests_utils.get_cluster_name()
+            task = sky.Task(run="echo 'Testing user hash'; sleep 30")
+            task.set_resources(
+                sky.Resources(infra=generic_cloud,
+                              **smoke_tests_utils.LOW_RESOURCE_PARAM))
+
+            # Launch job in detached mode
+            job_id, handle = sky.stream_and_get(sky.jobs.launch(task,
+                                                                name=name))
+            assert handle is not None
+
+            try:
+                # Immediately check the database for user_hash using jobs client SDK
+                job_records = sky.stream_and_get(
+                    sky.jobs.queue(refresh=False,
+                                   skip_finished=False,
+                                   all_users=False))
+
+                # Find our job in the queue
+                found_job_record = None
+                for job_record in job_records:
+                    if job_record.job_id == job_id:
+                        found_job_record = job_record
+                        break
+
+                assert found_job_record is not None, f"Job {job_id} not found in queue"
+
+                # Check that the job is in PENDING state (or other early states)
+                assert found_job_record.status in [
+                    sky.ManagedJobStatus.PENDING
+                ], (f"Job {job_id} not in expected state. "
+                    f"Status: {found_job_record.status}")
+
+                # Check that user_hash exists and is not None
+                assert found_job_record.user_hash is not None and found_job_record.user_hash != '', (
+                    f"Job {job_id} found but user_hash is missing or empty. "
+                    f"user_hash: {found_job_record.user_hash}")
+            finally:
+                sky.jobs.cancel(job_ids=[job_id])

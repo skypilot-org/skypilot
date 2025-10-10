@@ -2112,8 +2112,12 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
-    def set_pending(cls, job_id: int, managed_job_dag: 'dag_lib.Dag',
-                    workspace: str, entrypoint: str) -> str:
+    def set_pending(cls,
+                    job_id: int,
+                    managed_job_dag: 'dag_lib.Dag',
+                    workspace: str,
+                    entrypoint: str,
+                    user_hash: Optional[str] = None) -> str:
         dag_name = managed_job_dag.name
         pool = managed_job_dag.pool
         # Add the managed job to queue table.
@@ -2130,6 +2134,8 @@ class ManagedJobCodeGen:
                     pool_hash = serve_state.get_service_hash({pool!r})
                 set_job_info_kwargs['pool'] = {pool!r}
                 set_job_info_kwargs['pool_hash'] = pool_hash
+            if managed_job_version >= 11:
+                set_job_info_kwargs['user_hash'] = {user_hash!r}
             managed_job_state.set_job_info(
                 {job_id}, {dag_name!r}, **set_job_info_kwargs)
             """)

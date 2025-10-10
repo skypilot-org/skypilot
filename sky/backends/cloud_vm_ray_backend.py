@@ -4297,14 +4297,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         # codegen not set - server assumes script uploaded
                         remote_log_dir=remote_log_dir,
                         managed_job=managed_job_info,
-                        script_path=script_path)
+                        script_path=script_path,
+                        user_hash=common_utils.get_user_hash())
                 else:
                     queue_job_request = jobsv1_pb2.QueueJobRequest(
                         job_id=job_id,
                         codegen=codegen,
                         remote_log_dir=remote_log_dir,
                         managed_job=managed_job_info,
-                        script_path=script_path)
+                        script_path=script_path,
+                        user_hash=common_utils.get_user_hash())
 
                 backend_utils.invoke_skylet_with_retries(lambda: SkyletClient(
                     handle.get_grpc_channel()).queue_job(queue_job_request))
@@ -4325,7 +4327,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         managed_job_dag,
                         skypilot_config.get_active_workspace(
                             force_user_workspace=True),
-                        entrypoint=common_utils.get_current_command())
+                        entrypoint=common_utils.get_current_command(),
+                        user_hash=common_utils.get_user_hash())
                     # Set the managed job to PENDING state to make sure that
                     # this managed job appears in the `sky jobs queue`, even
                     # if it needs to wait to be submitted.

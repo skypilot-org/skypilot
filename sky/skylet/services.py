@@ -216,10 +216,12 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                 if pool is not None:
                     pool_hash = serve_state.get_service_hash(pool)
                 # Add the managed job to job queue database.
+                user_hash = request.user_hash if request.HasField(
+                    'user_hash') else None
                 managed_job_state.set_job_info(job_id, managed_job.name,
                                                managed_job.workspace,
                                                managed_job.entrypoint, pool,
-                                               pool_hash)
+                                               pool_hash, user_hash)
                 # Set the managed job to PENDING state to make sure that
                 # this managed job appears in the `sky jobs queue`, even
                 # if it needs to wait to be submitted.

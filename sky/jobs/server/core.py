@@ -740,13 +740,11 @@ def queue_v2(
     assert isinstance(backend, backends.CloudVmRayBackend)
 
     user_hashes: Optional[List[Optional[str]]] = None
-    show_jobs_without_user_hash = False
     if not all_users:
         user_hashes = [common_utils.get_user_hash()]
         # For backwards compatibility, we show jobs that do not have a
         # user_hash. TODO(cooperc): Remove before 0.12.0.
         user_hashes.append(None)
-        show_jobs_without_user_hash = True
     elif user_match is not None:
         users = global_user_state.get_user_by_name_match(user_match)
         if not users:
@@ -775,7 +773,6 @@ def queue_v2(
                 ]) if user_hashes is not None else None,
                 statuses=managed_jobsv1_pb2.Statuses(
                     statuses=statuses) if statuses is not None else None,
-                show_jobs_without_user_hash=show_jobs_without_user_hash,
             )
             response = backend_utils.invoke_skylet_with_retries(
                 lambda: cloud_vm_ray_backend.SkyletClient(

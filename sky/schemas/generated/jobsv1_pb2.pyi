@@ -52,18 +52,20 @@ class AddJobResponse(_message.Message):
     def __init__(self, job_id: _Optional[int] = ..., log_dir: _Optional[str] = ...) -> None: ...
 
 class QueueJobRequest(_message.Message):
-    __slots__ = ("job_id", "codegen", "script_path", "remote_log_dir", "managed_job")
+    __slots__ = ("job_id", "codegen", "script_path", "remote_log_dir", "managed_job", "user_hash")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     CODEGEN_FIELD_NUMBER: _ClassVar[int]
     SCRIPT_PATH_FIELD_NUMBER: _ClassVar[int]
     REMOTE_LOG_DIR_FIELD_NUMBER: _ClassVar[int]
     MANAGED_JOB_FIELD_NUMBER: _ClassVar[int]
+    USER_HASH_FIELD_NUMBER: _ClassVar[int]
     job_id: int
     codegen: str
     script_path: str
     remote_log_dir: str
     managed_job: ManagedJobInfo
-    def __init__(self, job_id: _Optional[int] = ..., codegen: _Optional[str] = ..., script_path: _Optional[str] = ..., remote_log_dir: _Optional[str] = ..., managed_job: _Optional[_Union[ManagedJobInfo, _Mapping]] = ...) -> None: ...
+    user_hash: str
+    def __init__(self, job_id: _Optional[int] = ..., codegen: _Optional[str] = ..., script_path: _Optional[str] = ..., remote_log_dir: _Optional[str] = ..., managed_job: _Optional[_Union[ManagedJobInfo, _Mapping]] = ..., user_hash: _Optional[str] = ...) -> None: ...
 
 class ManagedJobInfo(_message.Message):
     __slots__ = ("name", "pool", "workspace", "entrypoint", "tasks")
