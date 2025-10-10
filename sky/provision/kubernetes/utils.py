@@ -238,40 +238,6 @@ def normalize_tpu_accelerator_name(accelerator: str) -> Tuple[str, int]:
     return accelerator, 1
 
 
-def _is_cloudflare_403_error(exception: Exception) -> bool:
-    """Check if an exception is a transient CloudFlare 403 error.
-
-    CloudFlare proxy 403 errors with CF-specific headers are transient and
-    should be retried, unlike real RBAC 403 errors.
-
-    Args:
-        exception: The exception to check
-
-    Returns:
-        True if this is a CloudFlare 403 error that should be retried
-    """
-    if not isinstance(exception, kubernetes.api_exception()):
-        return False
-
-    # Only check for 403 errors
-    if exception.status != 403:
-        return False
-
-    # Check for CloudFlare-specific headers
-    headers = exception.headers if hasattr(exception, 'headers') else {}
-    if not headers:
-        return False
-
-    # CloudFlare errors have CF-RAY header and/or Server: cloudflare
-    for k, v in headers.items():
-        if 'cf-ray' in k.lower():
-            return True
-        if 'server' in k.lower() and 'cloudflare' in str(v).lower():
-            return True
-
-    return False
-
-
 def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                     retry_interval=DEFAULT_RETRY_INTERVAL_SECONDS,
                     resource_type: Optional[str] = None):
@@ -306,25 +272,19 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                         kubernetes.api_exception(),
                         kubernetes.config_exception()) as e:
                     last_exception = e
-
-                    # Check if this is a CloudFlare transient 403 error
-                    is_cloudflare_403 = _is_cloudflare_403_error(e)
-
                     # Don't retry on permanent errors like 401 (Unauthorized)
-                    # or 403 (Forbidden), unless it's a CloudFlare transient 403
+                    # or 403 (Forbidden)
                     if (isinstance(e, kubernetes.api_exception()) and
-                            e.status in (401, 403) and not is_cloudflare_403):
+                            e.status in (401, 403)):
                         # Raise KubeAPIUnreachableError exception so that the
                         # optimizer/provisioner can failover to other clouds.
                         raise exceptions.KubeAPIUnreachableError(
                             f'Kubernetes API error: {str(e)}') from e
                     if attempt < max_retries - 1:
                         sleep_time = backoff.current_backoff()
-                        error_type = 'CloudFlare 403' if is_cloudflare_403 else 'error'
-                        logger.debug(
-                            f'Kubernetes API call {func.__name__} '
-                            f'failed with {error_type} {str(e)}. Retrying in '
-                            f'{sleep_time:.1f}s...')
+                        logger.debug(f'Kubernetes API call {func.__name__} '
+                                     f'failed with {str(e)}. Retrying in '
+                                     f'{sleep_time:.1f}s...')
                         time.sleep(sleep_time)
                         continue
 
@@ -2778,7 +2738,6 @@ def merge_custom_metadata(
     config_utils.merge_k8s_configs(original_metadata, custom_metadata)
 
 
-@_retry_on_error(resource_type='runtimeclass')
 def check_nvidia_runtime_class(context: Optional[str] = None) -> bool:
     """Checks if the 'nvidia' RuntimeClass exists in the cluster"""
     # Fetch the list of available RuntimeClasses
