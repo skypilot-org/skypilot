@@ -10,7 +10,8 @@ import sys
 import threading
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, Union
+from typing import (Any, Callable, Dict, List, Optional, Protocol, Set, Tuple,
+                    Union)
 
 import colorama
 
@@ -107,7 +108,7 @@ def get_parallel_threads(cloud_str: Optional[str] = None) -> int:
 
 
 def run_in_parallel(func: Callable,
-                    args: List[Any],
+                    args: Union[List[Any], Set[Any]],
                     num_threads: Optional[int] = None) -> List[Any]:
     """Run a function in parallel on a list of arguments.
 
@@ -128,7 +129,7 @@ def run_in_parallel(func: Callable,
     if len(args) == 0:
         return []
     if len(args) == 1:
-        return [func(args[0])]
+        return [func(list(args)[0])]
 
     processes = (num_threads
                  if num_threads is not None else get_parallel_threads())
