@@ -1006,10 +1006,18 @@ def update_last_use(cluster_name: str):
 @metrics_lib.time_me
 def remove_cluster(cluster_name: str, terminate: bool) -> None:
     """Removes cluster_name mapping."""
+    import traceback
     assert _SQLALCHEMY_ENGINE is not None
     cluster_hash = _get_hash_for_existing_cluster(cluster_name)
     usage_intervals = _get_cluster_usage_intervals(cluster_hash)
     provision_log_path = get_cluster_provision_log_path(cluster_name)
+    
+    # Log when controller clusters are being removed to help debug race conditions
+    from sky.utils import controller_utils
+    if controller_utils.Controllers.from_name(cluster_name) is not None:
+        logger.warning(f'remove_cluster called for controller cluster: {cluster_name}, '
+                      f'terminate={terminate}')
+        logger.debug(f'remove_cluster call stack:\n{"".join(traceback.format_stack())}')
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         # usage_intervals is not None and not empty

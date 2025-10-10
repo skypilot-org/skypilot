@@ -1662,6 +1662,7 @@ class RetryingVmProvisioner(object):
 
             prev_cluster_ips, prev_ssh_ports, prev_cluster_info = (None, None,
                                                                    None)
+            logger.info(f'prev_handle: {prev_handle}')
             if prev_handle is not None:
                 prev_cluster_ips = prev_handle.stable_internal_external_ips
                 prev_ssh_ports = prev_handle.stable_ssh_ports

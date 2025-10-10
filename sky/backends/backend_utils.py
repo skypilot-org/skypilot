@@ -2670,6 +2670,8 @@ def refresh_cluster_record(
         include_user_info=include_user_info,
         summary_response=summary_response)
     if record is None:
+        logger.info(f'refresh_cluster_record: Cluster {cluster_name} not found in DB '
+                   f'at initial check, returning None')
         return None
     # TODO(zhwu, 05/20): switch to the specific workspace to make sure we are
     # using the correct cloud credentials.
@@ -2707,6 +2709,9 @@ def refresh_cluster_record(
                         cluster_name,
                         include_user_info=include_user_info,
                         summary_response=summary_response)
+                    if record is None:
+                        logger.warning(f'refresh_cluster_record: Cluster {cluster_name} disappeared '
+                                      f'from DB after acquiring lock, returning None')
                     if record is None or not _must_refresh_cluster_status(
                             record, force_refresh_statuses):
                         return record
@@ -2739,6 +2744,8 @@ def refresh_cluster_record(
                 include_user_info=include_user_info,
                 summary_response=summary_response)
             if record is None:
+                logger.warning(f'refresh_cluster_record: Cluster {cluster_name} disappeared '
+                              f'from DB during lock wait loop, returning None')
                 return None
 
 
@@ -2758,6 +2765,9 @@ def refresh_cluster_status_handle(
     handle of the cluster.
     Please refer to the docstring of refresh_cluster_record for the details.
     """
+    logger.debug(f'refresh_cluster_status_handle called for {cluster_name}, '
+                f'force_refresh_statuses={force_refresh_statuses}, '
+                f'cluster_status_lock_timeout={cluster_status_lock_timeout}')
     record = refresh_cluster_record(
         cluster_name,
         force_refresh_statuses=force_refresh_statuses,
@@ -2765,8 +2775,13 @@ def refresh_cluster_status_handle(
         cluster_status_lock_timeout=cluster_status_lock_timeout,
         include_user_info=False,
         summary_response=True)
+    logger.debug(f'refresh_cluster_status_handle: record is {"None" if record is None else "not None"}')
     if record is None:
+        logger.info(f'refresh_cluster_status_handle: Cluster {cluster_name} not found in DB, '
+                   f'returning (None, None)')
         return None, None
+    logger.debug(f'refresh_cluster_status_handle: returning status={record["status"]}, '
+                f'handle={record["handle"]}')
     return record['status'], record['handle']
 
 
@@ -2990,13 +3005,23 @@ def is_controller_accessible(
         # code will check if the controller is accessible by directly checking
         # the ssh connection to the controller, if it fails to get accurate
         # status of the controller.
+        logger.info(f'Checking controller accessibility for cluster: {cluster_name}')
+        # Check if cluster exists in DB before refresh
+        pre_refresh_record = global_user_state.get_cluster_from_name(
+            cluster_name, include_user_info=False, summary_response=True)
+        logger.info(f'Pre-refresh DB record exists: {pre_refresh_record is not None}, '
+                   f'status: {pre_refresh_record["status"] if pre_refresh_record else None}')
+        
         controller_status, handle = refresh_cluster_status_handle(
             cluster_name,
             force_refresh_statuses=[status_lib.ClusterStatus.INIT],
             cluster_status_lock_timeout=0)
-        logger.info(f'controller_status: {controller_status}, handle: {handle}')
+        logger.info(f'After refresh_cluster_status_handle: '
+                   f'controller_status={controller_status}, '
+                   f'handle={handle}, '
+                   f'handle.head_ip={handle.head_ip if handle else None}')
     except exceptions.ClusterStatusFetchingError as e:
-        logger.info(f'exceptions.ClusterStatusFetchingError: {e}')
+        logger.info(f'ClusterStatusFetchingError: {e}')
         # We do not catch the exceptions related to the cluster owner identity
         # mismatch, please refer to the comment in
         # `backend_utils.check_cluster_available`.
@@ -3008,15 +3033,19 @@ def is_controller_accessible(
             f'  Details: {common_utils.format_exception(e, use_bracket=True)}')
         record = global_user_state.get_cluster_from_name(
             cluster_name, include_user_info=False, summary_response=True)
-        logger.info(f'record: {record}')
+        logger.info(f'Fallback DB record: record_exists={record is not None}, '
+                   f'status={record["status"] if record else None}, '
+                   f'handle={record["handle"] if record else None}')
         if record is not None:
             controller_status, handle = record['status'], record['handle']
             # We check the connection even if the cluster has a cached status UP
             # to make sure the controller is actually accessible, as the cached
             # status might be stale.
             need_connection_check = True
-    logger.info(f'need_connection_check: {need_connection_check}')
-    logger.info(f'controller_status: {controller_status}, handle: {handle}')
+    logger.info(f'need_connection_check={need_connection_check}')
+    logger.info(f'Final state: controller_status={controller_status}, '
+               f'handle={handle}, '
+               f'handle.head_ip={handle.head_ip if handle else None}')
 
     error_msg = None
     if controller_status == status_lib.ClusterStatus.STOPPED:
