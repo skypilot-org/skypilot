@@ -292,9 +292,7 @@ class Request:
             raise
 
 
-def encode_requests(
-        requests: List[Request],
-        fields: Optional[List[str]] = None) -> List[payloads.RequestPayload]:
+def encode_requests(requests: List[Request]) -> List[payloads.RequestPayload]:
     """Serialize the SkyPilot API request for display purposes.
 
         This function should be called on the server side to serialize the
@@ -312,15 +310,18 @@ def encode_requests(
     all_users = global_user_state.get_all_users()
     all_users_map = {user.id: user.name for user in all_users}
     for request in requests:
-        assert isinstance(request.request_body,
-                          payloads.RequestBody), (request.name,
-                                                  request.request_body)
+        if request.request_body is not None:
+            assert isinstance(request.request_body,
+                              payloads.RequestBody), (request.name,
+                                                      request.request_body)
         user_name = all_users_map.get(request.user_id)
         payload = payloads.RequestPayload(
             request_id=request.request_id,
             name=request.name,
-            entrypoint=request.entrypoint.__name__,
-            request_body=request.request_body.model_dump_json(),
+            entrypoint=request.entrypoint.__name__
+            if request.entrypoint is not None else '',
+            request_body=request.request_body.model_dump_json()
+            if request.request_body is not None else json.dumps(None),
             status=request.status.value,
             return_value=json.dumps(None),
             error=json.dumps(None),
@@ -334,51 +335,59 @@ def encode_requests(
             should_retry=request.should_retry,
             finished_at=request.finished_at,
         )
-        payload = _update_request_payload_fields(payload, fields)
         encoded_requests.append(payload)
     return encoded_requests
 
 
-def _update_request_payload_fields(
-        payload: payloads.RequestPayload,
-        fields: Optional[List[str]] = None) -> payloads.RequestPayload:
-    """Update the request payload fields."""
+def _update_request_row_fields(
+        row: Tuple[Any, ...],
+        fields: Optional[List[str]] = None) -> Tuple[Any, ...]:
+    """Update the request row fields."""
     if not fields:
-        return payload
+        return row
+
+    # Convert tuple to dictionary for easier manipulation
+    content = dict(zip(fields, row))
+
+    # Valid empty values for pickled fields (base64-encoded pickled None)
+    # base64.b64encode(pickle.dumps(None)).decode('utf-8')
+    empty_pickled_value = 'gAROLg=='
+
     # Required fields in RequestPayload
     if 'request_id' not in fields:
-        payload.request_id = ''
+        content['request_id'] = ''
     if 'name' not in fields:
-        payload.name = ''
+        content['name'] = ''
     if 'entrypoint' not in fields:
-        payload.entrypoint = ''
+        content['entrypoint'] = empty_pickled_value
     if 'request_body' not in fields:
-        payload.request_body = json.dumps(None)
+        content['request_body'] = empty_pickled_value
     if 'status' not in fields:
-        payload.status = ''
+        content['status'] = RequestStatus.PENDING.value
     if 'created_at' not in fields:
-        payload.created_at = 0
+        content['created_at'] = 0
     if 'user_id' not in fields:
-        payload.user_id = ''
-        payload.user_name = None
+        content['user_id'] = ''
     if 'return_value' not in fields:
-        payload.return_value = json.dumps(None)
+        content['return_value'] = json.dumps(None)
     if 'error' not in fields:
-        payload.error = json.dumps(None)
+        content['error'] = json.dumps(None)
     if 'schedule_type' not in fields:
-        payload.schedule_type = ''
+        content['schedule_type'] = ScheduleType.SHORT.value
     # Optional fields in RequestPayload
     if 'pid' not in fields:
-        payload.pid = None
+        content['pid'] = None
     if 'cluster_name' not in fields:
-        payload.cluster_name = None
+        content['cluster_name'] = None
     if 'status_msg' not in fields:
-        payload.status_msg = None
+        content['status_msg'] = None
     if 'should_retry' not in fields:
-        payload.should_retry = False
+        content['should_retry'] = False
     if 'finished_at' not in fields:
-        payload.finished_at = None
-    return payload
+        content['finished_at'] = None
+
+    # Convert back to tuple in the same order as REQUEST_COLUMNS
+    return tuple(content[col] for col in REQUEST_COLUMNS)
 
 
 def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
@@ -736,6 +745,7 @@ class RequestTaskFilter:
     include_request_names: Optional[List[str]] = None
     finished_before: Optional[float] = None
     request_limit: int = 0
+    fields: Optional[List[str]] = None
 
     def __post_init__(self):
         if (self.exclude_request_names is not None and
@@ -778,6 +788,8 @@ class RequestTaskFilter:
         if filter_str:
             filter_str = f' WHERE {filter_str}'
         columns_str = ', '.join(REQUEST_COLUMNS)
+        if self.fields:
+            columns_str = ', '.join(self.fields)
         query_str = (f'SELECT {columns_str} FROM {REQUEST_TABLE}{filter_str} '
                      'ORDER BY created_at DESC')
         if self.request_limit > 0:
@@ -813,6 +825,21 @@ async def get_request_tasks_async(
     async with _DB.execute_fetchall_async(*req_filter.build_query()) as rows:
         if not rows:
             return []
+    return [Request.from_row(row) for row in rows]
+
+
+@init_db_async
+@metrics_lib.time_me_async
+async def get_request_tasks_with_fields_async(
+    req_filter: RequestTaskFilter,
+    fields: Optional[List[str]] = None,
+) -> List[Request]:
+    """Async version of get_request_tasks."""
+    assert _DB is not None
+    async with _DB.execute_fetchall_async(*req_filter.build_query()) as rows:
+        if not rows:
+            return []
+    rows = [_update_request_row_fields(row, fields) for row in rows]
     return [Request.from_row(row) for row in rows]
 
 
