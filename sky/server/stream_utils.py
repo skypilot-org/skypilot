@@ -10,6 +10,7 @@ import fastapi
 
 from sky import global_user_state
 from sky import sky_logging
+from sky.server.requests import event_bus as requests_event_bus
 from sky.server.requests import requests as requests_lib
 from sky.utils import message_utils
 from sky.utils import rich_utils
@@ -40,13 +41,13 @@ async def _yield_log_file_with_payloads_skipped(
         yield line_str
 
 
-async def log_streamer(
-        request_id: Optional[str],
-        log_path: pathlib.Path,
-        plain_logs: bool = False,
-        tail: Optional[int] = None,
-        follow: bool = True,
-        cluster_name: Optional[str] = None) -> AsyncGenerator[str, None]:
+async def log_streamer(request_id: Optional[str],
+                       log_path: pathlib.Path,
+                       plain_logs: bool = False,
+                       tail: Optional[int] = None,
+                       follow: bool = True,
+                       cluster_name: Optional[str] = None,
+                       aylei: bool = False) -> AsyncGenerator[str, None]:
     """Streams the logs of a request.
 
     Args:
@@ -111,19 +112,153 @@ async def log_streamer(
 
     async with aiofiles.open(log_path, 'rb') as f:
         async for chunk in _tail_log_file(f, request_id, plain_logs, tail,
-                                          follow, cluster_name):
+                                          follow, cluster_name, aylei):
             yield chunk
 
 
-async def _tail_log_file(
+async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
+                         request_id: Optional[str] = None,
+                         plain_logs: bool = False,
+                         tail: Optional[int] = None,
+                         follow: bool = True,
+                         cluster_name: Optional[str] = None,
+                         aylei: bool = False) -> AsyncGenerator[str, None]:
+    """Tail the opened log file, buffer the lines and flush in chunks."""
+    if not aylei:
+        async for chunk in _original_tail_log_file(f, request_id, plain_logs,
+                                                   tail, follow, cluster_name):
+            yield chunk
+        return
+    yield 'Enter aylei test path!\n'
+    if tail is not None:
+        # Find last n lines of the log file. Do not read the whole file into
+        # memory.
+        # TODO(zhwu): this will include the control lines for rich status,
+        # which may not lead to exact tail lines when showing on the client
+        # side.
+        lines: Deque[str] = collections.deque(maxlen=tail)
+        async for line_str in _yield_log_file_with_payloads_skipped(f):
+            lines.append(line_str)
+        for line_str in lines:
+            yield line_str
+
+    last_heartbeat_time = asyncio.get_event_loop().time()
+    last_cluster_status_check_time = asyncio.get_event_loop().time()
+
+    # Buffer the lines in memory and flush them in chunks to improve log
+    # tailing throughput.
+    buffer: List[str] = []
+    buffer_bytes = 0
+    last_flush_time = asyncio.get_event_loop().time()
+
+    async def flush_buffer() -> AsyncGenerator[str, None]:
+        nonlocal buffer, buffer_bytes, last_flush_time
+        if buffer:
+            yield ''.join(buffer)
+            buffer.clear()
+            buffer_bytes = 0
+            last_flush_time = asyncio.get_event_loop().time()
+
+    stop_event = asyncio.Event()
+    stopped_status: Optional[requests_lib.RequestStatus] = None
+
+    async def on_stop(request_id: str, status: requests_lib.RequestStatus):
+        print(f'[log_streamer] stop signal for {request_id}')
+        stop_event.set()
+        nonlocal stopped_status
+        stopped_status = status
+
+    if request_id is not None:
+        await requests_event_bus.subscribe(
+            request_id,
+            requests_event_bus.Callback(requests_lib.RequestStatus.SUCCEEDED,
+                                        on_stop))
+    while True:
+        # Sleep 0 to yield control to allow other coroutines to run,
+        # while keeps the loop tight to make log stream responsive.
+        await asyncio.sleep(0)
+        current_time = asyncio.get_event_loop().time()
+        # Flush the buffer when it is not empty and the buffer is full or the
+        # flush timeout is reached.
+        if buffer and (buffer_bytes >= _BUFFER_SIZE or
+                       (current_time - last_flush_time) >= _BUFFER_TIMEOUT):
+            async for chunk in flush_buffer():
+                yield chunk
+
+        line: Optional[bytes] = await f.readline()
+        if not line:
+            if request_id is not None:
+                if stop_event.is_set():
+                    print(f'Request status is: {stopped_status}')
+                    if stopped_status == requests_lib.RequestStatus.CANCELLED:
+                        request_task = await requests_lib.get_request_async(
+                            request_id)
+                        if request_task.should_retry:
+                            buffer.append(
+                                message_utils.encode_payload(
+                                    rich_utils.Control.RETRY.encode('')))
+                        else:
+                            buffer.append(
+                                f'{request_task.name!r} request {request_id}'
+                                ' cancelled\n')
+                    break
+            if not follow:
+                break
+            # Provision logs pass in cluster_name, check cluster status
+            # periodically to see if provisioning is done. We only
+            # check once a second to avoid overloading the DB.
+            check_status = (current_time - last_cluster_status_check_time
+                           ) >= _CLUSTER_STATUS_INTERVAL
+            if cluster_name is not None and check_status:
+                cluster_record = await (
+                    global_user_state.get_status_from_cluster_name_async(
+                        cluster_name))
+                if (cluster_record is None or
+                        cluster_record != status_lib.ClusterStatus.INIT):
+                    break
+                last_cluster_status_check_time = current_time
+            if current_time - last_heartbeat_time >= _HEARTBEAT_INTERVAL:
+                # Currently just used to keep the connection busy, refer to
+                # https://github.com/skypilot-org/skypilot/issues/5750 for
+                # more details.
+                buffer.append(
+                    message_utils.encode_payload(
+                        rich_utils.Control.HEARTBEAT.encode('')))
+                last_heartbeat_time = current_time
+
+            # Sleep shortly to avoid storming the DB and CPU, this has
+            # little impact on the responsivness here since we are waiting
+            # for a new line to come in.
+            await asyncio.sleep(0.1)
+            continue
+
+        # Refresh the heartbeat time, this is a trivial optimization for
+        # performance but it helps avoid unnecessary heartbeat strings
+        # being printed when the client runs in an old version.
+        last_heartbeat_time = asyncio.get_event_loop().time()
+        line_str = line.decode('utf-8')
+        if plain_logs:
+            is_payload, line_str = message_utils.decode_payload(
+                line_str, raise_for_mismatch=False)
+            # TODO(aylei): implement heartbeat mechanism for plain logs,
+            # sending invisible characters might be okay.
+            if is_payload:
+                continue
+        buffer.append(line_str)
+        buffer_bytes += len(line_str.encode('utf-8'))
+
+    # Flush remaining lines in the buffer.
+    async for chunk in flush_buffer():
+        yield chunk
+
+
+async def _original_tail_log_file(
         f: aiofiles.threadpool.binary.AsyncBufferedReader,
         request_id: Optional[str] = None,
         plain_logs: bool = False,
         tail: Optional[int] = None,
         follow: bool = True,
         cluster_name: Optional[str] = None) -> AsyncGenerator[str, None]:
-    """Tail the opened log file, buffer the lines and flush in chunks."""
-
     if tail is not None:
         # Find last n lines of the log file. Do not read the whole file into
         # memory.
@@ -235,8 +370,10 @@ async def _tail_log_file(
 
 
 def stream_response(
-    request_id: str, logs_path: pathlib.Path,
-    background_tasks: fastapi.BackgroundTasks
+    request_id: str,
+    logs_path: pathlib.Path,
+    background_tasks: fastapi.BackgroundTasks,
+    aylei: bool = False,
 ) -> fastapi.responses.StreamingResponse:
 
     async def on_disconnect():
@@ -249,7 +386,7 @@ def stream_response(
     background_tasks.add_task(on_disconnect)
 
     return fastapi.responses.StreamingResponse(
-        log_streamer(request_id, logs_path),
+        log_streamer(request_id, logs_path, aylei=aylei),
         media_type='text/plain',
         headers={
             'Cache-Control': 'no-cache, no-transform',

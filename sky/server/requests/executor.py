@@ -44,6 +44,7 @@ from sky.server import common as server_common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import metrics as metrics_lib
+from sky.server.requests import manager as request_manager
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
@@ -591,8 +592,10 @@ async def _execute_request_coroutine(request: api_requests.Request):
         if fut.done():
             try:
                 result = await fut
-                api_requests.set_request_succeeded(request_id, result)
-            except asyncio.CancelledError:
+                logger.info(
+                    f'Request {request_id} succeeded, set status to SUCCEEDED')
+                await request_manager.set_request_succeeded_async(
+                    request_id, result)
                 # The task is cancelled by ctx.cancel(), where the status
                 # should already be set to CANCELLED.
                 pass

@@ -1247,6 +1247,7 @@ async def logs(
         request_id=request.state.request_id,
         logs_path=request_task.log_path,
         background_tasks=background_tasks,
+        aylei=True,
     )
 
 
