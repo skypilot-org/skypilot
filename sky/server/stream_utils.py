@@ -11,6 +11,7 @@ import fastapi
 from sky import global_user_state
 from sky import sky_logging
 from sky.server.requests import requests as requests_lib
+from sky.utils import common_utils
 from sky.utils import message_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
@@ -24,7 +25,7 @@ logger = sky_logging.init_logger(__name__)
 _BUFFER_SIZE = 8 * 1024  # 8KB
 _BUFFER_TIMEOUT = 0.02  # 20ms
 _HEARTBEAT_INTERVAL = 30
-_CLUSTER_STATUS_INTERVAL = 1
+_LOG_STATUS_CHECK_INTERVAL = 1
 
 
 async def _yield_log_file_with_payloads_skipped(
@@ -84,6 +85,11 @@ async def log_streamer(
                        f'scheduled: {request_id}')
         req_status = request_task.status
         req_msg = request_task.status_msg
+        # Slowly back off the database polling up to every 1 second, to avoid
+        # overloading the CPU and DB.
+        backoff = common_utils.Backoff(initial_backoff=0.1,
+                                       max_backoff_factor=10,
+                                       multiplier=1.2)
         while req_status < requests_lib.RequestStatus.RUNNING:
             if req_msg is not None:
                 waiting_msg = request_task.status_msg
@@ -99,7 +105,7 @@ async def log_streamer(
             # TODO(aylei): we should use a better mechanism to avoid busy
             # polling the DB, which can be a bottleneck for high-concurrency
             # requests.
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(backoff.current_backoff())
             status_with_msg = await requests_lib.get_request_status_async(
                 request_id, include_msg=True)
             req_status = status_with_msg.status
@@ -137,7 +143,7 @@ async def _tail_log_file(
             yield line_str
 
     last_heartbeat_time = asyncio.get_event_loop().time()
-    last_cluster_status_check_time = asyncio.get_event_loop().time()
+    last_status_check_time = asyncio.get_event_loop().time()
 
     # Buffer the lines in memory and flush them in chunks to improve log
     # tailing throughput.
@@ -167,7 +173,16 @@ async def _tail_log_file(
 
         line: Optional[bytes] = await f.readline()
         if not line:
-            if request_id is not None:
+            # Avoid checking the status too frequently to avoid overloading the
+            # DB.
+            should_check_status = (current_time - last_status_check_time
+                                  ) >= _LOG_STATUS_CHECK_INTERVAL
+            if not follow:
+                # We will only hit this path once, but we should make sure to
+                # check the status so that we display the final request status
+                # if the request is complete.
+                should_check_status = True
+            if request_id is not None and should_check_status:
                 req_status = await requests_lib.get_request_status_async(
                     request_id)
                 if req_status.status > requests_lib.RequestStatus.RUNNING:
@@ -185,20 +200,19 @@ async def _tail_log_file(
                                 ' cancelled\n')
                     break
             if not follow:
+                # The below checks (cluster status, heartbeat) are not needed
+                # for non-follow logs.
                 break
             # Provision logs pass in cluster_name, check cluster status
-            # periodically to see if provisioning is done. We only
-            # check once a second to avoid overloading the DB.
-            check_status = (current_time - last_cluster_status_check_time
-                           ) >= _CLUSTER_STATUS_INTERVAL
-            if cluster_name is not None and check_status:
+            # periodically to see if provisioning is done.
+            if cluster_name is not None and should_check_status:
                 cluster_record = await (
                     global_user_state.get_status_from_cluster_name_async(
                         cluster_name))
                 if (cluster_record is None or
                         cluster_record != status_lib.ClusterStatus.INIT):
                     break
-                last_cluster_status_check_time = current_time
+                last_status_check_time = current_time
             if current_time - last_heartbeat_time >= _HEARTBEAT_INTERVAL:
                 # Currently just used to keep the connection busy, refer to
                 # https://github.com/skypilot-org/skypilot/issues/5750 for
