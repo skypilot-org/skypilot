@@ -43,10 +43,12 @@ def _get_deployment_name() -> str:
                     os.getenv('SKYPILOT_RELEASE_NAME') or 'skypilot')
     return f'{release_name}-api-server'
 
+
 def _get_app_name() -> str:
     release_name = (os.getenv('HELM_RELEASE_NAME') or
                     os.getenv('SKYPILOT_RELEASE_NAME') or 'skypilot')
     return f'{release_name}-api'
+
 
 def initialize_configmap_sync_on_startup(config_file_path: str) -> None:
     """Initialize ConfigMap sync on API server startup.
@@ -170,24 +172,24 @@ def trigger_deployment_update() -> bool:
         True if the deployment update is successful, False otherwise.
     """
     if not is_running_in_kubernetes():
-        return
+        return False
     try:
         namespace = _get_kubernetes_namespace()
         deployment_name = _get_deployment_name()
-        label_selector = f"app={_get_app_name()}"
+        label_selector = f'app={_get_app_name()}'
         pods = kubernetes.core_api().list_namespaced_pod(
-            namespace=namespace,
-            label_selector=label_selector
-        )
+            namespace=namespace, label_selector=label_selector)
         # If there are multiple API server pods, assume that a rolling update
         # is already in progress. In this case, we don't need to trigger a new
         # rolling update.
         # TODO modify this logic once we have multi-replica support.
-        logger.info(f'Found {len(pods.items)} API server pods in namespace {namespace}')
+        logger.info(
+            f'Found {len(pods.items)} API server pods in namespace {namespace}')
         if len(pods.items) > 1:
-            logger.info(f'Found multiple API server pods in namespace {namespace}. '
-                        'Assuming a rolling update is already in progress, '
-                        'skipping deployment update.')
+            logger.info(
+                f'Found multiple API server pods in namespace {namespace}. '
+                'Assuming a rolling update is already in progress, '
+                'skipping deployment update.')
             return False
         # Get the current deployment object
         kubernetes.apps_api().read_namespaced_deployment(name=deployment_name,

@@ -28,7 +28,7 @@ class InternalRequestDaemon:
 
     id: str
     name: str
-    event_fn: Callable[[], None]
+    event_fn: Callable[[], bool]
     default_log_level: str = 'INFO'
     should_skip: Callable[[], bool] = _default_should_skip
 
@@ -109,6 +109,7 @@ def refresh_cluster_status_event() -> bool:
     time.sleep(server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS)
     return True
 
+
 def refresh_volume_status_event() -> bool:
     """Periodically refresh the volume status."""
     # pylint: disable=import-outside-toplevel
@@ -126,6 +127,7 @@ def refresh_volume_status_event() -> bool:
     time.sleep(server_constants.VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS)
     return True
 
+
 def managed_job_status_refresh_event() -> bool:
     """Refresh the managed job status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
@@ -142,6 +144,7 @@ def managed_job_status_refresh_event() -> bool:
     refresh_event.run()
     time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
     return True
+
 
 def should_skip_managed_job_status_refresh():
     """Check if the managed job status refresh event should be skipped."""
@@ -200,12 +203,16 @@ def deployment_update_event() -> bool:
     time.sleep(60)
     memory_limit = common_utils.get_mem_size_gb()
     memory_usage = common_utils.get_current_memory_usage_gb()
+    if memory_usage is None:
+        logger.warning('Failed to get the current memory usage.')
+        return True
     memory_utilization = memory_usage / memory_limit
     threshold = 0.4
     if memory_utilization <= threshold:
         logger.info(
             f'Currently using {memory_usage:.3f}GB of {memory_limit:.3f}GB. '
-            f'Memory utilization {memory_utilization:.3f} is less than {threshold}.')
+            f'Memory utilization {memory_utilization:.3f}'
+            f' is less than {threshold}.')
         # Nothing to do, return and continue running the daemon.
         return True
     logger.info(
