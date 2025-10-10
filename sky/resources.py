@@ -1562,6 +1562,13 @@ class Resources:
                 override_configs=self.cluster_config_overrides) and
                 self.accelerators is not None):
             initial_setup_commands = [constants.DISABLE_GPU_ECC_COMMAND]
+        uv_http_timeout = skypilot_config.get_nested(
+            ('provision', 'uv_http_timeout'),
+            None,
+            override_configs=self.cluster_config_overrides
+        )
+        if uv_http_timeout is not None:
+            initial_setup_commands.append(f"export UV_HTTP_TIMEOUT={uv_http_timeout}")
 
         docker_image = self.extract_docker_image()
 

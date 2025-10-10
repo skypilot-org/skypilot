@@ -635,6 +635,9 @@ available_node_types:
               # Set -x to print the commands and their arguments as they are executed.
               # Useful for debugging.
               set -x
+              {%- for initial_setup_command in initial_setup_commands %}
+              {{ initial_setup_command }}
+              {%- endfor %}
               # Helper function to conditionally use sudo
               # TODO(zhwu): consolidate the two prefix_cmd and sudo replacements
               prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
@@ -1328,9 +1331,6 @@ setup_commands:
   # commands in pod args are asynchronous and we cannot guarantee the failure indicators are created before the setup commands finish.
   - |
     mkdir -p ~/.ssh; touch ~/.ssh/config;
-    {%- for initial_setup_command in initial_setup_commands %}
-    {{ initial_setup_command }}
-    {%- endfor %}
     STEPS=("apt-ssh-setup" "runtime-setup" "env-setup")
     start_epoch=$(date +%s);
 

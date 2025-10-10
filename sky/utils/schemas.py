@@ -1710,6 +1710,10 @@ def get_config_schema():
                 'type': 'integer',
                 'minimum': 1,
             },
+            'uv_http_timeout': {
+                'type': 'integer',
+                'minimum': 1,
+            },
         }
     }
 
