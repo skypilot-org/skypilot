@@ -201,13 +201,22 @@ def deployment_update_event() -> bool:
     memory_limit = common_utils.get_mem_size_gb()
     memory_usage = common_utils.get_current_memory_usage_gb()
     memory_utilization = memory_usage / memory_limit
-    if memory_utilization <= 0.8:
+    threshold = 0.4
+    if memory_utilization <= threshold:
         logger.info(
             f'Currently using {memory_usage:.3f}GB of {memory_limit:.3f}GB. '
-            f'Memory utilization {memory_utilization:.3f} is less than 0.8.')
+            f'Memory utilization {memory_utilization:.3f} is less than {threshold}.')
         # Nothing to do, return and continue running the daemon.
         return True
-    config_map_utils.trigger_deployment_update()
+    logger.info(
+        f'Currently using {memory_usage:.3f}GB of {memory_limit:.3f}GB. '
+        f'Memory utilization {memory_utilization:.3f} is above {threshold}. '
+        'Triggering deployment update...')
+    success = config_map_utils.trigger_deployment_update()
+    if not success:
+        logger.warning('Failed to trigger deployment update.')
+        # Continue running the daemon as deployment update failed.
+        return True
     # Deployment update event is done, return and stop running the daemon.
     return False
 
