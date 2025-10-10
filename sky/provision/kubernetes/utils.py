@@ -306,10 +306,10 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                         kubernetes.api_exception(),
                         kubernetes.config_exception()) as e:
                     last_exception = e
-                    
+
                     # Check if this is a CloudFlare transient 403 error
                     is_cloudflare_403 = _is_cloudflare_403_error(e)
-                    
+
                     # Don't retry on permanent errors like 401 (Unauthorized)
                     # or 403 (Forbidden), unless it's a CloudFlare transient 403
                     if (isinstance(e, kubernetes.api_exception()) and
@@ -321,9 +321,10 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                     if attempt < max_retries - 1:
                         sleep_time = backoff.current_backoff()
                         error_type = 'CloudFlare 403' if is_cloudflare_403 else 'error'
-                        logger.debug(f'Kubernetes API call {func.__name__} '
-                                     f'failed with {error_type} {str(e)}. Retrying in '
-                                     f'{sleep_time:.1f}s...')
+                        logger.debug(
+                            f'Kubernetes API call {func.__name__} '
+                            f'failed with {error_type} {str(e)}. Retrying in '
+                            f'{sleep_time:.1f}s...')
                         time.sleep(sleep_time)
                         continue
 

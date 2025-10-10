@@ -1190,7 +1190,7 @@ class TestCloudFlare403ErrorDetection(unittest.TestCase):
     def test_check_nvidia_runtime_class_retries_on_cloudflare_403(self):
         """Test that check_nvidia_runtime_class retries on CloudFlare 403.
         
-        Simulates CoreWeave's CloudFlare proxy returning transient 403 on first
+        Simulates CloudFlare proxy returning transient 403 on first
         call, then succeeding on retry.
         """
 
