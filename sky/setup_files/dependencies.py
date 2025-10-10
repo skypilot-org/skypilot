@@ -88,6 +88,7 @@ install_requires = [
     'aiohttp',
     'aiosqlite',
     'anyio',
+    'zmq',
 ]
 
 # See requirements-dev.txt for the version of grpc and protobuf
