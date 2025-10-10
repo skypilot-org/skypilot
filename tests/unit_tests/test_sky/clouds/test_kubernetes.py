@@ -1034,5 +1034,200 @@ class TestKubernetesVolumeNameValidation(unittest.TestCase):
         self.assertFalse(ok)
 
 
+class TestCloudFlare403ErrorDetection(unittest.TestCase):
+    """Test cases for CloudFlare 403 error detection and retry."""
+
+    def test_cloudflare_403_with_cf_ray_header(self):
+        """Test that 403 with CF-RAY header is detected as CloudFlare error."""
+        mock_exception = mock.Mock()
+        mock_exception.status = 403
+        mock_exception.headers = {
+            'Date': 'Wed, 08 Oct 2025 19:26:17 GMT',
+            'CF-RAY': '98b8076cfae4058d-IAD',
+            'Server': 'cloudflare'
+        }
+
+        with patch('sky.adaptors.kubernetes.api_exception',
+                   return_value=type(mock_exception)):
+            result = kubernetes_utils._is_cloudflare_403_error(mock_exception)
+
+        self.assertTrue(result)
+
+    def test_cloudflare_403_with_server_cloudflare(self):
+        """Test that 403 with Server: cloudflare header is detected."""
+        mock_exception = mock.Mock()
+        mock_exception.status = 403
+        mock_exception.headers = {
+            'Date': 'Wed, 08 Oct 2025 19:26:17 GMT',
+            'Server': 'cloudflare',
+            'Content-Length': '0'
+        }
+
+        with patch('sky.adaptors.kubernetes.api_exception',
+                   return_value=type(mock_exception)):
+            result = kubernetes_utils._is_cloudflare_403_error(mock_exception)
+
+        self.assertTrue(result)
+
+    def test_real_rbac_403_not_cloudflare(self):
+        """Test that real RBAC 403 without CloudFlare headers is NOT detected."""
+        mock_exception = mock.Mock()
+        mock_exception.status = 403
+        mock_exception.headers = {
+            'Date': 'Wed, 08 Oct 2025 19:26:17 GMT',
+            'Content-Type': 'application/json'
+        }
+
+        with patch('sky.adaptors.kubernetes.api_exception',
+                   return_value=type(mock_exception)):
+            result = kubernetes_utils._is_cloudflare_403_error(mock_exception)
+
+        self.assertFalse(result)
+
+    def test_other_status_codes_not_checked(self):
+        """Test that non-403 status codes return False (only 403 is checked)."""
+        # Test 401
+        mock_401 = mock.Mock()
+        mock_401.status = 401
+        mock_401.headers = {'CF-RAY': '12345-IAD', 'Server': 'cloudflare'}
+
+        with patch('sky.adaptors.kubernetes.api_exception',
+                   return_value=type(mock_401)):
+            result = kubernetes_utils._is_cloudflare_403_error(mock_401)
+            self.assertFalse(result)
+
+        # Test 404
+        mock_404 = mock.Mock()
+        mock_404.status = 404
+        mock_404.headers = {'CF-RAY': '12345-IAD', 'Server': 'cloudflare'}
+
+        with patch('sky.adaptors.kubernetes.api_exception',
+                   return_value=type(mock_404)):
+            result = kubernetes_utils._is_cloudflare_403_error(mock_404)
+            self.assertFalse(result)
+
+        # Test 429
+        mock_429 = mock.Mock()
+        mock_429.status = 429
+        mock_429.headers = {'CF-RAY': '12345-IAD', 'Server': 'cloudflare'}
+
+        with patch('sky.adaptors.kubernetes.api_exception',
+                   return_value=type(mock_429)):
+            result = kubernetes_utils._is_cloudflare_403_error(mock_429)
+            self.assertFalse(result)
+
+    def test_no_headers_not_detected(self):
+        """Test that 403 without headers is not detected as CloudFlare."""
+        mock_exception = mock.Mock()
+        mock_exception.status = 403
+        # Simulate hasattr returning False
+        del mock_exception.headers
+
+        with patch('sky.adaptors.kubernetes.api_exception',
+                   return_value=type(mock_exception)):
+            result = kubernetes_utils._is_cloudflare_403_error(mock_exception)
+
+        self.assertFalse(result)
+
+    def test_case_insensitive_header_matching(self):
+        """Test that header matching is case-insensitive."""
+        mock_exception = mock.Mock()
+        mock_exception.status = 403
+        mock_exception.headers = {
+            'cf-ray': '12345-IAD',  # lowercase
+            'server': 'CloudFlare'  # mixed case
+        }
+
+        with patch('sky.adaptors.kubernetes.api_exception',
+                   return_value=type(mock_exception)):
+            result = kubernetes_utils._is_cloudflare_403_error(mock_exception)
+
+        self.assertTrue(result)
+
+    def test_check_nvidia_runtime_class_retries_on_cloudflare_403(self):
+        """Test that check_nvidia_runtime_class retries on CloudFlare 403.
+        
+        Simulates CloudFlare proxy returning transient 403 on first
+        call, then succeeding on retry.
+        """
+
+        # Create a CloudFlare 403 exception class
+        class CloudFlare403Exception(Exception):
+
+            def __init__(self):
+                self.status = 403
+                self.headers = {
+                    'Date': 'Wed, 08 Oct 2025 19:26:17 GMT',
+                    'CF-RAY': '98b8076cfae4058d-IAD',
+                    'Server': 'cloudflare',
+                    'Content-Length': '0'
+                }
+                super().__init__('Forbidden')
+
+        # Successful response
+        mock_runtime_class = mock.Mock()
+        mock_runtime_class.metadata.name = 'nvidia'
+        successful_response = mock.Mock()
+        successful_response.items = [mock_runtime_class]
+
+        call_count = {'count': 0}
+
+        def mock_list_runtime_class():
+            call_count['count'] += 1
+            if call_count['count'] == 1:
+                raise CloudFlare403Exception()
+            else:
+                return successful_response
+
+        mock_node_api = mock.Mock()
+        mock_node_api.list_runtime_class = mock_list_runtime_class
+
+        with patch('sky.adaptors.kubernetes.node_api',
+                   return_value=mock_node_api), \
+             patch('sky.adaptors.kubernetes.api_exception', return_value=CloudFlare403Exception), \
+             patch('time.sleep'):
+
+            result = kubernetes_utils.check_nvidia_runtime_class(
+                context='test-context')
+
+            self.assertTrue(result)
+            self.assertEqual(call_count['count'], 2)
+
+    def test_check_nvidia_runtime_class_fails_on_real_rbac_403(self):
+        """Test that real RBAC 403 errors fail immediately without retry."""
+
+        # Real RBAC 403 (no CloudFlare headers)
+        class RBACApiException(Exception):
+
+            def __init__(self):
+                self.status = 403
+                self.headers = {
+                    'Date': 'Wed, 08 Oct 2025 19:26:17 GMT',
+                    'Content-Type': 'application/json'
+                }
+                super().__init__('Forbidden: User does not have permission')
+
+        call_count = {'count': 0}
+
+        def mock_list_runtime_class():
+            call_count['count'] += 1
+            raise RBACApiException()
+
+        mock_node_api = mock.Mock()
+        mock_node_api.list_runtime_class = mock_list_runtime_class
+
+        from sky import exceptions as sky_exceptions
+
+        with patch('sky.adaptors.kubernetes.node_api',
+                   return_value=mock_node_api), \
+             patch('sky.adaptors.kubernetes.api_exception', return_value=RBACApiException):
+
+            with self.assertRaises(sky_exceptions.KubeAPIUnreachableError):
+                kubernetes_utils.check_nvidia_runtime_class(
+                    context='test-context')
+
+            self.assertEqual(call_count['count'], 1)
+
+
 if __name__ == '__main__':
     unittest.main()
