@@ -190,6 +190,7 @@ async def _tail_log_file(
                 # if the request is complete.
                 should_check_status = True
             if request_id is not None and should_check_status:
+                last_status_check_time = current_time
                 req_status = await requests_lib.get_request_status_async(
                     request_id)
                 if req_status.status > requests_lib.RequestStatus.RUNNING:
@@ -213,13 +214,13 @@ async def _tail_log_file(
             # Provision logs pass in cluster_name, check cluster status
             # periodically to see if provisioning is done.
             if cluster_name is not None and should_check_status:
+                last_status_check_time = current_time
                 cluster_record = await (
                     global_user_state.get_status_from_cluster_name_async(
                         cluster_name))
                 if (cluster_record is None or
                         cluster_record != status_lib.ClusterStatus.INIT):
                     break
-                last_status_check_time = current_time
             if current_time - last_heartbeat_time >= _HEARTBEAT_INTERVAL:
                 # Currently just used to keep the connection busy, refer to
                 # https://github.com/skypilot-org/skypilot/issues/5750 for
