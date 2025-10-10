@@ -605,7 +605,9 @@ class RayCodeGen:
                 # skip the scheduling step.
                 job_lib.scheduler.schedule_step()
 
-                # If some nodes are down and then new nodes are added, we need to get the alive nodes.
+                # If some nodes are down and then new nodes are added after launching again,
+                # the result of `ray.nodes()` will include all the nodes, so we need to get
+                # the alive nodes.
                 alive_nodes = [n for n in ray.nodes() if n["Alive"]]
                 total_num_nodes = len(alive_nodes)
                 setup_bundles = [{{"CPU": _SETUP_CPUS}} for _ in range(total_num_nodes)]

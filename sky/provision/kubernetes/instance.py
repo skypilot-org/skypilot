@@ -959,6 +959,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     def _create_resource_thread(i: int):
         pod_spec_copy = copy.deepcopy(pod_spec)
+        # 0 is for head pod, while 1+ is for worker pods.
         if i == 0:
             if head_pod_name is None:
                 # First pod should be head if no head exists
