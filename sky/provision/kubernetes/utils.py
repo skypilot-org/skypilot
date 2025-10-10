@@ -2930,7 +2930,7 @@ def merge_custom_metadata(
 
 
 @_retry_on_error(resource_type='runtimeclass')
-def check_nvidia_runtime_class(context: Optional[str] = None) -> bool:
+def check_nvidia_runtime_class(*, context: Optional[str] = None) -> bool:
     """Checks if the 'nvidia' RuntimeClass exists in the cluster"""
     # Fetch the list of available RuntimeClasses
     runtime_classes = kubernetes.node_api(context).list_runtime_class()
