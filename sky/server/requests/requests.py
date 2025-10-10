@@ -292,6 +292,95 @@ class Request:
             raise
 
 
+def encode_requests(
+        requests: List[Request],
+        fields: Optional[List[str]] = None) -> List[payloads.RequestPayload]:
+    """Serialize the SkyPilot API request for display purposes.
+
+        This function should be called on the server side to serialize the
+        request body into human readable format, e.g., the entrypoint should
+        be a string, and the pid, error, or return value are not needed.
+
+        The returned value will then be displayed on the client side in request
+        table.
+
+        We do not use `encode` for display to avoid a large amount of data being
+        sent to the client side, especially for the request table could include
+        all the requests.
+        """
+    encoded_requests = []
+    all_users = global_user_state.get_all_users()
+    all_users_map = {user.id: user.name for user in all_users}
+    for request in requests:
+        assert isinstance(request.request_body,
+                          payloads.RequestBody), (request.name,
+                                                  request.request_body)
+        user_name = all_users_map.get(request.user_id)
+        payload = payloads.RequestPayload(
+            request_id=request.request_id,
+            name=request.name,
+            entrypoint=request.entrypoint.__name__,
+            request_body=request.request_body.model_dump_json(),
+            status=request.status.value,
+            return_value=json.dumps(None),
+            error=json.dumps(None),
+            pid=None,
+            created_at=request.created_at,
+            schedule_type=request.schedule_type.value,
+            user_id=request.user_id,
+            user_name=user_name,
+            cluster_name=request.cluster_name,
+            status_msg=request.status_msg,
+            should_retry=request.should_retry,
+            finished_at=request.finished_at,
+        )
+        payload = _update_request_payload_fields(payload, fields)
+        encoded_requests.append(payload)
+    return encoded_requests
+
+
+def _update_request_payload_fields(
+        payload: payloads.RequestPayload,
+        fields: Optional[List[str]] = None) -> payloads.RequestPayload:
+    """Update the request payload fields."""
+    if not fields:
+        return payload
+    # Required fields in RequestPayload
+    if 'request_id' not in fields:
+        payload.request_id = ''
+    if 'name' not in fields:
+        payload.name = ''
+    if 'entrypoint' not in fields:
+        payload.entrypoint = ''
+    if 'request_body' not in fields:
+        payload.request_body = json.dumps(None)
+    if 'status' not in fields:
+        payload.status = ''
+    if 'created_at' not in fields:
+        payload.created_at = 0
+    if 'user_id' not in fields:
+        payload.user_id = ''
+        payload.user_name = None
+    if 'return_value' not in fields:
+        payload.return_value = json.dumps(None)
+    if 'error' not in fields:
+        payload.error = json.dumps(None)
+    if 'schedule_type' not in fields:
+        payload.schedule_type = ''
+    # Optional fields in RequestPayload
+    if 'pid' not in fields:
+        payload.pid = None
+    if 'cluster_name' not in fields:
+        payload.cluster_name = None
+    if 'status_msg' not in fields:
+        payload.status_msg = None
+    if 'should_retry' not in fields:
+        payload.should_retry = False
+    if 'finished_at' not in fields:
+        payload.finished_at = None
+    return payload
+
+
 def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
     """Kill all pending and running requests for a cluster.
 
@@ -634,6 +723,7 @@ class RequestTaskFilter:
             Mutually exclusive with exclude_request_names.
         finished_before: if provided, only include requests finished before this
             timestamp.
+        request_limit: the number of requests to show. If 0, show all requests.
 
     Raises:
         ValueError: If both exclude_request_names and include_request_names are
@@ -645,6 +735,7 @@ class RequestTaskFilter:
     exclude_request_names: Optional[List[str]] = None
     include_request_names: Optional[List[str]] = None
     finished_before: Optional[float] = None
+    request_limit: int = 0
 
     def __post_init__(self):
         if (self.exclude_request_names is not None and
@@ -687,8 +778,11 @@ class RequestTaskFilter:
         if filter_str:
             filter_str = f' WHERE {filter_str}'
         columns_str = ', '.join(REQUEST_COLUMNS)
-        return (f'SELECT {columns_str} FROM {REQUEST_TABLE}{filter_str} '
-                'ORDER BY created_at DESC'), filter_params
+        query_str = (f'SELECT {columns_str} FROM {REQUEST_TABLE}{filter_str} '
+                     'ORDER BY created_at DESC')
+        if self.request_limit > 0:
+            query_str += f' LIMIT {self.request_limit}'
+        return query_str, filter_params
 
 
 @init_db

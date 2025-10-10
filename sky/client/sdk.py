@@ -2158,7 +2158,9 @@ def _local_api_server_running(kill: bool = False) -> bool:
 def api_status(
     request_ids: Optional[List[Union[server_common.RequestId[T], str]]] = None,
     # pylint: disable=redefined-builtin
-    all_status: bool = False
+    all_status: bool = False,
+    request_limit: int = 0,
+    fields: Optional[List[str]] = None,
 ) -> List[payloads.RequestPayload]:
     """Lists all requests.
 
@@ -2167,6 +2169,8 @@ def api_status(
             If None, all requests are queried.
         all_status: Whether to list all finished requests as well. This argument
             is ignored if request_ids is not None.
+        request_limit: The number of requests to show. If 0, show all requests.
+        fields: The fields to get. If None, get all fields.
 
     Returns:
         A list of request payloads.
@@ -2175,8 +2179,12 @@ def api_status(
         logger.info('SkyPilot API server is not running.')
         return []
 
-    body = payloads.RequestStatusBody(request_ids=request_ids,
-                                      all_status=all_status)
+    body = payloads.RequestStatusBody(
+        request_ids=request_ids,
+        all_status=all_status,
+        request_limit=request_limit,
+        fields=fields,
+    )
     response = server_common.make_authenticated_request(
         'GET',
         '/api/status',
