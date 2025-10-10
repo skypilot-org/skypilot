@@ -5,9 +5,8 @@ Preprocess rStar-Coder dataset.
 """
 
 import argparse
-import os
-
 import datasets
+import os
 
 from verl.utils.hdfs_io import copy
 from verl.utils.hdfs_io import makedirs
