@@ -1,5 +1,4 @@
 # Copyright 2025 MIT
-
 """
 Preprocess rStar-Coder dataset.
 
@@ -10,8 +9,8 @@ import os
 
 import datasets
 
-from verl.utils.hdfs_io import copy, makedirs
-
+from verl.utils.hdfs_io import copy
+from verl.utils.hdfs_io import makedirs
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -27,8 +26,7 @@ if __name__ == "__main__":
         data_source,
         data_files="synthetic_sft/data-00000-of-00015.parquet",
         split="train",
-        trust_remote_code=True
-    )
+        trust_remote_code=True)
 
     data_source = 'openai/gsm8k'
 
@@ -40,6 +38,7 @@ if __name__ == "__main__":
     instruction_following = 'Let\'s think step by step and output the final answer after "####".'
 
     def make_map_fn(split):
+
         def process_fn(doc, idx):
             question_raw = doc.get("question", "")
             question = question_raw + " " + instruction_following
@@ -47,7 +46,10 @@ if __name__ == "__main__":
 
             data = {
                 "data_source": data_source,
-                "prompt": [{"role": "user", "content": question}],
+                "prompt": [{
+                    "role": "user",
+                    "content": question
+                }],
                 "ability": "code",
                 "reward_model": {
                     "style": "rule",
@@ -62,13 +64,17 @@ if __name__ == "__main__":
 
         return process_fn
 
-    train_dataset = train_dataset.map(function=make_map_fn("train"), with_indices=True)
-    test_dataset = test_dataset.map(function=make_map_fn("test"), with_indices=True)
+    train_dataset = train_dataset.map(function=make_map_fn("train"),
+                                      with_indices=True)
+    test_dataset = test_dataset.map(function=make_map_fn("test"),
+                                    with_indices=True)
 
     hdfs_dir = args.hdfs_dir
     local_save_dir = args.local_dir
     if local_save_dir is not None:
-        print("Warning: Argument 'local_dir' is deprecated. Please use 'local_save_dir' instead.")
+        print(
+            "Warning: Argument 'local_dir' is deprecated. Please use 'local_save_dir' instead."
+        )
     else:
         local_save_dir = args.local_save_dir
 
