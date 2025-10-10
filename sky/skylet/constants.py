@@ -410,8 +410,14 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     ('workspaces',),
     ('db',),
     ('daemons',),
-    ('jobs', 'controller', 'consolidation_mode'),
-    ('serve', 'controller', 'consolidation_mode'),
+    (
+        'jobs',
+        'controller',
+    ),
+    (
+        'serve',
+        'controller',
+    ),
 ]
 
 # Constants for Azure blob storage
