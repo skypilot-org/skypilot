@@ -150,6 +150,62 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
 
 
 @usage_lib.entrypoint
+def terminate_failed_replicas(service_name: str) -> None:
+    """Terminates all failed replicas for the given service.
+
+    This function queries the controller for all replicas in failed states
+    and terminates them with purge=True.
+
+    Args:
+        service_name: Name of the service.
+
+    Raises:
+        sky.exceptions.ClusterNotUpError: if the sky serve controller is
+            not up.
+        RuntimeError: if failed to access the controller or query failed
+            replicas.
+        ValueError: if the service does not exist.
+    """
+    handle = backend_utils.is_controller_accessible(
+        controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+        stopped_message=
+        'No service is running now. Please spin up a service first.',
+        non_existent_message='No service is running now. '
+        'Please spin up a service first.',
+    )
+
+    assert isinstance(handle, backends.CloudVmRayResourceHandle)
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+
+    # Generate code to run on the controller
+    code = serve_utils.ServeCodeGen.terminate_failed_replicas(service_name)
+
+    try:
+        returncode, stdout, stderr = backend.run_on_head(handle,
+                                                         code,
+                                                         require_outputs=True,
+                                                         stream_logs=False,
+                                                         separate_stderr=True)
+
+        subprocess_utils.handle_returncode(
+            returncode,
+            code,
+            'Failed to terminate failed replicas',
+            stderr,
+            stream_logs=True)
+    except exceptions.FetchClusterInfoError as e:
+        raise RuntimeError(
+            'Failed to fetch controller information. The controller may be '
+            'unreachable. Please check controller status with '
+            '`sky status sky-serve-controller` and try again.') from e
+    except exceptions.CommandError as e:
+        raise RuntimeError(e.error_msg) from e
+
+    sky_logging.print(stdout)
+
+
+@usage_lib.entrypoint
 def status(
     service_names: Optional[Union[str,
                                   List[str]]] = None) -> List[Dict[str, Any]]:

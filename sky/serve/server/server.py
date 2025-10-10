@@ -78,6 +78,21 @@ async def terminate_replica(
     )
 
 
+@router.post('/terminate-failed-replicas')
+async def terminate_failed_replicas(
+    request: fastapi.Request,
+    terminate_failed_replicas_body: payloads.ServeTerminateFailedReplicasBody,
+) -> None:
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='serve.terminate_failed_replicas',
+        request_body=terminate_failed_replicas_body,
+        func=core.terminate_failed_replicas,
+        schedule_type=api_requests.ScheduleType.SHORT,
+        request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+    )
+
+
 @router.post('/status')
 async def status(
     request: fastapi.Request,

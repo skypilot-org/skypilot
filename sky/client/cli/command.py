@@ -5719,6 +5719,11 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
               default=None,
               type=int,
               help='Tear down a given replica')
+@click.option('--failed-only',
+              default=False,
+              is_flag=True,
+              help=('Remove all replicas in failed states for the given '
+                    'service. Replicas will be purged (forcefully removed).'))
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
@@ -5728,6 +5733,7 @@ def serve_down(
     purge: bool,
     yes: bool,
     replica_id: Optional[int],
+    failed_only: bool,
     async_call: bool,
 ) -> None:
     """Teardown service(s).
@@ -5762,6 +5768,9 @@ def serve_down(
         \b
         # Forcefully tear down a specific replica, even in failed status.
         sky serve down my-service --replica-id 1 --purge
+        \b
+        # Remove all failed replicas for a service
+        sky serve down my-service --failed-only
     """
     if sum([bool(service_names), all]) != 1:
         argument_str = (f'SERVICE_NAMES={",".join(service_names)}'
@@ -5781,8 +5790,30 @@ def serve_down(
         if all:
             raise click.UsageError('The --replica-id option cannot be used '
                                    'with the --all option.')
-    if not yes:
+
+    if failed_only:
+        if len(service_names) != 1:
+            service_names_str = ', '.join(
+                service_names) if service_names else ''
+            raise click.UsageError('The --failed-only option can only be used '
+                                   'with a single service name. Got: '
+                                   f'{service_names_str}.')
+        if all:
+            raise click.UsageError('The --failed-only option cannot be used '
+                                   'with the --all option.')
         if replica_id_is_defined:
+            raise click.UsageError('The --failed-only option cannot be used '
+                                   'with the --replica-id option.')
+
+    if not yes:
+        if failed_only:
+            click.confirm(
+                f'Terminating all failed replicas in service '
+                f'{service_names[0]!r} (with purge). Proceed?',
+                default=True,
+                abort=True,
+                show_default=True)
+        elif replica_id_is_defined:
             click.confirm(
                 f'Terminating replica ID {replica_id} in '
                 f'{service_names[0]!r}. Proceed?',
@@ -5800,15 +5831,21 @@ def serve_down(
                           abort=True,
                           show_default=True)
 
-    if replica_id_is_defined:
+    if failed_only:
+        # Handle --failed-only: terminate all failed replicas
+        service_name = service_names[0]
+        request_id = serve_lib.terminate_failed_replicas(service_name)
+        _async_call_or_wait(request_id, async_call, 'sky.serve.down')
+    elif replica_id_is_defined:
         assert replica_id is not None
         request_id = serve_lib.terminate_replica(service_names[0], replica_id,
                                                  purge)
+        _async_call_or_wait(request_id, async_call, 'sky.serve.down')
     else:
         request_id = serve_lib.down(service_names=service_names,
                                     all=all,
                                     purge=purge)
-    _async_call_or_wait(request_id, async_call, 'sky.serve.down')
+        _async_call_or_wait(request_id, async_call, 'sky.serve.down')
 
 
 @serve.command('logs', cls=_DocumentedCodeCommand)
