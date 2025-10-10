@@ -901,3 +901,388 @@ def test_requests_filter():
                     '\'cluster\"with\"double\') ORDER BY created_at DESC')
     assert sql == expected_sql
     assert params == []
+
+
+def test_encode_requests_basic(isolated_database):
+    """Test basic functionality of encode_requests."""
+    from sky import models
+
+    # Store expected times to avoid timing issues
+    current_time = time.time()
+    expected_finished_at = current_time - 50
+
+    # Create test requests
+    request1 = requests.Request(request_id='test-encode-1',
+                                name='test-request-1',
+                                entrypoint=dummy,
+                                request_body=payloads.RequestBody(),
+                                status=RequestStatus.PENDING,
+                                created_at=current_time,
+                                user_id='user-1',
+                                cluster_name='cluster-1',
+                                status_msg='Test message',
+                                should_retry=True,
+                                finished_at=None)
+
+    request2 = requests.Request(request_id='test-encode-2',
+                                name='test-request-2',
+                                entrypoint=dummy,
+                                request_body=payloads.RequestBody(),
+                                status=RequestStatus.SUCCEEDED,
+                                created_at=current_time - 100,
+                                user_id='user-2',
+                                cluster_name='cluster-2',
+                                status_msg=None,
+                                should_retry=False,
+                                finished_at=expected_finished_at)
+
+    # Mock global_user_state.get_all_users to return test users
+    mock_users = [
+        models.User(id='user-1', name='Alice'),
+        models.User(id='user-2', name='Bob'),
+        models.User(id='user-3', name='Charlie')  # Not used in requests
+    ]
+
+    with mock.patch(
+            'sky.server.requests.requests.global_user_state.get_all_users'
+    ) as mock_get_users:
+        mock_get_users.return_value = mock_users
+
+        # Test encoding without field filtering
+        encoded = requests.encode_requests([request1, request2])
+
+        # Verify results
+        assert len(encoded) == 2
+
+        # Check first request
+        payload1 = encoded[0]
+        assert payload1.request_id == 'test-encode-1'
+        assert payload1.name == 'test-request-1'
+        assert payload1.entrypoint == 'dummy'
+        assert payload1.status == 'PENDING'
+        assert payload1.user_id == 'user-1'
+        assert payload1.user_name == 'Alice'
+        assert payload1.cluster_name == 'cluster-1'
+        assert payload1.status_msg == 'Test message'
+        assert payload1.should_retry is True
+        assert payload1.finished_at is None
+        assert payload1.return_value == 'null'
+        assert payload1.error == 'null'
+        assert payload1.pid is None
+
+        # Check second request
+        payload2 = encoded[1]
+        assert payload2.request_id == 'test-encode-2'
+        assert payload2.name == 'test-request-2'
+        assert payload2.entrypoint == 'dummy'
+        assert payload2.status == 'SUCCEEDED'
+        assert payload2.user_id == 'user-2'
+        assert payload2.user_name == 'Bob'
+        assert payload2.cluster_name == 'cluster-2'
+        assert payload2.status_msg is None
+        assert payload2.should_retry is False
+        assert payload2.finished_at == expected_finished_at
+
+
+def test_encode_requests_with_field_filtering(isolated_database):
+    """Test encode_requests with field filtering."""
+    from sky import models
+
+    # Create test request
+    request = requests.Request(request_id='test-encode-filter-1',
+                               name='test-request-filter',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.RUNNING,
+                               created_at=time.time(),
+                               user_id='user-1',
+                               cluster_name='cluster-1',
+                               status_msg='Running message',
+                               should_retry=True,
+                               finished_at=None)
+
+    # Mock global_user_state.get_all_users
+    mock_users = [models.User(id='user-1', name='Alice')]
+
+    with mock.patch(
+            'sky.server.requests.requests.global_user_state.get_all_users'
+    ) as mock_get_users:
+        mock_get_users.return_value = mock_users
+
+        # Test with specific fields only
+        fields = ['request_id', 'name', 'status', 'user_id']
+        encoded = requests.encode_requests([request], fields=fields)
+
+        assert len(encoded) == 1
+        payload = encoded[0]
+
+        # Check that specified fields are preserved
+        assert payload.request_id == 'test-encode-filter-1'
+        assert payload.name == 'test-request-filter'
+        assert payload.status == 'RUNNING'
+        assert payload.user_id == 'user-1'
+        assert payload.user_name == 'Alice'  # user_name should still be set
+
+        # Check that non-specified fields are cleared
+        assert payload.entrypoint == ''
+        assert payload.request_body == 'null'
+        assert payload.return_value == 'null'
+        assert payload.error == 'null'
+        assert payload.schedule_type == ''
+        assert payload.pid is None
+        assert payload.cluster_name is None
+        assert payload.status_msg is None
+        assert payload.should_retry is False
+        assert payload.finished_at is None
+
+
+def test_encode_requests_empty_list(isolated_database):
+    """Test encode_requests with empty request list."""
+    with mock.patch(
+            'sky.server.requests.requests.global_user_state.get_all_users'
+    ) as mock_get_users:
+        mock_get_users.return_value = []
+
+        encoded = requests.encode_requests([])
+        assert encoded == []
+
+
+def test_encode_requests_user_not_found(isolated_database):
+    """Test encode_requests when user is not found in global state."""
+    from sky import models
+
+    # Create test request with user not in global state
+    request = requests.Request(request_id='test-encode-no-user',
+                               name='test-request-no-user',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.PENDING,
+                               created_at=time.time(),
+                               user_id='nonexistent-user',
+                               cluster_name='cluster-1')
+
+    # Mock global_user_state.get_all_users to return different users
+    mock_users = [models.User(id='other-user', name='Other')]
+
+    with mock.patch(
+            'sky.server.requests.requests.global_user_state.get_all_users'
+    ) as mock_get_users:
+        mock_get_users.return_value = mock_users
+
+        encoded = requests.encode_requests([request])
+
+        assert len(encoded) == 1
+        payload = encoded[0]
+        assert payload.user_id == 'nonexistent-user'
+        assert payload.user_name is None  # Should be None when user not found
+
+
+def test_update_request_payload_fields_no_fields(isolated_database):
+    """Test _update_request_payload_fields with no field filtering."""
+    # Create a test payload
+    payload = payloads.RequestPayload(request_id='test-payload-1',
+                                      name='test-name',
+                                      entrypoint='test_entrypoint',
+                                      request_body='{"test": "body"}',
+                                      status='PENDING',
+                                      created_at=1234567890.0,
+                                      user_id='user-1',
+                                      return_value='{"result": "value"}',
+                                      error='{"error": "message"}',
+                                      pid=12345,
+                                      schedule_type='long',
+                                      user_name='Test User',
+                                      cluster_name='test-cluster',
+                                      status_msg='Test status',
+                                      should_retry=True,
+                                      finished_at=1234567891.0)
+
+    # Test with no fields (should return unchanged)
+    result = requests._update_request_payload_fields(payload, None)
+    assert result is payload  # Should return the same object
+
+    result = requests._update_request_payload_fields(payload, [])
+    assert result is payload  # Should return the same object
+
+
+def test_update_request_payload_fields_all_fields_specified(isolated_database):
+    """Test _update_request_payload_fields with all fields specified."""
+    # Create a test payload
+    payload = payloads.RequestPayload(request_id='test-payload-2',
+                                      name='test-name',
+                                      entrypoint='test_entrypoint',
+                                      request_body='{"test": "body"}',
+                                      status='PENDING',
+                                      created_at=1234567890.0,
+                                      user_id='user-1',
+                                      return_value='{"result": "value"}',
+                                      error='{"error": "message"}',
+                                      pid=12345,
+                                      schedule_type='long',
+                                      user_name='Test User',
+                                      cluster_name='test-cluster',
+                                      status_msg='Test status',
+                                      should_retry=True,
+                                      finished_at=1234567891.0)
+
+    # Test with all fields specified (should return unchanged)
+    all_fields = [
+        'request_id', 'name', 'entrypoint', 'request_body', 'status',
+        'created_at', 'user_id', 'return_value', 'error', 'schedule_type',
+        'pid', 'cluster_name', 'status_msg', 'should_retry', 'finished_at'
+    ]
+
+    result = requests._update_request_payload_fields(payload, all_fields)
+    assert result is payload  # Should return the same object
+
+
+def test_update_request_payload_fields_partial_fields(isolated_database):
+    """Test _update_request_payload_fields with partial field filtering."""
+    # Create a test payload
+    payload = payloads.RequestPayload(request_id='test-payload-3',
+                                      name='test-name',
+                                      entrypoint='test_entrypoint',
+                                      request_body='{"test": "body"}',
+                                      status='PENDING',
+                                      created_at=1234567890.0,
+                                      user_id='user-1',
+                                      return_value='{"result": "value"}',
+                                      error='{"error": "message"}',
+                                      pid=12345,
+                                      schedule_type='long',
+                                      user_name='Test User',
+                                      cluster_name='test-cluster',
+                                      status_msg='Test status',
+                                      should_retry=True,
+                                      finished_at=1234567891.0)
+
+    # Test with only some fields specified
+    fields = ['request_id', 'name', 'status', 'user_id']
+    result = requests._update_request_payload_fields(payload, fields)
+
+    # Check that specified fields are preserved
+    assert result.request_id == 'test-payload-3'
+    assert result.name == 'test-name'
+    assert result.status == 'PENDING'
+    assert result.user_id == 'user-1'
+    assert result.user_name == 'Test User'  # user_name should be preserved
+
+    # Check that non-specified fields are cleared
+    assert result.entrypoint == ''
+    assert result.request_body == 'null'
+    assert result.return_value == 'null'
+    assert result.error == 'null'
+    assert result.schedule_type == ''
+    assert result.created_at == 0
+    assert result.pid is None
+    assert result.cluster_name is None
+    assert result.status_msg is None
+    assert result.should_retry is False
+    assert result.finished_at is None
+
+
+def test_update_request_payload_fields_user_id_clearing(isolated_database):
+    """Test _update_request_payload_fields clearing user_id also clears user_name."""
+    # Create a test payload
+    payload = payloads.RequestPayload(request_id='test-payload-4',
+                                      name='test-name',
+                                      entrypoint='test_entrypoint',
+                                      request_body='{"test": "body"}',
+                                      status='PENDING',
+                                      created_at=1234567890.0,
+                                      user_id='user-1',
+                                      return_value='{"result": "value"}',
+                                      error='{"error": "message"}',
+                                      pid=12345,
+                                      schedule_type='long',
+                                      user_name='Test User',
+                                      cluster_name='test-cluster',
+                                      status_msg='Test status',
+                                      should_retry=True,
+                                      finished_at=1234567891.0)
+
+    # Test clearing user_id (should also clear user_name)
+    fields = ['request_id', 'name', 'status']  # user_id not included
+    result = requests._update_request_payload_fields(payload, fields)
+
+    assert result.user_id == ''
+    assert result.user_name is None  # Should be cleared when user_id is cleared
+
+
+def test_update_request_payload_fields_individual_field_tests(
+        isolated_database):
+    """Test _update_request_payload_fields for individual field clearing."""
+    # Test each field individually to ensure proper clearing behavior
+
+    # Test request_id clearing
+    payload = payloads.RequestPayload(request_id='test-id',
+                                      name='test',
+                                      entrypoint='test',
+                                      request_body='{}',
+                                      status='PENDING',
+                                      created_at=1.0,
+                                      user_id='user',
+                                      return_value='{}',
+                                      error='{}',
+                                      pid=1,
+                                      schedule_type='long',
+                                      user_name='User',
+                                      cluster_name='cluster',
+                                      status_msg='msg',
+                                      should_retry=True,
+                                      finished_at=2.0)
+
+    result = requests._update_request_payload_fields(payload, ['name'])
+    assert result.request_id == ''
+
+    # Test name clearing
+    result = requests._update_request_payload_fields(payload, ['request_id'])
+    assert result.name == ''
+
+    # Test entrypoint clearing
+    result = requests._update_request_payload_fields(payload, ['request_id'])
+    assert result.entrypoint == ''
+
+    # Test request_body clearing
+    result = requests._update_request_payload_fields(payload, ['request_id'])
+    assert result.request_body == 'null'
+
+    # Test status clearing
+    result = requests._update_request_payload_fields(payload, ['request_id'])
+    assert result.status == ''
+
+    # Test created_at clearing
+    result = requests._update_request_payload_fields(payload, ['request_id'])
+    assert result.created_at == 0
+
+    # Test return_value clearing
+    result = requests._update_request_payload_fields(payload, ['request_id'])
+    assert result.return_value == 'null'
+
+    # Test error clearing
+    result = requests._update_request_payload_fields(payload, ['request_id'])
+    assert result.error == 'null'
+
+    # Test schedule_type clearing
+    result = requests._update_request_payload_fields(payload, ['request_id'])
+    assert result.schedule_type == ''
+
+    # Test pid clearing
+    result = requests._update_request_payload_fields(payload, ['request_id'])
+    assert result.pid is None
+
+    # Test cluster_name clearing
+    result = requests._update_request_payload_fields(payload, ['request_id'])
+    assert result.cluster_name is None
+
+    # Test status_msg clearing
+    result = requests._update_request_payload_fields(payload, ['request_id'])
+    assert result.status_msg is None
+
+    # Test should_retry clearing
+    result = requests._update_request_payload_fields(payload, ['request_id'])
+    assert result.should_retry is False
+
+    # Test finished_at clearing
+    result = requests._update_request_payload_fields(payload, ['request_id'])
+    assert result.finished_at is None
