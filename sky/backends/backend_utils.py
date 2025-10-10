@@ -2994,7 +2994,9 @@ def is_controller_accessible(
             cluster_name,
             force_refresh_statuses=[status_lib.ClusterStatus.INIT],
             cluster_status_lock_timeout=0)
+        logger.info(f'controller_status: {controller_status}, handle: {handle}')
     except exceptions.ClusterStatusFetchingError as e:
+        logger.info(f'exceptions.ClusterStatusFetchingError: {e}')
         # We do not catch the exceptions related to the cluster owner identity
         # mismatch, please refer to the comment in
         # `backend_utils.check_cluster_available`.
@@ -3006,17 +3008,24 @@ def is_controller_accessible(
             f'  Details: {common_utils.format_exception(e, use_bracket=True)}')
         record = global_user_state.get_cluster_from_name(
             cluster_name, include_user_info=False, summary_response=True)
+        logger.info(f'record: {record}')
         if record is not None:
             controller_status, handle = record['status'], record['handle']
             # We check the connection even if the cluster has a cached status UP
             # to make sure the controller is actually accessible, as the cached
             # status might be stale.
             need_connection_check = True
+    logger.info(f'need_connection_check: {need_connection_check}')
+    logger.info(f'controller_status: {controller_status}, handle: {handle}')
 
     error_msg = None
     if controller_status == status_lib.ClusterStatus.STOPPED:
+        logger.info(f'controller_status == status_lib.ClusterStatus.STOPPED')
         error_msg = stopped_message
     elif controller_status is None or handle is None or handle.head_ip is None:
+        logger.info(
+            f'controller_status is None or handle is None or handle.head_ip is None'
+        )
         # We check the controller is STOPPED before the check for handle.head_ip
         # None because when the controller is STOPPED, handle.head_ip can also
         # be None, but we only want to catch the case when the controller is
@@ -3024,6 +3033,7 @@ def is_controller_accessible(
         error_msg = non_existent_message
     elif (controller_status == status_lib.ClusterStatus.INIT or
           need_connection_check):
+        logger.info('controller is in INIT state or need to check connection')
         # Check ssh connection if (1) controller is in INIT state, or (2) we failed to fetch the
         # status, both of which can happen when controller's status lock is held by another `sky jobs launch` or
         # `sky serve up`. If we have controller's head_ip available and it is ssh-reachable,
@@ -3036,10 +3046,11 @@ def is_controller_accessible(
                                                        handle.head_ssh_port),
                                                  **ssh_credentials)
         if not runner.check_connection():
+            logger.info('runner.check_connection() is False')
             error_msg = controller.value.connection_error_hint
     else:
         assert controller_status == status_lib.ClusterStatus.UP, handle
-
+    logger.info(f'error_msg {error_msg}')
     if error_msg is not None:
         if exit_if_not_accessible:
             sky_logging.print(error_msg)
