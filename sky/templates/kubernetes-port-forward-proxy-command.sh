@@ -67,7 +67,7 @@ if [ -n "$KUBE_NAMESPACE" ]; then
   KUBECTL_ARGS+=("--namespace=$KUBE_NAMESPACE")
 fi
 
-kubectl "${KUBECTL_ARGS[@]}" port-forward pod/"${POD_NAME}" :22 > "${KUBECTL_OUTPUT}" 2>&1 &
+kubectl "${KUBECTL_ARGS[@]}" port-forward --v=9 pod/"${POD_NAME}" :22 > "${KUBECTL_OUTPUT}" 2>&1 &
 
 # Capture the PID for the backgrounded kubectl command
 K8S_PORT_FWD_PID=$!
