@@ -109,7 +109,7 @@ async def tail_logs(
     task = executor.execute_request_in_coroutine(request_task)
     # Cancel the coroutine after the request is done or client disconnects
     background_tasks.add_task(task.cancel)
-    return stream_utils.stream_response(
+    return stream_utils.stream_response_for_long_request(
         request_id=request_task.request_id,
         logs_path=request_task.log_path,
         background_tasks=background_tasks,
