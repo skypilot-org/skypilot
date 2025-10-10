@@ -6175,12 +6175,14 @@ def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool):
               default=False,
               required=False,
               help='Show requests of all statuses.')
-@click.option('--limit',
-              '-l',
-              default=_NUM_REQUESTS_TO_SHOW,
-              type=int,
-              required=False,
-              help='Number of requests to show, set to 0 to show all requests.')
+@click.option(
+    '--limit',
+    '-l',
+    default=_NUM_REQUESTS_TO_SHOW,
+    type=int,
+    required=False,
+    help=(f'Number of requests to show, default is {_NUM_REQUESTS_TO_SHOW},'
+          f' set to 0 to show all requests.'))
 @flags.verbose_option('Show more details.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
