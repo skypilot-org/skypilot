@@ -43,6 +43,7 @@ from sky.utils import yaml_utils
 @pytest.mark.no_vast  #requires GCP and AWS set up
 @pytest.mark.no_fluidstack  #requires GCP and AWS set up
 @pytest.mark.no_hyperbolic  #requires GCP and AWS set up
+@pytest.mark.no_shadeform  #requires GCP and AWS set up
 @pytest.mark.no_seeweb  #requires GCP and AWS set up
 def test_example_app():
     test = smoke_tests_utils.Test(
@@ -264,6 +265,7 @@ def test_launch_fast(generic_cloud: str):
 @pytest.mark.no_ibm
 @pytest.mark.no_kubernetes
 @pytest.mark.no_hyperbolic
+@pytest.mark.no_shadeform
 @pytest.mark.no_seeweb
 def test_launch_fast_with_autostop(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -341,6 +343,7 @@ def test_launch_fast_with_cluster_changes(generic_cloud: str, tmp_path):
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 @pytest.mark.no_vast  # This requires port opening
 @pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
+@pytest.mark.no_shadeform  #Shadeform does not support stopping instances in SkyPilot implementation
 def test_stale_job(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -363,6 +366,7 @@ def test_stale_job(generic_cloud: str):
 
 
 @pytest.mark.no_vast
+@pytest.mark.no_shadeform
 @pytest.mark.aws
 def test_aws_stale_job_manual_restart():
     name = smoke_tests_utils.get_cluster_name()
@@ -402,6 +406,7 @@ def test_aws_stale_job_manual_restart():
 
 
 @pytest.mark.no_vast
+@pytest.mark.no_shadeform
 @pytest.mark.aws
 def test_aws_manual_restart_recovery():
     name = smoke_tests_utils.get_cluster_name()
@@ -456,6 +461,7 @@ def test_aws_manual_restart_recovery():
 
 
 @pytest.mark.no_vast
+@pytest.mark.no_shadeform
 @pytest.mark.gcp
 def test_gcp_stale_job_manual_restart():
     name = smoke_tests_utils.get_cluster_name()
@@ -495,6 +501,7 @@ def test_gcp_stale_job_manual_restart():
 @pytest.mark.no_fluidstack  # Requires amazon S3
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support num_nodes > 1 yet.
 def test_env_check(generic_cloud: str):
@@ -519,6 +526,7 @@ def test_env_check(generic_cloud: str):
 # ---------- CLI logs ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_logs instead.
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet.
+@pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
 @pytest.mark.no_seeweb  # Seeweb does not support num_nodes > 1 yet.
 def test_cli_logs(generic_cloud: str):
@@ -739,6 +747,7 @@ class TestYamlSpecs:
 
 # ---------- Testing Multiple Accelerators ----------
 @pytest.mark.no_vast  # Vast has low availability for K80 GPUs
+@pytest.mark.no_shadeform  # Shadeform does not support K80 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack does not support K80 gpus for now
 @pytest.mark.no_paperspace  # Paperspace does not support K80 gpus
 @pytest.mark.no_nebius  # Nebius does not support K80s
@@ -759,6 +768,7 @@ def test_multiple_accelerators_ordered():
 
 
 @pytest.mark.no_vast  # Vast has low availability for T4 GPUs
+@pytest.mark.no_shadeform  # Shadeform does not support T4 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 @pytest.mark.no_nebius  # Nebius does not support T4 GPUs
@@ -779,6 +789,7 @@ def test_multiple_accelerators_ordered_with_default():
 
 
 @pytest.mark.no_vast  # Vast has low availability for T4 GPUs
+@pytest.mark.no_shadeform  # Shadeform does not support T4 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 @pytest.mark.no_nebius  # Nebius does not support T4 GPUs
@@ -798,6 +809,7 @@ def test_multiple_accelerators_unordered():
 
 
 @pytest.mark.no_vast  # Vast has low availability for T4 GPUs
+@pytest.mark.no_shadeform  # Shadeform does not support T4 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 @pytest.mark.no_nebius  # Nebius does not support T4 GPUs
@@ -820,6 +832,7 @@ def test_multiple_accelerators_unordered_with_default():
 @pytest.mark.no_vast  # Requires other clouds to be enabled
 @pytest.mark.no_fluidstack  # Requires other clouds to be enabled
 @pytest.mark.no_hyperbolic  # Requires other clouds to be enabled
+@pytest.mark.no_shadeform  # Requires other clouds to be enabled
 @pytest.mark.no_seeweb  # Requires other clouds to be enabled
 def test_multiple_resources():
     name = smoke_tests_utils.get_cluster_name()
@@ -1085,6 +1098,7 @@ def test_launch_and_exec_async(generic_cloud: str):
 
 @pytest.mark.no_hyperbolic  # Hyperbolic fails to provision resources
 @pytest.mark.no_kubernetes  # Kubernetes runs to UP state too fast
+@pytest.mark.no_shadeform  # Shadeform instances can't be deleted immediately after launch
 def test_cancel_launch_and_exec_async(generic_cloud: str):
     """Test if async launch and exec commands work correctly when cluster is shutdown"""
     name = smoke_tests_utils.get_cluster_name()
