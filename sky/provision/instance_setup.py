@@ -439,6 +439,7 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
         head_ip = head_instance.external_ip
     else:
         # For Kubernetes, use the internal service address of the head node.
+        # Keep this consistent with the logic in kubernetes-ray.yml.j2
         if head_instance.internal_svc:
             head_ip = head_instance.internal_svc
         else:
