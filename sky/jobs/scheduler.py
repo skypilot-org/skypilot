@@ -290,8 +290,8 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
             return
 
     state.scheduler_set_waiting(job_id, dag_yaml_path,
-                                original_user_yaml_path, env_file_path,
-                                common_utils.get_user_hash(), priority)
+                                original_user_yaml_path, env_file_path, 
+                                priority)
     if state.get_ha_recovery_script(job_id) is None:
         # the run command is just the command that called scheduler
         run = (f'source {env_file_path} && '

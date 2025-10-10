@@ -1214,7 +1214,7 @@ def get_task_specs(job_id: int, task_id: int) -> Dict[str, Any]:
 @_init_db
 def scheduler_set_waiting(job_id: int, dag_yaml_path: str,
                           original_user_yaml_path: str, env_file_path: str,
-                          user_hash: str, priority: int):
+                          priority: int):
     """Do not call without holding the scheduler lock.
 
     Returns: Whether this is a recovery run or not.
@@ -1233,7 +1233,6 @@ def scheduler_set_waiting(job_id: int, dag_yaml_path: str,
             job_info_table.c.dag_yaml_path: dag_yaml_path,
             job_info_table.c.original_user_yaml_path: original_user_yaml_path,
             job_info_table.c.env_file_path: env_file_path,
-            job_info_table.c.user_hash: user_hash,
             job_info_table.c.priority: priority,
         })
         session.commit()
