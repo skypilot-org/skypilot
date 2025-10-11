@@ -531,7 +531,15 @@ async def _get_request_no_lock_async(request_id: str) -> Optional[Request]:
         row = rows[0] if rows else None
         if row is None:
             return None
-    return Request.from_row(row)
+    start_time = time.time()
+    r: Optional[Request] = None
+    with metrics_lib.time_it('Request.from_row', group='function'):
+        r = Request.from_row(row)
+    duration = time.time() - start_time
+    if duration > 0.5:
+        logger.warning(f'Request.from_row took {duration} seconds, '
+                       f'request_id: {request_id}, {r.name}')
+    return r
 
 
 @init_db
