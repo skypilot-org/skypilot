@@ -2826,7 +2826,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 return grpc.insecure_channel(f'localhost:{tunnel.port}',
                                              options=grpc_options)
             except socket.error as e:
-                logger.warning(
+                logger.debug(
                     'Failed to connect to SSH tunnel for cluster '
                     f'{self.cluster_name!r} on port {tunnel.port} ({e}), '
                     'acquiring lock')
@@ -2852,7 +2852,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                         return grpc.insecure_channel(f'localhost:{tunnel.port}',
                                                      options=grpc_options)
                 except socket.error as e:
-                    logger.warning(
+                    logger.debug(
                         'Failed to connect to SSH tunnel for cluster '
                         f'{self.cluster_name!r} on port {tunnel.port} ({e}), '
                         'opening new tunnel')
