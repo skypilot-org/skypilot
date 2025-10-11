@@ -72,7 +72,8 @@ class _ControllerSpec:
     """Spec for skypilot controllers."""
     controller_type: str
     name: str
-    cluster_name: str
+    _cluster_name_func: Callable[[], str]
+    _cluster_name_from_server: Optional[str]  # For client-side only
     in_progress_hint: Callable[[bool], str]
     decline_cancel_hint: str
     _decline_down_when_failed_to_fetch_status_hint: str
@@ -93,6 +94,24 @@ class _ControllerSpec:
         return self._check_cluster_name_hint.format(
             cluster_name=self.cluster_name)
 
+    @property
+    def cluster_name(self) -> str:
+        """The cluster name of the controller.
+
+        On the server-side, the cluster name is the actual cluster name,
+        which is read from common.(JOB|SKY_SERVE)_CONTROLLER_NAME.
+
+        On the client-side, the cluster name may not be accurate,
+        as we may not know the exact name, because we are missing
+        the server-side common.SERVER_ID. We have to wait until
+        we get the actual cluster name from the server.
+        """
+        return (self._cluster_name_from_server if self._cluster_name_from_server
+                is not None else self._cluster_name_func())
+
+    def set_cluster_name_from_server(self, cluster_name: str) -> None:
+        self._cluster_name_from_server = cluster_name
+
 
 # TODO: refactor controller class to not be an enum.
 class Controllers(enum.Enum):
@@ -102,7 +121,8 @@ class Controllers(enum.Enum):
     JOBS_CONTROLLER = _ControllerSpec(
         controller_type='jobs',
         name='managed jobs controller',
-        cluster_name=common.JOB_CONTROLLER_NAME,
+        _cluster_name_func=lambda: common.JOB_CONTROLLER_NAME,
+        _cluster_name_from_server=None,
         in_progress_hint=lambda _:
         ('* {job_info}To see all managed jobs: '
          f'{colorama.Style.BRIGHT}sky jobs queue{colorama.Style.RESET_ALL}'),
@@ -133,7 +153,8 @@ class Controllers(enum.Enum):
     SKY_SERVE_CONTROLLER = _ControllerSpec(
         controller_type='serve',
         name='serve controller',
-        cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+        _cluster_name_func=lambda: common.SKY_SERVE_CONTROLLER_NAME,
+        _cluster_name_from_server=None,
         in_progress_hint=(
             lambda pool:
             (f'* To see detailed pool status: {colorama.Style.BRIGHT}'
@@ -201,7 +222,7 @@ class Controllers(enum.Enum):
                                                                          prefix)
 
             # Update the cluster name.
-            controller.value.cluster_name = name
+            controller.value.set_cluster_name_from_server(name)
         return controller
 
     @classmethod
