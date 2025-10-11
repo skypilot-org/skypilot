@@ -1,3 +1,14 @@
+# Multi-node serving with NVIDIA Dynamo and SGLang in disaggregation mode.
+#
+# Usage:
+#
+#  sky launch -c dynamo-multi nvidia-dynamo-multinode.sky.yaml 
+#
+# This config uses 2 nodes with 8x H100 GPUs each for disaggregated serving.
+# Optionally override the model:
+#
+#  sky launch -c dynamo-multi nvidia-dynamo-multinode.sky.yaml --env MODEL_NAME=meta-llama/Llama-3.1-8B-Instruct --env HF_TOKEN
+
 resources:
   accelerators: H100:8
   ports: 8080
@@ -7,6 +18,7 @@ num_nodes: 2
 envs:
   MODEL_NAME: Qwen/Qwen3-8B
   DIST_INIT_PORT: 29500
+  HF_TOKEN: "" # needed if a model is gated in HF Hub. Pass the value with `--env HF_TOKEN`
 
 setup: |
   sudo usermod -aG docker $USER

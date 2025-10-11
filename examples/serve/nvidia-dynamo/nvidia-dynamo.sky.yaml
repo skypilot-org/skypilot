@@ -1,9 +1,20 @@
+# Single-node serving with NVIDIA Dynamo and SGLang.
+#
+# Usage:
+#
+#  sky launch -c dynamo nvidia-dynamo.sky.yaml 
+#
+# Optionally override the model:
+#
+#  sky launch -c dynamo nvidia-dynamo.sky.yaml  --env MODEL_NAME=meta-llama/Llama-3.1-8B-Instruct --env HF_TOKEN
+
 resources:
   accelerators: H100:1
   ports: 8080
 
 envs:
   MODEL_NAME: Qwen/Qwen3-8B
+  HF_TOKEN: "" # needed if a model is gated in HF Hub. Pass the value with `--env HF_TOKEN`
 
 setup: |
   sudo usermod -aG docker $USER

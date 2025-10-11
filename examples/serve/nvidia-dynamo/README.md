@@ -34,15 +34,16 @@ NVIDIA Dynamo is a high-performance inference framework designed for serving gen
 
 ## Launch Cluster
 
-Once SkyPilot is set up <link to prep section>, launch the example with: 
+Once SkyPilot is set up (see [Appendix: Preparation](#appendix-preparation)), launch the example with: 
 
 ```bash
-sky launch -c dynamo-serving nvidia-dynamo.sky.yaml
+sky launch -c dynamo nvidia-dynamo.sky.yaml
+```
 
 ## Test Endpoint
 
 ```bash
-export ENDPOINT=$(sky status --endpoint 8080 dynamo-serving)
+export ENDPOINT=$(sky status --endpoint 8080 dynamo)
 
 curl http://$ENDPOINT/v1/chat/completions \
   -H "Content-Type: application/json" \
@@ -87,13 +88,13 @@ curl http://$ENDPOINT/v1/chat/completions \
 ### Launch Multi-Node Cluster
 
 ```bash
-sky launch -c dynamo-serving-multi nvidia-dynamo-multinode.sky.yaml
+sky launch -c dynamo-multi nvidia-dynamo-multinode.sky.yaml
 ```
 
 ### Test Multi-Node Endpoint
 
 ```bash
-export ENDPOINT=$(sky status --endpoint 8080 dynamo-serving-multi)
+export ENDPOINT=$(sky status --endpoint 8080 dynamo-multi)
 
 curl http://$ENDPOINT/v1/chat/completions \
   -H "Content-Type: application/json" \
@@ -147,3 +148,38 @@ INFO dynamo_llm::kv_router::scheduler: Selected worker: 7587889683284143912, log
 ```
 
 The routing formula shows worker selection based on KV cache hits and load balancing.
+
+## Appendix: Preparation
+
+1. Install SkyPilot for launching the serving:
+```bash
+pip install skypilot-nightly[aws,gcp,kubernetes]
+# or other clouds (17+ clouds and kubernetes are supported) you have setup
+# See: https://docs.skypilot.co/en/latest/getting-started/installation.html
+```
+
+2. Check your infra setup:
+```bash
+sky check
+
+🎉 Enabled clouds 🎉
+    ✔ AWS
+    ✔ GCP
+    ✔ Azure
+    ...
+    ✔ Kubernetes
+```
+
+3. Set `HF_TOKEN` if you're using a [gated model](https://huggingface.co/docs/hub/en/models-gated) and then pass it to the `sky launch` command:
+  
+```bash
+export HF_TOKEN="xxxx"
+sky launch -c dynamo nvidia-dynamo.sky.yaml --env MODEL_NAME=meta-llama/Llama-3.1-8B-Instruct --env HF_TOKEN
+```
+
+## What's next
+
+* [AI on Kubernetes Without the Pain](https://blog.skypilot.co/ai-on-kubernetes/)
+* [SkyPilot AI Gallery](https://docs.skypilot.co/en/latest/gallery/index.html)
+* [SkyPilot Docs](https://docs.skypilot.co)
+* [SkyPilot GitHub](https://github.com/skypilot-org/skypilot)
