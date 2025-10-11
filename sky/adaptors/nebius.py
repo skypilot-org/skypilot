@@ -235,7 +235,7 @@ def _sdk(token: Optional[str], cred_path: Optional[str]):
     # Exactly one of token or cred_path must be provided
     assert (token is None) != (cred_path is None), (token, cred_path)
     # Load the LazyImport submodule to get the actual nebius.sdk module
-    # This is required because nebius is a LazyImport object, not the actual module
+    # This is required because nebius is a LazyImport object
     nebius_sdk = nebius.sdk.load_module()
     if token is not None:
         return nebius_sdk.SDK(credentials=token, domain=api_domain())
