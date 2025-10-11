@@ -1,11 +1,13 @@
 """Utilities for processing GPU metrics from Kubernetes clusters."""
 import contextlib
 import functools
+import logging
 import os
 import re
 import select
 import subprocess
 import time
+import traceback
 from typing import List, Optional, Tuple
 
 import httpx
@@ -134,6 +136,22 @@ def time_it(name: str, group: str = 'default'):
             yield
         finally:
             duration = time.time() - start_time
+            # Log slow code execution
+            if duration > 60:
+                file_logger = logging.Logger('temp_logger', logging.INFO)
+                path = os.path.expanduser('~/.sky/api_server/server.log')
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                file_logger.addHandler(logging.FileHandler(path))
+
+                # Log with stack trace to track caller
+                stack_trace = ''.join(traceback.format_stack())
+
+                pid = os.getpid()
+
+                logger.info(f'PID: {pid}, {name} took {duration} seconds, '
+                            f'group: {group}\nStack trace:\n{stack_trace}')
+                file_logger.info(f'PID: {pid}, {name} took {duration} seconds, '
+                                 f'group: {group}\nStack trace:\n{stack_trace}')
             SKY_APISERVER_CODE_DURATION_SECONDS.labels(
                 name=name, group=group).observe(duration)
 

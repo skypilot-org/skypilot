@@ -567,8 +567,14 @@ def get_request(request_id: str) -> Optional[Request]:
 @metrics_lib.time_me_async
 async def get_request_async(request_id: str) -> Optional[Request]:
     """Async version of get_request."""
-    async with filelock.AsyncFileLock(request_lock_path(request_id)):
-        return await _get_request_no_lock_async(request_id)
+    with metrics_lib.time_it('get_request_async.lock', group='function'):
+        await filelock.AsyncFileLock(request_lock_path(request_id)).acquire()
+    try:
+        with metrics_lib.time_it('get_request_async.no_lock_call',
+                                 group='function'):
+            return await _get_request_no_lock_async(request_id)
+    finally:
+        await filelock.AsyncFileLock(request_lock_path(request_id)).release()
 
 
 class StatusWithMsg(NamedTuple):
