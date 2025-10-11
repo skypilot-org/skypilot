@@ -1,0 +1,18 @@
+resources:
+  accelerators: H100:1
+  ports: 8080
+
+envs:
+  MODEL_NAME: Qwen/Qwen3-8B
+
+setup: |
+  sudo usermod -aG docker $USER
+  sudo chmod 666 /var/run/docker.sock
+
+  uv pip install "ai-dynamo[sglang]==0.4.1" accelerate --system --prerelease=allow
+  curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/ai-dynamo/dynamo/release/0.4.1/deploy/docker-compose.yml
+  docker compose -f docker-compose.yml up -d
+
+run: |
+  python -m dynamo.frontend &
+  python -m dynamo.sglang --model $MODEL_NAME
