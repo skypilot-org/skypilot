@@ -131,6 +131,7 @@ def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
                     # Removed per-line flush to avoid disk I/O bottleneck,
                     # especially in Docker containers. The file will be
                     # automatically flushed when closed.
+                    fout.flush()
                 line_processor.process_line(line)
                 out.append(line)
     return ''.join(out)
