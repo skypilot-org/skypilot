@@ -1506,6 +1506,10 @@ async def stream(
             clients, console for CLI/API clients), 'plain' (force plain text),
             'html' (force HTML), or 'console' (force console)
     """
+    pid = os.getpid()
+    logger.info(
+        f'API stream start: PID: {pid}, request_id: {request_id}, log_path: {log_path}, tail: {tail}, follow: {follow}, format: {format}'
+    )
     if request_id is not None and log_path is not None:
         raise fastapi.HTTPException(
             status_code=400,
@@ -1542,7 +1546,13 @@ async def stream(
     polling_interval = stream_utils.DEFAULT_POLL_INTERVAL
     # Original plain text streaming logic
     if request_id is not None:
+        logger.info(
+            f'API stream start get request async: PID: {pid}, request_id: {request_id}'
+        )
         request_task = await requests_lib.get_request_async(request_id)
+        logger.info(
+            f'API stream end get request async: PID: {pid}, request_id: {request_id}'
+        )
         if request_task is None:
             print(f'No task with request ID {request_id}')
             raise fastapi.HTTPException(
@@ -1598,6 +1608,8 @@ async def stream(
     if request_id is not None:
         headers[server_constants.STREAM_REQUEST_HEADER] = request_id
 
+    logger.info(
+        f'API stream return response: PID: {pid}, request_id: {request_id}')
     return fastapi.responses.StreamingResponse(
         content=stream_utils.log_streamer(request_id,
                                           log_path_to_stream,
