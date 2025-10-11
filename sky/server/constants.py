@@ -64,3 +64,7 @@ DAEMON_RESTART_INTERVAL_SECONDS = 20
 
 # Cookie header for stream request id.
 STREAM_REQUEST_HEADER = 'X-SkyPilot-Stream-Request-ID'
+
+# Valid empty values for pickled fields (base64-encoded pickled None)
+# base64.b64encode(pickle.dumps(None)).decode('utf-8')
+EMPTY_PICKLED_VALUE = 'gAROLg=='

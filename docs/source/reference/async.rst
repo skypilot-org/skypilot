@@ -174,7 +174,7 @@ To view all requests on the server, run ``sky api status``.
 .. code-block:: console
 
     $ # List ongoing requests, default to show 50 requests
-    $ # add `--limit 0` to show all ongoing requests
+    $ # add `-l none` or `-l all` to show all ongoing requests
     $ sky api status
     ID                                    User             Name    Created         Status
     0d35ffa7-2813-4f3b-95c2-c5ab2238df50  user2            logs    a few secs ago  RUNNING
@@ -182,7 +182,7 @@ To view all requests on the server, run ``sky api status``.
     skypilot-status-refresh-daemon        skypilot-system  status  5 hrs ago       RUNNING
 
     $ # List finished and ongoing requests, default to show 50 requests
-    $ # add `--limit 0` to show all finished and ongoing requests
+    $ # add `-l none` or `-l all` to show all finished and ongoing requests
     $ sky api status -a
 
 .. hint::

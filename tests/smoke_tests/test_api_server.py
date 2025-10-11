@@ -253,13 +253,13 @@ def test_requests_scheduling(generic_cloud: str):
                     f'sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -n dispatch tests/test_yamls/minimal.yaml',
                     f'for i in {{1..10}}; do sky exec {name} -n job-${{i}} "sleep 60" --async; done',
                     # Wait for all reqeusts get scheduled and executed, do not check the status here to make this case focus.
-                    (f's=$(sky api status -a | grep {username});'
+                    (f's=$(sky api status -a -l none | grep {username});'
                      'timeout=60; start=$SECONDS; '
                      'until ! echo "$s" | grep "" | grep "PENDING|RUNNING"; do '
                      '  if [ $((SECONDS - start)) -gt $timeout ]; then '
                      '    echo "Timeout waiting for jobs to be scheduled"; exit 1; '
                      '  fi; '
-                     f'  sleep 5; s=$(sky api status -a | grep {username});'
+                     f'  sleep 5; s=$(sky api status -a -l none | grep {username});'
                      '  echo "Waiting for request get scheduled"; echo "$s"; '
                      'done'),
                 ],

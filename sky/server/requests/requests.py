@@ -349,19 +349,15 @@ def _update_request_row_fields(
     # Convert tuple to dictionary for easier manipulation
     content = dict(zip(fields, row))
 
-    # Valid empty values for pickled fields (base64-encoded pickled None)
-    # base64.b64encode(pickle.dumps(None)).decode('utf-8')
-    empty_pickled_value = 'gAROLg=='
-
     # Required fields in RequestPayload
     if 'request_id' not in fields:
         content['request_id'] = ''
     if 'name' not in fields:
         content['name'] = ''
     if 'entrypoint' not in fields:
-        content['entrypoint'] = empty_pickled_value
+        content['entrypoint'] = server_constants.EMPTY_PICKLED_VALUE
     if 'request_body' not in fields:
-        content['request_body'] = empty_pickled_value
+        content['request_body'] = server_constants.EMPTY_PICKLED_VALUE
     if 'status' not in fields:
         content['status'] = RequestStatus.PENDING.value
     if 'created_at' not in fields:
@@ -732,7 +728,7 @@ class RequestTaskFilter:
             Mutually exclusive with exclude_request_names.
         finished_before: if provided, only include requests finished before this
             timestamp.
-        request_limit: the number of requests to show. If 0, show all requests.
+        limit: the number of requests to show. If None, show all requests.
 
     Raises:
         ValueError: If both exclude_request_names and include_request_names are
@@ -744,7 +740,7 @@ class RequestTaskFilter:
     exclude_request_names: Optional[List[str]] = None
     include_request_names: Optional[List[str]] = None
     finished_before: Optional[float] = None
-    request_limit: int = 0
+    limit: Optional[int] = None
     fields: Optional[List[str]] = None
 
     def __post_init__(self):
@@ -792,8 +788,8 @@ class RequestTaskFilter:
             columns_str = ', '.join(self.fields)
         query_str = (f'SELECT {columns_str} FROM {REQUEST_TABLE}{filter_str} '
                      'ORDER BY created_at DESC')
-        if self.request_limit > 0:
-            query_str += f' LIMIT {self.request_limit}'
+        if self.limit is not None:
+            query_str += f' LIMIT {self.limit}'
         return query_str, filter_params
 
 

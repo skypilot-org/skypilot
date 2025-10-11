@@ -22,8 +22,8 @@ run: |
     # We now either in a clean stopped state or in a clean running state
     sky api start
     # Thus the following command should always succeed
-    sky api status
-    if sky api status | grep -q "PENDING"; then
+    sky api status -l none
+    if sky api status -l none | grep -q "PENDING"; then
       echo "Found request pending"
       exit 1
     fi

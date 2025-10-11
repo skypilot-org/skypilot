@@ -6162,6 +6162,25 @@ def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool):
                     fg='green')
 
 
+class IntOrNone(click.ParamType):
+    """Int or None"""
+    name = 'int-or-none'
+
+    def convert(self, value, param, ctx):
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.lower() in ('none', 'all'):
+            return None
+        try:
+            return int(value)
+        except ValueError:
+            self.fail(f'{value!r} is not a valid integer or "none" or "all"',
+                      param, ctx)
+
+
+INT_OR_NONE = IntOrNone()
+
+
 @api.command('status', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @click.argument('request_ids',
@@ -6179,15 +6198,15 @@ def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool):
     '--limit',
     '-l',
     default=_NUM_REQUESTS_TO_SHOW,
-    type=int,
+    type=INT_OR_NONE,
     required=False,
     help=(f'Number of requests to show, default is {_NUM_REQUESTS_TO_SHOW},'
-          f' set to 0 to show all requests.'))
+          f' set to "none" or "all" to show all requests.'))
 @flags.verbose_option('Show more details.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def api_status(request_ids: Optional[List[str]], all_status: bool,
-               verbose: bool, limit: int):
+               verbose: bool, limit: Optional[int]):
     """List requests on SkyPilot API server."""
     if not request_ids:
         request_ids = None
@@ -6220,8 +6239,12 @@ def api_status(request_ids: Optional[List[str]], all_status: bool,
         if verbose:
             dummy_row.append('-')
         table.add_row(dummy_row)
-        click.echo()
     click.echo(table)
+    if limit and len(request_list) >= limit:
+        click.echo()
+        click.echo(
+            f'Showing {limit} requests. Use "-l none" or "-l all" to show'
+            f' all requests.')
 
 
 @api.command('login', cls=_DocumentedCodeCommand)

@@ -2159,7 +2159,7 @@ def api_status(
     request_ids: Optional[List[Union[server_common.RequestId[T], str]]] = None,
     # pylint: disable=redefined-builtin
     all_status: bool = False,
-    request_limit: int = 0,
+    limit: Optional[int] = None,
     fields: Optional[List[str]] = None,
 ) -> List[payloads.RequestPayload]:
     """Lists all requests.
@@ -2169,7 +2169,7 @@ def api_status(
             If None, all requests are queried.
         all_status: Whether to list all finished requests as well. This argument
             is ignored if request_ids is not None.
-        request_limit: The number of requests to show. If 0, show all requests.
+        limit: The number of requests to show. If None, show all requests.
         fields: The fields to get. If None, get all fields.
 
     Returns:
@@ -2182,7 +2182,7 @@ def api_status(
     body = payloads.RequestStatusBody(
         request_ids=request_ids,
         all_status=all_status,
-        request_limit=request_limit,
+        limit=limit,
         fields=fields,
     )
     response = server_common.make_authenticated_request(

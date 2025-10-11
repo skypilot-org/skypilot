@@ -1629,8 +1629,8 @@ async def api_status(
         None, description='Request IDs to get status for.'),
     all_status: bool = fastapi.Query(
         False, description='Get finished requests as well.'),
-    request_limit: int = fastapi.Query(
-        0, description='Number of requests to show. If 0, show all requests.'),
+    limit: Optional[int] = fastapi.Query(
+        None, description='Number of requests to show.'),
     fields: Optional[List[str]] = fastapi.Query(
         None, description='Fields to get. If None, get all fields.'),
 ) -> List[payloads.RequestPayload]:
@@ -1645,7 +1645,7 @@ async def api_status(
         request_tasks = await requests_lib.get_request_tasks_with_fields_async(
             req_filter=requests_lib.RequestTaskFilter(
                 status=statuses,
-                request_limit=request_limit,
+                limit=limit,
                 fields=fields,
             ),
             fields=fields,

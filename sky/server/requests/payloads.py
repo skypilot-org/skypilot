@@ -573,7 +573,7 @@ class RequestStatusBody(pydantic.BaseModel):
     """The request body for the API request status endpoint."""
     request_ids: Optional[List[str]] = None
     all_status: bool = False
-    request_limit: int = 0
+    limit: Optional[int] = None
     fields: Optional[List[str]] = None
 
 
