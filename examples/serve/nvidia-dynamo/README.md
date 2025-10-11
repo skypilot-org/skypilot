@@ -34,9 +34,10 @@ NVIDIA Dynamo is a high-performance inference framework designed for serving gen
 
 ## Launch Cluster
 
+Once SkyPilot is set up <link to prep section>, launch the example with: 
+
 ```bash
 sky launch -c dynamo-serving nvidia-dynamo.sky.yaml
-```
 
 ## Test Endpoint
 
