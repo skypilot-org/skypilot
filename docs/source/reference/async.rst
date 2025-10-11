@@ -41,7 +41,7 @@ For example, when a user runs ``sky launch -c my-cluster``, the following output
     INFRA                   INSTANCE      vCPUs   Mem(GB)   GPUS      COST ($)   CHOSEN
     ---------------------------------------------------------------------------------------------
     Kubernetes (my-cluster) 2CPU--2GB     2       2         -         0.00       ✔
-    AWS (us-east-1)         m6i.large     2       8         -         0.098     
+    AWS (us-east-1)         m6i.large     2       8         -         0.098
     ---------------------------------------------------------------------------------------------
     Launching a new cluster 'my-cluster'. Proceed? [Y/n]:
     ⚙︎ Launching on Kubernetes.
@@ -173,14 +173,16 @@ To view all requests on the server, run ``sky api status``.
 
 .. code-block:: console
 
-    $ # List all ongoing requests
+    $ # List ongoing requests, default to show 50 requests
+    $ # add `-l none` or `-l all` to show all ongoing requests
     $ sky api status
     ID                                    User             Name    Created         Status
     0d35ffa7-2813-4f3b-95c2-c5ab2238df50  user2            logs    a few secs ago  RUNNING
     a9d59602-b82b-4cf8-a10f-5cde4dd76f29  user1            launch  a few secs ago  RUNNING
     skypilot-status-refresh-daemon        skypilot-system  status  5 hrs ago       RUNNING
 
-    $ # List all finished and ongoing requests
+    $ # List finished and ongoing requests, default to show 50 requests
+    $ # add `-l none` or `-l all` to show all finished and ongoing requests
     $ sky api status -a
 
 .. hint::
@@ -206,4 +208,3 @@ To cancel requests, run ``sky api cancel <request-id> <request-id> ...``.
 .. code-block:: console
 
     $ sky api cancel 0d35ffa7 a9d59602
-
