@@ -20,7 +20,7 @@ NVIDIA Dynamo is a high-performance inference framework designed for serving gen
 - **Multi-Engine Support**: Works with TensorRT-LLM, vLLM, SGLang, and other backends
 - **Orchestration Excellence**: Bridges the "orchestration gap" in multi-GPU/multi-node environments
 
-## Features Enabled in These Examples
+## Launching Nvidia Dynamo with SkyPilot
 
 ### Single-Node Example (`nvidia-dynamo.sky.yaml`)
 - ✅ **SGLang Backend**: High-performance inference engine
