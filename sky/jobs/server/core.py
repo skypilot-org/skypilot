@@ -186,6 +186,7 @@ def launch(
       handle: Optional[backends.ResourceHandle]; handle to the controller VM.
         None if dryrun.
     """
+    logger.info(f'launch called with controller name: {common.JOB_CONTROLLER_NAME}')
     entrypoint = task
     # using hasattr instead of isinstance to avoid importing sky
     if hasattr(task, 'metadata'):
@@ -979,6 +980,7 @@ def tail_logs(name: Optional[str],
         ValueError: invalid arguments.
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
     """
+    logger.info(f'tail_logs called with controller name: {common.JOB_CONTROLLER_NAME}')
     # TODO(zhwu): Automatically restart the jobs controller
     if name is not None and job_id is not None:
         with ux_utils.print_exception_no_traceback():
