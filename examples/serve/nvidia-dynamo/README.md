@@ -1,6 +1,6 @@
 # Run Nvidia Dynamo on any cloud or Kubernetes with SkyPilot
 
-This demo shows how to serve models using [Nvidia Dynamo](https://github.com/ai-dynamo/dynamo) and [SkyPilot](https://docs.skypilot.co/en/latest/docs/index.html).
+This demo shows how to deploy and serve models using [Nvidia Dynamo](https://github.com/ai-dynamo/dynamo) on any cloud provider or Kubernetes cluster with [SkyPilot](https://docs.skypilot.co/en/latest/docs/index.html). Run Dynamo seamlessly across AWS, GCP, Azure, Lambda Labs, Nebius and more - or bring your own Kubernetes infrastructure.
 
 ## What is Nvidia Dynamo?
 
@@ -12,13 +12,6 @@ NVIDIA Dynamo is a high-performance inference framework designed for serving gen
 - **LLM-Aware Request Routing**: Smart routing based on model characteristics and cache states
 - **Accelerated Data Transfer**: High-performance data movement between nodes
 - **KV Cache Offloading**: Multi-tiered memory management for efficient cache utilization
-
-### Key Benefits
-- **Unified Multi-GPU Experience**: Makes distributed GPU inference feel like "one accelerator"
-- **Maximum GPU Throughput**: Optimizes performance across fluctuating computational demands
-- **Tensor Parallelism**: Enables models to span multiple GPUs and servers seamlessly
-- **Multi-Engine Support**: Works with TensorRT-LLM, vLLM, SGLang, and other backends
-- **Orchestration Excellence**: Bridges the "orchestration gap" in multi-GPU/multi-node environments
 
 ## Launching Nvidia Dynamo with SkyPilot
 
