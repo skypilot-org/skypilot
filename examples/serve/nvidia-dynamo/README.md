@@ -36,6 +36,7 @@ NVIDIA Dynamo is a high-performance inference framework designed for serving gen
 - ✅ **Disaggregated Transfer**: NIXL backend for KV cache transfers
 
 **Model**: `Qwen/Qwen3-8B` (8B parameter reasoning model)
+
 **Architecture**: 2 nodes, each with 8×H100 GPUs, TP=8, DP=2
 
 ## Launch Cluster
