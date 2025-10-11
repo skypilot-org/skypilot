@@ -23,7 +23,7 @@ NVIDIA Dynamo is a high-performance inference framework designed for serving gen
 ## Launching Nvidia Dynamo with SkyPilot
 
 ### Single-Node Example (`nvidia-dynamo.sky.yaml`)
-- ✅ **SGLang Backend**: High-performance inference engine
+- ✅ **SGLang Backend**: High-performance inference engine. Can be swapped with vLLM if required.
 - ✅ **OpenAI-Compatible API**: Drop-in replacement for OpenAI endpoints
 - ✅ **Basic Load Balancing**: Round-robin request distribution
 - ✅ **Auto-Discovery**: Dynamic worker registration
