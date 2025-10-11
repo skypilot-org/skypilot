@@ -183,7 +183,6 @@ async def test_get_job_schedule_state_same(_seed_one_job: int):
         dag_yaml_path='dummy.yaml',
         original_user_yaml_path='dummy_user.yaml',
         env_file_path='dummy.env',
-        user_hash='user',
         priority=1,
     )
 
@@ -211,7 +210,6 @@ async def test_schedule_state_transitions_same(_mock_jobs_db_conn):
         dag_yaml_path='d.yaml',
         original_user_yaml_path='u.yaml',
         env_file_path='e.env',
-        user_hash='u',
         priority=10,
     )
     assert state.get_job_schedule_state(
