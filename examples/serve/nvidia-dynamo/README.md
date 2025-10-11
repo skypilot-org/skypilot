@@ -1,4 +1,4 @@
-# Nvidia Dynamo + SkyPilot Demo
+# Run Nvidia Dynamo on any cloud or Kubernetes with SkyPilot
 
 This demo shows how to serve models using [Nvidia Dynamo](https://github.com/ai-dynamo/dynamo) and [SkyPilot](https://docs.skypilot.co/en/latest/docs/index.html).
 
