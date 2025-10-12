@@ -613,8 +613,7 @@ def test_infer_cloud_from_region_or_zone(enable_all_clouds):
     # Typo, fuzzy hint.
     with pytest.raises(ValueError) as e:
         _test_resources_launch(zone='us-west-2-a', cloud=sky.AWS())
-    assert ('Did you mean one of these: \'us-west-2a\'?'
-            in str(e.value))
+    assert ('Did you mean one of these: \'us-west-2a\'?' in str(e.value))
 
     # Detailed hints.
     # ValueError: Invalid (region None, zone 'us-west-2-a') for any cloud among
