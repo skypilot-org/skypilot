@@ -64,7 +64,7 @@ def passthrough_stream_handler(in_stream: IO[Any], out_stream: IO[Any]) -> str:
         line = wrapped.readline()
         if line:
             out_stream.write(line)
-            time.sleep(0.5)
+            # time.sleep(0.5)
             out_stream.flush()
             lines_written += 1
             bytes_written += len(line.encode('utf-8'))
