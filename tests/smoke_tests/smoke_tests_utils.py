@@ -322,7 +322,7 @@ def get_cmd_wait_until_job_status_succeeded(cluster_name: str,
                                                    timeout=timeout)
 
 
-DEFAULT_CMD_TIMEOUT = 15 * 60
+DEFAULT_CMD_TIMEOUT = 60 * 60
 
 
 class Test(NamedTuple):
@@ -557,7 +557,7 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
 
         if proc.returncode and is_remote_server_test():
             subprocess_utils.run(
-                ['tail -100 ~/.sky/api_server/server.log'],
+                ['tail', '-100', '~/.sky/api_server/server.log'],
                 stdout=subprocess_out,
                 stderr=subprocess.STDOUT,
                 timeout=10,
