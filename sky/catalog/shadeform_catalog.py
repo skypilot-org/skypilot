@@ -26,7 +26,7 @@ def _get_df():
         # In a full implementation, this would call the Shadeform API
         # to dynamically fetch the latest instance types and pricing
         try:
-            _df = common.read_catalog('shadeform/vms.csv')
+            df = common.read_catalog('shadeform/vms.csv')
         except FileNotFoundError:
             # If no static catalog exists, create an empty one
             # This would be replaced with dynamic API fetching
@@ -34,7 +34,28 @@ def _get_df():
                 'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
                 'MemoryGiB', 'Price', 'Region', 'GpuInfo', 'SpotPrice'
             ])
+        else:
+            df = df[df['InstanceType'].notna()]
+            if 'AcceleratorName' in df.columns:
+                df = df[df['AcceleratorName'].notna()]
+                df = df.assign(
+                    AcceleratorName=df['AcceleratorName'].astype(str).str.strip())
+            _df = df.reset_index(drop=True)
     return _df
+
+
+def _is_not_found_error(err: ValueError) -> bool:
+    msg = str(err).lower()
+    return 'not found' in msg or 'not supported' in msg
+
+
+def _call_or_default(func, default):
+    try:
+        return func()
+    except ValueError as err:
+        if _is_not_found_error(err):
+            return default
+        raise
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -66,8 +87,9 @@ def get_hourly_cost(instance_type: str,
 def get_vcpus_mem_from_instance_type(
         instance_type: str) -> Tuple[Optional[float], Optional[float]]:
     """Get vCPUs and memory from instance type."""
-    return common.get_vcpus_mem_from_instance_type_impl(_get_df(),
-                                                        instance_type)
+    return _call_or_default(
+        lambda: common.get_vcpus_mem_from_instance_type_impl(
+            _get_df(), instance_type), (None, None))
 
 
 def get_default_instance_type(cpus: Optional[str] = None,
@@ -77,15 +99,17 @@ def get_default_instance_type(cpus: Optional[str] = None,
                               zone: Optional[str] = None) -> Optional[str]:
     """Get default instance type based on requirements."""
     del disk_tier  # Shadeform doesn't support custom disk tiers yet
-    return common.get_instance_type_for_cpus_mem_impl(_get_df(), cpus, memory,
-                                                      region, zone)
+    return _call_or_default(
+        lambda: common.get_instance_type_for_cpus_mem_impl(
+            _get_df(), cpus, memory, region, zone), None)
 
 
 def get_accelerators_from_instance_type(
         instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
     """Get accelerator information from instance type."""
-    return common.get_accelerators_from_instance_type_impl(
-        _get_df(), instance_type)
+    return _call_or_default(
+        lambda: common.get_accelerators_from_instance_type_impl(
+            _get_df(), instance_type), None)
 
 
 def get_instance_type_for_accelerator(
@@ -101,14 +125,16 @@ def get_instance_type_for_accelerator(
         # Return empty lists since spot is not supported
         return None, ['Spot instances are not supported on Shadeform']
 
-    return common.get_instance_type_for_accelerator_impl(df=_get_df(),
-                                                         acc_name=acc_name,
-                                                         acc_count=acc_count,
-                                                         cpus=cpus,
-                                                         memory=memory,
-                                                         use_spot=use_spot,
-                                                         region=region,
-                                                         zone=zone)
+    return _call_or_default(
+        lambda: common.get_instance_type_for_accelerator_impl(
+            df=_get_df(),
+            acc_name=acc_name,
+            acc_count=acc_count,
+            cpus=cpus,
+            memory=memory,
+            use_spot=use_spot,
+            region=region,
+            zone=zone), (None, []))
 
 
 def get_region_zones_for_instance_type(instance_type: str,
@@ -119,7 +145,8 @@ def get_region_zones_for_instance_type(instance_type: str,
 
     df = _get_df()
     df_filtered = df[df['InstanceType'] == instance_type]
-    return common.get_region_zones(df_filtered, use_spot)
+    return _call_or_default(lambda: common.get_region_zones(df_filtered,
+                                                             use_spot), [])
 
 
 def list_accelerators(
