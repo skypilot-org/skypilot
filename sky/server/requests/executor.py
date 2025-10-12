@@ -560,6 +560,9 @@ async def _execute_request_coroutine(request: api_requests.Request):
     event loop. This is designed for executing tasks that are not CPU
     intensive, e.g. sky logs.
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     context.initialize()
     ctx = context.get()
     assert ctx is not None, 'Context is not initialized'
@@ -589,6 +592,7 @@ async def _execute_request_coroutine(request: api_requests.Request):
             import time
             logger = logging.getLogger(__name__)
             logger.info(f'[DEBUG executor] Request {request_id} cancelled, killing kubectl process, time: {time.time():.2f}')
+            logger.info(f'[DEBUG executor] Context cancellation reason: Request status set to CANCELLED')
             ctx.cancel()
             return True
 
@@ -630,6 +634,10 @@ async def _execute_request_coroutine(request: api_requests.Request):
     finally:
         # Always cancel the context to kill potentially running background
         # routine.
+        import logging
+        import time
+        logger = logging.getLogger(__name__)
+        logger.info(f'[DEBUG executor] Finally block: cancelling context for request {request.request_id}, time: {time.time():.2f}')
         ctx.cancel()
 
 

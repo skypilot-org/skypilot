@@ -76,6 +76,10 @@ def passthrough_stream_handler(in_stream: IO[Any], out_stream: IO[Any]) -> str:
                 rate = lines_written / elapsed if elapsed > 0 else 0
                 logger.info(f'[DEBUG passthrough_stream_handler] Progress: {lines_written} lines, {bytes_written} bytes written in {elapsed:.2f}s (rate: {rate:.1f} lines/s)')
         else:
+            # Stream ended - log why
+            current_time = time.time()
+            elapsed = current_time - start_time
+            logger.info(f'[DEBUG passthrough_stream_handler] Stream ended - no more data from kubectl, time: {current_time:.2f}, elapsed: {elapsed:.2f}s')
             break
     
     # Final timing log

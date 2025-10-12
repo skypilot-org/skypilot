@@ -301,6 +301,13 @@ def run_with_log(
                     proc, stdout_stream_handler, stderr_stream_handler)
             # Ensure returncode is set.
             print(f'[DEBUG run_with_log] Waiting for kubectl process to exit, time: {time.time():.2f}', file=sys.stderr, flush=True)
+            
+            # Check if process is still alive before waiting
+            if proc.poll() is None:
+                print(f'[DEBUG run_with_log] kubectl process is still running before wait(), time: {time.time():.2f}', file=sys.stderr, flush=True)
+            else:
+                print(f'[DEBUG run_with_log] kubectl process already terminated before wait(), returncode: {proc.returncode}, time: {time.time():.2f}', file=sys.stderr, flush=True)
+            
             proc.wait()
             print(f'[DEBUG run_with_log] kubectl process exited with returncode: {proc.returncode}, time: {time.time():.2f}', file=sys.stderr, flush=True)
             if require_outputs:
@@ -310,7 +317,11 @@ def run_with_log(
             # Kill the subprocess directly, otherwise, the underlying
             # process will only be killed after the python program exits,
             # causing the stream handling stuck at `readline`.
+            print(f'[DEBUG run_with_log] KeyboardInterrupt caught, killing kubectl process, time: {time.time():.2f}', file=sys.stderr, flush=True)
             subprocess_utils.kill_children_processes()
+            raise
+        except Exception as e:
+            print(f'[DEBUG run_with_log] Exception caught in run_with_log: {type(e).__name__}: {e}, time: {time.time():.2f}', file=sys.stderr, flush=True)
             raise
 
 
