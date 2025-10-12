@@ -187,6 +187,24 @@ def run_with_log(
     Returns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
     """
+    print(f'Running command: {cmd}')
+    print(f'log_path: {log_path}')
+    print(f'require_outputs: {require_outputs}')
+    print(f'process_stream: {process_stream}')
+    print(f'stream_logs: {stream_logs}')
+    print(f'start_streaming_at: {start_streaming_at}')
+    print(f'end_streaming_at: {end_streaming_at}')
+    print(f'skip_lines: {skip_lines}')
+    print(f'line_processor: {line_processor}')
+    print(f'streaming_prefix: {streaming_prefix}')
+    print(f'log_cmd: {log_cmd}')
+    print(f'with_ray: {with_ray}')
+    print(f'shell: {shell}')
+    print(f'kwargs: {kwargs}')
+    print(f'with_ray: {with_ray}')
+    print(f'shell: {shell}')
+    print(f'kwargs: {kwargs}')
+
     assert process_stream or not require_outputs, (
         process_stream, require_outputs,
         'require_outputs should be False when process_stream is False')
@@ -212,6 +230,7 @@ def run_with_log(
     if log_cmd:
         with open(log_path, 'a', encoding='utf-8') as f:
             print(f'Running command: {cmd}', file=f)
+    print(f'Running command: {cmd}')
     with subprocess.Popen(cmd,
                           stdout=stdout_arg,
                           stderr=stderr_arg,
@@ -274,13 +293,16 @@ def run_with_log(
                     cancel_callback=subprocess_utils.kill_children_processes,
                     stdout_stream_handler=stdout_stream_handler,
                     stderr_stream_handler=stderr_stream_handler)
+                print(f'ctx: {ctx}, stdout: {stdout}, stderr: {stderr}', file=sys.stderr, flush=True)
             elif process_stream:
                 # When runs in a process, only process subprocess stream if
                 # necessary to avoid unnecessary stream handling overhead.
                 stdout, stderr = process_subprocess_stream(
                     proc, stdout_stream_handler, stderr_stream_handler)
+                print(f'process_stream: {process_stream}, stdout: {stdout}, stderr: {stderr}', file=sys.stderr, flush=True)
             # Ensure returncode is set.
             proc.wait()
+            print(f'proc.returncode: {proc.returncode}, stdout: {stdout}, stderr: {stderr}', file=sys.stderr, flush=True)
             if require_outputs:
                 return proc.returncode, stdout, stderr
             return proc.returncode
