@@ -38,8 +38,8 @@ def _get_df():
             df = df[df['InstanceType'].notna()]
             if 'AcceleratorName' in df.columns:
                 df = df[df['AcceleratorName'].notna()]
-                df = df.assign(
-                    AcceleratorName=df['AcceleratorName'].astype(str).str.strip())
+                df = df.assign(AcceleratorName=df['AcceleratorName'].astype(
+                    str).str.strip())
             _df = df.reset_index(drop=True)
     return _df
 
@@ -145,8 +145,8 @@ def get_region_zones_for_instance_type(instance_type: str,
 
     df = _get_df()
     df_filtered = df[df['InstanceType'] == instance_type]
-    return _call_or_default(lambda: common.get_region_zones(df_filtered,
-                                                             use_spot), [])
+    return _call_or_default(
+        lambda: common.get_region_zones(df_filtered, use_spot), [])
 
 
 def list_accelerators(
