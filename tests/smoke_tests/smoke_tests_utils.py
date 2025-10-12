@@ -555,6 +555,15 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
             test.echo(msg)
             write(msg)
 
+        if proc.returncode and is_remote_server_test():
+            subprocess_utils.run(
+                ['tail -100 ~/.sky/api_server/server.log'],
+                stdout=subprocess_out,
+                stderr=subprocess.STDOUT,
+                timeout=10,
+                shell=True
+            )
+
         if (proc.returncode == 0 or
                 pytest.terminate_on_failure) and test.teardown is not None:
             subprocess_utils.run(
