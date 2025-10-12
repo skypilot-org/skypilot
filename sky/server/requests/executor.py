@@ -585,6 +585,10 @@ async def _execute_request_coroutine(request: api_requests.Request):
             raise RuntimeError('Request not found')
 
         if req_status.status == api_requests.RequestStatus.CANCELLED:
+            import logging
+            import time
+            logger = logging.getLogger(__name__)
+            logger.info(f'[DEBUG executor] Request {request_id} cancelled, killing kubectl process, time: {time.time():.2f}')
             ctx.cancel()
             return True
 

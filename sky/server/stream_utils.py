@@ -296,8 +296,9 @@ def stream_response(
 ) -> fastapi.responses.StreamingResponse:
 
     async def on_disconnect():
-        logger.info(f'User terminated the connection for request '
-                    f'{request_id}')
+        import time
+        logger.info(f'[DEBUG stream_utils] User terminated the connection for request '
+                    f'{request_id}, time: {time.time():.2f}')
         requests_lib.kill_requests([request_id])
 
     # The background task will be run after returning a response.

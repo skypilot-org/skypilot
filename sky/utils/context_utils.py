@@ -64,7 +64,7 @@ def passthrough_stream_handler(in_stream: IO[Any], out_stream: IO[Any]) -> str:
         line = wrapped.readline()
         if line:
             out_stream.write(line)
-            # time.sleep(0.5)
+            time.sleep(0.5)
             out_stream.flush()
             lines_written += 1
             bytes_written += len(line.encode('utf-8'))
@@ -83,6 +83,7 @@ def passthrough_stream_handler(in_stream: IO[Any], out_stream: IO[Any]) -> str:
     elapsed = end_time - start_time
     rate = lines_written / elapsed if elapsed > 0 else 0
     logger.info(f'[DEBUG passthrough_stream_handler] Finished kubectl output to log file: {log_path}, {lines_written} lines, {bytes_written} bytes in {elapsed:.2f}s (rate: {rate:.1f} lines/s)')
+    logger.info(f'[DEBUG passthrough_stream_handler] kubectl process ended - stream closed, time: {end_time:.2f}')
     
     return ''
 
