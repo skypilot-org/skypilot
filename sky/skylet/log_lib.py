@@ -299,12 +299,10 @@ def run_with_log(
                 # necessary to avoid unnecessary stream handling overhead.
                 stdout, stderr = process_subprocess_stream(
                     proc, stdout_stream_handler, stderr_stream_handler)
-                print(f'process_stream: {process_stream}, stdout: {stdout}, stderr: {stderr}', file=sys.stderr, flush=True)
             # Ensure returncode is set.
             print(f'[DEBUG run_with_log] Waiting for kubectl process to exit, time: {time.time():.2f}', file=sys.stderr, flush=True)
             proc.wait()
             print(f'[DEBUG run_with_log] kubectl process exited with returncode: {proc.returncode}, time: {time.time():.2f}', file=sys.stderr, flush=True)
-            print(f'proc.returncode: {proc.returncode}, stdout: {stdout}, stderr: {stderr}', file=sys.stderr, flush=True)
             if require_outputs:
                 return proc.returncode, stdout, stderr
             return proc.returncode
