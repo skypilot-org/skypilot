@@ -10,6 +10,35 @@ from typing import Dict, List
 
 clouds_with_ray = ['ibm', 'docker', 'scp']
 
+# See requirements-dev.txt for the version of grpc and protobuf
+# used to generate the code during development.
+
+# The grpc version at runtime has to be newer than the version
+# used to generate the code.
+GRPC = 'grpcio>=1.63.0'
+# >= 5.26.1 because the runtime version can't be older than the version
+# used to generate the code.
+# < 7.0.0 because code generated for a major version V will be supported by
+# protobuf runtimes of version V and V+1.
+# https://protobuf.dev/support/cross-version-runtime-guarantee
+PROTOBUF = 'protobuf>=5.26.1, < 7.0.0'
+
+server_dependencies = [
+    'casbin',
+    'sqlalchemy_adapter',
+    'passlib',
+    'pyjwt',
+    'aiohttp',
+    'anyio',
+    GRPC,
+    PROTOBUF,
+    'aiosqlite',
+    'asyncpg',
+    'greenlet',
+    # Required for API server metrics
+    'prometheus_client>=0.8.0',
+]
+
 install_requires = [
     'wheel<0.46.0',  # https://github.com/skypilot-org/skypilot/issues/5153
     'setuptools',  # TODO: match version to pyproject.toml once #5153 is fixed
@@ -71,49 +100,14 @@ install_requires = [
     'setproctitle',
     'sqlalchemy',
     'psycopg2-binary',
-    'aiosqlite',
-    'asyncpg',
-    # TODO(hailong): These three dependencies should be removed after we make
-    # the client-side actually not importing them.
-    'casbin',
-    'sqlalchemy_adapter',
-    # Required for API server metrics
-    'prometheus_client>=0.8.0',
-    'passlib',
+    # TODO(hailong): These server_dependencies should be removed after we make
+    # the client-side actually not importing them, and we make sure that local
+    # API server installations will get them
+    *server_dependencies,
     'bcrypt==4.0.1',
-    'pyjwt',
     'gitpython',
     'types-paramiko',
     'alembic',
-    'aiohttp',
-    'aiosqlite',
-    'anyio',
-]
-
-# See requirements-dev.txt for the version of grpc and protobuf
-# used to generate the code during development.
-
-# The grpc version at runtime has to be newer than the version
-# used to generate the code.
-GRPC = 'grpcio>=1.63.0'
-# >= 5.26.1 because the runtime version can't be older than the version
-# used to generate the code.
-# < 7.0.0 because code generated for a major version V will be supported by
-# protobuf runtimes of version V and V+1.
-# https://protobuf.dev/support/cross-version-runtime-guarantee
-PROTOBUF = 'protobuf>=5.26.1, < 7.0.0'
-
-server_dependencies = [
-    'casbin',
-    'sqlalchemy_adapter',
-    'passlib',
-    'pyjwt',
-    'aiohttp',
-    'anyio',
-    GRPC,
-    PROTOBUF,
-    'aiosqlite',
-    'greenlet',
 ]
 
 local_ray = [
@@ -227,6 +221,7 @@ extras_require: Dict[str, List[str]] = {
 # Calculate which clouds should be included in the [all] installation.
 clouds_for_all = set(extras_require)
 clouds_for_all.remove('remote')
+clouds_for_all.remove('server')
 
 if sys.version_info < (3, 10):
     # Nebius needs python3.10. If python 3.9 [all] will not install nebius
