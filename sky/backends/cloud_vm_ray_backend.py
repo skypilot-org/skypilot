@@ -3924,10 +3924,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 handle.cached_external_ssh_ports, handle.docker_user,
                 handle.ssh_user)
 
-            # we do not need to force unlock the lock here, because we are
-            # already holding the lock in the caller (_locked_provision)
-            dist_lock_event.release()
-
     def _sync_workdir(self, handle: CloudVmRayResourceHandle,
                       workdir: Union[Path, Dict[str, Any]],
                       envs_and_secrets: Dict[str, str]) -> None:
