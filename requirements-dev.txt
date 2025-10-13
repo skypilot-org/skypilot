@@ -33,7 +33,6 @@ types-python-dateutil
 # testing
 pytest
 pytest-xdist
-pytest-forked
 pytest-env>=0.6
 pytest-asyncio
 

@@ -1,5 +1,6 @@
 """Test the controller_utils module."""
 import importlib
+import multiprocessing
 import os
 from typing import Any, Dict, Set
 from unittest import mock
@@ -706,9 +707,48 @@ def test_shared_controller_vars_to_fill(controller_type: str, monkeypatch):
     os.unlink(local_config_path)
 
 
-@pytest.mark.forked  # importlib.reload() creates new module-level objects that may break parallel tests
+def _run_controller_cluster_name_refresh_test(controller_type: str):
+    """Helper function to run in subprocess to avoid module pollution."""
+    import importlib
+    from unittest import mock
+
+    from sky.utils import common
+    from sky.utils import controller_utils
+
+    stale_hash = 'def456'
+    with mock.patch('sky.utils.common_utils.get_user_hash',
+                    return_value=stale_hash):
+        # Reload modules to simulate server startup.
+        importlib.reload(common)
+        importlib.reload(controller_utils)
+
+        controller = controller_utils.Controllers.from_type(controller_type)
+        prefix = (common.JOB_CONTROLLER_PREFIX if controller_type == 'jobs' else
+                  common.SKY_SERVE_CONTROLLER_PREFIX)
+
+        # cluster_name should contain the stale hash at this point.
+        expected_stale_name = f'{prefix}{stale_hash}'
+        assert controller.value.cluster_name == expected_stale_name, (
+            f'Expected {expected_stale_name}, got {controller.value.cluster_name}'
+        )
+
+        # Simulate server startup: _init_or_restore_server_user_hash reads
+        # the correct hash from db, writes to disk, and calls
+        # refresh_server_id().
+        correct_hash = 'abc123'
+        with mock.patch('sky.utils.common_utils.get_user_hash',
+                        return_value=correct_hash):
+            common.refresh_server_id()
+
+            # cluster_name should now return the updated value.
+            expected_correct_name = f'{prefix}{correct_hash}'
+            assert controller.value.cluster_name == expected_correct_name, (
+                f'Expected {expected_correct_name}, got {controller.value.cluster_name}'
+            )
+
+
 @pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
-def test_controller_cluster_name_refresh(controller_type: str, monkeypatch):
+def test_controller_cluster_name_refresh(controller_type: str):
     """Test controller cluster name is evaluated dynamically, not only at import time.
 
     Scenario:
@@ -717,75 +757,73 @@ def test_controller_cluster_name_refresh(controller_type: str, monkeypatch):
        calls refresh_server_id()
     3. cluster_name property should return the updated value, not the stale one
     """
-    stale_hash = 'def456'
-    monkeypatch.setattr('sky.utils.common_utils.get_user_hash',
-                        lambda: stale_hash)
-    # Reload modules to simulate server startup.
-    importlib.reload(common)
-    importlib.reload(controller_utils)
-
-    controller = controller_utils.Controllers.from_type(controller_type)
-    prefix = (common.JOB_CONTROLLER_PREFIX if controller_type == 'jobs' else
-              common.SKY_SERVE_CONTROLLER_PREFIX)
-
-    # cluster_name should contain the stale hash at this point.
-    expected_stale_name = f'{prefix}{stale_hash}'
-    assert controller.value.cluster_name == expected_stale_name, (
-        f'Expected {expected_stale_name}, got {controller.value.cluster_name}')
-
-    # Simulate server startup: _init_or_restore_server_user_hash reads
-    # the correct hash from db, writes to disk, and calls refresh_server_id().
-    correct_hash = 'abc123'
-    monkeypatch.setattr('sky.utils.common_utils.get_user_hash',
-                        lambda: correct_hash)
-    common.refresh_server_id()
-
-    # cluster_name should now return the updated value.
-    expected_correct_name = f'{prefix}{correct_hash}'
-    assert controller.value.cluster_name == expected_correct_name, (
-        f'Expected {expected_correct_name}, got {controller.value.cluster_name}'
-    )
+    # Run in subprocess to avoid module pollution from importlib.reload().
+    proc = multiprocessing.Process(
+        target=_run_controller_cluster_name_refresh_test,
+        args=(controller_type,))
+    proc.start()
+    proc.join()
+    assert proc.exitcode == 0, f'Subprocess test failed with exit code {proc.exitcode}'
 
 
-@pytest.mark.forked  # importlib.reload() creates new module-level objects that may break parallel tests
+def _run_controller_cluster_name_client_side_test(controller_type: str):
+    """Helper function to run in subprocess to avoid module pollution."""
+    import importlib
+    from unittest import mock
+
+    from sky.utils import common
+    from sky.utils import controller_utils
+
+    client_hash = 'def456'
+    with mock.patch('sky.utils.common_utils.get_user_hash',
+                    return_value=client_hash):
+        # Reload modules to get the mock hash.
+        importlib.reload(common)
+        importlib.reload(controller_utils)
+
+        controller = controller_utils.Controllers.from_type(controller_type)
+        prefix = (common.JOB_CONTROLLER_PREFIX if controller_type == 'jobs' else
+                  common.SKY_SERVE_CONTROLLER_PREFIX)
+
+        # Initially, cluster_name uses client's hash.
+        expected_client_name = f'{prefix}{client_hash}'
+        assert controller.value.cluster_name == expected_client_name
+        assert controller.value._cluster_name_from_server is None
+
+        # Server has a different hash - client receives the actual controller
+        # name.
+        server_hash = 'abc123'
+        actual_controller_name = f'{prefix}{server_hash}'
+
+        # Client calls from_name() with the server-provided name.
+        # This happens when client receives cluster info from server.
+        controller = controller_utils.Controllers.from_name(
+            actual_controller_name, expect_exact_match=False)
+
+        # Should have the server-provided name set.
+        assert controller.value.cluster_name == actual_controller_name, (
+            f'Expected {actual_controller_name}, got {controller.value.cluster_name}'
+        )
+
+        # Clean up.
+        controller.value._cluster_name_from_server = None
+
+
 @pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
-def test_controller_cluster_name_client_side(controller_type: str, monkeypatch):
+def test_controller_cluster_name_client_side(controller_type: str):
     """Test client-side cluster name caching when receiving name from server.
+
+    Runs in subprocess to avoid module pollution from importlib.reload().
 
     This test verifies client-side behavior where the client may not know
     the exact controller name (because it doesn't have the server's user hash).
     When from_name() is called with the actual controller name from the server,
     it should save it using set_cluster_name_from_server().
     """
-    client_hash = 'def456'
-    monkeypatch.setattr('sky.utils.common_utils.get_user_hash',
-                        lambda: client_hash)
-    # Reload modules to get the mock hash.
-    importlib.reload(common)
-    importlib.reload(controller_utils)
-
-    controller = controller_utils.Controllers.from_type(controller_type)
-    prefix = (common.JOB_CONTROLLER_PREFIX if controller_type == 'jobs' else
-              common.SKY_SERVE_CONTROLLER_PREFIX)
-
-    # Initially, cluster_name uses client's hash.
-    expected_client_name = f'{prefix}{client_hash}'
-    assert controller.value.cluster_name == expected_client_name
-    assert controller.value._cluster_name_from_server is None
-
-    # Server has a different hash - client receives the actual controller name.
-    server_hash = 'abc123'
-    actual_controller_name = f'{prefix}{server_hash}'
-
-    # Client calls from_name() with the server-provided name.
-    # This happens when client receives cluster info from server.
-    controller = controller_utils.Controllers.from_name(
-        actual_controller_name, expect_exact_match=False)
-
-    # Should have the server-provided name set.
-    assert controller.value.cluster_name == actual_controller_name, (
-        f'Expected {actual_controller_name}, got {controller.value.cluster_name}'
-    )
-
-    # Clean up.
-    controller.value._cluster_name_from_server = None
+    # Run in subprocess to avoid module pollution from importlib.reload().
+    proc = multiprocessing.Process(
+        target=_run_controller_cluster_name_client_side_test,
+        args=(controller_type,))
+    proc.start()
+    proc.join()
+    assert proc.exitcode == 0, f'Subprocess test failed with exit code {proc.exitcode}'
