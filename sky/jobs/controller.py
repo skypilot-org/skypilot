@@ -908,7 +908,7 @@ class Controller:
 
     # Use context.contextual to enable per-job output redirection and env var
     # isolation.
-    @context.contextual
+    @context.contextual_async
     async def run_job_loop(self,
                            job_id: int,
                            dag_yaml: str,
