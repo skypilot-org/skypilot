@@ -1992,7 +1992,6 @@ def test_long_setup_run_script(generic_cloud: str):
                 f'sky logs {name} --status 1',
                 f'sky logs {name} --status 2',
                 f'sky logs {name} --status 3',
-                # f'sky down {name} -y',
                 f'sky jobs launch -y -n {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {f.name}',
                 f'sky jobs queue | grep {name} | grep SUCCEEDED',
             ],
