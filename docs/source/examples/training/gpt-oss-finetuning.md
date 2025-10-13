@@ -1,1 +1,1 @@
-../../../../llm/gpt-oss-finetuning/README.md
+../../generated-examples/gpt-oss-finetuning.md

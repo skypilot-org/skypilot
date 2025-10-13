@@ -43,7 +43,7 @@ class TestVolumeServer:
             mock_schedule.assert_called_once_with(
                 request_id='test-request-id',
                 request_name='volume_list',
-                request_body=payloads.VolumeListBody(),
+                request_body=payloads.RequestBody(),
                 func=server.core.volume_list,
                 schedule_type=requests_lib.ScheduleType.SHORT,
             )

@@ -34,6 +34,7 @@ setup: |
   cd ..
 
 run: |
+  set -e
   sudo chmod 777 -R /var/tmp
   cd nemo-rl
   head_ip=`echo "$SKYPILOT_NODE_IPS" | head -n1`

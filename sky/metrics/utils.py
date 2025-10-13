@@ -11,7 +11,9 @@ from typing import List, Optional, Tuple
 import httpx
 import prometheus_client as prom
 
+from sky import sky_logging
 from sky.skylet import constants
+from sky.utils import common_utils
 from sky.utils import context_utils
 
 _SELECT_TIMEOUT = 1
@@ -34,6 +36,8 @@ _MEM_BUCKETS = [
     256 * _MB,
     float('inf'),
 ]
+
+logger = sky_logging.init_logger(__name__)
 
 # Whether the metrics are enabled, cannot be changed at runtime.
 METRICS_ENABLED = os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED,
@@ -188,35 +192,42 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
     if 'KUBECONFIG' not in env:
         env['KUBECONFIG'] = os.path.expanduser('~/.kube/config')
 
-    # start the port forward process
-    port_forward_process = subprocess.Popen(cmd,
-                                            stdout=subprocess.PIPE,
-                                            stderr=subprocess.STDOUT,
-                                            text=True,
-                                            env=env)
-
+    port_forward_process = None
+    port_forward_exit = False
     local_port = None
-    start_time = time.time()
+    poller = None
+    fd = None
 
-    buffer = ''
-    # wait for the port forward to start and extract the local port
-    while time.time() - start_time < start_port_forward_timeout:
-        if port_forward_process.poll() is not None:
-            # port forward process has terminated
-            if port_forward_process.returncode != 0:
-                raise RuntimeError(
-                    f'Port forward failed for service {service} in namespace '
-                    f'{namespace} on context {context}')
-            break
+    try:
+        # start the port forward process
+        port_forward_process = subprocess.Popen(cmd,
+                                                stdout=subprocess.PIPE,
+                                                stderr=subprocess.STDOUT,
+                                                text=True,
+                                                env=env)
 
-        # read output line by line to find the local port
-        if port_forward_process.stdout:
-            # Wait up to 1s for data to be available without blocking
-            r, _, _ = select.select([port_forward_process.stdout], [], [],
-                                    _SELECT_TIMEOUT)
-            if r:
+        # Use poll() instead of select() to avoid FD_SETSIZE limit
+        poller = select.poll()
+        assert port_forward_process.stdout is not None
+        fd = port_forward_process.stdout.fileno()
+        poller.register(fd, select.POLLIN)
+
+        start_time = time.time()
+        buffer = ''
+        # wait for the port forward to start and extract the local port
+        while time.time() - start_time < start_port_forward_timeout:
+            if port_forward_process.poll() is not None:
+                # port forward process has terminated
+                if port_forward_process.returncode != 0:
+                    port_forward_exit = True
+                break
+
+            # Wait up to 1000ms for data to be available without blocking
+            # poll() takes timeout in milliseconds
+            events = poller.poll(_SELECT_TIMEOUT * 1000)
+
+            if events:
                 # Read available bytes from the FD without blocking
-                fd = port_forward_process.stdout.fileno()
                 raw = os.read(fd, _SELECT_BUFFER_SIZE)
                 chunk = raw.decode(errors='ignore')
                 buffer += chunk
@@ -225,16 +236,28 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
                     local_port = int(match.group(1))
                     break
 
-        # sleep for 100ms to avoid busy-waiting
-        time.sleep(0.1)
-
+            # sleep for 100ms to avoid busy-waiting
+            time.sleep(0.1)
+    except BaseException:  # pylint: disable=broad-exception-caught
+        if port_forward_process:
+            stop_svc_port_forward(port_forward_process,
+                                  timeout=terminate_port_forward_timeout)
+        raise
+    finally:
+        if poller is not None and fd is not None:
+            try:
+                poller.unregister(fd)
+            except (OSError, ValueError):
+                # FD may already be unregistered or invalid
+                pass
+    if port_forward_exit:
+        raise RuntimeError(f'Port forward failed for service {service} in '
+                           f'namespace {namespace} on context {context}')
     if local_port is None:
         try:
-            port_forward_process.terminate()
-            port_forward_process.wait(timeout=terminate_port_forward_timeout)
-        except subprocess.TimeoutExpired:
-            port_forward_process.kill()
-            port_forward_process.wait()
+            if port_forward_process:
+                stop_svc_port_forward(port_forward_process,
+                                      timeout=terminate_port_forward_timeout)
         finally:
             raise RuntimeError(
                 f'Failed to extract local port for service {service} in '
@@ -243,14 +266,15 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
     return port_forward_process, local_port
 
 
-def stop_svc_port_forward(port_forward_process: subprocess.Popen) -> None:
+def stop_svc_port_forward(port_forward_process: subprocess.Popen,
+                          timeout: int = 5) -> None:
     """Stops a port forward to a service in a Kubernetes cluster.
     Args:
         port_forward_process: The subprocess.Popen process to terminate
     """
     try:
         port_forward_process.terminate()
-        port_forward_process.wait(timeout=5)
+        port_forward_process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         port_forward_process.kill()
         port_forward_process.wait()
@@ -301,6 +325,10 @@ async def send_metrics_request_with_port_forward(
             response.raise_for_status()
             return response.text
 
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.error(f'Failed to send metrics request with port forward: '
+                     f'{common_utils.format_exception(e)}')
+        raise
     finally:
         # Always clean up port forward
         if port_forward_process:

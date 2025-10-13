@@ -723,11 +723,15 @@ def write_cluster_config(
                 'is not supported by this cloud. Remove the config or set: '
                 '`remote_identity: LOCAL_CREDENTIALS`.')
         if isinstance(cloud, clouds.Kubernetes):
-            if skypilot_config.get_effective_region_config(
+            allowed_contexts = skypilot_config.get_workspace_cloud(
+                'kubernetes').get('allowed_contexts', None)
+            if allowed_contexts is None:
+                allowed_contexts = skypilot_config.get_effective_region_config(
                     cloud='kubernetes',
                     region=None,
                     keys=('allowed_contexts',),
-                    default_value=None) is None:
+                    default_value=None)
+            if allowed_contexts is None:
                 excluded_clouds.add(cloud)
         else:
             excluded_clouds.add(cloud)
@@ -1120,6 +1124,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
         config = auth.setup_fluidstack_authentication(config)
     elif isinstance(cloud, clouds.Hyperbolic):
         config = auth.setup_hyperbolic_authentication(config)
+    elif isinstance(cloud, clouds.Shadeform):
+        config = auth.setup_shadeform_authentication(config)
     elif isinstance(cloud, clouds.PrimeIntellect):
         config = auth.setup_primeintellect_authentication(config)
     elif isinstance(cloud, clouds.Seeweb):
@@ -2613,7 +2619,7 @@ def refresh_cluster_record(
         cluster_name: str,
         *,
         force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]] = None,
-        acquire_per_cluster_status_lock: bool = True,
+        cluster_lock_already_held: bool = False,
         cluster_status_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS,
         include_user_info: bool = True,
         summary_response: bool = False) -> Optional[Dict[str, Any]]:
@@ -2633,9 +2639,13 @@ def refresh_cluster_record(
               _CLUSTER_STATUS_CACHE_DURATION_SECONDS old, and one of:
                 1. the cluster is a spot cluster, or
                 2. cluster autostop is set and the cluster is not STOPPED.
-        acquire_per_cluster_status_lock: Whether to acquire the per-cluster lock
-          before updating the status. Even if this is True, the lock may not be
-          acquired if the status does not need to be refreshed.
+        cluster_lock_already_held: Whether the caller is already holding the
+          per-cluster lock. You MUST NOT set this to True if the caller does not
+          already hold the lock. If True, we will not acquire the lock before
+          updating the status. Failing to hold the lock while updating the
+          status can lead to correctness issues - e.g. an launch in-progress may
+          appear to be DOWN incorrectly. Even if this is set to False, the lock
+          may not be acquired if the status does not need to be refreshed.
         cluster_status_lock_timeout: The timeout to acquire the per-cluster
           lock. If timeout, the function will use the cached status. If the
           value is <0, do not timeout (wait for the lock indefinitely). By
@@ -2686,7 +2696,7 @@ def refresh_cluster_record(
             if not _must_refresh_cluster_status(record, force_refresh_statuses):
                 return record
 
-            if not acquire_per_cluster_status_lock:
+            if cluster_lock_already_held:
                 return _update_cluster_status(cluster_name, include_user_info,
                                               summary_response)
 
@@ -2740,7 +2750,7 @@ def refresh_cluster_status_handle(
     cluster_name: str,
     *,
     force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]] = None,
-    acquire_per_cluster_status_lock: bool = True,
+    cluster_lock_already_held: bool = False,
     cluster_status_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS
 ) -> Tuple[Optional[status_lib.ClusterStatus],
            Optional[backends.ResourceHandle]]:
@@ -2753,7 +2763,7 @@ def refresh_cluster_status_handle(
     record = refresh_cluster_record(
         cluster_name,
         force_refresh_statuses=force_refresh_statuses,
-        acquire_per_cluster_status_lock=acquire_per_cluster_status_lock,
+        cluster_lock_already_held=cluster_lock_already_held,
         cluster_status_lock_timeout=cluster_status_lock_timeout,
         include_user_info=False,
         summary_response=True)
@@ -3078,7 +3088,7 @@ def _refresh_cluster(
         record = refresh_cluster_record(
             cluster_name,
             force_refresh_statuses=force_refresh_statuses,
-            acquire_per_cluster_status_lock=True,
+            cluster_lock_already_held=False,
             include_user_info=include_user_info,
             summary_response=summary_response)
     except (exceptions.ClusterStatusFetchingError,

@@ -5,7 +5,7 @@ import json
 import re
 import sys
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from sky import exceptions
 from sky import global_user_state
@@ -17,7 +17,6 @@ from sky.provision import constants
 from sky.provision import docker_utils
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
-from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes import volume
 from sky.utils import command_runner
@@ -584,31 +583,6 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
         time.sleep(1)
 
 
-def _run_function_with_retries(func: Callable,
-                               operation_name: str,
-                               max_retries: int = _MAX_RETRIES,
-                               retry_delay: int = 5) -> Any:
-    """Runs a function with retries on Kubernetes errors.
-    Args:
-        func: Function to retry
-        operation_name: Name of the operation for logging
-        max_retries: Maximum number of retry attempts
-        retry_delay: Delay between retries in seconds
-    Raises:
-        The last exception encountered if all retries fail.
-    """
-    for attempt in range(max_retries + 1):
-        try:
-            return func()
-        except config_lib.KubernetesError:
-            if attempt < max_retries:
-                logger.warning(f'Failed to {operation_name} - '
-                               f'retrying in {retry_delay} seconds.')
-                time.sleep(retry_delay)
-            else:
-                raise
-
-
 @timeline.event
 def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
     """Pre-initialization step for SkyPilot pods.
@@ -847,7 +821,7 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
 def _wait_for_deployment_pod(context,
                              namespace,
                              deployment,
-                             timeout=60) -> List:
+                             timeout=300) -> List:
     label_selector = ','.join([
         f'{key}={value}'
         for key, value in deployment.spec.selector.match_labels.items()
@@ -935,8 +909,11 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     running_pods = kubernetes_utils.filter_pods(namespace, context, tags,
                                                 ['Pending', 'Running'])
     head_pod_name = _get_head_pod_name(running_pods)
+    running_pod_statuses = [{
+        pod.metadata.name: pod.status.phase
+    } for pod in running_pods.values()]
     logger.debug(f'Found {len(running_pods)} existing pods: '
-                 f'{list(running_pods.keys())}')
+                 f'{running_pod_statuses}')
 
     to_start_count = config.count - len(running_pods)
     if to_start_count < 0:
@@ -952,7 +929,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     nvidia_runtime_exists = False
     try:
         nvidia_runtime_exists = kubernetes_utils.check_nvidia_runtime_class(
-            context)
+            context=context)
     except kubernetes.kubernetes.client.ApiException as e:
         logger.warning('run_instances: Error occurred while checking for '
                        f'nvidia RuntimeClass - '
@@ -1143,20 +1120,22 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         pods = created_resources
 
     created_pods = {}
+    valid_pods = []
     for pod in pods:
+        # In case Pod is not created
+        if pod is None:
+            continue
+        valid_pods.append(pod)
         created_pods[pod.metadata.name] = pod
         if head_pod_name is None and _is_head(pod):
             head_pod_name = pod.metadata.name
+    pods = valid_pods
 
-    networking_mode = network_utils.get_networking_mode(
-        config.provider_config.get('networking_mode'), context)
-    if networking_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
-        # Adding the jump pod to the new_nodes list as well so it can be
-        # checked if it's scheduled and running along with other pods.
-        ssh_jump_pod_name = pod_spec['metadata']['labels']['skypilot-ssh-jump']
-        jump_pod = kubernetes.core_api(context).read_namespaced_pod(
-            ssh_jump_pod_name, namespace)
-        pods.append(jump_pod)
+    # The running_pods may include Pending Pods, so we add them to the pods
+    # list to wait for scheduling and running
+    if running_pods:
+        pods = pods + list(running_pods.values())
+
     provision_timeout = provider_config['timeout']
 
     wait_str = ('indefinitely'
@@ -1320,18 +1299,6 @@ def terminate_instances(
                                         ray_tag_filter(cluster_name_on_cloud),
                                         None)
 
-    # Clean up the SSH jump pod if in use
-    networking_mode = network_utils.get_networking_mode(
-        provider_config.get('networking_mode'), context)
-    if networking_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
-        pod_name = list(pods.keys())[0]
-        try:
-            kubernetes_utils.clean_zombie_ssh_jump_pod(namespace, context,
-                                                       pod_name)
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning('terminate_instances: Error occurred when analyzing '
-                           f'SSH Jump pod: {e}')
-
     if is_high_availability_cluster_by_kubectl(cluster_name_on_cloud, context,
                                                namespace):
         # For high availability controllers, terminate the deployment
@@ -1367,15 +1334,6 @@ def get_cluster_info(
     pods: Dict[str, List[common.InstanceInfo]] = {}
     head_pod_name = None
 
-    port_forward_mode = kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD
-    network_mode_str = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
-        region=context,
-        keys=('networking_mode',),
-        default_value=port_forward_mode.value)
-    network_mode = kubernetes_enums.KubernetesNetworkingMode.from_str(
-        network_mode_str)
-    external_ip = kubernetes_utils.get_external_ip(network_mode, context)
     port = 22
     if not provider_config.get('use_internal_ips', False):
         port = kubernetes_utils.get_head_ssh_port(cluster_name_on_cloud,
@@ -1389,8 +1347,7 @@ def get_cluster_info(
             common.InstanceInfo(
                 instance_id=pod_name,
                 internal_ip=internal_ip,
-                external_ip=(None if network_mode == port_forward_mode else
-                             external_ip),
+                external_ip=None,
                 ssh_port=port,
                 tags=pod.metadata.labels,
             )
@@ -1401,8 +1358,9 @@ def get_cluster_info(
             assert head_spec is not None, pod
             cpu_request = head_spec.containers[0].resources.requests['cpu']
 
-    assert cpu_request is not None, ('cpu_request should not be None, check '
-                                     'the Pod status')
+    if cpu_request is None:
+        raise RuntimeError(f'Pod {cluster_name_on_cloud}-head not found'
+                           ' or not Running, check the Pod status')
 
     ssh_user = 'sky'
     # Use pattern matching to extract SSH user, handling MOTD contamination.

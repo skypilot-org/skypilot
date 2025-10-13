@@ -11,6 +11,7 @@ import enum
 import logging
 import os
 import pathlib
+import re
 import shlex
 import textwrap
 import time
@@ -33,6 +34,7 @@ from sky.backends import cloud_vm_ray_backend
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
+from sky.schemas.api import responses
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -298,8 +300,10 @@ async def get_job_status(
                 job_logger.info(f'Job status: {status}')
             job_logger.info('=' * 34)
             return status
-        except (exceptions.CommandError, grpc.RpcError,
-                grpc.FutureTimeoutError) as e:
+        except (exceptions.CommandError, grpc.RpcError, grpc.FutureTimeoutError,
+                ValueError, TypeError) as e:
+            # Note: Each of these exceptions has some additional conditions to
+            # limit how we handle it and whether or not we catch it.
             # Retry on k8s transient network errors. This is useful when using
             # coreweave which may have transient network issue sometimes.
             is_transient_error = False
@@ -318,6 +322,31 @@ async def get_job_status(
                     is_transient_error = True
             elif isinstance(e, grpc.FutureTimeoutError):
                 detailed_reason = 'Timeout'
+            # TODO(cooperc): Gracefully handle these exceptions in the backend.
+            elif isinstance(e, ValueError):
+                # If the cluster yaml is deleted in the middle of getting the
+                # SSH credentials, we could see this. See
+                # sky/global_user_state.py get_cluster_yaml_dict.
+                if re.search(r'Cluster yaml .* not found', str(e)):
+                    detailed_reason = 'Cluster yaml was deleted'
+                else:
+                    raise
+            elif isinstance(e, TypeError):
+                # We will grab the SSH credentials from the cluster yaml, but if
+                # handle.cluster_yaml is None, we will just return an empty dict
+                # for the credentials. See
+                # backend_utils.ssh_credential_from_yaml. Then, the credentials
+                # are passed as kwargs to SSHCommandRunner.__init__ - see
+                # cloud_vm_ray_backend.get_command_runners. So we can hit this
+                # TypeError if the cluster yaml is removed from the handle right
+                # when we pull it before the cluster is fully deleted.
+                error_msg_to_check = (
+                    'SSHCommandRunner.__init__() missing 2 required positional '
+                    'arguments: \'ssh_user\' and \'ssh_private_key\'')
+                if str(e) == error_msg_to_check:
+                    detailed_reason = 'SSH credentials were already cleaned up'
+                else:
+                    raise
             if is_transient_error:
                 logger.info('Failed to connect to the cluster. Retrying '
                             f'({i + 1}/{_JOB_STATUS_FETCH_MAX_RETRIES})...')
@@ -1324,6 +1353,23 @@ def get_managed_job_queue(
                                              page,
                                              limit,
                                              statuses=statuses)
+
+    job_ids = set(job['job_id'] for job in jobs)
+    job_id_to_pool_info = (
+        managed_job_state.get_pool_and_submit_info_from_job_ids(job_ids))
+    cluster_names: Dict[int, str] = {}
+    for job in jobs:
+        # pool info is (pool, cluster_name, job_id_on_pool_cluster)
+        pool_info = job_id_to_pool_info.get(job['job_id'], None)
+        if pool_info and pool_info[0]:
+            cluster_name = pool_info[1]
+        else:
+            cluster_name = generate_managed_job_cluster_name(
+                job['task_name'], job['job_id'])
+        cluster_names[job['job_id']] = cluster_name
+    cluster_name_to_handles = global_user_state.get_handles_from_cluster_names(
+        set(cluster_names.values()))
+
     for job in jobs:
         end_at = job['end_at']
         if end_at is None:
@@ -1343,15 +1389,8 @@ def get_managed_job_queue(
         job['status'] = job['status'].value
         job['schedule_state'] = job['schedule_state'].value
 
-        pool = managed_job_state.get_pool_from_job_id(job['job_id'])
-        if pool is not None:
-            cluster_name, _ = managed_job_state.get_pool_submit_info(
-                job['job_id'])
-        else:
-            cluster_name = generate_managed_job_cluster_name(
-                job['task_name'], job['job_id'])
-        handle = global_user_state.get_handle_from_cluster_name(
-            cluster_name) if cluster_name is not None else None
+        cluster_name = cluster_names[job['job_id']]
+        handle = cluster_name_to_handles.get(cluster_name, None)
         if isinstance(handle, backends.CloudVmRayResourceHandle):
             resources_str = resources_utils.get_readable_resources_repr(
                 handle, simplify=True)
@@ -1506,18 +1545,26 @@ def load_managed_job_queue(
         total_no_filter = total
         result_type = ManagedJobQueueResultType.LIST
 
+    job_id_to_user_hash: Dict[int, str] = {}
     for job in jobs:
-        job['status'] = managed_job_state.ManagedJobStatus(job['status'])
         if 'user_hash' in job and job['user_hash'] is not None:
             # Skip jobs that do not have user_hash info.
             # TODO(cooperc): Remove check before 0.12.0.
-            user = global_user_state.get_user(job['user_hash'])
+            job_id_to_user_hash[job['job_id']] = job['user_hash']
+    user_hash_to_user = global_user_state.get_users(
+        job_id_to_user_hash.values())
+
+    for job in jobs:
+        job['status'] = managed_job_state.ManagedJobStatus(job['status'])
+        if job['job_id'] in job_id_to_user_hash:
+            user_hash = job_id_to_user_hash[job['job_id']]
+            user = user_hash_to_user.get(user_hash, None)
             job['user_name'] = user.name if user is not None else None
     return jobs, total, result_type, total_no_filter, status_counts
 
 
 def _get_job_status_from_tasks(
-    job_tasks: List[Dict[str, Any]]
+    job_tasks: Union[List[responses.ManagedJobRecord], List[Dict[str, Any]]]
 ) -> Tuple[managed_job_state.ManagedJobStatus, int]:
     """Get the current task status and the current task id for a job."""
     managed_task_status = managed_job_state.ManagedJobStatus.SUCCEEDED

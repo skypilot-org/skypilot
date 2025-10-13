@@ -1,5 +1,6 @@
 """Test the controller_utils module."""
-from typing import Any, Dict, Optional, Set, Tuple
+import os
+from typing import Any, Dict, Set
 from unittest import mock
 
 import pytest
@@ -9,7 +10,6 @@ from sky import exceptions
 from sky import resources as resources_lib
 from sky.jobs import constants as managed_job_constants
 from sky.serve import constants as serve_constants
-from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.utils import controller_utils
 from sky.utils import registry
@@ -24,16 +24,16 @@ _DEFAULT_AUTOSTOP = {
     ('controller_type', 'custom_controller_resources_config', 'expected'), [
         ('jobs', {}, {
             'cpus': '4+',
-            'memory': '8x',
+            'memory': '4x',
             'disk_size': 50,
             'autostop': _DEFAULT_AUTOSTOP,
         }),
         ('jobs', {
-            'cpus': '4+',
+            'cpus': '8+',
             'disk_size': 100,
         }, {
-            'cpus': '4+',
-            'memory': '8x',
+            'cpus': '8+',
+            'memory': '4x',
             'disk_size': 100,
             'autostop': _DEFAULT_AUTOSTOP,
         }),
@@ -66,6 +66,8 @@ def test_get_controller_resources(controller_type: str,
     monkeypatch.setattr('sky.skypilot_config.loaded', lambda: True)
     monkeypatch.setattr('sky.skypilot_config.get_nested',
                         get_custom_controller_resources)
+    monkeypatch.setattr('sky.global_user_state.get_handle_from_cluster_name',
+                        lambda _: None)
 
     controller_resources = list(
         controller_utils.get_controller_resources(
@@ -650,3 +652,53 @@ def test_get_cloud_dependencies_installation_commands_cudo_only(
     # Should include Cudo dependencies
     combined_commands = ' '.join(commands)
     assert 'cudoctl' in combined_commands
+
+
+@pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
+def test_shared_controller_vars_to_fill(controller_type: str, monkeypatch):
+    """Test that api_server config is removed from user config sent to controller."""
+    from sky.utils import yaml_utils
+
+    def mock_get_cloud_dependencies_installation_commands(controller):
+        return ['echo "Installing dependencies"']
+
+    monkeypatch.setattr(
+        'sky.utils.controller_utils._get_cloud_dependencies_installation_commands',
+        mock_get_cloud_dependencies_installation_commands)
+
+    controller = controller_utils.Controllers.from_type(controller_type)
+
+    user_config = {
+        'api_server': {
+            'endpoint': 'http://example.com:8080',
+            'service_account_token': 'sky_test_token_123'
+        },
+        'admin_policy': '/path/to/admin/policy',
+        'allowed_contexts': ['context1', 'context2'],
+        'jobs': {
+            'controller': {
+                'resources': {
+                    'cpus': '8+'
+                }
+            }
+        }
+    }
+
+    result = controller_utils.shared_controller_vars_to_fill(
+        controller, '/remote/path/to/config', user_config.copy())
+
+    local_config_path = result['local_user_config_path']
+    assert local_config_path is not None
+
+    saved_config = yaml_utils.read_yaml(local_config_path)
+
+    # Verify that api_server, admin_policy, and allowed_contexts are removed
+    assert 'api_server' not in saved_config
+    assert 'admin_policy' not in saved_config
+    assert 'allowed_contexts' not in saved_config
+
+    # Verify that other config is preserved
+    assert 'jobs' in saved_config
+    assert saved_config['jobs']['controller']['resources']['cpus'] == '8+'
+
+    os.unlink(local_config_path)

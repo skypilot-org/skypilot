@@ -195,7 +195,7 @@ def status(
 def status_kubernetes(
 ) -> Tuple[List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
            List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
-           List[Dict[str, Any]], Optional[str]]:
+           List[responses.ManagedJobRecord], Optional[str]]:
     """Gets all SkyPilot clusters and jobs in the Kubernetes cluster.
 
     Managed jobs and services are also included in the clusters returned.
@@ -270,6 +270,7 @@ all_clusters, unmanaged_clusters, all_jobs, context
         kubernetes_utils.KubernetesSkyPilotClusterInfoPayload.from_cluster(c)
         for c in unmanaged_clusters
     ]
+    all_jobs = [responses.ManagedJobRecord(**job) for job in all_jobs]
     return all_clusters, unmanaged_clusters, all_jobs, context
 
 
@@ -1130,25 +1131,25 @@ def job_status(cluster_name: str,
 # = Storage Management =
 # ======================
 @usage_lib.entrypoint
-def storage_ls() -> List[Dict[str, Any]]:
+def storage_ls() -> List[responses.StorageRecord]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets the storages.
 
     Returns:
-        [
-            {
-                'name': str,
-                'launched_at': int timestamp of creation,
-                'store': List[sky.StoreType],
-                'last_use': int timestamp of last use,
-                'status': sky.StorageStatus,
-            }
-        ]
+        List[responses.StorageRecord]: A list of storage records.
     """
     storages = global_user_state.get_storage()
+    storage_records = []
     for storage in storages:
-        storage['store'] = list(storage.pop('handle').sky_stores.keys())
-    return storages
+        storage_records.append(
+            responses.StorageRecord(
+                name=storage['name'],
+                launched_at=storage['launched_at'],
+                store=list(storage.pop('handle').sky_stores.keys()),
+                last_use=storage['last_use'],
+                status=storage['status'],
+            ))
+    return storage_records
 
 
 @usage_lib.entrypoint
@@ -1164,9 +1165,7 @@ def storage_delete(name: str) -> None:
     if handle is None:
         raise ValueError(f'Storage name {name!r} not found.')
     else:
-        storage_object = data.Storage(name=handle.storage_name,
-                                      source=handle.source,
-                                      sync_on_reconstruction=False)
+        storage_object = data.Storage.from_handle(handle)
         storage_object.delete()
 
 
