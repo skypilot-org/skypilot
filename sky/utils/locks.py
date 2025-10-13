@@ -243,6 +243,7 @@ class PostgresLock(DistributedLock):
         if not self._acquired or not self._connection:
             return
 
+        connection_lost = False
         try:
             cursor = self._connection.cursor()
             cursor.execute('SELECT pg_advisory_unlock(%s)', (self._lock_key,))
@@ -252,8 +253,11 @@ class PostgresLock(DistributedLock):
             # Lost connection to the database, likely the lock is force unlocked
             # by other routines.
             logger.debug(f'Failed to release postgres lock {self.lock_id}: {e}')
+            connection_lost = True
         finally:
-            self._close_connection()
+            # Invalidate if connection was lost to prevent SQLAlchemy from
+            # trying to reset a dead connection
+            self._close_connection(invalidate=connection_lost)
 
     def force_unlock(self) -> None:
         """Force unlock the postgres advisory lock."""
@@ -292,13 +296,24 @@ class PostgresLock(DistributedLock):
         finally:
             self._close_connection()
 
-    def _close_connection(self) -> None:
-        """Close the postgres connection."""
+    def _close_connection(self, invalidate: bool = False) -> None:
+        """Close the postgres connection.
+
+        Args:
+            invalidate: If True, invalidate connection instead of closing it.
+                Use this when the connection might be broken (e.g., after
+                pg_terminate_backend) to prevent SQLAlchemy from trying to
+                reset it (which would result in an error being logged).
+        """
         if self._connection:
             try:
-                self._connection.close()
+                if invalidate:
+                    self._connection.invalidate()
+                else:
+                    self._connection.close()
             except Exception as e:  # pylint: disable=broad-except
-                logger.debug(f'Failed to close postgres connection: {e}')
+                logger.debug(
+                    f'Failed to invalidate or close postgres connection: {e}')
             self._connection = None
 
     def is_locked(self) -> bool:
