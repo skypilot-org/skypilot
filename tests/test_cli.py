@@ -1,17 +1,16 @@
 import re
-
-import click
-import pytest
-
 from unittest import mock
 
+import click
 from click import testing as cli_testing
+import pytest
+
 import requests
 
 from sky import clouds
+from sky import exceptions
 from sky import models
 from sky import server
-from sky import exceptions
 from sky.client.cli import command
 from sky.schemas.api import responses
 from sky.utils import status_lib
