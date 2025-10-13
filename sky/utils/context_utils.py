@@ -19,6 +19,8 @@ from sky.utils import subprocess_utils
 
 StreamHandler = Callable[[IO[Any], IO[Any]], str]
 
+logger = sky_logging.init_logger(__name__)
+
 
 # TODO(aylei): call hijack_sys_attrs() proactivly in module init at server-side
 # once we have context widely adopted.

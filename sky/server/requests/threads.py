@@ -41,6 +41,7 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
             result = fn(*args, **kwargs)
             fut.set_result(result)
         except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Executor [{self.name}] error executing {fn}: {e}')
             fut.set_exception(e)
         finally:
             self.running.decrement()
@@ -51,30 +52,22 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
                 raise RuntimeError(
                     'Cannot submit task after executor is shutdown')
             count = self.running.increment()
-            logger.info('Submitting task to thread executor',
-                        extra={
-                            'executor': self.name,
-                            'count': count,
-                            'max_workers': self.max_workers,
-                        })
             if count > self.max_workers:
                 self.running.decrement()
                 raise exceptions.ConcurrentWorkerExhaustedError(
                     f'Maximum concurrent workers {self.max_workers} of threads '
                     f'executor [{self.name}] reached')
             fut: concurrent.futures.Future = concurrent.futures.Future()
-            logger.info('Running task in thread executor',
-                        extra={
-                            'executor': self.name,
-                            'count': count,
-                            'max_workers': self.max_workers,
-                        })
+            # Name is assigned for debugging purpose, duplication is fine
             thread = threading.Thread(target=self._task_wrapper,
-                                      args=(fn, fut, args, kwargs),
+                                      name=f'{self.name}-{count}',
+                                      args=(fn, fut, *args),
+                                      kwargs=kwargs,
                                       daemon=True)
             # Protected by GIL
             self._threads.append(thread)
             thread.start()
+            return fut
 
     def shutdown(self, wait=True):
         with self._shutdown_lock:

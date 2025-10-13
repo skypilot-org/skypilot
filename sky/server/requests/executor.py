@@ -602,8 +602,15 @@ async def _execute_request_coroutine(request: api_requests.Request):
     # 1. skypilot config is not contextual
     # 2. envs that read directly from os.environ are not contextual
     ctx.override_envs(request_body.env_vars)
-    fut: asyncio.Future = context_utils.to_thread_with_executor(
-        get_request_thread_executor(), func, **request_body.to_kwargs())
+    try:
+        fut: asyncio.Future = context_utils.to_thread_with_executor(
+            get_request_thread_executor(), func, **request_body.to_kwargs())
+    except Exception as e:  # pylint: disable=broad-except
+        ctx.redirect_log(original_output)
+        api_requests.set_request_cancelled(request.request_id)
+        logger.error(f'Failed to run request {request.request_id} due to '
+                     f'{common_utils.format_exception(e)}')
+        return
 
     async def poll_task(request_id: str) -> bool:
         req_status = await api_requests.get_request_status_async(request_id)

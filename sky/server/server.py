@@ -1484,10 +1484,11 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
         # to avoid storming the DB and CPU in the meantime
         await asyncio.sleep(0.1)
     request_task = await requests_lib.get_request_async(request_id)
-    if request_task.should_retry:
-        raise fastapi.HTTPException(
-            status_code=503, detail=f'Request {request_id!r} should be retried')
     request_error = request_task.get_error()
+    if request_task.should_retry:
+        msg = (request_error['message'] if request_error is not None else
+               f'Request {request_id!r} should be retried')
+        raise fastapi.HTTPException(status_code=503, detail=msg)
     if request_error is not None:
         raise fastapi.HTTPException(status_code=500,
                                     detail=request_task.encode().model_dump())
