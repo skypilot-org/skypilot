@@ -187,7 +187,9 @@ class Controllers(enum.Enum):
         default_autostop_config=serve_constants.CONTROLLER_AUTOSTOP)
 
     @classmethod
-    def from_name(cls, name: Optional[str]) -> Optional['Controllers']:
+    def from_name(cls,
+                  name: Optional[str],
+                  expect_exact_match: bool = True) -> Optional['Controllers']:
         """Check if the cluster name is a controller name.
 
         Returns:
@@ -208,6 +210,13 @@ class Controllers(enum.Enum):
         elif name.startswith(common.JOB_CONTROLLER_PREFIX):
             controller = cls.JOBS_CONTROLLER
             prefix = common.JOB_CONTROLLER_PREFIX
+
+        if expect_exact_match:
+            assert controller is not None, name
+            assert name == controller.value.cluster_name, (
+                name, controller.value.cluster_name)
+            return controller
+
         if controller is not None and name != controller.value.cluster_name:
             # The client-side cluster_name is not accurate. Assume that `name`
             # is the actual cluster name, so need to set the controller's
@@ -249,7 +258,7 @@ def get_controller_for_pool(pool: bool) -> Controllers:
 def high_availability_specified(cluster_name: Optional[str]) -> bool:
     """Check if the controller high availability is specified in user config.
     """
-    controller = Controllers.from_name(cluster_name)
+    controller = Controllers.from_name(cluster_name, expect_exact_match=True)
     if controller is None:
         return False
 
@@ -432,7 +441,7 @@ def check_cluster_name_not_controller(
     Returns:
       None, if the cluster name is not a controller name.
     """
-    controller = Controllers.from_name(cluster_name)
+    controller = Controllers.from_name(cluster_name, expect_exact_match=True)
     if controller is not None:
         msg = controller.value.check_cluster_name_hint
         if operation_str is not None:
