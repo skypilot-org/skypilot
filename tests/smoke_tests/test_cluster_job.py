@@ -1960,7 +1960,11 @@ def test_long_setup_run_script(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
                                      suffix='.yaml') as f:
-        debug_command = f'sky exec {name} "source ~/skypilot-runtime/bin/activate; ray status --verbose; ray list tasks --detail' + '; find /home/sky/sky_logs -name "*.log" -type f -exec tail -f \{\} +"'
+        debug_command = (
+            f'sky exec {name} "source ~/skypilot-runtime/bin/activate; '
+            f'ray status --verbose; ray list tasks --detail; '
+            f'find /home/sky/sky_logs -name "*.log" -type f -exec tail -f '
+            f'{{}} +"')
         f.write(
             textwrap.dedent(""" \
             setup: |
@@ -1988,7 +1992,7 @@ def test_long_setup_run_script(generic_cloud: str):
                 f'sky logs {name} --status 1',
                 f'sky logs {name} --status 2',
                 f'sky logs {name} --status 3',
-                f'sky down {name} -y',
+                # f'sky down {name} -y',
                 f'sky jobs launch -y -n {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {f.name}',
                 f'sky jobs queue | grep {name} | grep SUCCEEDED',
             ],
