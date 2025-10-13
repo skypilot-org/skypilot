@@ -1324,12 +1324,13 @@ def get_allocated_gpu_qty_by_node(
     try:
         allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
         for item_dict in ijson.items(response,
-                                    'items.item',
-                                    buf_size=IJSON_BUFFER_SIZE):
+                                     'items.item',
+                                     buf_size=IJSON_BUFFER_SIZE):
             pod = V1Pod.from_dict(item_dict)
             if should_exclude_pod_from_gpu_allocation(pod):
-                logger.debug(f'Excluding pod {pod.metadata.name} from GPU count '
-                            f'calculations on node {pod.spec.node_name}')
+                logger.debug(
+                    f'Excluding pod {pod.metadata.name} from GPU count '
+                    f'calculations on node {pod.spec.node_name}')
                 continue
             # Sum GPU requests across all containers
             for container in pod.spec.containers:
@@ -1337,7 +1338,8 @@ def get_allocated_gpu_qty_by_node(
                     allocated_qty = get_node_accelerator_count(
                         context, container.resources.requests)
                     if allocated_qty > 0 and pod.spec.node_name:
-                        allocated_qty_by_node[pod.spec.node_name] += allocated_qty
+                        allocated_qty_by_node[
+                            pod.spec.node_name] += allocated_qty
         return allocated_qty_by_node
     finally:
         response.release_conn()
@@ -3035,12 +3037,14 @@ def get_kubernetes_node_info(
 
     # Get the allocated GPU quantity by each node
     allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
+    error_on_get_allocated_gpu_qty_by_node = False
     if has_accelerator_nodes:
         try:
             allocated_qty_by_node = get_allocated_gpu_qty_by_node(
                 context=context)
         except kubernetes.api_exception() as e:
             if e.status == 403:
+                error_on_get_allocated_gpu_qty_by_node = True
                 pass
             else:
                 raise
@@ -3085,7 +3089,7 @@ def get_kubernetes_node_info(
                 ip_address=node_ip)
             continue
 
-        if not has_accelerator_nodes:
+        if not has_accelerator_nodes or error_on_get_allocated_gpu_qty_by_node:
             accelerators_available = -1
         else:
             allocated_qty = allocated_qty_by_node[node.metadata.name]
