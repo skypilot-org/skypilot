@@ -320,8 +320,8 @@ def contextual(func: Callable[P, T]) -> Callable[P, T]:
     def run_in_context(*args: P.args, **kwargs: P.kwargs) -> T:
         # Within the new contextvars Context, set up the SkyPilotContext.
         original_ctx = get()
-        initialize(original_ctx)
-        return func(*args, **kwargs)
+        with initialize(original_ctx):
+            return func(*args, **kwargs)
 
     @functools.wraps(func)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
@@ -346,8 +346,8 @@ def contextual_async(
     async def run_in_context(*args: P.args, **kwargs: P.kwargs) -> T:
         # Within the new contextvars Context, set up the SkyPilotContext.
         original_ctx = get()
-        initialize(original_ctx)
-        return await func(*args, **kwargs)
+        with initialize(original_ctx):
+            return await func(*args, **kwargs)
 
     @functools.wraps(func)
     async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
