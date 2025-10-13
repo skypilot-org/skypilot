@@ -4,7 +4,6 @@ from unittest import mock
 import click
 from click import testing as cli_testing
 import pytest
-
 import requests
 
 from sky import clouds
