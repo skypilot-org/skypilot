@@ -81,6 +81,26 @@ logger = sky_logging.init_logger(__name__)
 # platforms, including macOS.
 multiprocessing.set_start_method('spawn', force=True)
 
+# Max threads that is equivalent to the number of thread workers in the
+# default thread pool executor of event loop.
+_REQUEST_THREADS_LIMIT = min(32, (os.cpu_count() or 0) + 4)
+
+_REQUEST_THREAD_EXECUTOR_LOCK = threading.Lock()
+# A dedicated thread pool executor for synced requests execution in coroutine
+_REQUEST_THREAD_EXECUTOR: Optional[concurrent.futures.ThreadPoolExecutor] = None
+
+
+def get_request_thread_executor() -> concurrent.futures.ThreadPoolExecutor:
+    """Lazy init and return the request thread executor for current process."""
+    global _REQUEST_THREAD_EXECUTOR
+    if _REQUEST_THREAD_EXECUTOR is not None:
+        return _REQUEST_THREAD_EXECUTOR
+    with _REQUEST_THREAD_EXECUTOR_LOCK:
+        if _REQUEST_THREAD_EXECUTOR is None:
+            _REQUEST_THREAD_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+                max_workers=_REQUEST_THREADS_LIMIT)
+        return _REQUEST_THREAD_EXECUTOR
+
 
 class RequestQueue:
     """The queue for the requests, either redis or multiprocessing.
@@ -349,32 +369,6 @@ def override_request_env_and_config(
         os.environ.update(original_env)
 
 
-def _get_current_output() -> Tuple[int, int]:
-    """Get the current stdout and stderr file descriptors."""
-    return os.dup(sys.stdout.fileno()), os.dup(sys.stderr.fileno())
-
-
-def _redirect_output(file: TextIO) -> None:
-    """Redirect stdout and stderr to the log file."""
-    # Get the file descriptor from the file object
-    fd = file.fileno()
-    # Copy this fd to stdout and stderr
-    os.dup2(fd, sys.stdout.fileno())
-    os.dup2(fd, sys.stderr.fileno())
-
-
-def _restore_output(original_stdout: Optional[int],
-                    original_stderr: Optional[int]) -> None:
-    """Restore stdout and stderr to their original file descriptors."""
-    if original_stdout is not None:
-        os.dup2(original_stdout, sys.stdout.fileno())
-        os.close(original_stdout)
-
-    if original_stderr is not None:
-        os.dup2(original_stderr, sys.stderr.fileno())
-        os.close(original_stderr)
-
-
 def _sigterm_handler(signum: int, frame: Optional['types.FrameType']) -> None:
     raise KeyboardInterrupt
 
@@ -402,6 +396,34 @@ def _request_execution_wrapper(request_id: str,
     logger.info(f'Running request {request_id} with pid {pid}')
 
     original_stdout = original_stderr = None
+
+    def _save_current_output() -> None:
+        """Save the current stdout and stderr file descriptors."""
+        nonlocal original_stdout, original_stderr
+        original_stdout = os.dup(sys.stdout.fileno())
+        original_stderr = os.dup(sys.stderr.fileno())
+
+    def _redirect_output(file: TextIO) -> None:
+        """Redirect stdout and stderr to the log file."""
+        # Get the file descriptor from the file object
+        fd = file.fileno()
+        # Copy this fd to stdout and stderr
+        os.dup2(fd, sys.stdout.fileno())
+        os.dup2(fd, sys.stderr.fileno())
+
+    def _restore_output() -> None:
+        """Restore stdout and stderr to their original file descriptors."""
+        nonlocal original_stdout, original_stderr
+        if original_stdout is not None:
+            os.dup2(original_stdout, sys.stdout.fileno())
+            os.close(original_stdout)
+            original_stdout = None
+
+        if original_stderr is not None:
+            os.dup2(original_stderr, sys.stderr.fileno())
+            os.close(original_stderr)
+            original_stderr = None
+
     try:
         # As soon as the request is updated with the executor PID, we can
         # receive SIGTERM from cancellation. So, we update the request inside
@@ -422,7 +444,7 @@ def _request_execution_wrapper(request_id: str,
         # Store copies of the original stdout and stderr file descriptors
         # We do this in two steps because we should make sure to restore the
         # original values even if we are cancelled or fail during the redirect.
-        original_stdout, original_stderr = _get_current_output()
+        _save_current_output()
 
         # Append to the log file instead of overwriting it since there might be
         # logs from previous retries.
@@ -464,15 +486,14 @@ def _request_execution_wrapper(request_id: str,
             # clear the pid of the request.
             request_task.pid = None
         # Yield control to the scheduler for uniform handling of retries.
-        _restore_output(original_stdout, original_stderr)
+        _restore_output()
         raise
     except (Exception, SystemExit) as e:  # pylint: disable=broad-except
         api_requests.set_request_failed(request_id, e)
         # Manually reset the original stdout and stderr file descriptors early
         # so that the "Request xxxx failed due to ..." log message will be
         # written to the original stdout and stderr file descriptors.
-        _restore_output(original_stdout, original_stderr)
-        original_stdout = original_stderr = None
+        _restore_output()
         logger.info(f'Request {request_id} failed due to '
                     f'{common_utils.format_exception(e)}')
         return
@@ -482,11 +503,10 @@ def _request_execution_wrapper(request_id: str,
         # Manually reset the original stdout and stderr file descriptors early
         # so that the "Request xxxx failed due to ..." log message will be
         # written to the original stdout and stderr file descriptors.
-        _restore_output(original_stdout, original_stderr)
-        original_stdout = original_stderr = None
+        _restore_output()
         logger.info(f'Request {request_id} finished')
     finally:
-        _restore_output(original_stdout, original_stderr)
+        _restore_output()
         try:
             # Capture the peak RSS before GC.
             peak_rss = max(proc.memory_info().rss, metrics_lib.peak_rss_bytes)
@@ -576,15 +596,15 @@ async def _execute_request_coroutine(request: api_requests.Request):
     # 1. skypilot config is not contextual
     # 2. envs that read directly from os.environ are not contextual
     ctx.override_envs(request_body.env_vars)
-    fut: asyncio.Future = context_utils.to_thread(func,
-                                                  **request_body.to_kwargs())
+    fut: asyncio.Future = context_utils.to_thread_with_executor(
+        get_request_thread_executor(), func, **request_body.to_kwargs())
 
     async def poll_task(request_id: str) -> bool:
-        request = await api_requests.get_request_async(request_id)
-        if request is None:
+        req_status = await api_requests.get_request_status_async(request_id)
+        if req_status is None:
             raise RuntimeError('Request not found')
 
-        if request.status == api_requests.RequestStatus.CANCELLED:
+        if req_status.status == api_requests.RequestStatus.CANCELLED:
             ctx.cancel()
             return True
 

@@ -44,6 +44,7 @@ from sky.utils import resources_utils
 
 # ---------- Job Queue. ----------
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
+@pytest.mark.no_shadeform  # Shadeform does not have T4 GPUs
 @pytest.mark.no_fluidstack  # FluidStack DC has low availability of T4 GPUs
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus. run test_ibm_job_queue instead
@@ -89,6 +90,7 @@ def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
 @pytest.mark.no_lambda_cloud  # Doesn't support Lambda Cloud for now
 @pytest.mark.no_ibm  # Doesn't support IBM Cloud for now
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
+@pytest.mark.no_shadeform  # Shadeform does not have T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace doesn't have T4 GPUs
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
@@ -234,6 +236,7 @@ def test_scp_job_queue():
 
 
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
+@pytest.mark.no_shadeform  # Shadeform does not have T4 GPUs
 @pytest.mark.no_fluidstack  # FluidStack DC has low availability of T4 GPUs
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus. run test_ibm_job_queue_multinode instead
@@ -241,6 +244,7 @@ def test_scp_job_queue():
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus.
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_kubernetes  # Kubernetes not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
@@ -287,6 +291,7 @@ def test_job_queue_multinode(generic_cloud: str, accelerator: Dict[str, str]):
 @pytest.mark.no_fluidstack  # No FluidStack VM has 8 CPUs
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
 @pytest.mark.no_vast  # Vast doesn't guarantee exactly 8 CPUs, only at least.
+@pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic
 def test_large_job_queue(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -334,6 +339,7 @@ def test_large_job_queue(generic_cloud: str):
 @pytest.mark.no_fluidstack  # No FluidStack VM has 8 CPUs
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
 @pytest.mark.no_vast  # No Vast Cloud VM has 8 CPUs
+@pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic
 @pytest.mark.resource_heavy
 def test_fast_large_job_queue(generic_cloud: str):
@@ -400,6 +406,7 @@ def test_ibm_job_queue_multinode():
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
 @pytest.mark.no_hyperbolic  # Doesn't support Hyperbolic for now
+@pytest.mark.no_shadeform  # Doesn't support Shadeform for now
 @pytest.mark.no_seeweb  # Seeweb does not support Docker images
 # TODO(zhwu): we should fix this for kubernetes
 def test_docker_preinstalled_package(generic_cloud: str):
@@ -419,6 +426,7 @@ def test_docker_preinstalled_package(generic_cloud: str):
 
 # ---------- Submitting multiple tasks to the same cluster. ----------
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
+@pytest.mark.no_shadeform  # Shadeform does not have T4 GPUs
 @pytest.mark.no_fluidstack  # FluidStack DC has low availability of T4 GPUs
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
 @pytest.mark.no_paperspace  # Paperspace does not have T4 gpus
@@ -481,6 +489,7 @@ def test_multi_echo(generic_cloud: str):
 
 # ---------- Task: 1 node training. ----------
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
+@pytest.mark.no_shadeform  # Shadeform does not have T4 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack does not have T4 gpus for now
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
@@ -642,6 +651,7 @@ def test_tpu_pod_slice_gke():
 
 # ---------- Simple apps. ----------
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
@@ -665,6 +675,7 @@ def test_multi_hostname(generic_cloud: str):
 
 
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
@@ -1268,6 +1279,7 @@ def test_azure_start_stop():
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 and autostop yet
 @pytest.mark.no_seeweb  # Seeweb does not support autostop
 def test_autostop_wait_for_jobs(generic_cloud: str):
@@ -1340,6 +1352,7 @@ def test_autostop_wait_for_jobs(generic_cloud: str):
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 and autostop yet
 @pytest.mark.no_seeweb  # Seeweb does not support autostop
 def test_autostop_wait_for_jobs_and_ssh(generic_cloud: str):
@@ -1386,6 +1399,7 @@ def test_autostop_wait_for_jobs_and_ssh(generic_cloud: str):
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 and autostop yet
 @pytest.mark.no_seeweb  # Seeweb does not support autostop
 def test_autostop_wait_for_none(generic_cloud: str):
@@ -1471,6 +1485,7 @@ def test_cancel_azure():
 @pytest.mark.no_paperspace  # Paperspace has `gnome-shell` on nvidia-smi
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support num_nodes > 1 yet
 @pytest.mark.resource_heavy
@@ -1543,6 +1558,7 @@ def test_cancel_ibm():
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
+@pytest.mark.no_shadeform  # Shadeform does not support spot instances
 @pytest.mark.no_seeweb  # Seeweb does not support spot instances
 @pytest.mark.no_do
 def test_use_spot(generic_cloud: str):
@@ -2078,6 +2094,7 @@ def test_remote_server_api_login():
 @pytest.mark.no_nebius  # Nebius does not support autodown
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
+@pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support autostop
 def test_autostop_with_unhealthy_ray_cluster(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -2117,6 +2134,7 @@ def test_autostop_with_unhealthy_ray_cluster(generic_cloud: str):
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_nebius  # Nebius does not support autodown
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
+@pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support autostop
 def test_autodown(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -2256,6 +2274,59 @@ def test_kubernetes_pod_config_pvc():
         )
         smoke_tests_utils.run_one_test(test)
         os.unlink(task_yaml_path)
+
+
+# ---------- Testing Launching with Pending Pods on Kubernetes ----------
+@pytest.mark.kubernetes
+def test_launching_with_pending_pods():
+    """Test Kubernetes launching with pending pods."""
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Kubernetes.max_cluster_name_length())
+    head = f'{name_on_cloud}-head'
+    test = smoke_tests_utils.Test(
+        'kubernetes_pod_pending',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name, f'kubectl create -f - <<EOF\n'
+                f'apiVersion: v1\n'
+                f'kind: Pod\n'
+                f'metadata:\n'
+                f'  name: {head}\n'
+                f'  labels:\n'
+                f'    parent: skypilot\n'
+                f'    ray-node-type: head\n'
+                f'    skypilot-head-node: "1"\n'
+                f'    ray-cluster-name: {name_on_cloud}\n'
+                f'    skypilot-cluster-name: {name_on_cloud}\n'
+                f'spec:\n'
+                f'  containers:\n'
+                f'  - command:\n'
+                f'    - /bin/sh\n'
+                f'    - -c\n'
+                f'    - sleep 365d\n'
+                f'    image: us-docker.pkg.dev/sky-dev-465/skypilotk8s/skypilot:latest\n'
+                f'    imagePullPolicy: IfNotPresent\n'
+                f'    name: skypilot\n'
+                f'  nodeSelector:\n'
+                f'    test: test\n'
+                f'EOF'),
+            # Check Pod pending
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name, f'kubectl get pod {head} | grep "Pending"'),
+            f's=$(SKYPILOT_DEBUG=1 sky launch -y -c {name} --infra kubernetes --cpus 0.1+ \'echo hi\'); echo "$s"; echo; echo; echo "$s" | grep "Timed out while waiting for nodes to start"',
+            # Check Pods have been deleted
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'pod=$(kubectl get pod -l ray-cluster-name={name_on_cloud} | grep {head}); if [ -n "$pod" ]; then exit 1; fi'
+            ),
+        ],
+        f'sky down -y {name} && '
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        timeout=10 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.kubernetes

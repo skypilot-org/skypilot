@@ -84,6 +84,7 @@ _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
 _JOB_STATUS_FETCH_MAX_RETRIES = 3
 _JOB_K8S_TRANSIENT_NW_MSG = 'Unable to connect to the server: dial tcp'
+_JOB_STATUS_FETCH_TIMEOUT_SECONDS = 30
 
 _JOB_WAITING_STATUS_MESSAGE = ux_utils.spinner_message(
     'Waiting for task to start[/]'
@@ -322,10 +323,12 @@ async def get_job_status(
     for i in range(_JOB_STATUS_FETCH_MAX_RETRIES):
         try:
             job_logger.info('=== Checking the job status... ===')
-            statuses = await context_utils.to_thread(backend.get_job_status,
-                                                     handle,
-                                                     job_ids=job_ids,
-                                                     stream_logs=False)
+            statuses = await asyncio.wait_for(
+                context_utils.to_thread(backend.get_job_status,
+                                        handle,
+                                        job_ids=job_ids,
+                                        stream_logs=False),
+                timeout=_JOB_STATUS_FETCH_TIMEOUT_SECONDS)
             status = list(statuses.values())[0]
             if status is None:
                 job_logger.info('No job found.')
@@ -334,7 +337,7 @@ async def get_job_status(
             job_logger.info('=' * 34)
             return status
         except (exceptions.CommandError, grpc.RpcError, grpc.FutureTimeoutError,
-                ValueError, TypeError) as e:
+                ValueError, TypeError, asyncio.TimeoutError) as e:
             # Note: Each of these exceptions has some additional conditions to
             # limit how we handle it and whether or not we catch it.
             # Retry on k8s transient network errors. This is useful when using
@@ -355,6 +358,9 @@ async def get_job_status(
                     is_transient_error = True
             elif isinstance(e, grpc.FutureTimeoutError):
                 detailed_reason = 'Timeout'
+            elif isinstance(e, asyncio.TimeoutError):
+                detailed_reason = ('Job status check timed out after '
+                                   f'{_JOB_STATUS_FETCH_TIMEOUT_SECONDS}s')
             # TODO(cooperc): Gracefully handle these exceptions in the backend.
             elif isinstance(e, ValueError):
                 # If the cluster yaml is deleted in the middle of getting the

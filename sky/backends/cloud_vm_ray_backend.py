@@ -141,6 +141,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.OCI: 300,
     clouds.Paperspace: 600,
     clouds.Kubernetes: 300,
+    clouds.Shadeform: 300,
     clouds.Vsphere: 240,
 }
 
@@ -211,6 +212,7 @@ _EXCEPTION_MSG_AND_RETURNCODE_FOR_DUMP_INLINE_SCRIPT = [
     ('too long', 255),
     ('request-uri too large', 1),
     ('request header fields too large', 1),
+    ('400 bad request', 1),  # CloudFlare 400 error
 ]
 
 _RESOURCES_UNAVAILABLE_LOG = (
@@ -303,6 +305,7 @@ def _get_cluster_config_template(cloud):
         clouds.RunPod: 'runpod-ray.yml.j2',
         clouds.Kubernetes: 'kubernetes-ray.yml.j2',
         clouds.SSH: 'kubernetes-ray.yml.j2',
+        clouds.Shadeform: 'shadeform-ray.yml.j2',
         clouds.Vsphere: 'vsphere-ray.yml.j2',
         clouds.Vast: 'vast-ray.yml.j2',
         clouds.Fluidstack: 'fluidstack-ray.yml.j2',
@@ -2825,7 +2828,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 return grpc.insecure_channel(f'localhost:{tunnel.port}',
                                              options=grpc_options)
             except socket.error as e:
-                logger.warning(
+                logger.debug(
                     'Failed to connect to SSH tunnel for cluster '
                     f'{self.cluster_name!r} on port {tunnel.port} ({e}), '
                     'acquiring lock')
@@ -2851,7 +2854,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                         return grpc.insecure_channel(f'localhost:{tunnel.port}',
                                                      options=grpc_options)
                 except socket.error as e:
-                    logger.warning(
+                    logger.debug(
                         'Failed to connect to SSH tunnel for cluster '
                         f'{self.cluster_name!r} on port {tunnel.port} ({e}), '
                         'opening new tunnel')

@@ -578,7 +578,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
             f'sky jobs launch -d --infra {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} -n {job_name} "echo hello world; sleep 60"',
             # No restart on switch to current, cli in current, server in base, verify cli works with different version of sky server
-            f'{self.ACTIVATE_CURRENT} && sky api status',
+            f'{self.ACTIVATE_CURRENT} && sky api status -l none',
             f'{self.ACTIVATE_CURRENT} && sky api info',
             f'{self.ACTIVATE_CURRENT} && {self._wait_for_managed_job_status(job_name, [sky.ManagedJobStatus.RUNNING])}',
             f'{self.ACTIVATE_CURRENT} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {job_name} | grep RUNNING',
