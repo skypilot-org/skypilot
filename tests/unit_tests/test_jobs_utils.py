@@ -1,5 +1,4 @@
 import logging
-import sys
 import time
 from unittest import mock
 
@@ -72,21 +71,20 @@ async def test_get_job_status_timeout(mock_get_handle, mock_logger):
 
     mock_backend.get_job_status = slow_get_job_status
 
-    test_logger = logging.getLogger('test_logger')
+    test_job_logger = logging.getLogger('test_job_logger')
 
     start_time = time.time()
     result = await utils.get_job_status(backend=mock_backend,
                                         cluster_name='test-cluster',
                                         job_id=1,
-                                        job_logger=test_logger)
+                                        job_logger=test_job_logger)
     assert result is None, 'Expected None when timeout occurs'
 
     elapsed_time = time.time() - start_time
     assert elapsed_time >= 30 and elapsed_time < 31, f'Expected timeout around 30s, but took {elapsed_time}s'
 
-    # one for "checking the job status" message, one for failure reason.
+    # one for failure reason, one for separator
     assert mock_logger.info.call_count == 2
-
-    second_call = mock_logger.info.call_args_list[0][0][0]
-    assert 'Failed to get job status:' in second_call
-    assert 'timed out after 30s' in second_call
+    first_call = mock_logger.info.call_args_list[0][0][0]
+    assert 'Failed to get job status:' in first_call
+    assert 'timed out after 30s' in first_call
