@@ -576,8 +576,11 @@ async def _execute_request_coroutine(request: api_requests.Request):
     # 1. skypilot config is not contextual
     # 2. envs that read directly from os.environ are not contextual
     ctx.override_envs(request_body.env_vars)
-    fut: asyncio.Future = context_utils.to_thread(func,
-                                                  **request_body.to_kwargs())
+    fut: Optional[asyncio.Future] = None
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        fut = context_utils.to_thread_with_executor(executor, func,
+                                                    **request_body.to_kwargs())
+    assert fut is not None, 'Failed to submit task to thread executor'
 
     async def poll_task(request_id: str) -> bool:
         req_status = await api_requests.get_request_status_async(request_id)
