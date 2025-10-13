@@ -400,7 +400,8 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
         for request_task in get_request_tasks(req_filter=RequestTaskFilter(
             status=[RequestStatus.PENDING, RequestStatus.RUNNING],
             exclude_request_names=[exclude_request_name],
-            cluster_names=[cluster_name]))
+            cluster_names=[cluster_name],
+            fields=['request_id']))
     ]
     kill_requests(request_ids)
 
@@ -418,6 +419,7 @@ def kill_requests(request_ids: Optional[List[str]] = None,
     Returns:
         A list of request IDs that were cancelled.
     """
+    request_id_is_from_db = False
     if request_ids is None:
         request_ids = [
             request_task.request_id
@@ -425,18 +427,27 @@ def kill_requests(request_ids: Optional[List[str]] = None,
                 status=[RequestStatus.PENDING, RequestStatus.RUNNING],
                 # Avoid cancelling the cancel request itself.
                 exclude_request_names=['sky.api_cancel'],
-                user_id=user_id))
+                user_id=user_id,
+                fields=['request_id']))
         ]
-    cancelled_request_ids = []
+        # Since we got these request IDs from the database, we can assume
+        # they are exact matches.
+        request_id_is_from_db = True
+    internal_request_ids = set(
+        event.id for event in daemons.INTERNAL_REQUEST_DAEMONS)
+    request_ids_to_cancel = []
     for request_id in request_ids:
-        with update_request(request_id) as request_record:
+        if request_id in internal_request_ids:
+            continue
+        request_ids_to_cancel.append(request_id)
+    del request_ids
+    cancelled_request_ids = []
+    for request_id in request_ids_to_cancel:
+        with update_request(
+                request_id,
+                exact_match=request_id_is_from_db) as request_record:
             if request_record is None:
                 logger.debug(f'No request ID {request_id}')
-                continue
-            # Skip internal requests. The internal requests are scheduled with
-            # request_id in range(len(INTERNAL_REQUEST_EVENTS)).
-            if request_record.request_id in set(
-                    event.id for event in daemons.INTERNAL_REQUEST_DAEMONS):
                 continue
             if request_record.status > RequestStatus.RUNNING:
                 logger.debug(f'Request {request_id} already finished')
@@ -581,12 +592,14 @@ def request_lock_path(request_id: str) -> str:
 @contextlib.contextmanager
 @init_db
 @metrics_lib.time_me
-def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
+def update_request(
+        request_id: str,
+        exact_match: bool = False) -> Generator[Optional[Request], None, None]:
     """Get and update a SkyPilot API request."""
     # Acquire the lock to avoid race conditions between multiple request
     # operations, e.g. execute and cancel.
     with filelock.FileLock(request_lock_path(request_id)):
-        request = _get_request_no_lock(request_id)
+        request = _get_request_no_lock(request_id, exact_match=exact_match)
         yield request
         if request is not None:
             _add_or_update_request_no_lock(request)
@@ -604,27 +617,39 @@ async def update_status_msg_async(request_id: str, status_msg: str) -> None:
             await _add_or_update_request_no_lock_async(request)
 
 
-_get_request_sql = (f'SELECT {", ".join(REQUEST_COLUMNS)} FROM {REQUEST_TABLE} '
-                    'WHERE request_id LIKE ?')
+def _get_request_sql(exact_match: bool = False) -> str:
+    query = f'SELECT {", ".join(REQUEST_COLUMNS)} FROM {REQUEST_TABLE}'
+    if not exact_match:
+        query += ' WHERE request_id LIKE ?'
+    if exact_match:
+        query += ' WHERE request_id = ?'
+    return query
 
 
-def _get_request_no_lock(request_id: str) -> Optional[Request]:
+def _get_request_no_lock(request_id: str,
+                         exact_match: bool = False) -> Optional[Request]:
     """Get a SkyPilot API request."""
     assert _DB is not None
+    if not exact_match:
+        request_id = request_id + '%'
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute(_get_request_sql, (request_id + '%',))
+        cursor.execute(_get_request_sql(exact_match), (request_id,))
         row = cursor.fetchone()
         if row is None:
             return None
     return Request.from_row(row)
 
 
-async def _get_request_no_lock_async(request_id: str) -> Optional[Request]:
+async def _get_request_no_lock_async(request_id: str,
+                                     exact_match: bool = False
+                                    ) -> Optional[Request]:
     """Async version of _get_request_no_lock."""
     assert _DB is not None
-    async with _DB.execute_fetchall_async(_get_request_sql,
-                                          (request_id + '%',)) as rows:
+    if not exact_match:
+        request_id = request_id + '%'
+    async with _DB.execute_fetchall_async(_get_request_sql(exact_match),
+                                          (request_id,)) as rows:
         row = rows[0] if rows else None
         if row is None:
             return None
@@ -646,20 +671,23 @@ def get_latest_request_id() -> Optional[str]:
 
 @init_db
 @metrics_lib.time_me
-def get_request(request_id: str) -> Optional[Request]:
+def get_request(request_id: str,
+                exact_match: bool = False) -> Optional[Request]:
     """Get a SkyPilot API request."""
     with filelock.FileLock(request_lock_path(request_id)):
-        return _get_request_no_lock(request_id)
+        return _get_request_no_lock(request_id, exact_match=exact_match)
 
 
 @init_db_async
 @metrics_lib.time_me_async
 @asyncio_utils.shield
-async def get_request_async(request_id: str) -> Optional[Request]:
+async def get_request_async(request_id: str,
+                            exact_match: bool = False) -> Optional[Request]:
     """Async version of get_request."""
     # TODO(aylei): figure out how to remove FileLock here to avoid the overhead
     async with filelock.AsyncFileLock(request_lock_path(request_id)):
-        return await _get_request_no_lock_async(request_id)
+        return await _get_request_no_lock_async(request_id,
+                                                exact_match=exact_match)
 
 
 class StatusWithMsg(NamedTuple):
@@ -672,12 +700,14 @@ class StatusWithMsg(NamedTuple):
 async def get_request_status_async(
     request_id: str,
     include_msg: bool = False,
+    exact_match: bool = False,
 ) -> Optional[StatusWithMsg]:
     """Get the status of a request.
 
     Args:
         request_id: The ID of the request.
         include_msg: Whether to include the status message.
+        exact_match: Whether to match the request ID exactly.
 
     Returns:
         The status of the request. If the request is not found, returns
@@ -687,8 +717,13 @@ async def get_request_status_async(
     columns = 'status'
     if include_msg:
         columns += ', status_msg'
-    sql = f'SELECT {columns} FROM {REQUEST_TABLE} WHERE request_id LIKE ?'
-    async with _DB.execute_fetchall_async(sql, (request_id + '%',)) as rows:
+    sql = f'SELECT {columns} FROM {REQUEST_TABLE}'
+    if not exact_match:
+        sql += ' WHERE request_id LIKE ?'
+        request_id = request_id + '%'
+    if exact_match:
+        sql += ' WHERE request_id = ?'
+    async with _DB.execute_fetchall_async(sql, (request_id,)) as rows:
         if rows is None or len(rows) == 0:
             return None
         status = RequestStatus(rows[0][0])
@@ -701,7 +736,8 @@ async def get_request_status_async(
 def create_if_not_exists(request: Request) -> bool:
     """Create a SkyPilot API request if it does not exist."""
     with filelock.FileLock(request_lock_path(request.request_id)):
-        if _get_request_no_lock(request.request_id) is not None:
+        if _get_request_no_lock(request.request_id,
+                                exact_match=True) is not None:
             return False
         _add_or_update_request_no_lock(request)
         return True
@@ -713,7 +749,8 @@ def create_if_not_exists(request: Request) -> bool:
 async def create_if_not_exists_async(request: Request) -> bool:
     """Async version of create_if_not_exists."""
     async with filelock.AsyncFileLock(request_lock_path(request.request_id)):
-        if await _get_request_no_lock_async(request.request_id) is not None:
+        if await _get_request_no_lock_async(request.request_id,
+                                            exact_match=True) is not None:
             return False
         await _add_or_update_request_no_lock_async(request)
         return True
@@ -919,9 +956,9 @@ def set_request_cancelled(request_id: str) -> None:
 
 @init_db
 @metrics_lib.time_me
-async def _delete_requests(requests: List[Request]):
+async def _delete_requests(request_ids: List[str]):
     """Clean up requests by their IDs."""
-    id_list_str = ','.join(repr(req.request_id) for req in requests)
+    id_list_str = ','.join(repr(request_id) for request_id in request_ids)
     assert _DB is not None
     await _DB.execute_and_commit_async(
         f'DELETE FROM {REQUEST_TABLE} WHERE request_id IN ({id_list_str})')
@@ -949,7 +986,8 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
             req_filter=RequestTaskFilter(status=RequestStatus.finished_status(),
                                          finished_before=time.time() -
                                          retention_seconds,
-                                         limit=batch_size))
+                                         limit=batch_size,
+                                         fields=['request_id']))
         if len(reqs) == 0:
             break
         futs = []
@@ -960,7 +998,7 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
                         req.log_path.absolute()).unlink(missing_ok=True)))
         await asyncio.gather(*futs)
 
-        await _delete_requests(reqs)
+        await _delete_requests([req.request_id for req in reqs])
         total_deleted += len(reqs)
         if len(reqs) < batch_size:
             break

@@ -1404,7 +1404,7 @@ def test_update_request_row_fields_maintains_order():
 @pytest.mark.asyncio
 async def test_cancel_get_request_async():
 
-    async def mock_get_request_async_no_lock(id: str):
+    async def mock_get_request_async_no_lock(id: str, exact_match: bool = False):
         await asyncio.sleep(1)
         return None
 

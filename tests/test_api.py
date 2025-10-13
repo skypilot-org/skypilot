@@ -61,7 +61,7 @@ def test_api_stream_heartbeat(monkeypatch):
         async def mock_get_request(request_id):
             return MockRequest()
 
-        async def mock_get_request_status(request_id):
+        async def mock_get_request_status(request_id, exact_match=False):
             return requests_lib.StatusWithMsg(MockRequest().status,
                                               MockRequest().status_msg)
 
@@ -153,7 +153,7 @@ def test_heartbeat_not_displayed_to_users(monkeypatch):
         async def mock_get_request(request_id):
             return MockRequest()
 
-        async def mock_get_request_status(request_id):
+        async def mock_get_request_status(request_id, exact_match=False):
             return requests_lib.StatusWithMsg(MockRequest().status,
                                               MockRequest().status_msg)
 

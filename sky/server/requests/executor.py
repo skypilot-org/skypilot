@@ -214,7 +214,7 @@ class RequestWorker:
                 time.sleep(0.1)
                 return
             request_id, ignore_return_value, _ = request_element
-            request = api_requests.get_request(request_id)
+            request = api_requests.get_request(request_id, exact_match=True)
             assert request is not None, f'Request with ID {request_id} is None'
             if request.status == api_requests.RequestStatus.CANCELLED:
                 return

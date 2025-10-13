@@ -3131,7 +3131,8 @@ def refresh_cluster_records() -> None:
     requests = requests_lib.get_request_tasks(
         req_filter=requests_lib.RequestTaskFilter(
             status=[requests_lib.RequestStatus.RUNNING],
-            include_request_names=['sky.launch']))
+            include_request_names=['sky.launch'],
+            fields=['cluster_name']))
     cluster_names_with_launch_request = {
         request.cluster_name for request in requests
     }
@@ -3360,7 +3361,8 @@ def get_clusters(
         req_filter=requests_lib.RequestTaskFilter(
             status=[requests_lib.RequestStatus.RUNNING],
             include_request_names=['sky.launch'],
-            cluster_names=cluster_names))
+            cluster_names=cluster_names,
+            fields=['cluster_name']))
     cluster_names_with_launch_request = {
         request.cluster_name for request in requests
     }
