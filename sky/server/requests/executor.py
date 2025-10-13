@@ -81,6 +81,26 @@ logger = sky_logging.init_logger(__name__)
 # platforms, including macOS.
 multiprocessing.set_start_method('spawn', force=True)
 
+# Max threads that is equivalent to the number of thread workers in the
+# default thread pool executor of event loop.
+_REQUEST_THREADS_LIMIT = min(32, (os.cpu_count() or 0) + 4)
+
+_REQUEST_THREAD_EXECUTOR_LOCK = threading.Lock()
+# A dedicated thread pool executor for synced requests execution in coroutine
+_REQUEST_THREAD_EXECUTOR: Optional[concurrent.futures.ThreadPoolExecutor] = None
+
+
+def get_request_thread_executor() -> concurrent.futures.ThreadPoolExecutor:
+    """Lazy init and return the request thread executor for current process."""
+    global _REQUEST_THREAD_EXECUTOR
+    if _REQUEST_THREAD_EXECUTOR is not None:
+        return _REQUEST_THREAD_EXECUTOR
+    with _REQUEST_THREAD_EXECUTOR_LOCK:
+        if _REQUEST_THREAD_EXECUTOR is None:
+            _REQUEST_THREAD_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+                max_workers=_REQUEST_THREADS_LIMIT)
+        return _REQUEST_THREAD_EXECUTOR
+
 
 class RequestQueue:
     """The queue for the requests, either redis or multiprocessing.
@@ -576,8 +596,8 @@ async def _execute_request_coroutine(request: api_requests.Request):
     # 1. skypilot config is not contextual
     # 2. envs that read directly from os.environ are not contextual
     ctx.override_envs(request_body.env_vars)
-    fut: asyncio.Future = context_utils.to_thread(func,
-                                                  **request_body.to_kwargs())
+    fut: asyncio.Future = context_utils.to_thread_with_executor(
+        get_request_thread_executor(), func, **request_body.to_kwargs())
 
     async def poll_task(request_id: str) -> bool:
         req_status = await api_requests.get_request_status_async(request_id)
