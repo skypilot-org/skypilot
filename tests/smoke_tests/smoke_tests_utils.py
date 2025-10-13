@@ -576,7 +576,7 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
                 test.teardown,
                 stdout=subprocess_out,
                 stderr=subprocess.STDOUT,
-                timeout=10 * 60,  # 10 mins
+                timeout=2 * 60,  # 20 mins
                 shell=True,
                 env=env_dict,
             )
