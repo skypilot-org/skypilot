@@ -179,7 +179,8 @@ def _retry_on_server_unavailable(max_wait_seconds: int = 600,
     """
 
     def _readable_error_msg(message: str) -> str:
-        return (f'{colorama.Fore.YELLOW}{message}.\nRetrying...'
+        return (f'{colorama.Fore.YELLOW}API server is temporarily '
+                f'unavailable: {message}.\nRetrying...'
                 f'{colorama.Style.RESET_ALL}')
 
     def decorator(func: F) -> F:

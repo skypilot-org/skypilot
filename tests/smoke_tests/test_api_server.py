@@ -492,7 +492,7 @@ def test_api_server_start_stop(generic_cloud: str):
 @pytest.mark.kubernetes  # We only run this test on Kubernetes to test its ssh.
 @pytest.mark.no_remote_server  # All blocking testing has been done for local server.
 def test_tail_jobs_logs_blocks_ssh(generic_cloud: str):
-    """Test that we don't block ssh when we do a large amount 
+    """Test that we don't block ssh when we do a large amount
     of tail logs requests.
     """
     name = smoke_tests_utils.get_cluster_name()
@@ -542,7 +542,7 @@ def test_tail_jobs_logs_blocks_ssh(generic_cloud: str):
 
         def log_thread(worker_id: int):
             try:
-                jobs.client.sdk.tail_logs(job_id=job_id, follow=True)
+                jobs.tail_logs(job_id=job_id, follow=True)
             except Exception as e:
                 print(f"Error in log thread {worker_id}: {e}")
 

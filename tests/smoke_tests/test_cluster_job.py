@@ -2276,6 +2276,59 @@ def test_kubernetes_pod_config_pvc():
         os.unlink(task_yaml_path)
 
 
+# ---------- Testing Launching with Pending Pods on Kubernetes ----------
+@pytest.mark.kubernetes
+def test_launching_with_pending_pods():
+    """Test Kubernetes launching with pending pods."""
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Kubernetes.max_cluster_name_length())
+    head = f'{name_on_cloud}-head'
+    test = smoke_tests_utils.Test(
+        'kubernetes_pod_pending',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name, f'kubectl create -f - <<EOF\n'
+                f'apiVersion: v1\n'
+                f'kind: Pod\n'
+                f'metadata:\n'
+                f'  name: {head}\n'
+                f'  labels:\n'
+                f'    parent: skypilot\n'
+                f'    ray-node-type: head\n'
+                f'    skypilot-head-node: "1"\n'
+                f'    ray-cluster-name: {name_on_cloud}\n'
+                f'    skypilot-cluster-name: {name_on_cloud}\n'
+                f'spec:\n'
+                f'  containers:\n'
+                f'  - command:\n'
+                f'    - /bin/sh\n'
+                f'    - -c\n'
+                f'    - sleep 365d\n'
+                f'    image: us-docker.pkg.dev/sky-dev-465/skypilotk8s/skypilot:latest\n'
+                f'    imagePullPolicy: IfNotPresent\n'
+                f'    name: skypilot\n'
+                f'  nodeSelector:\n'
+                f'    test: test\n'
+                f'EOF'),
+            # Check Pod pending
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name, f'kubectl get pod {head} | grep "Pending"'),
+            f's=$(SKYPILOT_DEBUG=1 sky launch -y -c {name} --infra kubernetes --cpus 0.1+ \'echo hi\'); echo "$s"; echo; echo; echo "$s" | grep "Timed out while waiting for nodes to start"',
+            # Check Pods have been deleted
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'pod=$(kubectl get pod -l ray-cluster-name={name_on_cloud} | grep {head}); if [ -n "$pod" ]; then exit 1; fi'
+            ),
+        ],
+        f'sky down -y {name} && '
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        timeout=10 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.kubernetes
 def test_kubernetes_pod_config_change_detection():
     """Test that pod_config changes are detected and warning is shown."""
