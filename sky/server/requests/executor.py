@@ -85,7 +85,7 @@ multiprocessing.set_start_method('spawn', force=True)
 # An upper limit of max threads for request execution per server process that
 # unlikely to be reached to allow higher concurrency while still prevent the
 # server process become overloaded.
-_REQUEST_THREADS_LIMIT = 1
+_REQUEST_THREADS_LIMIT = 128
 
 _REQUEST_THREAD_EXECUTOR_LOCK = threading.Lock()
 # A dedicated thread pool executor for synced requests execution in coroutine to
@@ -565,6 +565,21 @@ class CoroutineTask:
             pass
 
 
+def check_request_thread_executor_available() -> None:
+    """Check if the request thread executor is available.
+
+    This is a best effort check to hint the client to retry other server
+    processes when there is no avaiable thread worker in current one. But
+    a request may pass this check and still cannot get worker on execution
+    time due to race condition. In this case, the client will see a failed
+    request instead of retry.
+
+    TODO(aylei): this can be refined with a refactor of our coroutine
+    execution flow.
+    """
+    get_request_thread_executor().check_available()
+
+
 def execute_request_in_coroutine(
         request: api_requests.Request) -> CoroutineTask:
     """Execute a request in current event loop.
@@ -607,7 +622,7 @@ async def _execute_request_coroutine(request: api_requests.Request):
             get_request_thread_executor(), func, **request_body.to_kwargs())
     except Exception as e:  # pylint: disable=broad-except
         ctx.redirect_log(original_output)
-        api_requests.set_request_cancelled(request.request_id)
+        api_requests.set_request_failed(request.request_id, e)
         logger.error(f'Failed to run request {request.request_id} due to '
                      f'{common_utils.format_exception(e)}')
         return

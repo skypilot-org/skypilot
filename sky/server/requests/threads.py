@@ -46,17 +46,30 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
         finally:
             self.running.decrement()
 
+    def check_available(self, borrow: bool = False) -> int:
+        """Check if there are available workers.
+
+        Args:
+            borrow: If True, the caller borrow a worker from the executor.
+                The caller is responsible for returning the worker to the
+                executor after the task is completed.
+        """
+        count = self.running.increment()
+        if count > self.max_workers:
+            self.running.decrement()
+            raise exceptions.ConcurrentWorkerExhaustedError(
+                f'Maximum concurrent workers {self.max_workers} of threads '
+                f'executor [{self.name}] reached')
+        if not borrow:
+            self.running.decrement()
+        return count
+
     def submit(self, fn, /, *args, **kwargs):
         with self._shutdown_lock:
             if self._shutdown:
                 raise RuntimeError(
                     'Cannot submit task after executor is shutdown')
-            count = self.running.increment()
-            if count > self.max_workers:
-                self.running.decrement()
-                raise exceptions.ConcurrentWorkerExhaustedError(
-                    f'Maximum concurrent workers {self.max_workers} of threads '
-                    f'executor [{self.name}] reached')
+            count = self.check_available(borrow=True)
             fut: concurrent.futures.Future = concurrent.futures.Future()
             # Name is assigned for debugging purpose, duplication is fine
             thread = threading.Thread(target=self._task_wrapper,

@@ -1250,6 +1250,7 @@ async def logs(
     # TODO(zhwu): This should wait for the request on the cluster, e.g., async
     # launch, to finish, so that a user does not need to manually pull the
     # request status.
+    executor.check_request_thread_executor_available()
     request_task = executor.prepare_request(
         request_id=request.state.request_id,
         request_name='logs',
@@ -1484,11 +1485,12 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
         # to avoid storming the DB and CPU in the meantime
         await asyncio.sleep(0.1)
     request_task = await requests_lib.get_request_async(request_id)
-    request_error = request_task.get_error()
+    # TODO(aylei): refine this, /api/get will not be retried and this is
+    # meaningless to retry. It is the original request that should be retried.
     if request_task.should_retry:
-        msg = (request_error['message'] if request_error is not None else
-               f'Request {request_id!r} should be retried')
-        raise fastapi.HTTPException(status_code=503, detail=msg)
+        raise fastapi.HTTPException(
+            status_code=503, detail=f'Request {request_id!r} should be retried')
+    request_error = request_task.get_error()
     if request_error is not None:
         raise fastapi.HTTPException(status_code=500,
                                     detail=request_task.encode().model_dump())

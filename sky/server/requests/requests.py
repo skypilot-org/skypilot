@@ -904,9 +904,7 @@ def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
             request_task.set_return_value(result)
 
 
-def set_request_cancelled(request_id: str,
-                          should_retry: bool = False,
-                          error: Optional[BaseException] = None) -> None:
+def set_request_cancelled(request_id: str) -> None:
     """Set a pending or running request to cancelled."""
     with update_request(request_id) as request_task:
         assert request_task is not None, request_id
@@ -915,9 +913,6 @@ def set_request_cancelled(request_id: str,
             return
         request_task.finished_at = time.time()
         request_task.status = RequestStatus.CANCELLED
-        request_task.should_retry = should_retry
-        if error is not None:
-            request_task.set_error(error)
 
 
 @init_db
