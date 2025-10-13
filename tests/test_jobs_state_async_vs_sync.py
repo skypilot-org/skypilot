@@ -1,4 +1,5 @@
 import asyncio
+import time
 from typing import Dict, List, Tuple
 
 import pytest
@@ -474,3 +475,19 @@ async def test_set_backoff_pending_async_no_matching_rows(_mock_jobs_db_conn):
     with pytest.raises(state.exceptions.ManagedJobStatusError,
                        match='Failed to set the task back to pending'):
         await state.set_backoff_pending_async(job_id, 0)
+
+
+@pytest.mark.asyncio
+async def test_set_recovered_async_error_details(_seed_one_job: int):
+    """Transition failure surfaces detailed status information."""
+    job_id = _seed_one_job
+
+    async def noop_callback(_):
+        return None
+
+    with pytest.raises(state.exceptions.ManagedJobStatusError) as exc_info:
+        await state.set_recovered_async(job_id, 0, time.time(), noop_callback)
+
+    message = str(exc_info.value)
+    assert 'rows matched job' in message
+    assert 'Status: PENDING' in message
