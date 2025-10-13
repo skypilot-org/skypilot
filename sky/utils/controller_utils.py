@@ -211,13 +211,10 @@ class Controllers(enum.Enum):
             controller = cls.JOBS_CONTROLLER
             prefix = common.JOB_CONTROLLER_PREFIX
 
-        if expect_exact_match:
-            assert controller is not None, name
+        if controller is not None and expect_exact_match:
             assert name == controller.value.cluster_name, (
                 name, controller.value.cluster_name)
-            return controller
-
-        if controller is not None and name != controller.value.cluster_name:
+        elif controller is not None and name != controller.value.cluster_name:
             # The client-side cluster_name is not accurate. Assume that `name`
             # is the actual cluster name, so need to set the controller's
             # cluster name to the input name.
