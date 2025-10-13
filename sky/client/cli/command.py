@@ -1868,7 +1868,8 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     controllers = []
     for cluster_record in cluster_records:
         cluster_name = cluster_record['name']
-        controller = controller_utils.Controllers.from_name(cluster_name)
+        controller = controller_utils.Controllers.from_name(
+            cluster_name, expect_exact_match=False)
         if controller is not None:
             controllers.append(cluster_record)
         else:
@@ -2034,7 +2035,8 @@ def cost_report(all: bool, days: int):  # pylint: disable=redefined-builtin
     for cluster_record in cluster_records:
         cluster_name = cluster_record['name']
         try:
-            controller = controller_utils.Controllers.from_name(cluster_name)
+            controller = controller_utils.Controllers.from_name(
+                cluster_name, expect_exact_match=False)
         except AssertionError:
             # There could be some old controller clusters from previous
             # versions that we should not show in the cost report.
@@ -2406,7 +2408,8 @@ def cancel(
                                     job_ids=job_ids_to_cancel)
             _async_call_or_wait(request_id, async_call, 'sky.cancel')
         except exceptions.NotSupportedError as e:
-            controller = controller_utils.Controllers.from_name(cluster)
+            controller = controller_utils.Controllers.from_name(
+                cluster, expect_exact_match=False)
             assert controller is not None, cluster
             with ux_utils.print_exception_no_traceback():
                 raise click.UsageError(
@@ -2707,7 +2710,8 @@ def start(
         # Get all clusters that are not controllers.
         cluster_records = [
             cluster for cluster in all_clusters
-            if controller_utils.Controllers.from_name(cluster['name']) is None
+            if controller_utils.Controllers.from_name(
+                cluster['name'], expect_exact_match=False) is None
         ]
     if cluster_records is None:
         # Get GLOB cluster names
@@ -2769,7 +2773,8 @@ def start(
     # Checks for controller clusters (jobs controller / sky serve controller).
     controllers, normal_clusters = [], []
     for name in to_start:
-        if controller_utils.Controllers.from_name(name) is not None:
+        if controller_utils.Controllers.from_name(
+                name, expect_exact_match=False) is not None:
             controllers.append(name)
         else:
             normal_clusters.append(name)
@@ -2905,7 +2910,8 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
             to be torn down (e.g., because it has jobs running or
             it is in init state)
     """
-    controller = controller_utils.Controllers.from_name(controller_name)
+    controller = controller_utils.Controllers.from_name(
+        controller_name, expect_exact_match=False)
     assert controller is not None, controller_name
 
     with rich_utils.client_status(
@@ -3004,7 +3010,8 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str,
             to be torn down (e.g., because it has services running or
             it is in init state)
     """
-    controller = controller_utils.Controllers.from_name(controller_name)
+    controller = controller_utils.Controllers.from_name(
+        controller_name, expect_exact_match=False)
     assert controller is not None, controller_name
     with rich_utils.client_status('[bold cyan]Checking for live services[/]'):
         try:
@@ -3115,14 +3122,15 @@ def _down_or_stop_clusters(
     names = list(names)
     if names:
         controllers = [
-            name for name in names
-            if controller_utils.Controllers.from_name(name) is not None
+            name for name in names if controller_utils.Controllers.from_name(
+                name, expect_exact_match=False) is not None
         ]
         controllers_str = ', '.join(map(repr, controllers))
         names = [
             cluster['name']
             for cluster in _get_cluster_records_and_set_ssh_config(names)
-            if controller_utils.Controllers.from_name(cluster['name']) is None
+            if controller_utils.Controllers.from_name(
+                cluster['name'], expect_exact_match=False) is None
         ]
 
         # Make sure the controllers are explicitly specified without other
@@ -3147,7 +3155,7 @@ def _down_or_stop_clusters(
                     f'{controllers_str} is currently not supported.')
             else:
                 controller = controller_utils.Controllers.from_name(
-                    controller_name)
+                    controller_name, expect_exact_match=False)
                 assert controller is not None
                 hint_or_raise = _controller_to_hint_or_raise(controller)
                 try:
@@ -3195,9 +3203,10 @@ def _down_or_stop_clusters(
         names = [
             record['name']
             for record in all_clusters
-            if controller_utils.Controllers.from_name(record['name']) is None
-            and (down or idle_minutes_to_autostop is not None or
-                 record['status'] != status_lib.ClusterStatus.STOPPED)
+            if controller_utils.Controllers.from_name(
+                record['name'], expect_exact_match=False) is None and
+            (down or idle_minutes_to_autostop is not None or
+             record['status'] != status_lib.ClusterStatus.STOPPED)
         ]
 
     clusters = names
