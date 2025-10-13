@@ -46,11 +46,11 @@ except ValueError:
 
 # TODO(aylei): use decorator to register requests that need to be proactively
 # cancelled instead of hardcoding here.
-_RETRIABLE_REQUEST_NAMES = [
+_RETRIABLE_REQUEST_NAMES = {
     'sky.logs',
     'sky.jobs.logs',
     'sky.serve.logs',
-]
+}
 
 
 def add_timestamp_prefix_for_server_logs() -> None:
@@ -152,16 +152,17 @@ class Server(uvicorn.Server):
                 requests_lib.RequestStatus.RUNNING,
             ]
             reqs = requests_lib.get_request_tasks(
-                req_filter=requests_lib.RequestTaskFilter(status=statuses))
+                req_filter=requests_lib.RequestTaskFilter(
+                    status=statuses, fields=['request_id', 'name']))
             if not reqs:
                 break
             logger.info(f'{len(reqs)} on-going requests '
                         'found, waiting for them to finish...')
             # Proactively cancel internal requests and logs requests since
             # they can run for infinite time.
-            internal_request_ids = [
+            internal_request_ids = {
                 d.id for d in daemons.INTERNAL_REQUEST_DAEMONS
-            ]
+            }
             if time.time() - start_time > _WAIT_REQUESTS_TIMEOUT_SECONDS:
                 logger.warning('Timeout waiting for on-going requests to '
                                'finish, cancelling all on-going requests.')
