@@ -706,6 +706,7 @@ def test_shared_controller_vars_to_fill(controller_type: str, monkeypatch):
     os.unlink(local_config_path)
 
 
+@pytest.mark.forked  # importlib.reload() creates new module-level objects that may break parallel tests
 @pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
 def test_controller_cluster_name_refresh(controller_type: str, monkeypatch):
     """Test controller cluster name is evaluated dynamically, not only at import time.
@@ -716,50 +717,37 @@ def test_controller_cluster_name_refresh(controller_type: str, monkeypatch):
        calls refresh_server_id()
     3. cluster_name property should return the updated value, not the stale one
     """
-    # Save original modules to restore later
-    import sys
-    original_common = sys.modules.get('sky.utils.common')
-    original_controller_utils = sys.modules.get('sky.utils.controller_utils')
+    stale_hash = 'def456'
+    monkeypatch.setattr('sky.utils.common_utils.get_user_hash',
+                        lambda: stale_hash)
+    # Reload modules to simulate server startup.
+    importlib.reload(common)
+    importlib.reload(controller_utils)
 
-    try:
-        stale_hash = 'def456'
-        monkeypatch.setattr('sky.utils.common_utils.get_user_hash',
-                            lambda: stale_hash)
-        # Reload modules to simulate server startup.
-        importlib.reload(common)
-        importlib.reload(controller_utils)
+    controller = controller_utils.Controllers.from_type(controller_type)
+    prefix = (common.JOB_CONTROLLER_PREFIX if controller_type == 'jobs' else
+              common.SKY_SERVE_CONTROLLER_PREFIX)
 
-        controller = controller_utils.Controllers.from_type(controller_type)
-        prefix = (common.JOB_CONTROLLER_PREFIX if controller_type == 'jobs' else
-                  common.SKY_SERVE_CONTROLLER_PREFIX)
+    # cluster_name should contain the stale hash at this point.
+    expected_stale_name = f'{prefix}{stale_hash}'
+    assert controller.value.cluster_name == expected_stale_name, (
+        f'Expected {expected_stale_name}, got {controller.value.cluster_name}')
 
-        # cluster_name should contain the stale hash at this point.
-        expected_stale_name = f'{prefix}{stale_hash}'
-        assert controller.value.cluster_name == expected_stale_name, (
-            f'Expected {expected_stale_name}, got {controller.value.cluster_name}'
-        )
+    # Simulate server startup: _init_or_restore_server_user_hash reads
+    # the correct hash from db, writes to disk, and calls refresh_server_id().
+    correct_hash = 'abc123'
+    monkeypatch.setattr('sky.utils.common_utils.get_user_hash',
+                        lambda: correct_hash)
+    common.refresh_server_id()
 
-        # Simulate server startup: _init_or_restore_server_user_hash reads
-        # the correct hash from db, writes to disk, and calls refresh_server_id().
-        correct_hash = 'abc123'
-        monkeypatch.setattr('sky.utils.common_utils.get_user_hash',
-                            lambda: correct_hash)
-        common.refresh_server_id()
-
-        # cluster_name should now return the updated value.
-        expected_correct_name = f'{prefix}{correct_hash}'
-        assert controller.value.cluster_name == expected_correct_name, (
-            f'Expected {expected_correct_name}, got {controller.value.cluster_name}'
-        )
-    finally:
-        # Restore original modules to prevent affecting other tests
-        if original_common:
-            sys.modules['sky.utils.common'] = original_common
-        if original_controller_utils:
-            sys.modules[
-                'sky.utils.controller_utils'] = original_controller_utils
+    # cluster_name should now return the updated value.
+    expected_correct_name = f'{prefix}{correct_hash}'
+    assert controller.value.cluster_name == expected_correct_name, (
+        f'Expected {expected_correct_name}, got {controller.value.cluster_name}'
+    )
 
 
+@pytest.mark.forked  # importlib.reload() creates new module-level objects that may break parallel tests
 @pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
 def test_controller_cluster_name_client_side(controller_type: str, monkeypatch):
     """Test client-side cluster name caching when receiving name from server.
@@ -769,48 +757,35 @@ def test_controller_cluster_name_client_side(controller_type: str, monkeypatch):
     When from_name() is called with the actual controller name from the server,
     it should save it using set_cluster_name_from_server().
     """
-    # Save original modules to restore later
-    import sys
-    original_common = sys.modules.get('sky.utils.common')
-    original_controller_utils = sys.modules.get('sky.utils.controller_utils')
+    client_hash = 'def456'
+    monkeypatch.setattr('sky.utils.common_utils.get_user_hash',
+                        lambda: client_hash)
+    # Reload modules to get the mock hash.
+    importlib.reload(common)
+    importlib.reload(controller_utils)
 
-    try:
-        client_hash = 'def456'
-        monkeypatch.setattr('sky.utils.common_utils.get_user_hash',
-                            lambda: client_hash)
-        # Reload modules to get the mock hash.
-        importlib.reload(common)
-        importlib.reload(controller_utils)
+    controller = controller_utils.Controllers.from_type(controller_type)
+    prefix = (common.JOB_CONTROLLER_PREFIX if controller_type == 'jobs' else
+              common.SKY_SERVE_CONTROLLER_PREFIX)
 
-        controller = controller_utils.Controllers.from_type(controller_type)
-        prefix = (common.JOB_CONTROLLER_PREFIX if controller_type == 'jobs' else
-                  common.SKY_SERVE_CONTROLLER_PREFIX)
+    # Initially, cluster_name uses client's hash.
+    expected_client_name = f'{prefix}{client_hash}'
+    assert controller.value.cluster_name == expected_client_name
+    assert controller.value._cluster_name_from_server is None
 
-        # Initially, cluster_name uses client's hash.
-        expected_client_name = f'{prefix}{client_hash}'
-        assert controller.value.cluster_name == expected_client_name
-        assert controller.value._cluster_name_from_server is None
+    # Server has a different hash - client receives the actual controller name.
+    server_hash = 'abc123'
+    actual_controller_name = f'{prefix}{server_hash}'
 
-        # Server has a different hash - client receives the actual controller name.
-        server_hash = 'abc123'
-        actual_controller_name = f'{prefix}{server_hash}'
+    # Client calls from_name() with the server-provided name.
+    # This happens when client receives cluster info from server.
+    controller = controller_utils.Controllers.from_name(
+        actual_controller_name, expect_exact_match=False)
 
-        # Client calls from_name() with the server-provided name.
-        # This happens when client receives cluster info from server.
-        controller = controller_utils.Controllers.from_name(
-            actual_controller_name, expect_exact_match=False)
+    # Should have the server-provided name set.
+    assert controller.value.cluster_name == actual_controller_name, (
+        f'Expected {actual_controller_name}, got {controller.value.cluster_name}'
+    )
 
-        # Should have the server-provided name set.
-        assert controller.value.cluster_name == actual_controller_name, (
-            f'Expected {actual_controller_name}, got {controller.value.cluster_name}'
-        )
-
-        # Clean up.
-        controller.value._cluster_name_from_server = None
-    finally:
-        # Restore original modules to prevent affecting other tests
-        if original_common:
-            sys.modules['sky.utils.common'] = original_common
-        if original_controller_utils:
-            sys.modules[
-                'sky.utils.controller_utils'] = original_controller_utils
+    # Clean up.
+    controller.value._cluster_name_from_server = None
