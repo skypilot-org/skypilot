@@ -258,7 +258,7 @@ def get_controller_for_pool(pool: bool) -> Controllers:
 def high_availability_specified(cluster_name: Optional[str]) -> bool:
     """Check if the controller high availability is specified in user config.
     """
-    controller = Controllers.from_name(cluster_name, expect_exact_match=True)
+    controller = Controllers.from_name(cluster_name, expect_exact_match=False)
     if controller is None:
         return False
 
@@ -441,7 +441,7 @@ def check_cluster_name_not_controller(
     Returns:
       None, if the cluster name is not a controller name.
     """
-    controller = Controllers.from_name(cluster_name, expect_exact_match=True)
+    controller = Controllers.from_name(cluster_name, expect_exact_match=False)
     if controller is not None:
         msg = controller.value.check_cluster_name_hint
         if operation_str is not None:
