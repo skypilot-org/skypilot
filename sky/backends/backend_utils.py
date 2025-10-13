@@ -3127,12 +3127,12 @@ def refresh_cluster_records() -> None:
     # request info in backend_utils.py.
     # Refactor this to use some other info to
     # determine if a launch is in progress.
-    request = requests_lib.get_request_tasks(
+    requests = requests_lib.get_request_tasks(
         req_filter=requests_lib.RequestTaskFilter(
             status=[requests_lib.RequestStatus.RUNNING],
             include_request_names=['sky.launch']))
     cluster_names_with_launch_request = {
-        request.cluster_name for request in request
+        request.cluster_name for request in requests
     }
     cluster_names_without_launch_request = (cluster_names -
                                             cluster_names_with_launch_request)
@@ -3344,13 +3344,13 @@ def get_clusters(
     # request info in backend_utils.py.
     # Refactor this to use some other info to
     # determine if a launch is in progress.
-    request = requests_lib.get_request_tasks(
+    requests = requests_lib.get_request_tasks(
         req_filter=requests_lib.RequestTaskFilter(
             status=[requests_lib.RequestStatus.RUNNING],
             cluster_names=cluster_names,
             include_request_names=['sky.launch']))
     cluster_names_with_launch_request = {
-        request.cluster_name for request in request
+        request.cluster_name for request in requests
     }
     cluster_names_without_launch_request = [
         cluster_name for cluster_name in cluster_names
