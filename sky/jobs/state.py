@@ -280,6 +280,27 @@ def _init_db(func):
     return wrapper
 
 
+async def _describe_task_transition_failure(session: sql_async.AsyncSession,
+                                            job_id: int, task_id: int) -> str:
+    """Return a human-readable description when a task transition fails."""
+    details = 'Couldn\'t fetch the task details.'
+    try:
+        debug_result = await session.execute(
+            sqlalchemy.select(spot_table.c.status, spot_table.c.end_at).where(
+                sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
+                                spot_table.c.task_id == task_id)))
+        rows = debug_result.mappings().all()
+        details = (f'{len(rows)} rows matched job {job_id} and task '
+                   f'{task_id}.')
+        for row in rows:
+            status = row['status']
+            end_at = row['end_at']
+            details += f' Status: {status}, End time: {end_at}.'
+    except Exception as exc:  # pylint: disable=broad-except
+        details += f' Error fetching task details: {exc}'
+    return details
+
+
 # job_duration is the time a job actually runs (including the
 # setup duration) before last_recover, excluding the provision
 # and recovery time.
@@ -758,23 +779,8 @@ async def set_backoff_pending_async(job_id: int, task_id: int):
         count = result.rowcount
         await session.commit()
         if count != 1:
-            # Try to figure out why this failed.
-            details = 'Couldn\'t fetch the task details.'
-            try:
-                debug_result = await session.execute(
-                    sqlalchemy.select(
-                        spot_table.c.status, spot_table.c.end_at).where(
-                            sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
-                                            spot_table.c.task_id == task_id)))
-                rows = debug_result.mappings().all()
-                details = (f'{len(rows)} rows matched job {job_id} and task '
-                           f'{task_id}.')
-                for row in rows:
-                    status = row['status']
-                    end_at = row['end_at']
-                    details += f' Status: {status}, End time: {end_at}.'
-            except Exception as e:  # pylint: disable=broad-except
-                details += f' Error fetching task details: {e}'
+            details = await _describe_task_transition_failure(
+                session, job_id, task_id)
             message = ('Failed to set the task back to pending. '
                        f'({count} rows updated. {details})')
             logger.error(message)
@@ -807,23 +813,8 @@ async def set_restarting_async(job_id: int, task_id: int, recovering: bool):
         await session.commit()
         logger.debug(f'back to {target_status}')
         if count != 1:
-            # Try to figure out why this failed.
-            details = 'Couldn\'t fetch the task details.'
-            try:
-                debug_result = await session.execute(
-                    sqlalchemy.select(
-                        spot_table.c.status, spot_table.c.end_at).where(
-                            sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
-                                            spot_table.c.task_id == task_id)))
-                rows = debug_result.mappings().all()
-                details = (f'{len(rows)} rows matched job {job_id} and task '
-                           f'{task_id}.')
-                for row in rows:
-                    status = row['status']
-                    end_at = row['end_at']
-                    details += f' Status: {status}, End time: {end_at}.'
-            except Exception as e:  # pylint: disable=broad-except
-                details += f' Error fetching task details: {e}'
+            details = await _describe_task_transition_failure(
+                session, job_id, task_id)
             message = (f'Failed to set the task back to {target_status}. '
                        f'({count} rows updated. {details})')
             logger.error(message)
@@ -1680,23 +1671,8 @@ async def set_starting_async(job_id: int, task_id: int, run_timestamp: str,
         count = result.rowcount
         await session.commit()
         if count != 1:
-            # Try to figure out why this failed.
-            details = 'Couldn\'t fetch the task details.'
-            try:
-                debug_result = await session.execute(
-                    sqlalchemy.select(
-                        spot_table.c.status, spot_table.c.end_at).where(
-                            sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
-                                            spot_table.c.task_id == task_id)))
-                rows = debug_result.mappings().all()
-                details = (f'{len(rows)} rows matched job {job_id} and task '
-                           f'{task_id}.')
-                for row in rows:
-                    status = row['status']
-                    end_at = row['end_at']
-                    details += f' Status: {status}, End time: {end_at}.'
-            except Exception as e:  # pylint: disable=broad-except
-                details += f' Error fetching task details: {e}'
+            details = await _describe_task_transition_failure(
+                session, job_id, task_id)
             message = ('Failed to set the task to starting. '
                        f'({count} rows updated. {details})')
             logger.error(message)
@@ -1730,23 +1706,8 @@ async def set_started_async(job_id: int, task_id: int, start_time: float,
         count = result.rowcount
         await session.commit()
         if count != 1:
-            # Try to figure out why this failed.
-            details = 'Couldn\'t fetch the task details.'
-            try:
-                debug_result = await session.execute(
-                    sqlalchemy.select(
-                        spot_table.c.status, spot_table.c.end_at).where(
-                            sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
-                                            spot_table.c.task_id == task_id)))
-                rows = debug_result.mappings().all()
-                details = (f'{len(rows)} rows matched job {job_id} and task '
-                           f'{task_id}.')
-                for row in rows:
-                    status = row['status']
-                    end_at = row['end_at']
-                    details += f' Status: {status}, End time: {end_at}.'
-            except Exception as e:  # pylint: disable=broad-except
-                details += f' Error fetching task details: {e}'
+            details = await _describe_task_transition_failure(
+                session, job_id, task_id)
             message = (f'Failed to set the task to started. '
                        f'({count} rows updated. {details})')
             logger.error(message)
@@ -1805,23 +1766,8 @@ async def set_recovering_async(job_id: int, task_id: int,
         count = result.rowcount
         await session.commit()
         if count != 1:
-            # Try to figure out why this failed.
-            details = 'Couldn\'t fetch the task details.'
-            try:
-                debug_result = await session.execute(
-                    sqlalchemy.select(
-                        spot_table.c.status, spot_table.c.end_at).where(
-                            sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
-                                            spot_table.c.task_id == task_id)))
-                rows = debug_result.mappings().all()
-                details = (f'{len(rows)} rows matched job {job_id} and task '
-                           f'{task_id}.')
-                for row in rows:
-                    status = row['status']
-                    end_at = row['end_at']
-                    details += f' Status: {status}, End time: {end_at}.'
-            except Exception as e:  # pylint: disable=broad-except
-                details += f' Error fetching task details: {e}'
+            details = await _describe_task_transition_failure(
+                session, job_id, task_id)
             message = ('Failed to set the task to recovering with '
                        'force_transit_to_recovering='
                        f'{force_transit_to_recovering}. '
@@ -1853,23 +1799,8 @@ async def set_recovered_async(job_id: int, task_id: int, recovered_time: float,
         count = result.rowcount
         await session.commit()
         if count != 1:
-            # Try to figure out why this failed.
-            details = 'Couldn\'t fetch the task details.'
-            try:
-                debug_result = await session.execute(
-                    sqlalchemy.select(
-                        spot_table.c.status, spot_table.c.end_at).where(
-                            sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
-                                            spot_table.c.task_id == task_id)))
-                rows = debug_result.mappings().all()
-                details = (f'{len(rows)} rows matched job {job_id} and task '
-                           f'{task_id}.')
-                for row in rows:
-                    status = row['status']
-                    end_at = row['end_at']
-                    details += f' Status: {status}, End time: {end_at}.'
-            except Exception as e:  # pylint: disable=broad-except
-                details += f' Error fetching task details: {e}'
+            details = await _describe_task_transition_failure(
+                session, job_id, task_id)
             message = (f'Failed to set the task to recovered. '
                        f'({count} rows updated. {details})')
             logger.error(message)
@@ -1898,23 +1829,8 @@ async def set_succeeded_async(job_id: int, task_id: int, end_time: float,
         count = result.rowcount
         await session.commit()
         if count != 1:
-            # Try to figure out why this failed.
-            details = 'Couldn\'t fetch the task details.'
-            try:
-                debug_result = await session.execute(
-                    sqlalchemy.select(spot_table.c.status,
-                                      spot_table.c.end_at).where(
-                                          spot_table.c.spot_job_id == job_id,
-                                          spot_table.c.task_id == task_id))
-                rows = debug_result.mappings().all()
-                details = (f'{len(rows)} rows matched job {job_id} and task '
-                           f'{task_id}.')
-                for row in rows:
-                    status = row['status']
-                    end_at = row['end_at']
-                    details += f' Status: {status}, End time: {end_at}.'
-            except Exception as e:  # pylint: disable=broad-except
-                details += f' Error fetching task details: {e}'
+            details = await _describe_task_transition_failure(
+                session, job_id, task_id)
             message = (f'Failed to set the task to succeeded. '
                        f'({count} rows updated. {details})')
             logger.error(message)
