@@ -5,7 +5,10 @@ import threading
 from typing import Callable, List
 
 from sky import exceptions
+from sky import sky_logging
 from sky.utils import atomic
+
+logger = sky_logging.init_logger(__name__)
 
 
 class OnDemandThreadExecutor(concurrent.futures.Executor):
@@ -48,12 +51,24 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
                 raise RuntimeError(
                     'Cannot submit task after executor is shutdown')
             count = self.running.increment()
+            logger.info('Submitting task to thread executor',
+                        extra={
+                            'executor': self.name,
+                            'count': count,
+                            'max_workers': self.max_workers,
+                        })
             if count > self.max_workers:
                 self.running.decrement()
                 raise exceptions.ConcurrentWorkerExhaustedError(
                     f'Maximum concurrent workers {self.max_workers} of threads '
                     f'executor [{self.name}] reached')
             fut: concurrent.futures.Future = concurrent.futures.Future()
+            logger.info('Running task in thread executor',
+                        extra={
+                            'executor': self.name,
+                            'count': count,
+                            'max_workers': self.max_workers,
+                        })
             thread = threading.Thread(target=self._task_wrapper,
                                       args=(fn, fut, args, kwargs),
                                       daemon=True)

@@ -48,6 +48,7 @@ from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
 from sky.server.requests import requests as api_requests
+from sky.server.requests import threads
 from sky.server.requests.queues import local_queue
 from sky.server.requests.queues import mp_queue
 from sky.skylet import constants
@@ -84,24 +85,25 @@ multiprocessing.set_start_method('spawn', force=True)
 # An upper limit of max threads for request execution per server process that
 # unlikely to be reached to allow higher concurrency while still prevent the
 # server process become overloaded.
-_REQUEST_THREADS_LIMIT = 128
+_REQUEST_THREADS_LIMIT = 1
 
 _REQUEST_THREAD_EXECUTOR_LOCK = threading.Lock()
 # A dedicated thread pool executor for synced requests execution in coroutine to
 # avoid:
 # 1. blocking the event loop;
 # 2. exhausting the default thread pool executor of event loop;
-_REQUEST_THREAD_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=10)
+_REQUEST_THREAD_EXECUTOR: Optional[threads.OnDemandThreadExecutor] = None
 
 
-def get_request_thread_executor() -> concurrent.futures.Executor:
+def get_request_thread_executor() -> threads.OnDemandThreadExecutor:
     """Lazy init and return the request thread executor for current process."""
     global _REQUEST_THREAD_EXECUTOR
     if _REQUEST_THREAD_EXECUTOR is not None:
         return _REQUEST_THREAD_EXECUTOR
     with _REQUEST_THREAD_EXECUTOR_LOCK:
         if _REQUEST_THREAD_EXECUTOR is None:
-            _REQUEST_THREAD_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+            _REQUEST_THREAD_EXECUTOR = threads.OnDemandThreadExecutor(
+                name='request_thread_executor',
                 max_workers=_REQUEST_THREADS_LIMIT)
         return _REQUEST_THREAD_EXECUTOR
 

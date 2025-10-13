@@ -74,6 +74,7 @@ from sky.utils import dag_utils
 from sky.utils import perf_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
+from sky.utils import ux_utils
 from sky.utils.db import db_utils
 from sky.volumes.server import server as volumes_rest
 from sky.workspaces import server as workspaces_rest
@@ -662,6 +663,23 @@ try:
     resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
 except Exception:  # pylint: disable=broad-except
     pass  # no issue, we will warn the user later if its too low
+
+
+@app.exception_handler(exceptions.ConcurrentWorkerExhaustedError)
+def handle_concurrent_worker_exhausted_error(
+        request: fastapi.Request, e: exceptions.ConcurrentWorkerExhaustedError):
+    del request  # request is not used
+    # Print detailed error message to server log
+    with ux_utils.enable_traceback():
+        logger.error(f'Concurrent worker exhausted: {e}')
+    # Return human readable error message to client
+    return fastapi.responses.JSONResponse(
+        status_code=503,
+        content={
+            'detail':
+                ('The server has exhausted its concurrent worker limit. '
+                 'Please try again or scale the server if the load persists.')
+        })
 
 
 @app.get('/token')
