@@ -15,7 +15,7 @@ This demo shows how to train and serve [nanochat](https://github.com/karpathy/na
 Once SkyPilot is set up (see [Appendix: Preparation](#appendix-preparation)), launch the speedrun training pipeline on any cloud provider:
 
 ```bash
-sky launch -c nanochat-speedrun speedrun.sky.yaml --infra <aws|gcp|nebius|lambda|etc>
+sky launch -c nanochat-speedrun speedrun.sky.yaml --infra <k8s|aws|gcp|nebius|lambda|etc>
 ```
 
 This will:
@@ -41,7 +41,7 @@ cat report.md
 Once training is complete, serve your trained model with the web UI:
 
 ```bash
-sky launch -c nanochat-serve serve.sky.yaml --infra <aws|gcp|nebius|lambda|etc>
+sky launch -c nanochat-serve serve.sky.yaml --infra <k8s|aws|gcp|nebius|lambda|etc>
 ```
 
 This will:
