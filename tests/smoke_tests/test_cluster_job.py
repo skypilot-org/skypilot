@@ -2417,3 +2417,36 @@ def test_kubernetes_ssh_proxy_performance():
         timeout=15 * 60,  # 15 minutes timeout
     )
     smoke_tests_utils.run_one_test(test)
+
+
+def test_cancel_logs_does_not_break_process_pool(generic_cloud: str):
+    """Test that canceling sky logs doesn't break the process pool.
+
+    Regression test for cascading BrokenProcessPool errors
+    when coroutine requests (like sky logs) are cancelled.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'cancel_logs_does_not_break_process_pool',
+        [
+            # Launch cluster 1 with long-running job, in detached mode.
+            f'sky launch -c {name}-1 -y -d --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} \'for i in {{1..180}}; do echo $i; sleep 1; done\'',
+            # Start sky logs in background.
+            f'sky logs {name}-1 1 &',
+            'LOGS_PID=$!',
+            # Launch cluster 2 in background, redirect output to temp file.
+            f'sky launch -c {name}-2 -y --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} echo hi > /tmp/{name}-2.log 2>&1 &',
+            'LAUNCH_PID=$!',
+            # send SIGINT to sky logs (simulating Ctrl+C)
+            'kill -2 $LOGS_PID',
+            # Wait for launch to finish
+            'wait $LAUNCH_PID',
+            # Verify launch succeeded (contains "hi", not BrokenProcessPool)
+            'cat /tmp/{name}-2.log',
+            f'cat /tmp/{name}-2.log | grep -q "hi"',
+            f'! cat /tmp/{name}-2.log | grep -q "BrokenProcessPool"',
+        ],
+        f'sky down -y {name}-1; sky down -y {name}-2; rm /tmp/{name}-2.log',
+        timeout=10 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
