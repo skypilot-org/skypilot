@@ -651,7 +651,7 @@ def test_batch_continues_on_errors_helper(monkeypatch, capsys, mode):
     class FakeControllers:
 
         @staticmethod
-        def from_name(name):
+        def from_name(name, expect_exact_match):
             return None
 
     monkeypatch.setattr(command, "controller_utils",
