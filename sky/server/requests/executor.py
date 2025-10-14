@@ -430,6 +430,7 @@ def _request_execution_wrapper(request_id: str,
             os.close(original_stderr)
             original_stderr = None
 
+    request_name = None
     try:
         # As soon as the request is updated with the executor PID, we can
         # receive SIGTERM from cancellation. So, we update the request inside
@@ -521,7 +522,8 @@ def _request_execution_wrapper(request_id: str,
             annotations.clear_request_level_cache()
             with metrics_utils.time_it(name='release_memory', group='internal'):
                 common_utils.release_memory()
-            _record_memory_metrics(request_name, proc, rss_begin, peak_rss)
+            if request_name is not None:
+                _record_memory_metrics(request_name, proc, rss_begin, peak_rss)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Failed to record memory metrics: '
                          f'{common_utils.format_exception(e)}')

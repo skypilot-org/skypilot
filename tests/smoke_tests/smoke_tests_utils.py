@@ -744,6 +744,12 @@ VALIDATE_LAUNCH_OUTPUT = (
     'grep "Job ID:" && '
     'echo "$s" | grep -A 1 "Useful Commands" | grep "Job ID:"')
 
+VALIDATE_LAUNCH_OUTPUT_NO_PG_CONN_CLOSED_ERROR = (
+    VALIDATE_LAUNCH_OUTPUT +
+    ' && echo "==Validating no pg conn closed error==" && '
+    '! echo "$s" | grep -i "psycopg2.InterfaceError: connection already closed"'
+)
+
 _CLOUD_CMD_CLUSTER_NAME_SUFFIX = '-cloud-cmd'
 
 
