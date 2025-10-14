@@ -43,6 +43,7 @@ from sky.data import storage_utils
 from sky.jobs import utils as managed_job_utils
 from sky.jobs.server import server as jobs_rest
 from sky.metrics import utils as metrics_utils
+from sky.provision import metadata_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
 from sky.serve.server import server as serve_rest
@@ -1364,26 +1365,51 @@ async def download(download_body: payloads.DownloadBody,
 # TODO(aylei): run it asynchronously after global_user_state support async op
 @app.post('/provision_logs')
 def provision_logs(cluster_body: payloads.ClusterNameBody,
+                   worker: int = -1,
                    follow: bool = True,
                    tail: int = 0) -> fastapi.responses.StreamingResponse:
     """Streams the provision.log for the latest launch request of a cluster."""
-    # Prefer clusters table first, then cluster_history as fallback.
-    log_path_str = global_user_state.get_cluster_provision_log_path(
-        cluster_body.cluster_name)
-    if not log_path_str:
-        log_path_str = global_user_state.get_cluster_history_provision_log_path(
+    log_path = None
+    log_dir = None
+    # stream head node logs
+    if worker == -1:
+        # Prefer clusters table first, then cluster_history as fallback.
+        log_path_str = global_user_state.get_cluster_provision_log_path(
             cluster_body.cluster_name)
-    if not log_path_str:
-        raise fastapi.HTTPException(
-            status_code=404,
-            detail=('Provision log path is not recorded for this cluster. '
-                    'Please relaunch to generate provisioning logs.'))
+        if not log_path_str:
+            log_path_str = (
+                global_user_state.get_cluster_history_provision_log_path(
+                    cluster_body.cluster_name))
+        if not log_path_str:
+            raise fastapi.HTTPException(
+                status_code=404,
+                detail=('Provision log path is not recorded for this cluster. '
+                        'Please relaunch to generate provisioning logs.'))
+        log_path = pathlib.Path(log_path_str).expanduser().resolve()
+        if not log_path.exists():
+            raise fastapi.HTTPException(
+                status_code=404,
+                detail=f'Provision log path does not exist: {str(log_path)}')
 
-    log_path = pathlib.Path(log_path_str).expanduser().resolve()
-    if not log_path.exists():
-        raise fastapi.HTTPException(
-            status_code=404,
-            detail=f'Provision log path does not exist: {str(log_path)}')
+    # stream worker node logs
+    else:
+        handle = global_user_state.get_handle_from_cluster_name(
+            cluster_body.cluster_name)
+        if handle is None:
+            raise fastapi.HTTPException(
+                status_code=404,
+                detail=('Cluster handle is not recorded for this cluster. '
+                        'Please relaunch to generate provisioning logs.'))
+        # instance_ids includes head node
+        logger.debug(f'Instance IDs: {handle.instance_ids}')
+        instance_ids = handle.instance_ids
+        if worker > len(instance_ids) - 1:
+            raise fastapi.HTTPException(
+                status_code=400,
+                detail=f'Worker {worker} is out of range. '
+                f'The cluster has {len(instance_ids)} nodes.')
+        log_dir = metadata_utils.get_instance_log_dir(
+            handle.get_cluster_name_on_cloud(), instance_ids[worker])
 
     # Tail semantics: 0 means print all lines. Convert 0 -> None for streamer.
     effective_tail = None if tail is None or tail <= 0 else tail
@@ -1392,6 +1418,7 @@ def provision_logs(cluster_body: payloads.ClusterNameBody,
         content=stream_utils.log_streamer(
             None,
             log_path,
+            log_dir,
             tail=effective_tail,
             follow=follow,
             cluster_name=cluster_body.cluster_name),

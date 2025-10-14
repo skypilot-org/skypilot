@@ -2471,6 +2471,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     def get_cluster_name(self):
         return self.cluster_name
 
+    def get_cluster_name_on_cloud(self):
+        return self.cluster_name_on_cloud
+
     def _use_internal_ips(self):
         """Returns whether to use internal IPs for SSH connections."""
         # Directly load the `use_internal_ips` flag from the cluster yaml
@@ -2953,6 +2956,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     @cluster_yaml.setter
     def cluster_yaml(self, value: Optional[str]):
         self._cluster_yaml = value
+
+    @property
+    def instance_ids(self):
+        if self.cached_cluster_info is not None:
+            return self.cached_cluster_info.instance_ids()
+        return []
 
     @property
     def ssh_user(self):
