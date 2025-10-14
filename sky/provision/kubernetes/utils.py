@@ -1332,14 +1332,16 @@ def get_allocated_gpu_qty_by_node(
                     f'Excluding pod {pod.metadata.name} from GPU count '
                     f'calculations on node {pod.spec.node_name}')
                 continue
-            # Sum GPU requests across all containers
+            # Iterate over all the containers in the pod and sum the
+            # GPU requests
+            pod_allocated_qty = 0
             for container in pod.spec.containers:
                 if container.resources.requests:
-                    allocated_qty = get_node_accelerator_count(
+                    pod_allocated_qty += get_node_accelerator_count(
                         context, container.resources.requests)
-                    if allocated_qty > 0 and pod.spec.node_name:
-                        allocated_qty_by_node[
-                            pod.spec.node_name] += allocated_qty
+            if pod_allocated_qty > 0:
+                allocated_qty_by_node[
+                    pod.spec.node_name] += pod_allocated_qty
         return allocated_qty_by_node
     finally:
         response.release_conn()
