@@ -67,7 +67,7 @@ SkyPilot YAMLs are flexible and can be customized to fit your use case.
 
 ### Custom Storage Bucket
 
-To use your own bucket for storing the model weights, replace `s3://nanochat-data` in the bucket:
+To use your own bucket for storing the model weights, replace `s3://nanochat-data` in the YAML:
 
 ```yaml
 file_mounts:
