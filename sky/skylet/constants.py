@@ -100,7 +100,7 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '21'
+SKYLET_VERSION = '22'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -226,7 +226,9 @@ RAY_INSTALLATION_COMMANDS = (
     f'{SKY_UV_PIP_CMD} list | grep "ray " | '
     f'grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
     f'|| {RAY_STATUS} || '
-    f'{SKY_UV_PIP_CMD} install -U ray[default]=={SKY_REMOTE_RAY_VERSION}; '  # pylint: disable=line-too-long
+    # The pydantic-core==2.41.3 for arm seems corrupted
+    # so we need to avoid that specific version.
+    f'{SKY_UV_PIP_CMD} install -U "ray[default]=={SKY_REMOTE_RAY_VERSION}" "pydantic-core==2.41.1"; '  # pylint: disable=line-too-long
     # In some envs, e.g. pip does not have permission to write under /opt/conda
     # ray package will be installed under ~/.local/bin. If the user's PATH does
     # not include ~/.local/bin (the pip install will have the output: `WARNING:
@@ -330,6 +332,14 @@ FILE_MOUNTS_LOCAL_TMP_BASE_PATH = '~/.sky/tmp/'
 # Base path for two-hop file mounts translation. See
 # controller_utils.translate_local_file_mounts_to_two_hop().
 FILE_MOUNTS_CONTROLLER_TMP_BASE_PATH = '~/.sky/tmp/controller'
+
+# For passing in CPU and memory limits to the controller pod when running
+# in k8s. Right now, we only use this for the jobs controller, but we may
+# use this for the serve controller as well in the future.
+# These files are written to disk by the skylet, who reads it from env vars
+# passed by the backend when starting the skylet (start_skylet_on_head_node).
+CONTROLLER_K8S_CPU_FILE = '~/.sky/_internal_k8s_pod_cpu'
+CONTROLLER_K8S_MEMORY_FILE = '~/.sky/_internal_k8s_pod_memory'
 
 # Used when an managed jobs are created and
 # files are synced up to the cloud.
@@ -463,7 +473,7 @@ CATALOG_DIR = '~/.sky/catalogs'
 ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
               'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
               'paperspace', 'primeintellect', 'do', 'nebius', 'ssh',
-              'hyperbolic', 'seeweb')
+              'hyperbolic', 'seeweb', 'shadeform')
 # END constants used for service catalog.
 
 # The user ID of the SkyPilot system.

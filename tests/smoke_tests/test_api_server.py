@@ -1,9 +1,17 @@
-from typing import List, Optional, TypeVar
+import os
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+from typing import Dict, List, Optional, Tuple, TypeVar
 
 import pytest
+from smoke_tests import metrics_utils
 from smoke_tests import smoke_tests_utils
 
 import sky
+from sky import jobs
 from sky.client import common as client_common
 from sky.server import common as server_common
 from sky.skylet import constants
@@ -21,6 +29,7 @@ def set_user(user_id: str, user_name: str, commands: List[str]) -> List[str]:
 
 # ---------- Test multi-tenant ----------
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support multi-tenant jobs
+@pytest.mark.no_shadeform  # Shadeform does not support multi-tenant jobs
 @pytest.mark.no_seeweb  # Seeweb does not support multi-tenant jobs
 def test_multi_tenant(generic_cloud: str):
     if smoke_tests_utils.services_account_token_configured_in_env_file():
@@ -111,6 +120,7 @@ def test_multi_tenant(generic_cloud: str):
 
 
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support multi-tenant jobs
+@pytest.mark.no_shadeform  # Shadeform does not support multi-tenant jobs
 @pytest.mark.no_seeweb  # Seeweb does not support multi-tenant jobs
 def test_multi_tenant_managed_jobs(generic_cloud: str):
     if smoke_tests_utils.services_account_token_configured_in_env_file():
@@ -249,13 +259,13 @@ def test_requests_scheduling(generic_cloud: str):
                     f'sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -n dispatch tests/test_yamls/minimal.yaml',
                     f'for i in {{1..10}}; do sky exec {name} -n job-${{i}} "sleep 60" --async; done',
                     # Wait for all reqeusts get scheduled and executed, do not check the status here to make this case focus.
-                    (f's=$(sky api status -a | grep {username});'
+                    (f's=$(sky api status -a -l none | grep {username});'
                      'timeout=60; start=$SECONDS; '
                      'until ! echo "$s" | grep "" | grep "PENDING|RUNNING"; do '
                      '  if [ $((SECONDS - start)) -gt $timeout ]; then '
                      '    echo "Timeout waiting for jobs to be scheduled"; exit 1; '
                      '  fi; '
-                     f'  sleep 5; s=$(sky api status -a | grep {username});'
+                     f'  sleep 5; s=$(sky api status -a -l none | grep {username});'
                      '  echo "Waiting for request get scheduled"; echo "$s"; '
                      'done'),
                 ],
@@ -305,3 +315,288 @@ def test_recent_request_tracking(generic_cloud: str):
             assert req_id_exec == stream_request_id
         finally:
             sky.get(sky.down(name))
+
+
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support managed jobs
+@pytest.mark.no_seeweb  # Seeweb does not support managed jobs
+def test_managed_jobs_force_disable_cloud_bucket(generic_cloud: str):
+    """Test jobs with force_disable_cloud_bucket config.
+
+    This tests the "two-hop" scenario where:
+    1. Client submits job to remote API server (first translation with file_mounts_mapping)
+    2. Jobs controller submits task back to API server (second translation)
+
+    This is a regression test for a bug where file_mounts_mapping would persist
+    in the task config after the first translation, causing KeyError on the
+    second translation when the jobs controller calls back to the API server.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+
+    test = smoke_tests_utils.Test(
+        'test_managed_jobs_force_disable_cloud_bucket',
+        [
+            # Launch a managed job with force_disable_cloud_bucket config.
+            # This forces the "two-hop" scenario where the task is submitted
+            # twice to API servers, which would trigger the bug.
+            f'sky jobs launch -n {name} --cloud {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--config jobs.force_disable_cloud_bucket=true '
+            f'tests/test_yamls/minimal.yaml -y -d',
+            # Wait for the job to complete successfully.
+            # If the bug exists, this would fail with KeyError.
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=300),
+        ],
+        f'sky jobs cancel -y -n {name} || true',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+def test_big_file_upload_memory_usage(generic_cloud: str):
+    if not smoke_tests_utils.is_remote_server_test():
+        pytest.skip('This test is only for remote server')
+
+    def compare_rss_metrics(baseline: Dict[Tuple[str, ...], List[Tuple[float,
+                                                                       float]]],
+                            actual: Dict[Tuple[str, ...], List[Tuple[float,
+                                                                     float]]]):
+
+        def _rss_peak_aggregator(
+            baseline_values: List[Tuple[float, float]],
+            actual_values: List[Tuple[float, float]]
+        ) -> metrics_utils.AggregatedMetric:
+            """Aggregator for RSS (memory) metrics - computes peak values."""
+            baseline_peak_bytes = max([v for _, v in baseline_values
+                                      ]) if baseline_values else 0
+            actual_peak_bytes = max([v for _, v in actual_values
+                                    ]) if actual_values else 0
+
+            baseline_mb = baseline_peak_bytes / (1024 * 1024)
+            actual_mb = actual_peak_bytes / (1024 * 1024)
+
+            return metrics_utils.AggregatedMetric(baseline=baseline_mb,
+                                                  actual=actual_mb,
+                                                  unit='MB')
+
+        def _rss_per_key_threshold_checker(key_label: str, baseline: float,
+                                           actual: float, increase: float,
+                                           increase_pct: float) -> List[str]:
+            """Per-key threshold checker for RSS metrics."""
+            failures = []
+            if actual > 300:
+                failures.append(f"exceeded 300 MB: {actual:.1f} MB")
+            if increase_pct > 50 and increase_pct != float('inf'):
+                failures.append(
+                    f"increased by {increase_pct:.1f}% (limit: 50%)")
+            return failures
+
+        def _rss_aggregate_threshold_checker(
+                total_baseline: float, total_actual: float,
+                total_increase: float, total_increase_pct: float) -> List[str]:
+            """Aggregate threshold checker for RSS metrics."""
+            failures = []
+            if total_increase_pct > 20:
+                failures.append(
+                    f"Average memory increase too high: {total_increase_pct:.1f}% (limit: 20%)"
+                )
+            return failures
+
+        metrics_utils.compare_metrics(
+            baseline,
+            actual,
+            aggregator_fn=_rss_peak_aggregator,
+            per_key_threshold_fn=_rss_per_key_threshold_checker,
+            aggregate_threshold_fn=_rss_aggregate_threshold_checker)
+
+    with smoke_tests_utils.override_sky_config():
+        name = smoke_tests_utils.get_cluster_name()
+
+        metrics_server_url = smoke_tests_utils.get_metrics_server_url()
+        metrics_url = f'{metrics_server_url}/metrics'
+
+        print("Collecting baseline RSS measurements...",
+              file=sys.stderr,
+              flush=True)
+        baseline_metrics = metrics_utils.collect_metrics(
+            metrics_url, 'sky_apiserver_process_peak_rss', duration_seconds=30)
+
+        # Create large files and launch task.
+        with tempfile.NamedTemporaryFile(mode='wb') as large_file1, \
+            tempfile.NamedTemporaryFile(mode='wb') as large_file2, \
+            tempfile.NamedTemporaryFile(mode='wb') as large_file3:
+            smoke_tests_utils.write_blob(large_file1, 1024 * 1024 * 1024)
+            smoke_tests_utils.write_blob(large_file2, 1024 * 1024 * 1024)
+            smoke_tests_utils.write_blob(large_file3, 1024 * 1024 * 1024)
+
+            req_id = sky.launch(task=sky.Task(
+                run='ls -l /large_file1 /large_file2 /large_file3',
+                resources=sky.Resources(infra=generic_cloud,
+                                        **smoke_tests_utils.LOW_RESOURCE_PARAM),
+                file_mounts={
+                    '/large_file1': large_file1.name,
+                    '/large_file2': large_file2.name,
+                    '/large_file3': large_file3.name,
+                }),
+                                cluster_name=name)
+
+            # Start metrics collection in background thread.
+            actual_metrics = {}
+            stop_metrics = threading.Event()
+
+            def collect_actual_metrics():
+                nonlocal actual_metrics
+                actual_metrics = metrics_utils.collect_metrics(
+                    metrics_url,
+                    'sky_apiserver_process_peak_rss',
+                    stop_event=stop_metrics)
+
+            print("Starting actual RSS measurement...",
+                  file=sys.stderr,
+                  flush=True)
+            metrics_thread = threading.Thread(target=collect_actual_metrics)
+            metrics_thread.start()
+
+            sky.stream_and_get(req_id, output_stream=sys.stderr)
+
+            # Cleanup the cluster.
+            req_id = sky.down(name)
+            sky.stream_and_get(req_id, output_stream=sys.stderr)
+
+            stop_metrics.set()
+            metrics_thread.join(timeout=10)
+
+            assert len(baseline_metrics) > 0, "No baseline metrics collected"
+            assert len(actual_metrics) > 0, "No actual metrics collected"
+
+            compare_rss_metrics(baseline_metrics, actual_metrics)
+
+
+# TODO(aylei): this case should not be retried in buildkite.
+def test_api_server_start_stop(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+
+    test = smoke_tests_utils.Test(
+        'test_managed_jobs_force_disable_cloud_bucket',
+        [
+            # To avoid interference with other tests, we launch a separate API server for this test.
+            f'sky launch -n {name} --cloud {generic_cloud} tests/test_yamls/apiserver-start-stop.yaml -y {smoke_tests_utils.LOW_RESOURCE_ARG}'
+        ],
+        f'sky down -y {name} || true',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes  # We only run this test on Kubernetes to test its ssh.
+@pytest.mark.no_remote_server  # All blocking testing has been done for local server.
+@pytest.mark.no_dependency  # We can't restart the api server in the dependency test.
+def test_tail_jobs_logs_blocks_ssh(generic_cloud: str):
+    """Test that we don't block ssh when we do a large amount
+    of tail logs requests.
+    """
+    if not smoke_tests_utils.is_in_buildkite_env():
+        pytest.skip(
+            'Skipping test: requires restarting API server, run only in '
+            'Buildkite.')
+
+    name = smoke_tests_utils.get_cluster_name()
+    job_name = name + '-job'
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+
+    num_cpus = os.cpu_count()
+    # Use the asyncio logic to get the number of threads that the executor uses
+    # so that we can attempt to block them.
+    num_threads = min(num_cpus + 4, 32)
+
+    threads = [None for _ in range(num_threads)]
+    try:
+        # Launch cluster, use the command line because the sdk doesn't
+        # lead to websocket_proxy.
+        print("Launching cluster...")
+        subprocess.Popen([
+            'sky launch -c ' + name + ' --infra ' + generic_cloud + ' ' +
+            smoke_tests_utils.LOW_RESOURCE_ARG + ' -y'
+        ],
+                         shell=True)
+        print("Cluster launched.")
+
+        # Launch a problematic job with infinite logs.
+        task = sky.Task(
+            run=
+            'for i in {{1..10000}}; do echo "Hello, world! $i"; sleep 1; done')
+        task.set_resources(
+            sky.Resources(infra=generic_cloud,
+                          **smoke_tests_utils.LOW_RESOURCE_PARAM))
+        req_id = jobs.launch(task, name=job_name)
+        job_id, _ = sky.stream_and_get(req_id)
+
+        # Wait for the job to start.
+        def is_job_started(job_id: int):
+            req_id = jobs.queue(refresh=True, job_ids=[job_id])
+            job_records = sky.stream_and_get(req_id)
+            assert len(job_records) == 1
+            return job_records[0]['status'] == sky.ManagedJobStatus.RUNNING
+
+        start_time = time.time()
+        while not is_job_started(job_id):
+            if time.time() - start_time > timeout:
+                raise Exception("Job failed to start.")
+            time.sleep(1)
+        print("Job started.")
+
+        def log_thread(worker_id: int):
+            try:
+                jobs.tail_logs(job_id=job_id, follow=True)
+            except Exception as e:
+                print(f"Error in log thread {worker_id}: {e}")
+
+        # Tail job logs.
+        print(
+            f"Launching {num_threads} tail log requests to block the workers.")
+        for worker_id in range(num_threads):
+            threads[worker_id] = threading.Thread(target=log_thread,
+                                                  args=(worker_id,))
+            threads[worker_id].start()
+        print("Requests launched.")
+
+        # Give time for requests to start.
+        time.sleep(10)
+
+        print("Attempting to ssh in.")
+
+        # Now attempt to ssh in.
+        ssh_cmd = f'ssh -o ConnectTimeout=10 -o BatchMode=yes {name} "echo hi"'
+        ssh_ret = subprocess.Popen(ssh_cmd, shell=True)
+        if ssh_ret.wait(timeout=10) != 0:
+            raise Exception("SSH failed.")
+
+        print("SSH completed.")
+    finally:
+        # Stop and start the api server to unblock it.
+        cmd_one = subprocess.Popen(['sky api stop'], shell=True)
+        cmd_one.wait(timeout=timeout)
+        cmd_two = subprocess.Popen(['sky api start'], shell=True)
+        cmd_two.wait(timeout=timeout)
+        # Tear down cluster.
+        try:
+            print("Tearing down cluster...")
+            req_id = sky.down(name)
+            sky.stream_and_get(req_id)
+            print("Cluster torn down.")
+        except Exception:
+            pass
+
+        # Cancel job.
+        try:
+            print(f"Cancelling job {job_id}...")
+            req_id = jobs.cancel(job_ids=[job_id])
+            sky.stream_and_get(req_id)
+            print("Job cancelled.")
+        except Exception:
+            pass
+
+        # Join threads.
+        for thread in threads:
+            thread.join()

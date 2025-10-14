@@ -288,7 +288,7 @@ class Cudo(clouds.Cloud):
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         Cudo's compute service."""
-        if not common.can_import_modules(['cudo_api']):
+        if not common.can_import_modules(['cudo_compute']):
             return False, (f'{cls._DEPENDENCY_HINT}\n'
                            f'{cls._INDENT_PREFIX}')
 

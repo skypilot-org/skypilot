@@ -39,9 +39,9 @@ DEFAULT_CLOUDS_TO_RUN = default_clouds_to_run
 PYTEST_TO_CLOUD_KEYWORD = {v: k for k, v in cloud_to_pytest_keyword.items()}
 
 QUEUE_GENERIC_CLOUD = 'generic_cloud'
-QUEUE_KUBERNETES = 'kubernetes'
 QUEUE_EKS = 'eks'
 QUEUE_GKE = 'gke'
+QUEUE_KIND = 'kind'
 # We use a separate queue for generic cloud tests on remote servers because:
 # - generic_cloud queue has high concurrency on a single VM
 # - remote-server requires launching a docker container per test
@@ -60,7 +60,7 @@ CLOUD_QUEUE_MAP = {
     'gcp': QUEUE_GENERIC_CLOUD,
     'azure': QUEUE_GENERIC_CLOUD,
     'nebius': QUEUE_GENERIC_CLOUD,
-    'kubernetes': QUEUE_KUBERNETES
+    'kubernetes': QUEUE_KIND
 }
 
 GENERATED_FILE_HEAD = ('# This is an auto-generated Buildkite pipeline by '
@@ -131,6 +131,7 @@ def _parse_args(args: Optional[str] = None):
     parser.add_argument('--jobs-consolidation', action="store_true")
     parser.add_argument('--grpc', action="store_true")
     parser.add_argument('--env-file')
+    parser.add_argument('--dependency', nargs='?', const='', default='all')
 
     parsed_args, _ = parser.parse_known_args(args_list)
 
@@ -174,6 +175,9 @@ def _parse_args(args: Optional[str] = None):
         extra_args.append('--grpc')
     if parsed_args.env_file:
         extra_args.append(f'--env-file {parsed_args.env_file}')
+    if parsed_args.dependency != 'all':
+        space = ' ' if parsed_args.dependency else ''
+        extra_args.append(f'--dependency{space}{parsed_args.dependency}')
 
     return default_clouds_to_run, parsed_args.k, extra_args
 
@@ -440,7 +444,7 @@ def _convert_quick_tests_core(test_files: List[str], args: str,
                         branch != 'master'):
                     continue
                 pipeline = _generate_pipeline(test_file,
-                                              args + f'--base-branch {branch}',
+                                              args + f' --base-branch {branch}',
                                               auto_retry=True)
                 output_file_pipelines.append(pipeline)
         else:

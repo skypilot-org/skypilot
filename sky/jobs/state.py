@@ -10,7 +10,8 @@ import sqlite3
 import threading
 import time
 import typing
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
+from typing import (Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple,
+                    Union)
 import urllib.parse
 
 import colorama
@@ -1248,6 +1249,25 @@ def get_pool_from_job_id(job_id: int) -> Optional[str]:
             sqlalchemy.select(job_info_table.c.pool).where(
                 job_info_table.c.spot_job_id == job_id)).fetchone()
         return pool[0] if pool else None
+
+
+@_init_db
+def get_pool_and_submit_info_from_job_ids(
+    job_ids: Set[int]
+) -> Dict[int, Tuple[Optional[str], Optional[str], Optional[int]]]:
+    """Get the pool, cluster name, and job id on pool from job id"""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.execute(
+            sqlalchemy.select(
+                job_info_table.c.spot_job_id, job_info_table.c.pool,
+                job_info_table.c.current_cluster_name,
+                job_info_table.c.job_id_on_pool_cluster).where(
+                    job_info_table.c.spot_job_id.in_(job_ids))).fetchall()
+        return {
+            job_id: (pool, cluster_name, job_id_on_pool_cluster)
+            for job_id, pool, cluster_name, job_id_on_pool_cluster in rows
+        }
 
 
 @_init_db

@@ -28,5 +28,9 @@ uv pip install -r requirements-docs.txt
 # serve without rebuilding
 python3 -m http.server 8000 --directory build/html
 ```
-
 The documentation will be available at http://127.0.0.1:8000
+
+
+## Add new examples
+
+Refer to https://docs.skypilot.co/en/latest/examples/index.html#adding-an-example
