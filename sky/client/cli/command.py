@@ -165,6 +165,9 @@ def _get_cluster_records_and_set_ssh_config(
             # we need to remove the cluster from the SSH config.
             cluster_utils.SSHConfigHelper.remove_cluster(record['name'])
             continue
+        if not record['credentials']:
+            # The credential is missing for some reason, continue.
+            continue
 
         # During the failover, even though a cluster does not exist, the handle
         # can still exist in the record, and we check for credentials to avoid
