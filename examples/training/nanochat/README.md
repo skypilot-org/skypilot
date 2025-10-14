@@ -39,7 +39,7 @@ cat report.md
 Once training is complete, serve your trained model with the web UI:
 
 ```bash
-sky launch -c nanochat-serve serve.sky.yaml --infra <aws|gcp|nebius|lambda|etc>
+sky launch -c nanochat-serve serve.sky.yaml --infra <k8s|aws|gcp|nebius|lambda|etc>
 ```
 
 This will:
