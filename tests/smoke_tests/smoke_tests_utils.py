@@ -572,8 +572,10 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
             if callable(command):
                 try:
                     write(f'+ callable: {command!r}\n')
+                    flush()
                     for output in ensure_iterable_result(command):
                         write(str(output) + '\n')
+                        flush()
                 except Exception as e:
                     file, lineno, src = get_callable_source(command)
                     error_in_callable = f'Error executing callable command: {e} at {file}:{lineno}\ncode: {src}\ntraceback: {traceback.format_exc()}'

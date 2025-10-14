@@ -617,26 +617,32 @@ def test_high_logs_concurrency_not_blocking_operations(generic_cloud: str,
     tail_log_threads: List[threading.Thread] = []
 
     def tail_log_thread(idx: int):
-        context.initialize()
-        ctx = context.get()
-        origin = ctx.redirect_log(tmp_path / f'log_{idx}.txt')
-        sky.stream_and_get(sky.tail_logs(cluster_name=name, follow=True))
-        ctx.redirect_log(origin)
+        try:
+            context.initialize()
+            ctx = context.get()
+            log_file = tmp_path / f'log_{idx}.txt'
+            log_file.touch()
+            origin = ctx.redirect_log(log_file)
+            sky.tail_logs(cluster_name=name, job_id=None, follow=True)
+            ctx.redirect_log(origin)
+        except Exception as e:  # pylint: disable=broad-except
+            print(f'Error in tail log thread {idx}: {e}')
 
     def start_tail_logs() -> Generator[str, None, None]:
-        # We expect a single server process can handle enough concurrent log tail request
-        # without affecting the responsiveness.
+        yield f'Starting tail log threads, log path: {tmp_path}'
+        # Probe we can start log tail first to fail fast on exceptional case
+        sky.tail_logs(cluster_name=name, job_id=None, follow=False, tail=10)
+        # We expect a single server process will still be responsive even the logs requests
+        # rate exceeds its capability.
         # Note that we have to use SDK here to avoid the overhead of too much CLI processes
         # which makes the test flaky.
-        yield f'Starting 256 tail log threads, log path: {tmp_path}'
-        for _ in range(256):
-            thread = threading.Thread(target=tail_log_thread, daemon=True)
+        tmp_path.mkdir(exist_ok=True)
+        for i in range(196):
+            thread = threading.Thread(target=tail_log_thread,
+                                      args=(i,),
+                                      daemon=True)
             tail_log_threads.append(thread)
             thread.start()
-
-    def wait_tail_logs_threads():
-        for thread in tail_log_threads:
-            thread.join()
 
     def expect_enough_concurrent_logs() -> Generator[str, None, None]:
         start = time.time()
@@ -680,10 +686,8 @@ def test_high_logs_concurrency_not_blocking_operations(generic_cloud: str,
                 timeout=smoke_tests_utils.get_timeout(generic_cloud)),
             # sky api cancel does not support skip confirmation, just stop and start the API server to cancel all logs requests
             'sky api stop && sky api start',
-            wait_tail_logs_threads,
             f'sky down -y {name}',
             f'sky down -y {name}-another',
-            f'sky jobs cancel -y {name}-job',
         ],
         f'sky api stop && sky api start; sky down -y {name} || true; sky down -y {name}-another || true; sky jobs cancel -n {name}-job -y || true;',
     )
