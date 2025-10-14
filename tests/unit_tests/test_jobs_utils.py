@@ -71,20 +71,19 @@ async def test_get_job_status_timeout(mock_get_handle, mock_logger):
 
     mock_backend.get_job_status = slow_get_job_status
 
-    test_job_logger = logging.getLogger('test_job_logger')
-
     start_time = time.time()
     result = await utils.get_job_status(backend=mock_backend,
                                         cluster_name='test-cluster',
-                                        job_id=1,
-                                        job_logger=test_job_logger)
+                                        job_id=1)
     assert result is None, 'Expected None when timeout occurs'
 
     elapsed_time = time.time() - start_time
     assert elapsed_time >= 30 and elapsed_time < 31, f'Expected timeout around 30s, but took {elapsed_time}s'
 
-    # one for failure reason, one for separator
-    assert mock_logger.info.call_count == 2
-    first_call = mock_logger.info.call_args_list[0][0][0]
-    assert 'Failed to get job status:' in first_call
-    assert 'timed out after 30s' in first_call
+    # === Checking the job status... ===
+    # Failed to get job status: Job status check timed out after 30s
+    # ==================================
+    assert mock_logger.info.call_count == 3
+    error_log_line = mock_logger.info.call_args_list[1][0][0]
+    assert 'Failed to get job status:' in error_log_line
+    assert 'timed out after 30s' in error_log_line
