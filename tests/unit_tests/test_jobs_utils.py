@@ -77,7 +77,8 @@ async def test_get_job_status_timeout(mock_get_handle, mock_logger):
 
     # Patch the timeout so the test passes quickly, while still checking the
     # timeout logic.
-    with mock.patch.object(utils, '_JOB_STATUS_FETCH_TIMEOUT_SECONDS', timeout_override):
+    with mock.patch.object(utils, '_JOB_STATUS_FETCH_TIMEOUT_SECONDS',
+                           timeout_override):
         result = await utils.get_job_status(backend=mock_backend,
                                             cluster_name='test-cluster',
                                             job_id=1)
@@ -85,7 +86,8 @@ async def test_get_job_status_timeout(mock_get_handle, mock_logger):
 
     elapsed_time = time.time() - start_time
     assert timeout_override <= elapsed_time < timeout_override + 1.0, (
-        f'Expected timeout around {timeout_override}s, but took {elapsed_time}s')
+        f'Expected timeout around {timeout_override}s, but took {elapsed_time}s'
+    )
 
     # === Checking the job status... ===
     # Failed to get job status: Job status check timed out after 30s
