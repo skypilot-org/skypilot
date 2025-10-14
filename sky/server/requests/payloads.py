@@ -702,13 +702,9 @@ class SSHUpBody(RequestBody):
 class ServeTerminateReplicaBody(RequestBody):
     """The request body for the serve terminate replica endpoint."""
     service_name: str
-    replica_id: int
+    replica_id: Optional[int] = None
     purge: bool = False
-
-
-class ServeTerminateFailedReplicasBody(RequestBody):
-    """The request body for the serve terminate failed replicas endpoint."""
-    service_name: str
+    failed_replicas: bool = False
 
 
 class KillRequestProcessesBody(RequestBody):

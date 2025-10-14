@@ -745,6 +745,9 @@ def test_skyserve_update(generic_cloud: str):
             f'sky serve update {name} --infra {generic_cloud} {resource_arg} --mode blue_green -y tests/skyserve/update/new.yaml',
             # sleep before update is registered.
             'sleep 20',
+            # Timeout will be triggered when update fails.
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1) +
+            _check_service_version(name, "2"),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'until curl $endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done;'
             # Make sure the traffic is not mixed
@@ -1331,3 +1334,96 @@ def test_skyserve_ha_kill_during_shutdown():
             skypilot_config.ENV_VAR_GLOBAL_CONFIG: 'tests/skyserve/high_availability/config.yaml'
         })
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.serve
+@pytest.mark.no_fluidstack  # Fluidstack does not support `--cpus 2`
+@pytest.mark.no_do  # DO does not support `--cpus 2`
+@pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports
+@pytest.mark.no_remote_server
+def test_skyserve_down_failed_replicas(generic_cloud: str):
+    """Test sky serve down --failed-replicas with failed replicas from user bug."""
+    resource_arg, env = smoke_tests_utils.get_cloud_specific_resource_config(
+        generic_cloud)
+    name = _get_service_name()
+    with smoke_tests_utils.increase_initial_delay_seconds_for_slow_cloud(
+            generic_cloud) as increase_initial_delay_seconds:
+        test = smoke_tests_utils.Test(
+            'test-skyserve-down-failed-replicas',
+            [
+                # Launch service with failing replicas (using existing user_bug.yaml)
+                increase_initial_delay_seconds(
+                    f'sky serve up -n {name} --infra {generic_cloud} {resource_arg} -y tests/skyserve/restart/user_bug.yaml'
+                ),
+                # Wait for replica to enter FAILED state
+                f's=$(sky serve status {name}); echo "$s";'
+                'until echo "$s" | grep -A 100 "Service Replicas" | grep "FAILED"; '
+                'do echo "Waiting for replica to be FAILED..."; '
+                f'sleep 5; s=$(sky serve status {name}); echo "$s"; done; ' +
+                _check_replica_in_status(name, [(1, True, 'FAILED')]),
+                # Use --failed-replicas to clean up only the failed replica
+                f'sky serve down --failed-replicas -y {name}',
+                # Wait for termination to complete
+                'sleep 10',
+                # Verify service still exists
+                f'sky serve status {name} || exit 1',
+                # Update to working configuration to verify recovery
+                increase_initial_delay_seconds(
+                    f'sky serve update {name} --infra {generic_cloud} {resource_arg} -y tests/skyserve/auto_restart.yaml'
+                ),
+                # Wait for healthy replica
+                _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+                # Verify service endpoint works
+                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+                'curl --connect-timeout 10 --max-time 10 $endpoint | grep "Hi, SkyPilot here"',
+            ],
+            _TEARDOWN_SERVICE.format(name=name),
+            env=env,
+            timeout=25 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.serve
+@pytest.mark.no_fluidstack  # Fluidstack does not support `--cpus 2`
+@pytest.mark.no_do  # DO does not support `--cpus 2`
+@pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports
+@pytest.mark.no_remote_server
+def test_skyserve_down_failed_replicas_noop(generic_cloud: str):
+    """Test --failed-replicas with no failed replicas is a no-op."""
+    resource_arg, env = smoke_tests_utils.get_cloud_specific_resource_config(
+        generic_cloud)
+    name = _get_service_name()
+    with smoke_tests_utils.increase_initial_delay_seconds_for_slow_cloud(
+            generic_cloud) as increase_initial_delay_seconds:
+        test = smoke_tests_utils.Test(
+            'test-skyserve-down-failed-replicas-noop',
+            [
+                # Launch a healthy service
+                increase_initial_delay_seconds(
+                    f'sky serve up -n {name} --infra {generic_cloud} {resource_arg} -y tests/skyserve/auto_restart.yaml'
+                ),
+                # Wait for service to be ready
+                _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+                # Verify service works
+                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+                'curl --connect-timeout 10 --max-time 10 $endpoint | grep "Hi, SkyPilot here"',
+                # Check replica status before --failed-replicas
+                _check_replica_in_status(name, [(1, False, 'READY')]),
+                # Run --failed-replicas (should be no-op since no failures)
+                f'sky serve down --failed-replicas -y {name}',
+                # Wait a bit
+                'sleep 5',
+                # Verify service still has ready replica (no-op confirmed)
+                _check_replica_in_status(name, [(1, False, 'READY')]),
+                # Verify endpoint still works
+                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+                'curl --connect-timeout 10 --max-time 10 $endpoint | grep "Hi, SkyPilot here"',
+            ],
+            _TEARDOWN_SERVICE.format(name=name),
+            env=env,
+            timeout=20 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)

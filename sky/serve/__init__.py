@@ -5,7 +5,6 @@ from sky.serve.client.sdk import down
 from sky.serve.client.sdk import status
 from sky.serve.client.sdk import sync_down_logs
 from sky.serve.client.sdk import tail_logs
-from sky.serve.client.sdk import terminate_failed_replicas
 from sky.serve.client.sdk import terminate_replica
 from sky.serve.client.sdk import up
 from sky.serve.client.sdk import update
@@ -45,7 +44,6 @@ __all__ = [
     'SkyServiceSpec',
     'SKYSERVE_METADATA_DIR',
     'status',
-    'terminate_failed_replicas',
     'terminate_replica',
     'tail_logs',
     'up',

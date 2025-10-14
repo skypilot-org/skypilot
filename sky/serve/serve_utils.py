@@ -665,54 +665,31 @@ def update_service_encoded(service_name: str, version: int, mode: str,
     return message_utils.encode_payload(service_msg)
 
 
-def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
-    # TODO(tian): Currently pool does not support terminating replica.
-    service_status = _get_service_status(service_name, pool=False)
-    if service_status is None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Service {service_name!r} does not exist.')
-    replica_info = serve_state.get_replica_info_from_id(service_name,
-                                                        replica_id)
-    if replica_info is None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                f'Replica {replica_id} for service {service_name} does not '
-                'exist.')
-
-    controller_port = service_status['controller_port']
-    resp = requests.post(
-        _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
-        '/controller/terminate_replica',
-        json={
-            'replica_id': replica_id,
-            'purge': purge,
-        })
-
-    message: str = resp.json()['message']
-    if resp.status_code != 200:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Failed to terminate replica {replica_id} '
-                             f'in {service_name}. Reason:\n{message}')
-    return message
-
-
-def terminate_failed_replicas(service_name: str) -> str:
-    """Terminate all failed replicas for a service.
+def terminate_replica(service_name: str,
+                      replica_id: Optional[int],
+                      purge: bool,
+                      failed_replicas: bool = False) -> str:
+    """Terminate a specific replica or all failed replicas for a service.
 
     This function runs on the controller where it can access the serve_state
     database to query for failed replicas.
 
     Args:
         service_name: Name of the service.
+        replica_id: ID of replica to terminate. If None and
+          failed_replicas=True, terminates all failed replicas.
+        purge: Whether to terminate replicas in a failed status.
+        failed_replicas: If True, terminates all failed replicas instead
+          of a specific replica.
 
     Returns:
-        A summary message indicating the results of the termination operation.
+        A message indicating the result of the termination operation.
 
     Raises:
-        ValueError: If the service does not exist or if there are errors
-            accessing the service state.
+        ValueError: If the service or replica does not exist, or if
+          failed_replicas=True and replica_id is not None.
     """
-    # Verify service exists
+    # TODO(tian): Currently pool does not support terminating replica.
     service_status = _get_service_status(service_name, pool=False)
     if service_status is None:
         with ux_utils.print_exception_no_traceback():
@@ -720,79 +697,115 @@ def terminate_failed_replicas(service_name: str) -> str:
 
     controller_port = service_status['controller_port']
 
-    # Get all failed replica statuses
-    failed_statuses = serve_state.ReplicaStatus.failed_statuses()
+    if failed_replicas:
+        # Terminate all failed replicas
+        if replica_id is not None:
+            raise ValueError(
+                'replica_id must be None when failed_replicas=True')
 
-    # Collect all failed replicas, using a dict to deduplicate by replica_id
-    failed_replicas_dict: Dict[int, 'replica_managers.ReplicaInfo'] = {}
-    for replica_status in failed_statuses:
-        replicas = serve_state.get_replicas_at_status(service_name,
-                                                      replica_status)
-        for replica in replicas:
-            # Use replica_id as key to deduplicate
-            if replica.replica_id not in failed_replicas_dict:
-                failed_replicas_dict[replica.replica_id] = replica
+        # Get all failed replica statuses
+        failed_statuses = serve_state.ReplicaStatus.failed_statuses()
 
-    failed_replicas = list(failed_replicas_dict.values())
+        # Collect all failed replicas, using a dict to deduplicate by replica_id
+        failed_replicas_dict: Dict[int, 'replica_managers.ReplicaInfo'] = {}
+        for replica_status in failed_statuses:
+            replicas = serve_state.get_replicas_at_status(
+                service_name, replica_status)
+            for replica in replicas:
+                # Use replica_id as key to deduplicate
+                if replica.replica_id not in failed_replicas_dict:
+                    failed_replicas_dict[replica.replica_id] = replica
 
-    if not failed_replicas:
-        return (f'{colorama.Fore.YELLOW}No failed replicas found for service '
+        failed_replica_list = list(failed_replicas_dict.values())
+
+        if not failed_replica_list:
+            return (
+                f'{colorama.Fore.YELLOW}No failed replicas found for service '
                 f'{service_name!r}.{colorama.Style.RESET_ALL}')
 
-    # Terminate each failed replica with purge=True
-    messages = []
-    messages.append(f'{colorama.Fore.CYAN}Found {len(failed_replicas)} failed '
-                    f'replica(s) for service {service_name!r}. Terminating...'
-                    f'{colorama.Style.RESET_ALL}')
+        # Terminate each failed replica with purge=True
+        messages = []
+        messages.append(
+            f'{colorama.Fore.CYAN}Found {len(failed_replica_list)} failed '
+            f'replica(s) for service {service_name!r}. Terminating...'
+            f'{colorama.Style.RESET_ALL}')
 
-    terminated_count = 0
-    failed_terminations = []
+        terminated_count = 0
+        failed_terminations = []
 
-    for replica_info in failed_replicas:
-        replica_id = replica_info.replica_id
-        replica_status = replica_info.status
+        for replica_info in failed_replica_list:
+            rid = replica_info.replica_id
+            replica_status = replica_info.status
 
-        try:
-            # Make HTTP request to controller to terminate the replica
-            resp = requests.post(
-                _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
-                '/controller/terminate_replica',
-                json={
-                    'replica_id': replica_id,
-                    'purge': True,  # Always use purge for failed replicas
-                })
+            try:
+                # Make HTTP request to controller to terminate the replica
+                resp = requests.post(
+                    _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
+                    '/controller/terminate_replica',
+                    json={
+                        'replica_id': rid,
+                        'purge': True,  # Always use purge for failed replicas
+                    })
 
-            if resp.status_code == 200:
-                messages.append(
-                    f'  {colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} '
-                    f'Terminated replica {replica_id} '
-                    f'(status: {replica_status.value})')
-                terminated_count += 1
-            else:
-                error_msg = resp.json().get('message', 'Unknown error')
+                if resp.status_code == 200:
+                    messages.append(
+                        f'  {colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} '
+                        f'Terminated replica {rid} '
+                        f'(status: {replica_status.value})')
+                    terminated_count += 1
+                else:
+                    error_msg = resp.json().get('message', 'Unknown error')
+                    messages.append(
+                        f'  {colorama.Fore.RED}✗{colorama.Style.RESET_ALL} '
+                        f'Failed to terminate replica {rid}: {error_msg}')
+                    failed_terminations.append((rid, error_msg))
+            except Exception as e:  # pylint: disable=broad-except
+                error_msg = f'{type(e).__name__}: {e}'
                 messages.append(
                     f'  {colorama.Fore.RED}✗{colorama.Style.RESET_ALL} '
-                    f'Failed to terminate replica {replica_id}: {error_msg}')
-                failed_terminations.append((replica_id, error_msg))
-        except Exception as e:  # pylint: disable=broad-except
-            error_msg = f'{type(e).__name__}: {e}'
+                    f'Failed to terminate replica {rid}: {error_msg}')
+                failed_terminations.append((rid, error_msg))
+
+        # Add summary
+        if terminated_count > 0:
+            messages.append(f'{colorama.Fore.GREEN}Successfully terminated '
+                            f'{terminated_count} failed replica(s).'
+                            f'{colorama.Style.RESET_ALL}')
+
+        if failed_terminations:
             messages.append(
-                f'  {colorama.Fore.RED}✗{colorama.Style.RESET_ALL} '
-                f'Failed to terminate replica {replica_id}: {error_msg}')
-            failed_terminations.append((replica_id, error_msg))
+                f'{colorama.Fore.YELLOW}{len(failed_terminations)} replica(s) '
+                f'could not be terminated.{colorama.Style.RESET_ALL}')
 
-    # Add summary
-    if terminated_count > 0:
-        messages.append(
-            f'{colorama.Fore.GREEN}Successfully terminated {terminated_count} '
-            f'failed replica(s).{colorama.Style.RESET_ALL}')
+        return '\n'.join(messages)
+    else:
+        # Terminate a specific replica
+        if replica_id is None:
+            raise ValueError(
+                'replica_id must be provided when failed_replicas=False')
 
-    if failed_terminations:
-        messages.append(
-            f'{colorama.Fore.YELLOW}{len(failed_terminations)} replica(s) '
-            f'could not be terminated.{colorama.Style.RESET_ALL}')
+        replica_info = serve_state.get_replica_info_from_id(
+            service_name, replica_id)
+        if replica_info is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Replica {replica_id} for service {service_name} does not '
+                    'exist.')
 
-    return '\n'.join(messages)
+        resp = requests.post(
+            _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
+            '/controller/terminate_replica',
+            json={
+                'replica_id': replica_id,
+                'purge': purge,
+            })
+
+        message: str = resp.json()['message']
+        if resp.status_code != 200:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Failed to terminate replica {replica_id} '
+                                 f'in {service_name}. Reason:\n{message}')
+        return message
 
 
 def _get_service_status(
@@ -1722,22 +1735,18 @@ class ServeCodeGen:
         return cls._build(code)
 
     @classmethod
-    def terminate_replica(cls, service_name: str, replica_id: int,
-                          purge: bool) -> str:
+    def terminate_replica(cls,
+                          service_name: str,
+                          replica_id: Optional[int],
+                          purge: bool,
+                          failed_replicas: bool = False) -> str:
         code = [
             f'(lambda: print(serve_utils.terminate_replica({service_name!r}, '
-            f'{replica_id}, {purge}), end="", flush=True) '
+            f'{replica_id}, {purge}, failed_replicas={failed_replicas}), '
+            f'end="", flush=True) '
             'if getattr(constants, "SERVE_VERSION", 0) >= 2 else '
             f'exec("raise RuntimeError('
             f'{constants.TERMINATE_REPLICA_VERSION_MISMATCH_ERROR!r})"))()'
-        ]
-        return cls._build(code)
-
-    @classmethod
-    def terminate_failed_replicas(cls, service_name: str) -> str:
-        code = [
-            f'msg = serve_utils.terminate_failed_replicas({service_name!r})',
-            'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 
