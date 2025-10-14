@@ -1,6 +1,5 @@
-![Run nanochat on Your Infra](banner.png)
-
 # Run nanochat on any cloud or Kubernetes with SkyPilot
+![Run nanochat on Your Infra](https://i.imgur.com/2MVlTsh.png)
 
 This demo shows how to train and serve [nanochat](https://github.com/karpathy/nanochat) on any cloud provider or Kubernetes cluster with [SkyPilot](https://docs.skypilot.co/en/latest/docs/index.html). Run nanochat seamlessly across AWS, GCP, Azure, Lambda Labs, Nebius and more - or bring your own Kubernetes infrastructure.
 
@@ -64,9 +63,12 @@ Open the displayed URL in your browser to chat with your trained model!
 
 ## Customizing Your Training
 
+SkyPilot YAMLs are flexible and can be customized to fit your use case. 
+
 ### Custom Storage Bucket
 
-Edit the YAML files to use your own bucket instead of `s3://nanochat-data`:
+To use your own bucket for storing the model weights, replace `s3://nanochat-data` in the bucket:
+
 ```yaml
 file_mounts:
   /tmp/nanochat:
