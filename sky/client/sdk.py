@@ -925,6 +925,7 @@ def tail_logs(
 @annotations.client_api
 @rest.retry_transient_errors()
 def tail_provision_logs(cluster_name: str,
+                        worker: int = -1,
                         follow: bool = True,
                         tail: int = 0,
                         output_stream: Optional['io.TextIOBase'] = None) -> int:
@@ -932,6 +933,8 @@ def tail_provision_logs(cluster_name: str,
 
     Args:
         cluster_name: name of the cluster.
+        worker: worker id in multi-node cluster.
+             If -1, stream the logs of the head node.
         follow: follow the logs.
         tail: lines from end to tail.
         output_stream: optional stream to write logs.
@@ -940,6 +943,7 @@ def tail_provision_logs(cluster_name: str,
     """
     body = payloads.ClusterNameBody(cluster_name=cluster_name)
     params = {
+        'worker': worker,
         'follow': str(follow).lower(),
         'tail': tail,
     }
