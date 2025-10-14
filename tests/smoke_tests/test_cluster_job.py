@@ -2433,15 +2433,17 @@ def test_cancel_logs_does_not_break_process_pool(generic_cloud: str):
             f'sky launch -c {name}-1 -y -d --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} \'for i in {{1..180}}; do echo $i; sleep 1; done\'',
             # Start sky logs in background, launch cluster 2 in background,
             # send SIGTERM to sky logs, then wait for launch to finish.
-            f'sky logs {name}-1 1 > /tmp/{name}-1.log 2>&1 & '
-            f'LOGS_PID=$!; echo "Logs PID: $LOGS_PID"; '
+            f'sky logs {name}-1 & '
+            f'LOGS_PID=$!; '
             f'sky launch -c {name}-2 -y --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} echo hi > /tmp/{name}-2.log 2>&1 & '
-            f'LAUNCH_PID=$!; echo "Launch PID: $LAUNCH_PID"; '
-            f'sleep 5; '
+            f'LAUNCH_PID=$!; '
+            'sleep 10; '
+            f'echo "Killing logs PID: $LOGS_PID"; '
             f'kill -9 $LOGS_PID; '
+            f'echo "Waiting for launch PID: $LAUNCH_PID"; '
+            f'tail -f /tmp/{name}-2.log & '
             f'wait $LAUNCH_PID',
             # Verify launch succeeded
-            f'cat /tmp/{name}-2.log',
             f'cat /tmp/{name}-2.log | grep sky-cmd | grep hi',
             f'! cat /tmp/{name}-2.log | grep BrokenProcessPool',
         ],
