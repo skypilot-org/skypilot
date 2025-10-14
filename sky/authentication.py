@@ -156,7 +156,9 @@ def get_or_generate_keys() -> Tuple[str, str]:
 def create_ssh_key_files_from_db(private_key_path: str) -> bool:
     """Creates the ssh key files from the database.
 
-    Returns True if the ssh key files are created successfully, False otherwise."""
+    Returns:
+        True if the ssh key files are created successfully, False otherwise.
+    """
     # Assume private key path is in the format of
     # ~/.sky/clients/<user_hash>/ssh/sky-key
     separated_path = os.path.normpath(private_key_path).split(os.path.sep)
