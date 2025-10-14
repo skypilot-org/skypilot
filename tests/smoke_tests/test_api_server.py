@@ -5,7 +5,7 @@ import sys
 import tempfile
 import threading
 import time
-from typing import Dict, List, Optional, Tuple, TypeVar
+from typing import Dict, Generator, List, Optional, Tuple, TypeVar
 
 import pytest
 from smoke_tests import metrics_utils
@@ -623,11 +623,12 @@ def test_high_logs_concurrency_not_blocking_operations(generic_cloud: str,
         sky.stream_and_get(sky.tail_logs(cluster_name=name, follow=True))
         ctx.redirect_log(origin)
 
-    def start_tail_logs():
+    def start_tail_logs() -> Generator[str, None, None]:
         # We expect a single server process can handle enough concurrent log tail request
         # without affecting the responsiveness.
         # Note that we have to use SDK here to avoid the overhead of too much CLI processes
         # which makes the test flaky.
+        yield f'Starting 256 tail log threads, log path: {tmp_path}'
         for _ in range(256):
             thread = threading.Thread(target=tail_log_thread, daemon=True)
             tail_log_threads.append(thread)
@@ -637,21 +638,19 @@ def test_high_logs_concurrency_not_blocking_operations(generic_cloud: str,
         for thread in tail_log_threads:
             thread.join()
 
-    def expect_enough_concurrent_logs() -> bool:
+    def expect_enough_concurrent_logs() -> Generator[str, None, None]:
         start = time.time()
         # Expect the API server support enough concurrent logs requests
         # within a reasonable time.
         expected_count = 128
-        while time.time() - start < 600:
+        while time.time() - start < 120:
             count = 0
             for req in sky.api_status(limit=None):
-                if 'logs' in req.name:
+                if 'logs' in req.name and req.status == 'RUNNING':
                     count += 1
-                print(
-                    f'Wait enough concurrent logs requests: {count}/{expected_count}'
-                )
             if count >= expected_count:
-                return True
+                return
+            yield f'Wait enough concurrent logs requests: {count}/{expected_count}'
             time.sleep(5)
         raise Exception('Enough concurrent logs requests are not supported')
 
@@ -669,7 +668,7 @@ def test_high_logs_concurrency_not_blocking_operations(generic_cloud: str,
             start_tail_logs,
             expect_enough_concurrent_logs,
             f'sky launch -c {name}-another --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --async',
-            f'sky jobs launch -n {name}-job --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --async',
+            f'sky jobs launch -n {name}-job "echo hello" --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --async',
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name + '-another',
                 cluster_status=[sky.ClusterStatus.UP],
@@ -678,7 +677,7 @@ def test_high_logs_concurrency_not_blocking_operations(generic_cloud: str,
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-job',
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
-                timeout=60),
+                timeout=smoke_tests_utils.get_timeout(generic_cloud)),
             # sky api cancel does not support skip confirmation, just stop and start the API server to cancel all logs requests
             'sky api stop && sky api start',
             wait_tail_logs_threads,

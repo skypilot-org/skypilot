@@ -9,6 +9,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import traceback
 from types import MethodType
 from typing import (Any, BinaryIO, Callable, Dict, Generator, List, NamedTuple,
                     Optional, Sequence, Set, Tuple, Union)
@@ -334,7 +335,8 @@ class Test(NamedTuple):
     # Command can either be:
     # - bash script (str), will be called as a subprocess via Popen.
     # - a python Callable, will be executed directly. This is useful for testing
-    #   our python SDK in smoke test.
+    #   our python SDK in smoke test. The Callable can be generator to yield logs
+    #   that reflects current test status.
     commands: List[Union[str, Callable[[], None]]]
     teardown: Optional[str] = None
     # Timeout for each command in seconds.
@@ -530,6 +532,16 @@ def get_callable_source(func):
     return file, lineno, src
 
 
+def ensure_iterable_result(func):
+    result = func()
+    if inspect.isgenerator(result):
+        return result
+    elif result is None:
+        return []
+    else:
+        return [result]
+
+
 def run_one_test(test: Test, check_sky_status: bool = True) -> None:
     # Fail fast if `sky` CLI somehow errors out.
     if check_sky_status:
@@ -560,10 +572,11 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
             if callable(command):
                 try:
                     write(f'+ callable: {command!r}\n')
-                    command()
+                    for output in ensure_iterable_result(command):
+                        write(str(output) + '\n')
                 except Exception as e:
                     file, lineno, src = get_callable_source(command)
-                    error_in_callable = f'Error executing callable command: {e} at {file}:{lineno}\ncode: {src}'
+                    error_in_callable = f'Error executing callable command: {e} at {file}:{lineno}\ncode: {src}\ntraceback: {traceback.format_exc()}'
                     test.echo(error_in_callable)
                     write(error_in_callable + '\n')
                     flush()
