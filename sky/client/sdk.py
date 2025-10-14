@@ -943,10 +943,12 @@ def tail_provision_logs(cluster_name: str,
     """
     body = payloads.ClusterNameBody(cluster_name=cluster_name)
     params = {
-        'worker': worker,
         'follow': str(follow).lower(),
         'tail': tail,
     }
+    remote_api_version = versions.get_remote_api_version()
+    if remote_api_version is not None and remote_api_version >= 21:
+        params['worker'] = worker
     response = server_common.make_authenticated_request(
         'POST',
         '/provision_logs',
