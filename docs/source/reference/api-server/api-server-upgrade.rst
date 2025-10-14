@@ -302,7 +302,7 @@ For a nightly build, its API compatibility is equivalent to its previous minor v
 
 .. _sky-api-server-database-migrations:
 
-Manual Database Migrations
+Manual database migrations
 --------------------------
 
 The SkyPilot API server runs Alembic database migrations during startup if necessary to ensure the database schema is up to date.
@@ -315,7 +315,7 @@ The Alembic wrapper is located at ``sky/schemas/db/scripts/run_alembic.py``. It 
 * ``spot_jobs_db`` - Spot jobs database
 * ``serve_db`` - Serve database
 
-Common Commands
+Common commands
 ~~~~~~~~~~~~~~~
 
 Check current database version:
