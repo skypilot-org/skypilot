@@ -700,9 +700,13 @@ class SSHUpBody(RequestBody):
 
 
 class ServeTerminateReplicaBody(RequestBody):
-    """The request body for the serve terminate replica endpoint."""
+    """The request body for the serve terminate replica endpoint.
+
+    Note: replica_id=-1 is used as a sentinel value to indicate
+    "all failed replicas" when failed_replicas=True.
+    """
     service_name: str
-    replica_id: Optional[int] = None
+    replica_id: int
     purge: bool = False
     failed_replicas: bool = False
 

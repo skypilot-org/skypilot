@@ -666,7 +666,7 @@ def update_service_encoded(service_name: str, version: int, mode: str,
 
 
 def terminate_replica(service_name: str,
-                      replica_id: Optional[int],
+                      replica_id: int,
                       purge: bool,
                       failed_replicas: bool = False) -> str:
     """Terminate a specific replica or all failed replicas for a service.
@@ -674,10 +674,13 @@ def terminate_replica(service_name: str,
     This function runs on the controller where it can access the serve_state
     database to query for failed replicas.
 
+    Note: replica_id=-1 is used as a sentinel value to indicate
+    "all failed replicas" when failed_replicas=True.
+
     Args:
         service_name: Name of the service.
-        replica_id: ID of replica to terminate. If None and
-          failed_replicas=True, terminates all failed replicas.
+        replica_id: ID of replica to terminate. Use -1 with
+          failed_replicas=True to terminate all failed replicas.
         purge: Whether to terminate replicas in a failed status.
         failed_replicas: If True, terminates all failed replicas instead
           of a specific replica.
@@ -687,7 +690,7 @@ def terminate_replica(service_name: str,
 
     Raises:
         ValueError: If the service or replica does not exist, or if
-          failed_replicas=True and replica_id is not None.
+          failed_replicas=True and replica_id is not -1.
     """
     # TODO(tian): Currently pool does not support terminating replica.
     service_status = _get_service_status(service_name, pool=False)
@@ -699,9 +702,8 @@ def terminate_replica(service_name: str,
 
     if failed_replicas:
         # Terminate all failed replicas
-        if replica_id is not None:
-            raise ValueError(
-                'replica_id must be None when failed_replicas=True')
+        if replica_id != -1:
+            raise ValueError('replica_id must be -1 when failed_replicas=True')
 
         # Get all failed replica statuses
         failed_statuses = serve_state.ReplicaStatus.failed_statuses()
@@ -780,9 +782,9 @@ def terminate_replica(service_name: str,
         return '\n'.join(messages)
     else:
         # Terminate a specific replica
-        if replica_id is None:
+        if replica_id < 0:
             raise ValueError(
-                'replica_id must be provided when failed_replicas=False')
+                'replica_id must be >= 0 when failed_replicas=False')
 
         replica_info = serve_state.get_replica_info_from_id(
             service_name, replica_id)
@@ -1737,7 +1739,7 @@ class ServeCodeGen:
     @classmethod
     def terminate_replica(cls,
                           service_name: str,
-                          replica_id: Optional[int],
+                          replica_id: int,
                           purge: bool,
                           failed_replicas: bool = False) -> str:
         code = [

@@ -92,31 +92,34 @@ def down(
 
 @usage_lib.entrypoint
 def terminate_replica(service_name: str,
-                      replica_id: Optional[int],
+                      replica_id: int,
                       purge: bool,
                       failed_replicas: bool = False) -> None:
     """Tears down a replica or all failed replicas.
 
+    Note: replica_id=-1 is used as a sentinel value to indicate
+    "all failed replicas" when failed_replicas=True.
+
     Args:
         service_name: Name of the service.
-        replica_id: ID of replica to terminate. If None and
-          failed_replicas=True, terminates all failed replicas.
+        replica_id: ID of replica to terminate. Use -1 with
+          failed_replicas=True to terminate all failed replicas.
         purge: Whether to terminate replicas in a failed status. These
           replicas may lead to resource leaks, so we require the user to
           explicitly specify this flag to make sure they are aware of this
           potential resource leak.
         failed_replicas: If True, terminates all failed replicas instead
-          of a specific replica. replica_id must be None when this is True.
+          of a specific replica. replica_id must be -1 when this is True.
 
     Raises:
         sky.exceptions.ClusterNotUpError: if the sky serve controller is
           not up.
         RuntimeError: if failed to terminate the replica(s).
         ValueError: if the service or replica does not exist, or if
-          failed_replicas=True and replica_id is not None.
+          failed_replicas=True and replica_id is not -1.
     """
-    if failed_replicas and replica_id is not None:
-        raise ValueError('replica_id must be None when failed_replicas=True')
+    if failed_replicas and replica_id != -1:
+        raise ValueError('replica_id must be -1 when failed_replicas=True')
 
     handle = backend_utils.is_controller_accessible(
         controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
@@ -132,19 +135,17 @@ def terminate_replica(service_name: str,
 
     # Generate code to run on the controller
     if failed_replicas:
-        code = serve_utils.ServeCodeGen.terminate_replica(service_name,
-                                                          replica_id=None,
-                                                          purge=purge,
-                                                          failed_replicas=True)
+        code = serve_utils.ServeCodeGen.terminate_replica(
+            service_name,
+            replica_id=-1,  # Sentinel value for "all failed replicas"
+            purge=purge,
+            failed_replicas=True)
     else:
         # For single replica termination, try gRPC first if enabled
         use_legacy = not handle.is_grpc_enabled_with_flag
 
         if not use_legacy:
             try:
-                assert replica_id is not None, (
-                    'replica_id must be provided for single replica '
-                    'termination')
                 stdout = serve_rpc_utils.RpcRunner.terminate_replica(
                     handle, service_name, replica_id, purge)
                 sky_logging.print(stdout)

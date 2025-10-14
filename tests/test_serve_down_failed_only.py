@@ -47,7 +47,8 @@ class TestServeDownFailedReplicasClient:
         assert result.exit_code == 0, (result.exception, result.output)
 
         # Check that terminate_replica was called with the service name,
-        # replica_id=None, purge=True, failed_replicas=True
+        # replica_id=None (CLI passes None, SDK converts to -1 internally),
+        # purge=True, failed_replicas=True
         self.mock_terminate_replica.assert_called_once_with(
             'test-service', replica_id=None, purge=True, failed_replicas=True)
 
@@ -165,7 +166,7 @@ class TestServeDownFailedReplicasServerSide:
             lambda: [serve_state.ReplicaStatus.FAILED_PROVISION])
 
         result = serve_utils.terminate_replica('test-service',
-                                               replica_id=None,
+                                               replica_id=-1,
                                                purge=True,
                                                failed_replicas=True)
         assert 'No failed replicas found' in result
@@ -181,7 +182,7 @@ class TestServeDownFailedReplicasServerSide:
 
         with pytest.raises(ValueError, match="does not exist"):
             serve_utils.terminate_replica('nonexistent-service',
-                                          replica_id=None,
+                                          replica_id=-1,
                                           purge=True,
                                           failed_replicas=True)
 
@@ -190,7 +191,7 @@ class TestServeDownFailedReplicasServerSide:
         from sky.serve.serve_utils import ServeCodeGen
 
         code = ServeCodeGen.terminate_replica('test-service',
-                                              replica_id=None,
+                                              replica_id=-1,
                                               purge=True,
                                               failed_replicas=True)
 
@@ -235,11 +236,11 @@ class TestServeDownFailedReplicasIntegration:
 
         # Test instantiation with failed_replicas parameter
         body = payloads.ServeTerminateReplicaBody(service_name='test',
-                                                  replica_id=None,
+                                                  replica_id=-1,
                                                   purge=True,
                                                   failed_replicas=True)
         assert body.service_name == 'test'
-        assert body.replica_id is None
+        assert body.replica_id == -1  # Sentinel value
         assert body.purge is True
         assert body.failed_replicas is True
 

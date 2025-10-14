@@ -152,9 +152,15 @@ def terminate_replica(
     if failed_replicas and replica_id is not None:
         raise ValueError('replica_id must be None when failed_replicas=True')
 
+    # Use -1 as sentinel value for "all failed replicas"
+    actual_replica_id = -1 if failed_replicas else replica_id
+    if actual_replica_id is None:
+        raise ValueError('replica_id must be provided when '
+                         'failed_replicas=False')
+
     body = payloads.ServeTerminateReplicaBody(
         service_name=service_name,
-        replica_id=replica_id,
+        replica_id=actual_replica_id,
         purge=purge,
         failed_replicas=failed_replicas,
     )
