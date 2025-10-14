@@ -153,7 +153,10 @@ def get_or_generate_keys() -> Tuple[str, str]:
     return private_key_path, public_key_path
 
 
-def create_ssh_key_files_from_db(private_key_path: str):
+def create_ssh_key_files_from_db(private_key_path: str) -> bool:
+    """Creates the ssh key files from the database.
+
+    Returns True if the ssh key files are created successfully, False otherwise."""
     # Assume private key path is in the format of
     # ~/.sky/clients/<user_hash>/ssh/sky-key
     separated_path = os.path.normpath(private_key_path).split(os.path.sep)
@@ -181,12 +184,14 @@ def create_ssh_key_files_from_db(private_key_path: str):
             ssh_public_key, ssh_private_key, exists = (
                 global_user_state.get_ssh_keys(user_hash))
             if not exists:
-                raise RuntimeError(f'SSH keys not found for user {user_hash}')
+                logger.debug(f'SSH keys not found for user {user_hash}')
+                return False
             _save_key_pair(private_key_path, public_key_path, ssh_private_key,
                            ssh_public_key)
     assert os.path.exists(public_key_path), (
         'Private key found, but associated public key '
         f'{public_key_path} does not exist.')
+    return True
 
 
 def configure_ssh_info(config: Dict[str, Any]) -> Dict[str, Any]:
