@@ -39,7 +39,7 @@
 ----
 
 :fire: *News* :fire:
-- [Oct 2025] Run large-scale **LLM training with TorchTitan** on any AI infra: [**example**](./llm/torchtitan/)
+- [Oct 2025] Run large-scale **LLM training with TorchTitan** on any AI infra: [**example**](./examples/training/torchtitan)
 - [Sep 2025] Scaling AI infrastructure at Abridge - **10x faster development** with SkyPilot: [**blog**](https://blog.skypilot.co/abridge/)
 - [Sep 2025] Network and Storage Benchmarks for LLM training on the cloud: [**blog**](https://maknee.github.io/blog/2025/Network-And-Storage-Training-Skypilot/)
 - [Aug 2025] Serve and finetune **OpenAI GPT-OSS models** (gpt-oss-120b, gpt-oss-20b) with one command on any infra: [**serve**](./llm/gpt-oss/) + [**LoRA and full finetuning**](./llm/gpt-oss-finetuning/)
