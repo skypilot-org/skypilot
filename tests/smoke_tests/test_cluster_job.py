@@ -2437,7 +2437,8 @@ def test_cancel_logs_does_not_break_process_pool(generic_cloud: str):
             # Launch cluster 2 in background, redirect output to temp file.
             f'sky launch -c {name}-2 -y --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} echo hi > /tmp/{name}-2.log 2>&1 &',
             'LAUNCH_PID=$!',
-            # send SIGINT to sky logs (simulating Ctrl+C)
+            # Wait a bit, then send SIGINT to sky logs (simulating Ctrl+C)
+            'sleep 5',
             'kill -2 $LOGS_PID',
             # Wait for launch to finish
             'wait $LAUNCH_PID',
@@ -2446,7 +2447,7 @@ def test_cancel_logs_does_not_break_process_pool(generic_cloud: str):
             f'cat /tmp/{name}-2.log | grep -q "hi"',
             f'! cat /tmp/{name}-2.log | grep -q "BrokenProcessPool"',
         ],
-        f'sky down -y {name}-1; sky down -y {name}-2; rm /tmp/{name}-2.log',
+        f'sky down -y {name}-1; sky down -y {name}-2; rm -f /tmp/{name}-2.log',
         timeout=10 * 60,
     )
     smoke_tests_utils.run_one_test(test)
