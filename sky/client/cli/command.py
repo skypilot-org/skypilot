@@ -65,6 +65,7 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import constants as server_constants
+from sky.server import versions
 from sky.server.requests import requests
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -2224,6 +2225,11 @@ def logs(
     a non-zero return code.
     """
     if worker != -1:
+        remote_api_version = versions.get_remote_api_version()
+        if remote_api_version is not None and remote_api_version < 21:
+            logger.warning(
+                'The worker option is not supported on your api server. '
+                'Please upgrade to a newer API server to use it.')
         if not provision:
             raise click.UsageError(
                 '--worker can only be used with --provision.')
