@@ -412,8 +412,10 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     ('workspaces',),
     ('db',),
     ('daemons',),
-    ('jobs', 'controller'),
-    ('serve', 'controller'),
+    # TODO(kevin,tian): Override the whole controller config once our test
+    # infrastructure supports setting dynamic server side configs.
+    ('jobs', 'controller', 'consolidation_mode'),
+    ('serve', 'controller', 'consolidation_mode'),
 ]
 
 # Constants for Azure blob storage
