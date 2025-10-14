@@ -227,8 +227,8 @@ RAY_INSTALLATION_COMMANDS = (
     f'grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
     f'|| {RAY_STATUS} || '
     # The pydantic-core==2.41.3 for arm seems corrupted
-    # so we need to install from source for fallback.
-    f'({SKY_UV_PIP_CMD} install -U ray[default]=={SKY_REMOTE_RAY_VERSION} || {SKY_UV_PIP_CMD} install -U --no-binary=pydantic-core ray[default]=={SKY_REMOTE_RAY_VERSION}); '  # pylint: disable=line-too-long
+    # so we need to avoid that specific version for fallback.
+    f'({SKY_UV_PIP_CMD} install -U ray[default]=={SKY_REMOTE_RAY_VERSION} || {SKY_UV_PIP_CMD} install -U "ray[default]=={SKY_REMOTE_RAY_VERSION}" "pydantic-core!=2.41.3"); '  # pylint: disable=line-too-long
     # In some envs, e.g. pip does not have permission to write under /opt/conda
     # ray package will be installed under ~/.local/bin. If the user's PATH does
     # not include ~/.local/bin (the pip install will have the output: `WARNING:
