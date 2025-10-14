@@ -681,18 +681,6 @@ def test_batch_continues_on_errors_helper(monkeypatch, capsys, mode):
     captured = capsys.readouterr()
 
     out_raw = (captured.out + captured.err).replace("\r", "\n")
-
-    import sys
-
-    print("\n=== DEBUG: RAW OUTPUT ===", file=sys.stderr)
-    print(repr(out_raw), file=sys.stderr)
-    print("\n=== DEBUG: CLEAN OUTPUT ===", file=sys.stderr)
-    print(strip_ansi(out_raw), file=sys.stderr)
-    print("=" * 50, file=sys.stderr)
-
-    with capsys.disabled():
-        print("\n=== USER-VISIBLE OUTPUT (raw) ===\n")
-        print(out_raw)
     out = strip_ansi(out_raw)
 
     assert re.search(r"nebius.*UNAUTHENTICATED", out, re.I)
