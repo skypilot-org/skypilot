@@ -3720,7 +3720,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
                 self._update_after_cluster_provisioned(
                     handle, to_provision_config.prev_handle, task,
-                    prev_cluster_status, lock_id, config_hash)
+                    prev_cluster_status, config_hash)
                 return handle, False
 
             cluster_config_file = config_dict['ray']
@@ -3792,7 +3792,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             self._update_after_cluster_provisioned(
                 handle, to_provision_config.prev_handle, task,
-                prev_cluster_status, lock_id, config_hash)
+                prev_cluster_status, config_hash)
             return handle, False
 
     def _open_ports(self, handle: CloudVmRayResourceHandle) -> None:
@@ -3810,7 +3810,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             prev_handle: Optional[CloudVmRayResourceHandle],
             task: task_lib.Task,
             prev_cluster_status: Optional[status_lib.ClusterStatus],
-            lock_id: str, config_hash: str) -> None:
+            config_hash: str) -> None:
         usage_lib.messages.usage.update_cluster_resources(
             handle.launched_nodes, handle.launched_resources)
         usage_lib.messages.usage.update_final_cluster_status(
@@ -3921,8 +3921,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 handle.cluster_name, handle.cached_external_ips, auth_config,
                 handle.cached_external_ssh_ports, handle.docker_user,
                 handle.ssh_user)
-
-            locks.get_lock(lock_id).force_unlock()
 
     def _sync_workdir(self, handle: CloudVmRayResourceHandle,
                       workdir: Union[Path, Dict[str, Any]],
