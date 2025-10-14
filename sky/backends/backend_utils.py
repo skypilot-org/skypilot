@@ -3275,6 +3275,9 @@ def get_clusters(
                     if not success:
                         # If the ssh key files are not found, we do not
                         # update the record with credentials.
+                        logger.debug(
+                            f'SSH keys not found for cluster {record["name"]} '
+                            f'at key path {ssh_private_key_path}')
                         continue
             else:
                 private_key_path, _ = auth.get_or_generate_keys()
