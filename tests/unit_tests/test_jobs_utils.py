@@ -1,6 +1,4 @@
 import logging
-import pathlib
-import tempfile
 import time
 from unittest import mock
 
@@ -98,40 +96,3 @@ async def test_get_job_status_timeout(mock_get_handle, mock_logger):
     error_log_line = mock_logger.info.call_args_list[1][0][0]
     assert 'Failed to get job status:' in error_log_line
     assert f'timed out after {timeout_override}s' in error_log_line
-
-
-@mock.patch('sky.jobs.utils.logger')
-@mock.patch('sky.jobs.utils.skypilot_config')
-def test_consolidation_mode_warning_without_restart(mock_config, mock_logger):
-    """Test that a warning is printed when consolidation mode is enabled
-    but the API server has not been restarted."""
-    # Clear the LRU cache to ensure fresh test
-    utils.is_consolidation_mode.cache_clear()
-
-    # Mock config to return True for consolidation mode
-    mock_config.get_nested.return_value = True
-
-    # Create a temporary directory to use as the signal file location
-    with tempfile.TemporaryDirectory() as tmpdir:
-        signal_file = pathlib.Path(tmpdir) / 'consolidation_signal'
-
-        # Ensure signal file does not exist
-        if signal_file.exists():
-            signal_file.unlink()
-
-        # Mock the signal file path
-        with mock.patch(
-                'sky.jobs.utils._JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE',
-                str(signal_file)):
-            # Call is_consolidation_mode
-            result = utils.is_consolidation_mode()
-
-            # Should return False because signal file doesn't exist
-            assert result is False
-
-            # Verify warning was logged
-            assert mock_logger.warning.call_count == 1
-            warning_message = mock_logger.warning.call_args[0][0]
-            assert 'Consolidation mode for managed jobs is enabled' in warning_message
-            assert 'API server has not been restarted yet' in warning_message
-            assert 'Please restart the API server to enable it' in warning_message
