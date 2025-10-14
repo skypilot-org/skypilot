@@ -491,10 +491,16 @@ def test_api_server_start_stop(generic_cloud: str):
 
 @pytest.mark.kubernetes  # We only run this test on Kubernetes to test its ssh.
 @pytest.mark.no_remote_server  # All blocking testing has been done for local server.
+@pytest.mark.no_dependency  # We can't restart the api server in the dependency test.
 def test_tail_jobs_logs_blocks_ssh(generic_cloud: str):
     """Test that we don't block ssh when we do a large amount
     of tail logs requests.
     """
+    if not smoke_tests_utils.is_in_buildkite_env():
+        pytest.skip(
+            'Skipping test: requires restarting API server, run only in '
+            'Buildkite.')
+
     name = smoke_tests_utils.get_cluster_name()
     job_name = name + '-job'
     timeout = smoke_tests_utils.get_timeout(generic_cloud)

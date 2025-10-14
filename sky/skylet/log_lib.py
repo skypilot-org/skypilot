@@ -271,7 +271,6 @@ def run_with_log(
                 stdout, stderr = context_utils.pipe_and_wait_process(
                     ctx,
                     proc,
-                    cancel_callback=subprocess_utils.kill_children_processes,
                     stdout_stream_handler=stdout_stream_handler,
                     stderr_stream_handler=stderr_stream_handler)
             elif process_stream:
