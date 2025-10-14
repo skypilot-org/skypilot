@@ -1339,9 +1339,8 @@ def get_allocated_gpu_qty_by_node(
                 if container.resources.requests:
                     pod_allocated_qty += get_node_accelerator_count(
                         context, container.resources.requests)
-            if pod_allocated_qty > 0:
-                allocated_qty_by_node[
-                    pod.spec.node_name] += pod_allocated_qty
+            if pod_allocated_qty > 0 and pod.spec.node_name:
+                allocated_qty_by_node[pod.spec.node_name] += pod_allocated_qty
         return allocated_qty_by_node
     finally:
         response.release_conn()
