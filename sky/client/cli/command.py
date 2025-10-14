@@ -158,12 +158,17 @@ def _get_cluster_records_and_set_ssh_config(
     # Update the SSH config for all clusters
     for record in cluster_records:
         handle = record['handle']
-
+        name = record['name']
         if not (handle is not None and handle.cached_external_ips is not None
                 and 'credentials' in record):
             # If the cluster is not UP or does not have credentials available,
             # we need to remove the cluster from the SSH config.
-            cluster_utils.SSHConfigHelper.remove_cluster(record['name'])
+            cluster_utils.SSHConfigHelper.remove_cluster(name)
+            continue
+        if not record['credentials']:
+            # The credential is missing for some reason, continue.
+            logger.debug(
+                f'Client did not receive SSH credential for cluster {name}')
             continue
 
         # During the failover, even though a cluster does not exist, the handle
