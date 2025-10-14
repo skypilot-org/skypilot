@@ -414,6 +414,12 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     ('daemons',),
     # TODO(kevin,tian): Override the whole controller config once our test
     # infrastructure supports setting dynamic server side configs.
+    # Tests that are affected:
+    # - test_managed_jobs_ha_kill_starting
+    # - test_managed_jobs_ha_kill_running
+    # - all tests that use LOW_CONTROLLER_RESOURCE_ENV or
+    #   LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG (won't cause test failure,
+    #   but the configs won't be applied)
     ('jobs', 'controller', 'consolidation_mode'),
     ('serve', 'controller', 'consolidation_mode'),
 ]
