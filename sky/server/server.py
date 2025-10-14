@@ -3,7 +3,6 @@
 import argparse
 import asyncio
 import base64
-from concurrent.futures import ThreadPoolExecutor
 import contextlib
 import datetime
 import hashlib
@@ -15,8 +14,10 @@ import posixpath
 import re
 import resource
 import shutil
+import signal
 import sys
 import threading
+import time
 from typing import Dict, List, Literal, Optional, Set, Tuple
 import uuid
 import zipfile
@@ -24,14 +25,13 @@ import zipfile
 import aiofiles
 import anyio
 import fastapi
-from fastapi.middleware import cors
 import starlette.middleware.base
+import uvicorn
 import uvloop
 
 import sky
 from sky import catalog
 from sky import check as sky_check
-from sky import clouds
 from sky import core
 from sky import exceptions
 from sky import execution
@@ -50,12 +50,13 @@ from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.server import metrics
+from sky.server import middleware as middleware_config
+from sky.server import reverse_proxy
 from sky.server import state
 from sky.server import stream_utils
 from sky.server import versions
 from sky.server.auth import authn
 from sky.server.auth import loopback
-from sky.server.auth import oauth2_proxy
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
@@ -72,7 +73,6 @@ from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import dag_utils
 from sky.utils import perf_utils
-from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils.db import db_utils
 from sky.volumes.server import server as volumes_rest
@@ -591,54 +591,10 @@ class APIVersionMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
 
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
-# Middleware wraps in the order defined here. E.g., given
-#   app.add_middleware(Middleware1)
-#   app.add_middleware(Middleware2)
-#   app.add_middleware(Middleware3)
-# The effect will be like:
-#   Middleware3(Middleware2(Middleware1(request)))
-# If MiddlewareN does something like print(n); call_next(); print(n), you'll get
-#   3; 2; 1; <request>; 1; 2; 3
-# Use environment variable to make the metrics middleware optional.
-if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
-    app.add_middleware(metrics.PrometheusMiddleware)
-app.add_middleware(APIVersionMiddleware)
-app.add_middleware(RBACMiddleware)
-app.add_middleware(InternalDashboardPrefixMiddleware)
-app.add_middleware(GracefulShutdownMiddleware)
-app.add_middleware(PathCleanMiddleware)
-app.add_middleware(CacheControlStaticMiddleware)
-app.add_middleware(
-    cors.CORSMiddleware,
-    # TODO(zhwu): in production deployment, we should restrict the allowed
-    # origins to the domains that are allowed to access the API server.
-    allow_origins=['*'],  # Specify the correct domains for production
-    allow_credentials=True,
-    allow_methods=['*'],
-    allow_headers=['*'],
-    # TODO(syang): remove X-Request-ID \when v0.10.0 is released.
-    expose_headers=['X-Request-ID', 'X-Skypilot-Request-ID'])
-# The order of all the authentication-related middleware is important.
-# RBACMiddleware must precede all the auth middleware, so it can access
-# request.state.auth_user.
-app.add_middleware(RBACMiddleware)
-# Authentication based on oauth2-proxy.
-app.add_middleware(oauth2_proxy.OAuth2ProxyMiddleware)
-# AuthProxyMiddleware should precede BasicAuthMiddleware and
-# BearerTokenMiddleware, since it should be skipped if either of those set the
-# auth user.
-app.add_middleware(AuthProxyMiddleware)
-enable_basic_auth = os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false')
-if str(enable_basic_auth).lower() == 'true':
-    app.add_middleware(BasicAuthMiddleware)
-# Bearer token middleware should always be present to handle service account
-# authentication
-app.add_middleware(BearerTokenMiddleware)
-# InitializeRequestAuthUserMiddleware must be the last added middleware so that
-# request.state.auth_user is always set, but can be overridden by the auth
-# middleware above.
-app.add_middleware(InitializeRequestAuthUserMiddleware)
-app.add_middleware(RequestIDMiddleware)
+
+# Apply all middleware using the centralized middleware configuration
+# This ensures consistency across all SkyPilot API server applications
+middleware_config.apply_middleware(app)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
 app.include_router(users_rest.router, prefix='/users', tags=['users'])
@@ -1724,128 +1680,10 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
     )
 
 
-@app.websocket('/kubernetes-pod-ssh-proxy')
-async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
-                                   cluster_name: str) -> None:
-    """Proxies SSH to the Kubernetes pod with websocket."""
-    await websocket.accept()
-    logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
-
-    # Run core.status in another thread to avoid blocking the event loop.
-    with ThreadPoolExecutor(max_workers=1) as thread_pool_executor:
-        cluster_records = await context_utils.to_thread_with_executor(
-            thread_pool_executor, core.status, cluster_name, all_users=True)
-    cluster_record = cluster_records[0]
-    if cluster_record['status'] != status_lib.ClusterStatus.UP:
-        raise fastapi.HTTPException(
-            status_code=400, detail=f'Cluster {cluster_name} is not running')
-
-    handle = cluster_record['handle']
-    assert handle is not None, 'Cluster handle is None'
-    if not isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
-        raise fastapi.HTTPException(
-            status_code=400,
-            detail=f'Cluster {cluster_name} is not a Kubernetes cluster'
-            'Use ssh to connect to the cluster instead.')
-
-    kubectl_cmd = handle.get_command_runners()[0].port_forward_command(
-        port_forward=[(None, 22)])
-    proc = await asyncio.create_subprocess_exec(
-        *kubectl_cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT)
-    logger.info(f'Started kubectl port-forward with command: {kubectl_cmd}')
-
-    # Wait for port-forward to be ready and get the local port
-    local_port = None
-    assert proc.stdout is not None
-    while True:
-        stdout_line = await proc.stdout.readline()
-        if stdout_line:
-            decoded_line = stdout_line.decode()
-            logger.info(f'kubectl port-forward stdout: {decoded_line}')
-            if 'Forwarding from 127.0.0.1' in decoded_line:
-                port_str = decoded_line.split(':')[-1]
-                local_port = int(port_str.replace(' -> ', ':').split(':')[0])
-                break
-        else:
-            await websocket.close()
-            return
-
-    logger.info(f'Starting port-forward to local port: {local_port}')
-    conn_gauge = metrics_utils.SKY_APISERVER_WEBSOCKET_CONNECTIONS.labels(
-        pid=os.getpid())
-    ssh_failed = False
-    websocket_closed = False
-    try:
-        conn_gauge.inc()
-        # Connect to the local port
-        reader, writer = await asyncio.open_connection('127.0.0.1', local_port)
-
-        async def websocket_to_ssh():
-            try:
-                async for message in websocket.iter_bytes():
-                    writer.write(message)
-                    try:
-                        await writer.drain()
-                    except Exception as e:  # pylint: disable=broad-except
-                        # Typically we will not reach here, if the ssh to pod
-                        # is disconnected, ssh_to_websocket will exit first.
-                        # But just in case.
-                        logger.error('Failed to write to pod through '
-                                     f'port-forward connection: {e}')
-                        nonlocal ssh_failed
-                        ssh_failed = True
-                        break
-            except fastapi.WebSocketDisconnect:
-                pass
-            nonlocal websocket_closed
-            websocket_closed = True
-            writer.close()
-
-        async def ssh_to_websocket():
-            try:
-                while True:
-                    data = await reader.read(1024)
-                    if not data:
-                        if not websocket_closed:
-                            logger.warning('SSH connection to pod is '
-                                           'disconnected before websocket '
-                                           'connection is closed')
-                            nonlocal ssh_failed
-                            ssh_failed = True
-                        break
-                    await websocket.send_bytes(data)
-            except Exception:  # pylint: disable=broad-except
-                pass
-            try:
-                await websocket.close()
-            except Exception:  # pylint: disable=broad-except
-                # The websocket might has been closed by the client.
-                pass
-
-        await asyncio.gather(websocket_to_ssh(), ssh_to_websocket())
-    finally:
-        conn_gauge.dec()
-        reason = ''
-        try:
-            logger.info('Terminating kubectl port-forward process')
-            proc.terminate()
-        except ProcessLookupError:
-            stdout = await proc.stdout.read()
-            logger.error('kubectl port-forward was terminated before the '
-                         'ssh websocket connection was closed. Remaining '
-                         f'output: {str(stdout)}')
-            reason = 'KubectlPortForwardExit'
-            metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
-                pid=os.getpid(), reason='KubectlPortForwardExit').inc()
-        else:
-            if ssh_failed:
-                reason = 'SSHToPodDisconnected'
-            else:
-                reason = 'ClientClosed'
-        metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
-            pid=os.getpid(), reason=reason).inc()
+# Note: The /kubernetes-pod-ssh-proxy WebSocket endpoint has been moved to
+# a separate FastAPI application in k8s_ssh_proxy_app.py for better resource
+# management. It now runs on its own port and is accessed through the reverse
+# proxy.
 
 
 @app.get('/all_contexts')
@@ -1953,8 +1791,61 @@ def _init_or_restore_server_user_hash():
     apply_user_hash(user_hash)
 
 
+# Start the reverse proxy in a separate process
+def run_reverse_proxy(
+        port: int = reverse_proxy.PROXY_PORT,
+        main_app_port: int = reverse_proxy.MAIN_APP_PORT,
+        k8s_ssh_proxy_port: int = reverse_proxy.K8S_SSH_PROXY_PORT,
+        host: str = '127.0.0.1'):
+    """Run the reverse proxy application."""
+
+    # Ignore SIGINT in this process - let the main process handle it
+    # This prevents Ctrl-C from shutting down the reverse proxy
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+    try:
+        # Update the port configuration in the reverse_proxy module
+        reverse_proxy.PROXY_PORT = port
+        reverse_proxy.MAIN_APP_PORT = main_app_port
+        reverse_proxy.K8S_SSH_PROXY_PORT = k8s_ssh_proxy_port
+
+        logger.info(f'Reverse proxy process starting on {host}:{port}')
+        uvicorn.run(
+            reverse_proxy.app,
+            host=host,
+            port=port,
+            log_level='info',
+            # Important: disable workers to avoid nested multiprocessing issues
+            workers=1,
+        )
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Reverse proxy process crashed: {e}', exc_info=True)
+        raise
+
+
+# Start the Kubernetes SSH proxy application in a separate process
+def run_k8s_ssh_proxy(host: str = '127.0.0.1', port: int = 46582):
+    """Run the Kubernetes SSH proxy application."""
+    # Ignore SIGINT in this process - let the main process handle it
+    # This prevents Ctrl-C from shutting down the K8s SSH proxy
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+    try:
+        logger.info(f'K8s SSH proxy process starting on {host}:{port}')
+        uvicorn.run(
+            'sky.server.k8s_ssh_proxy_app:app',
+            host=host,
+            port=port,
+            log_level='info',
+            # Important: disable workers to avoid nested multiprocessing issues
+            workers=1,
+        )
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'K8s SSH proxy process crashed: {e}', exc_info=True)
+        raise
+
+
 if __name__ == '__main__':
-    import uvicorn
 
     from sky.server import uvicorn as skyuvicorn
 
@@ -1963,25 +1854,45 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', default='127.0.0.1')
-    parser.add_argument('--port', default=46580, type=int)
+    parser.add_argument('--port',
+                        default=46580,
+                        type=int,
+                        help='Port for the reverse proxy (main entry point)')
+    parser.add_argument('--main-app-port',
+                        default=46581,
+                        type=int,
+                        help='Port for the main API server application')
+    parser.add_argument('--k8s-ssh-proxy-port',
+                        default=46582,
+                        type=int,
+                        help='Port for the Kubernetes SSH proxy application')
     parser.add_argument('--deploy', action='store_true')
     # Serve metrics on a separate port to isolate it from the application APIs:
     # metrics port will not be exposed to the public network typically.
     parser.add_argument('--metrics-port', default=9090, type=int)
     parser.add_argument('--start-with-python', action='store_true')
     cmd_args = parser.parse_args()
-    if cmd_args.port == cmd_args.metrics_port:
-        logger.error('port and metrics-port cannot be the same, exiting.')
-        raise ValueError('port and metrics-port cannot be the same')
 
-    # Fail fast if the port is not available to avoid corrupt the state
-    # of potential running server instance.
-    # We might reach here because the running server is currently not
-    # responding, thus the healthz check fails and `sky api start` think
-    # we should start a new server instance.
-    if not common_utils.is_port_available(cmd_args.port):
-        logger.error(f'Port {cmd_args.port} is not available, exiting.')
-        raise RuntimeError(f'Port {cmd_args.port} is not available')
+    # Validate that all ports are unique
+    ports = [
+        cmd_args.port, cmd_args.main_app_port, cmd_args.k8s_ssh_proxy_port,
+        cmd_args.metrics_port
+    ]
+    if len(ports) != len(set(ports)):
+        logger.error('All ports must be unique, exiting.')
+        raise ValueError(
+            'All ports (proxy, main-app, k8s-ssh-proxy, metrics) must be unique'
+        )
+
+    # Fail fast if any required port is not available
+    for port_name, port_num in [('proxy', cmd_args.port),
+                                ('main-app', cmd_args.main_app_port),
+                                ('k8s-ssh-proxy', cmd_args.k8s_ssh_proxy_port)]:
+        if not common_utils.is_port_available(port_num):
+            logger.error(
+                f'Port {port_num} ({port_name}) is not available, exiting.')
+            raise RuntimeError(
+                f'Port {port_num} ({port_name}) is not available')
 
     if not cmd_args.start_with_python:
         # Maybe touch the signal file on API server startup.
@@ -2013,6 +1924,10 @@ if __name__ == '__main__':
     workers: List[executor.RequestWorker] = []
     # Global background tasks that will be scheduled in a separate event loop.
     global_tasks: List[asyncio.Task] = []
+    # Processes for the separate applications
+    k8s_ssh_proxy_process: Optional[multiprocessing.Process] = None
+    reverse_proxy_process: Optional[multiprocessing.Process] = None
+
     try:
         background = uvloop.new_event_loop()
         if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
@@ -2028,12 +1943,81 @@ if __name__ == '__main__':
 
         queue_server, workers = executor.start(config)
 
-        logger.info(f'Starting SkyPilot API server, workers={num_workers}')
+        k8s_ssh_proxy_process = multiprocessing.Process(
+            target=run_k8s_ssh_proxy,
+            args=(cmd_args.host, cmd_args.k8s_ssh_proxy_port),
+            name='k8s-ssh-proxy',
+            daemon=False,  # Not daemon - we want proper cleanup
+        )
+        k8s_ssh_proxy_process.start()
+        logger.info(
+            f'Started Kubernetes SSH proxy on port '
+            f'{cmd_args.k8s_ssh_proxy_port} (PID: {k8s_ssh_proxy_process.pid})')
+
+        reverse_proxy_process = multiprocessing.Process(
+            target=run_reverse_proxy,
+            args=(cmd_args.port, cmd_args.main_app_port,
+                  cmd_args.k8s_ssh_proxy_port, cmd_args.host),
+            name='reverse-proxy',
+            daemon=False,  # Not daemon - we want proper cleanup
+        )
+        reverse_proxy_process.start()
+        logger.info(f'Started reverse proxy on port {cmd_args.port} '
+                    f'(PID: {reverse_proxy_process.pid})')
+
+        # Monitor auxiliary processes in a background thread
+        def monitor_processes():
+            """Monitor auxiliary processes and log if they crash."""
+            while True:
+                time.sleep(5)  # Check every 5 seconds
+                if k8s_ssh_proxy_process and not k8s_ssh_proxy_process.is_alive(
+                ):
+                    exit_code = k8s_ssh_proxy_process.exitcode
+                    logger.error(
+                        f'K8s SSH proxy process died unexpectedly '
+                        f'(exit code: {exit_code}). '
+                        f'Clients won\'t be able to connect to Kubernetes pods.'
+                    )
+                if reverse_proxy_process and not reverse_proxy_process.is_alive(
+                ):
+                    exit_code = reverse_proxy_process.exitcode
+                    logger.error(f'Reverse proxy process died unexpectedly '
+                                 f'(exit code: {exit_code}). '
+                                 f'All API requests will fail!')
+                    # If reverse proxy dies, the whole server is unusable
+                    logger.error(
+                        'Reverse proxy is critical - shutting down server')
+                    exit(1)
+
+        monitor_thread = threading.Thread(target=monitor_processes, daemon=True)
+        monitor_thread.start()
+        logger.info('Started process monitor thread')
+
+        # Give auxiliary processes time to start and verify they're running
+        logger.info('Waiting for auxiliary processes to start...')
+        time.sleep(2)
+
+        if not k8s_ssh_proxy_process.is_alive():
+            ex_code = k8s_ssh_proxy_process.exitcode
+            logger.error(f'K8s SSH proxy process failed to start '
+                         f'(exit code: {ex_code})')
+            raise RuntimeError('K8s SSH proxy process failed to start')
+
+        if not reverse_proxy_process.is_alive():
+            ex_code = reverse_proxy_process.exitcode
+            logger.error(f'Reverse proxy process failed to start '
+                         f'(exit code: {ex_code})')
+            raise RuntimeError('Reverse proxy process failed to start')
+
+        logger.info('All auxiliary processes started successfully')
+
+        logger.info(f'Starting main SkyPilot API server on port '
+                    f'{cmd_args.main_app_port}, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request
         # workers or interrupt running requests.
         uvicorn_config = uvicorn.Config('sky.server.server:app',
                                         host=cmd_args.host,
-                                        port=cmd_args.port,
+                                        port=cmd_args.main_app_port,
                                         workers=num_workers)
         skyuvicorn.run(uvicorn_config,
                        max_db_connections=config.num_db_connections_per_worker)
@@ -2052,3 +2036,20 @@ if __name__ == '__main__':
         if queue_server is not None:
             queue_server.kill()
             queue_server.join()
+
+        # Shutdown the auxiliary processes
+        if k8s_ssh_proxy_process is not None and k8s_ssh_proxy_process.is_alive(
+        ):
+            logger.info('Shutting down Kubernetes SSH proxy...')
+            k8s_ssh_proxy_process.terminate()
+            k8s_ssh_proxy_process.join(timeout=5)
+            if k8s_ssh_proxy_process.is_alive():
+                k8s_ssh_proxy_process.kill()
+
+        if reverse_proxy_process is not None and reverse_proxy_process.is_alive(
+        ):
+            logger.info('Shutting down reverse proxy...')
+            reverse_proxy_process.terminate()
+            reverse_proxy_process.join(timeout=5)
+            if reverse_proxy_process.is_alive():
+                reverse_proxy_process.kill()
