@@ -39,6 +39,7 @@
 ----
 
 :fire: *News* :fire:
+- [Oct 2025] Train and serve **nanochat** - the best ChatGPT that $100 can buy (by [Andrej Karpathy](https://x.com/karpathy/status/1977755427569111362)): [**example**](./examples/training/nanochat)
 - [Oct 2025] Run large-scale **LLM training with TorchTitan** on any AI infra: [**example**](./examples/training/torchtitan)
 - [Sep 2025] Scaling AI infrastructure at Abridge - **10x faster development** with SkyPilot: [**blog**](https://blog.skypilot.co/abridge/)
 - [Sep 2025] Network and Storage Benchmarks for LLM training on the cloud: [**blog**](https://maknee.github.io/blog/2025/Network-And-Storage-Training-Skypilot/)
