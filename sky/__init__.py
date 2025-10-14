@@ -198,6 +198,7 @@ __all__ = [
     'reload_config',
     # core APIs
     'status',
+    'endpoints',
     'start',
     'stop',
     'down',
