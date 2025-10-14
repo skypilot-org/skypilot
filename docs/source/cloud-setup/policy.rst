@@ -287,6 +287,7 @@ Always disable public IP for AWS tasks
 Use spot for all GPU tasks
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+..
 .. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
     :language: python
     :pyobject: UseSpotForGpuPolicy
