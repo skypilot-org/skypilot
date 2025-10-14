@@ -168,11 +168,12 @@ def start_controller() -> None:
     logs_dir = os.path.expanduser(
         managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
     os.makedirs(logs_dir, exist_ok=True)
-    log_path = os.path.join(logs_dir, f'controller_{uuid.uuid4()}.log')
+    controller_uuid = str(uuid.uuid4())
+    log_path = os.path.join(logs_dir, f'controller_{controller_uuid}.log')
 
     activate_python_env_cmd = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
     run_controller_cmd = (f'{sys.executable} -u -m'
-                          'sky.jobs.controller')
+                          f'sky.jobs.controller {controller_uuid}')
 
     run_cmd = (f'{activate_python_env_cmd}'
                f'{run_controller_cmd}')
@@ -309,7 +310,6 @@ async def scheduled_launch(
     starting: Set[int],
     starting_lock: asyncio.Lock,
     starting_signal: asyncio.Condition,
-    job_logger: 'logging.Logger',
 ):
     """Launch as part of an ongoing job.
 
@@ -347,10 +347,10 @@ async def scheduled_launch(
             starting_count = len(starting)
             if starting_count < LAUNCHES_PER_WORKER:
                 break
-            job_logger.info('Too many jobs starting, waiting for a slot')
+            logger.info('Too many jobs starting, waiting for a slot')
             await starting_signal.wait()
 
-    job_logger.info(f'Starting job {job_id}')
+    logger.info(f'Starting job {job_id}')
 
     async with starting_lock:
         starting.add(job_id)

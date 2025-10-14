@@ -8,7 +8,6 @@ import asyncio
 import collections
 import datetime
 import enum
-import logging
 import os
 import pathlib
 import re
@@ -125,9 +124,8 @@ class UserSignal(enum.Enum):
 
 # ====== internal functions ======
 def terminate_cluster(
-        cluster_name: str,
-        max_retry: int = 6,
-        _logger: logging.Logger = logger,  # pylint: disable=invalid-name
+    cluster_name: str,
+    max_retry: int = 6,
 ) -> None:
     """Terminate the cluster."""
     from sky import core  # pylint: disable=import-outside-toplevel
@@ -151,18 +149,18 @@ def terminate_cluster(
             return
         except exceptions.ClusterDoesNotExist:
             # The cluster is already down.
-            _logger.debug(f'The cluster {cluster_name} is already down.')
+            logger.debug(f'The cluster {cluster_name} is already down.')
             return
         except Exception as e:  # pylint: disable=broad-except
             retry_cnt += 1
             if retry_cnt >= max_retry:
                 raise RuntimeError(
                     f'Failed to terminate the cluster {cluster_name}.') from e
-            _logger.error(
+            logger.error(
                 f'Failed to terminate the cluster {cluster_name}. Retrying.'
                 f'Details: {common_utils.format_exception(e)}')
             with ux_utils.enable_traceback():
-                _logger.error(f'  Traceback: {traceback.format_exc()}')
+                logger.error(f'  Traceback: {traceback.format_exc()}')
             time.sleep(backoff.current_backoff())
 
 
@@ -303,8 +301,7 @@ def ha_recovery_for_consolidation_mode():
 
 async def get_job_status(
         backend: 'backends.CloudVmRayBackend', cluster_name: str,
-        job_id: Optional[int],
-        job_logger: logging.Logger) -> Optional['job_lib.JobStatus']:
+        job_id: Optional[int]) -> Optional['job_lib.JobStatus']:
     """Check the status of the job running on a managed job cluster.
 
     It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_DRIVER,
@@ -316,13 +313,13 @@ async def get_job_status(
     if handle is None:
         # This can happen if the cluster was preempted and background status
         # refresh already noticed and cleaned it up.
-        job_logger.info(f'Cluster {cluster_name} not found.')
+        logger.info(f'Cluster {cluster_name} not found.')
         return None
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     job_ids = None if job_id is None else [job_id]
     for i in range(_JOB_STATUS_FETCH_MAX_RETRIES):
         try:
-            job_logger.info('=== Checking the job status... ===')
+            logger.info('=== Checking the job status... ===')
             statuses = await asyncio.wait_for(
                 context_utils.to_thread(backend.get_job_status,
                                         handle,
@@ -331,10 +328,10 @@ async def get_job_status(
                 timeout=_JOB_STATUS_FETCH_TIMEOUT_SECONDS)
             status = list(statuses.values())[0]
             if status is None:
-                job_logger.info('No job found.')
+                logger.info('No job found.')
             else:
-                job_logger.info(f'Job status: {status}')
-            job_logger.info('=' * 34)
+                logger.info(f'Job status: {status}')
+            logger.info('=' * 34)
             return status
         except (exceptions.CommandError, grpc.RpcError, grpc.FutureTimeoutError,
                 ValueError, TypeError, asyncio.TimeoutError) as e:

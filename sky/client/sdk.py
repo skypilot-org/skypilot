@@ -98,6 +98,9 @@ def reload_config() -> None:
     skypilot_config.safe_reload_config()
 
 
+# The overloads are not comprehensive - e.g. get_result Literal[False] could be
+# specified to return None. We can add more overloads if needed. To do that see
+# https://github.com/python/mypy/issues/8634#issuecomment-609411104
 @typing.overload
 def stream_response(request_id: None,
                     response: 'requests.Response',
@@ -112,7 +115,16 @@ def stream_response(request_id: server_common.RequestId[T],
                     response: 'requests.Response',
                     output_stream: Optional['io.TextIOBase'] = None,
                     resumable: bool = False,
-                    get_result: bool = True) -> T:
+                    get_result: Literal[True] = True) -> T:
+    ...
+
+
+@typing.overload
+def stream_response(request_id: server_common.RequestId[T],
+                    response: 'requests.Response',
+                    output_stream: Optional['io.TextIOBase'] = None,
+                    resumable: bool = False,
+                    get_result: bool = True) -> Optional[T]:
     ...
 
 

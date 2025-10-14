@@ -59,37 +59,45 @@ def test_terminate_cluster_handles_nonexistent_cluster(mock_set_internal,
 @mock.patch('sky.jobs.utils.logger')
 @mock.patch('sky.global_user_state.get_handle_from_cluster_name')
 async def test_get_job_status_timeout(mock_get_handle, mock_logger):
-    """Test that get_job_status times out after 30 seconds."""
+    """Test that get_job_status times."""
     mock_handle = mock.MagicMock(
         spec=cloud_vm_ray_backend.CloudVmRayResourceHandle)
     mock_get_handle.return_value = mock_handle
 
     mock_backend = mock.MagicMock(spec=cloud_vm_ray_backend.CloudVmRayBackend)
 
+    timeout_override = 0.5  # seconds
+
     def slow_get_job_status(*args, **kwargs):
-        """Simulates get_job_status call that hangs."""
-        time.sleep(60)  # Sleep longer than the 30s timeout.
+        """Simulates get_job_status call that hangs past the timeout."""
+        time.sleep(timeout_override * 10)
         return {1: None}
 
     mock_backend.get_job_status = slow_get_job_status
 
-    test_job_logger = logging.getLogger('test_job_logger')
-
     start_time = time.time()
-    result = await utils.get_job_status(backend=mock_backend,
-                                        cluster_name='test-cluster',
-                                        job_id=1,
-                                        job_logger=test_job_logger)
+
+    # Patch the timeout so the test passes quickly, while still checking the
+    # timeout logic.
+    with mock.patch.object(utils, '_JOB_STATUS_FETCH_TIMEOUT_SECONDS',
+                           timeout_override):
+        result = await utils.get_job_status(backend=mock_backend,
+                                            cluster_name='test-cluster',
+                                            job_id=1)
     assert result is None, 'Expected None when timeout occurs'
 
     elapsed_time = time.time() - start_time
-    assert elapsed_time >= 30 and elapsed_time < 31, f'Expected timeout around 30s, but took {elapsed_time}s'
+    assert timeout_override <= elapsed_time < timeout_override + 1.0, (
+        f'Expected timeout around {timeout_override}s, but took {elapsed_time}s'
+    )
 
-    # one for failure reason, one for separator
-    assert mock_logger.info.call_count == 2
-    first_call = mock_logger.info.call_args_list[0][0][0]
-    assert 'Failed to get job status:' in first_call
-    assert 'timed out after 30s' in first_call
+    # === Checking the job status... ===
+    # Failed to get job status: Job status check timed out after 30s
+    # ==================================
+    assert mock_logger.info.call_count == 3
+    error_log_line = mock_logger.info.call_args_list[1][0][0]
+    assert 'Failed to get job status:' in error_log_line
+    assert f'timed out after {timeout_override}s' in error_log_line
 
 
 @mock.patch('sky.jobs.utils.logger')
