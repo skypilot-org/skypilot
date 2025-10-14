@@ -1,3 +1,5 @@
+![Run nanochat on Your Infra](banner.png)
+
 # Run nanochat on any cloud or Kubernetes with SkyPilot
 
 This demo shows how to train and serve [nanochat](https://github.com/karpathy/nanochat) on any cloud provider or Kubernetes cluster with [SkyPilot](https://docs.skypilot.co/en/latest/docs/index.html). Run nanochat seamlessly across AWS, GCP, Azure, Lambda Labs, Nebius and more - or bring your own Kubernetes infrastructure.
