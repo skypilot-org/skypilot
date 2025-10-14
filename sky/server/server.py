@@ -1798,10 +1798,7 @@ def run_reverse_proxy(
         k8s_ssh_proxy_port: int = reverse_proxy.K8S_SSH_PROXY_PORT,
         host: str = '127.0.0.1'):
     """Run the reverse proxy application."""
-
-    # Ignore SIGINT in this process - let the main process handle it
-    # This prevents Ctrl-C from shutting down the reverse proxy
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    from sky.server import uvicorn as skyuvicorn
 
     try:
         # Update the port configuration in the reverse_proxy module
@@ -1810,14 +1807,33 @@ def run_reverse_proxy(
         reverse_proxy.K8S_SSH_PROXY_PORT = k8s_ssh_proxy_port
 
         logger.info(f'Reverse proxy process starting on {host}:{port}')
-        uvicorn.run(
+        skyuvicorn.add_timestamp_prefix_for_server_logs()
+        
+        # Create uvicorn config for the reverse proxy
+        uvicorn_config = uvicorn.Config(
             reverse_proxy.app,
             host=host,
             port=port,
             log_level='info',
-            # Important: disable workers to avoid nested multiprocessing issues
             workers=1,
         )
+        
+        # Use custom server that ignores SIGINT
+        # We override handle_exit to ignore SIGINT - let the main process handle it
+        server = skyuvicorn.Server(config=uvicorn_config)
+        original_handle_exit = server.handle_exit
+        
+        def handle_exit_ignore_sigint(sig: int, frame):
+            # if sig == signal.SIGINT:
+            #     # Ignore SIGINT - only the main process should handle it
+            #     logger.warning('Reverse proxy ignoring SIGINT')
+            #     return
+            # # For other signals, use the original handler
+            # original_handle_exit(sig, frame)
+            logger.warning('Reverse proxy ignoring SIGINT')
+        
+        server.handle_exit = handle_exit_ignore_sigint
+        server.run()
     except Exception as e:  # pylint: disable=broad-except
         logger.error(f'Reverse proxy process crashed: {e}', exc_info=True)
         raise
@@ -1826,20 +1842,37 @@ def run_reverse_proxy(
 # Start the Kubernetes SSH proxy application in a separate process
 def run_k8s_ssh_proxy(host: str = '127.0.0.1', port: int = 46582):
     """Run the Kubernetes SSH proxy application."""
-    # Ignore SIGINT in this process - let the main process handle it
-    # This prevents Ctrl-C from shutting down the K8s SSH proxy
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    from sky.server import uvicorn as skyuvicorn
 
     try:
         logger.info(f'K8s SSH proxy process starting on {host}:{port}')
-        uvicorn.run(
+        skyuvicorn.add_timestamp_prefix_for_server_logs()
+        
+        # Create uvicorn config for the K8s SSH proxy
+        uvicorn_config = uvicorn.Config(
             'sky.server.k8s_ssh_proxy_app:app',
             host=host,
             port=port,
             log_level='info',
-            # Important: disable workers to avoid nested multiprocessing issues
             workers=1,
         )
+        
+        # Use custom server that ignores SIGINT
+        # We override handle_exit to ignore SIGINT - let the main process handle it
+        server = skyuvicorn.Server(config=uvicorn_config)
+        original_handle_exit = server.handle_exit
+        
+        def handle_exit_ignore_sigint(sig: int, frame):
+            # if sig == signal.SIGINT:
+            #     # Ignore SIGINT - only the main process should handle it
+            #     logger.warning('K8s SSH proxy ignoring SIGINT')
+            #     return
+            # # For other signals, use the original handler
+            # original_handle_exit(sig, frame)
+            logger.warning('K8s SSH proxy ignoring SIGINT')
+        
+        server.handle_exit = handle_exit_ignore_sigint
+        server.run()
     except Exception as e:  # pylint: disable=broad-except
         logger.error(f'K8s SSH proxy process crashed: {e}', exc_info=True)
         raise
