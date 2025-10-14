@@ -1299,29 +1299,51 @@ class V1Pod:
 
 
 @_retry_on_error(resource_type='pod')
-def get_all_pods_in_kubernetes_cluster(*,
-                                       context: Optional[str] = None
-                                      ) -> List[V1Pod]:
-    """Gets pods in all namespaces in kubernetes cluster indicated by context.
-
-    Used for computing cluster resource usage.
+def get_allocated_gpu_qty_by_node(
+    *,
+    context: Optional[str] = None,
+) -> Dict[str, int]:
+    """Gets allocated GPU quantity by each node by fetching pods in
+    all namespaces in kubernetes cluster indicated by context.
     """
     if context is None:
         context = get_current_kube_config_context_name()
+    non_included_pod_statuses = POD_STATUSES.copy()
+    status_filters = ['Running', 'Pending']
+    if status_filters is not None:
+        non_included_pod_statuses -= set(status_filters)
+        field_selector = ','.join(
+            [f'status.phase!={status}' for status in non_included_pod_statuses])
 
     # Return raw urllib3.HTTPResponse object so that we can parse the json
     # more efficiently.
     response = kubernetes.core_api(context).list_pod_for_all_namespaces(
-        _request_timeout=kubernetes.API_TIMEOUT, _preload_content=False)
+        _request_timeout=kubernetes.API_TIMEOUT,
+        _preload_content=False,
+        field_selector=field_selector)
     try:
-        pods = [
-            V1Pod.from_dict(item_dict) for item_dict in ijson.items(
-                response, 'items.item', buf_size=IJSON_BUFFER_SIZE)
-        ]
+        allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
+        for item_dict in ijson.items(response,
+                                     'items.item',
+                                     buf_size=IJSON_BUFFER_SIZE):
+            pod = V1Pod.from_dict(item_dict)
+            if should_exclude_pod_from_gpu_allocation(pod):
+                logger.debug(
+                    f'Excluding pod {pod.metadata.name} from GPU count '
+                    f'calculations on node {pod.spec.node_name}')
+                continue
+            # Iterate over all the containers in the pod and sum the
+            # GPU requests
+            pod_allocated_qty = 0
+            for container in pod.spec.containers:
+                if container.resources.requests:
+                    pod_allocated_qty += get_node_accelerator_count(
+                        context, container.resources.requests)
+            if pod_allocated_qty > 0 and pod.spec.node_name:
+                allocated_qty_by_node[pod.spec.node_name] += pod_allocated_qty
+        return allocated_qty_by_node
     finally:
         response.release_conn()
-
-    return pods
 
 
 def check_instance_fits(context: Optional[str],
@@ -3014,33 +3036,16 @@ def get_kubernetes_node_info(
             has_accelerator_nodes = True
             break
 
-    # Get the pods to get the real-time resource usage
-    pods = None
+    # Get the allocated GPU quantity by each node
     allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
+    error_on_get_allocated_gpu_qty_by_node = False
     if has_accelerator_nodes:
         try:
-            pods = get_all_pods_in_kubernetes_cluster(context=context)
-            # Pre-compute allocated accelerator count per node
-            for pod in pods:
-                if pod.status.phase in ['Running', 'Pending']:
-                    # Skip pods that should not count against GPU count
-                    if should_exclude_pod_from_gpu_allocation(pod):
-                        logger.debug(f'Excluding low priority pod '
-                                     f'{pod.metadata.name} from GPU allocation '
-                                     f'calculations')
-                        continue
-                    # Iterate over all the containers in the pod and sum the
-                    # GPU requests
-                    pod_allocated_qty = 0
-                    for container in pod.spec.containers:
-                        if container.resources.requests:
-                            pod_allocated_qty += get_node_accelerator_count(
-                                context, container.resources.requests)
-                    if pod_allocated_qty > 0:
-                        allocated_qty_by_node[
-                            pod.spec.node_name] += pod_allocated_qty
+            allocated_qty_by_node = get_allocated_gpu_qty_by_node(
+                context=context)
         except kubernetes.api_exception() as e:
             if e.status == 403:
+                error_on_get_allocated_gpu_qty_by_node = True
                 pass
             else:
                 raise
@@ -3085,7 +3090,7 @@ def get_kubernetes_node_info(
                 ip_address=node_ip)
             continue
 
-        if pods is None:
+        if not has_accelerator_nodes or error_on_get_allocated_gpu_qty_by_node:
             accelerators_available = -1
         else:
             allocated_qty = allocated_qty_by_node[node.metadata.name]
