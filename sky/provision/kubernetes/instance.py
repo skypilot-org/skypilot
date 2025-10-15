@@ -1406,7 +1406,7 @@ def get_cluster_info(
         f'Using ssh user {ssh_user} for cluster {cluster_name_on_cloud}')
 
     # cpu_request may be a string like `100m`, need to parse and convert
-    num_cpus = kubernetes_utils.parse_float_cpu_or_gpu_resource(cpu_request)
+    num_cpus = kubernetes_utils.parse_cpu_or_gpu_resource_to_float(cpu_request)
     # 'num-cpus' for ray must be an integer, but we should not set it to 0 if
     # cpus is <1.
     # Keep consistent with the logic in clouds/kubernetes.py
