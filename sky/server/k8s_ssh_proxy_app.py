@@ -1,16 +1,95 @@
-"""Kubernetes SSH Proxy WebSocket application.
+"""SkyPilot API Server exposing RESTful APIs."""
 
-This module contains a separate FastAPI application that handles WebSocket
-connections for SSH proxy to Kubernetes pods. It's separated from the main
-API server to run on its own port for better resource management.
-"""
-
+import argparse
 import asyncio
+import base64
+import contextlib
 from concurrent.futures import ThreadPoolExecutor
+import datetime
+import hashlib
+import json
+import multiprocessing
 import os
+import pathlib
+import posixpath
+import re
+import resource
+import shutil
+import signal
+import sys
+import threading
+import time
+from typing import Dict, List, Literal, Optional, Set, Tuple
+import uuid
+import zipfile
 
+import importlib
+import aiofiles
+import anyio
 import fastapi
+import starlette.middleware.base
+# Remove the current directory from sys.path temporarily
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path = [p for p in sys.path if p != current_dir]
 
+# Import the real pip-installed 'x'
+x_pkg = importlib.import_module('uvicorn')
+
+# Restore sys.path
+sys.path.insert(0, current_dir)
+import uvicorn
+import uvloop
+
+import sky
+from sky import catalog
+from sky import check as sky_check
+from sky import core
+from sky import exceptions
+from sky import execution
+from sky import global_user_state
+from sky import models
+from sky import sky_logging
+from sky.data import storage_utils
+from sky.jobs import utils as managed_job_utils
+from sky.jobs.server import server as jobs_rest
+from sky.metrics import utils as metrics_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.schemas.api import responses
+from sky.serve.server import server as serve_rest
+from sky.server import common
+from sky.server import config as server_config
+from sky.server import constants as server_constants
+from sky.server import daemons
+from sky.server import metrics
+from sky.server import middleware as middleware_config
+from sky.server import reverse_proxy
+from sky.server import state
+from sky.server import stream_utils
+from sky.server import versions
+from sky.server.auth import authn
+from sky.server.auth import loopback
+from sky.server.requests import executor
+from sky.server.requests import payloads
+from sky.server.requests import preconditions
+from sky.server.requests import requests as requests_lib
+from sky.skylet import constants
+from sky.ssh_node_pools import server as ssh_node_pools_rest
+from sky.usage import usage_lib
+from sky.users import permission
+from sky.users import server as users_rest
+from sky.utils import admin_policy_utils
+from sky.utils import common as common_lib
+from sky.utils import common_utils
+from sky.utils import context
+from sky.utils import context_utils
+from sky.utils import dag_utils
+from sky.utils import perf_utils
+from sky.utils import subprocess_utils
+from sky.utils.db import db_utils
+from sky.volumes.server import server as volumes_rest
+from sky.workspaces import server as workspaces_rest
+from sky.utils import context_utils
+from sky.utils import status_lib
 from sky import clouds
 from sky import core
 from sky import sky_logging
@@ -26,6 +105,20 @@ app = fastapi.FastAPI(debug=True)
 
 # Apply all standard middleware
 middleware_config.apply_middleware(app)
+
+# increase the resource limit for the server
+soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
+
+# Increase the limit of files we can open to our hard limit. This fixes bugs
+# where we can not aquire file locks or open enough logs and the API server
+# crashes. On Mac, the hard limit is 9,223,372,036,854,775,807.
+# TODO(luca) figure out what to do if we need to open more than 2^63 files.
+try:
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
+except Exception:  # pylint: disable=broad-except
+    pass  # no issue, we will warn the user later if its too low
 
 
 @app.websocket('/kubernetes-pod-ssh-proxy')
@@ -156,3 +249,53 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
 async def health() -> dict:
     """Simple health check endpoint for the K8s SSH proxy app."""
     return {'status': 'healthy', 'service': 'k8s-ssh-proxy'}
+
+if __name__ == '__main__':
+
+    from sky.server import uvicorn as skyuvicorn
+
+    logger.info('Initializing SkyPilot API server')
+    skyuvicorn.add_timestamp_prefix_for_server_logs()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--host', default='127.0.0.1')
+    parser.add_argument('--port',
+                        default=46582,
+                        type=int,
+                        help='Port for the Kubernetes SSH proxy application')
+    parser.add_argument('--deploy', action='store_true')
+    cmd_args = parser.parse_args()
+
+    usage_lib.maybe_show_privacy_policy()
+
+    # Initialize global user state db
+    db_utils.set_max_connections(1)
+    logger.info('Initializing database engine')
+    global_user_state.get_db_engine()
+    logger.info('Database engine initialized')
+
+    max_db_connections = global_user_state.get_max_db_connections()
+    logger.info(f'Max db connections: {max_db_connections}')
+    config = server_config.compute_server_config(cmd_args.deploy,
+                                                 max_db_connections)
+
+    num_workers = config.num_server_workers
+
+    try:
+
+        logger.info(f'Starting SkyPilot K8s SSH proxy server on port '
+                    f'{cmd_args.port}, workers={num_workers}')
+        # We don't support reload for now, since it may cause leakage of request
+        # workers or interrupt running requests.
+        uvicorn_config = uvicorn.Config('sky.server.k8s_ssh_proxy_app:app',
+                                        host=cmd_args.host,
+                                        port=cmd_args.port,
+                                        workers=num_workers)
+        server = skyuvicorn.Server(config=uvicorn_config)
+        server.run()
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.error(f'Failed to start SkyPilot API server: '
+                     f'{common_utils.format_exception(exc, use_bracket=True)}')
+        raise
+    finally:
+        logger.info('Shutting down SkyPilot API server...')

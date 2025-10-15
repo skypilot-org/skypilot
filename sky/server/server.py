@@ -1917,15 +1917,15 @@ if __name__ == '__main__':
             'All ports (proxy, main-app, k8s-ssh-proxy, metrics) must be unique'
         )
 
-    # Fail fast if any required port is not available
-    for port_name, port_num in [('proxy', cmd_args.port),
-                                ('main-app', cmd_args.main_app_port),
-                                ('k8s-ssh-proxy', cmd_args.k8s_ssh_proxy_port)]:
-        if not common_utils.is_port_available(port_num):
-            logger.error(
-                f'Port {port_num} ({port_name}) is not available, exiting.')
-            raise RuntimeError(
-                f'Port {port_num} ({port_name}) is not available')
+    # # Fail fast if any required port is not available
+    # for port_name, port_num in [('proxy', cmd_args.port),
+    #                             ('main-app', cmd_args.main_app_port),
+    #                             ('k8s-ssh-proxy', cmd_args.k8s_ssh_proxy_port)]:
+    #     if not common_utils.is_port_available(port_num):
+    #         logger.error(
+    #             f'Port {port_num} ({port_name}) is not available, exiting.')
+    #         raise RuntimeError(
+    #             f'Port {port_num} ({port_name}) is not available')
 
     if not cmd_args.start_with_python:
         # Maybe touch the signal file on API server startup.
@@ -1976,71 +1976,71 @@ if __name__ == '__main__':
 
         queue_server, workers = executor.start(config)
 
-        k8s_ssh_proxy_process = multiprocessing.Process(
-            target=run_k8s_ssh_proxy,
-            args=(cmd_args.host, cmd_args.k8s_ssh_proxy_port),
-            name='k8s-ssh-proxy',
-            daemon=False,  # Not daemon - we want proper cleanup
-        )
-        k8s_ssh_proxy_process.start()
-        logger.info(
-            f'Started Kubernetes SSH proxy on port '
-            f'{cmd_args.k8s_ssh_proxy_port} (PID: {k8s_ssh_proxy_process.pid})')
+        # k8s_ssh_proxy_process = multiprocessing.Process(
+        #     target=run_k8s_ssh_proxy,
+        #     args=(cmd_args.host, cmd_args.k8s_ssh_proxy_port),
+        #     name='k8s-ssh-proxy',
+        #     daemon=False,  # Not daemon - we want proper cleanup
+        # )
+        # k8s_ssh_proxy_process.start()
+        # logger.info(
+        #     f'Started Kubernetes SSH proxy on port '
+        #     f'{cmd_args.k8s_ssh_proxy_port} (PID: {k8s_ssh_proxy_process.pid})')
 
-        reverse_proxy_process = multiprocessing.Process(
-            target=run_reverse_proxy,
-            args=(cmd_args.port, cmd_args.main_app_port,
-                  cmd_args.k8s_ssh_proxy_port, cmd_args.host),
-            name='reverse-proxy',
-            daemon=False,  # Not daemon - we want proper cleanup
-        )
-        reverse_proxy_process.start()
-        logger.info(f'Started reverse proxy on port {cmd_args.port} '
-                    f'(PID: {reverse_proxy_process.pid})')
+        # reverse_proxy_process = multiprocessing.Process(
+        #     target=run_reverse_proxy,
+        #     args=(cmd_args.port, cmd_args.main_app_port,
+        #           cmd_args.k8s_ssh_proxy_port, cmd_args.host),
+        #     name='reverse-proxy',
+        #     daemon=False,  # Not daemon - we want proper cleanup
+        # )
+        # reverse_proxy_process.start()
+        # logger.info(f'Started reverse proxy on port {cmd_args.port} '
+        #             f'(PID: {reverse_proxy_process.pid})')
 
-        # Monitor auxiliary processes in a background thread
-        def monitor_processes():
-            """Monitor auxiliary processes and log if they crash."""
-            while True:
-                time.sleep(5)  # Check every 5 seconds
-                if k8s_ssh_proxy_process and not k8s_ssh_proxy_process.is_alive(
-                ):
-                    exit_code = k8s_ssh_proxy_process.exitcode
-                    logger.error(
-                        f'K8s SSH proxy process died unexpectedly '
-                        f'(exit code: {exit_code}). '
-                        f'Clients won\'t be able to connect to Kubernetes pods.'
-                    )
-                if reverse_proxy_process and not reverse_proxy_process.is_alive(
-                ):
-                    exit_code = reverse_proxy_process.exitcode
-                    logger.error(f'Reverse proxy process died unexpectedly '
-                                 f'(exit code: {exit_code}). '
-                                 f'All API requests will fail!')
-                    # If reverse proxy dies, the whole server is unusable
-                    logger.error(
-                        'Reverse proxy is critical - shutting down server')
-                    exit(1)
+        # # Monitor auxiliary processes in a background thread
+        # def monitor_processes():
+        #     """Monitor auxiliary processes and log if they crash."""
+        #     while True:
+        #         time.sleep(5)  # Check every 5 seconds
+        #         if k8s_ssh_proxy_process and not k8s_ssh_proxy_process.is_alive(
+        #         ):
+        #             exit_code = k8s_ssh_proxy_process.exitcode
+        #             logger.error(
+        #                 f'K8s SSH proxy process died unexpectedly '
+        #                 f'(exit code: {exit_code}). '
+        #                 f'Clients won\'t be able to connect to Kubernetes pods.'
+        #             )
+        #         if reverse_proxy_process and not reverse_proxy_process.is_alive(
+        #         ):
+        #             exit_code = reverse_proxy_process.exitcode
+        #             logger.error(f'Reverse proxy process died unexpectedly '
+        #                          f'(exit code: {exit_code}). '
+        #                          f'All API requests will fail!')
+        #             # If reverse proxy dies, the whole server is unusable
+        #             logger.error(
+        #                 'Reverse proxy is critical - shutting down server')
+        #             exit(1)
 
-        monitor_thread = threading.Thread(target=monitor_processes, daemon=True)
-        monitor_thread.start()
-        logger.info('Started process monitor thread')
+        # monitor_thread = threading.Thread(target=monitor_processes, daemon=True)
+        # monitor_thread.start()
+        # logger.info('Started process monitor thread')
 
-        # Give auxiliary processes time to start and verify they're running
-        logger.info('Waiting for auxiliary processes to start...')
-        time.sleep(2)
+        # # Give auxiliary processes time to start and verify they're running
+        # logger.info('Waiting for auxiliary processes to start...')
+        # time.sleep(2)
 
-        if not k8s_ssh_proxy_process.is_alive():
-            ex_code = k8s_ssh_proxy_process.exitcode
-            logger.error(f'K8s SSH proxy process failed to start '
-                         f'(exit code: {ex_code})')
-            raise RuntimeError('K8s SSH proxy process failed to start')
+        # if not k8s_ssh_proxy_process.is_alive():
+        #     ex_code = k8s_ssh_proxy_process.exitcode
+        #     logger.error(f'K8s SSH proxy process failed to start '
+        #                  f'(exit code: {ex_code})')
+        #     raise RuntimeError('K8s SSH proxy process failed to start')
 
-        if not reverse_proxy_process.is_alive():
-            ex_code = reverse_proxy_process.exitcode
-            logger.error(f'Reverse proxy process failed to start '
-                         f'(exit code: {ex_code})')
-            raise RuntimeError('Reverse proxy process failed to start')
+        # if not reverse_proxy_process.is_alive():
+        #     ex_code = reverse_proxy_process.exitcode
+        #     logger.error(f'Reverse proxy process failed to start '
+        #                  f'(exit code: {ex_code})')
+        #     raise RuntimeError('Reverse proxy process failed to start')
 
         logger.info('All auxiliary processes started successfully')
 
@@ -2050,7 +2050,7 @@ if __name__ == '__main__':
         # workers or interrupt running requests.
         uvicorn_config = uvicorn.Config('sky.server.server:app',
                                         host=cmd_args.host,
-                                        port=cmd_args.main_app_port,
+                                        port=cmd_args.port,
                                         workers=num_workers)
         skyuvicorn.run(uvicorn_config,
                        max_db_connections=config.num_db_connections_per_worker)
@@ -2070,19 +2070,19 @@ if __name__ == '__main__':
             queue_server.kill()
             queue_server.join()
 
-        # Shutdown the auxiliary processes
-        if k8s_ssh_proxy_process is not None and k8s_ssh_proxy_process.is_alive(
-        ):
-            logger.info('Shutting down Kubernetes SSH proxy...')
-            k8s_ssh_proxy_process.terminate()
-            k8s_ssh_proxy_process.join(timeout=5)
-            if k8s_ssh_proxy_process.is_alive():
-                k8s_ssh_proxy_process.kill()
+        # # Shutdown the auxiliary processes
+        # if k8s_ssh_proxy_process is not None and k8s_ssh_proxy_process.is_alive(
+        # ):
+        #     logger.info('Shutting down Kubernetes SSH proxy...')
+        #     k8s_ssh_proxy_process.terminate()
+        #     k8s_ssh_proxy_process.join(timeout=5)
+        #     if k8s_ssh_proxy_process.is_alive():
+        #         k8s_ssh_proxy_process.kill()
 
-        if reverse_proxy_process is not None and reverse_proxy_process.is_alive(
-        ):
-            logger.info('Shutting down reverse proxy...')
-            reverse_proxy_process.terminate()
-            reverse_proxy_process.join(timeout=5)
-            if reverse_proxy_process.is_alive():
-                reverse_proxy_process.kill()
+        # if reverse_proxy_process is not None and reverse_proxy_process.is_alive(
+        # ):
+        #     logger.info('Shutting down reverse proxy...')
+        #     reverse_proxy_process.terminate()
+        #     reverse_proxy_process.join(timeout=5)
+        #     if reverse_proxy_process.is_alive():
+        #         reverse_proxy_process.kill()

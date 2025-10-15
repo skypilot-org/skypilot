@@ -344,6 +344,14 @@ def initialize_and_get_db() -> sqlalchemy.engine.Engine:
         _SQLALCHEMY_ENGINE = engine
         return _SQLALCHEMY_ENGINE
 
+def get_db_engine():
+    global _SQLALCHEMY_ENGINE
+    with _SQLALCHEMY_ENGINE_LOCK:
+        if _SQLALCHEMY_ENGINE is not None:
+            return _SQLALCHEMY_ENGINE
+        _SQLALCHEMY_ENGINE = db_utils.get_engine('state')
+        return _SQLALCHEMY_ENGINE
+
 
 def _init_db_async(func):
     """Initialize the async database."""
