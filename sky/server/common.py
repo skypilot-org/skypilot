@@ -488,8 +488,20 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
 
 
 def handle_request_error(response: 'requests.Response') -> None:
-    # Keep the original HTTPError if the response code >= 400
-    response.raise_for_status()
+    # Check for error status codes and extract the error detail from FastAPI
+    if response.status_code >= 400:
+        error_detail = None
+        try:
+            # Try to parse the FastAPI HTTPException response
+            error_json = response.json()
+            error_detail = error_json.get('detail', response.text)
+        except requests.exceptions.JSONDecodeError:
+            # If not JSON, use the raw text
+            error_detail = response.text
+
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(f'{error_detail}')
+
     # Other status codes are not expected neither, e.g. we do not expect to
     # handle redirection here.
     if response.status_code != 200:
