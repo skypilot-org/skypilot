@@ -99,6 +99,22 @@ def test_minimal(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+def test_launch_refresh(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'launch_refresh',
+        [
+            # Launch the cluster asynchronously.
+            f'SKYPILOT_DEBUG=0 sky launch -y --async -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            # Refresh the cluster while the cluster is launching.
+            f'sky status --refresh',
+        ],
+        f'sky down -y {name}',
+        smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.aws
 def test_minimal_arm64(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
