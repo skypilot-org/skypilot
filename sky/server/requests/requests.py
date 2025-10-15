@@ -32,6 +32,7 @@ from sky.server import daemons
 from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
+from sky.utils import asyncio_utils
 from sky.utils import common_utils
 from sky.utils import ux_utils
 from sky.utils.db import db_utils
@@ -587,6 +588,7 @@ def update_request_async(
     """
 
     @contextlib.asynccontextmanager
+    @asyncio_utils.shield
     async def _cm():
         # Acquire the lock to avoid race conditions between multiple request
         # operations, e.g. execute and cancel.
@@ -651,6 +653,7 @@ def get_request(request_id: str) -> Optional[Request]:
 
 @init_db_async
 @metrics_lib.time_me_async
+@asyncio_utils.shield
 async def get_request_async(request_id: str) -> Optional[Request]:
     """Async version of get_request."""
     async with filelock.AsyncFileLock(request_lock_path(request_id)):
@@ -704,6 +707,7 @@ def create_if_not_exists(request: Request) -> bool:
 
 @init_db_async
 @metrics_lib.time_me_async
+@asyncio_utils.shield
 async def create_if_not_exists_async(request: Request) -> bool:
     """Async version of create_if_not_exists."""
     async with filelock.AsyncFileLock(request_lock_path(request.request_id)):

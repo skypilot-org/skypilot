@@ -4,6 +4,7 @@ import pathlib
 import time
 import unittest.mock as mock
 
+import filelock
 import pytest
 
 from sky.server.requests import payloads
@@ -1189,3 +1190,36 @@ def test_update_request_row_fields_maintains_order():
     assert result[0] == 'req-1'  # request_id (first in REQUEST_COLUMNS)
     assert result[1] == 'test-name'  # name (second in REQUEST_COLUMNS)
     assert result[11] == 'user-1'  # user_id (later in REQUEST_COLUMNS)
+
+
+@pytest.mark.asyncio
+async def test_cancel_get_request_async():
+
+    async def mock_get_request_async_no_lock(id: str):
+        await asyncio.sleep(1)
+        return None
+
+    with mock.patch('sky.server.requests.requests._get_request_no_lock_async',
+                    side_effect=mock_get_request_async_no_lock):
+        tasks = []
+        for i in range(10000):
+            task = asyncio.create_task(
+                requests.get_request_async(f'test-request-id-{i}'))
+            tasks.append(task)
+        await asyncio.sleep(0.2)
+        for task in tasks:
+            task.cancel()
+        try:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        except Exception:
+            pass
+        # Since get_request_async is shielded, task.cancel() will neither cancel or
+        # wait the get_request_async coroutine. So we have to wait for a enough time
+        # to ensure all the coroutines are done.
+        # TODO(aylei): this may have timing issue, but looks good for now.
+        await asyncio.sleep(10)
+        for i in range(65536):
+            lock = filelock.FileLock(
+                requests.request_lock_path(f'test-request-id-{i}'))
+            # The locks must be released properly
+            lock.acquire(blocking=False)
