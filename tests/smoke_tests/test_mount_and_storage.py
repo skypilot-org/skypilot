@@ -187,6 +187,11 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
     f.flush()
     file_path = f.name
 
+    # stop is not supported on kubernetes
+    stop_command = ''
+    if cloud != 'kubernetes':
+        stop_command = f'sky stop -y {cluster_name}'
+
     test_commands = [
         smoke_tests_utils.launch_cluster_for_cloud_cmd(cloud, cluster_name),
         *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
@@ -194,7 +199,7 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
         f'sky logs {cluster_name} 1 --status',  # Ensure job succeeded.
         smoke_tests_utils.run_cloud_cmd_on_cluster(cluster_name,
                                                    cmd=ls_hello_command),
-        f'sky stop -y {cluster_name}',
+        stop_command,
         f'sky start -y {cluster_name}',
         # Check if hello.txt from mounting bucket exists after restart in
         # the mounted directory

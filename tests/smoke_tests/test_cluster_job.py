@@ -2216,6 +2216,55 @@ def test_scp_autodown():
     smoke_tests_utils.run_one_test(test)
 
 
+# ---------- Testing Recovery on Kubernetes ----------
+@pytest.mark.kubernetes
+def test_kubernetes_recovery():
+    """Test Kubernetes recovery."""
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Kubernetes.max_cluster_name_length())
+    head = f'{name_on_cloud}-head'
+    worker2 = f'{name_on_cloud}-worker2'
+    worker3 = f'{name_on_cloud}-worker3'
+    test = smoke_tests_utils.Test(
+        'kubernetes_pod_recovery',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            f'sky launch -y -c {name} --infra kubernetes --cpus 0.1+ --num-nodes 4 \'set -e;ps aux | grep -v "grep " | grep "ray/raylet/raylet"\'',
+            f'sky logs {name} --status 1',
+
+            # Check launching again
+            f'sky launch -y -c {name} --infra kubernetes --cpus 0.1+ --num-nodes 4 \'set -e;ps aux | grep -v "grep " | grep "ray/raylet/raylet"\'',
+            f'sky logs {name} --status 2',
+
+            # Delete head, worker-2 and worker-3
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'kubectl get pod -l ray-cluster-name={name_on_cloud} && kubectl delete pod {head} {worker2} {worker3}'
+            ),
+            # Check launching again
+            f'sky launch -y -c {name} --infra kubernetes --cpus 0.1+ --num-nodes 4 \'set -e;ps aux | grep -v "grep " | grep "ray/raylet/raylet"\'',
+            f'sky logs {name} --status 1',
+
+            # Check launching again
+            f'sky launch -y -c {name} --infra kubernetes --cpus 0.1+ --num-nodes 4 \'set -e;ps aux | grep -v "grep " | grep "ray/raylet/raylet"\'',
+            f'sky logs {name} --status 2',
+
+            # Delete all Pods
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'kubectl get pod -l ray-cluster-name={name_on_cloud} && kubectl delete pod -l ray-cluster-name={name_on_cloud}'
+            ),
+            # Check status
+            f'sky status -r {name} --no-show-pools --no-show-services --no-show-managed-jobs',
+        ],
+        f'sky down -y {name} && '
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Testing Kubernetes pod_config ----------
 @pytest.mark.kubernetes
 def test_kubernetes_pod_config_pvc():
@@ -2415,5 +2464,39 @@ def test_kubernetes_ssh_proxy_performance():
         ],
         f'sky down -y {cluster_name}',
         timeout=15 * 60,  # 15 minutes timeout
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+def test_cancel_logs_does_not_break_process_pool(generic_cloud: str):
+    """Test that canceling sky logs doesn't break the process pool.
+
+    Regression test for cascading BrokenProcessPool errors
+    when coroutine requests (like sky logs) are cancelled.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'cancel_logs_does_not_break_process_pool',
+        [
+            # Launch cluster 1 with long-running job, in detached mode.
+            f'sky launch -c {name}-1 -y -d --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} \'for i in {{1..180}}; do echo $i; sleep 1; done\'',
+            # Start sky logs in background, launch cluster 2 in background,
+            # send SIGTERM to sky logs, then wait for launch to finish.
+            f'sky logs {name}-1 & '
+            f'LOGS_PID=$!; '
+            f'sky launch -c {name}-2 -y --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} echo hi > /tmp/{name}-2.log 2>&1 & '
+            f'LAUNCH_PID=$!; '
+            'sleep 10; '
+            f'echo "Killing logs PID: $LOGS_PID"; '
+            f'kill -9 $LOGS_PID; '
+            f'echo "Waiting for launch PID: $LAUNCH_PID"; '
+            f'tail -f /tmp/{name}-2.log & '
+            f'wait $LAUNCH_PID',
+            # Verify launch succeeded
+            f'cat /tmp/{name}-2.log | grep sky-cmd | grep hi',
+            f'! cat /tmp/{name}-2.log | grep BrokenProcessPool',
+        ],
+        f'sky down -y {name}-1; sky down -y {name}-2; rm -f /tmp/{name}-*.log',
+        timeout=10 * 60,
     )
     smoke_tests_utils.run_one_test(test)

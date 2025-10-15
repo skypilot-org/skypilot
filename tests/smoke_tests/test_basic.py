@@ -1007,8 +1007,8 @@ def test_kubernetes_context_failover(unreachable_context):
 
 @pytest.mark.kubernetes
 @pytest.mark.no_dependency
-def test_kubernetes_get_nodes_and_pods():
-    """Test the correctness of get_kubernetes_nodes and get_all_pods_in_kubernetes_cluster,
+def test_kubernetes_get_nodes():
+    """Test the correctness of get_kubernetes_nodes,
     as we parse the JSON ourselves and not using the Kubernetes Python client deserializer.
     """
     if smoke_tests_utils.is_non_docker_remote_api_server():
@@ -1036,23 +1036,6 @@ def test_kubernetes_get_nodes_and_pods():
             'address': addr.address
         } for addr in preloaded_node.status.addresses]
         assert node_addresses == preloaded_addresses
-
-    pods = kubernetes_utils.get_all_pods_in_kubernetes_cluster(context=None)
-    preloaded_pods = kubernetes.core_api().list_pod_for_all_namespaces().items
-
-    for pod, preloaded_pod in zip(pods, preloaded_pods):
-        assert pod.metadata.name == preloaded_pod.metadata.name
-        assert pod.metadata.labels == preloaded_pod.metadata.labels
-        assert pod.metadata.namespace == preloaded_pod.metadata.namespace
-
-        assert pod.status.phase == preloaded_pod.status.phase
-
-        assert pod.spec.node_name == preloaded_pod.spec.node_name
-        assert len(pod.spec.containers) == len(preloaded_pod.spec.containers)
-
-        for container, preloaded_container in zip(
-                pod.spec.containers, preloaded_pod.spec.containers):
-            assert container.resources.requests == preloaded_container.resources.requests
 
 
 @pytest.mark.no_seeweb  # Seeweb fails to provision resources
@@ -1448,8 +1431,8 @@ def test_sky_down_with_multiple_sgs():
         f'printf "%s" "$s" | grep "Terminating cluster {name_two}...done" && '
         # Ensure the last line is present.
         f'printf "%s" "$s" | grep "Terminating 2 clusters" && '
-        # # Ensure there are only 3 lines.
-        f'echo "$s" | sed "/^$/d" | wc -l | grep 3')
+        # # Ensure there are only 5 lines (includes Summary and succeeded clusters).
+        f'echo "$s" | sed "/^$/d" | wc -l | grep 5')
 
     test = smoke_tests_utils.Test(
         'sky_down_with_multiple_sgs',

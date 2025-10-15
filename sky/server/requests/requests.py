@@ -14,8 +14,8 @@ import sqlite3
 import threading
 import time
 import traceback
-from typing import (Any, AsyncContextManager, Callable, Dict, Generator, List,
-                    NamedTuple, Optional, Tuple)
+from typing import (Any, Callable, Dict, Generator, List, NamedTuple, Optional,
+                    Tuple)
 
 import anyio
 import colorama
@@ -32,6 +32,7 @@ from sky.server import daemons
 from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
+from sky.utils import asyncio_utils
 from sky.utils import common_utils
 from sky.utils import ux_utils
 from sky.utils.db import db_utils
@@ -578,27 +579,14 @@ def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
 
 @init_db
 @metrics_lib.time_me
-def update_request_async(
-        request_id: str) -> AsyncContextManager[Optional[Request]]:
-    """Async version of update_request.
-
-    Returns an async context manager that yields the request record and
-    persists any in-place updates upon exit.
-    """
-
-    @contextlib.asynccontextmanager
-    async def _cm():
-        # Acquire the lock to avoid race conditions between multiple request
-        # operations, e.g. execute and cancel.
-        async with filelock.AsyncFileLock(request_lock_path(request_id)):
-            request = await _get_request_no_lock_async(request_id)
-            try:
-                yield request
-            finally:
-                if request is not None:
-                    await _add_or_update_request_no_lock_async(request)
-
-    return _cm()
+@asyncio_utils.shield
+async def update_status_msg_async(request_id: str, status_msg: str) -> None:
+    """Update the status message of a request"""
+    async with filelock.AsyncFileLock(request_lock_path(request_id)):
+        request = await _get_request_no_lock_async(request_id)
+        if request is not None:
+            request.status_msg = status_msg
+            await _add_or_update_request_no_lock_async(request)
 
 
 _get_request_sql = (f'SELECT {", ".join(REQUEST_COLUMNS)} FROM {REQUEST_TABLE} '
@@ -651,6 +639,7 @@ def get_request(request_id: str) -> Optional[Request]:
 
 @init_db_async
 @metrics_lib.time_me_async
+@asyncio_utils.shield
 async def get_request_async(request_id: str) -> Optional[Request]:
     """Async version of get_request."""
     async with filelock.AsyncFileLock(request_lock_path(request_id)):
@@ -704,6 +693,7 @@ def create_if_not_exists(request: Request) -> bool:
 
 @init_db_async
 @metrics_lib.time_me_async
+@asyncio_utils.shield
 async def create_if_not_exists_async(request: Request) -> bool:
     """Async version of create_if_not_exists."""
     async with filelock.AsyncFileLock(request_lock_path(request.request_id)):
