@@ -925,7 +925,7 @@ def tail_logs(
 @annotations.client_api
 @rest.retry_transient_errors()
 def tail_provision_logs(cluster_name: str,
-                        worker: int = -1,
+                        worker: Optional[int] = None,
                         follow: bool = True,
                         tail: int = 0,
                         output_stream: Optional['io.TextIOBase'] = None) -> int:
@@ -948,7 +948,9 @@ def tail_provision_logs(cluster_name: str,
     }
     remote_api_version = versions.get_remote_api_version()
     if remote_api_version is not None and remote_api_version >= 21:
-        params['worker'] = worker
+        # Only add worker parameter if it's specified
+        if worker is not None:
+            params['worker'] = worker
     response = server_common.make_authenticated_request(
         'POST',
         '/provision_logs',
