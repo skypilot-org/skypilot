@@ -33,13 +33,12 @@ def isolated_database(tmp_path):
 
 
 @pytest.fixture()
-def test_config_file(tmp_path):
+def mock_skypilot_config(tmp_path):
     config_content = """
-jobs:
-  controller:
-    consolidation_mode: true
-    resources:
-      cpus: 2+
+aws:
+  labels:
+    key: value
+  vpc_name: skypilot-vpc
 """
     config_file = tmp_path / 'config.yaml'
     config_file.write_text(config_content)
@@ -158,8 +157,8 @@ def test_api_cancel_race_condition(isolated_database):
     assert updated.status == requests_lib.RequestStatus.CANCELLED
 
 
-def worker_fn(expected_env_a: str, expected_env_b: str, expected_cpus: str,
-              expected_memory: str):
+def _test_isolation_worker_fn(expected_env_a: str, expected_env_b: str,
+                              expected_labels: dict):
     """Worker that verifies it sees the correct env vars and config overrides."""
     # Assert env vars are correct
     assert os.environ.get('TEST_VAR_A') == expected_env_a, (
@@ -169,27 +168,22 @@ def worker_fn(expected_env_a: str, expected_env_b: str, expected_cpus: str,
         f"Expected TEST_VAR_B={expected_env_b}, got {os.environ.get('TEST_VAR_B')}"
     )
 
-    # Assert config override works - should see the overridden value, not the base
-    actual_cpus = skypilot_config.get_nested(
-        ('jobs', 'controller', 'resources', 'cpus'), default_value=None)
-    assert actual_cpus == expected_cpus, (
-        f"Expected cpus={expected_cpus}, got {actual_cpus}")
-    actual_memory = skypilot_config.get_nested(
-        ('jobs', 'controller', 'resources', 'memory'), default_value=None)
-    assert actual_memory == expected_memory, (
-        f"Expected memory={expected_memory}, got {actual_memory}")
+    # Assert config override works - should see the overridden value, not the base.
+    actual_labels = skypilot_config.get_nested(('aws', 'labels'),
+                                               default_value={})
+    assert actual_labels == expected_labels, (
+        f"Expected labels={expected_labels}, got {actual_labels}")
 
-    # Assert base config from test_config_file is still loaded (consolidation_mode: true)
-    assert skypilot_config.get_nested(
-        ('jobs', 'controller', 'consolidation_mode'),
-        default_value=False) is True
+    # Assert base config from mock_skypilot_config is still there.
+    assert skypilot_config.get_nested(('aws', 'vpc_name'),
+                                      default_value=None) == 'skypilot-vpc'
 
     return
 
 
 @pytest.mark.asyncio
 async def test_execute_with_env_override_thread_isolation(
-        isolated_database, mock_global_user_state, test_config_file,
+        isolated_database, mock_global_user_state, mock_skypilot_config,
         hijacked_sys_attrs):
     """Test that multiple concurrent threads see independent env vars.
 
@@ -208,12 +202,9 @@ async def test_execute_with_env_override_thread_isolation(
                 constants.USER_ENV_VAR: f'user-{request_id}',
             },
             override_skypilot_config={
-                'jobs': {
-                    'controller': {
-                        'resources': {
-                            'cpus': f'{request_id}+',
-                            'memory': f'{request_id}x',
-                        }
+                'aws': {
+                    'labels': {
+                        'request_id': request_id,
                     }
                 }
             })
@@ -222,19 +213,27 @@ async def test_execute_with_env_override_thread_isolation(
             request_id=request_id,
             request_name='test.isolation',
             request_body=request_body,
-            func=worker_fn,
+            func=_test_isolation_worker_fn,
             schedule_type=requests_lib.ScheduleType.SHORT)
-        request.entrypoint = lambda: worker_fn(expected_env_a=env_a,
-                                               expected_env_b=env_b,
-                                               expected_cpus=f'{request_id}+',
-                                               expected_memory=f'{request_id}x')
+        request.entrypoint = lambda: _test_isolation_worker_fn(
+            expected_env_a=env_a,
+            expected_env_b=env_b,
+            expected_labels={
+                'key': 'value',
+                'request_id': request_id
+            })
 
         task = executor.execute_request_in_coroutine(request)
         await task.task
 
         completed_request = requests_lib.get_request(request_id)
         assert completed_request is not None
-        assert completed_request.status == requests_lib.RequestStatus.SUCCEEDED
+        if completed_request.status != requests_lib.RequestStatus.SUCCEEDED:
+            error_info = completed_request.get_error()
+            error_msg = f"Request {request_id} failed"
+            if error_info:
+                error_msg += f": {error_info['type']}: {error_info['message']}"
+            pytest.fail(error_msg)
         return completed_request.get_return_value()
 
     # Spawn 5 concurrent requests with different env vars
