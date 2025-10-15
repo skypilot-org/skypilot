@@ -2,7 +2,7 @@
 
 import concurrent.futures
 import threading
-from typing import Callable, List
+from typing import Callable, Set
 
 from sky import exceptions
 from sky import sky_logging
@@ -33,7 +33,12 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
         self.running: atomic.AtomicInt = atomic.AtomicInt(0)
         self._shutdown: bool = False
         self._shutdown_lock: threading.Lock = threading.Lock()
-        self._threads: List[threading.Thread] = []
+        self._threads: Set[threading.Thread] = set()
+        self._threads_lock: threading.Lock = threading.Lock()
+
+    def _cleanup_thread(self, thread: threading.Thread):
+        with self._threads_lock:
+            self._threads.discard(thread)
 
     def _task_wrapper(self, fn: Callable, fut: concurrent.futures.Future, /,
                       *args, **kwargs):
@@ -45,6 +50,7 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
             fut.set_exception(e)
         finally:
             self.running.decrement()
+            self._cleanup_thread(threading.current_thread())
 
     def check_available(self, borrow: bool = False) -> int:
         """Check if there are available workers.
@@ -77,14 +83,24 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
                                       args=(fn, fut, *args),
                                       kwargs=kwargs,
                                       daemon=True)
-            # Protected by GIL
-            self._threads.append(thread)
-            thread.start()
+            with self._threads_lock:
+                self._threads.add(thread)
+            try:
+                thread.start()
+            except Exception as e:
+                self.running.decrement()
+                self._cleanup_thread(thread)
+                fut.set_exception(e)
+                raise
+            assert thread.ident is not None, 'Thread should be started'
             return fut
 
     def shutdown(self, wait=True):
         with self._shutdown_lock:
             self._shutdown = True
-        if wait:
-            for t in self._threads:
-                t.join()
+        if not wait:
+            return
+        with self._threads_lock:
+            threads = list(self._threads)
+        for t in threads:
+            t.join()

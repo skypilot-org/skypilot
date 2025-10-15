@@ -120,3 +120,14 @@ def test_on_demand_executor_thread_naming():
         assert thread_name.startswith('myexec-')
     finally:
         executor.shutdown()
+
+
+def test_on_demand_executor_threads_dict_cleanup():
+    executor = OnDemandThreadExecutor(name='test', max_workers=1)
+    try:
+        fut = executor.submit(dummy_task)
+        assert fut.result(timeout=5) is True
+        assert len(executor._threads) == 0
+        assert executor.running.get() == 0
+    finally:
+        executor.shutdown()
