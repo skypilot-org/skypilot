@@ -6,6 +6,8 @@ from sky import clouds
 from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.resources import Resources
+from sky.utils import common
+from sky.utils import status_lib
 
 
 # Set env var to test config file.
@@ -167,3 +169,92 @@ def test_write_cluster_config_w_post_provision_runcmd(mock_fill_template,
         0] == cluster_config_template, "config template incorrect"
     assert mock_fill_template.call_args[0][1][
         'runcmd'] == expected_runcmd, "runcmd not passed correctly"
+
+
+def test_get_clusters_launch_refresh(monkeypatch):
+    # verifies that `get_clusters` works when one cluster is launching
+    # and other is not.
+    # https://github.com/skypilot-org/skypilot/pull/7624
+
+    def _get_up_cluster():
+        handle_up = mock.MagicMock()
+        handle_up.cluster_name_on_cloud = 'up-cluster-cloud'
+        handle_up.launched_nodes = 1
+        handle_up.launched_resources = None
+
+        return {
+            'name': 'up-cluster',
+            'launched_at': '0',
+            'handle': handle_up,
+            'last_use': 'sky launch',
+            'status': status_lib.ClusterStatus.UP,
+            'autostop': 0,
+            'to_down': False,
+            'cluster_hash': '00000',
+            'cluster_ever_up': True,
+            'status_updated_at': 0,
+            'user_hash': '00000',
+            'user_name': 'pilot',
+            'workspace': 'default',
+            'is_managed': False,
+            'nodes': 0,
+        }
+
+    def _get_down_cluster():
+        handle_launch = mock.MagicMock()
+        handle_launch.cluster_name_on_cloud = 'launch-cluster-cloud'
+        handle_launch.launched_nodes = 1
+        handle_launch.launched_resources = None
+
+        return {
+            'name': 'launch-cluster',
+            'launched_at': '0',
+            'handle': handle_launch,
+            'last_use': 'sky launch',
+            'status': status_lib.ClusterStatus.INIT,
+            'autostop': 0,
+            'to_down': False,
+            'cluster_hash': '00000',
+            'cluster_ever_up': False,
+            'status_updated_at': 0,
+            'user_hash': '00000',
+            'user_name': 'pilot',
+            'workspace': 'default',
+            'is_managed': False,
+            'nodes': 0,
+        }
+
+    def get_clusters_mock(*args, **kwargs):
+        return [_get_up_cluster(), _get_down_cluster()]
+
+    def get_readable_resources_repr(handle, simplify):
+        return ''
+
+    def ssh_credentials_from_handles(handles):
+        return []
+
+    def refresh_cluster(cluster_name, force_refresh_statuses, include_user_info,
+                        summary_response):
+        if cluster_name == 'up-cluster':
+            return _get_up_cluster()
+        else:
+            return _get_down_cluster()
+
+    def get_request_tasks(*args, **kwargs):
+        magic_mock = mock.MagicMock()
+        magic_mock.cluster_name = 'launch-cluster'
+        return [magic_mock]
+
+    monkeypatch.setattr('sky.global_user_state.get_clusters', get_clusters_mock)
+    monkeypatch.setattr('sky.utils.resources_utils',
+                        get_readable_resources_repr)
+    monkeypatch.setattr(
+        'sky.backends.backend_utils.ssh_credentials_from_handles',
+        ssh_credentials_from_handles)
+    monkeypatch.setattr('sky.backends.backend_utils._refresh_cluster',
+                        refresh_cluster)
+    monkeypatch.setattr('sky.server.requests.requests.get_request_tasks',
+                        get_request_tasks)
+
+    assert len(
+        backend_utils.get_clusters(refresh=common.StatusRefreshMode.FORCE)) == 2
