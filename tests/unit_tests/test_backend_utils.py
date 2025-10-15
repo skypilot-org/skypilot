@@ -176,46 +176,28 @@ def test_get_clusters_launch_refresh(monkeypatch):
     # and other is not.
     # https://github.com/skypilot-org/skypilot/pull/7624
 
-    def _get_up_cluster():
-        handle_up = mock.MagicMock()
-        handle_up.cluster_name_on_cloud = 'up-cluster-cloud'
-        handle_up.launched_nodes = 1
-        handle_up.launched_resources = None
+    def _mock_cluster(launch):
+        cluster_name = 'launch-cluster' if launch else 'up-cluster'
+        handle = mock.MagicMock()
+        handle.cluster_name_on_cloud = f'{cluster_name}-cloud'
+        handle.launched_nodes = 1
+        handle.launched_resources = None
+
+        if launch:
+            status = status_lib.ClusterStatus.INIT
+        else:
+            status = status_lib.ClusterStatus.UP
 
         return {
-            'name': 'up-cluster',
+            'name': cluster_name,
             'launched_at': '0',
-            'handle': handle_up,
+            'handle': handle,
             'last_use': 'sky launch',
-            'status': status_lib.ClusterStatus.UP,
+            'status': status,
             'autostop': 0,
             'to_down': False,
             'cluster_hash': '00000',
-            'cluster_ever_up': True,
-            'status_updated_at': 0,
-            'user_hash': '00000',
-            'user_name': 'pilot',
-            'workspace': 'default',
-            'is_managed': False,
-            'nodes': 0,
-        }
-
-    def _get_down_cluster():
-        handle_launch = mock.MagicMock()
-        handle_launch.cluster_name_on_cloud = 'launch-cluster-cloud'
-        handle_launch.launched_nodes = 1
-        handle_launch.launched_resources = None
-
-        return {
-            'name': 'launch-cluster',
-            'launched_at': '0',
-            'handle': handle_launch,
-            'last_use': 'sky launch',
-            'status': status_lib.ClusterStatus.INIT,
-            'autostop': 0,
-            'to_down': False,
-            'cluster_hash': '00000',
-            'cluster_ever_up': False,
+            'cluster_ever_up': not launch,
             'status_updated_at': 0,
             'user_hash': '00000',
             'user_name': 'pilot',
@@ -225,7 +207,7 @@ def test_get_clusters_launch_refresh(monkeypatch):
         }
 
     def get_clusters_mock(*args, **kwargs):
-        return [_get_up_cluster(), _get_down_cluster()]
+        return [_mock_cluster(False), _mock_cluster(True)]
 
     def get_readable_resources_repr(handle, simplify):
         return ''
@@ -236,9 +218,9 @@ def test_get_clusters_launch_refresh(monkeypatch):
     def refresh_cluster(cluster_name, force_refresh_statuses, include_user_info,
                         summary_response):
         if cluster_name == 'up-cluster':
-            return _get_up_cluster()
+            return _mock_cluster(False)
         else:
-            return _get_down_cluster()
+            return _mock_cluster(True)
 
     def get_request_tasks(*args, **kwargs):
         magic_mock = mock.MagicMock()
