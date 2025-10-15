@@ -160,6 +160,10 @@ async def _tail_log_file(
     start_time = asyncio.get_event_loop().time()
     flush_count = 0
     total_bytes_sent = 0
+    
+    # Read file in chunks instead of line-by-line for better performance
+    read_chunk_size = 256 * 1024  # 256KB chunks for file reading
+    incomplete_line = b''  # Buffer for incomplete lines across chunks
 
     logger.info(
         f'[DEBUG _tail_log_file] Starting with BUFFER_SIZE={_BUFFER_SIZE}, '
@@ -194,8 +198,23 @@ async def _tail_log_file(
             async for chunk in flush_buffer():
                 yield chunk
 
-        line: Optional[bytes] = await f.readline()
-        if not line:
+        # Read file in chunks for better I/O performance
+        file_chunk: bytes = await f.read(read_chunk_size)
+        if not file_chunk:
+            # Process any remaining incomplete line
+            if incomplete_line:
+                line_str = incomplete_line.decode('utf-8')
+                if plain_logs:
+                    is_payload, line_str = message_utils.decode_payload(
+                        line_str, raise_for_mismatch=False)
+                    if not is_payload:
+                        buffer.append(line_str)
+                        buffer_bytes += len(line_str.encode('utf-8'))
+                else:
+                    buffer.append(line_str)
+                    buffer_bytes += len(line_str.encode('utf-8'))
+                incomplete_line = b''
+            
             # Avoid checking the status too frequently to avoid overloading the
             # DB.
             should_check_status = (current_time -
@@ -256,16 +275,38 @@ async def _tail_log_file(
         # performance but it helps avoid unnecessary heartbeat strings
         # being printed when the client runs in an old version.
         last_heartbeat_time = asyncio.get_event_loop().time()
-        line_str = line.decode('utf-8')
-        if plain_logs:
-            is_payload, line_str = message_utils.decode_payload(
-                line_str, raise_for_mismatch=False)
-            # TODO(aylei): implement heartbeat mechanism for plain logs,
-            # sending invisible characters might be okay.
-            if is_payload:
-                continue
-        buffer.append(line_str)
-        buffer_bytes += len(line_str.encode('utf-8'))
+        
+        # Combine with any incomplete line from previous chunk
+        file_chunk = incomplete_line + file_chunk
+        incomplete_line = b''
+        
+        # Split chunk into lines, preserving line structure
+        lines = file_chunk.split(b'\n')
+        
+        # If chunk doesn't end with newline, the last element is incomplete
+        if file_chunk and not file_chunk.endswith(b'\n'):
+            incomplete_line = lines[-1]
+            lines = lines[:-1]
+        else:
+            # If ends with \n, split creates an empty last element we should ignore
+            if lines and lines[-1] == b'':
+                lines = lines[:-1]
+        
+        # Process all complete lines in this chunk
+        for line_bytes in lines:
+            # Reconstruct line with newline (since split removed it)
+            line_str = line_bytes.decode('utf-8') + '\n'
+            
+            if plain_logs:
+                is_payload, line_str = message_utils.decode_payload(
+                    line_str, raise_for_mismatch=False)
+                # TODO(aylei): implement heartbeat mechanism for plain logs,
+                # sending invisible characters might be okay.
+                if is_payload:
+                    continue
+            
+            buffer.append(line_str)
+            buffer_bytes += len(line_str.encode('utf-8'))
 
     # Flush remaining lines in the buffer.
     async for chunk in flush_buffer():
