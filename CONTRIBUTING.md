@@ -162,46 +162,42 @@ These are suggestions, not strict rules to follow. When in doubt, follow the [st
 
 By default, the [Helm Chart Deployment](https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html) will use the latest released API Server. To test the local change on API Server, you can follow the steps below.
 
-First, start the API Server:
+First, prepare and build the local changes:
 
 ```bash
 # Ensure the helm repository is added and up to date
 helm repo add skypilot https://helm.skypilot.co
 helm repo update
 
+# Build the local changes
+helm dependency build ./charts/skypilot
+
+# Build the local SkyPilot changes
+DOCKER_IMAGE=my-docker-repo/image-name:v1 # change the tag to deploy the new changes
+docker buildx build --push --platform linux/amd64  -t $DOCKER_IMAGE -f Dockerfile .
+```
+
+Then start the API Server with new changes:
+
+```bash
 # The following variables will be used throughout the guide
 # NAMESPACE is the namespace to deploy the API server in
 NAMESPACE=skypilot
 # RELEASE_NAME is the name of the helm release, must be unique within the namespace
 RELEASE_NAME=skypilot
 # Set up basic username/password HTTP auth, or use OAuth2 proxy
-WEB_USERNAME=skypilot
-WEB_PASSWORD=yourpassword
+WEB_USERNAME=sk
+WEB_PASSWORD=pw
 AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
 # Deploy the API server
-helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+helm upgrade --install $RELEASE_NAME ./charts/skypilot --devel \
   --namespace $NAMESPACE \
   --create-namespace \
-  --set ingress.authCredentials=$AUTH_STRING
+  --set ingress.authCredentials=$AUTH_STRING \
+  --set apiService.image=$DOCKER_IMAGE
 ```
 
-Then build the local changes and deploy the new changes to the API Server:
-
-```bash
-DOCKER_IMAGE=my-docker-repo/image-name:v1 # change the tag to deploy the new changes
-docker buildx build --push --platform linux/amd64  -t $DOCKER_IMAGE -f Dockerfile .
-
-# Build the local changes
-helm dependency build ./charts/skypilot
-
-# Deploy the new changes to the API Server
-helm upgrade --install $RELEASE_NAME ./charts/skypilot --devel \
-              --namespace $NAMESPACE \
-              --reuse-values \
-              --set apiService.image=$DOCKER_IMAGE
-```
-
-> Notice that the tag should change every time you build the local changes.
+> Notice that the tag should change every time you build the local changes. When new changes are made to the code, repeat the previous steps to build the new changes and deploy the new changes to the API Server.
 
 Then, watch the status until the `READY` shows `1/1` and `STATUS` shows `Running`:
 
