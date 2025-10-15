@@ -46,16 +46,20 @@ def passthrough_stream_handler(in_stream: IO[Any], out_stream: IO[Any]) -> str:
     """Passthrough the stream from the process to the output stream"""
     import logging
     import time
-    
+
     logger = logging.getLogger(__name__)
     start_time = time.time()
     lines_written = 0
     bytes_written = 0
-    
+    last_flush_time = start_time
+
+    # Flush interval in seconds - flush every 1 second instead of on every line
+    flush_interval = 1.0
+
     # Get the log file path from the output stream if possible
     log_path = getattr(out_stream, 'name', 'unknown')
     logger.info(f'[DEBUG passthrough_stream_handler] Starting kubectl output to log file: {log_path}')
-    
+
     wrapped = io.TextIOWrapper(in_stream,
                                encoding='utf-8',
                                newline='',
@@ -65,14 +69,17 @@ def passthrough_stream_handler(in_stream: IO[Any], out_stream: IO[Any]) -> str:
         line = wrapped.readline()
         if line:
             out_stream.write(line)
-            # time.sleep(0.5)
-            out_stream.flush()
             lines_written += 1
             bytes_written += len(line.encode('utf-8'))
-            
+
+            # Flush based on timeout instead of on every line
+            current_time = time.time()
+            if current_time - last_flush_time >= flush_interval:
+                out_stream.flush()
+                last_flush_time = current_time
+
             # Log progress every 5000 lines
             if lines_written % 5000 == 0:
-                current_time = time.time()
                 elapsed = current_time - start_time
                 rate = lines_written / elapsed if elapsed > 0 else 0
                 logger.info(f'[DEBUG passthrough_stream_handler] Progress: {lines_written} lines, {bytes_written} bytes written in {elapsed:.2f}s (rate: {rate:.1f} lines/s)')
@@ -82,14 +89,17 @@ def passthrough_stream_handler(in_stream: IO[Any], out_stream: IO[Any]) -> str:
             elapsed = current_time - start_time
             logger.info(f'[DEBUG passthrough_stream_handler] Stream ended - no more data from kubectl, time: {current_time:.2f}, elapsed: {elapsed:.2f}s')
             break
-    
+
+    # Final flush to ensure all data is written
+    out_stream.flush()
+
     # Final timing log
     end_time = time.time()
     elapsed = end_time - start_time
     rate = lines_written / elapsed if elapsed > 0 else 0
     logger.info(f'[DEBUG passthrough_stream_handler] Finished kubectl output to log file: {log_path}, {lines_written} lines, {bytes_written} bytes in {elapsed:.2f}s (rate: {rate:.1f} lines/s)')
     logger.info(f'[DEBUG passthrough_stream_handler] kubectl process ended - stream closed, time: {end_time:.2f}')
-    
+
     return ''
 
 
