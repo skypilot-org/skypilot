@@ -3379,10 +3379,10 @@ def get_clusters(
                     for _, cluster_name in cluster_names_without_launch_request
                 ])
         # Preserve the index of the cluster name as it appears on "records"
-        updated_records_dict = {
-            cluster_names_without_launch_request[i][0]: updated_records[i]
-            for i in range(len(cluster_names_without_launch_request))
-        }
+    updated_records_dict = {
+        cluster_names_without_launch_request[i][0]: updated_records[i]
+        for i in range(len(cluster_names_without_launch_request))
+    }
     # Show information for removed clusters.
     kept_records = []
     autodown_clusters, remaining_clusters, failed_clusters = [], [], []
