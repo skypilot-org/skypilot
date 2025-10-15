@@ -1,5 +1,6 @@
 """Unit tests for sky.server.requests.executor module."""
 import asyncio
+import functools
 import os
 import time
 from typing import List
@@ -9,8 +10,10 @@ import pytest
 
 from sky import exceptions
 from sky import skypilot_config
+from sky.server import constants as server_constants
 from sky.server.requests import executor
 from sky.server.requests import payloads
+from sky.server.requests import process
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import context_utils
@@ -158,7 +161,7 @@ def test_api_cancel_race_condition(isolated_database):
 
 
 def _test_isolation_worker_fn(expected_env_a: str, expected_env_b: str,
-                              expected_labels: dict):
+                              expected_labels: dict, **kwargs):
     """Worker that verifies it sees the correct env vars and config overrides."""
     # Assert env vars are correct
     assert os.environ.get('TEST_VAR_A') == expected_env_a, (
@@ -181,33 +184,73 @@ def _test_isolation_worker_fn(expected_env_a: str, expected_env_b: str,
     return
 
 
-@pytest.mark.asyncio
-async def test_execute_with_env_override_thread_isolation(
-        isolated_database, mock_global_user_state, mock_skypilot_config,
-        hijacked_sys_attrs):
-    """Test that multiple concurrent threads see independent env vars.
+def _subprocess_initializer(db_path: str, log_path: str, config_path: str):
+    """Initializer for subprocess workers to set up the same mocks as the main test process."""
+    from sky import skypilot_config
+    from sky.server import constants as server_constants
+    from sky.server.requests import requests as requests_lib
 
-    This test verifies the core isolation guarantee: when multiple coroutines
-    spawn worker threads via _execute_with_config_override, each thread should
-    see its own independent environment variables with no cross-contamination.
+    server_constants.API_SERVER_REQUEST_DB_PATH = db_path
+    requests_lib.REQUEST_LOG_PATH_PREFIX = log_path
+    requests_lib._DB = None
+    skypilot_config._GLOBAL_CONFIG_PATH = config_path
+
+
+class TestIsolationBody(payloads.RequestBody):
+    """Request body for isolation tests with expected values."""
+    expected_env_a: str
+    expected_env_b: str
+    expected_labels: dict
+
+
+@pytest.mark.parametrize('execution_mode', ['coroutine', 'process_executor'])
+@pytest.mark.asyncio
+async def test_execute_with_isolated_env_and_config(isolated_database,
+                                                    mock_global_user_state,
+                                                    mock_skypilot_config,
+                                                    hijacked_sys_attrs,
+                                                    execution_mode, tmp_path):
+    """Test that multiple concurrent requests see independent env vars and config.
+
+    Args:
+        execution_mode: Either 'coroutine' (for execute_request_in_coroutine)
+                       or 'process_executor' (for _request_execution_wrapper).
     """
+    proc_executor = None
+    if execution_mode == 'process_executor':
+        # Get the paths that were set up by the fixtures, as we need to re-apply
+        # the same patches in the subprocess created by the BurstableExecutor.
+        db_path = server_constants.API_SERVER_REQUEST_DB_PATH
+        log_path_prefix = requests_lib.REQUEST_LOG_PATH_PREFIX
+
+        proc_executor = process.BurstableExecutor(
+            garanteed_workers=5,
+            burst_workers=0,
+            initializer=_subprocess_initializer,
+            initargs=(db_path, log_path_prefix, mock_skypilot_config))
 
     async def spawn_request(request_id: str, env_a: str, env_b: str):
-        """Spawn a request with specific env overrides."""
-        request_body = payloads.RequestBody(
-            env_vars={
-                'TEST_VAR_A': env_a,
-                'TEST_VAR_B': env_b,
-                constants.USER_ID_ENV_VAR: f'user-{request_id}',
-                constants.USER_ENV_VAR: f'user-{request_id}',
-            },
-            override_skypilot_config={
-                'aws': {
-                    'labels': {
-                        'request_id': request_id,
-                    }
-                }
-            })
+        """Spawn a request with env and config overrides."""
+        expected_labels = {
+            'key': 'value',  # From mock_skypilot_config
+            'request_id': request_id,  # From override_skypilot_config
+        }
+        request_body = TestIsolationBody(env_vars={
+            'TEST_VAR_A': env_a,
+            'TEST_VAR_B': env_b,
+            constants.USER_ID_ENV_VAR: f'user-{request_id}',
+            constants.USER_ENV_VAR: f'user-{request_id}',
+        },
+                                         override_skypilot_config={
+                                             'aws': {
+                                                 'labels': {
+                                                     'request_id': request_id,
+                                                 }
+                                             }
+                                         },
+                                         expected_env_a=env_a,
+                                         expected_env_b=env_b,
+                                         expected_labels=expected_labels)
 
         request = executor.prepare_request(
             request_id=request_id,
@@ -215,24 +258,25 @@ async def test_execute_with_env_override_thread_isolation(
             request_body=request_body,
             func=_test_isolation_worker_fn,
             schedule_type=requests_lib.ScheduleType.SHORT)
-        request.entrypoint = lambda: _test_isolation_worker_fn(
-            expected_env_a=env_a,
-            expected_env_b=env_b,
-            expected_labels={
-                'key': 'value',
-                'request_id': request_id
-            })
 
-        task = executor.execute_request_in_coroutine(request)
-        await task.task
+        if execution_mode == 'coroutine':
+            task = executor.execute_request_in_coroutine(request)
+            await task.task
+        else:
+            # Submit to shared executor like production code
+            fut = proc_executor.submit_until_success(
+                executor._request_execution_wrapper, request_id, False)
+            await asyncio.to_thread(fut.result)
 
         completed_request = requests_lib.get_request(request_id)
         assert completed_request is not None
         if completed_request.status != requests_lib.RequestStatus.SUCCEEDED:
             error_info = completed_request.get_error()
-            error_msg = f"Request {request_id} failed"
+            error_msg = f"Request {request_id} failed (mode={execution_mode}), status={completed_request.status}"
             if error_info:
-                error_msg += f": {error_info['type']}: {error_info['message']}"
+                error_msg += f"\nError type: {error_info['type']}\nError message: {error_info['message']}\nError traceback:\n{error_info.get('traceback', 'N/A')}"
+            else:
+                error_msg += "\nNo error info available"
             pytest.fail(error_msg)
         return completed_request.get_return_value()
 
@@ -245,8 +289,13 @@ async def test_execute_with_env_override_thread_isolation(
         spawn_request('5', 'e', 'five'),
     ]
 
-    results = await asyncio.gather(*tasks)
-    assert len(results) == 5
+    try:
+        results = await asyncio.gather(*tasks)
+        assert len(results) == 5
+    finally:
+        # Shutdown the executor if we created one
+        if proc_executor is not None:
+            proc_executor.shutdown()
 
 
 FAKE_FD_START = 100
