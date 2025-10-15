@@ -1961,7 +1961,7 @@ def set_job_info(job_id: int,
                  entrypoint: str,
                  pool: Optional[str],
                  pool_hash: Optional[str],
-                 user_hash: Optional[str] = None):
+                 user_hash: Optional[str]):
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
