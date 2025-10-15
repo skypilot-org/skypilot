@@ -982,6 +982,18 @@ def _get_user_hash_or_current_user(user_hash: Optional[str]) -> str:
 
 @_init_db
 @metrics_lib.time_me
+def update_cluster_handle(cluster_name: str,
+                          cluster_handle: 'backends.ResourceHandle'):
+    assert _SQLALCHEMY_ENGINE is not None
+    handle = pickle.dumps(cluster_handle)
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(cluster_table).filter_by(name=cluster_name).update(
+            {cluster_table.c.handle: handle})
+        session.commit()
+
+
+@_init_db
+@metrics_lib.time_me
 def update_last_use(cluster_name: str):
     """Updates the last used command for the cluster."""
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1036,18 +1048,6 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
                 cluster_table.c.status: status_lib.ClusterStatus.STOPPED.value,
                 cluster_table.c.status_updated_at: current_time
             })
-        session.commit()
-
-
-@_init_db
-@metrics_lib.time_me
-def update_cluster_handle(cluster_name: str,
-                          cluster_handle: 'backends.ResourceHandle'):
-    assert _SQLALCHEMY_ENGINE is not None
-    handle = pickle.dumps(cluster_handle)
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.query(cluster_table).filter_by(name=cluster_name).update(
-            {cluster_table.c.handle: handle})
         session.commit()
 
 
