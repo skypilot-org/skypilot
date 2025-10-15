@@ -11,7 +11,7 @@ import subprocess
 import sys
 
 from typing import (Any, Callable, Dict, Iterator, MutableMapping, Optional, TextIO,
-                    TYPE_CHECKING, TypeVar)
+                    TYPE_CHECKING, TypeVar, Coroutine)
 
 from typing_extensions import ParamSpec
 
