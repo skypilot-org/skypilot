@@ -3378,8 +3378,9 @@ def get_clusters(
                     cluster_name
                     for _, cluster_name in cluster_names_without_launch_request
                 ])
-        # Preserve the index of the cluster name as it appears on "records"
-    updated_records_dict = {
+    # Preserve the index of the cluster name as it appears on "records"
+    # before filtering for clusters being launched.
+    updated_records_dict: Dict[int, Optional[Dict[str, Any]]] = {
         cluster_names_without_launch_request[i][0]: updated_records[i]
         for i in range(len(cluster_names_without_launch_request))
     }
