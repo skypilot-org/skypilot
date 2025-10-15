@@ -2216,6 +2216,55 @@ def test_scp_autodown():
     smoke_tests_utils.run_one_test(test)
 
 
+# ---------- Testing Recovery on Kubernetes ----------
+@pytest.mark.kubernetes
+def test_kubernetes_recovery():
+    """Test Kubernetes recovery."""
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Kubernetes.max_cluster_name_length())
+    head = f'{name_on_cloud}-head'
+    worker2 = f'{name_on_cloud}-worker2'
+    worker3 = f'{name_on_cloud}-worker3'
+    test = smoke_tests_utils.Test(
+        'kubernetes_pod_recovery',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            f'sky launch -y -c {name} --infra kubernetes --cpus 0.1+ --num-nodes 4 \'set -e;ps aux | grep -v "grep " | grep "ray/raylet/raylet"\'',
+            f'sky logs {name} --status 1',
+
+            # Check launching again
+            f'sky launch -y -c {name} --infra kubernetes --cpus 0.1+ --num-nodes 4 \'set -e;ps aux | grep -v "grep " | grep "ray/raylet/raylet"\'',
+            f'sky logs {name} --status 2',
+
+            # Delete head, worker-2 and worker-3
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'kubectl get pod -l ray-cluster-name={name_on_cloud} && kubectl delete pod {head} {worker2} {worker3}'
+            ),
+            # Check launching again
+            f'sky launch -y -c {name} --infra kubernetes --cpus 0.1+ --num-nodes 4 \'set -e;ps aux | grep -v "grep " | grep "ray/raylet/raylet"\'',
+            f'sky logs {name} --status 1',
+
+            # Check launching again
+            f'sky launch -y -c {name} --infra kubernetes --cpus 0.1+ --num-nodes 4 \'set -e;ps aux | grep -v "grep " | grep "ray/raylet/raylet"\'',
+            f'sky logs {name} --status 2',
+
+            # Delete all Pods
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'kubectl get pod -l ray-cluster-name={name_on_cloud} && kubectl delete pod -l ray-cluster-name={name_on_cloud}'
+            ),
+            # Check status
+            f'sky status -r {name} --no-show-pools --no-show-services --no-show-managed-jobs',
+        ],
+        f'sky down -y {name} && '
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Testing Kubernetes pod_config ----------
 @pytest.mark.kubernetes
 def test_kubernetes_pod_config_pvc():
