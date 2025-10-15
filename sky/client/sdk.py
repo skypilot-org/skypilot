@@ -668,7 +668,9 @@ def _launch(
             # exist.
             optimize_request_id = optimize(
                 dag, admin_policy_request_options=request_options)
-            stream_and_get(optimize_request_id)
+            with rich_utils.client_status(
+                    ux_utils.spinner_message('Waiting for optimizer')):
+                stream_and_get(optimize_request_id)
         else:
             cluster_record = clusters[0]
             cluster_status = cluster_record['status']
