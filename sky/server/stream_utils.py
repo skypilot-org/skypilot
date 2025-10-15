@@ -28,6 +28,10 @@ _HEARTBEAT_INTERVAL = 30
 # If a SHORT request has been stuck in pending for
 # _SHORT_REQUEST_SPINNER_TIMEOUT seconds, we show the waiting spinner
 _SHORT_REQUEST_SPINNER_TIMEOUT = 2
+# If there is an issue during provisioning that causes the cluster to be stuck
+# in INIT state, we use this timeout to break the loop and stop streaming
+# provision logs.
+_PROVISION_LOG_TIMEOUT = 1
 
 LONG_REQUEST_POLL_INTERVAL = 1
 DEFAULT_POLL_INTERVAL = 0.1
@@ -256,21 +260,23 @@ async def _tail_log_file(
                 break
             # Provision logs pass in cluster_name, check cluster status
             # periodically to see if provisioning is done.
-            if cluster_name is not None and should_check_status:
-                last_status_check_time = current_time
-                cluster_status = await (
-                    global_user_state.get_status_from_cluster_name_async(
-                        cluster_name))
-                if cluster_status is None:
-                    logger.debug(
-                        'Stop tailing provision logs for cluster'
-                        f' status for cluster {cluster_name} not found')
+            if cluster_name is not None:
+                if current_time - last_flush_time > _PROVISION_LOG_TIMEOUT:
                     break
-                if cluster_status != status_lib.ClusterStatus.INIT:
-                    logger.debug(f'Stop tailing provision logs for cluster'
-                                 f' {cluster_name} has status {cluster_status} '
-                                 '(not in INIT state)')
-                    break
+                if should_check_status:
+                    last_status_check_time = current_time
+                    cluster_status = await (
+                        global_user_state.get_status_from_cluster_name_async(
+                            cluster_name))
+                    if cluster_status is None:
+                        logger.debug(
+                            'Stop tailing provision logs for cluster'
+                            f' status for cluster {cluster_name} not found')
+                        break
+                    if cluster_status != status_lib.ClusterStatus.INIT:
+                        logger.debug(f'Stop tailing provision logs for cluster'
+                                    f' {cluster_name} has status {cluster_status} '
+                                    '(not in INIT state)')
             if current_time - last_heartbeat_time >= _HEARTBEAT_INTERVAL:
                 # Currently just used to keep the connection busy, refer to
                 # https://github.com/skypilot-org/skypilot/issues/5750 for
