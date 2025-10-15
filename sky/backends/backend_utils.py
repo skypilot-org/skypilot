@@ -3370,7 +3370,9 @@ def get_clusters(
         with progress:
             updated_records = subprocess_utils.run_in_parallel(
                 _refresh_cluster_record, cluster_names_without_launch_request)
-    updated_records_dict = {record['cluster_hash']: record for record in updated_records}
+    updated_records_dict = {
+        record['cluster_hash']: record for record in updated_records
+    }
     # Show information for removed clusters.
     kept_records = []
     autodown_clusters, remaining_clusters, failed_clusters = [], [], []
@@ -3386,8 +3388,7 @@ def get_clusters(
             else:
                 remaining_clusters.append(record['name'])
         elif updated_record['status'] == 'UNKNOWN':
-            failed_clusters.append(
-                (record['name'], updated_record['error']))
+            failed_clusters.append((record['name'], updated_record['error']))
             # Keep the original record if the status is unknown,
             # so that the user can still see the cluster.
             kept_records.append(record)
