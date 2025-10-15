@@ -59,7 +59,6 @@ message QueueJobRequest {
   string script_path = 3;
   string remote_log_dir = 4;
   optional ManagedJobInfo managed_job = 5;
-  optional string user_hash = 6;
 }
 
 message ManagedJobInfo {
@@ -68,6 +67,7 @@ message ManagedJobInfo {
   string workspace = 3;
   string entrypoint = 4;
   repeated ManagedJobTask tasks = 5;
+  optional string user_id = 6;
 }
 
 message ManagedJobTask {

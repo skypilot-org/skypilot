@@ -52,34 +52,34 @@ class AddJobResponse(_message.Message):
     def __init__(self, job_id: _Optional[int] = ..., log_dir: _Optional[str] = ...) -> None: ...
 
 class QueueJobRequest(_message.Message):
-    __slots__ = ("job_id", "codegen", "script_path", "remote_log_dir", "managed_job", "user_hash")
+    __slots__ = ("job_id", "codegen", "script_path", "remote_log_dir", "managed_job")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     CODEGEN_FIELD_NUMBER: _ClassVar[int]
     SCRIPT_PATH_FIELD_NUMBER: _ClassVar[int]
     REMOTE_LOG_DIR_FIELD_NUMBER: _ClassVar[int]
     MANAGED_JOB_FIELD_NUMBER: _ClassVar[int]
-    USER_HASH_FIELD_NUMBER: _ClassVar[int]
     job_id: int
     codegen: str
     script_path: str
     remote_log_dir: str
     managed_job: ManagedJobInfo
-    user_hash: str
-    def __init__(self, job_id: _Optional[int] = ..., codegen: _Optional[str] = ..., script_path: _Optional[str] = ..., remote_log_dir: _Optional[str] = ..., managed_job: _Optional[_Union[ManagedJobInfo, _Mapping]] = ..., user_hash: _Optional[str] = ...) -> None: ...
+    def __init__(self, job_id: _Optional[int] = ..., codegen: _Optional[str] = ..., script_path: _Optional[str] = ..., remote_log_dir: _Optional[str] = ..., managed_job: _Optional[_Union[ManagedJobInfo, _Mapping]] = ...) -> None: ...
 
 class ManagedJobInfo(_message.Message):
-    __slots__ = ("name", "pool", "workspace", "entrypoint", "tasks")
+    __slots__ = ("name", "pool", "workspace", "entrypoint", "tasks", "user_id")
     NAME_FIELD_NUMBER: _ClassVar[int]
     POOL_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     ENTRYPOINT_FIELD_NUMBER: _ClassVar[int]
     TASKS_FIELD_NUMBER: _ClassVar[int]
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
     name: str
     pool: str
     workspace: str
     entrypoint: str
     tasks: _containers.RepeatedCompositeFieldContainer[ManagedJobTask]
-    def __init__(self, name: _Optional[str] = ..., pool: _Optional[str] = ..., workspace: _Optional[str] = ..., entrypoint: _Optional[str] = ..., tasks: _Optional[_Iterable[_Union[ManagedJobTask, _Mapping]]] = ...) -> None: ...
+    user_id: str
+    def __init__(self, name: _Optional[str] = ..., pool: _Optional[str] = ..., workspace: _Optional[str] = ..., entrypoint: _Optional[str] = ..., tasks: _Optional[_Iterable[_Union[ManagedJobTask, _Mapping]]] = ..., user_id: _Optional[str] = ...) -> None: ...
 
 class ManagedJobTask(_message.Message):
     __slots__ = ("task_id", "name", "resources_str", "metadata_json")
