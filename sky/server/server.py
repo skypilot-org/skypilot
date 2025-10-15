@@ -1364,22 +1364,23 @@ async def download(download_body: payloads.DownloadBody,
 
 # TODO(aylei): run it asynchronously after global_user_state support async op
 @app.post('/provision_logs')
-def provision_logs(cluster_body: payloads.ClusterNameBody,
-                   worker: Optional[int] = None,
+def provision_logs(provision_logs_body: payloads.ProvisionLogsBody,
                    follow: bool = True,
                    tail: int = 0) -> fastapi.responses.StreamingResponse:
     """Streams the provision.log for the latest launch request of a cluster."""
     log_path = None
     log_dir = None
+    cluster_name = provision_logs_body.cluster_name
+    worker = provision_logs_body.worker
     # stream head node logs
     if worker is None:
         # Prefer clusters table first, then cluster_history as fallback.
         log_path_str = global_user_state.get_cluster_provision_log_path(
-            cluster_body.cluster_name)
+            cluster_name)
         if not log_path_str:
             log_path_str = (
                 global_user_state.get_cluster_history_provision_log_path(
-                    cluster_body.cluster_name))
+                    cluster_name))
         if not log_path_str:
             raise fastapi.HTTPException(
                 status_code=404,
@@ -1393,8 +1394,7 @@ def provision_logs(cluster_body: payloads.ClusterNameBody,
 
     # stream worker node logs
     else:
-        handle = global_user_state.get_handle_from_cluster_name(
-            cluster_body.cluster_name)
+        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is None:
             raise fastapi.HTTPException(
                 status_code=404,
@@ -1415,13 +1415,12 @@ def provision_logs(cluster_body: payloads.ClusterNameBody,
     effective_tail = None if tail is None or tail <= 0 else tail
 
     return fastapi.responses.StreamingResponse(
-        content=stream_utils.log_streamer(
-            None,
-            log_path,
-            log_dir,
-            tail=effective_tail,
-            follow=follow,
-            cluster_name=cluster_body.cluster_name),
+        content=stream_utils.log_streamer(None,
+                                          log_path,
+                                          log_dir,
+                                          tail=effective_tail,
+                                          follow=follow,
+                                          cluster_name=cluster_name),
         media_type='text/plain',
         headers={
             'Cache-Control': 'no-cache, no-transform',
