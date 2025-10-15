@@ -8,6 +8,7 @@ import multiprocessing
 import os
 import subprocess
 import sys
+import time
 import typing
 from typing import Any, Callable, IO, Optional, Tuple, TypeVar
 
@@ -18,6 +19,7 @@ from sky.utils import context
 from sky.utils import subprocess_utils
 
 StreamHandler = Callable[[IO[Any], IO[Any]], str]
+PASSTHROUGH_FLUSH_INTERVAL_SECONDS = 1.0
 
 
 # TODO(aylei): call hijack_sys_attrs() proactivly in module init at server-side
@@ -44,6 +46,7 @@ def hijack_sys_attrs():
 
 def passthrough_stream_handler(in_stream: IO[Any], out_stream: IO[Any]) -> str:
     """Passthrough the stream from the process to the output stream"""
+    last_flush_time = time.time()
     wrapped = io.TextIOWrapper(in_stream,
                                encoding='utf-8',
                                newline='',
@@ -54,8 +57,18 @@ def passthrough_stream_handler(in_stream: IO[Any], out_stream: IO[Any]) -> str:
         if line:
             out_stream.write(line)
             out_stream.flush()
+
+            # Flush based on timeout instead of on every line
+            current_time = time.time()
+            if (current_time - last_flush_time >=
+                    PASSTHROUGH_FLUSH_INTERVAL_SECONDS):
+                out_stream.flush()
+                last_flush_time = current_time
         else:
             break
+
+    # Final flush to ensure all data is written
+    out_stream.flush()
     return ''
 
 
