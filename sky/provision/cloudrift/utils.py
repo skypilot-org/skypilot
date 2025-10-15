@@ -22,7 +22,7 @@ logger = sky_logging.init_logger(__name__)
 
 # CloudRift credentials environment variable
 _CLOUDRIFT_CREDENTIALS_PATH = 'CLOUDRIFT_CREDENTIALS_PATH'
-CLOUDRIFT_SERVER_ADDRESS = "https://api.cloudrift.ai"
+CLOUDRIFT_SERVER_ADDRESS = "http://localhost:8000"
 CLOUDRIFT_API_VERSION = "2025-05-29"
 
 
@@ -132,7 +132,7 @@ class RiftClient:
         return None
 
     def deploy_instance(
-        self, instance_type: str, name:str, region: str, ssh_keys: List[str], cmd: str
+        self, instance_type: str, cluster_name:str, name:str, region: str, ssh_keys: List[str], cmd: str
     ) -> List[str]:
         image_url = self.get_vm_image_url()
         if not image_url:
@@ -147,13 +147,15 @@ class RiftClient:
                     "ssh_key": {"PublicKeys": ssh_keys},
                 }
             },
+            "cluster_name": cluster_name,
+            "name": name,
             "selector": {
                 "ByInstanceTypeAndLocation": {
                     #"datacenters": [region], # TODO add region
                     "instance_type": instance_type,
                 }
             },
-            "with_public_ip": True,
+            "with_public_ip": False,
         }
         #logger.debug("Deploying instance with request data: %s", request_data)
         print(request_data)
@@ -163,15 +165,22 @@ class RiftClient:
             return response_data.get("instance_ids", [])
         return []
 
-    def list_instances(self, instance_ids: Optional[List[str]] = None) -> List[Dict]:
+    def list_instances(self, cluster_name) -> List[Dict]:
+        statuses =  ["Initializing", "Active", "Deactivating"]
         request_data = {
             "selector": {
-                "ByStatus": ["Initializing", "Active", "Deactivating"],
+                "ByClusterName": cluster_name
             }
         }
         # TODO use instance_ids
         logger.debug("Listing instances with request data: %s", request_data)
-        response_data = self._make_request("instances/list", request_data)
+        try:
+            response_data = self._make_request("instances/list", request_data)
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 400:
+                return []
+            raise
+
         if isinstance(response_data, dict):
             return response_data.get("instances", [])
 
@@ -252,7 +261,7 @@ class RiftClient:
                 **kwargs,
             )
 
-            if not response.ok:
+            if not response.ok and response.status_code == 400:
                 response.raise_for_status()
             try:
                 response_json = response.json()

@@ -8,3 +8,4 @@ from sky.provision.cloudrift.instance import run_instances
 from sky.provision.cloudrift.instance import stop_instances
 from sky.provision.cloudrift.instance import terminate_instances
 from sky.provision.cloudrift.instance import wait_instances
+from sky.provision.cloudrift.config import bootstrap_instances

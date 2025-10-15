@@ -22,9 +22,8 @@ logger = sky_logging.init_logger(__name__)
 
 def _get_head_instance(
         instances: Dict[str, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    for instance_name, instance_meta in instances.items():
-        if instance_name.endswith('-head'):
-            return instance_meta
+    for instance_id, instance_meta in instances.items():
+        return instance_meta
     return None
 
 
@@ -32,19 +31,14 @@ def _filter_instances(
         cluster_name_on_cloud: str,
         status_filters: Optional[List[str]]) -> Dict[str, Dict[str, Any]]:
     cloudrift_client = utils.get_cloudrift_client()
-    instances = cloudrift_client.list_instances()
-    possible_names = [
-        f'{cluster_name_on_cloud}-head',
-        f'{cluster_name_on_cloud}-worker',
-    ]
+    instances = cloudrift_client.list_instances(cluster_name=cluster_name_on_cloud)
 
     filtered_instances = {}
     for instance in instances:
         if (status_filters is not None and
                 instance['status'] not in status_filters):
             continue
-        if instance.get('name') in possible_names:
-            filtered_instances[instance['id']] = instance
+        filtered_instances[instance['id']] = instance
     return filtered_instances
 
 
@@ -60,15 +54,15 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         if not instances:
             break
         instance_statuses = [
-            instance['status'] for instance in instances.values()
+            instance['status'] for instance in instances
         ]
         logger.info(f'Waiting for {len(instances)} instances to be ready: '
                     f'{instance_statuses}')
         time.sleep(constants.POLL_INTERVAL)
 
     exist_instances = _filter_instances(cluster_name_on_cloud,
-                                             status_filters=pending_status +
-                                             ['Active'])
+                                         status_filters=pending_status +
+                                         ['Active'])
 
     head_instance = _get_head_instance(exist_instances)
     to_start_count = config.count - len(exist_instances)
@@ -98,16 +92,18 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             ssh_public_key_file = config.authentication_config['ssh_public_key']
             with open(ssh_public_key_file, 'r', encoding='utf-8') as f:
                 ssh_public_key = f.read().strip()
-                instance_ids = cloudrift_client.deploy_instance(
+                launch_data = cloudrift_client.deploy_instance(
                     instance_type=config.node_config['InstanceType'],
                     region=region,
+                    cluster_name=cluster_name_on_cloud,
                     name = f'{cluster_name_on_cloud}-{suffix}-{node_type}',
                     ssh_keys=[ssh_public_key],
                     cmd = ""
                 )
+                instance_id = launch_data[0]
                 logger.info(f'Launched {node_type} node, '
-                            f'instance_id: {instance_ids[0]}')
-                return instance_ids[0]
+                            f'instance_id: {instance_id}')
+                return instance_id
         except Exception as e:
             logger.warning(f'run_instances error: {e}')
             raise
@@ -130,7 +126,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     # Wait for instances to be ready.
     for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
-        instances = cloudrift_client.list_instances(instances_to_wait)
+        instances = cloudrift_client.list_instances(cluster_name_on_cloud)
         print("list instances", instances)
         for instance in instances:
             if instance['status'] == 'Active' and instance['id'] in instances_to_wait:
@@ -195,7 +191,7 @@ def get_cluster_info(
     region: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
-) -> Tuple[Optional[str], List[str]]:
+) -> common.ClusterInfo:
     """Returns head ip and worker ips of a cluster.
 
     Args:
@@ -206,18 +202,30 @@ def get_cluster_info(
     Returns:
         A tuple of (head_ip, worker_ips).
     """
-    del provider_config, region  # Unused
-    head_ip = None
-    worker_ips = []
-    instances = _filter_instances(cluster_name_on_cloud, ['Active', "Initializing"])
-    for instance_name, instance_meta in instances.items():
-        if instance_name.endswith('-head'):
-            head_ip = instance_meta.get('public_ip')
-        else:
-            ip = instance_meta.get('public_ip')
-            if ip is not None:
-                worker_ips.append(ip)
-    return head_ip, worker_ips
+    del region  # unused
+    running_instances = _filter_instances(cluster_name_on_cloud, ['Active', "Initializing"])
+    print("running_instances", running_instances)
+    instances: Dict[str, List[common.InstanceInfo]] = {}
+    head_instance_id = None
+    for instance_id, instance_info in running_instances.items():
+        instances[instance_id] = [
+            common.InstanceInfo(
+                instance_id=instance_id,
+                internal_ip=instance_info["internal_host_address"],
+                external_ip=instance_info['host_address'],
+                ssh_port=22,
+                tags={},
+            )
+        ]
+        if head_instance_id is None:
+            head_instance_id = instance_id
+
+    return common.ClusterInfo(
+        instances=instances,
+        head_instance_id=head_instance_id,
+        provider_name='cloudrift',
+        provider_config=provider_config,
+    )
 
 
 def query_instances(
@@ -225,27 +233,26 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
-) -> List[Dict[str, Any]]:
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
     del cluster_name, provider_config  # unused
     instances = _filter_instances(cluster_name_on_cloud, status_filters=None)
-    ret = []
+    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                              Optional[str]]] = {}
+
+    status_map = {
+        'Active': status_lib.ClusterStatus.UP,
+        'Initializing': status_lib.ClusterStatus.INIT,
+        'Inactive': None,
+    }
     for instance_name, instance_meta in instances.items():
         status = instance_meta.get('status')
         # Skip terminated instances if non_terminated_only is True
         if non_terminated_only and status == 'terminated':
             continue
         # Convert the status to the SkyPilot status
-        if status == 'running':
-            status = status_lib.ClusterStatus.UP
-        elif status in ('stopped', 'stopping'):
-            status = status_lib.ClusterStatus.STOPPED
-        else:  # terminated, error, etc.
-            status = status_lib.ClusterStatus.TERMINATED
-
-        instance_meta['status'] = status
-        ret.append(instance_meta)
-    return ret
+        statuses[instance_name] = (status_map.get(status), None)
+    return statuses
 
 
 def open_ports(
