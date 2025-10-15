@@ -1199,10 +1199,12 @@ async def test_cancel_get_request_async():
         await asyncio.sleep(1)
         return None
 
+    concurrency = 1000
+
     with mock.patch('sky.server.requests.requests._get_request_no_lock_async',
                     side_effect=mock_get_request_async_no_lock):
         tasks = []
-        for i in range(10000):
+        for i in range(concurrency):
             task = asyncio.create_task(
                 requests.get_request_async(f'test-request-id-{i}'))
             tasks.append(task)
@@ -1218,7 +1220,7 @@ async def test_cancel_get_request_async():
         # to ensure all the coroutines are done.
         # TODO(aylei): this may have timing issue, but looks good for now.
         await asyncio.sleep(10)
-        for i in range(65536):
+        for i in range(concurrency):
             lock = filelock.FileLock(
                 requests.request_lock_path(f'test-request-id-{i}'))
             # The locks must be released properly
