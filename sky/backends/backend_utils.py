@@ -3270,7 +3270,15 @@ def get_clusters(
                 expanded_private_key_path = os.path.expanduser(
                     ssh_private_key_path)
                 if not os.path.exists(expanded_private_key_path):
-                    auth.create_ssh_key_files_from_db(ssh_private_key_path)
+                    success = auth.create_ssh_key_files_from_db(
+                        ssh_private_key_path)
+                    if not success:
+                        # If the ssh key files are not found, we do not
+                        # update the record with credentials.
+                        logger.debug(
+                            f'SSH keys not found for cluster {record["name"]} '
+                            f'at key path {ssh_private_key_path}')
+                        continue
             else:
                 private_key_path, _ = auth.get_or_generate_keys()
                 expanded_private_key_path = os.path.expanduser(private_key_path)
@@ -3332,7 +3340,7 @@ def get_clusters(
                                   force_refresh_statuses=force_refresh_statuses,
                                   include_user_info=True,
                                   summary_response=summary_response)
-        if 'error' not in record:
+        if record is not None and 'error' not in record:
             _update_records_with_handle_info([record])
             if include_credentials:
                 _update_records_with_credentials([record])

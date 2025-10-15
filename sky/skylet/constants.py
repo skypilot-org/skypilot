@@ -404,10 +404,25 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
 ]
 # When overriding the SkyPilot configs on the API server with the client one,
 # we skip the following keys because they are meant to be client-side configs.
-SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [('api_server',),
-                                                       ('allowed_clouds',),
-                                                       ('workspaces',), ('db',),
-                                                       ('daemons',)]
+# Also, we skip the consolidation mode config as those should be only set on
+# the API server side.
+SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
+    ('api_server',),
+    ('allowed_clouds',),
+    ('workspaces',),
+    ('db',),
+    ('daemons',),
+    # TODO(kevin,tian): Override the whole controller config once our test
+    # infrastructure supports setting dynamic server side configs.
+    # Tests that are affected:
+    # - test_managed_jobs_ha_kill_starting
+    # - test_managed_jobs_ha_kill_running
+    # - all tests that use LOW_CONTROLLER_RESOURCE_ENV or
+    #   LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG (won't cause test failure,
+    #   but the configs won't be applied)
+    ('jobs', 'controller', 'consolidation_mode'),
+    ('serve', 'controller', 'consolidation_mode'),
+]
 
 # Constants for Azure blob storage
 WAIT_FOR_STORAGE_ACCOUNT_CREATION = 60
