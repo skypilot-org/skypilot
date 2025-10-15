@@ -107,7 +107,14 @@ def test_launch_refresh(generic_cloud: str):
             # Launch the cluster asynchronously.
             f'SKYPILOT_DEBUG=0 sky launch -y --async -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
             # Refresh the cluster while the cluster is launching.
-            f'sky status --refresh',
+            'sky status --refresh',
+            'sky status --refresh',
+            'sky status --refresh',
+            'sky status --refresh',
+            'sky status --refresh',
+            'sky status --refresh',
+            'sky status --refresh',
+            'sky status --refresh',
         ],
         f'sky down -y {name}',
         smoke_tests_utils.get_timeout(generic_cloud),
