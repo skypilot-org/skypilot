@@ -942,12 +942,17 @@ def tail_provision_logs(cluster_name: str,
         Exit code 0 on streaming success; raises on HTTP error.
     """
     body = payloads.ProvisionLogsBody(cluster_name=cluster_name)
-    remote_api_version = versions.get_remote_api_version()
-    if remote_api_version is not None and remote_api_version >= 21:
-        # Only add worker parameter if it's specified
-        if worker is not None:
-            body.worker = worker
 
+    if worker is not None:
+        remote_api_version = versions.get_remote_api_version()
+        if remote_api_version is not None and remote_api_version >= 21:
+            if worker < 1:
+                raise ValueError('Worker must be a positive integer.')
+            body.worker = worker
+        else:
+            raise ValueError(
+                'Worker node provision logs are not supported in your API '
+                'server. Please upgrade to a newer API server to use it.')
     params = {
         'follow': str(follow).lower(),
         'tail': tail,
