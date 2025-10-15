@@ -6276,7 +6276,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def _get_managed_job_user_id(self, task: task_lib.Task) -> Optional[str]:
         """Returns the user id for the managed job."""
         if task.managed_job_dag is not None:
-            return task.envs['SKYPILOT_USER_ID']
+            return task.envs[constants.USER_ID_ENV_VAR]
         return None
 
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
