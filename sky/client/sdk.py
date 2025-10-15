@@ -941,16 +941,18 @@ def tail_provision_logs(cluster_name: str,
     Returns:
         Exit code 0 on streaming success; raises on HTTP error.
     """
-    body = payloads.ClusterNameBody(cluster_name=cluster_name)
-    params = {
-        'follow': str(follow).lower(),
-        'tail': tail,
-    }
+    body = payloads.ProvisionLogsBody(cluster_name=cluster_name)
     remote_api_version = versions.get_remote_api_version()
     if remote_api_version is not None and remote_api_version >= 21:
         # Only add worker parameter if it's specified
         if worker is not None:
-            params['worker'] = worker
+            body.worker = worker
+
+    params = {
+        'follow': str(follow).lower(),
+        'tail': tail,
+    }
+
     response = server_common.make_authenticated_request(
         'POST',
         '/provision_logs',
