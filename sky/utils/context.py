@@ -15,6 +15,8 @@ from typing import (Any, Callable, Dict, Iterator, MutableMapping, Optional, Tex
 
 from typing_extensions import ParamSpec
 
+from sky import sky_logging
+
 
 if TYPE_CHECKING:
     from sky.skypilot_config import ConfigContext
@@ -93,7 +95,7 @@ class SkyPilotContext(object):
         if log_file is None:
             self._log_file_handle = None
         else:
-            logger = logging.getLogger(__name__)
+            logger = sky_logging.init_logger(__name__)
             logger.info(f'[DEBUG redirect_log] Starting server log write to {log_file}')
             self._log_file_handle = open(log_file, 'a', encoding='utf-8')
         self._log_file = log_file
