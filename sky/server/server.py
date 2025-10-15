@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import contextlib
 import datetime
 import hashlib
@@ -1629,6 +1630,10 @@ async def api_status(
         None, description='Request IDs to get status for.'),
     all_status: bool = fastapi.Query(
         False, description='Get finished requests as well.'),
+    limit: Optional[int] = fastapi.Query(
+        None, description='Number of requests to show.'),
+    fields: Optional[List[str]] = fastapi.Query(
+        None, description='Fields to get. If None, get all fields.'),
 ) -> List[payloads.RequestPayload]:
     """Gets the list of requests."""
     if request_ids is None:
@@ -1638,9 +1643,15 @@ async def api_status(
                 requests_lib.RequestStatus.PENDING,
                 requests_lib.RequestStatus.RUNNING,
             ]
-        request_tasks = await requests_lib.get_request_tasks_async(
-            req_filter=requests_lib.RequestTaskFilter(status=statuses))
-        return [r.readable_encode() for r in request_tasks]
+        request_tasks = await requests_lib.get_request_tasks_with_fields_async(
+            req_filter=requests_lib.RequestTaskFilter(
+                status=statuses,
+                limit=limit,
+                fields=fields,
+            ),
+            fields=fields,
+        )
+        return requests_lib.encode_requests(request_tasks)
     else:
         encoded_request_tasks = []
         for request_id in request_ids:
@@ -1721,9 +1732,9 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
 
     # Run core.status in another thread to avoid blocking the event loop.
-    cluster_records = await context_utils.to_thread(core.status,
-                                                    cluster_name,
-                                                    all_users=True)
+    with ThreadPoolExecutor(max_workers=1) as thread_pool_executor:
+        cluster_records = await context_utils.to_thread_with_executor(
+            thread_pool_executor, core.status, cluster_name, all_users=True)
     cluster_record = cluster_records[0]
     if cluster_record['status'] != status_lib.ClusterStatus.UP:
         raise fastapi.HTTPException(
@@ -1957,6 +1968,7 @@ if __name__ == '__main__':
     # Serve metrics on a separate port to isolate it from the application APIs:
     # metrics port will not be exposed to the public network typically.
     parser.add_argument('--metrics-port', default=9090, type=int)
+    parser.add_argument('--start-with-python', action='store_true')
     cmd_args = parser.parse_args()
     if cmd_args.port == cmd_args.metrics_port:
         logger.error('port and metrics-port cannot be the same, exiting.')
@@ -1970,6 +1982,10 @@ if __name__ == '__main__':
     if not common_utils.is_port_available(cmd_args.port):
         logger.error(f'Port {cmd_args.port} is not available, exiting.')
         raise RuntimeError(f'Port {cmd_args.port} is not available')
+
+    if not cmd_args.start_with_python:
+        # Maybe touch the signal file on API server startup.
+        managed_job_utils.is_consolidation_mode(on_api_restart=True)
 
     # Show the privacy policy if it is not already shown. We place it here so
     # that it is shown only when the API server is started.

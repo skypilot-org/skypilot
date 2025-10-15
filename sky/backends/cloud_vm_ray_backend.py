@@ -141,6 +141,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.OCI: 300,
     clouds.Paperspace: 600,
     clouds.Kubernetes: 300,
+    clouds.Shadeform: 300,
     clouds.Vsphere: 240,
 }
 
@@ -304,6 +305,7 @@ def _get_cluster_config_template(cloud):
         clouds.RunPod: 'runpod-ray.yml.j2',
         clouds.Kubernetes: 'kubernetes-ray.yml.j2',
         clouds.SSH: 'kubernetes-ray.yml.j2',
+        clouds.Shadeform: 'shadeform-ray.yml.j2',
         clouds.Vsphere: 'vsphere-ray.yml.j2',
         clouds.Vast: 'vast-ray.yml.j2',
         clouds.Fluidstack: 'fluidstack-ray.yml.j2',
@@ -2826,7 +2828,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 return grpc.insecure_channel(f'localhost:{tunnel.port}',
                                              options=grpc_options)
             except socket.error as e:
-                logger.warning(
+                logger.debug(
                     'Failed to connect to SSH tunnel for cluster '
                     f'{self.cluster_name!r} on port {tunnel.port} ({e}), '
                     'acquiring lock')
@@ -2852,7 +2854,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                         return grpc.insecure_channel(f'localhost:{tunnel.port}',
                                                      options=grpc_options)
                 except socket.error as e:
-                    logger.warning(
+                    logger.debug(
                         'Failed to connect to SSH tunnel for cluster '
                         f'{self.cluster_name!r} on port {tunnel.port} ({e}), '
                         'opening new tunnel')
@@ -3718,7 +3720,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
                 self._update_after_cluster_provisioned(
                     handle, to_provision_config.prev_handle, task,
-                    prev_cluster_status, lock_id, config_hash)
+                    prev_cluster_status, config_hash)
                 return handle, False
 
             cluster_config_file = config_dict['ray']
@@ -3790,7 +3792,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             self._update_after_cluster_provisioned(
                 handle, to_provision_config.prev_handle, task,
-                prev_cluster_status, lock_id, config_hash)
+                prev_cluster_status, config_hash)
             return handle, False
 
     def _open_ports(self, handle: CloudVmRayResourceHandle) -> None:
@@ -3808,7 +3810,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             prev_handle: Optional[CloudVmRayResourceHandle],
             task: task_lib.Task,
             prev_cluster_status: Optional[status_lib.ClusterStatus],
-            lock_id: str, config_hash: str) -> None:
+            config_hash: str) -> None:
         usage_lib.messages.usage.update_cluster_resources(
             handle.launched_nodes, handle.launched_resources)
         usage_lib.messages.usage.update_final_cluster_status(
@@ -3919,8 +3921,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 handle.cluster_name, handle.cached_external_ips, auth_config,
                 handle.cached_external_ssh_ports, handle.docker_user,
                 handle.ssh_user)
-
-            locks.get_lock(lock_id).force_unlock()
 
     def _sync_workdir(self, handle: CloudVmRayResourceHandle,
                       workdir: Union[Path, Dict[str, Any]],
