@@ -10,8 +10,7 @@ import sqlite3
 import threading
 import time
 import typing
-from typing import (Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple,
-                    Union)
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
 import urllib.parse
 
 import colorama
@@ -315,41 +314,42 @@ async def _describe_task_transition_failure(session: sql_async.AsyncSession,
 # by joining the spot and job_info tables.
 def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
     return {
-        '_job_id': r['job_id'],  # from spot table
-        '_task_name': r['job_name'],  # deprecated, from spot table
-        'resources': r['resources'],
-        'submitted_at': r['submitted_at'],
-        'status': r['status'],
-        'run_timestamp': r['run_timestamp'],
-        'start_at': r['start_at'],
-        'end_at': r['end_at'],
-        'last_recovered_at': r['last_recovered_at'],
-        'recovery_count': r['recovery_count'],
-        'job_duration': r['job_duration'],
-        'failure_reason': r['failure_reason'],
-        'job_id': r[spot_table.c.spot_job_id],  # ambiguous, use table.column
-        'task_id': r['task_id'],
-        'task_name': r['task_name'],
-        'specs': r['specs'],
-        'local_log_file': r['local_log_file'],
-        'metadata': r['metadata'],
+        '_job_id': r.get('job_id'),  # from spot table
+        '_task_name': r.get('job_name'),  # deprecated, from spot table
+        'resources': r.get('resources'),
+        'submitted_at': r.get('submitted_at'),
+        'status': r.get('status'),
+        'run_timestamp': r.get('run_timestamp'),
+        'start_at': r.get('start_at'),
+        'end_at': r.get('end_at'),
+        'last_recovered_at': r.get('last_recovered_at'),
+        'recovery_count': r.get('recovery_count'),
+        'job_duration': r.get('job_duration'),
+        'failure_reason': r.get('failure_reason'),
+        'job_id': r.get(spot_table.c.spot_job_id
+                       ),  # ambiguous, use table.column
+        'task_id': r.get('task_id'),
+        'task_name': r.get('task_name'),
+        'specs': r.get('specs'),
+        'local_log_file': r.get('local_log_file'),
+        'metadata': r.get('metadata'),
         # columns from job_info table (some may be None for legacy jobs)
-        '_job_info_job_id': r[job_info_table.c.spot_job_id
-                             ],  # ambiguous, use table.column
-        'job_name': r['name'],  # from job_info table
-        'schedule_state': r['schedule_state'],
-        'controller_pid': r['controller_pid'],
-        'dag_yaml_path': r['dag_yaml_path'],
-        'env_file_path': r['env_file_path'],
-        'user_hash': r['user_hash'],
-        'workspace': r['workspace'],
-        'priority': r['priority'],
-        'entrypoint': r['entrypoint'],
-        'original_user_yaml_path': r['original_user_yaml_path'],
-        'pool': r['pool'],
-        'current_cluster_name': r['current_cluster_name'],
-        'job_id_on_pool_cluster': r['job_id_on_pool_cluster'],
-        'pool_hash': r['pool_hash'],
+        '_job_info_job_id': r.get(job_info_table.c.spot_job_id
+                                 ),  # ambiguous, use table.column
+        'job_name': r.get('name'),  # from job_info table
+        'schedule_state': r.get('schedule_state'),
+        'controller_pid': r.get('controller_pid'),
+        'dag_yaml_path': r.get('dag_yaml_path'),
+        'env_file_path': r.get('env_file_path'),
+        'user_hash': r.get('user_hash'),
+        'workspace': r.get('workspace'),
+        'priority': r.get('priority'),
+        'entrypoint': r.get('entrypoint'),
+        'original_user_yaml_path': r.get('original_user_yaml_path'),
+        'pool': r.get('pool'),
+        'current_cluster_name': r.get('current_cluster_name'),
+        'job_id_on_pool_cluster': r.get('job_id_on_pool_cluster'),
+        'pool_hash': r.get('pool_hash'),
     }
 
 
@@ -1200,6 +1200,277 @@ def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
     return jobs
 
 
+def _map_response_field_to_db_column(field: str):
+    """Map the response field name to an actual SQLAlchemy ColumnElement.
+
+    This ensures we never pass plain strings to SQLAlchemy 2.0 APIs like
+    Select.with_only_columns().
+    """
+    # Explicit aliases differing from actual DB column names
+    alias_mapping = {
+        '_job_id': spot_table.c.job_id,  # spot.job_id (PK of task row)
+        '_task_name': spot_table.c.job_name,  # deprecated alias for task name
+        'job_id': spot_table.c.spot_job_id,  # public/job id -> spot.spot_job_id
+        '_job_info_job_id': job_info_table.c.spot_job_id,
+        'job_name': job_info_table.c.name,  # public/job name -> job_info.name
+    }
+    if field in alias_mapping:
+        return alias_mapping[field]
+
+    # Try direct match on the `spot` table columns
+    if field in spot_table.c:
+        return spot_table.c[field]
+
+    # Try direct match on the `job_info` table columns
+    if field in job_info_table.c:
+        return job_info_table.c[field]
+
+    # Fallback: create a generic column expression (best-effort)
+    # This avoids passing raw strings to SQLAlchemy.
+    return sqlalchemy.column(field)
+
+
+@_init_db
+def get_managed_jobs_total() -> int:
+    """Get the total number of managed jobs."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        result = session.execute(
+            sqlalchemy.select(sqlalchemy.func.count()  # pylint: disable=not-callable
+                             ).select_from(spot_table)).fetchone()
+        return result[0] if result else 0
+
+
+@_init_db
+def get_managed_jobs_highest_priority() -> int:
+    """Get the highest priority of the managed jobs."""
+    assert _SQLALCHEMY_ENGINE is not None
+    query = sqlalchemy.select(sqlalchemy.func.max(
+        job_info_table.c.priority)).where(
+            sqlalchemy.and_(
+                job_info_table.c.schedule_state.in_([
+                    ManagedJobScheduleState.LAUNCHING.value,
+                    ManagedJobScheduleState.ALIVE_BACKOFF.value,
+                    ManagedJobScheduleState.WAITING.value,
+                    ManagedJobScheduleState.ALIVE_WAITING.value,
+                ]),
+                job_info_table.c.priority.is_not(None),
+            ))
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        priority = session.execute(query).fetchone()
+        return priority[0] if priority else constants.MIN_PRIORITY
+
+
+def build_managed_jobs_with_filters_no_status_query(
+    fields: Optional[List[str]] = None,
+    job_ids: Optional[List[int]] = None,
+    accessible_workspaces: Optional[List[str]] = None,
+    workspace_match: Optional[str] = None,
+    name_match: Optional[str] = None,
+    pool_match: Optional[str] = None,
+    user_hashes: Optional[List[Optional[str]]] = None,
+    skip_finished: bool = False,
+    count_only: bool = False,
+    status_count: bool = False,
+) -> sqlalchemy.Select:
+    """Build a query to get managed jobs from the database with filters."""
+    # Join spot and job_info tables to get the job name for each task.
+    # We use LEFT OUTER JOIN mainly for backward compatibility, as for an
+    # existing controller before #1982, the job_info table may not exist,
+    # and all the managed jobs created before will not present in the
+    # job_info.
+    # Note: we will get the user_hash here, but don't try to call
+    # global_user_state.get_user() on it. This runs on the controller, which may
+    # not have the user info. Prefer to do it on the API server side.
+    query = sqlalchemy.select(spot_table, job_info_table)
+    if count_only:
+        query = sqlalchemy.select(sqlalchemy.func.count().label('count'))  # pylint: disable=not-callable
+    elif status_count:
+        query = sqlalchemy.select(spot_table.c.status,
+                                  sqlalchemy.func.count().label('count'))  # pylint: disable=not-callable
+    query = query.select_from(
+        spot_table.outerjoin(
+            job_info_table,
+            spot_table.c.spot_job_id == job_info_table.c.spot_job_id))
+    if skip_finished:
+        # Filter out finished jobs at the DB level. If a multi-task job is
+        # partially finished, include all its tasks. We do this by first
+        # selecting job_ids that have at least one non-terminal task, then
+        # restricting the main query to those job_ids.
+        terminal_status_values = [
+            s.value for s in ManagedJobStatus.terminal_statuses()
+        ]
+        non_terminal_job_ids_subquery = (sqlalchemy.select(
+            spot_table.c.spot_job_id).where(
+                sqlalchemy.or_(
+                    spot_table.c.status.is_(None),
+                    sqlalchemy.not_(
+                        spot_table.c.status.in_(terminal_status_values)),
+                )).distinct())
+        query = query.where(
+            spot_table.c.spot_job_id.in_(non_terminal_job_ids_subquery))
+    if not count_only and not status_count and fields:
+        # Resolve requested field names to explicit ColumnElements from
+        # the joined tables.
+        selected_columns = [_map_response_field_to_db_column(f) for f in fields]
+        query = query.with_only_columns(*selected_columns)
+    if job_ids is not None:
+        query = query.where(spot_table.c.spot_job_id.in_(job_ids))
+    if accessible_workspaces is not None:
+        query = query.where(
+            job_info_table.c.workspace.in_(accessible_workspaces))
+    if workspace_match is not None:
+        query = query.where(
+            job_info_table.c.workspace.like(f'%{workspace_match}%'))
+    if name_match is not None:
+        query = query.where(job_info_table.c.name.like(f'%{name_match}%'))
+    if pool_match is not None:
+        query = query.where(job_info_table.c.pool.like(f'%{pool_match}%'))
+    if user_hashes is not None:
+        query = query.where(job_info_table.c.user_hash.in_(user_hashes))
+    return query
+
+
+def build_managed_jobs_with_filters_query(
+    fields: Optional[List[str]] = None,
+    job_ids: Optional[List[int]] = None,
+    accessible_workspaces: Optional[List[str]] = None,
+    workspace_match: Optional[str] = None,
+    name_match: Optional[str] = None,
+    pool_match: Optional[str] = None,
+    user_hashes: Optional[List[Optional[str]]] = None,
+    statuses: Optional[List[str]] = None,
+    skip_finished: bool = False,
+    count_only: bool = False,
+) -> sqlalchemy.Select:
+    """Build a query to get managed jobs from the database with filters."""
+    query = build_managed_jobs_with_filters_no_status_query(
+        fields=fields,
+        job_ids=job_ids,
+        accessible_workspaces=accessible_workspaces,
+        workspace_match=workspace_match,
+        name_match=name_match,
+        pool_match=pool_match,
+        user_hashes=user_hashes,
+        skip_finished=skip_finished,
+        count_only=count_only,
+    )
+    if statuses is not None:
+        query = query.where(spot_table.c.status.in_(statuses))
+    return query
+
+
+@_init_db
+def get_status_count_with_filters(
+    fields: Optional[List[str]] = None,
+    job_ids: Optional[List[int]] = None,
+    accessible_workspaces: Optional[List[str]] = None,
+    workspace_match: Optional[str] = None,
+    name_match: Optional[str] = None,
+    pool_match: Optional[str] = None,
+    user_hashes: Optional[List[Optional[str]]] = None,
+    skip_finished: bool = False,
+) -> Dict[str, int]:
+    """Get the status count of the managed jobs with filters."""
+    query = build_managed_jobs_with_filters_no_status_query(
+        fields=fields,
+        job_ids=job_ids,
+        accessible_workspaces=accessible_workspaces,
+        workspace_match=workspace_match,
+        name_match=name_match,
+        pool_match=pool_match,
+        user_hashes=user_hashes,
+        skip_finished=skip_finished,
+        status_count=True,
+    )
+    query = query.group_by(spot_table.c.status)
+    results: Dict[str, int] = {}
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.execute(query).fetchall()
+        for status_value, count in rows:
+            # status_value is already a string (enum value)
+            results[str(status_value)] = int(count)
+    return results
+
+
+@_init_db
+def get_managed_jobs_with_filters(
+    fields: Optional[List[str]] = None,
+    job_ids: Optional[List[int]] = None,
+    accessible_workspaces: Optional[List[str]] = None,
+    workspace_match: Optional[str] = None,
+    name_match: Optional[str] = None,
+    pool_match: Optional[str] = None,
+    user_hashes: Optional[List[Optional[str]]] = None,
+    statuses: Optional[List[str]] = None,
+    skip_finished: bool = False,
+    page: Optional[int] = None,
+    limit: Optional[int] = None,
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Get managed jobs from the database with filters."""
+    assert _SQLALCHEMY_ENGINE is not None
+
+    count_query = build_managed_jobs_with_filters_query(
+        fields=None,
+        job_ids=job_ids,
+        accessible_workspaces=accessible_workspaces,
+        workspace_match=workspace_match,
+        name_match=name_match,
+        pool_match=pool_match,
+        user_hashes=user_hashes,
+        statuses=statuses,
+        skip_finished=skip_finished,
+        count_only=True,
+    )
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        total = session.execute(count_query).fetchone()[0]
+
+    query = build_managed_jobs_with_filters_query(
+        fields=fields,
+        job_ids=job_ids,
+        accessible_workspaces=accessible_workspaces,
+        workspace_match=workspace_match,
+        name_match=name_match,
+        pool_match=pool_match,
+        user_hashes=user_hashes,
+        statuses=statuses,
+        skip_finished=skip_finished,
+    )
+    query = query.order_by(spot_table.c.spot_job_id.desc(),
+                           spot_table.c.task_id.asc())
+    if page is not None and limit is not None:
+        query = query.offset((page - 1) * limit).limit(limit)
+    rows = None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.execute(query).fetchall()
+    jobs = []
+    for row in rows:
+        job_dict = _get_jobs_dict(row._mapping)  # pylint: disable=protected-access
+        job_dict['status'] = ManagedJobStatus(job_dict['status'])
+        if job_dict.get('schedule_state') is not None:
+            job_dict['schedule_state'] = ManagedJobScheduleState(
+                job_dict['schedule_state'])
+        if job_dict.get('job_name') is None:
+            job_dict['job_name'] = job_dict.get('task_name')
+        if job_dict.get('metadata') is not None:
+            job_dict['metadata'] = json.loads(job_dict['metadata'])
+
+        # Add user YAML content for managed jobs.
+        yaml_path = job_dict.get('original_user_yaml_path')
+        if (not fields or 'user_yaml' in fields) and yaml_path:
+            try:
+                with open(yaml_path, 'r', encoding='utf-8') as f:
+                    job_dict['user_yaml'] = f.read()
+            except (FileNotFoundError, IOError, OSError):
+                job_dict['user_yaml'] = None
+        else:
+            job_dict['user_yaml'] = None
+
+        jobs.append(job_dict)
+    return jobs, total
+
+
 @_init_db
 def get_task_name(job_id: int, task_id: int) -> str:
     """Get the task name of a job."""
@@ -1276,25 +1547,6 @@ def get_pool_from_job_id(job_id: int) -> Optional[str]:
             sqlalchemy.select(job_info_table.c.pool).where(
                 job_info_table.c.spot_job_id == job_id)).fetchone()
         return pool[0] if pool else None
-
-
-@_init_db
-def get_pool_and_submit_info_from_job_ids(
-    job_ids: Set[int]
-) -> Dict[int, Tuple[Optional[str], Optional[str], Optional[int]]]:
-    """Get the pool, cluster name, and job id on pool from job id"""
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.execute(
-            sqlalchemy.select(
-                job_info_table.c.spot_job_id, job_info_table.c.pool,
-                job_info_table.c.current_cluster_name,
-                job_info_table.c.job_id_on_pool_cluster).where(
-                    job_info_table.c.spot_job_id.in_(job_ids))).fetchall()
-        return {
-            job_id: (pool, cluster_name, job_id_on_pool_cluster)
-            for job_id, pool, cluster_name, job_id_on_pool_cluster in rows
-        }
 
 
 @_init_db

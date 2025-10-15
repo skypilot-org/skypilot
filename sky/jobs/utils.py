@@ -108,6 +108,19 @@ _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 120
 _JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE = (
     '~/.sky/.jobs_controller_consolidation_reloaded_signal')
 
+# The response fields for managed jobs that require cluster handle
+_CLUSTER_HANDLE_FIELDS = [
+    'cluster_resources',
+    'cluster_resources_full',
+    'cloud',
+    'region',
+    'zone',
+    'infra',
+    'accelerators',
+]
+# The response fields for managed jobs that are not stored in the database
+_NON_DB_FIELDS = _CLUSTER_HANDLE_FIELDS + ['user_yaml', 'user_name', 'details']
+
 
 class ManagedJobQueueResultType(enum.Enum):
     """The type of the managed job queue result."""
@@ -1321,6 +1334,54 @@ def dump_managed_job_queue(
                               limit, user_hashes, statuses, fields))
 
 
+def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
+    """Update the fields list to include the necessary fields."""
+    cluster_handle_required = True
+    if _cluster_handle_not_required(fields):
+        cluster_handle_required = False
+    # Copy the list to avoid modifying the original list
+    new_fields = fields.copy()
+    # Always include status and job_id
+    if 'status' not in new_fields:
+        new_fields.append('status')
+    if 'job_id' not in new_fields:
+        new_fields.append('job_id')
+    # Keep both fields
+    if 'user_name' in new_fields and 'user_hash' not in new_fields:
+        new_fields.append('user_hash')
+    if 'job_duration' in new_fields:
+        if 'last_recovered_at' not in new_fields:
+            new_fields.append('last_recovered_at')
+        if 'end_at' not in new_fields:
+            new_fields.append('end_at')
+    if 'job_name' in new_fields and 'task_name' not in new_fields:
+        new_fields.append('task_name')
+    if 'details' in new_fields:
+        if 'schedule_state' not in new_fields:
+            new_fields.append('schedule_state')
+        if 'priority' not in new_fields:
+            new_fields.append('priority')
+        if 'failure_reason' not in new_fields:
+            new_fields.append('failure_reason')
+    if ('user_yaml' in new_fields and
+            'original_user_yaml_path' not in new_fields):
+        new_fields.append('original_user_yaml_path')
+    if cluster_handle_required:
+        if 'task_name' not in new_fields:
+            new_fields.append('task_name')
+        if 'current_cluster_name' not in new_fields:
+            new_fields.append('current_cluster_name')
+    # Remove _NON_DB_FIELDS
+    for field in _NON_DB_FIELDS:
+        if field in new_fields:
+            new_fields.remove(field)
+    return new_fields, cluster_handle_required
+
+
+def _cluster_handle_not_required(fields: List[str]) -> bool:
+    return not any(field in fields for field in _CLUSTER_HANDLE_FIELDS)
+
+
 def get_managed_job_queue(
     skip_finished: bool = False,
     accessible_workspaces: Optional[List[str]] = None,
@@ -1336,155 +1397,128 @@ def get_managed_job_queue(
 ) -> Dict[str, Any]:
     # Make sure to get all jobs - some logic below (e.g. high priority job
     # detection) requires a full view of the jobs table.
-    jobs = managed_job_state.get_managed_jobs()
-
-    # Figure out what the highest priority blocking job is. We need to know in
-    # order to determine if other jobs are blocked by a higher priority job, or
-    # just by the limited controller resources.
-    highest_blocking_priority = constants.MIN_PRIORITY
-    for job in jobs:
-        if job['schedule_state'] not in (
-                # LAUNCHING and ALIVE_BACKOFF jobs will block other jobs with
-                # lower priority.
-                managed_job_state.ManagedJobScheduleState.LAUNCHING,
-                managed_job_state.ManagedJobScheduleState.ALIVE_BACKOFF,
-                # It's possible for a WAITING/ALIVE_WAITING job to be ready to
-                # launch, but the scheduler just hasn't run yet.
-                managed_job_state.ManagedJobScheduleState.WAITING,
-                managed_job_state.ManagedJobScheduleState.ALIVE_WAITING):
-            # This job will not block others.
-            continue
-
-        priority = job.get('priority')
-        if priority is not None and priority > highest_blocking_priority:
-            highest_blocking_priority = priority
-
-    total_no_filter = len(jobs)
-
-    if user_hashes:
-        jobs = [
-            job for job in jobs if job.get('user_hash', None) in user_hashes
-        ]
-    if accessible_workspaces:
-        jobs = [
-            job for job in jobs
-            if job.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE) in
-            accessible_workspaces
-        ]
-    if skip_finished:
-        # Filter out the finished jobs. If a multi-task job is partially
-        # finished, we will include all its tasks.
-        non_finished_tasks = list(
-            filter(
-                lambda job: not managed_job_state.ManagedJobStatus(job[
-                    'status']).is_terminal(), jobs))
-        non_finished_job_ids = {job['job_id'] for job in non_finished_tasks}
-        jobs = list(
-            filter(lambda job: job['job_id'] in non_finished_job_ids, jobs))
-    if job_ids:
-        jobs = [job for job in jobs if job['job_id'] in job_ids]
-
-    jobs, total, status_counts = filter_jobs(jobs,
-                                             workspace_match,
-                                             name_match,
-                                             pool_match,
-                                             page,
-                                             limit,
-                                             statuses=statuses)
-
-    job_ids = set(job['job_id'] for job in jobs)
-    job_id_to_pool_info = (
-        managed_job_state.get_pool_and_submit_info_from_job_ids(job_ids))
-    cluster_names: Dict[int, str] = {}
-    for job in jobs:
-        # pool info is (pool, cluster_name, job_id_on_pool_cluster)
-        pool_info = job_id_to_pool_info.get(job['job_id'], None)
-        if pool_info and pool_info[0]:
-            cluster_name = pool_info[1]
-        else:
-            cluster_name = generate_managed_job_cluster_name(
-                job['task_name'], job['job_id'])
-        cluster_names[job['job_id']] = cluster_name
-    cluster_name_to_handles = global_user_state.get_handles_from_cluster_names(
-        set(cluster_names.values()))
-
-    for job in jobs:
-        end_at = job['end_at']
-        if end_at is None:
-            end_at = time.time()
-
-        job_submitted_at = job['last_recovered_at'] - job['job_duration']
-        if job['status'] == managed_job_state.ManagedJobStatus.RECOVERING:
-            # When job is recovering, the duration is exact job['job_duration']
-            job_duration = job['job_duration']
-        elif job_submitted_at > 0:
-            job_duration = end_at - job_submitted_at
-        else:
-            # When job_start_at <= 0, that means the last_recovered_at is not
-            # set yet, i.e. the job is not started.
-            job_duration = 0
-        job['job_duration'] = job_duration
-        job['status'] = job['status'].value
-        job['schedule_state'] = job['schedule_state'].value
-
-        cluster_name = cluster_names[job['job_id']]
-        handle = cluster_name_to_handles.get(cluster_name, None)
-        if isinstance(handle, backends.CloudVmRayResourceHandle):
-            resources_str = resources_utils.get_readable_resources_repr(
-                handle, simplify=True)
-            resources_str_full = resources_utils.get_readable_resources_repr(
-                handle, simplify=False)
-            job['cluster_resources'] = resources_str
-            job['cluster_resources_full'] = resources_str_full
-            job['cloud'] = str(handle.launched_resources.cloud)
-            job['region'] = handle.launched_resources.region
-            job['zone'] = handle.launched_resources.zone
-            job['infra'] = infra_utils.InfraInfo(
-                str(handle.launched_resources.cloud),
-                handle.launched_resources.region,
-                handle.launched_resources.zone).formatted_str()
-            job['accelerators'] = handle.launched_resources.accelerators
-        else:
-            # FIXME(zongheng): display the last cached values for these.
-            job['cluster_resources'] = '-'
-            job['cluster_resources_full'] = '-'
-            job['cloud'] = '-'
-            job['region'] = '-'
-            job['zone'] = '-'
-            job['infra'] = '-'
-
-        # Add details about schedule state / backoff.
-        state_details = None
-        if job['schedule_state'] == 'ALIVE_BACKOFF':
-            state_details = 'In backoff, waiting for resources'
-        elif job['schedule_state'] in ('WAITING', 'ALIVE_WAITING'):
-            priority = job.get('priority')
-            if (priority is not None and priority < highest_blocking_priority):
-                # Job is lower priority than some other blocking job.
-                state_details = 'Waiting for higher priority jobs to launch'
-            else:
-                state_details = 'Waiting for other jobs to launch'
-
-        if state_details and job['failure_reason']:
-            job['details'] = f'{state_details} - {job["failure_reason"]}'
-        elif state_details:
-            job['details'] = state_details
-        elif job['failure_reason']:
-            job['details'] = f'Failure: {job["failure_reason"]}'
-        else:
-            job['details'] = None
-
-    # Filter fields
+    cluster_handle_required = True
+    updated_fields = None
     if fields:
-        new_jobs = []
-        for job in jobs:
-            new_job = {}
-            for field in fields:
-                if field not in job:
-                    continue
-                new_job[field] = job[field]
-            new_jobs.append(new_job)
-        jobs = new_jobs
+        updated_fields, cluster_handle_required = _update_fields(fields)
+
+    total_no_filter = managed_job_state.get_managed_jobs_total()
+
+    status_counts = managed_job_state.get_status_count_with_filters(
+        fields=fields,
+        job_ids=job_ids,
+        accessible_workspaces=accessible_workspaces,
+        workspace_match=workspace_match,
+        name_match=name_match,
+        pool_match=pool_match,
+        user_hashes=user_hashes,
+        skip_finished=skip_finished,
+    )
+
+    jobs, total = managed_job_state.get_managed_jobs_with_filters(
+        fields=updated_fields,
+        job_ids=job_ids,
+        accessible_workspaces=accessible_workspaces,
+        workspace_match=workspace_match,
+        name_match=name_match,
+        pool_match=pool_match,
+        user_hashes=user_hashes,
+        statuses=statuses,
+        skip_finished=skip_finished,
+        page=page,
+        limit=limit,
+    )
+
+    if cluster_handle_required:
+        cluster_name_to_handle = (
+            global_user_state.get_cluster_name_to_handle_map())
+
+    highest_blocking_priority = constants.MIN_PRIORITY
+    if not fields or 'details' in fields:
+        # Figure out what the highest priority blocking job is. We need to know
+        # in order to determine if other jobs are blocked by a higher priority
+        # job, or just by the limited controller resources.
+        highest_blocking_priority = (
+            managed_job_state.get_managed_jobs_highest_priority())
+
+    for job in jobs:
+        if not fields or 'job_duration' in fields:
+            end_at = job['end_at']
+            if end_at is None:
+                end_at = time.time()
+
+            job_submitted_at = job['last_recovered_at'] - job['job_duration']
+            if job['status'] == managed_job_state.ManagedJobStatus.RECOVERING:
+                # When job is recovering, the duration is exact
+                # job['job_duration']
+                job_duration = job['job_duration']
+            elif job_submitted_at > 0:
+                job_duration = end_at - job_submitted_at
+            else:
+                # When job_start_at <= 0, that means the last_recovered_at
+                # is not set yet, i.e. the job is not started.
+                job_duration = 0
+            job['job_duration'] = job_duration
+        job['status'] = job['status'].value
+        if not fields or 'schedule_state' in fields:
+            job['schedule_state'] = job['schedule_state'].value
+        else:
+            job['schedule_state'] = None
+
+        if cluster_handle_required:
+            cluster_name = job.get('current_cluster_name', None)
+            if cluster_name is None:
+                cluster_name = generate_managed_job_cluster_name(
+                    job['task_name'], job['job_id'])
+            handle = cluster_name_to_handle.get(
+                cluster_name, None) if cluster_name is not None else None
+            if isinstance(handle, backends.CloudVmRayResourceHandle):
+                resources_str = resources_utils.get_readable_resources_repr(
+                    handle, simplify=True)
+                resources_str_full = (
+                    resources_utils.get_readable_resources_repr(handle,
+                                                                simplify=False))
+                job['cluster_resources'] = resources_str
+                job['cluster_resources_full'] = resources_str_full
+                job['cloud'] = str(handle.launched_resources.cloud)
+                job['region'] = handle.launched_resources.region
+                job['zone'] = handle.launched_resources.zone
+                job['infra'] = infra_utils.InfraInfo(
+                    str(handle.launched_resources.cloud),
+                    handle.launched_resources.region,
+                    handle.launched_resources.zone).formatted_str()
+                job['accelerators'] = handle.launched_resources.accelerators
+            else:
+                # FIXME(zongheng): display the last cached values for these.
+                job['cluster_resources'] = '-'
+                job['cluster_resources_full'] = '-'
+                job['cloud'] = '-'
+                job['region'] = '-'
+                job['zone'] = '-'
+                job['infra'] = '-'
+
+        if not fields or 'details' in fields:
+            # Add details about schedule state / backoff.
+            state_details = None
+            if job['schedule_state'] == 'ALIVE_BACKOFF':
+                state_details = 'In backoff, waiting for resources'
+            elif job['schedule_state'] in ('WAITING', 'ALIVE_WAITING'):
+                priority = job.get('priority')
+                if (priority is not None and
+                        priority < highest_blocking_priority):
+                    # Job is lower priority than some other blocking job.
+                    state_details = 'Waiting for higher priority jobs to launch'
+                else:
+                    state_details = 'Waiting for other jobs to launch'
+
+            if state_details and job['failure_reason']:
+                job['details'] = f'{state_details} - {job["failure_reason"]}'
+            elif state_details:
+                job['details'] = state_details
+            elif job['failure_reason']:
+                job['details'] = f'Failure: {job["failure_reason"]}'
+            else:
+                job['details'] = None
 
     return {
         'jobs': jobs,
@@ -1595,21 +1629,15 @@ def load_managed_job_queue(
         total_no_filter = total
         result_type = ManagedJobQueueResultType.LIST
 
-    job_id_to_user_hash: Dict[int, str] = {}
+    all_users = global_user_state.get_all_users()
+    all_users_map = {user.id: user.name for user in all_users}
     for job in jobs:
+        job['status'] = managed_job_state.ManagedJobStatus(job['status'])
         if 'user_hash' in job and job['user_hash'] is not None:
             # Skip jobs that do not have user_hash info.
             # TODO(cooperc): Remove check before 0.12.0.
-            job_id_to_user_hash[job['job_id']] = job['user_hash']
-    user_hash_to_user = global_user_state.get_users(
-        job_id_to_user_hash.values())
-
-    for job in jobs:
-        job['status'] = managed_job_state.ManagedJobStatus(job['status'])
-        if job['job_id'] in job_id_to_user_hash:
-            user_hash = job_id_to_user_hash[job['job_id']]
-            user = user_hash_to_user.get(user_hash, None)
-            job['user_name'] = user.name if user is not None else None
+            user_name = all_users_map.get(job['user_hash'], None)
+            job['user_name'] = user_name if user_name is not None else None
     return jobs, total, result_type, total_no_filter, status_counts
 
 
