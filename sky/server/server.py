@@ -17,6 +17,7 @@ import resource
 import shutil
 import sys
 import threading
+import traceback
 from typing import Dict, List, Literal, Optional, Set, Tuple
 import uuid
 import zipfile
@@ -670,8 +671,10 @@ def handle_concurrent_worker_exhausted_error(
         request: fastapi.Request, e: exceptions.ConcurrentWorkerExhaustedError):
     del request  # request is not used
     # Print detailed error message to server log
+    logger.error('Concurrent worker exhausted: '
+                 f'{common_utils.format_exception(e)}')
     with ux_utils.enable_traceback():
-        logger.error(f'Concurrent worker exhausted: {e}')
+        logger.error(f'  Traceback: {traceback.format_exc()}')
     # Return human readable error message to client
     return fastapi.responses.JSONResponse(
         status_code=503,
