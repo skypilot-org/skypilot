@@ -25,6 +25,7 @@ logger = sky_logging.init_logger(__name__)
 _BUFFER_SIZE = 8 * 1024  # 8KB
 _BUFFER_TIMEOUT = 0.02  # 20ms
 _HEARTBEAT_INTERVAL = 30
+_READ_CHUNK_SIZE = 256 * 1024  # 256KB chunks for file reading
 
 LONG_REQUEST_POLL_INTERVAL = 1
 DEFAULT_POLL_INTERVAL = 0.1
@@ -159,7 +160,6 @@ async def _tail_log_file(
     last_flush_time = asyncio.get_event_loop().time()
 
     # Read file in chunks instead of line-by-line for better performance
-    read_chunk_size = 256 * 1024  # 256KB chunks for file reading
     incomplete_line = b''  # Buffer for incomplete lines across chunks
 
     async def flush_buffer() -> AsyncGenerator[str, None]:
@@ -183,7 +183,7 @@ async def _tail_log_file(
                 yield chunk
 
         # Read file in chunks for better I/O performance
-        file_chunk: bytes = await f.read(read_chunk_size)
+        file_chunk: bytes = await f.read(_READ_CHUNK_SIZE)
         if not file_chunk:
             # Process any remaining incomplete line
             if incomplete_line:
