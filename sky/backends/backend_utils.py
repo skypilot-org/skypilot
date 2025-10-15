@@ -3363,8 +3363,10 @@ def get_clusters(
     cluster_names_with_launch_request = {
         request.cluster_name for request in requests
     }
+    # Preserve the index of the cluster name as it appears on "records"
     cluster_names_without_launch_request = [
-        cluster_name for cluster_name in cluster_names
+        (i, cluster_name)
+        for i, cluster_name in enumerate(cluster_names)
         if cluster_name not in cluster_names_with_launch_request
     ]
     # for clusters that have an active launch request, we do not refresh the status
@@ -3372,19 +3374,24 @@ def get_clusters(
     if len(cluster_names_without_launch_request) > 0:
         with progress:
             updated_records = subprocess_utils.run_in_parallel(
-                _refresh_cluster_record, cluster_names_without_launch_request)
-    updated_records_dict = {
-        record['cluster_hash']: record for record in updated_records
-    }
+                _refresh_cluster_record, [
+                    cluster_name
+                    for _, cluster_name in cluster_names_without_launch_request
+                ])
+        # Preserve the index of the cluster name as it appears on "records"
+        updated_records_dict = {
+            cluster_names_without_launch_request[i][0]: updated_records[i]
+            for i in range(len(cluster_names_without_launch_request))
+        }
     # Show information for removed clusters.
     kept_records = []
     autodown_clusters, remaining_clusters, failed_clusters = [], [], []
-    for record in records:
-        if record['cluster_hash'] not in updated_records_dict:
+    for i, record in enumerate(records):
+        if i not in updated_records_dict:
             # record was not refreshed, keep the original record
             kept_records.append(record)
             continue
-        updated_record = updated_records_dict[record['cluster_hash']]
+        updated_record = updated_records_dict[i]
         if updated_record is None:
             if record['to_down']:
                 autodown_clusters.append(record['name'])
