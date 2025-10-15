@@ -229,6 +229,10 @@ async def test_execute_with_isolated_env_and_config(isolated_database,
             initializer=_subprocess_initializer,
             initargs=(db_path, log_path_prefix, mock_skypilot_config))
 
+    # Capture main process state before spawning any workers to verify no leakage.
+    env_before = dict(os.environ)
+    config_before = skypilot_config.to_dict()
+
     async def spawn_request(request_id: str, env_a: str, env_b: str):
         """Spawn a request with env and config overrides."""
         expected_labels = {
@@ -266,7 +270,8 @@ async def test_execute_with_isolated_env_and_config(isolated_database,
             # Submit to shared executor like production code
             fut = proc_executor.submit_until_success(
                 executor._request_execution_wrapper, request_id, False)
-            await asyncio.to_thread(fut.result)
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, fut.result)
 
         completed_request = requests_lib.get_request(request_id)
         assert completed_request is not None
@@ -292,6 +297,21 @@ async def test_execute_with_isolated_env_and_config(isolated_database,
     try:
         results = await asyncio.gather(*tasks)
         assert len(results) == 5
+
+        # Verify main process state is unchanged.
+        env_after = dict(os.environ)
+        config_after = skypilot_config.to_dict()
+
+        assert env_after == env_before, (
+            "Environment leaked into main process! "
+            f"Added: {set(env_after.keys()) - set(env_before.keys())}, "
+            f"Removed: {set(env_before.keys()) - set(env_after.keys())}, "
+            f"Changed: {[k for k in env_before if env_before.get(k) != env_after.get(k)]}"
+        )
+
+        assert config_after == config_before, (
+            "Config leaked into main process! "
+            f"Before: {config_before}, After: {config_after}")
     finally:
         # Shutdown the executor if we created one
         if proc_executor is not None:
