@@ -239,22 +239,24 @@ async def test_execute_with_isolated_env_and_config(isolated_database,
             'key': 'value',  # From mock_skypilot_config
             'request_id': request_id,  # From override_skypilot_config
         }
-        request_body = TestIsolationBody(env_vars={
-            'TEST_VAR_A': env_a,
-            'TEST_VAR_B': env_b,
-            constants.USER_ID_ENV_VAR: f'user-{request_id}',
-            constants.USER_ENV_VAR: f'user-{request_id}',
-        },
-                                         override_skypilot_config={
-                                             'aws': {
-                                                 'labels': {
-                                                     'request_id': request_id,
-                                                 }
-                                             }
-                                         },
-                                         expected_env_a=env_a,
-                                         expected_env_b=env_b,
-                                         expected_labels=expected_labels)
+        request_body = TestIsolationBody(
+            env_vars={
+                'TEST_VAR_A': env_a,
+                'TEST_VAR_B': env_b,
+                constants.USER_ID_ENV_VAR: f'user-{request_id}',
+                constants.USER_ENV_VAR: f'user-{request_id}',
+            },
+            override_skypilot_config={
+                'aws': {
+                    'labels': {
+                        'request_id': request_id,
+                    }
+                }
+            },
+            # Expected values to assert from inside the worker's context.
+            expected_env_a=env_a,
+            expected_env_b=env_b,
+            expected_labels=expected_labels)
 
         request = executor.prepare_request(
             request_id=request_id,
