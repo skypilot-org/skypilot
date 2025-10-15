@@ -1955,9 +1955,13 @@ async def scheduler_set_done_async(job_id: int,
 
 
 @_init_db
-def set_job_info(job_id: int, name: str, workspace: str, entrypoint: str,
-                 pool: Optional[str], pool_hash: Optional[str],
-                 user_hash: Optional[str]):
+def set_job_info(job_id: int,
+                 name: str,
+                 workspace: str,
+                 entrypoint: str,
+                 pool: Optional[str],
+                 pool_hash: Optional[str],
+                 user_hash: Optional[str] = None):
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
