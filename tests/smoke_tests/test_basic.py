@@ -100,12 +100,15 @@ def test_minimal(generic_cloud: str):
 
 
 def test_launch_refresh(generic_cloud: str):
-    name = smoke_tests_utils.get_cluster_name()
+    name1 = smoke_tests_utils.get_cluster_name()
+    name2 = name1 + '-2'
     test = smoke_tests_utils.Test(
         'launch_refresh',
         [
-            # Launch the cluster asynchronously.
-            f'SKYPILOT_DEBUG=0 sky launch -y --async -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            # Launch one cluster.
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name1} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # Launch another cluster asynchronously.
+            f'SKYPILOT_DEBUG=0 sky launch -y --async -c {name2} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
             # Refresh the cluster while the cluster is launching.
             'sky status --refresh',
             'sky status --refresh',
@@ -116,7 +119,7 @@ def test_launch_refresh(generic_cloud: str):
             'sky status --refresh',
             'sky status --refresh',
         ],
-        f'sky down -y {name}',
+        f'sky down -y {name1} {name2}',
         smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)
