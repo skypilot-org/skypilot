@@ -1365,14 +1365,14 @@ async def download(download_body: payloads.DownloadBody,
 # TODO(aylei): run it asynchronously after global_user_state support async op
 @app.post('/provision_logs')
 def provision_logs(cluster_body: payloads.ClusterNameBody,
-                   worker: int = -1,
+                   worker: Optional[int] = None,
                    follow: bool = True,
                    tail: int = 0) -> fastapi.responses.StreamingResponse:
     """Streams the provision.log for the latest launch request of a cluster."""
     log_path = None
     log_dir = None
     # stream head node logs
-    if worker == -1:
+    if worker is None:
         # Prefer clusters table first, then cluster_history as fallback.
         log_path_str = global_user_state.get_cluster_provision_log_path(
             cluster_body.cluster_name)

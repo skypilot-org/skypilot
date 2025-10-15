@@ -2153,7 +2153,7 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
               help='Stream the cluster provisioning logs (provision.log).')
 @click.option('--worker',
               '-w',
-              default=-1,
+              default=None,
               type=int,
               help='The worker ID to stream the logs from. '
               'If -1, stream the logs of the head node.')
@@ -2194,7 +2194,7 @@ def logs(
     cluster: str,
     job_ids: Tuple[str, ...],
     provision: bool,
-    worker: int,
+    worker: Optional[int],
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
     follow: bool,
@@ -2224,7 +2224,7 @@ def logs(
     4. If the job fails or fetching the logs fails, the command will exit with
     a non-zero return code.
     """
-    if worker != -1:
+    if worker is not None:
         remote_api_version = versions.get_remote_api_version()
         if remote_api_version is not None and remote_api_version < 21:
             logger.warning(
@@ -2233,7 +2233,7 @@ def logs(
         if not provision:
             raise click.UsageError(
                 '--worker can only be used with --provision.')
-        if worker < -1 or worker == 0:
+        if worker < 1:
             raise click.UsageError('--worker must be a positive integer.')
 
     if provision and (sync_down or status or job_ids):
