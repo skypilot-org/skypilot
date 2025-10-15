@@ -579,7 +579,7 @@ def _execute_with_config_override(func: Callable,
                                   request_body: payloads.RequestBody,
                                   request_id: str, request_name: str,
                                   **kwargs) -> Any:
-    """Execute a function with proper config override inside a thread."""
+    """Execute a function with env and config override inside a thread."""
     # Override the environment and config within this thread's context,
     # which gets copied when we call to_thread.
     with override_request_env_and_config(request_body, request_id,
