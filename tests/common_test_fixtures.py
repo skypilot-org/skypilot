@@ -8,6 +8,7 @@ import unittest
 import uuid
 
 import boto3
+import click.testing
 import fastapi
 from fastapi import testclient
 import pandas as pd
@@ -169,18 +170,6 @@ def regions_with_offering_mock(*_, **__):
 
 def check_quota_available_mock(*_, **__):
     return True
-
-
-def mock_redirect_output(*_, **__):
-    return (None, None)
-
-
-def mock_restore_output(*_, **__):
-    return None
-
-
-def mock_get_current_output(*_, **__):
-    return (None, None)
 
 
 @pytest.fixture
@@ -439,12 +428,19 @@ def mock_execute_in_coroutine(monkeypatch):
 
 @pytest.fixture
 def mock_redirect_log_file(monkeypatch):
-    monkeypatch.setattr('sky.server.requests.executor._redirect_output',
-                        mock_redirect_output)
-    monkeypatch.setattr('sky.server.requests.executor._restore_output',
-                        mock_restore_output)
-    monkeypatch.setattr('sky.server.requests.executor._get_current_output',
-                        mock_get_current_output)
+    # Click's CliRunner replaces sys.stdout/stderr with _NamedTextIOWrapper objects
+    # that don't support fileno(). We patch these wrapper objects to add fileno() support.
+    original_init = click.testing._NamedTextIOWrapper.__init__
+
+    def patched_wrapper_init(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        if hasattr(self, 'name') and 'stdout' in str(self.name):
+            self.fileno = lambda: 1
+        else:
+            self.fileno = lambda: 2
+
+    monkeypatch.setattr(click.testing._NamedTextIOWrapper, '__init__',
+                        patched_wrapper_init)
 
 
 @pytest.fixture

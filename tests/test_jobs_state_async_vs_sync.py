@@ -1,4 +1,5 @@
 import asyncio
+import time
 from typing import Dict, List, Tuple
 
 import pytest
@@ -472,5 +473,60 @@ async def test_set_backoff_pending_async_no_matching_rows(_mock_jobs_db_conn):
 
     # Call set_backoff_pending_async - should raise ManagedJobStatusError
     with pytest.raises(state.exceptions.ManagedJobStatusError,
-                       match='Failed to set the task back to pending'):
+                       match='Failed to set the task back to pending') as exc:
         await state.set_backoff_pending_async(job_id, 0)
+
+    message = str(exc.value)
+    assert 'rows matched job' in message
+    assert 'Status: RUNNING' in message
+
+
+@pytest.mark.asyncio
+async def test_set_recovered_async_error_details(_seed_one_job: int):
+    """Transition failure surfaces detailed status information."""
+    job_id = _seed_one_job
+
+    async def noop_callback(_):
+        return None
+
+    with pytest.raises(state.exceptions.ManagedJobStatusError) as exc_info:
+        await state.set_recovered_async(job_id, 0, time.time(), noop_callback)
+
+    message = str(exc_info.value)
+    assert 'rows matched job' in message
+    assert 'Status: PENDING' in message
+
+
+@pytest.mark.asyncio
+async def test_transition_failures_surface_details_for_all_functions(
+        _seed_one_job: int):
+    """Every transition failure includes contextual task details."""
+    job_id = _seed_one_job
+    missing_task_id = 1
+
+    async def noop_callback(_):
+        return None
+
+    async def expect_failure(coro_factory):
+        with pytest.raises(state.exceptions.ManagedJobStatusError) as exc:
+            await coro_factory()
+        message = str(exc.value)
+        assert (f'0 rows matched job {job_id} and task {missing_task_id}'
+                in message)
+        return message
+
+    await expect_failure(
+        lambda: state.set_backoff_pending_async(job_id, missing_task_id))
+    await expect_failure(
+        lambda: state.set_restarting_async(job_id, missing_task_id, False))
+    await expect_failure(lambda: state.set_starting_async(
+        job_id, missing_task_id, 'run-id', time.time(), '{}', {}, noop_callback)
+                        )
+    await expect_failure(lambda: state.set_started_async(
+        job_id, missing_task_id, time.time(), noop_callback))
+    await expect_failure(lambda: state.set_recovering_async(
+        job_id, missing_task_id, False, noop_callback))
+    await expect_failure(lambda: state.set_recovered_async(
+        job_id, missing_task_id, time.time(), noop_callback))
+    await expect_failure(lambda: state.set_succeeded_async(
+        job_id, missing_task_id, time.time(), noop_callback))

@@ -48,8 +48,15 @@ SKY_APISERVER_CODE_DURATION_SECONDS = prom.Histogram(
     'sky_apiserver_code_duration_seconds',
     'Time spent processing code',
     ['name', 'group'],
-    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 30.0,
-             60.0, 120.0, float('inf')),
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.125, 0.15, 0.25,
+             0.35, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 2.75, 3, 3.5, 4, 4.5,
+             5, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0,
+             50.0, 55.0, 60.0, 80.0, 120.0, 140.0, 160.0, 180.0, 200.0, 220.0,
+             240.0, 260.0, 280.0, 300.0, 320.0, 340.0, 360.0, 380.0, 400.0,
+             420.0, 440.0, 460.0, 480.0, 500.0, 520.0, 540.0, 560.0, 580.0,
+             600.0, 620.0, 640.0, 660.0, 680.0, 700.0, 720.0, 740.0, 760.0,
+             780.0, 800.0, 820.0, 840.0, 860.0, 880.0, 900.0, 920.0, 940.0,
+             960.0, 980.0, 1000.0, float('inf')),
 )
 
 # Total number of API server requests, grouped by path, method, and status.
@@ -65,16 +72,30 @@ SKY_APISERVER_REQUEST_DURATION_SECONDS = prom.Histogram(
     'sky_apiserver_request_duration_seconds',
     'Time spent processing API server requests',
     ['path', 'method', 'status'],
-    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 30.0,
-             60.0, 120.0, float('inf')),
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.125, 0.15, 0.25,
+             0.35, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 2.75, 3, 3.5, 4, 4.5,
+             5, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0,
+             50.0, 55.0, 60.0, 80.0, 120.0, 140.0, 160.0, 180.0, 200.0, 220.0,
+             240.0, 260.0, 280.0, 300.0, 320.0, 340.0, 360.0, 380.0, 400.0,
+             420.0, 440.0, 460.0, 480.0, 500.0, 520.0, 540.0, 560.0, 580.0,
+             600.0, 620.0, 640.0, 660.0, 680.0, 700.0, 720.0, 740.0, 760.0,
+             780.0, 800.0, 820.0, 840.0, 860.0, 880.0, 900.0, 920.0, 940.0,
+             960.0, 980.0, 1000.0, float('inf')),
 )
 
 SKY_APISERVER_EVENT_LOOP_LAG_SECONDS = prom.Histogram(
     'sky_apiserver_event_loop_lag_seconds',
     'Scheduling delay of the server event loop',
     ['pid'],
-    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 20.0,
-             60.0, float('inf')),
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.125, 0.15, 0.25,
+             0.35, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 2.75, 3, 3.5, 4, 4.5,
+             5, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0,
+             50.0, 55.0, 60.0, 80.0, 120.0, 140.0, 160.0, 180.0, 200.0, 220.0,
+             240.0, 260.0, 280.0, 300.0, 320.0, 340.0, 360.0, 380.0, 400.0,
+             420.0, 440.0, 460.0, 480.0, 500.0, 520.0, 540.0, 560.0, 580.0,
+             600.0, 620.0, 640.0, 660.0, 680.0, 700.0, 720.0, 740.0, 760.0,
+             780.0, 800.0, 820.0, 840.0, 860.0, 880.0, 900.0, 920.0, 940.0,
+             960.0, 980.0, 1000.0, float('inf')),
 )
 
 SKY_APISERVER_WEBSOCKET_CONNECTIONS = prom.Gauge(
@@ -195,6 +216,8 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
     port_forward_process = None
     port_forward_exit = False
     local_port = None
+    poller = None
+    fd = None
 
     try:
         # start the port forward process
@@ -204,8 +227,13 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
                                                 text=True,
                                                 env=env)
 
-        start_time = time.time()
+        # Use poll() instead of select() to avoid FD_SETSIZE limit
+        poller = select.poll()
+        assert port_forward_process.stdout is not None
+        fd = port_forward_process.stdout.fileno()
+        poller.register(fd, select.POLLIN)
 
+        start_time = time.time()
         buffer = ''
         # wait for the port forward to start and extract the local port
         while time.time() - start_time < start_port_forward_timeout:
@@ -215,22 +243,19 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
                     port_forward_exit = True
                 break
 
-            # read output line by line to find the local port
-            if port_forward_process.stdout:
-                # Wait up to 1s for data to be available without blocking
-                r, _, _ = select.select([port_forward_process.stdout], [], [],
-                                        _SELECT_TIMEOUT)
-                if r:
-                    # Read available bytes from the FD without blocking
-                    fd = port_forward_process.stdout.fileno()
-                    raw = os.read(fd, _SELECT_BUFFER_SIZE)
-                    chunk = raw.decode(errors='ignore')
-                    buffer += chunk
-                    match = re.search(r'Forwarding from 127\.0\.0\.1:(\d+)',
-                                      buffer)
-                    if match:
-                        local_port = int(match.group(1))
-                        break
+            # Wait up to 1000ms for data to be available without blocking
+            # poll() takes timeout in milliseconds
+            events = poller.poll(_SELECT_TIMEOUT * 1000)
+
+            if events:
+                # Read available bytes from the FD without blocking
+                raw = os.read(fd, _SELECT_BUFFER_SIZE)
+                chunk = raw.decode(errors='ignore')
+                buffer += chunk
+                match = re.search(r'Forwarding from 127\.0\.0\.1:(\d+)', buffer)
+                if match:
+                    local_port = int(match.group(1))
+                    break
 
             # sleep for 100ms to avoid busy-waiting
             time.sleep(0.1)
@@ -239,6 +264,13 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
             stop_svc_port_forward(port_forward_process,
                                   timeout=terminate_port_forward_timeout)
         raise
+    finally:
+        if poller is not None and fd is not None:
+            try:
+                poller.unregister(fd)
+            except (OSError, ValueError):
+                # FD may already be unregistered or invalid
+                pass
     if port_forward_exit:
         raise RuntimeError(f'Port forward failed for service {service} in '
                            f'namespace {namespace} on context {context}')
