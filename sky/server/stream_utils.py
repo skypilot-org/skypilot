@@ -75,11 +75,7 @@ async def log_streamer(
                 status_code=404, detail=f'Request {request_id} not found')
         request_id = request_task.request_id
 
-        # Do not show the waiting spinner if the request is a fast, non-blocking
-        # request.
-        show_request_waiting_spinner = (not plain_logs and
-                                        request_task.schedule_type
-                                        == requests_lib.ScheduleType.LONG)
+        show_request_waiting_spinner = not plain_logs
 
         if show_request_waiting_spinner:
             yield status_msg.init()
