@@ -25,7 +25,7 @@ sky logs skyrl
 ```
 
 <p align="center">
-  <img src="https://imgur.com/a/adw1CfG" alt="SkyPilot logs" width="90%"/>
+  <img src="https://imgur.com/a/adw1CfG.png" alt="SkyPilot logs" width="90%"/>
 </p>
 <p align="center"><i>Logs of the training jobs</i></p>
 
@@ -36,14 +36,14 @@ sky dashboard
 ```
 
 <p align="center">
-  <img src="https://imgur.com/a/qU4GkJP" alt="SkyPilot Dashboard" width="90%"/>
+  <img src="https://imgur.com/a/qU4GkJP.png" alt="SkyPilot Dashboard" width="90%"/>
 </p>
 <p align="center"><i>Dashboard showing the status of the training job</i></p>
 
 If Weights & Biases (W&B) is configured, you can monitor the training run:
 
 <p align="center">
-  <img src="https://imgur.com/a/Dvp8Sh4" alt="W&B training metrics" width="90%"/>
+  <img src="https://imgur.com/a/Dvp8Sh4.png" alt="W&B training metrics" width="90%"/>
   
 </p>
 
