@@ -615,6 +615,7 @@ def test_tail_jobs_logs_blocks_ssh(generic_cloud: str):
 # TODO(aylei): this assumption does not hold when running this test locally, should figure
 # a better way to isolate this test.
 @pytest.mark.no_remote_server
+@pytest.mark.no_dependency  # We can't restart the api server in the dependency test.
 def test_high_logs_concurrency_not_blocking_operations(generic_cloud: str,
                                                        tmp_path: pathlib.Path):
     """Test that high logs concurrency does not block other operations."""
