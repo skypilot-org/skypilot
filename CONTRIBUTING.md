@@ -290,6 +290,7 @@ However, when the value of the new field is taken from user input (e.g. CLI flag
 from sky.server import versions
 
 @click.option('--newflag', default=None)
+# Must have this or the version will be None!
 @server_common.check_server_healthy_or_start
 def cli_entry_point(newflag: Optional[str] = None):
     # The new flag is set but the server does not support the new field yet
