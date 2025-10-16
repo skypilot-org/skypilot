@@ -23,6 +23,12 @@ from sky.utils import common_utils
 # TODO(luca): The future is now! ^^^
 LONG_WORKER_MEM_GB = 0.4
 SHORT_WORKER_MEM_GB = 0.3
+# Memory overhead for auxiliary server applications
+# These apps run in separate processes for better resource isolation
+K8S_SSH_PROXY_APP_MEM_GB = 0.1  # Kubernetes SSH proxy WebSocket app
+REVERSE_PROXY_APP_MEM_GB = 0.05  # Reverse proxy routing app
+# Total overhead for auxiliary apps
+AUXILIARY_APPS_MEM_GB = K8S_SSH_PROXY_APP_MEM_GB + REVERSE_PROXY_APP_MEM_GB
 # To control the number of long workers.
 _CPU_MULTIPLIER_FOR_LONG_WORKERS = 2
 # Limit the number of long workers of local API server, since local server is
@@ -207,7 +213,8 @@ def _max_long_worker_parallism(cpu_count: int,
     max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
                   if job_utils.is_consolidation_mode() else
                   server_constants.MIN_AVAIL_MEM_GB)
-    available_mem = max(0, mem_size_gb - max_memory)
+    # Account for memory used by auxiliary apps (reverse proxy, k8s ssh proxy)
+    available_mem = max(0, mem_size_gb - max_memory - AUXILIARY_APPS_MEM_GB)
     cpu_based_max_parallel = cpu_count * _CPU_MULTIPLIER_FOR_LONG_WORKERS
     mem_based_max_parallel = int(available_mem * _MAX_MEM_PERCENT_FOR_BLOCKING /
                                  LONG_WORKER_MEM_GB)
