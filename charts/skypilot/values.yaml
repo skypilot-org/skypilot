@@ -123,9 +123,11 @@ apiService:
     requests:
       cpu: "4"
       memory: "8Gi"
+      ephemeral-storage: "10Gi"
     limits:
       cpu: "4"
       memory: "8Gi"
+      ephemeral-storage: "10Gi"
 
   # Extra environment variables to set before starting the API server. Example:
   # extraEnvs:
