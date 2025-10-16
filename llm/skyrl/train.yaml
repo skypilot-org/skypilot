@@ -1,37 +1,14 @@
-# Multi-node distributed training with Verl (Volcano Engine Reinforcement Learning) framework.
-#
-# Verl is a flexible and efficient reinforcement learning framework designed for
-# training large language models with RLHF (Reinforcement Learning from Human Feedback).
-# This example demonstrates multi-node training using PPO on the GSM8K dataset.
-#
-# Prerequisites:
-#   - GPU nodes with at least 40GB memory (e.g., A100)
-#   - Access to Hugging Face models (Qwen/Qwen2.5-0.5B-Instruct in this example)
-#
-# Usage:
-#   # Launch a 2-node training cluster:
-#   $ sky launch -c verl-cluster examples/verl/multinode.yaml
-#
-#   # Monitor the Ray dashboard (optional):
-#   $ sky status --endpoint 8280 verl-cluster
-#
-#   # Stream logs:
-#   $ sky logs verl-cluster
-#
-#   # Cleanup:
-#   $ sky down verl-cluster
-
 # Run this from the repository root after cloning SkyRL.
 resources:
-  infra: aws           # replace this with what cloud you want to launch on
+  infra: aws # replace this with what cloud you want to launch on
   accelerators: L40S:4 # 4x 48 GB GPUs; adjust to the SKU that matches your quota
-  memory: 64+          # every node has at least 64 GB memory
-  ports: 6479          # expose port for ray dashboard
+  memory: 64+ # every node has at least 64 GB memory
+  ports: 6479 # expose port for ray dashboard
 #  network_tier: best # when using multiple nodes, communication can become a bottleneck
 
-num_nodes: 1         # cluster size
+num_nodes: 2 # cluster size
 
-# Set to a git repository 
+# Set to a git repository
 workdir:
   url: https://github.com/NovaSky-AI/SkyRL.git
   ref: main
@@ -41,10 +18,10 @@ secrets:
   WANDB_API_KEY: null
 
 envs:
-  LOGGER: "wandb"  # change to "console" to print to stdout
+  LOGGER: "wandb" # change to "console" to print to stdout
   INFERENCE_BACKEND: "vllm"
   # INFERENCE_BACKEND: "sglang"
-
+  NUM_EPOCHS: 20
 
 # Commands run on each node of the remote cluster to set up the environment (e.g., install dependencies). These are run directly inside Docker.
 setup: |
@@ -94,6 +71,12 @@ run: |
       ray start --head --disable-usage-stats --port 6479
     fi
     wait_for_ray 127.0.0.1:6479
+    # Ensure rollout GPUs match policy GPUs when colocating all models.
+    # With colocate_all=true, we must have:
+    #   policy_num_gpus_per_node * policy_num_nodes ==
+    #   num_inference_engines * inference_engine_tensor_parallel_size * inference_engine_data_parallel_size
+    # Given TP=1 and DP=1, set num_inference_engines to total policy GPUs across the cluster.
+    TOTAL_POLICY_GPUS=$((SKYPILOT_NUM_GPUS_PER_NODE * SKYPILOT_NUM_NODES))
     uv run --isolated --extra "$INFERENCE_BACKEND" -m skyrl_train.entrypoints.main_base \
       data.train_data="['${DATA_DIR}/train.parquet']" \
       data.val_data="['${DATA_DIR}/validation.parquet']" \
@@ -105,17 +88,17 @@ run: |
       trainer.placement.ref_num_gpus_per_node="$SKYPILOT_NUM_GPUS_PER_NODE" \
       trainer.placement.ref_num_nodes="$SKYPILOT_NUM_NODES" \
       trainer.placement.policy_num_nodes="$SKYPILOT_NUM_NODES" \
-      generator.num_inference_engines="$SKYPILOT_NUM_GPUS_PER_NODE" \
+      generator.num_inference_engines="$TOTAL_POLICY_GPUS" \
       generator.inference_engine_tensor_parallel_size=1 \
-      trainer.epochs=20 \
+      trainer.epochs=${NUM_EPOCHS} \
       trainer.eval_batch_size=1024 \
       trainer.eval_before_train=true \
       trainer.eval_interval=5 \
       trainer.update_epochs_per_batch=1 \
       trainer.train_batch_size=1024 \
       trainer.policy_mini_batch_size=256 \
-      trainer.micro_forward_batch_size_per_gpu=64 \
-      trainer.micro_train_batch_size_per_gpu=64 \
+      trainer.micro_forward_batch_size_per_gpu=40 \
+      trainer.micro_train_batch_size_per_gpu=40 \
       trainer.ckpt_interval=10 \
       trainer.max_prompt_length=512 \
       generator.sampling_params.max_generate_length=1024 \
