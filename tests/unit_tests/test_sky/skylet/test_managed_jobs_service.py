@@ -315,7 +315,7 @@ class TestGetJobTable:
         assert not target_job.HasField('details')
         assert not target_job.HasField('failure_reason')
         assert not target_job.HasField('user_name')
-        assert not target_job.HasField('user_hash')
+        assert target_job.user_hash == 'abcd1234'
         assert not target_job.HasField('submitted_at')
         assert not target_job.HasField('start_at')
         assert not target_job.HasField('end_at')
