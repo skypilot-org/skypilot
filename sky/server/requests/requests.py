@@ -400,7 +400,8 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
         for request_task in get_request_tasks(req_filter=RequestTaskFilter(
             cluster_names=[cluster_name],
             status=[RequestStatus.PENDING, RequestStatus.RUNNING],
-            exclude_request_names=[exclude_request_name]))
+            exclude_request_names=[exclude_request_name],
+            sort=False))
     ]
     kill_requests(request_ids)
 
@@ -425,7 +426,8 @@ def kill_requests(request_ids: Optional[List[str]] = None,
                 user_id=user_id,
                 status=[RequestStatus.RUNNING, RequestStatus.PENDING],
                 # Avoid cancelling the cancel request itself.
-                exclude_request_names=['sky.api_cancel']))
+                exclude_request_names=['sky.api_cancel'],
+                sort=False))
         ]
     cancelled_request_ids = []
     for request_id in request_ids:
@@ -733,6 +735,7 @@ class RequestTaskFilter:
     finished_before: Optional[float] = None
     limit: Optional[int] = None
     fields: Optional[List[str]] = None
+    sort: bool = True
 
     def __post_init__(self):
         if (self.exclude_request_names is not None and
@@ -777,8 +780,11 @@ class RequestTaskFilter:
         columns_str = ', '.join(REQUEST_COLUMNS)
         if self.fields:
             columns_str = ', '.join(self.fields)
-        query_str = (f'SELECT {columns_str} FROM {REQUEST_TABLE}{filter_str} '
-                     'ORDER BY created_at DESC')
+        sort_str = ''
+        if self.sort:
+            sort_str = ' ORDER BY created_at DESC'
+        query_str = (f'SELECT {columns_str} FROM {REQUEST_TABLE}{filter_str}'
+                     f'{sort_str}')
         if self.limit is not None:
             query_str += f' LIMIT {self.limit}'
         return query_str, filter_params
@@ -921,7 +927,8 @@ async def clean_finished_requests_with_retention(retention_seconds: int):
     reqs = await get_request_tasks_async(
         req_filter=RequestTaskFilter(status=RequestStatus.finished_status(),
                                      finished_before=time.time() -
-                                     retention_seconds))
+                                     retention_seconds,
+                                     sort=False))
 
     futs = []
     for req in reqs:
