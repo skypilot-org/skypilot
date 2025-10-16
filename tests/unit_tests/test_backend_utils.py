@@ -176,8 +176,9 @@ def test_get_clusters_launch_refresh(monkeypatch):
     # and other is not.
     # https://github.com/skypilot-org/skypilot/pull/7624
 
-    def _mock_cluster(launch):
+    def _mock_cluster(launch, postfix=''):
         cluster_name = 'launch-cluster' if launch else 'up-cluster'
+        cluster_name += postfix
         handle = mock.MagicMock()
         handle.cluster_name_on_cloud = f'{cluster_name}-cloud'
         handle.launched_nodes = 1
@@ -207,7 +208,7 @@ def test_get_clusters_launch_refresh(monkeypatch):
         }
 
     def get_clusters_mock(*args, **kwargs):
-        return [_mock_cluster(False), _mock_cluster(True)]
+        return [_mock_cluster(False), _mock_cluster(True), _mock_cluster(True, 'None')]
 
     def get_readable_resources_repr(handle, simplify):
         return ''
@@ -219,8 +220,10 @@ def test_get_clusters_launch_refresh(monkeypatch):
                         summary_response):
         if cluster_name == 'up-cluster':
             return _mock_cluster(False)
-        else:
+        elif cluster_name == 'launch-cluster':
             return _mock_cluster(True)
+        else:
+            return None
 
     def get_request_tasks(*args, **kwargs):
         magic_mock = mock.MagicMock()
