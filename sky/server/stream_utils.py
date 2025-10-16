@@ -32,6 +32,10 @@ _SHORT_REQUEST_SPINNER_TIMEOUT = 2
 # in INIT state, we use this timeout to break the loop and stop streaming
 # provision logs.
 _PROVISION_LOG_TIMEOUT = 3
+# Maximum time to wait for new log files to appear when streaming worker node
+# provision logs. Worker logs are created sequentially during the provisioning
+# process, so we need to wait for new files to appear.
+_MAX_WAIT_FOR_NEW_LOG_FILES = 3  # seconds
 
 LONG_REQUEST_POLL_INTERVAL = 1
 DEFAULT_POLL_INTERVAL = 0.1
@@ -146,22 +150,49 @@ async def log_streamer(
             yield status_msg.stop()
 
     if log_path is not None and log_path.is_dir():
-        # get all *.log files in the log_path
-        log_files = sorted(
-            log_path.glob('*.log'))  # Sort for consistent ordering
-        if len(log_files) == 0:
-            raise fastapi.HTTPException(
-                status_code=404, detail=f'No log files found in {log_path}')
-        for log_path in log_files:
-            # Add header before each file (similar to tail -f behavior)
-            header = f'\n==> {log_path} <==\n\n'
-            yield header
+        # Track which log files we've already streamed
+        streamed_files = set()
+        no_new_files_count = 0
 
-            async with aiofiles.open(log_path, 'rb') as f:
-                async for chunk in _tail_log_file(f, request_id, plain_logs,
-                                                  tail, follow, cluster_name,
-                                                  polling_interval):
-                    yield chunk
+        while True:
+            # Get all *.log files in the log_path
+            log_files = sorted(log_path.glob('*.log'))
+
+            # Filter out already streamed files
+            new_files = [f for f in log_files if f not in streamed_files]
+
+            if len(new_files) == 0:
+                if not follow:
+                    break
+                # Wait a bit to see if new files appear
+                await asyncio.sleep(0.5)
+                no_new_files_count += 1
+                # Check if we've waited too long for new files
+                if no_new_files_count > _MAX_WAIT_FOR_NEW_LOG_FILES * 2:
+                    break
+                continue
+
+            # Reset the no-new-files counter when we find new files
+            no_new_files_count = 0
+
+            for log_file_path in new_files:
+                # Add header before each file (similar to tail -f behavior)
+                header = f'\n==> {log_file_path} <==\n\n'
+                yield header
+
+                async with aiofiles.open(log_file_path, 'rb') as f:
+                    async for chunk in _tail_log_file(f, request_id, plain_logs,
+                                                      tail, follow,
+                                                      cluster_name,
+                                                      polling_interval):
+                        yield chunk
+
+                # Mark this file as streamed
+                streamed_files.add(log_file_path)
+
+            # If not following, break after streaming all current files
+            if not follow:
+                break
     else:
         assert log_path is not None, (request_id, log_path)
         async with aiofiles.open(log_path, 'rb') as f:
