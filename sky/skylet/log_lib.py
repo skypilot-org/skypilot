@@ -6,7 +6,6 @@ import collections
 import copy
 import functools
 import io
-import multiprocessing.pool
 import os
 import queue as queue_lib
 import shlex
@@ -28,6 +27,7 @@ from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import log_utils
 from sky.utils import subprocess_utils
+from sky.utils import thread_utils
 from sky.utils import ux_utils
 
 SKY_LOG_WAITING_GAP_SECONDS = 1
@@ -142,14 +142,14 @@ def process_subprocess_stream(proc, stdout_stream_handler,
         # different thread.
         # selectors is possible to handle the multiplexing of stdout/stderr,
         # but it introduces buffering making the output not streaming.
-        with multiprocessing.pool.ThreadPool(processes=1) as pool:
-            stderr_fut = pool.apply_async(stderr_stream_handler,
-                                          args=(proc.stderr, sys.stderr))
-            # Do not launch a thread for stdout as the rich.status does not
-            # work in a thread, which is used in
-            # log_utils.RayUpLineProcessor.
-            stdout = stdout_stream_handler(proc.stdout, sys.stdout)
-            stderr = stderr_fut.get()
+        stderr_fut = thread_utils.ThreadWithResult(target=stderr_stream_handler,
+                                                   args=(proc.stderr,
+                                                         sys.stderr))
+        # Do not launch a thread for stdout as the rich.status does not
+        # work in a thread, which is used in
+        # log_utils.RayUpLineProcessor.
+        stdout = stdout_stream_handler(proc.stdout, sys.stdout)
+        stderr = stderr_fut.get()
     else:
         stdout = stdout_stream_handler(proc.stdout, sys.stdout)
         stderr = ''

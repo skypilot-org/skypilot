@@ -4,7 +4,6 @@ import concurrent.futures
 import contextvars
 import functools
 import io
-import multiprocessing
 import os
 import subprocess
 import sys
@@ -16,6 +15,7 @@ from typing_extensions import ParamSpec
 from sky import sky_logging
 from sky.utils import context
 from sky.utils import subprocess_utils
+from sky.utils import thread_utils
 
 StreamHandler = Callable[[IO[Any], IO[Any]], str]
 
@@ -84,33 +84,38 @@ def pipe_and_wait_process(
     if stderr_stream_handler is None:
         stderr_stream_handler = passthrough_stream_handler
 
-    # Threads are lazily created, so no harm if stderr is None
-    with multiprocessing.pool.ThreadPool(processes=2) as pool:
-        # Context will be lost in the new thread, capture current output stream
-        # and pass it to the new thread directly.
-        stdout_fut = pool.apply_async(
-            stdout_stream_handler, (proc.stdout, ctx.output_stream(sys.stdout)))
-        stderr_fut = None
-        if proc.stderr is not None:
-            stderr_fut = pool.apply_async(
-                stderr_stream_handler,
-                (proc.stderr, ctx.output_stream(sys.stderr)))
-        try:
-            wait_process(ctx,
-                         proc,
-                         poll_interval=poll_interval,
-                         cancel_callback=cancel_callback)
-        finally:
-            # Wait for the stream handler threads to exit when process is done
-            # or cancelled
-            stdout_fut.wait()
-            if stderr_fut is not None:
-                stderr_fut.wait()
-        stdout = stdout_fut.get()
-        stderr = ''
+    # Use ThreadWithResult instead of multiprocessing.pool.ThreadPool to
+    # avoid creating semaphores in /dev/shm that can leak when processes
+    # are killed. See https://github.com/skypilot-org/skypilot/issues/XXXX
+    # Context will be lost in the new thread, capture current output stream
+    # and pass it to the new thread directly.
+    stdout_fut = thread_utils.ThreadWithResult(
+        target=stdout_stream_handler,
+        args=(proc.stdout, ctx.output_stream(sys.stdout)))
+    stderr_fut = None
+    if proc.stderr is not None:
+        stderr_fut = thread_utils.ThreadWithResult(
+            target=stderr_stream_handler,
+            args=(proc.stderr, ctx.output_stream(sys.stderr)))
+
+    try:
+        wait_process(ctx,
+                     proc,
+                     poll_interval=poll_interval,
+                     cancel_callback=cancel_callback)
+    finally:
+        # Wait for the stream handler threads to exit when process is done
+        # or cancelled
+        stdout_fut.wait()
         if stderr_fut is not None:
-            stderr = stderr_fut.get()
-        return stdout, stderr
+            stderr_fut.wait()
+
+    stdout = stdout_fut.get()
+    stderr = ''
+    if stderr_fut is not None:
+        stderr = stderr_fut.get()
+
+    return stdout, stderr
 
 
 def wait_process(ctx: context.SkyPilotContext,
