@@ -88,9 +88,6 @@ install_requires = [
     'aiohttp',
     'aiosqlite',
     'anyio',
-    # we use this to get uuid7
-    # note: uuid7 support is added to stdlib in Python 3.14
-    'uuid-utils',
 ]
 
 # See requirements-dev.txt for the version of grpc and protobuf
