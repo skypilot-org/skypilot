@@ -2961,7 +2961,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     def instance_ids(self):
         if self.cached_cluster_info is not None:
             return self.cached_cluster_info.instance_ids()
-        return []
+        return None
 
     @property
     def ssh_user(self):

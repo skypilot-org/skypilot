@@ -1401,8 +1401,12 @@ def provision_logs(provision_logs_body: payloads.ProvisionLogsBody,
                 detail=('Cluster handle is not recorded for this cluster. '
                         'Please relaunch to generate provisioning logs.'))
         # instance_ids includes head node
-        logger.debug(f'Instance IDs: {handle.instance_ids}')
         instance_ids = handle.instance_ids
+        if instance_ids is None:
+            raise fastapi.HTTPException(
+                status_code=400,
+                detail='Instance IDs are not recorded for this cluster. '
+                'Please relaunch to generate provisioning logs.')
         if worker > len(instance_ids) - 1:
             raise fastapi.HTTPException(
                 status_code=400,

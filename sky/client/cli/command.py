@@ -2155,7 +2155,7 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
               default=None,
               type=int,
               help='The worker ID to stream the logs from. '
-              'If -1, stream the logs of the head node.')
+              'If not set, stream the logs of the head node.')
 @click.option(
     '--sync-down',
     '-s',

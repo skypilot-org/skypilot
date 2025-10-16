@@ -31,7 +31,7 @@ _SHORT_REQUEST_SPINNER_TIMEOUT = 2
 # If there is an issue during provisioning that causes the cluster to be stuck
 # in INIT state, we use this timeout to break the loop and stop streaming
 # provision logs.
-_PROVISION_LOG_TIMEOUT = 1
+_PROVISION_LOG_TIMEOUT = 3
 
 LONG_REQUEST_POLL_INTERVAL = 1
 DEFAULT_POLL_INTERVAL = 0.1
