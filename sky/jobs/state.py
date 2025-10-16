@@ -671,8 +671,7 @@ class ManagedJobScheduleState(enum.Enum):
 # === Status transition functions ===
 @_init_db
 def set_job_info_without_job_id(name: str, workspace: str, entrypoint: str,
-                                pool: Optional[str],
-                                pool_hash: Optional[str],
+                                pool: Optional[str], pool_hash: Optional[str],
                                 user_hash: Optional[str]) -> int:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
