@@ -429,7 +429,7 @@ def test_detect_gpu_label_formatter_ignores_empty_labels():
 
 
 # pylint: disable=line-too-long
-def test_heterogenous_gpu_detection_key_counts():
+def test_heterogenous_gpu_detection():
     """Tests that a heterogenous gpu cluster with empty
     labels are correctly processed."""
 
@@ -438,11 +438,11 @@ def test_heterogenous_gpu_detection_key_counts():
     mock_node1.metadata.labels = {
         'cloud.google.com/gke-accelerator': 'nvidia-h100-80gb',
         'gpu.nvidia.com/class': 'nvidia-h100-80gb',
-        'gpu.nvidia.com/count': '1',
+        'gpu.nvidia.com/count': '2',
         'gpu.nvidia.com/model': 'nvidia-h100-80gb',
         'gpu.nvidia.com/vram': '81'
     }
-    mock_node1.status.allocatable = {'nvidia.com/gpu': '1'}
+    mock_node1.status.allocatable = {'nvidia.com/gpu': '2'}
 
     mock_node2 = mock.MagicMock()
     mock_node2.metadata.name = 'node2'
@@ -478,6 +478,7 @@ def test_heterogenous_gpu_detection_key_counts():
         assert (set(counts.keys()) == set(capacity.keys()) == set(available.keys())), \
             (f'Keys of counts ({list(counts.keys())}), capacity ({list(capacity.keys())}), '
              f'and available ({list(available.keys())}) must be the same.')
+        assert available == {'H100': 1}
 
 
 def test_low_priority_pod_filtering():
