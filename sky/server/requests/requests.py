@@ -398,9 +398,9 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
     request_ids = [
         request_task.request_id
         for request_task in get_request_tasks(req_filter=RequestTaskFilter(
-            cluster_names=[cluster_name],
             status=[RequestStatus.PENDING, RequestStatus.RUNNING],
-            exclude_request_names=[exclude_request_name]))
+            exclude_request_names=[exclude_request_name],
+            cluster_names=[cluster_name]))
     ]
     kill_requests(request_ids)
 
@@ -422,10 +422,10 @@ def kill_requests(request_ids: Optional[List[str]] = None,
         request_ids = [
             request_task.request_id
             for request_task in get_request_tasks(req_filter=RequestTaskFilter(
-                user_id=user_id,
-                status=[RequestStatus.RUNNING, RequestStatus.PENDING],
+                status=[RequestStatus.PENDING, RequestStatus.RUNNING],
                 # Avoid cancelling the cancel request itself.
-                exclude_request_names=['sky.api_cancel']))
+                exclude_request_names=['sky.api_cancel'],
+                user_id=user_id))
         ]
     cancelled_request_ids = []
     for request_id in request_ids:
@@ -489,23 +489,6 @@ def create_table(cursor, conn):
         {COL_SHOULD_RETRY} INTEGER,
         {COL_FINISHED_AT} REAL
         )""")
-    # Add an index on created_at to speed up queries that sort on this column.
-    cursor.execute(f"""\
-        CREATE INDEX IF NOT EXISTS created_at_idx ON {REQUEST_TABLE} (created_at);
-    """)
-    # Add an index on cluster_name to speed up queries
-    # that filter on this column.
-    cursor.execute(f"""\
-        CREATE INDEX IF NOT EXISTS cluster_name_idx ON {REQUEST_TABLE} ({COL_CLUSTER_NAME});
-    """)
-    # Add an index on name to speed up queries that filter on this column.
-    cursor.execute(f"""\
-        CREATE INDEX IF NOT EXISTS name_idx ON {REQUEST_TABLE} (name);
-    """)
-    # Add an index on status to speed up queries that filter on this column.
-    cursor.execute(f"""\
-        CREATE INDEX IF NOT EXISTS status_idx ON {REQUEST_TABLE} (status);
-    """)
 
     db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_STATUS_MSG,
                                  'TEXT')
@@ -513,6 +496,20 @@ def create_table(cursor, conn):
                                  'INTEGER')
     db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_FINISHED_AT,
                                  'REAL')
+
+    # Add an index on status to speed up queries that filter on this column.
+    cursor.execute(f"""\
+        CREATE INDEX IF NOT EXISTS status_name_idx ON {REQUEST_TABLE} (status, name) WHERE status IN ('PENDING', 'RUNNING');
+    """)
+    # Add an index on cluster_name to speed up queries
+    # that filter on this column.
+    cursor.execute(f"""\
+        CREATE INDEX IF NOT EXISTS cluster_name_idx ON {REQUEST_TABLE} ({COL_CLUSTER_NAME}) WHERE status IN ('PENDING', 'RUNNING');
+    """)
+    # Add an index on created_at to speed up queries that sort on this column.
+    cursor.execute(f"""\
+        CREATE INDEX IF NOT EXISTS created_at_idx ON {REQUEST_TABLE} (created_at);
+    """)
 
 
 _DB = None
@@ -770,6 +767,10 @@ class RequestTaskFilter:
             status_list_str = ','.join(
                 repr(status.value) for status in self.status)
             filters.append(f'status IN ({status_list_str})')
+        if self.include_request_names is not None:
+            request_names_str = ','.join(
+                repr(name) for name in self.include_request_names)
+            filters.append(f'name IN ({request_names_str})')
         if self.exclude_request_names is not None:
             exclude_request_names_str = ','.join(
                 repr(name) for name in self.exclude_request_names)
@@ -781,10 +782,6 @@ class RequestTaskFilter:
         if self.user_id is not None:
             filters.append(f'{COL_USER_ID} = ?')
             filter_params.append(self.user_id)
-        if self.include_request_names is not None:
-            request_names_str = ','.join(
-                repr(name) for name in self.include_request_names)
-            filters.append(f'name IN ({request_names_str})')
         if self.finished_before is not None:
             filters.append('finished_at < ?')
             filter_params.append(self.finished_before)

@@ -162,8 +162,8 @@ class ClusterStartCompletePrecondition(Precondition):
         requests = await api_requests.get_request_tasks_async(
             req_filter=api_requests.RequestTaskFilter(
                 status=[
-                    api_requests.RequestStatus.RUNNING,
-                    api_requests.RequestStatus.PENDING
+                    api_requests.RequestStatus.PENDING,
+                    api_requests.RequestStatus.RUNNING
                 ],
                 include_request_names=['sky.launch', 'sky.start'],
                 cluster_names=[self.cluster_name]))
