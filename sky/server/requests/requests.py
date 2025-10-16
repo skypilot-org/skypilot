@@ -489,6 +489,10 @@ def create_table(cursor, conn):
         {COL_SHOULD_RETRY} INTEGER,
         {COL_FINISHED_AT} REAL
         )""")
+    # Add an index on created_at to speed up queries that sort on this column.
+    cursor.execute(f"""\
+        CREATE INDEX IF NOT EXISTS created_at_idx ON {REQUEST_TABLE} (created_at);
+    """)
 
     db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_STATUS_MSG,
                                  'TEXT')
