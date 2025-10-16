@@ -1282,12 +1282,13 @@ def build_managed_jobs_with_filters_no_status_query(
     # Note: we will get the user_hash here, but don't try to call
     # global_user_state.get_user() on it. This runs on the controller, which may
     # not have the user info. Prefer to do it on the API server side.
-    query = sqlalchemy.select(spot_table, job_info_table)
     if count_only:
         query = sqlalchemy.select(sqlalchemy.func.count().label('count'))  # pylint: disable=not-callable
     elif status_count:
         query = sqlalchemy.select(spot_table.c.status,
                                   sqlalchemy.func.count().label('count'))  # pylint: disable=not-callable
+    else:
+        query = sqlalchemy.select(spot_table, job_info_table)
     query = query.select_from(
         spot_table.outerjoin(
             job_info_table,
