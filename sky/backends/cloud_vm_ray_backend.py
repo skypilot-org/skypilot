@@ -4220,6 +4220,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         codegen: str,
         job_id: int,
         managed_job_dag: Optional['dag.Dag'] = None,
+        managed_job_user_id: Optional[str] = None,
         remote_log_dir: Optional[str] = None,
     ) -> None:
         """Executes generated code on the head node."""
@@ -4292,7 +4293,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         pool=managed_job_dag.pool,
                         workspace=workspace,
                         entrypoint=entrypoint,
-                        tasks=managed_job_tasks)
+                        tasks=managed_job_tasks,
+                        user_id=managed_job_user_id)
 
                 if _is_command_length_over_limit(codegen):
                     _dump_code_to_file(codegen)
@@ -4329,7 +4331,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         managed_job_dag,
                         skypilot_config.get_active_workspace(
                             force_user_workspace=True),
-                        entrypoint=common_utils.get_current_command())
+                        entrypoint=common_utils.get_current_command(),
+                        user_hash=managed_job_user_id)
                     # Set the managed job to PENDING state to make sure that
                     # this managed job appears in the `sky jobs queue`, even
                     # if it needs to wait to be submitted.
@@ -6274,6 +6277,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         env_vars.update(self._skypilot_predefined_env_vars(handle))
         return env_vars
 
+    def _get_managed_job_user_id(self, task: task_lib.Task) -> Optional[str]:
+        """Returns the user id for the managed job."""
+        if task.managed_job_dag is not None:
+            return task.envs[constants.USER_ID_ENV_VAR]
+        return None
+
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
                                task: task_lib.Task, job_id: int,
                                remote_log_dir: str) -> None:
@@ -6312,11 +6321,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         codegen.add_epilogue()
 
-        self._exec_code_on_head(handle,
-                                codegen.build(),
-                                job_id,
-                                managed_job_dag=task.managed_job_dag,
-                                remote_log_dir=remote_log_dir)
+        self._exec_code_on_head(
+            handle,
+            codegen.build(),
+            job_id,
+            managed_job_dag=task.managed_job_dag,
+            managed_job_user_id=self._get_managed_job_user_id(task),
+            remote_log_dir=remote_log_dir)
 
     def _execute_task_n_nodes(self, handle: CloudVmRayResourceHandle,
                               task: task_lib.Task, job_id: int,
@@ -6367,8 +6378,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         codegen.add_epilogue()
         # TODO(zhanghao): Add help info for downloading logs.
-        self._exec_code_on_head(handle,
-                                codegen.build(),
-                                job_id,
-                                managed_job_dag=task.managed_job_dag,
-                                remote_log_dir=remote_log_dir)
+        self._exec_code_on_head(
+            handle,
+            codegen.build(),
+            job_id,
+            managed_job_dag=task.managed_job_dag,
+            managed_job_user_id=self._get_managed_job_user_id(task),
+            remote_log_dir=remote_log_dir)
