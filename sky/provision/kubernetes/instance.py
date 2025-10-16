@@ -959,12 +959,19 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     def _create_resource_thread(i: int):
         pod_spec_copy = copy.deepcopy(pod_spec)
-        if head_pod_name is None and i == 0:
-            # First pod should be head if no head exists
-            pod_spec_copy['metadata']['labels'].update(constants.HEAD_NODE_TAGS)
-            head_selector = _head_service_selector(cluster_name_on_cloud)
-            pod_spec_copy['metadata']['labels'].update(head_selector)
-            pod_spec_copy['metadata']['name'] = f'{cluster_name_on_cloud}-head'
+        # 0 is for head pod, while 1+ is for worker pods.
+        if i == 0:
+            if head_pod_name is None:
+                # First pod should be head if no head exists
+                pod_spec_copy['metadata']['labels'].update(
+                    constants.HEAD_NODE_TAGS)
+                head_selector = _head_service_selector(cluster_name_on_cloud)
+                pod_spec_copy['metadata']['labels'].update(head_selector)
+                pod_spec_copy['metadata'][
+                    'name'] = f'{cluster_name_on_cloud}-head'
+            else:
+                # If head pod already exists, we skip creating it.
+                return
         else:
             # Worker pods
             pod_spec_copy['metadata']['labels'].update(
@@ -1105,9 +1112,16 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 'and then up the cluster again.')
             raise exceptions.InconsistentHighAvailabilityError(message)
 
-    # Create pods in parallel
-    created_resources = subprocess_utils.run_in_parallel(
-        _create_resource_thread, list(range(to_start_count)), _NUM_THREADS)
+    created_resources = []
+    if to_start_count > 0:
+        # Create pods in parallel.
+        # Use `config.count` instead of `to_start_count` to keep the index of
+        # the Pods consistent especially for the case where some Pods are down
+        # due to node failure or manual termination, etc. and then launch
+        # again to create the Pods back.
+        # The existing Pods will be skipped in _create_resource_thread.
+        created_resources = subprocess_utils.run_in_parallel(
+            _create_resource_thread, list(range(config.count)), _NUM_THREADS)
 
     if to_create_deployment:
         deployments = copy.deepcopy(created_resources)
@@ -1350,6 +1364,9 @@ def get_cluster_info(
                 external_ip=None,
                 ssh_port=port,
                 tags=pod.metadata.labels,
+                # TODO(hailong): `cluster.local` may need to be configurable
+                # Service name is same as the pod name for now.
+                internal_svc=f'{pod_name}.{namespace}.svc.cluster.local',
             )
         ]
         if _is_head(pod):
@@ -1388,6 +1405,13 @@ def get_cluster_info(
     logger.debug(
         f'Using ssh user {ssh_user} for cluster {cluster_name_on_cloud}')
 
+    # cpu_request may be a string like `100m`, need to parse and convert
+    num_cpus = kubernetes_utils.parse_cpu_or_gpu_resource_to_float(cpu_request)
+    # 'num-cpus' for ray must be an integer, but we should not set it to 0 if
+    # cpus is <1.
+    # Keep consistent with the logic in clouds/kubernetes.py
+    str_cpus = str(max(int(num_cpus), 1))
+
     return common.ClusterInfo(
         instances=pods,
         head_instance_id=head_pod_name,
@@ -1397,7 +1421,7 @@ def get_cluster_info(
         # problems for other pods.
         custom_ray_options={
             'object-store-memory': 500000000,
-            'num-cpus': cpu_request,
+            'num-cpus': str_cpus,
         },
         provider_name='kubernetes',
         provider_config=provider_config)
