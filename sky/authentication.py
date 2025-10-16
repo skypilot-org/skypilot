@@ -123,6 +123,34 @@ def _save_key_pair(private_key_path: str, public_key_path: str,
         f.write(public_key)
 
 
+def initialize_ssh_key_files_from_db():
+    """Initializes the ssh key files from the database
+    at the start of the API server."""
+    import glob  # pylint: disable=import-outside-toplevel
+    db_user_hashes = global_user_state.get_all_user_hashes_with_ssh_keys()
+    file_user_hashes = set()
+    match_all_pattern = _SSH_KEY_PATH_PREFIX.format(user_hash='*')
+    match_dirs = glob.glob(os.path.expanduser(match_all_pattern))
+    for match_dir in match_dirs:
+        separated_path = os.path.normpath(match_dir).split(os.path.sep)
+        assert separated_path[-1] == 'ssh'
+        user_hash = separated_path[-2]
+        file_user_hashes.add(user_hash)
+    user_hashes_to_create = db_user_hashes - file_user_hashes
+    if len(user_hashes_to_create) == 0:
+        return
+    private_key_path_fmtstr = os.path.expanduser(
+        os.path.join(_SSH_KEY_PATH_PREFIX, 'sky-key'))
+    public_key_path_fmtstr = os.path.expanduser(
+        os.path.join(_SSH_KEY_PATH_PREFIX, 'sky-key.pub'))
+    ssh_keys = global_user_state.get_multiple_ssh_keys(user_hashes_to_create)
+    for user_hash, (ssh_public_key, ssh_private_key) in ssh_keys.items():
+        private_key_path = private_key_path_fmtstr.format(user_hash=user_hash)
+        public_key_path = public_key_path_fmtstr.format(user_hash=user_hash)
+        _save_key_pair(private_key_path, public_key_path, ssh_private_key,
+                       ssh_public_key)
+
+
 def get_or_generate_keys() -> Tuple[str, str]:
     """Returns the absolute private and public key paths."""
     user_hash = common_utils.get_user_hash()

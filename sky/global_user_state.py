@@ -2278,6 +2278,18 @@ def get_ssh_keys(user_hash: str) -> Tuple[str, str, bool]:
 
 @_init_db
 @metrics_lib.time_me
+def get_multiple_ssh_keys(user_hashes: List[str]) -> Dict[str, Tuple[str, str]]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(ssh_key_table).filter(
+            ssh_key_table.c.user_hash.in_(user_hashes)).all()
+    return {
+        row.user_hash: (row.ssh_public_key, row.ssh_private_key) for row in rows
+    }
+
+
+@_init_db
+@metrics_lib.time_me
 def set_ssh_keys(user_hash: str, ssh_public_key: str, ssh_private_key: str):
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -2301,6 +2313,16 @@ def set_ssh_keys(user_hash: str, ssh_public_key: str, ssh_private_key: str):
             })
         session.execute(do_update_stmt)
         session.commit()
+
+
+@_init_db
+@metrics_lib.time_me
+def get_all_user_hashes_with_ssh_keys() -> Set[str]:
+    """Get all users with ssh keys."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(ssh_key_table.c.user_hash).all()
+    return set(row[0] for row in rows)
 
 
 @_init_db

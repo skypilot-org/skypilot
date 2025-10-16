@@ -1956,6 +1956,7 @@ def _init_or_restore_server_user_hash():
 if __name__ == '__main__':
     import uvicorn
 
+    from sky import authentication
     from sky.server import uvicorn as skyuvicorn
 
     logger.info('Initializing SkyPilot API server')
@@ -2001,6 +2002,7 @@ if __name__ == '__main__':
     # Restore the server user hash
     logger.info('Initializing server user hash')
     _init_or_restore_server_user_hash()
+    authentication.initialize_ssh_key_files_from_db()
 
     max_db_connections = global_user_state.get_max_db_connections()
     logger.info(f'Max db connections: {max_db_connections}')
