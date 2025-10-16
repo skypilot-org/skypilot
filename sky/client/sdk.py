@@ -967,7 +967,12 @@ def tail_provision_logs(cluster_name: str,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None))
     # Check for HTTP errors before streaming the response
-    server_common.handle_request_error(response)
+    if response.status_code != 200:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.CommandError(response.status_code,
+                                          'tail_provision_logs',
+                                          'Failed to stream provision logs',
+                                          response.text)
 
     # Log request is idempotent when tail is 0, thus can resume previous
     # streaming point on retry.
