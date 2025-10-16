@@ -163,10 +163,12 @@ def test_api_cancel_race_condition(isolated_database):
 def _test_isolation_worker_fn(expected_env_a: str, expected_env_b: str,
                               expected_labels: dict, **kwargs):
     """Worker that verifies it sees the correct env vars and config overrides."""
-    # Assert env vars are correct
+    # TEST_VAR_A: Should see the overridden value (not main process value)
     assert os.environ.get('TEST_VAR_A') == expected_env_a, (
         f"Expected TEST_VAR_A={expected_env_a}, got {os.environ.get('TEST_VAR_A')}"
     )
+
+    # TEST_VAR_B: Should see the new value set by this request
     assert os.environ.get('TEST_VAR_B') == expected_env_b, (
         f"Expected TEST_VAR_B={expected_env_b}, got {os.environ.get('TEST_VAR_B')}"
     )
@@ -229,6 +231,9 @@ async def test_execute_with_isolated_env_and_config(isolated_database,
             initializer=_subprocess_initializer,
             initargs=(db_path, log_path_prefix, mock_skypilot_config))
 
+    # Set TEST_VAR_A in main process that workers will override
+    os.environ['TEST_VAR_A'] = 'init'
+
     # Capture main process state before spawning any workers to verify no leakage.
     env_before = dict(os.environ)
     config_before = skypilot_config.to_dict()
@@ -241,8 +246,8 @@ async def test_execute_with_isolated_env_and_config(isolated_database,
         }
         request_body = TestIsolationBody(
             env_vars={
-                'TEST_VAR_A': env_a,
-                'TEST_VAR_B': env_b,
+                'TEST_VAR_A': env_a,  # Override env var from main process
+                'TEST_VAR_B': env_b,  # New env var
                 constants.USER_ID_ENV_VAR: f'user-{request_id}',
                 constants.USER_ENV_VAR: f'user-{request_id}',
             },
@@ -318,6 +323,7 @@ async def test_execute_with_isolated_env_and_config(isolated_database,
         # Shutdown the executor if we created one
         if proc_executor is not None:
             proc_executor.shutdown()
+        os.environ.pop('TEST_VAR_A', None)
 
 
 FAKE_FD_START = 100
