@@ -1040,6 +1040,26 @@ spec:
         self._check_pod_config(comprehensive_pod_config, True)
 
 
+def test_parse_cpu_or_gpu_resource_to_float():
+    """Test parse_cpu_or_gpu_resource_to_float function."""
+    # Test with millicore values (ending with 'm')
+    assert utils.parse_cpu_or_gpu_resource_to_float('500m') == 0.5
+    assert utils.parse_cpu_or_gpu_resource_to_float('1000m') == 1.0
+    assert utils.parse_cpu_or_gpu_resource_to_float('250m') == 0.25
+    assert utils.parse_cpu_or_gpu_resource_to_float('1m') == 0.001
+    assert utils.parse_cpu_or_gpu_resource_to_float('0m') == 0.0
+
+    # Test with whole number values (no 'm' suffix)
+    assert utils.parse_cpu_or_gpu_resource_to_float('1') == 1.0
+    assert utils.parse_cpu_or_gpu_resource_to_float('2') == 2.0
+    assert utils.parse_cpu_or_gpu_resource_to_float('0') == 0.0
+    assert utils.parse_cpu_or_gpu_resource_to_float('4.5') == 4.5
+    assert utils.parse_cpu_or_gpu_resource_to_float('0.5') == 0.5
+
+    # Test edge cases
+    assert utils.parse_cpu_or_gpu_resource_to_float('') == 0.0  # Empty string
+
+
 def test_coreweave_autoscaler():
     """Test that CoreweaveAutoscaler is properly configured."""
     from sky.provision.kubernetes.utils import AUTOSCALER_TYPE_TO_AUTOSCALER
