@@ -1064,6 +1064,20 @@ def test_kubernetes_get_nodes():
         assert node_addresses == preloaded_addresses
 
 
+@pytest.mark.kubernetes
+def test_kubernetes_show_gpus(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+
+    test = smoke_tests_utils.Test(
+        'kubernetes_show_gpus',
+        [
+            # First launch to create the cluster
+            'sky show-gpus --infra kubernetes',
+        ],
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.no_seeweb  # Seeweb fails to provision resources
 def test_launch_and_exec_async(generic_cloud: str):
     """Test if the launch and exec commands work correctly with --async."""
