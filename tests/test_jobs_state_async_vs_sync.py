@@ -53,7 +53,8 @@ def _seed_one_job(_mock_jobs_db_conn) -> int:
                                                workspace='default',
                                                entrypoint='echo',
                                                pool=None,
-                                               pool_hash=None)
+                                               pool_hash=None,
+                                               user_hash='abcd1234')
     state.set_pending(
         job_id=job_id,
         task_id=0,
@@ -71,7 +72,8 @@ def _seed_complex_job(_mock_jobs_db_conn) -> int:
                                                workspace='default',
                                                entrypoint='echo',
                                                pool=None,
-                                               pool_hash=None)
+                                               pool_hash=None,
+                                               user_hash='abcd1234')
     # Create gaps in task ids to test ordering
     state.set_pending(job_id=job_id,
                       task_id=0,
@@ -198,7 +200,8 @@ async def test_schedule_state_transitions_same(_mock_jobs_db_conn):
                                                workspace='default',
                                                entrypoint='echo',
                                                pool=None,
-                                               pool_hash=None)
+                                               pool_hash=None,
+                                               user_hash='abcd1234')
 
     # INACTIVE
     assert state.get_job_schedule_state(
@@ -280,7 +283,8 @@ async def test_get_status_no_tasks_returns_none(_mock_jobs_db_conn):
                                                workspace='default',
                                                entrypoint='echo',
                                                pool=None,
-                                               pool_hash=None)
+                                               pool_hash=None,
+                                               user_hash='abcd1234')
     assert state.get_latest_task_id_status(job_id) == (None, None)
     assert await state.get_latest_task_id_status_async(job_id) == (None, None)
     assert state.get_status(job_id) is None
@@ -314,12 +318,14 @@ async def test_override_terminal_failure_reason_prepend(_mock_jobs_db_conn):
                                                     workspace='default',
                                                     entrypoint='echo',
                                                     pool=None,
-                                                    pool_hash=None)
+                                                    pool_hash=None,
+                                                    user_hash='abcd1234')
     async_job_id = state.set_job_info_without_job_id(name='async_job',
                                                      workspace='default',
                                                      entrypoint='echo',
                                                      pool=None,
-                                                     pool_hash=None)
+                                                     pool_hash=None,
+                                                     user_hash='abcd1234')
 
     # Set up initial pending task for both jobs
     state.set_pending(sync_job_id,
@@ -388,7 +394,8 @@ async def test_set_backoff_pending_async_success(_mock_jobs_db_conn):
                                                workspace='default',
                                                entrypoint='echo',
                                                pool=None,
-                                               pool_hash=None)
+                                               pool_hash=None,
+                                               user_hash='abcd1234')
     state.set_pending(
         job_id=job_id,
         task_id=0,
@@ -422,7 +429,8 @@ async def test_set_backoff_pending_async_from_recovering(_mock_jobs_db_conn):
                                                workspace='default',
                                                entrypoint='echo',
                                                pool=None,
-                                               pool_hash=None)
+                                               pool_hash=None,
+                                               user_hash='abcd1234')
     state.set_pending(
         job_id=job_id,
         task_id=0,
@@ -456,7 +464,8 @@ async def test_set_backoff_pending_async_no_matching_rows(_mock_jobs_db_conn):
                                                workspace='default',
                                                entrypoint='echo',
                                                pool=None,
-                                               pool_hash=None)
+                                               pool_hash=None,
+                                               user_hash='abcd1234')
     state.set_pending(
         job_id=job_id,
         task_id=0,
