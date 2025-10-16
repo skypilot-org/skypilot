@@ -363,7 +363,12 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         await Promise.all([
           dashboardCache.get(getClusters),
           dashboardCache.get(getManagedJobs, [
-            { allUsers: true, skipFinished: true },
+            {
+              allUsers: true,
+              skipFinished: true,
+              workspaceMatch: workspaceName,
+              fields: ['workspace', 'status'],
+            },
           ]),
           dashboardCache.get(getEnabledClouds, [workspaceName, true]),
         ]);
@@ -391,16 +396,11 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
       let managedJobsCount = 0;
 
       jobs.forEach((job) => {
-        const jobClusterName =
-          job.cluster_name || (job.resources && job.resources.cluster_name);
-        if (jobClusterName) {
-          const jobWorkspace = clusterNameToWorkspace[jobClusterName];
-          if (
-            jobWorkspace === workspaceName &&
-            activeJobStatuses.has(job.status)
-          ) {
-            managedJobsCount++;
-          }
+        if (
+          job.workspace === workspaceName &&
+          activeJobStatuses.has(job.status)
+        ) {
+          managedJobsCount++;
         }
       });
 

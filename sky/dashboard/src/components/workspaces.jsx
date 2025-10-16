@@ -106,6 +106,9 @@ export async function getWorkspaceManagedJobs(workspaceName) {
     const response = await apiClient.post('/jobs/queue/v2', {
       all_users: true,
       verbose: true,
+      skip_finished: true,
+      workspace_match: workspaceName,
+      fields: ['workspace', 'status'],
       override_skypilot_config: { active_workspace: workspaceName },
     });
 

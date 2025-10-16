@@ -93,7 +93,12 @@ export async function getManagedJobs(options = {}) {
         console.error('Error parsing JSON:', parseError);
       }
       // For non-CLUSTER_NOT_UP 500 errors, signal cache to skip update
-      return { __skipCache: true, jobs: [], total: 0, controllerStopped: false };
+      return {
+        __skipCache: true,
+        jobs: [],
+        total: 0,
+        controllerStopped: false,
+      };
     }
     // print out the response for debugging
     const data = await fetchedData.json();
@@ -338,6 +343,7 @@ export async function getPoolStatus() {
         {
           allUsers: true,
           skipFinished: true,
+          fields: ['pool', 'status'],
         },
       ]);
       if (!jobsResponse.controllerStopped) {

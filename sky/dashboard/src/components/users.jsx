@@ -285,7 +285,7 @@ export function Users() {
     dashboardCache.invalidate(getUsers);
     dashboardCache.invalidate(getClusters);
     dashboardCache.invalidate(getManagedJobs, [
-      { allUsers: true, skipFinished: true },
+      { allUsers: true, skipFinished: true, fields: ['user_hash', 'status'] },
     ]);
 
     if (refreshDataRef.current) {
@@ -1114,7 +1114,11 @@ function UsersTable({
         const [clustersData, managedJobsResponse] = await Promise.all([
           dashboardCache.get(getClusters),
           dashboardCache.get(getManagedJobs, [
-            { allUsers: true, skipFinished: true },
+            {
+              allUsers: true,
+              skipFinished: true,
+              fields: ['user_hash', 'status'],
+            },
           ]),
         ]);
 
@@ -1574,7 +1578,11 @@ function ServiceAccountTokensView({
       const [clustersResponse, jobsResponse] = await Promise.all([
         dashboardCache.get(getClusters),
         dashboardCache.get(getManagedJobs, [
-          { allUsers: true, skipFinished: true },
+          {
+            allUsers: true,
+            skipFinished: true,
+            fields: ['user_hash', 'status'],
+          },
         ]),
       ]);
 
