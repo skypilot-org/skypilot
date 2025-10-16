@@ -642,6 +642,7 @@ def get_request(request_id: str) -> Optional[Request]:
 @asyncio_utils.shield
 async def get_request_async(request_id: str) -> Optional[Request]:
     """Async version of get_request."""
+    # TODO(aylei): figure out how to remove FileLock here to avoid the overhead
     async with filelock.AsyncFileLock(request_lock_path(request_id)):
         return await _get_request_no_lock_async(request_id)
 
