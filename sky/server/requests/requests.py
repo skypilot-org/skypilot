@@ -493,7 +493,8 @@ def create_table(cursor, conn):
     cursor.execute(f"""\
         CREATE INDEX IF NOT EXISTS created_at_idx ON {REQUEST_TABLE} (created_at);
     """)
-    # Add an index on cluster_name to speed up queries that filter on this column.
+    # Add an index on cluster_name to speed up queries
+    # that filter on this column.
     cursor.execute(f"""\
         CREATE INDEX IF NOT EXISTS cluster_name_idx ON {REQUEST_TABLE} ({COL_CLUSTER_NAME});
     """)
