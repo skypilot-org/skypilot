@@ -660,5 +660,5 @@ def _summary_message(
     return (f'\n{colorama.Fore.GREEN}{PARTY_POPPER_EMOJI} '
             f'Enabled infra{workspace_str} '
             f'{PARTY_POPPER_EMOJI}'
-            f'{colorama.Style.RESET_ALL}{enabled_clouds_str}'
-            f'{disallowed_clouds_hint}')
+            f'{colorama.Style.RESET_ALL}{enabled_clouds_str}')
+            # f'{colorama.Style.DIM}{disallowed_clouds_hint}{colorama.Style.RESET_ALL}')
