@@ -11,6 +11,9 @@ from typing import List, Optional
 
 import psutil
 
+# Environment variable to enable kill_pg in subprocess daemon.
+USE_KILL_PG_ENV_VAR = 'SKYPILOT_SUBPROCESS_DAEMON_KILL_PG'
+
 
 def daemonize():
     """Detaches the process from its parent process with double-forking.
@@ -140,7 +143,20 @@ def main():
             except (psutil.NoSuchProcess, ValueError):
                 pass
 
-    pgid = get_pgid_if_leader(process.pid)
+    pgid: Optional[int] = None
+    if os.environ.get(USE_KILL_PG_ENV_VAR) == '1':
+        # Use kill_pg on UNIX system if allowed to reduce the resource usage.
+        # Note that both implementations might leave subprocessed uncancelled:
+        # - kill_process_tree(default): a subprocess is able to detach itself
+        #   from the process tree use the same technique as daemonize(). Also,
+        #   since we refresh the process tree per second, if the subprocess is
+        #   launched between the [last_poll, parent_die] interval, the
+        #   subprocess will not be captured will not be killed.
+        # - kill_process_group: kill_pg will kill all the processed in the group
+        #   but if a subprocess calls setpgid(0, 0) to detach itself from the
+        #   process group (usually to daemonize itself), the subprocess will
+        #   not be killed.
+        pgid = get_pgid_if_leader(process.pid)
 
     if process is not None and parent_process is not None:
         # Wait for either parent or target process to exit
