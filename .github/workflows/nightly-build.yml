@@ -230,6 +230,20 @@ jobs:
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
+  smoke-tests-jobs-consolidation:
+    needs: [gate-tests, nightly-build-pypi]
+    if: ${{ needs.gate-tests.outputs.run_tests == 'true' }}
+    uses: ./.github/workflows/buildkite-trigger-wait.yml
+    with:
+      commit: ${{ github.sha }}
+      branch: ${{ github.ref_name }}
+      message: "nightly-build-pypi --jobs-consolidation"
+      pipeline: "smoke-tests"
+      build_env_vars: '{"ARGS": "--jobs-consolidation"}'
+      timeout_minutes: 60
+    secrets:
+      BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+
   publish-and-validate-both:
     needs: [gate-tests, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, backward-compat-test-nightly, backward-compat-test-stable]
     # Allow publish/validate for manual dispatch or the original nightly cron; skip for the 5PM PT preflight
