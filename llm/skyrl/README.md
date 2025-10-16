@@ -1,6 +1,6 @@
 # SkyRL: Modular Full-Stack RL Training for LLMs
 
-[SkyRL](https://github.com/NovaSky-AI/SkyRL) is a modular, full‑stack reinforcement learning library for LLMs, designed for real‑world agentic workloads.
+[SkyRL](https://github.com/NovaSky-AI/SkyRL) is a modular, performant reinforcement learning library for LLMs, designed for real‑world agentic workloads.
 Its modular design enables easy implementation of real‑world improvements such as asynchronous training, heterogeneous hardware support, and new environments in under 100 lines of code.
 
 ## Why SkyPilot + SkyRL?
