@@ -88,6 +88,8 @@ install_requires = [
     'aiohttp',
     'aiosqlite',
     'anyio',
+    # we use this to get uuid7
+    'uuid-utils',
 ]
 
 # See requirements-dev.txt for the version of grpc and protobuf

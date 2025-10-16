@@ -19,7 +19,6 @@ import sys
 import threading
 import traceback
 from typing import Dict, List, Literal, Optional, Set, Tuple
-import uuid
 import zipfile
 
 import aiofiles
@@ -27,6 +26,7 @@ import anyio
 import fastapi
 from fastapi.middleware import cors
 import starlette.middleware.base
+import uuid_utils as uuid
 import uvloop
 
 import sky
@@ -162,7 +162,7 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to add a request ID to each request."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
-        request_id = str(uuid.uuid4())
+        request_id = str(uuid.uuid7())
         request.state.request_id = request_id
         response = await call_next(request)
         # TODO(syang): remove X-Request-ID when v0.10.0 is released.
@@ -1315,7 +1315,7 @@ async def download(download_body: payloads.DownloadBody,
                 status_code=404, detail=f'Folder not found: {folder_path}')
 
     # Create a temporary zip file
-    log_id = str(uuid.uuid4().hex)
+    log_id = str(uuid.uuid4())
     zip_filename = f'folder_{log_id}.zip'
     zip_path = pathlib.Path(
         logs_dir_on_api_server).expanduser().resolve() / zip_filename
