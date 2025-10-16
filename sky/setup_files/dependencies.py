@@ -95,7 +95,7 @@ install_requires = [
 
 # The grpc version at runtime has to be newer than the version
 # used to generate the code.
-GRPC = 'grpcio>=1.63.0'
+GRPCIO = 'grpcio>=1.63.0'
 # >= 5.26.1 because the runtime version can't be older than the version
 # used to generate the code.
 # < 7.0.0 because code generated for a major version V will be supported by
@@ -110,8 +110,6 @@ server_dependencies = [
     'pyjwt',
     'aiohttp',
     'anyio',
-    GRPC,
-    PROTOBUF,
     'aiosqlite',
     'greenlet',
 ]
@@ -125,8 +123,8 @@ local_ray = [
     'ray[default] >= 2.6.1',
 ]
 
-remote = [
-    GRPC,
+grpc = [
+    GRPCIO,
     PROTOBUF,
 ]
 
@@ -191,7 +189,8 @@ extras_require: Dict[str, List[str]] = {
         'kubernetes>=20.0.0,!=32.0.0', 'websockets', 'python-dateutil'
     ],
     'ssh': ['kubernetes>=20.0.0,!=32.0.0', 'websockets', 'python-dateutil'],
-    'remote': remote,
+    # TODO(kevin): Deprecate [remote] extras. It's still being used in kubernetes-ray.yml.j2
+    'remote': grpc,
     # For the container registry auth api. Reference:
     # https://github.com/runpod/runpod-python/releases/tag/1.6.1
     # RunPod needs a TOML parser to read ~/.runpod/config.toml. On Python 3.11+
@@ -212,18 +211,15 @@ extras_require: Dict[str, List[str]] = {
         # docs instead.
         # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long
     ],
-    'nebius': [
-        # Nebius requires grpcio and protobuf, so we need to include
-        # our constraints here.
-        'nebius>=0.2.47',
-        GRPC,
-        PROTOBUF,
-    ] + aws_dependencies,
+    'nebius': ['nebius>=0.2.47'] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'seeweb': ['ecsapi>=0.2.0'],
     'server': server_dependencies,
     'shadeform': [],  # No dependencies needed for shadeform
 }
+
+for extra, deps in extras_require.items():
+    deps.extend(grpc)
 
 # Calculate which clouds should be included in the [all] installation.
 clouds_for_all = set(extras_require)
