@@ -3340,6 +3340,9 @@ def get_clusters(
                                   force_refresh_statuses=force_refresh_statuses,
                                   include_user_info=True,
                                   summary_response=summary_response)
+        # record may be None if the cluster is deleted during refresh,
+        # e.g. all the Pods of a cluster on Kubernetes have been
+        # deleted before refresh.
         if record is not None and 'error' not in record:
             _update_records_with_handle_info([record])
             if include_credentials:
@@ -3360,37 +3363,48 @@ def get_clusters(
     cluster_names_with_launch_request = {
         request.cluster_name for request in requests
     }
+    # Preserve the index of the cluster name as it appears on "records"
     cluster_names_without_launch_request = [
-        cluster_name for cluster_name in cluster_names
+        (i, cluster_name)
+        for i, cluster_name in enumerate(cluster_names)
         if cluster_name not in cluster_names_with_launch_request
     ]
     # for clusters that have an active launch request, we do not refresh the status
-    updated_records = [
-        record for record in records
-        if record['name'] in cluster_names_with_launch_request
-    ]
+    updated_records = []
     if len(cluster_names_without_launch_request) > 0:
         with progress:
             updated_records = subprocess_utils.run_in_parallel(
-                _refresh_cluster_record, cluster_names_without_launch_request)
-
+                _refresh_cluster_record, [
+                    cluster_name
+                    for _, cluster_name in cluster_names_without_launch_request
+                ])
+    # Preserve the index of the cluster name as it appears on "records"
+    # before filtering for clusters being launched.
+    updated_records_dict: Dict[int, Optional[Dict[str, Any]]] = {
+        cluster_names_without_launch_request[i][0]: updated_records[i]
+        for i in range(len(cluster_names_without_launch_request))
+    }
     # Show information for removed clusters.
     kept_records = []
     autodown_clusters, remaining_clusters, failed_clusters = [], [], []
     for i, record in enumerate(records):
-        if updated_records[i] is None:
+        if i not in updated_records_dict:
+            # record was not refreshed, keep the original record
+            kept_records.append(record)
+            continue
+        updated_record = updated_records_dict[i]
+        if updated_record is None:
             if record['to_down']:
-                autodown_clusters.append(cluster_names[i])
+                autodown_clusters.append(record['name'])
             else:
-                remaining_clusters.append(cluster_names[i])
-        elif updated_records[i]['status'] == 'UNKNOWN':
-            failed_clusters.append(
-                (cluster_names[i], updated_records[i]['error']))
+                remaining_clusters.append(record['name'])
+        elif updated_record['status'] == 'UNKNOWN':
+            failed_clusters.append((record['name'], updated_record['error']))
             # Keep the original record if the status is unknown,
             # so that the user can still see the cluster.
             kept_records.append(record)
         else:
-            kept_records.append(updated_records[i])
+            kept_records.append(updated_record)
 
     if autodown_clusters:
         plural = 's' if len(autodown_clusters) > 1 else ''

@@ -596,6 +596,18 @@ def execute_request_in_coroutine(
     return CoroutineTask(task)
 
 
+def _execute_with_config_override(func: Callable,
+                                  request_body: payloads.RequestBody,
+                                  request_id: str, request_name: str,
+                                  **kwargs) -> Any:
+    """Execute a function with env and config override inside a thread."""
+    # Override the environment and config within this thread's context,
+    # which gets copied when we call to_thread.
+    with override_request_env_and_config(request_body, request_id,
+                                         request_name):
+        return func(**kwargs)
+
+
 async def _execute_request_coroutine(request: api_requests.Request):
     """Execute a request in current event loop.
 
@@ -613,15 +625,11 @@ async def _execute_request_coroutine(request: api_requests.Request):
         request_task.status = api_requests.RequestStatus.RUNNING
     # Redirect stdout and stderr to the request log path.
     original_output = ctx.redirect_log(request.log_path)
-    # Override environment variables that backs env_options.Options
-    # TODO(aylei): compared to process executor, running task in coroutine has
-    # two issues to fix:
-    # 1. skypilot config is not contextual
-    # 2. envs that read directly from os.environ are not contextual
-    ctx.override_envs(request_body.env_vars)
     try:
         fut: asyncio.Future = context_utils.to_thread_with_executor(
-            get_request_thread_executor(), func, **request_body.to_kwargs())
+            get_request_thread_executor(), _execute_with_config_override, func,
+            request_body, request.request_id, request.name,
+            **request_body.to_kwargs())
     except Exception as e:  # pylint: disable=broad-except
         ctx.redirect_log(original_output)
         api_requests.set_request_failed(request.request_id, e)
