@@ -72,4 +72,11 @@ spec:
             name: {{ .Release.Name }}-api-service
             port:
               number: 80
+      - pathType: {{ if eq .Values.ingress.path "/" }}Prefix{{ else }}ImplementationSpecific{{ end }}
+        path: /kubernetes-pod-ssh-proxy
+        backend:
+          service:
+            name: {{ .Release.Name }}-ssh-service
+            port:
+              number: 46582
 {{- end }}

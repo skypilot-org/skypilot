@@ -16,7 +16,7 @@ spec:
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 1
+      maxSurge: 0
       maxUnavailable: 0
   {{- else }}
   strategy:
@@ -52,7 +52,7 @@ spec:
       terminationGracePeriodSeconds: {{ .Values.apiService.terminationGracePeriodSeconds }}
       containers:
       - name: skypilot-ssh
-        image: {{ .Values.sshService.image }}
+        image: {{ .Values.apiService.image }}
         imagePullPolicy: Always
         {{- with .Values.securityContext }}
         securityContext:
@@ -129,12 +129,12 @@ spec:
         - name: SKYPILOT_POD_CPU_CORE_LIMIT
           valueFrom:
             resourceFieldRef:
-              containerName: skypilot-api
+              containerName: skypilot-ssh
               resource: requests.cpu
         - name: SKYPILOT_POD_MEMORY_BYTES_LIMIT
           valueFrom:
             resourceFieldRef:
-              containerName: skypilot-api
+              containerName: skypilot-ssh
               resource: requests.memory
         # Use tini as the init process
         command: ["tini", "--"]
@@ -212,17 +212,7 @@ spec:
           done
           {{- end }}
 
-          if sky api start -h | grep -q -- "--foreground"; then
-            exec sky api start {{ include "skypilot.apiArgs" . }} --foreground
-          else
-            # For backward compatibility, run in background if --foreground is not supported.
-            # TODO(aylei): this will be dropped in 0.11.0.
-            if sky api start {{ include "skypilot.apiArgs" . }}; then
-              tail -n+0 -f /root/.sky/api_server/server.log
-            else
-              cat /root/.sky/api_server/server.log
-            fi
-          fi
+          python3 -m sky.server.k8s_ssh_proxy_app --host 0.0.0.0 --port 46582 --deploy
         ports:
         - containerPort: 46582
         livenessProbe:
@@ -521,7 +511,7 @@ spec:
       {{- if .Values.storage.enabled }}
       - name: state-volume
         persistentVolumeClaim:
-          claimName: {{ .Release.Name }}-state
+          claimName: {{ .Release.Name }}-state-ssh
       {{- else }}
       - name: state-volume
         emptyDir: {}

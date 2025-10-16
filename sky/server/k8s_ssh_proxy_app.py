@@ -264,6 +264,7 @@ if __name__ == '__main__':
                         type=int,
                         help='Port for the Kubernetes SSH proxy application')
     parser.add_argument('--deploy', action='store_true')
+    os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
     cmd_args = parser.parse_args()
 
     usage_lib.maybe_show_privacy_policy()
