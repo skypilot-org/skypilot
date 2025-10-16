@@ -15,7 +15,8 @@ SkyPilot makes RL training with SkyRL easy to run and scale with best cost-effic
 Launch a multi‑node GRPO training job on GSM8K using the cheapest available GPUs:
 
 ```bash
-sky launch -c skyrl skyrl_train/examples/gsm8k/gsm8k-grpo-skypilot.yaml --secret WANDB_API_KEY="1234"
+export WANDB_API_KEY="xxx"
+sky launch -c skyrl skyrl_train/examples/gsm8k/gsm8k-grpo-skypilot.yaml --secret WANDB_API_KEY
 ```
 
 Monitor training progress:
