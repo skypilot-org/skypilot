@@ -934,7 +934,7 @@ def tail_provision_logs(cluster_name: str,
     Args:
         cluster_name: name of the cluster.
         worker: worker id in multi-node cluster.
-             If -1, stream the logs of the head node.
+             If None, stream the logs of the head node.
         follow: follow the logs.
         tail: lines from end to tail.
         output_stream: optional stream to write logs.
@@ -950,7 +950,7 @@ def tail_provision_logs(cluster_name: str,
                 raise ValueError('Worker must be a positive integer.')
             body.worker = worker
         else:
-            raise ValueError(
+            raise exceptions.APINotSupportedError(
                 'Worker node provision logs are not supported in your API '
                 'server. Please upgrade to a newer API server to use it.')
     params = {
