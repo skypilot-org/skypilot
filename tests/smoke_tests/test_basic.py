@@ -1069,14 +1069,13 @@ def test_kubernetes_show_gpus(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'kubernetes_show_gpus',
         [
-            # First launch to create the cluster
             (
-            's=$(SKYPILOT_DEBUG=0 sky show-gpus --infra kubernetes) && ',
-            'echo "$s" && ',
-            # Grab the table header by querying for `REQUESTABLE_QTY_PER_NODE`
-            # using -A 1 to grab the next line as well.
-            # On the next line, search for the correct utilization string.
-            'echo "$s" | grep "REQUESTABLE_QTY_PER_NODE" -A 1 | grep "8 of 8 free"',
+            's=$(SKYPILOT_DEBUG=0 sky show-gpus --infra kubernetes) && '
+            'echo "$s" && '
+            # # Grab the table header by querying for `REQUESTABLE_QTY_PER_NODE`
+            # # using -A 1 to grab the next line as well.
+            # # On the next line, search for the correct utilization string.
+            'echo $s | grep "REQUESTABLE_QTY_PER_NODE" -A 1 | grep "8 of 8 free"'
             )
         ],
     )
