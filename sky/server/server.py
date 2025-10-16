@@ -1369,7 +1369,6 @@ def provision_logs(provision_logs_body: payloads.ProvisionLogsBody,
                    tail: int = 0) -> fastapi.responses.StreamingResponse:
     """Streams the provision.log for the latest launch request of a cluster."""
     log_path = None
-    log_dir = None
     cluster_name = provision_logs_body.cluster_name
     worker = provision_logs_body.worker
     # stream head node logs
@@ -1412,7 +1411,7 @@ def provision_logs(provision_logs_body: payloads.ProvisionLogsBody,
                 status_code=400,
                 detail=f'Worker {worker} is out of range. '
                 f'The cluster has {len(instance_ids)} nodes.')
-        log_dir = metadata_utils.get_instance_log_dir(
+        log_path = metadata_utils.get_instance_log_dir(
             handle.get_cluster_name_on_cloud(), instance_ids[worker])
 
     # Tail semantics: 0 means print all lines. Convert 0 -> None for streamer.
@@ -1421,7 +1420,6 @@ def provision_logs(provision_logs_body: payloads.ProvisionLogsBody,
     return fastapi.responses.StreamingResponse(
         content=stream_utils.log_streamer(None,
                                           log_path,
-                                          log_dir,
                                           tail=effective_tail,
                                           follow=follow,
                                           cluster_name=cluster_name),

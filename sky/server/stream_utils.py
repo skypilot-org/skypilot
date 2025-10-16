@@ -53,7 +53,6 @@ async def _yield_log_file_with_payloads_skipped(
 async def log_streamer(
     request_id: Optional[str],
     log_path: Optional[pathlib.Path] = None,
-    log_dir: Optional[pathlib.Path] = None,
     plain_logs: bool = False,
     tail: Optional[int] = None,
     follow: bool = True,
@@ -65,8 +64,8 @@ async def log_streamer(
     Args:
         request_id: The request ID to check whether the log tailing process
             should be stopped.
-        log_path: The path to the log file.
-        log_dir: The directory containing the log files.
+        log_path: The path to the log file or directory containing the log
+        files.
         plain_logs: Whether to show plain logs.
         tail: The number of lines to tail. If None, tail the whole file.
         follow: Whether to follow the log file.
@@ -146,13 +145,13 @@ async def log_streamer(
         if show_request_waiting_spinner:
             yield status_msg.stop()
 
-    if log_dir is not None:
-        # get all *.log files in the log_dir
+    if log_path is not None and log_path.is_dir():
+        # get all *.log files in the log_path
         log_files = sorted(
-            log_dir.glob('*.log'))  # Sort for consistent ordering
+            log_path.glob('*.log'))  # Sort for consistent ordering
         if len(log_files) == 0:
             raise fastapi.HTTPException(
-                status_code=404, detail=f'No log files found in {log_dir}')
+                status_code=404, detail=f'No log files found in {log_path}')
         for log_path in log_files:
             # Add header before each file (similar to tail -f behavior)
             header = f'\n==> {log_path} <==\n\n'
