@@ -123,10 +123,20 @@ apiService:
     requests:
       cpu: "4"
       memory: "8Gi"
+      # not much ephemeral-storage is needed when 
+      # persistent storage is enabled.
+      # However, when ephemeral storage is used
+      # (e.g. to enable rollingUpdate), 
+      # it is recommended to set a larger value.
       ephemeral-storage: "10Gi"
     limits:
       cpu: "4"
       memory: "8Gi"
+      # not much ephemeral-storage is needed when 
+      # persistent storage is enabled.
+      # However, when ephemeral storage is used
+      # (e.g. to enable rollingUpdate), 
+      # it is recommended to set a larger value.
       ephemeral-storage: "10Gi"
 
   # Extra environment variables to set before starting the API server. Example:
