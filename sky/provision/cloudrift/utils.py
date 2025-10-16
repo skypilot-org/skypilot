@@ -22,7 +22,7 @@ logger = sky_logging.init_logger(__name__)
 
 # CloudRift credentials environment variable
 _CLOUDRIFT_CREDENTIALS_PATH = 'CLOUDRIFT_CREDENTIALS_PATH'
-CLOUDRIFT_SERVER_ADDRESS = "http://localhost:8000"
+CLOUDRIFT_SERVER_ADDRESS = "https://api.cloudrift.ai"
 CLOUDRIFT_API_VERSION = "2025-05-29"
 
 
@@ -155,7 +155,7 @@ class RiftClient:
                     "instance_type": instance_type,
                 }
             },
-            "with_public_ip": False,
+            "with_public_ip": True,
         }
         #logger.debug("Deploying instance with request data: %s", request_data)
         print(request_data)

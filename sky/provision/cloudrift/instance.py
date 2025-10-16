@@ -131,6 +131,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         for instance in instances:
             if instance['status'] == 'Active' and instance['id'] in instances_to_wait:
                 instances_to_wait.remove(instance['id'])
+            elif instance['status'] != 'Initializing' and instance['id'] in instances_to_wait:
+                raise RuntimeError(f'Failed to launch instance {instance["id"]}')
         logger.info('Waiting for instances to be ready: '
                     f'({len(instances)}/{config.count}).')
         if len(instances_to_wait) == 0:
@@ -208,12 +210,18 @@ def get_cluster_info(
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
     for instance_id, instance_info in running_instances.items():
+        port_mappings = instance_info.get('port_mappings', [])
+        ssh_port = 22
+        for port_mapping in port_mappings:
+            if port_mapping[0] == 22:
+                ssh_port = port_mapping[1]
+                break
         instances[instance_id] = [
             common.InstanceInfo(
                 instance_id=instance_id,
                 internal_ip=instance_info["internal_host_address"],
                 external_ip=instance_info['host_address'],
-                ssh_port=22,
+                ssh_port=ssh_port,
                 tags={},
             )
         ]
