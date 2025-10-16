@@ -7,7 +7,7 @@ Its modular design enables users to modify anything - add new environments, easi
 
 SkyPilot makes RL training with SkyRL easy and cost‑effective:
 
-- **Run on any cloud**
+- **Run on any AI infrastructure, including Kubernetes or clouds**
 - **Zero setup** — automatically provisions and manages distributed Ray clusters
 
 ## Quick Start
