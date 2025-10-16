@@ -1315,7 +1315,7 @@ async def download(download_body: payloads.DownloadBody,
                 status_code=404, detail=f'Folder not found: {folder_path}')
 
     # Create a temporary zip file
-    log_id = str(uuid.uuid4())
+    log_id = str(uuid.uuid4().hex)
     zip_filename = f'folder_{log_id}.zip'
     zip_path = pathlib.Path(
         logs_dir_on_api_server).expanduser().resolve() / zip_filename
