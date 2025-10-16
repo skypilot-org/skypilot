@@ -1672,6 +1672,7 @@ async def api_status(
                 status=statuses,
                 limit=limit,
                 fields=fields,
+                sort=True,
             ))
         return requests_lib.encode_requests(request_tasks)
     else:

@@ -400,8 +400,7 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
         for request_task in get_request_tasks(req_filter=RequestTaskFilter(
             cluster_names=[cluster_name],
             status=[RequestStatus.PENDING, RequestStatus.RUNNING],
-            exclude_request_names=[exclude_request_name],
-            sort=False))
+            exclude_request_names=[exclude_request_name]))
     ]
     kill_requests(request_ids)
 
@@ -426,8 +425,7 @@ def kill_requests(request_ids: Optional[List[str]] = None,
                 user_id=user_id,
                 status=[RequestStatus.RUNNING, RequestStatus.PENDING],
                 # Avoid cancelling the cancel request itself.
-                exclude_request_names=['sky.api_cancel'],
-                sort=False))
+                exclude_request_names=['sky.api_cancel']))
         ]
     cancelled_request_ids = []
     for request_id in request_ids:
@@ -735,7 +733,7 @@ class RequestTaskFilter:
     finished_before: Optional[float] = None
     limit: Optional[int] = None
     fields: Optional[List[str]] = None
-    sort: bool = True
+    sort: bool = False
 
     def __post_init__(self):
         if (self.exclude_request_names is not None and
@@ -927,8 +925,7 @@ async def clean_finished_requests_with_retention(retention_seconds: int):
     reqs = await get_request_tasks_async(
         req_filter=RequestTaskFilter(status=RequestStatus.finished_status(),
                                      finished_before=time.time() -
-                                     retention_seconds,
-                                     sort=False))
+                                     retention_seconds))
 
     futs = []
     for req in reqs:
