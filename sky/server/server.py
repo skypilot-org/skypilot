@@ -2002,6 +2002,7 @@ if __name__ == '__main__':
     # Restore the server user hash
     logger.info('Initializing server user hash')
     _init_or_restore_server_user_hash()
+    logger.info('Initializing SSH key files from database')
     authentication.initialize_ssh_key_files_from_db()
 
     max_db_connections = global_user_state.get_max_db_connections()

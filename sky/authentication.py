@@ -139,6 +139,8 @@ def initialize_ssh_key_files_from_db():
     user_hashes_to_create = db_user_hashes - file_user_hashes
     if len(user_hashes_to_create) == 0:
         return
+    logger.info(f'Creating {len(user_hashes_to_create)} '
+                'ssh key file pairs from database')
     private_key_path_fmtstr = os.path.expanduser(
         os.path.join(_SSH_KEY_PATH_PREFIX, 'sky-key'))
     public_key_path_fmtstr = os.path.expanduser(
