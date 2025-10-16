@@ -1,32 +1,57 @@
-# SkyRL: Modular Full-stack RL Training for LLMs
+# SkyRL: Modular Full-Stack RL Training for LLMs
 
-[SkyRL](https://github.com/NovaSky-AI/SkyRL) is a modular, full-stack reinforcement learning library for LLMs, designed for real-world agentic workloads. 
-Its modularity enable easy implementation of real-world improvements like async training, heterogeneous hardware, and new environments with under 100 LoC.
+[SkyRL](https://github.com/NovaSky-AI/SkyRL) is a modular, full‑stack reinforcement learning library for LLMs, designed for real‑world agentic workloads.
+Its modular design enables easy implementation of real‑world improvements such as asynchronous training, heterogeneous hardware support, and new environments in under 100 lines of code.
 
 ## Why SkyPilot + SkyRL?
-Skypilot makes RL training with SkyRL easy and cost effective:
-- **Run anywhere** with any clouds
-- **Zero setup** - automatically handles distributed Ray clusters
+
+SkyPilot makes RL training with SkyRL easy and cost‑effective:
+
+- **Run on any cloud**
+- **Zero setup** — automatically provisions and manages distributed Ray clusters
 
 ## Quick Start
 
-Launch a SkyRL GSM8K GRPO multi-node training job on the cheapest available GPUs:
+Launch a multi‑node GRPO training job on GSM8K using the cheapest available GPUs:
+
 ```bash
 sky launch -c skyrl skyrl_train/examples/gsm8k/gsm8k-grpo-skypilot.yaml --secret WANDB_API_KEY="1234"
 ```
 
 Monitor training progress:
+
 ```bash
 sky logs skyrl
 ```
 
+<p align="center">
+  <img src="https://imgur.com/a/adw1CfG" alt="SkyPilot logs" width="90%"/>
+</p>
+<p align="center"><i>Logs of the training jobs</i></p>
 
-Access Ray dashboard:
+You can also view the job status in the SkyPilot Dashboard:
+
 ```bash
-sky status --endpoint 8280 skyrl
+sky dashboard
 ```
 
+<p align="center">
+  <img src="https://imgur.com/a/qU4GkJP" alt="SkyPilot Dashboard" width="90%"/>
+</p>
+<p align="center"><i>Dashboard showing the status of the training job</i></p>
+
+If Weights & Biases (W&B) is configured, you can monitor the training run:
+
+<p align="center">
+  <img src="https://imgur.com/a/Dvp8Sh4" alt="W&B training metrics" width="90%"/>
+  
+</p>
+
 ## Key Features
+
+- Modular design: plug‑and‑play algorithms, environments, and hardware backends
+- Scales from a single GPU to multi‑node clusters via Ray + SkyPilot
+- Minimal boilerplate: add new environments quickly (often <100 LoC)
 
 ## Learn More
 
