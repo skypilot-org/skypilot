@@ -19,7 +19,6 @@ import sys
 import threading
 import traceback
 from typing import Dict, List, Literal, Optional, Set, Tuple
-import uuid
 import zipfile
 
 import aiofiles
@@ -27,6 +26,7 @@ import anyio
 import fastapi
 from fastapi.middleware import cors
 import starlette.middleware.base
+import uuid_utils as uuid
 import uvloop
 
 import sky
@@ -162,7 +162,11 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to add a request ID to each request."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
-        request_id = str(uuid.uuid4())
+        # request ID is a primary key in the request table,
+        # so it gets an index.
+        # Use uuid7 to encourage sequential inserts,
+        # which is more efficient when inserting into an indexed column.
+        request_id = str(uuid.uuid7())
         request.state.request_id = request_id
         response = await call_next(request)
         # TODO(syang): remove X-Request-ID when v0.10.0 is released.
