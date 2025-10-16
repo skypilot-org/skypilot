@@ -162,6 +162,10 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to add a request ID to each request."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
+        # request ID is a primary key in the request table,
+        # so it gets an index.
+        # Use uuid7 to encourage sequential inserts,
+        # which is more efficient when inserting into an indexed column.
         request_id = str(uuid.uuid7())
         request.state.request_id = request_id
         response = await call_next(request)
