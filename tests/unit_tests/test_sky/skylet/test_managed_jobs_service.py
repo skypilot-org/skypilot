@@ -64,7 +64,7 @@ def _seed_test_jobs(_mock_managed_jobs_db_conn):
                                                     workspace='ws1',
                                                     entrypoint='ep1',
                                                     pool='test-pool',
-                                                    pool_hash='hash123'
+                                                    pool_hash='hash123',
                                                     user_hash='abcd1234')
         state.set_pending(job_id1,
                           task_id=0,
