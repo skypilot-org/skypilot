@@ -3248,6 +3248,7 @@ def _down_or_stop_clusters(
                 success_progress = True
                 message = (f'{colorama.Fore.GREEN}{operation} '
                            f'cluster {name!r}...done{colorama.Style.RESET_ALL}')
+                successes.append(name)
                 if idle_minutes_to_autostop >= 0:
                     option_str = 'down' if down else 'stop'
                     passive_str = 'downed' if down else 'stopped'
@@ -3312,7 +3313,7 @@ def _down_or_stop_clusters(
         click.secho(f'{operation} requests are sent. Check the requests\' '
                     'status with `sky request get <request_id>`.')
 
-    show_summary = (len(clusters) > 1) or (bool(successes) and bool(failures))
+    show_summary = len(clusters) > 1
 
     if show_summary:
         click.echo('\nSummary:')
