@@ -1,3 +1,5 @@
+"""Utils for managing SkyPilot SSH key pairs."""
+
 import functools
 import os
 from typing import Tuple
@@ -17,6 +19,7 @@ MAX_TRIALS = 64
 # because ssh key pair need to persist across API server restarts, while
 # the former dir is empheral.
 _SSH_KEY_PATH_PREFIX = '~/.sky/clients/{user_hash}/ssh'
+
 
 def get_ssh_key_and_lock_path(user_hash: str) -> Tuple[str, str, str]:
     user_ssh_key_prefix = _SSH_KEY_PATH_PREFIX.format(user_hash=user_hash)
