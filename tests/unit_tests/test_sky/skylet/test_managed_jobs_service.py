@@ -64,7 +64,8 @@ def _seed_test_jobs(_mock_managed_jobs_db_conn):
                                                     workspace='ws1',
                                                     entrypoint='ep1',
                                                     pool='test-pool',
-                                                    pool_hash='hash123')
+                                                    pool_hash='hash123',
+                                                    user_hash='abcd1234')
         state.set_pending(job_id1,
                           task_id=0,
                           task_name='task0',
@@ -76,7 +77,8 @@ def _seed_test_jobs(_mock_managed_jobs_db_conn):
                                                     workspace='ws1',
                                                     entrypoint='ep2',
                                                     pool=None,
-                                                    pool_hash=None)
+                                                    pool_hash=None,
+                                                    user_hash='abcd1234')
         state.set_pending(job_id2,
                           task_id=0,
                           task_name='task0',
@@ -90,7 +92,8 @@ def _seed_test_jobs(_mock_managed_jobs_db_conn):
                                                     workspace='ws2',
                                                     entrypoint='ep3',
                                                     pool=None,
-                                                    pool_hash=None)
+                                                    pool_hash=None,
+                                                    user_hash='abcd1234')
         state.set_pending(job_id3,
                           task_id=0,
                           task_name='task0',
@@ -105,7 +108,8 @@ def _seed_test_jobs(_mock_managed_jobs_db_conn):
                                                     workspace='ws1',
                                                     entrypoint='ep4',
                                                     pool='test-pool',
-                                                    pool_hash='hash123')
+                                                    pool_hash='hash123',
+                                                    user_hash='abcd1234')
         state.set_pending(job_id4,
                           task_id=0,
                           task_name='task0',
@@ -311,7 +315,7 @@ class TestGetJobTable:
         assert not target_job.HasField('details')
         assert not target_job.HasField('failure_reason')
         assert not target_job.HasField('user_name')
-        assert not target_job.HasField('user_hash')
+        assert target_job.user_hash == 'abcd1234'
         assert not target_job.HasField('submitted_at')
         assert not target_job.HasField('start_at')
         assert not target_job.HasField('end_at')

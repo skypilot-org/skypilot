@@ -180,8 +180,8 @@ def _list_accelerators(
             break
 
     # Only fetch pods if we have accelerator nodes and realtime is requested
-    pods = None
     allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
+    error_on_get_allocated_gpu_qty_by_node = False
     if realtime and has_accelerator_nodes:
         # Get the allocated GPU quantity by each node
         try:
@@ -194,6 +194,7 @@ def _list_accelerators(
                     '(forbidden). Please check if your account has '
                     'necessary permissions to list pods. Realtime GPU '
                     'availability information may be incorrect.')
+                error_on_get_allocated_gpu_qty_by_node = True
             else:
                 raise
     # Total number of GPUs in the cluster
@@ -259,8 +260,9 @@ def _list_accelerators(
                         total_accelerators_capacity[
                             accelerator_name] += quantized_count
 
-                if pods is None:
-                    # If we can't get the pods, we can't get the GPU usage
+                if error_on_get_allocated_gpu_qty_by_node:
+                    # If we can't get the allocated GPU quantity by each node,
+                    # we can't get the GPU usage.
                     total_accelerators_available[accelerator_name] = -1
                     continue
 

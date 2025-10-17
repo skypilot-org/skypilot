@@ -17,6 +17,7 @@ import resource
 import shutil
 import sys
 import threading
+import traceback
 from typing import Dict, List, Literal, Optional, Set, Tuple
 import uuid
 import zipfile
@@ -74,6 +75,7 @@ from sky.utils import dag_utils
 from sky.utils import perf_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
+from sky.utils import ux_utils
 from sky.utils.db import db_utils
 from sky.volumes.server import server as volumes_rest
 from sky.workspaces import server as workspaces_rest
@@ -664,6 +666,25 @@ except Exception:  # pylint: disable=broad-except
     pass  # no issue, we will warn the user later if its too low
 
 
+@app.exception_handler(exceptions.ConcurrentWorkerExhaustedError)
+def handle_concurrent_worker_exhausted_error(
+        request: fastapi.Request, e: exceptions.ConcurrentWorkerExhaustedError):
+    del request  # request is not used
+    # Print detailed error message to server log
+    logger.error('Concurrent worker exhausted: '
+                 f'{common_utils.format_exception(e)}')
+    with ux_utils.enable_traceback():
+        logger.error(f'  Traceback: {traceback.format_exc()}')
+    # Return human readable error message to client
+    return fastapi.responses.JSONResponse(
+        status_code=503,
+        content={
+            'detail':
+                ('The server has exhausted its concurrent worker limit. '
+                 'Please try again or scale the server if the load persists.')
+        })
+
+
 @app.get('/token')
 async def token(request: fastapi.Request,
                 local_port: Optional[int] = None) -> fastapi.responses.Response:
@@ -1232,6 +1253,7 @@ async def logs(
     # TODO(zhwu): This should wait for the request on the cluster, e.g., async
     # launch, to finish, so that a user does not need to manually pull the
     # request status.
+    executor.check_request_thread_executor_available()
     request_task = executor.prepare_request(
         request_id=request.state.request_id,
         request_name='logs',
@@ -1466,6 +1488,8 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
         # to avoid storming the DB and CPU in the meantime
         await asyncio.sleep(0.1)
     request_task = await requests_lib.get_request_async(request_id)
+    # TODO(aylei): refine this, /api/get will not be retried and this is
+    # meaningless to retry. It is the original request that should be retried.
     if request_task.should_retry:
         raise fastapi.HTTPException(
             status_code=503, detail=f'Request {request_id!r} should be retried')
@@ -1643,14 +1667,12 @@ async def api_status(
                 requests_lib.RequestStatus.PENDING,
                 requests_lib.RequestStatus.RUNNING,
             ]
-        request_tasks = await requests_lib.get_request_tasks_with_fields_async(
+        request_tasks = await requests_lib.get_request_tasks_async(
             req_filter=requests_lib.RequestTaskFilter(
                 status=statuses,
                 limit=limit,
                 fields=fields,
-            ),
-            fields=fields,
-        )
+            ))
         return requests_lib.encode_requests(request_tasks)
     else:
         encoded_request_tasks = []
@@ -2034,7 +2056,8 @@ if __name__ == '__main__':
         uvicorn_config = uvicorn.Config('sky.server.server:app',
                                         host=cmd_args.host,
                                         port=cmd_args.port,
-                                        workers=num_workers)
+                                        workers=num_workers,
+                                        ws_per_message_deflate=False)
         skyuvicorn.run(uvicorn_config,
                        max_db_connections=config.num_db_connections_per_worker)
     except Exception as exc:  # pylint: disable=broad-except

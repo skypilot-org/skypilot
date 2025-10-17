@@ -398,9 +398,9 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
     request_ids = [
         request_task.request_id
         for request_task in get_request_tasks(req_filter=RequestTaskFilter(
-            cluster_names=[cluster_name],
             status=[RequestStatus.PENDING, RequestStatus.RUNNING],
-            exclude_request_names=[exclude_request_name]))
+            exclude_request_names=[exclude_request_name],
+            cluster_names=[cluster_name]))
     ]
     kill_requests(request_ids)
 
@@ -422,10 +422,10 @@ def kill_requests(request_ids: Optional[List[str]] = None,
         request_ids = [
             request_task.request_id
             for request_task in get_request_tasks(req_filter=RequestTaskFilter(
-                user_id=user_id,
-                status=[RequestStatus.RUNNING, RequestStatus.PENDING],
+                status=[RequestStatus.PENDING, RequestStatus.RUNNING],
                 # Avoid cancelling the cancel request itself.
-                exclude_request_names=['sky.api_cancel']))
+                exclude_request_names=['sky.api_cancel'],
+                user_id=user_id))
         ]
     cancelled_request_ids = []
     for request_id in request_ids:
@@ -496,6 +496,21 @@ def create_table(cursor, conn):
                                  'INTEGER')
     db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_FINISHED_AT,
                                  'REAL')
+
+    # Add an index on (status, name) to speed up queries
+    # that filter on these columns.
+    cursor.execute(f"""\
+        CREATE INDEX IF NOT EXISTS status_name_idx ON {REQUEST_TABLE} (status, name) WHERE status IN ('PENDING', 'RUNNING');
+    """)
+    # Add an index on cluster_name to speed up queries
+    # that filter on this column.
+    cursor.execute(f"""\
+        CREATE INDEX IF NOT EXISTS cluster_name_idx ON {REQUEST_TABLE} ({COL_CLUSTER_NAME}) WHERE status IN ('PENDING', 'RUNNING');
+    """)
+    # Add an index on created_at to speed up queries that sort on this column.
+    cursor.execute(f"""\
+        CREATE INDEX IF NOT EXISTS created_at_idx ON {REQUEST_TABLE} (created_at);
+    """)
 
 
 _DB = None
@@ -642,6 +657,7 @@ def get_request(request_id: str) -> Optional[Request]:
 @asyncio_utils.shield
 async def get_request_async(request_id: str) -> Optional[Request]:
     """Async version of get_request."""
+    # TODO(aylei): figure out how to remove FileLock here to avoid the overhead
     async with filelock.AsyncFileLock(request_lock_path(request_id)):
         return await _get_request_no_lock_async(request_id)
 
@@ -752,6 +768,10 @@ class RequestTaskFilter:
             status_list_str = ','.join(
                 repr(status.value) for status in self.status)
             filters.append(f'status IN ({status_list_str})')
+        if self.include_request_names is not None:
+            request_names_str = ','.join(
+                repr(name) for name in self.include_request_names)
+            filters.append(f'name IN ({request_names_str})')
         if self.exclude_request_names is not None:
             exclude_request_names_str = ','.join(
                 repr(name) for name in self.exclude_request_names)
@@ -763,10 +783,6 @@ class RequestTaskFilter:
         if self.user_id is not None:
             filters.append(f'{COL_USER_ID} = ?')
             filter_params.append(self.user_id)
-        if self.include_request_names is not None:
-            request_names_str = ','.join(
-                repr(name) for name in self.include_request_names)
-            filters.append(f'name IN ({request_names_str})')
         if self.finished_before is not None:
             filters.append('finished_at < ?')
             filter_params.append(self.finished_before)
@@ -799,6 +815,10 @@ def get_request_tasks(req_filter: RequestTaskFilter) -> List[Request]:
         rows = cursor.fetchall()
         if rows is None:
             return []
+    if req_filter.fields:
+        rows = [
+            _update_request_row_fields(row, req_filter.fields) for row in rows
+        ]
     return [Request.from_row(row) for row in rows]
 
 
@@ -811,21 +831,10 @@ async def get_request_tasks_async(
     async with _DB.execute_fetchall_async(*req_filter.build_query()) as rows:
         if not rows:
             return []
-    return [Request.from_row(row) for row in rows]
-
-
-@init_db_async
-@metrics_lib.time_me_async
-async def get_request_tasks_with_fields_async(
-    req_filter: RequestTaskFilter,
-    fields: Optional[List[str]] = None,
-) -> List[Request]:
-    """Async version of get_request_tasks."""
-    assert _DB is not None
-    async with _DB.execute_fetchall_async(*req_filter.build_query()) as rows:
-        if not rows:
-            return []
-    rows = [_update_request_row_fields(row, fields) for row in rows]
+    if req_filter.fields:
+        rows = [
+            _update_request_row_fields(row, req_filter.fields) for row in rows
+        ]
     return [Request.from_row(row) for row in rows]
 
 
