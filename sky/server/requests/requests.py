@@ -917,9 +917,9 @@ def set_request_cancelled(request_id: str) -> None:
 
 @init_db
 @metrics_lib.time_me
-async def _delete_requests(requests: List[Request]):
+async def _delete_requests(request_ids: List[str]):
     """Clean up requests by their IDs."""
-    id_list_str = ','.join(repr(req.request_id) for req in requests)
+    id_list_str = ','.join(repr(request_id) for request_id in request_ids)
     assert _DB is not None
     await _DB.execute_and_commit_async(
         f'DELETE FROM {REQUEST_TABLE} WHERE request_id IN ({id_list_str})')
