@@ -410,6 +410,20 @@ def _wrapper(ctor):
         return obj
     return _wrap_sem_lock
 
+def _wrap_init(name, cls):
+    orig_init = cls.__init__
+
+    def _init(self, *args, **kwargs):
+        logger.info(f'[AYLEI DEBUG] {name} constructor called')
+        orig_init(self, *args, **kwargs)
+        stack = ''.join(traceback.format_stack(limit=10))
+        semlock = getattr(self, '_semlock', None)
+        logger.info(
+            f'[AYLEI DEBUG] Created {name} sem_lock={semlock}\n{stack}'
+        )
+
+    cls.__init__ = _init
+
 def _request_execution_wrapper(request_id: str,
                                ignore_return_value: bool,
                                num_db_connections_per_worker: int = 0) -> None:
@@ -425,12 +439,15 @@ def _request_execution_wrapper(request_id: str,
     """
     global initialized
     if not initialized:
-        orig_semaphore = synchronize.Semaphore
-        orig_bounded_semaphore = synchronize.BoundedSemaphore
-        orig_sem_lock = synchronize.SemLock
-        synchronize.Semaphore = _wrap_sem('Semaphore', orig_semaphore)
-        synchronize.BoundedSemaphore = _wrap_sem('BoundedSemaphore', orig_bounded_semaphore)
-        synchronize.SemLock = _wrap_sem('SemLock', orig_sem_lock)
+        # orig_semaphore = synchronize.Semaphore
+        # orig_bounded_semaphore = synchronize.BoundedSemaphore
+        # orig_sem_lock = synchronize.SemLock
+        # synchronize.Semaphore = _wrap_sem('Semaphore', orig_semaphore)
+        # synchronize.BoundedSemaphore = _wrap_sem('BoundedSemaphore', orig_bounded_semaphore)
+        # synchronize.SemLock = _wrap_sem('SemLock', orig_sem_lock)
+        _wrap_init('SemLock', synchronize.SemLock)
+        _wrap_init('Semaphore', synchronize.Semaphore)
+        _wrap_init('BoundedSemaphore', synchronize.BoundedSemaphore)
         initialized = True
     pid = multiprocessing.current_process().pid
     proc = psutil.Process(pid)
