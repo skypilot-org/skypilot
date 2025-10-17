@@ -97,8 +97,8 @@ _REQUEST_THREAD_EXECUTOR: Optional[threads.OnDemandThreadExecutor] = None
 from multiprocessing import synchronize
 import traceback
 
-_orig_Semaphore = synchronize.Semaphore
-_orig_BoundedSemaphore = synchronize.BoundedSemaphore
+# _orig_Semaphore = synchronize.Semaphore
+# _orig_BoundedSemaphore = synchronize.BoundedSemaphore
 
 def _wrap_sem(name, ctor):
     def _wrapper(*args, **kwargs):
@@ -110,10 +110,10 @@ def _wrap_sem(name, ctor):
         return obj
     return _wrapper
 
-# Hijack the Semaphore constructor to log the stack trace when a Semaphore is created.
-synchronize.Semaphore = _wrap_sem('Semaphore', _orig_Semaphore)
-synchronize.BoundedSemaphore = _wrap_sem('BoundedSemaphore',
-                                         _orig_BoundedSemaphore)
+# # Hijack the Semaphore constructor to log the stack trace when a Semaphore is created.
+# synchronize.Semaphore = _wrap_sem('Semaphore', _orig_Semaphore)
+# synchronize.BoundedSemaphore = _wrap_sem('BoundedSemaphore',
+#                                          _orig_BoundedSemaphore)
 
 
 def get_request_thread_executor() -> threads.OnDemandThreadExecutor:
