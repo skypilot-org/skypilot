@@ -1064,6 +1064,24 @@ def test_kubernetes_get_nodes():
         assert node_addresses == preloaded_addresses
 
 
+@pytest.mark.kubernetes
+def test_kubernetes_show_gpus(generic_cloud: str):
+    test = smoke_tests_utils.Test(
+        'kubernetes_show_gpus',
+        [(
+            's=$(SKYPILOT_DEBUG=0 sky show-gpus --infra kubernetes) && '
+            'echo "$s" && '
+            # Grab the table header by querying for `REQUESTABLE_QTY_PER_NODE`
+            # using -A 1 to grab the next line as well.
+            # Then get the last line of the output
+            # (only the first line of values, exluding the table header.)
+            # Then, search for the correct utilization string.
+            'echo "$s" | grep "REQUESTABLE_QTY_PER_NODE" -A 1 | tail -n 1 | grep "8 of 8 free"'
+        )],
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.no_seeweb  # Seeweb fails to provision resources
 def test_launch_and_exec_async(generic_cloud: str):
     """Test if the launch and exec commands work correctly with --async."""
