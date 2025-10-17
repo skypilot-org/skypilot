@@ -8,7 +8,6 @@ import asyncio
 import collections
 import datetime
 import enum
-import logging
 import os
 import pathlib
 import re
@@ -84,6 +83,7 @@ _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
 _JOB_STATUS_FETCH_MAX_RETRIES = 3
 _JOB_K8S_TRANSIENT_NW_MSG = 'Unable to connect to the server: dial tcp'
+_JOB_STATUS_FETCH_TIMEOUT_SECONDS = 30
 
 _JOB_WAITING_STATUS_MESSAGE = ux_utils.spinner_message(
     'Waiting for task to start[/]'
@@ -101,6 +101,13 @@ _JOB_CANCELLED_MESSAGE = (
 # update the state.
 _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 120
 
+# After enabling consolidation mode, we need to restart the API server to get
+# the jobs refresh deamon and correct number of executors. We use this file to
+# indicate that the API server has been restarted after enabling consolidation
+# mode.
+_JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE = (
+    '~/.sky/.jobs_controller_consolidation_reloaded_signal')
+
 
 class ManagedJobQueueResultType(enum.Enum):
     """The type of the managed job queue result."""
@@ -117,9 +124,8 @@ class UserSignal(enum.Enum):
 
 # ====== internal functions ======
 def terminate_cluster(
-        cluster_name: str,
-        max_retry: int = 6,
-        _logger: logging.Logger = logger,  # pylint: disable=invalid-name
+    cluster_name: str,
+    max_retry: int = 6,
 ) -> None:
     """Terminate the cluster."""
     from sky import core  # pylint: disable=import-outside-toplevel
@@ -143,18 +149,18 @@ def terminate_cluster(
             return
         except exceptions.ClusterDoesNotExist:
             # The cluster is already down.
-            _logger.debug(f'The cluster {cluster_name} is already down.')
+            logger.debug(f'The cluster {cluster_name} is already down.')
             return
         except Exception as e:  # pylint: disable=broad-except
             retry_cnt += 1
             if retry_cnt >= max_retry:
                 raise RuntimeError(
                     f'Failed to terminate the cluster {cluster_name}.') from e
-            _logger.error(
+            logger.error(
                 f'Failed to terminate the cluster {cluster_name}. Retrying.'
                 f'Details: {common_utils.format_exception(e)}')
             with ux_utils.enable_traceback():
-                _logger.error(f'  Traceback: {traceback.format_exc()}')
+                logger.error(f'  Traceback: {traceback.format_exc()}')
             time.sleep(backoff.current_backoff())
 
 
@@ -202,13 +208,39 @@ def _validate_consolidation_mode_config(
 # API Server. Under the hood, we submit the job monitoring logic as processes
 # directly in the API Server.
 # Use LRU Cache so that the check is only done once.
-@annotations.lru_cache(scope='request', maxsize=1)
-def is_consolidation_mode() -> bool:
+@annotations.lru_cache(scope='request', maxsize=2)
+def is_consolidation_mode(on_api_restart: bool = False) -> bool:
     if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
         return True
 
-    consolidation_mode = skypilot_config.get_nested(
+    config_consolidation_mode = skypilot_config.get_nested(
         ('jobs', 'controller', 'consolidation_mode'), default_value=False)
+
+    signal_file = pathlib.Path(
+        _JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE).expanduser()
+
+    restart_signal_file_exists = signal_file.exists()
+    consolidation_mode = (config_consolidation_mode and
+                          restart_signal_file_exists)
+
+    if on_api_restart:
+        if config_consolidation_mode:
+            signal_file.touch()
+    else:
+        if not restart_signal_file_exists:
+            if config_consolidation_mode:
+                logger.warning(f'{colorama.Fore.YELLOW}Consolidation mode for '
+                               'managed jobs is enabled in the server config, '
+                               'but the API server has not been restarted yet. '
+                               'Please restart the API server to enable it.'
+                               f'{colorama.Style.RESET_ALL}')
+                return False
+        elif not config_consolidation_mode:
+            # Cleanup the signal file if the consolidation mode is disabled in
+            # the config. This allow the user to disable the consolidation mode
+            # without restarting the API server.
+            signal_file.unlink()
+
     # We should only do this check on API server, as the controller will not
     # have related config and will always seemingly disabled for consolidation
     # mode. Check #6611 for more details.
@@ -269,8 +301,7 @@ def ha_recovery_for_consolidation_mode():
 
 async def get_job_status(
         backend: 'backends.CloudVmRayBackend', cluster_name: str,
-        job_id: Optional[int],
-        job_logger: logging.Logger) -> Optional['job_lib.JobStatus']:
+        job_id: Optional[int]) -> Optional['job_lib.JobStatus']:
     """Check the status of the job running on a managed job cluster.
 
     It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_DRIVER,
@@ -282,26 +313,28 @@ async def get_job_status(
     if handle is None:
         # This can happen if the cluster was preempted and background status
         # refresh already noticed and cleaned it up.
-        job_logger.info(f'Cluster {cluster_name} not found.')
+        logger.info(f'Cluster {cluster_name} not found.')
         return None
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     job_ids = None if job_id is None else [job_id]
     for i in range(_JOB_STATUS_FETCH_MAX_RETRIES):
         try:
-            job_logger.info('=== Checking the job status... ===')
-            statuses = await context_utils.to_thread(backend.get_job_status,
-                                                     handle,
-                                                     job_ids=job_ids,
-                                                     stream_logs=False)
+            logger.info('=== Checking the job status... ===')
+            statuses = await asyncio.wait_for(
+                context_utils.to_thread(backend.get_job_status,
+                                        handle,
+                                        job_ids=job_ids,
+                                        stream_logs=False),
+                timeout=_JOB_STATUS_FETCH_TIMEOUT_SECONDS)
             status = list(statuses.values())[0]
             if status is None:
-                job_logger.info('No job found.')
+                logger.info('No job found.')
             else:
-                job_logger.info(f'Job status: {status}')
-            job_logger.info('=' * 34)
+                logger.info(f'Job status: {status}')
+            logger.info('=' * 34)
             return status
         except (exceptions.CommandError, grpc.RpcError, grpc.FutureTimeoutError,
-                ValueError, TypeError) as e:
+                ValueError, TypeError, asyncio.TimeoutError) as e:
             # Note: Each of these exceptions has some additional conditions to
             # limit how we handle it and whether or not we catch it.
             # Retry on k8s transient network errors. This is useful when using
@@ -322,6 +355,9 @@ async def get_job_status(
                     is_transient_error = True
             elif isinstance(e, grpc.FutureTimeoutError):
                 detailed_reason = 'Timeout'
+            elif isinstance(e, asyncio.TimeoutError):
+                detailed_reason = ('Job status check timed out after '
+                                   f'{_JOB_STATUS_FETCH_TIMEOUT_SECONDS}s')
             # TODO(cooperc): Gracefully handle these exceptions in the backend.
             elif isinstance(e, ValueError):
                 # If the cluster yaml is deleted in the middle of getting the
@@ -2112,8 +2148,12 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
-    def set_pending(cls, job_id: int, managed_job_dag: 'dag_lib.Dag',
-                    workspace: str, entrypoint: str) -> str:
+    def set_pending(cls,
+                    job_id: int,
+                    managed_job_dag: 'dag_lib.Dag',
+                    workspace: str,
+                    entrypoint: str,
+                    user_hash: Optional[str] = None) -> str:
         dag_name = managed_job_dag.name
         pool = managed_job_dag.pool
         # Add the managed job to queue table.
@@ -2130,6 +2170,8 @@ class ManagedJobCodeGen:
                     pool_hash = serve_state.get_service_hash({pool!r})
                 set_job_info_kwargs['pool'] = {pool!r}
                 set_job_info_kwargs['pool_hash'] = pool_hash
+            if managed_job_version >= 11:
+                set_job_info_kwargs['user_hash'] = {user_hash!r}
             managed_job_state.set_job_info(
                 {job_id}, {dag_name!r}, **set_job_info_kwargs)
             """)

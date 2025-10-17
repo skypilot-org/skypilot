@@ -98,6 +98,7 @@ async def tail_logs(
     request: fastapi.Request, log_body: payloads.ServeLogsBody,
     background_tasks: fastapi.BackgroundTasks
 ) -> fastapi.responses.StreamingResponse:
+    executor.check_request_thread_executor_available()
     request_task = executor.prepare_request(
         request_id=request.state.request_id,
         request_name='serve.logs',

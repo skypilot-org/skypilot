@@ -19,6 +19,8 @@ from sky.utils import subprocess_utils
 
 StreamHandler = Callable[[IO[Any], IO[Any]], str]
 
+logger = sky_logging.init_logger(__name__)
+
 
 # TODO(aylei): call hijack_sys_attrs() proactivly in module init at server-side
 # once we have context widely adopted.
@@ -60,7 +62,7 @@ def passthrough_stream_handler(in_stream: IO[Any], out_stream: IO[Any]) -> str:
 
 
 def pipe_and_wait_process(
-        ctx: context.Context,
+        ctx: context.SkyPilotContext,
         proc: subprocess.Popen,
         poll_interval: float = 0.5,
         cancel_callback: Optional[Callable[[], None]] = None,
@@ -113,7 +115,7 @@ def pipe_and_wait_process(
         return stdout, stderr
 
 
-def wait_process(ctx: context.Context,
+def wait_process(ctx: context.SkyPilotContext,
                  proc: subprocess.Popen,
                  poll_interval: float = 0.5,
                  cancel_callback: Optional[Callable[[], None]] = None):

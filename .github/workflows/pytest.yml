@@ -38,7 +38,7 @@ jobs:
             test-name: "Optimizer Dryruns Part 1"
           - test-path: "tests/test_optimizer_dryruns.py -k \"not partial\""
             test-name: "Optimizer Dryruns Part 2"
-          - test-path: tests/test_jobs_and_serve.py tests/test_yaml_parser.py tests/test_global_user_state.py tests/test_config.py tests/test_jobs.py tests/test_list_accelerators.py tests/test_wheels.py tests/test_api.py tests/test_storage.py tests/test_api_compatibility.py
+          - test-path: tests/test_jobs_and_serve.py tests/test_yaml_parser.py tests/test_global_user_state.py tests/test_config.py tests/test_jobs.py tests/test_list_accelerators.py tests/test_wheels.py tests/test_api.py tests/test_storage.py tests/test_api_compatibility.py tests/test_infra_k8s_alias.py
             test-name: "Jobs, Serve, Wheels, API, Config, Optimizer & Storage Tests"
           - test-path: tests/test_no_parellel.py
             test-name: "No Parallel Tests"
