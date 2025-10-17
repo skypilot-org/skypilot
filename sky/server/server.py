@@ -2058,7 +2058,8 @@ if __name__ == '__main__':
         uvicorn_config = uvicorn.Config('sky.server.server:app',
                                         host=cmd_args.host,
                                         port=cmd_args.port,
-                                        workers=num_workers)
+                                        workers=num_workers,
+                                        ws_per_message_deflate=False)
         skyuvicorn.run(uvicorn_config,
                        max_db_connections=config.num_db_connections_per_worker)
     except Exception as exc:  # pylint: disable=broad-except
