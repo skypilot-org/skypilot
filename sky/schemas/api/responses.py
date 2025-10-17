@@ -115,6 +115,7 @@ class StatusResponse(ResponseBaseModel):
     nodes: int
     cloud: Optional[str] = None
     region: Optional[str] = None
+    zone: Optional[str] = None
     cpus: Optional[str] = None
     memory: Optional[str] = None
     accelerators: Optional[str] = None

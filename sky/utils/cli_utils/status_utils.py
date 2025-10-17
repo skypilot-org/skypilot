@@ -8,6 +8,7 @@ import colorama
 from sky import backends
 from sky.schemas.api import responses
 from sky.utils import common_utils
+from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import status_lib
@@ -85,21 +86,20 @@ def show_status_table(cluster_records: List[responses.StatusResponse],
                          show_by_default=False),
             StatusColumn('LAST_EVENT', _get_last_event, show_by_default=False),
         ]
-
-    columns = []
-    for status_column in status_columns:
-        if status_column.show_by_default or show_all:
-            columns.append(status_column.name)
-    cluster_table = log_utils.create_table(columns)
+    # filter out columns that won't be displayed
+    status_columns = [
+        status_column for status_column in status_columns
+        if status_column.show_by_default or show_all
+    ]
+    cluster_table = log_utils.create_table([col.name for col in status_columns])
 
     num_pending_autostop = 0
-    for record in cluster_records:
-        row = []
-        for status_column in status_columns:
-            if status_column.show_by_default or show_all:
-                row.append(status_column.calc(record))
-        cluster_table.add_row(row)
-        num_pending_autostop += _is_pending_autostop(record)
+    rows = [[status_column.calc(record)
+             for status_column in status_columns]
+            for record in cluster_records]
+    cluster_table.add_rows(rows)
+    num_pending_autostop += sum(
+        _is_pending_autostop(record) for record in cluster_records)
 
     if cluster_records:
         click.echo(cluster_table)
@@ -268,6 +268,10 @@ def _get_resources(cluster_record: _ClusterRecord,
         - For K8S/SSH: "Nx (...)"
         - "-" if no resource information is available
     """
+    key = 'resources_str' if truncate else 'resources_str_full'
+    if key in cluster_record:
+        return cluster_record[key]
+
     handle = cluster_record['handle']
     if isinstance(handle, backends.CloudVmRayResourceHandle):
         launched_resources = handle.launched_resources
@@ -345,6 +349,14 @@ def _get_infra(cluster_record: _ClusterRecord, truncate: bool = True) -> str:
         - SSH/hostname (e.g., "SSH/my-tobi-box")
         - "-" if no infrastructure information is available
     """
+    if ('cloud' in cluster_record and 'region' in cluster_record and
+            'zone' in cluster_record):
+        infra = infra_utils.InfraInfo(cluster_record['cloud'],
+                                      cluster_record['region'],
+                                      cluster_record['zone'])
+        return infra.formatted_str(truncate)
+
+    # legacy code
     handle = cluster_record['handle']
     if isinstance(handle, backends.CloudVmRayResourceHandle):
         if handle.launched_resources is None:
