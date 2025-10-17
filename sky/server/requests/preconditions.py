@@ -166,7 +166,10 @@ class ClusterStartCompletePrecondition(Precondition):
                     api_requests.RequestStatus.RUNNING
                 ],
                 include_request_names=['sky.launch', 'sky.start'],
-                cluster_names=[self.cluster_name]))
+                cluster_names=[self.cluster_name],
+                # Only get the request ID to avoid fetching the whole request.
+                # We're only interested in the count, not the whole request.
+                fields=['request_id']))
         if len(requests) == 0:
             # No running or pending tasks, the start process is done.
             return True, None

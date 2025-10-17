@@ -136,7 +136,10 @@ async def _tail_log_file(
     polling_interval: float = DEFAULT_POLL_INTERVAL
 ) -> AsyncGenerator[str, None]:
     """Tail the opened log file, buffer the lines and flush in chunks."""
-
+    exact_request_id = None
+    if request_id is not None:
+        request_task = await requests_lib.get_request_async(request_id)
+        exact_request_id = request_task.request_id
     if tail is not None:
         # Find last n lines of the log file. Do not read the whole file into
         # memory.
@@ -189,23 +192,22 @@ async def _tail_log_file(
                 # check the status so that we display the final request status
                 # if the request is complete.
                 should_check_status = True
-            if request_id is not None and should_check_status:
+            if exact_request_id is not None and should_check_status:
                 last_status_check_time = current_time
                 req_status = await requests_lib.get_request_status_async(
-                    request_id)
+                    exact_request_id, exact_match=True)
                 if req_status.status > requests_lib.RequestStatus.RUNNING:
                     if (req_status.status ==
                             requests_lib.RequestStatus.CANCELLED):
                         request_task = await requests_lib.get_request_async(
-                            request_id)
+                            exact_request_id, exact_match=True)
                         if request_task.should_retry:
                             buffer.append(
                                 message_utils.encode_payload(
                                     rich_utils.Control.RETRY.encode('')))
                         else:
-                            buffer.append(
-                                f'{request_task.name!r} request {request_id}'
-                                ' cancelled\n')
+                            buffer.append(f'{request_task.name!r} request '
+                                          f'{exact_request_id} cancelled\n')
                     break
             if not follow:
                 # The below checks (cluster status, heartbeat) are not needed
