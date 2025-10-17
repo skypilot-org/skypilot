@@ -1617,7 +1617,6 @@ def get_clusters(
                 cluster_table.c.status, cluster_table.c.autostop,
                 cluster_table.c.to_down, cluster_table.c.owner,
                 cluster_table.c.metadata, cluster_table.c.cluster_hash,
-                cluster_table.c.storage_mounts_metadata,
                 cluster_table.c.cluster_ever_up,
                 cluster_table.c.status_updated_at, cluster_table.c.user_hash,
                 cluster_table.c.config_hash, cluster_table.c.workspace,
@@ -1700,8 +1699,6 @@ def get_clusters(
             'owner': _load_owner(row.owner),
             'metadata': json.loads(row.metadata),
             'cluster_hash': row.cluster_hash,
-            'storage_mounts_metadata': _load_storage_mounts_metadata(
-                row.storage_mounts_metadata),
             'cluster_ever_up': bool(row.cluster_ever_up),
             'status_updated_at': row.status_updated_at,
             'user_hash': user_hash,
@@ -1715,6 +1712,8 @@ def get_clusters(
             record['last_creation_command'] = row.last_creation_command
             record['last_event'] = last_cluster_event_dict.get(
                 row.cluster_hash, None)
+            record['storage_mounts_metadata'] = _load_storage_mounts_metadata(
+                row.storage_mounts_metadata)
 
         records.append(record)
     return records
