@@ -401,6 +401,13 @@ def _sigterm_handler(signum: int, frame: Optional['types.FrameType']) -> None:
 
 initialized = False
 
+def _wrap_sem_lock(*args, **kwargs):
+    logger.info(f'[AYLEI DEBUG] SemLock constructor called')
+    obj = synchronize.SemLock(*args, **kwargs)
+    stack = ''.join(traceback.format_stack(limit=10))
+    logger.info(f'[AYLEI DEBUG] Created SemLock sem_lock={obj}, args={args}, kwargs={kwargs}\n{stack}')
+    return obj
+
 def _request_execution_wrapper(request_id: str,
                                ignore_return_value: bool,
                                num_db_connections_per_worker: int = 0) -> None:
@@ -418,8 +425,10 @@ def _request_execution_wrapper(request_id: str,
     if not initialized:
         orig_semaphore = synchronize.Semaphore
         orig_bounded_semaphore = synchronize.BoundedSemaphore
+        orig_sem_lock = synchronize.SemLock
         synchronize.Semaphore = _wrap_sem('Semaphore', orig_semaphore)
         synchronize.BoundedSemaphore = _wrap_sem('BoundedSemaphore', orig_bounded_semaphore)
+        synchronize.SemLock = _wrap_sem_lock
         initialized = True
     pid = multiprocessing.current_process().pid
     proc = psutil.Process(pid)
