@@ -95,7 +95,6 @@ _REQUEST_THREAD_EXECUTOR_LOCK = threading.Lock()
 _REQUEST_THREAD_EXECUTOR: Optional[threads.OnDemandThreadExecutor] = None
 
 from multiprocessing import synchronize
-
 import traceback
 
 _orig_Semaphore = synchronize.Semaphore
