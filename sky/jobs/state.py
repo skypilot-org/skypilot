@@ -1258,7 +1258,8 @@ def get_managed_jobs_highest_priority() -> int:
             ))
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         priority = session.execute(query).fetchone()
-        return priority[0] if priority else constants.MIN_PRIORITY
+        return priority[0] if priority and priority[
+            0] is not None else constants.MIN_PRIORITY
 
 
 def build_managed_jobs_with_filters_no_status_query(

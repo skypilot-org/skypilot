@@ -409,18 +409,16 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
         try:
             accessible_workspaces = list(request.accessible_workspaces)
             job_ids = (list(request.job_ids.ids)
-                       if request.HasField('job_ids') and request.job_ids else
-                       None)
+                       if request.HasField('job_ids') else None)
             user_hashes: Optional[List[Optional[str]]] = None
-            if request.HasField('user_hashes') and request.user_hashes:
+            if request.HasField('user_hashes'):
                 user_hashes = list(request.user_hashes.hashes)
                 # For backwards compatibility, we show jobs that do not have a
                 # user_hash. TODO: Remove before 0.12.0.
                 if request.show_jobs_without_user_hash:
                     user_hashes.append(None)
             statuses = (list(request.statuses.statuses)
-                        if request.HasField('statuses') and request.statuses
-                        else None)
+                        if request.HasField('statuses') else None)
             job_queue = managed_job_utils.get_managed_job_queue(
                 skip_finished=request.skip_finished,
                 accessible_workspaces=accessible_workspaces,
