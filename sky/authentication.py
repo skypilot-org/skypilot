@@ -175,8 +175,10 @@ def create_ssh_key_files_from_db(private_key_path: str) -> bool:
     private_key_path = os.path.expanduser(private_key_path)
     public_key_path = os.path.expanduser(public_key_path)
     lock_path = os.path.expanduser(lock_path)
-
     lock_dir = os.path.dirname(lock_path)
+
+    if os.path.exists(private_key_path) and os.path.exists(public_key_path):
+        return True
     # We should have the folder ~/.sky/generated/ssh to have 0o700 permission,
     # as the ssh configs will be written to this folder as well in
     # backend_utils.SSHConfigHelper
