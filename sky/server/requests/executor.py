@@ -94,6 +94,22 @@ _REQUEST_THREAD_EXECUTOR_LOCK = threading.Lock()
 # 2. exhausting the default thread pool executor of event loop;
 _REQUEST_THREAD_EXECUTOR: Optional[threads.OnDemandThreadExecutor] = None
 
+import multiprocessing as mp
+
+import traceback
+import builtins
+
+_orig_Semaphore = mp.synchronize.Semaphore
+
+def debug_Semaphore(*args, **kwargs):
+    sem = _orig_Semaphore(*args, **kwargs)
+    stack = "".join(traceback.format_stack(limit=10))
+    logger.info(f"[AYLEI DEBUG] Created semaphore name={getattr(sem._semlock, '_name', None)}\n{stack}")
+    return sem
+
+# Hijack the Semaphore constructor to log the stack trace when a Semaphore is created.
+mp.synchronize.Semaphore = debug_Semaphore
+
 
 def get_request_thread_executor() -> threads.OnDemandThreadExecutor:
     """Lazy init and return the request thread executor for current process."""
