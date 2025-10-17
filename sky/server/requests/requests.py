@@ -800,6 +800,10 @@ def get_request_tasks(req_filter: RequestTaskFilter) -> List[Request]:
         rows = cursor.fetchall()
         if rows is None:
             return []
+    if req_filter.fields:
+        rows = [
+            _update_request_row_fields(row, req_filter.fields) for row in rows
+        ]
     return [Request.from_row(row) for row in rows]
 
 
@@ -812,21 +816,10 @@ async def get_request_tasks_async(
     async with _DB.execute_fetchall_async(*req_filter.build_query()) as rows:
         if not rows:
             return []
-    return [Request.from_row(row) for row in rows]
-
-
-@init_db_async
-@metrics_lib.time_me_async
-async def get_request_tasks_with_fields_async(
-    req_filter: RequestTaskFilter,
-    fields: Optional[List[str]] = None,
-) -> List[Request]:
-    """Async version of get_request_tasks."""
-    assert _DB is not None
-    async with _DB.execute_fetchall_async(*req_filter.build_query()) as rows:
-        if not rows:
-            return []
-    rows = [_update_request_row_fields(row, fields) for row in rows]
+    if req_filter.fields:
+        rows = [
+            _update_request_row_fields(row, req_filter.fields) for row in rows
+        ]
     return [Request.from_row(row) for row in rows]
 
 
