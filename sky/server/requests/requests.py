@@ -400,7 +400,8 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
         for request_task in get_request_tasks(req_filter=RequestTaskFilter(
             status=[RequestStatus.PENDING, RequestStatus.RUNNING],
             exclude_request_names=[exclude_request_name],
-            cluster_names=[cluster_name]))
+            cluster_names=[cluster_name],
+            fields=['request_id']))
     ]
     kill_requests(request_ids)
 
@@ -425,7 +426,8 @@ def kill_requests(request_ids: Optional[List[str]] = None,
                 status=[RequestStatus.PENDING, RequestStatus.RUNNING],
                 # Avoid cancelling the cancel request itself.
                 exclude_request_names=['sky.api_cancel'],
-                user_id=user_id))
+                user_id=user_id,
+                fields=['request_id']))
         ]
     cancelled_request_ids = []
     for request_id in request_ids:
@@ -949,11 +951,14 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
             req_filter=RequestTaskFilter(status=RequestStatus.finished_status(),
                                          finished_before=time.time() -
                                          retention_seconds,
-                                         limit=batch_size))
+                                         limit=batch_size,
+                                         fields=['request_id']))
         if len(reqs) == 0:
             break
         futs = []
         for req in reqs:
+            # req.log_path is derived from request_id,
+            # so it's ok to just grab the request_id in the above query.
             futs.append(
                 asyncio.create_task(
                     anyio.Path(
