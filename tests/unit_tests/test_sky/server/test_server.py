@@ -234,18 +234,26 @@ def test_server_run_uses_uvloop(mock_asyncio_run, mock_hijack_sys_attrs):
     uvloop_available = True
 
     def setup_and_check():
-        # Call original setup to configure event loop
-        original_setup()
-        # Check if uvloop policy is now set
-        nonlocal uvloop_policy_set, uvloop_available
-        import asyncio
+        # Save previous event loop policy
+        previous_policy = asyncio.get_event_loop_policy()
         try:
-            import uvloop
-            policy = asyncio.get_event_loop_policy()
-            uvloop_policy_set = isinstance(policy, uvloop.EventLoopPolicy)
-        except ImportError:
-            # uvloop not available
-            uvloop_available = False
+            # Call original setup to configure event loop
+            original_setup()
+            # Check if uvloop policy is now set
+            nonlocal uvloop_policy_set, uvloop_available
+            try:
+                import uvloop
+                policy = asyncio.get_event_loop_policy()
+                uvloop_policy_set = isinstance(policy, uvloop.EventLoopPolicy)
+            except ImportError:
+                # uvloop not available
+                uvloop_available = False
+        finally:
+            # Restore previous event loop policy
+            # This is needed because other tests/fixtures running on the same
+            # pytest worker may not work with the uvicorn event loop policy,
+            # such as _seed_test_jobs in test_managed_jobs_service.py
+            asyncio.set_event_loop_policy(previous_policy)
 
     with mock.patch.object(config,
                            'setup_event_loop',
