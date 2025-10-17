@@ -1,5 +1,6 @@
 import contextlib
 import enum
+import functools
 import inspect
 import json
 import os
@@ -8,8 +9,10 @@ import shlex
 import subprocess
 import sys
 import tempfile
-from typing import (Any, BinaryIO, Dict, Generator, List, NamedTuple, Optional,
-                    Sequence, Set, Tuple)
+import traceback
+from types import MethodType
+from typing import (Any, BinaryIO, Callable, Dict, Generator, List, NamedTuple,
+                    Optional, Sequence, Set, Tuple, Union)
 import uuid
 
 import colorama
@@ -329,7 +332,12 @@ class Test(NamedTuple):
     name: str
     # Each command is executed serially.  If any failed, the remaining commands
     # are not run and the test is treated as failed.
-    commands: List[str]
+    # Command can either be:
+    # - bash script (str), will be called as a subprocess via Popen.
+    # - a python Callable, will be executed directly. This is useful for testing
+    #   our python SDK in smoke test. The Callable can be generator to yield logs
+    #   that reflects current test status.
+    commands: List[Union[str, Callable[[], None]]]
     teardown: Optional[str] = None
     # Timeout for each command in seconds.
     timeout: int = DEFAULT_CMD_TIMEOUT
@@ -487,6 +495,53 @@ def override_sky_config(
         os.environ.update(env_before_override)
 
 
+def _resolve_callable(func):
+    seen = set()
+    while True:
+        if id(func) in seen:
+            break
+        seen.add(id(func))
+        if isinstance(func, functools.partial):
+            func = func.func
+            continue
+        if isinstance(func, MethodType):
+            func = func.__func__
+            continue
+        if (hasattr(func, '__call__') and not inspect.isfunction(func) and
+                not inspect.ismethod(func)):
+            func = func.__call__
+            continue
+        break
+    return func
+
+
+def get_callable_source(func):
+    target = _resolve_callable(func)
+    try:
+        src = inspect.getsource(target)
+    except (OSError, TypeError, IOError):
+        return None, None, None
+    try:
+        file = inspect.getsourcefile(target) or inspect.getfile(target)
+    except Exception:
+        file = None
+    try:
+        _, lineno = inspect.getsourcelines(target)
+    except Exception:
+        lineno = None
+    return file, lineno, src
+
+
+def ensure_iterable_result(func):
+    result = func()
+    if inspect.isgenerator(result):
+        return result
+    elif result is None:
+        return []
+    else:
+        return [result]
+
+
 def run_one_test(test: Test, check_sky_status: bool = True) -> None:
     # Fail fast if `sky` CLI somehow errors out.
     if check_sky_status:
@@ -514,6 +569,22 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
 
     with override_sky_config(test, env_dict, config_dict=test.config_dict):
         for command in test.commands:
+            if callable(command):
+                try:
+                    write(f'+ callable: {command!r}\n')
+                    flush()
+                    for output in ensure_iterable_result(command):
+                        write(str(output) + '\n')
+                        flush()
+                except Exception as e:
+                    file, lineno, src = get_callable_source(command)
+                    error_in_callable = f'Error executing callable command: {e} at {file}:{lineno}\ncode: {src}\ntraceback: {traceback.format_exc()}'
+                    test.echo(error_in_callable)
+                    write(error_in_callable + '\n')
+                    flush()
+                    proc.returncode = 1
+                    break
+                continue
             write(f'+ {command}\n')
             flush()
             proc = subprocess.Popen(
@@ -672,6 +743,12 @@ VALIDATE_LAUNCH_OUTPUT = (
     'echo "$s" | grep -A 5 "Job finished (status: SUCCEEDED)" | '
     'grep "Job ID:" && '
     'echo "$s" | grep -A 1 "Useful Commands" | grep "Job ID:"')
+
+VALIDATE_LAUNCH_OUTPUT_NO_PG_CONN_CLOSED_ERROR = (
+    VALIDATE_LAUNCH_OUTPUT +
+    ' && echo "==Validating no pg conn closed error==" && '
+    '! echo "$s" | grep -i "psycopg2.InterfaceError: connection already closed"'
+)
 
 _CLOUD_CMD_CLUSTER_NAME_SUFFIX = '-cloud-cmd'
 

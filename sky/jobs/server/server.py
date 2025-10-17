@@ -99,6 +99,8 @@ async def logs(
         # When refresh is specified, the job controller might be restarted,
         # which takes longer time to finish. We schedule it to long executor.
         schedule_type = api_requests.ScheduleType.LONG
+    if schedule_type == api_requests.ScheduleType.SHORT:
+        executor.check_request_thread_executor_available()
     request_task = executor.prepare_request(
         request_id=request.state.request_id,
         request_name='jobs.logs',
@@ -107,16 +109,16 @@ async def logs(
         schedule_type=schedule_type,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
     )
-    if schedule_type == api_requests.ScheduleType.LONG:
-        executor.schedule_prepared_request(request_task)
-    else:
+    if schedule_type == api_requests.ScheduleType.SHORT:
         # For short request, run in the coroutine to avoid blocking
         # short workers.
         task = executor.execute_request_in_coroutine(request_task)
         # Cancel the coroutine after the request is done or client disconnects
         background_tasks.add_task(task.cancel)
+    else:
+        executor.schedule_prepared_request(request_task)
 
-    return stream_utils.stream_response(
+    return stream_utils.stream_response_for_long_request(
         request_id=request_task.request_id,
         logs_path=request_task.log_path,
         background_tasks=background_tasks,
@@ -201,7 +203,7 @@ async def pool_tail_logs(
 
     request_task = api_requests.get_request(request.state.request_id)
 
-    return stream_utils.stream_response(
+    return stream_utils.stream_response_for_long_request(
         request_id=request_task.request_id,
         logs_path=request_task.log_path,
         background_tasks=background_tasks,

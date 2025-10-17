@@ -98,6 +98,9 @@ def reload_config() -> None:
     skypilot_config.safe_reload_config()
 
 
+# The overloads are not comprehensive - e.g. get_result Literal[False] could be
+# specified to return None. We can add more overloads if needed. To do that see
+# https://github.com/python/mypy/issues/8634#issuecomment-609411104
 @typing.overload
 def stream_response(request_id: None,
                     response: 'requests.Response',
@@ -112,7 +115,16 @@ def stream_response(request_id: server_common.RequestId[T],
                     response: 'requests.Response',
                     output_stream: Optional['io.TextIOBase'] = None,
                     resumable: bool = False,
-                    get_result: bool = True) -> T:
+                    get_result: Literal[True] = True) -> T:
+    ...
+
+
+@typing.overload
+def stream_response(request_id: server_common.RequestId[T],
+                    response: 'requests.Response',
+                    output_stream: Optional['io.TextIOBase'] = None,
+                    resumable: bool = False,
+                    get_result: bool = True) -> Optional[T]:
     ...
 
 
@@ -2158,7 +2170,9 @@ def _local_api_server_running(kill: bool = False) -> bool:
 def api_status(
     request_ids: Optional[List[Union[server_common.RequestId[T], str]]] = None,
     # pylint: disable=redefined-builtin
-    all_status: bool = False
+    all_status: bool = False,
+    limit: Optional[int] = None,
+    fields: Optional[List[str]] = None,
 ) -> List[payloads.RequestPayload]:
     """Lists all requests.
 
@@ -2167,6 +2181,8 @@ def api_status(
             If None, all requests are queried.
         all_status: Whether to list all finished requests as well. This argument
             is ignored if request_ids is not None.
+        limit: The number of requests to show. If None, show all requests.
+        fields: The fields to get. If None, get all fields.
 
     Returns:
         A list of request payloads.
@@ -2175,8 +2191,12 @@ def api_status(
         logger.info('SkyPilot API server is not running.')
         return []
 
-    body = payloads.RequestStatusBody(request_ids=request_ids,
-                                      all_status=all_status)
+    body = payloads.RequestStatusBody(
+        request_ids=request_ids,
+        all_status=all_status,
+        limit=limit,
+        fields=fields,
+    )
     response = server_common.make_authenticated_request(
         'GET',
         '/api/status',
@@ -2295,29 +2315,30 @@ def api_stop() -> None:
                 f'Cannot kill the API server at {server_url} because it is not '
                 f'the default SkyPilot API server started locally.')
 
-    try:
-        with open(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH),
-                  'r',
-                  encoding='utf-8') as f:
-            pids = f.read().split('\n')[:-1]
-            for pid in pids:
-                if subprocess_utils.is_process_alive(int(pid.strip())):
-                    subprocess_utils.kill_children_processes(
-                        parent_pids=[int(pid.strip())], force=True)
-        os.remove(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH))
-    except FileNotFoundError:
-        # its fine we will create it
-        pass
-    except Exception as e:  # pylint: disable=broad-except
-        # in case we get perm issues or something is messed up, just ignore it
-        # and assume the process is dead
-        logger.error(f'Error looking at job controller pid file: {e}')
-        pass
+    # Acquire the api server creation lock to prevent multiple processes from
+    # stopping and starting the API server at the same time.
+    with filelock.FileLock(
+            os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
+        try:
+            with open(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH),
+                      'r',
+                      encoding='utf-8') as f:
+                pids = f.read().split('\n')[:-1]
+                for pid in pids:
+                    if subprocess_utils.is_process_alive(int(pid.strip())):
+                        subprocess_utils.kill_children_processes(
+                            parent_pids=[int(pid.strip())], force=True)
+            os.remove(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH))
+        except FileNotFoundError:
+            # its fine we will create it
+            pass
+        except Exception as e:  # pylint: disable=broad-except
+            # in case we get perm issues or something is messed up, just ignore
+            # it and assume the process is dead
+            logger.error(f'Error looking at job controller pid file: {e}')
+            pass
 
-    found = _local_api_server_running(kill=True)
-
-    # Remove the database for requests.
-    server_common.clear_local_api_server_database()
+        found = _local_api_server_running(kill=True)
 
     if found:
         logger.info(f'{colorama.Fore.GREEN}SkyPilot API server stopped.'

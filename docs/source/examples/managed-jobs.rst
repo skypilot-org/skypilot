@@ -958,12 +958,12 @@ Best practices for scaling up the jobs controller
 
 The number of active jobs that the controller supports is based on the controller size. There are two limits that apply:
 
-- **Actively launching job count**: maxes out at ``8 * floor((memory - 2GiB) / 3.59GiB)``.
+- **Actively launching job count**: limit is ``8 * floor((memory - 2GiB) / 3.59GiB)``, with a maximum of 512 jobs.
   A job counts towards this limit when it is first starting, launching instances, or recovering.
 
   - The default controller size has 16 GiB memory, meaning **24 jobs** can be actively launching at once.
 
-- **Running job count**: maxes out at ``200 * floor((memory - 2GiB) / 3.59GiB)``.
+- **Running job count**: limit is ``200 * floor((memory - 2GiB) / 3.59GiB)``, with a maximum of 2000 jobs.
 
   - The default controller size supports up to **600 jobs** running in parallel.
 
@@ -1015,25 +1015,4 @@ For absolute maximum parallelism, the following per-cloud configurations are rec
 .. note::
   Remember to tear down your controller to apply these changes, as described above.
 
-With this configuration, you'll get the following performance:
-
-.. list-table::
-   :widths: 1 2 2 2
-   :header-rows: 1
-
-   * - Cloud
-     - Instance type
-     - Launches at once
-     - Running jobs
-   * - AWS
-     - m7i.48xlarge (~768GiB RAM)
-     - **~1,704**
-     - **~42,600**
-   * - GCP
-     - n2-standard-128 (~512GiB RAM)
-     - **~1,136**
-     - **~28,400**
-   * - Azure
-     - Standard_D96s_v5 (~384GiB RAM)
-     - **~848**
-     - **~21,200**
+With this configuration, you can launch up to 512 jobs at once. Once the jobs are launched, up to 2000 jobs can be running in parallel.

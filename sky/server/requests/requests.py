@@ -14,8 +14,8 @@ import sqlite3
 import threading
 import time
 import traceback
-from typing import (Any, AsyncContextManager, Callable, Dict, Generator, List,
-                    NamedTuple, Optional, Tuple)
+from typing import (Any, Callable, Dict, Generator, List, NamedTuple, Optional,
+                    Tuple)
 
 import anyio
 import colorama
@@ -32,6 +32,7 @@ from sky.server import daemons
 from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
+from sky.utils import asyncio_utils
 from sky.utils import common_utils
 from sky.utils import ux_utils
 from sky.utils.db import db_utils
@@ -292,6 +293,100 @@ class Request:
             raise
 
 
+def encode_requests(requests: List[Request]) -> List[payloads.RequestPayload]:
+    """Serialize the SkyPilot API request for display purposes.
+
+        This function should be called on the server side to serialize the
+        request body into human readable format, e.g., the entrypoint should
+        be a string, and the pid, error, or return value are not needed.
+
+        The returned value will then be displayed on the client side in request
+        table.
+
+        We do not use `encode` for display to avoid a large amount of data being
+        sent to the client side, especially for the request table could include
+        all the requests.
+        """
+    encoded_requests = []
+    all_users = global_user_state.get_all_users()
+    all_users_map = {user.id: user.name for user in all_users}
+    for request in requests:
+        if request.request_body is not None:
+            assert isinstance(request.request_body,
+                              payloads.RequestBody), (request.name,
+                                                      request.request_body)
+        user_name = all_users_map.get(request.user_id)
+        payload = payloads.RequestPayload(
+            request_id=request.request_id,
+            name=request.name,
+            entrypoint=request.entrypoint.__name__
+            if request.entrypoint is not None else '',
+            request_body=request.request_body.model_dump_json()
+            if request.request_body is not None else json.dumps(None),
+            status=request.status.value,
+            return_value=json.dumps(None),
+            error=json.dumps(None),
+            pid=None,
+            created_at=request.created_at,
+            schedule_type=request.schedule_type.value,
+            user_id=request.user_id,
+            user_name=user_name,
+            cluster_name=request.cluster_name,
+            status_msg=request.status_msg,
+            should_retry=request.should_retry,
+            finished_at=request.finished_at,
+        )
+        encoded_requests.append(payload)
+    return encoded_requests
+
+
+def _update_request_row_fields(
+        row: Tuple[Any, ...],
+        fields: Optional[List[str]] = None) -> Tuple[Any, ...]:
+    """Update the request row fields."""
+    if not fields:
+        return row
+
+    # Convert tuple to dictionary for easier manipulation
+    content = dict(zip(fields, row))
+
+    # Required fields in RequestPayload
+    if 'request_id' not in fields:
+        content['request_id'] = ''
+    if 'name' not in fields:
+        content['name'] = ''
+    if 'entrypoint' not in fields:
+        content['entrypoint'] = server_constants.EMPTY_PICKLED_VALUE
+    if 'request_body' not in fields:
+        content['request_body'] = server_constants.EMPTY_PICKLED_VALUE
+    if 'status' not in fields:
+        content['status'] = RequestStatus.PENDING.value
+    if 'created_at' not in fields:
+        content['created_at'] = 0
+    if 'user_id' not in fields:
+        content['user_id'] = ''
+    if 'return_value' not in fields:
+        content['return_value'] = json.dumps(None)
+    if 'error' not in fields:
+        content['error'] = json.dumps(None)
+    if 'schedule_type' not in fields:
+        content['schedule_type'] = ScheduleType.SHORT.value
+    # Optional fields in RequestPayload
+    if 'pid' not in fields:
+        content['pid'] = None
+    if 'cluster_name' not in fields:
+        content['cluster_name'] = None
+    if 'status_msg' not in fields:
+        content['status_msg'] = None
+    if 'should_retry' not in fields:
+        content['should_retry'] = False
+    if 'finished_at' not in fields:
+        content['finished_at'] = None
+
+    # Convert back to tuple in the same order as REQUEST_COLUMNS
+    return tuple(content[col] for col in REQUEST_COLUMNS)
+
+
 def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
     """Kill all pending and running requests for a cluster.
 
@@ -473,32 +568,25 @@ def request_lock_path(request_id: str) -> str:
 @metrics_lib.time_me
 def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
     """Get and update a SkyPilot API request."""
-    request = _get_request_no_lock(request_id)
-    yield request
-    if request is not None:
-        _add_or_update_request_no_lock(request)
+    # Acquire the lock to avoid race conditions between multiple request
+    # operations, e.g. execute and cancel.
+    with filelock.FileLock(request_lock_path(request_id)):
+        request = _get_request_no_lock(request_id)
+        yield request
+        if request is not None:
+            _add_or_update_request_no_lock(request)
 
 
 @init_db
 @metrics_lib.time_me
-def update_request_async(
-        request_id: str) -> AsyncContextManager[Optional[Request]]:
-    """Async version of update_request.
-
-    Returns an async context manager that yields the request record and
-    persists any in-place updates upon exit.
-    """
-
-    @contextlib.asynccontextmanager
-    async def _cm():
+@asyncio_utils.shield
+async def update_status_msg_async(request_id: str, status_msg: str) -> None:
+    """Update the status message of a request"""
+    async with filelock.AsyncFileLock(request_lock_path(request_id)):
         request = await _get_request_no_lock_async(request_id)
-        try:
-            yield request
-        finally:
-            if request is not None:
-                await _add_or_update_request_no_lock_async(request)
-
-    return _cm()
+        if request is not None:
+            request.status_msg = status_msg
+            await _add_or_update_request_no_lock_async(request)
 
 
 _get_request_sql = (f'SELECT {", ".join(REQUEST_COLUMNS)} FROM {REQUEST_TABLE} '
@@ -551,8 +639,10 @@ def get_request(request_id: str) -> Optional[Request]:
 
 @init_db_async
 @metrics_lib.time_me_async
+@asyncio_utils.shield
 async def get_request_async(request_id: str) -> Optional[Request]:
     """Async version of get_request."""
+    # TODO(aylei): figure out how to remove FileLock here to avoid the overhead
     async with filelock.AsyncFileLock(request_lock_path(request_id)):
         return await _get_request_no_lock_async(request_id)
 
@@ -604,6 +694,7 @@ def create_if_not_exists(request: Request) -> bool:
 
 @init_db_async
 @metrics_lib.time_me_async
+@asyncio_utils.shield
 async def create_if_not_exists_async(request: Request) -> bool:
     """Async version of create_if_not_exists."""
     async with filelock.AsyncFileLock(request_lock_path(request.request_id)):
@@ -628,6 +719,7 @@ class RequestTaskFilter:
             Mutually exclusive with exclude_request_names.
         finished_before: if provided, only include requests finished before this
             timestamp.
+        limit: the number of requests to show. If None, show all requests.
 
     Raises:
         ValueError: If both exclude_request_names and include_request_names are
@@ -639,6 +731,8 @@ class RequestTaskFilter:
     exclude_request_names: Optional[List[str]] = None
     include_request_names: Optional[List[str]] = None
     finished_before: Optional[float] = None
+    limit: Optional[int] = None
+    fields: Optional[List[str]] = None
 
     def __post_init__(self):
         if (self.exclude_request_names is not None and
@@ -681,8 +775,13 @@ class RequestTaskFilter:
         if filter_str:
             filter_str = f' WHERE {filter_str}'
         columns_str = ', '.join(REQUEST_COLUMNS)
-        return (f'SELECT {columns_str} FROM {REQUEST_TABLE}{filter_str} '
-                'ORDER BY created_at DESC'), filter_params
+        if self.fields:
+            columns_str = ', '.join(self.fields)
+        query_str = (f'SELECT {columns_str} FROM {REQUEST_TABLE}{filter_str} '
+                     'ORDER BY created_at DESC')
+        if self.limit is not None:
+            query_str += f' LIMIT {self.limit}'
+        return query_str, filter_params
 
 
 @init_db
@@ -713,6 +812,21 @@ async def get_request_tasks_async(
     async with _DB.execute_fetchall_async(*req_filter.build_query()) as rows:
         if not rows:
             return []
+    return [Request.from_row(row) for row in rows]
+
+
+@init_db_async
+@metrics_lib.time_me_async
+async def get_request_tasks_with_fields_async(
+    req_filter: RequestTaskFilter,
+    fields: Optional[List[str]] = None,
+) -> List[Request]:
+    """Async version of get_request_tasks."""
+    assert _DB is not None
+    async with _DB.execute_fetchall_async(*req_filter.build_query()) as rows:
+        if not rows:
+            return []
+    rows = [_update_request_row_fields(row, fields) for row in rows]
     return [Request.from_row(row) for row in rows]
 
 
@@ -781,9 +895,12 @@ def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
 
 
 def set_request_cancelled(request_id: str) -> None:
-    """Set a request to cancelled."""
+    """Set a pending or running request to cancelled."""
     with update_request(request_id) as request_task:
         assert request_task is not None, request_id
+        # Already finished or cancelled.
+        if request_task.status > RequestStatus.RUNNING:
+            return
         request_task.finished_at = time.time()
         request_task.status = RequestStatus.CANCELLED
 

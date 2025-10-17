@@ -25,7 +25,7 @@ import re
 import socket
 import subprocess
 import sys
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 import uuid
 
 import colorama
@@ -39,6 +39,7 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import runpod
 from sky.adaptors import seeweb as seeweb_adaptor
+from sky.adaptors import shadeform as shadeform_adaptor
 from sky.adaptors import vast
 from sky.provision.fluidstack import fluidstack_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -66,10 +67,7 @@ MAX_TRIALS = 64
 _SSH_KEY_PATH_PREFIX = '~/.sky/clients/{user_hash}/ssh'
 
 
-def get_ssh_key_and_lock_path(
-        user_hash: Optional[str] = None) -> Tuple[str, str, str]:
-    if user_hash is None:
-        user_hash = common_utils.get_user_hash()
+def get_ssh_key_and_lock_path(user_hash: str) -> Tuple[str, str, str]:
     user_ssh_key_prefix = _SSH_KEY_PATH_PREFIX.format(user_hash=user_hash)
 
     os.makedirs(os.path.expanduser(user_ssh_key_prefix),
@@ -125,52 +123,12 @@ def _save_key_pair(private_key_path: str, public_key_path: str,
               opener=functools.partial(os.open, mode=0o644)) as f:
         f.write(public_key)
 
-    global_user_state.set_ssh_keys(common_utils.get_user_hash(), public_key,
-                                   private_key)
-
 
 def get_or_generate_keys() -> Tuple[str, str]:
     """Returns the absolute private and public key paths."""
-    private_key_path, public_key_path, lock_path = get_ssh_key_and_lock_path()
-    private_key_path = os.path.expanduser(private_key_path)
-    public_key_path = os.path.expanduser(public_key_path)
-    lock_path = os.path.expanduser(lock_path)
-
-    lock_dir = os.path.dirname(lock_path)
-    # We should have the folder ~/.sky/generated/ssh to have 0o700 permission,
-    # as the ssh configs will be written to this folder as well in
-    # backend_utils.SSHConfigHelper
-    os.makedirs(lock_dir, exist_ok=True, mode=0o700)
-    with filelock.FileLock(lock_path, timeout=10):
-        if not os.path.exists(private_key_path):
-            ssh_public_key, ssh_private_key, exists = (
-                global_user_state.get_ssh_keys(common_utils.get_user_hash()))
-            if not exists:
-                ssh_public_key, ssh_private_key = _generate_rsa_key_pair()
-            _save_key_pair(private_key_path, public_key_path, ssh_private_key,
-                           ssh_public_key)
-    assert os.path.exists(public_key_path), (
-        'Private key found, but associated public key '
-        f'{public_key_path} does not exist.')
-    return private_key_path, public_key_path
-
-
-def create_ssh_key_files_from_db(private_key_path: Optional[str] = None):
-    if private_key_path is None:
-        user_hash = common_utils.get_user_hash()
-    else:
-        # Assume private key path is in the format of
-        # ~/.sky/clients/<user_hash>/ssh/sky-key
-        separated_path = os.path.normpath(private_key_path).split(os.path.sep)
-        assert separated_path[-1] == 'sky-key'
-        assert separated_path[-2] == 'ssh'
-        user_hash = separated_path[-3]
-
-    private_key_path_generated, public_key_path, lock_path = (
-        get_ssh_key_and_lock_path(user_hash))
-    assert private_key_path == os.path.expanduser(private_key_path_generated), (
-        f'Private key path {private_key_path} does not '
-        f'match the generated path {private_key_path_generated}')
+    user_hash = common_utils.get_user_hash()
+    private_key_path, public_key_path, lock_path = get_ssh_key_and_lock_path(
+        user_hash)
     private_key_path = os.path.expanduser(private_key_path)
     public_key_path = os.path.expanduser(public_key_path)
     lock_path = os.path.expanduser(lock_path)
@@ -185,12 +143,58 @@ def create_ssh_key_files_from_db(private_key_path: Optional[str] = None):
             ssh_public_key, ssh_private_key, exists = (
                 global_user_state.get_ssh_keys(user_hash))
             if not exists:
-                raise RuntimeError(f'SSH keys not found for user {user_hash}')
+                ssh_public_key, ssh_private_key = _generate_rsa_key_pair()
+                global_user_state.set_ssh_keys(user_hash, ssh_public_key,
+                                               ssh_private_key)
             _save_key_pair(private_key_path, public_key_path, ssh_private_key,
                            ssh_public_key)
     assert os.path.exists(public_key_path), (
         'Private key found, but associated public key '
         f'{public_key_path} does not exist.')
+    return private_key_path, public_key_path
+
+
+def create_ssh_key_files_from_db(private_key_path: str) -> bool:
+    """Creates the ssh key files from the database.
+
+    Returns:
+        True if the ssh key files are created successfully, False otherwise.
+    """
+    # Assume private key path is in the format of
+    # ~/.sky/clients/<user_hash>/ssh/sky-key
+    separated_path = os.path.normpath(private_key_path).split(os.path.sep)
+    assert separated_path[-1] == 'sky-key'
+    assert separated_path[-2] == 'ssh'
+    user_hash = separated_path[-3]
+
+    private_key_path_generated, public_key_path, lock_path = (
+        get_ssh_key_and_lock_path(user_hash))
+    assert private_key_path == os.path.expanduser(private_key_path_generated), (
+        f'Private key path {private_key_path} does not '
+        'match the generated path '
+        f'{os.path.expanduser(private_key_path_generated)}')
+    private_key_path = os.path.expanduser(private_key_path)
+    public_key_path = os.path.expanduser(public_key_path)
+    lock_path = os.path.expanduser(lock_path)
+
+    lock_dir = os.path.dirname(lock_path)
+    # We should have the folder ~/.sky/generated/ssh to have 0o700 permission,
+    # as the ssh configs will be written to this folder as well in
+    # backend_utils.SSHConfigHelper
+    os.makedirs(lock_dir, exist_ok=True, mode=0o700)
+    with filelock.FileLock(lock_path, timeout=10):
+        if not os.path.exists(private_key_path):
+            ssh_public_key, ssh_private_key, exists = (
+                global_user_state.get_ssh_keys(user_hash))
+            if not exists:
+                logger.debug(f'SSH keys not found for user {user_hash}')
+                return False
+            _save_key_pair(private_key_path, public_key_path, ssh_private_key,
+                           ssh_public_key)
+    assert os.path.exists(public_key_path), (
+        'Private key found, but associated public key '
+        f'{public_key_path} does not exist.')
+    return True
 
 
 def configure_ssh_info(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -512,6 +516,48 @@ def setup_hyperbolic_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     config.setdefault('auth', {})
     config['auth']['ssh_user'] = 'ubuntu'
     config['auth']['ssh_public_key'] = public_key_path
+
+    return configure_ssh_info(config)
+
+
+def setup_shadeform_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sets up SSH authentication for Shadeform.
+    - Generates a new SSH key pair if one does not exist.
+    - Adds the public SSH key to the user's Shadeform account.
+
+    Note: This assumes there is a Shadeform Python SDK available.
+    If no official SDK exists, this function would need to use direct API calls.
+    """
+
+    _, public_key_path = get_or_generate_keys()
+    ssh_key_id = None
+
+    with open(public_key_path, 'r', encoding='utf-8') as f:
+        public_key = f.read().strip()
+
+    try:
+        # Add SSH key to Shadeform using our utility functions
+        ssh_key_id = shadeform_adaptor.add_ssh_key_to_shadeform(public_key)
+
+    except ImportError as e:
+        # If required dependencies are missing
+        logger.warning(
+            f'Failed to add Shadeform SSH key due to missing dependencies: '
+            f'{e}. Manually configure SSH keys in your Shadeform account.')
+
+    except Exception as e:
+        logger.warning(f'Failed to set up Shadeform authentication: {e}')
+        raise exceptions.CloudUserIdentityError(
+            'Failed to set up SSH authentication for Shadeform. '
+            f'Please ensure your Shadeform credentials are configured: {e}'
+        ) from e
+
+    if ssh_key_id is None:
+        raise Exception('Failed to add SSH key to Shadeform')
+
+    # Configure SSH info in the config
+    config['auth']['ssh_public_key'] = public_key_path
+    config['auth']['ssh_key_id'] = ssh_key_id
 
     return configure_ssh_info(config)
 
