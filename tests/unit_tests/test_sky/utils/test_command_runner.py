@@ -2,7 +2,7 @@
 
 import os
 
-from sky import authentication
+from sky.utils import auth_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 
@@ -11,7 +11,7 @@ def test_docker_runner_passes_proxy_command_to_inner_hop() -> None:
     """Ensure docker-mode runners reuse user proxy for the host hop."""
     proxy_cmd = 'ssh -W %h:%p jump@host'
     user_hash = common_utils.get_user_hash()
-    private_key_path, _, _ = authentication.get_ssh_key_and_lock_path(user_hash)
+    private_key_path, _, _ = auth_utils.get_ssh_key_and_lock_path(user_hash)
 
     runner = command_runner.SSHCommandRunner(
         node=('10.0.0.5', 22),
