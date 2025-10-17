@@ -497,7 +497,8 @@ def create_table(cursor, conn):
     db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_FINISHED_AT,
                                  'REAL')
 
-    # Add an index on (status, name) to speed up queries that filter on these columns.
+    # Add an index on (status, name) to speed up queries
+    # that filter on these columns.
     cursor.execute(f"""\
         CREATE INDEX IF NOT EXISTS status_name_idx ON {REQUEST_TABLE} (status, name) WHERE status IN ('PENDING', 'RUNNING');
     """)
