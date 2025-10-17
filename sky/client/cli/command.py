@@ -3251,9 +3251,11 @@ def _down_or_stop_clusters(
                 request_id = sdk.autostop(name, idle_minutes_to_autostop,
                                           wait_for, down)
                 request_ids.append(request_id)
+                progress.stop()
                 _async_call_or_wait(
                     request_id, async_call,
                     server_constants.REQUEST_NAME_PREFIX + operation)
+                progress.start()
             except (exceptions.NotSupportedError, exceptions.ClusterNotUpError,
                     exceptions.CloudError) as e:
                 message = str(e)
@@ -3281,9 +3283,11 @@ def _down_or_stop_clusters(
                 else:
                     request_id = sdk.stop(name, purge=purge)
                 request_ids.append(request_id)
+                progress.stop()
                 _async_call_or_wait(
                     request_id, async_call,
                     server_constants.REQUEST_NAME_PREFIX + operation)
+                progress.start()
                 if not async_call:
                     # Remove the cluster from the SSH config file as soon as it
                     # is stopped or downed.
@@ -3317,6 +3321,10 @@ def _down_or_stop_clusters(
         progress.start()
 
     with progress:
+        # we write a new line here to avoid the "Waiting for 'sky.down'
+        # request to be scheduled" message from being printed on the same line
+        # as the "Terminating <num> clusters..." message
+        click.echo('')
         subprocess_utils.run_in_parallel(_down_or_stop, clusters)
         progress.live.transient = False
         # Make sure the progress bar not mess up the terminal.
