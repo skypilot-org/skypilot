@@ -1,5 +1,7 @@
 """Unit tests for sky.utils.command_runner."""
 
+import os
+
 from sky import authentication
 from sky.utils import command_runner
 from sky.utils import common_utils
@@ -14,7 +16,7 @@ def test_docker_runner_passes_proxy_command_to_inner_hop() -> None:
     runner = command_runner.SSHCommandRunner(
         node=('10.0.0.5', 22),
         ssh_user='ubuntu',
-        ssh_private_key=private_key_path,
+        ssh_private_key=os.path.expanduser(private_key_path),
         ssh_proxy_command=proxy_cmd,
         docker_user='container',
         ssh_control_name='unit-test-control',
