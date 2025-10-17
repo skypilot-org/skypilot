@@ -430,7 +430,7 @@ def _request_execution_wrapper(request_id: str,
         orig_sem_lock = synchronize.SemLock
         synchronize.Semaphore = _wrap_sem('Semaphore', orig_semaphore)
         synchronize.BoundedSemaphore = _wrap_sem('BoundedSemaphore', orig_bounded_semaphore)
-        synchronize.SemLock = _wrapper(orig_sem_lock)
+        synchronize.SemLock = _wrap_sem('SemLock', orig_sem_lock)
         initialized = True
     pid = multiprocessing.current_process().pid
     proc = psutil.Process(pid)
