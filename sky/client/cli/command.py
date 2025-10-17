@@ -166,8 +166,6 @@ def _get_cluster_records_and_set_ssh_config(
                             _include_credentials=True,
                             _summary_response=summary_response)
     cluster_records = sdk.stream_and_get(request_id)
-    if summary_response:
-        return cluster_records
     # Update the SSH config for all clusters
     for record in cluster_records:
         handle = record['handle']

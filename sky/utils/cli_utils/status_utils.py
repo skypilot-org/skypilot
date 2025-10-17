@@ -268,10 +268,6 @@ def _get_resources(cluster_record: _ClusterRecord,
         - For K8S/SSH: "Nx (...)"
         - "-" if no resource information is available
     """
-    key = 'resources_str' if truncate else 'resources_str_full'
-    if key in cluster_record:
-        return cluster_record[key]
-
     handle = cluster_record['handle']
     if isinstance(handle, backends.CloudVmRayResourceHandle):
         launched_resources = handle.launched_resources
