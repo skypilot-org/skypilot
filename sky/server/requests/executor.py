@@ -94,12 +94,11 @@ _REQUEST_THREAD_EXECUTOR_LOCK = threading.Lock()
 # 2. exhausting the default thread pool executor of event loop;
 _REQUEST_THREAD_EXECUTOR: Optional[threads.OnDemandThreadExecutor] = None
 
-import multiprocessing as mp
+from multiprocessing import synchronize
 
 import traceback
-import builtins
 
-_orig_Semaphore = mp.synchronize.Semaphore
+_orig_Semaphore = synchronize.Semaphore
 
 def debug_Semaphore(*args, **kwargs):
     sem = _orig_Semaphore(*args, **kwargs)
@@ -108,7 +107,7 @@ def debug_Semaphore(*args, **kwargs):
     return sem
 
 # Hijack the Semaphore constructor to log the stack trace when a Semaphore is created.
-mp.synchronize.Semaphore = debug_Semaphore
+synchronize.Semaphore = debug_Semaphore
 
 
 def get_request_thread_executor() -> threads.OnDemandThreadExecutor:
