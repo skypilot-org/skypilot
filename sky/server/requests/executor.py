@@ -408,6 +408,7 @@ def _wrapper(ctor):
         stack = ''.join(traceback.format_stack(limit=10))
         logger.info(f'[AYLEI DEBUG] Created SemLock sem_lock={obj}, args={args}, kwargs={kwargs}\n{stack}')
         return obj
+    return _wrap_sem_lock
 
 def _request_execution_wrapper(request_id: str,
                                ignore_return_value: bool,
