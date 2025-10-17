@@ -105,8 +105,8 @@ def _wrap_sem(name, ctor):
         logger.info(f'[AYLEI DEBUG] {name} CONSTRUCTOR CALLED')
         obj = ctor(*args, **kwargs)
         stack = ''.join(traceback.format_stack(limit=10))
-        name_attr = getattr(getattr(obj, '_semlock', None), '_name', None)
-        logger.info(f'[AYLEI DEBUG] Created {name} name={name_attr}\n{stack}')
+        semlock = getattr(obj, '_semlock', None)
+        logger.info(f'[AYLEI DEBUG] Created {name} sem_lock={semlock}\n{stack}')
         return obj
     return _wrapper
 
@@ -179,9 +179,10 @@ queue_backend = server_config.QueueBackend.MULTIPROCESSING
 def executor_initializer(proc_group: str):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
-    synchronize.Semaphore = _wrap_sem('Semaphore', _orig_Semaphore)
-    synchronize.BoundedSemaphore = _wrap_sem('BoundedSemaphore',
-                                         _orig_BoundedSemaphore)
+    orig_semaphore = synchronize.Semaphore
+    orig_bounded_semaphore = synchronize.BoundedSemaphore
+    synchronize.Semaphore = _wrap_sem('Semaphore', orig_semaphore)
+    synchronize.BoundedSemaphore = _wrap_sem('BoundedSemaphore', orig_bounded_semaphore)
     # Executor never stops, unless the whole process is killed.
     threading.Thread(target=metrics_lib.process_monitor,
                      args=(f'worker:{proc_group}', threading.Event()),
