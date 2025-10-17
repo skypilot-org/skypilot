@@ -470,16 +470,59 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
             set_api_cookie_jar(cookies, create_if_not_exists=True)
             return server_info
         except (requests.JSONDecodeError, AttributeError) as e:
+            expected_health_url = parse.urljoin(server_url.rstrip('/') + '/',
+                                                'api/health')
+            expected_parsed = parse.urlparse(expected_health_url)
+
+            def _matches_expected(url: str) -> bool:
+                if not url:
+                    return False
+                parsed_url = parse.urlparse(url)
+                if parsed_url.netloc != expected_parsed.netloc:
+                    return False
+                return parsed_url.path.rstrip('/') == expected_parsed.path.rstrip('/')
+
+            def _looks_like_auth_redirect(url: str,
+                                           location: Optional[str]) -> bool:
+                lower_url = (url or '').lower()
+                if any(key in lower_url for key in ('login', 'oauth2')):
+                    return True
+                if location and not _matches_expected(location):
+                    return True
+                return False
+
             # Try to check if we got redirected to a login page.
             for prev_response in response.history:
-                logger.debug(f'Previous response: {prev_response.url}')
-                # Heuristic: check if the url looks like a login page or
-                # oauth flow.
-                if any(key in prev_response.url for key in ['login', 'oauth2']):
-                    logger.debug(f'URL {prev_response.url} looks like '
-                                 'a login page or oauth flow, so try to '
-                                 'get the cookie.')
+                prev_url = getattr(prev_response, 'url', '') or ''
+                logger.debug(f'Previous response: {prev_url}')
+                location = ''
+                try:
+                    location = prev_response.headers.get('Location', '')
+                except Exception:  # pylint: disable=broad-except
+                    location = ''
+                if _looks_like_auth_redirect(prev_url, location):
+                    logger.debug('URL %s indicates authentication redirect; '
+                                 'forcing login flow.', prev_url)
                     return ApiServerInfo(status=ApiServerStatus.NEEDS_AUTH)
+                if getattr(prev_response, 'is_redirect', False) and not _matches_expected(
+                        prev_url):
+                    logger.debug('Redirected to %s during health check; '
+                                 'forcing login flow.', prev_url)
+                    return ApiServerInfo(status=ApiServerStatus.NEEDS_AUTH)
+
+            final_url = getattr(response, 'url', '') or ''
+            if final_url and not _matches_expected(final_url):
+                logger.debug('Health check ended at unexpected URL %s; '
+                             'forcing login flow.', final_url)
+                return ApiServerInfo(status=ApiServerStatus.NEEDS_AUTH)
+
+            content_type = response.headers.get('Content-Type', '')
+            if 'text/html' in content_type.lower():
+                logger.debug('Health check response content-type %s indicates '
+                             'HTML login page; forcing login flow.',
+                             content_type)
+                return ApiServerInfo(status=ApiServerStatus.NEEDS_AUTH)
+
             logger.warning('Failed to parse API server response: '
                            f'{str(e)}')
             return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
