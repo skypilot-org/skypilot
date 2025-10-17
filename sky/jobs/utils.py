@@ -2075,7 +2075,7 @@ class ManagedJobCodeGen:
                                 page={page!r},
                                 limit={limit!r},
                                 user_hashes={user_hashes!r})
-        elif managed_job_version < 11:
+        elif managed_job_version < 12:
             job_table = utils.dump_managed_job_queue(
                                 skip_finished={skip_finished},
                                 accessible_workspaces={accessible_workspaces!r},
