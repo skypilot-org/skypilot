@@ -615,6 +615,7 @@ Submit multiple jobs at once
 
 Pools support a :code:`--num-jobs` flag to conveniently submit multiple jobs at once.
 Each job will be assigned a unique environment variable :code:`$SKYPILOT_JOB_RANK`, which can be used to determine the job partition.
+Additionally, the :code:`$SKYPILOT_NUM_JOBS` environment variable will be set to the total number of jobs submitted.
 
 For example, if you have 1000 prompts to evaluate, each job can process prompts with sequence numbers
 :code:`$SKYPILOT_JOB_RANK * 100` to :code:`($SKYPILOT_JOB_RANK + 1) * 100`.
@@ -630,7 +631,7 @@ Here is a simple example:
     accelerators: {H100:1, H200:1}
 
   run: |
-    echo "Job rank: $SKYPILOT_JOB_RANK"
+    echo "Job rank: $SKYPILOT_JOB_RANK out of $SKYPILOT_NUM_JOBS"
     echo "Processing prompts from $(($SKYPILOT_JOB_RANK * 100)) to $((($SKYPILOT_JOB_RANK + 1) * 100))"
     # Actual business logic here...
     echo "Job $SKYPILOT_JOB_RANK finished"
