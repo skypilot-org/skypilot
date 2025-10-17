@@ -157,11 +157,31 @@ async def _tail_log_file(
     buffer: List[str] = []
     buffer_bytes = 0
     last_flush_time = asyncio.get_event_loop().time()
+    start_time = asyncio.get_event_loop().time()
+    flush_count = 0
+    total_bytes_sent = 0
+    
+    # Read file in chunks instead of line-by-line for better performance
+    read_chunk_size = 256 * 1024  # 256KB chunks for file reading
+    incomplete_line = b''  # Buffer for incomplete lines across chunks
+
+    logger.info(
+        f'[DEBUG _tail_log_file] Starting with BUFFER_SIZE={_BUFFER_SIZE}, '
+        f'BUFFER_TIMEOUT={_BUFFER_TIMEOUT}, follow={follow}')
 
     async def flush_buffer() -> AsyncGenerator[str, None]:
-        nonlocal buffer, buffer_bytes, last_flush_time
+        nonlocal buffer, buffer_bytes, last_flush_time, flush_count, total_bytes_sent
         if buffer:
-            yield ''.join(buffer)
+            chunk = ''.join(buffer)
+            chunk_size = len(chunk)
+            flush_count += 1
+            total_bytes_sent += chunk_size
+            if flush_count % 100 == 0:
+                elapsed = asyncio.get_event_loop().time() - start_time
+                logger.info(
+                    f'[DEBUG _tail_log_file] Flushed {flush_count} chunks, '
+                    f'{total_bytes_sent} bytes in {elapsed:.2f}s')
+            yield chunk
             buffer.clear()
             buffer_bytes = 0
             last_flush_time = asyncio.get_event_loop().time()
@@ -178,8 +198,23 @@ async def _tail_log_file(
             async for chunk in flush_buffer():
                 yield chunk
 
-        line: Optional[bytes] = await f.readline()
-        if not line:
+        # Read file in chunks for better I/O performance
+        file_chunk: bytes = await f.read(read_chunk_size)
+        if not file_chunk:
+            # Process any remaining incomplete line
+            if incomplete_line:
+                line_str = incomplete_line.decode('utf-8')
+                if plain_logs:
+                    is_payload, line_str = message_utils.decode_payload(
+                        line_str, raise_for_mismatch=False)
+                    if not is_payload:
+                        buffer.append(line_str)
+                        buffer_bytes += len(line_str.encode('utf-8'))
+                else:
+                    buffer.append(line_str)
+                    buffer_bytes += len(line_str.encode('utf-8'))
+                incomplete_line = b''
+            
             # Avoid checking the status too frequently to avoid overloading the
             # DB.
             should_check_status = (current_time -
@@ -247,20 +282,47 @@ async def _tail_log_file(
         # performance but it helps avoid unnecessary heartbeat strings
         # being printed when the client runs in an old version.
         last_heartbeat_time = asyncio.get_event_loop().time()
-        line_str = line.decode('utf-8')
-        if plain_logs:
-            is_payload, line_str = message_utils.decode_payload(
-                line_str, raise_for_mismatch=False)
-            # TODO(aylei): implement heartbeat mechanism for plain logs,
-            # sending invisible characters might be okay.
-            if is_payload:
-                continue
-        buffer.append(line_str)
-        buffer_bytes += len(line_str.encode('utf-8'))
+        
+        # Combine with any incomplete line from previous chunk
+        file_chunk = incomplete_line + file_chunk
+        incomplete_line = b''
+        
+        # Split chunk into lines, preserving line structure
+        lines = file_chunk.split(b'\n')
+        
+        # If chunk doesn't end with newline, the last element is incomplete
+        if file_chunk and not file_chunk.endswith(b'\n'):
+            incomplete_line = lines[-1]
+            lines = lines[:-1]
+        else:
+            # If ends with \n, split creates an empty last element we should ignore
+            if lines and lines[-1] == b'':
+                lines = lines[:-1]
+        
+        # Process all complete lines in this chunk
+        for line_bytes in lines:
+            # Reconstruct line with newline (since split removed it)
+            line_str = line_bytes.decode('utf-8') + '\n'
+            
+            if plain_logs:
+                is_payload, line_str = message_utils.decode_payload(
+                    line_str, raise_for_mismatch=False)
+                # TODO(aylei): implement heartbeat mechanism for plain logs,
+                # sending invisible characters might be okay.
+                if is_payload:
+                    continue
+            
+            buffer.append(line_str)
+            buffer_bytes += len(line_str.encode('utf-8'))
 
     # Flush remaining lines in the buffer.
     async for chunk in flush_buffer():
         yield chunk
+
+    elapsed = asyncio.get_event_loop().time() - start_time
+    logger.info(
+        f'[DEBUG _tail_log_file] Finished. Total flushes: {flush_count}, '
+        f'total bytes: {total_bytes_sent}, elapsed: {elapsed:.2f}s')
 
 
 def stream_response_for_long_request(
@@ -282,8 +344,9 @@ def stream_response(
 ) -> fastapi.responses.StreamingResponse:
 
     async def on_disconnect():
-        logger.info(f'User terminated the connection for request '
-                    f'{request_id}')
+        import time
+        logger.info(f'[DEBUG stream_utils] User terminated the connection for request '
+                    f'{request_id}, time: {time.time():.2f}')
         requests_lib.kill_requests([request_id])
 
     # The background task will be run after returning a response.

@@ -9,10 +9,14 @@ import os
 import pathlib
 import subprocess
 import sys
-from typing import (Any, Callable, Coroutine, Dict, Iterator, MutableMapping,
-                    Optional, TextIO, TYPE_CHECKING, TypeVar)
+
+from typing import (Any, Callable, Dict, Iterator, MutableMapping, Optional, TextIO,
+                    TYPE_CHECKING, TypeVar, Coroutine)
 
 from typing_extensions import ParamSpec
+
+from sky import sky_logging
+
 
 if TYPE_CHECKING:
     from sky.skypilot_config import ConfigContext
@@ -91,6 +95,8 @@ class SkyPilotContext(object):
         if log_file is None:
             self._log_file_handle = None
         else:
+            logger = sky_logging.init_logger(__name__)
+            logger.info(f'[DEBUG redirect_log] Starting server log write to {log_file}')
             self._log_file_handle = open(log_file, 'a', encoding='utf-8')
         self._log_file = log_file
         if original_log_handle is not None:

@@ -280,6 +280,8 @@ def generate_kind_config(port_start: int,
 
     config = textwrap.dedent(f"""
     apiVersion: kind.x-k8s.io/v1alpha4
+    networking:
+      apiServerAddress: "172.23.208.138"
     kind: Cluster
     kubeadmConfigPatches:
     - |

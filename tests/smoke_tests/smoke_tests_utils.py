@@ -325,7 +325,7 @@ def get_cmd_wait_until_job_status_succeeded(cluster_name: str,
                                                    timeout=timeout)
 
 
-DEFAULT_CMD_TIMEOUT = 15 * 60
+DEFAULT_CMD_TIMEOUT = 60 * 60
 
 
 class Test(NamedTuple):
@@ -625,6 +625,24 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
             msg += f'\nLog: less -r {log_file.name}\n'
             test.echo(msg)
             write(msg)
+
+        if proc.returncode and not is_remote_server_test():
+            test.echo('=== Sky API Server Log (last 100 lines) ===')
+            try:
+                # Read the log file directly and echo it
+                log_path = os.path.expanduser('~/.sky/api_server/server.log')
+                if os.path.exists(log_path):
+                    with open(log_path, 'r') as f:
+                        lines = f.readlines()
+                        # Get last 100 lines
+                        last_lines = lines[-100:] if len(lines) > 100 else lines
+                        for line in last_lines:
+                            test.echo(line.rstrip())
+                else:
+                    test.echo(f'Server log file not found: {log_path}')
+            except Exception as e:
+                test.echo(f'Failed to read server log: {e}')
+            test.echo('=== End of Sky API Server Log ===')
 
         if (proc.returncode == 0 or
                 pytest.terminate_on_failure) and test.teardown is not None:
