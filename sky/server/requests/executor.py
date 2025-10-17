@@ -101,6 +101,7 @@ import traceback
 _orig_Semaphore = synchronize.Semaphore
 
 def debug_Semaphore(*args, **kwargs):
+    logger.info(f"[AYLEI DEBUG] SEMAPHORE CONSTRUCTOR CALLED")
     sem = _orig_Semaphore(*args, **kwargs)
     stack = "".join(traceback.format_stack(limit=10))
     logger.info(f"[AYLEI DEBUG] Created semaphore name={getattr(sem._semlock, '_name', None)}\n{stack}")
