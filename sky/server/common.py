@@ -490,6 +490,7 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
 def handle_request_error(response: 'requests.Response') -> None:
     # Keep the original HTTPError if the response code >= 400
     response.raise_for_status()
+
     # Other status codes are not expected neither, e.g. we do not expect to
     # handle redirection here.
     if response.status_code != 200:

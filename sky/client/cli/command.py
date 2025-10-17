@@ -2150,6 +2150,12 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
               is_flag=True,
               default=False,
               help='Stream the cluster provisioning logs (provision.log).')
+@click.option('--worker',
+              '-w',
+              default=None,
+              type=int,
+              help='The worker ID to stream the logs from. '
+              'If not set, stream the logs of the head node.')
 @click.option(
     '--sync-down',
     '-s',
@@ -2187,6 +2193,7 @@ def logs(
     cluster: str,
     job_ids: Tuple[str, ...],
     provision: bool,
+    worker: Optional[int],
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
     follow: bool,
@@ -2216,6 +2223,13 @@ def logs(
     4. If the job fails or fetching the logs fails, the command will exit with
     a non-zero return code.
     """
+    if worker is not None:
+        if not provision:
+            raise click.UsageError(
+                '--worker can only be used with --provision.')
+        if worker < 1:
+            raise click.UsageError('--worker must be a positive integer.')
+
     if provision and (sync_down or status or job_ids):
         raise click.UsageError(
             '--provision cannot be combined with job log options '
@@ -2235,7 +2249,11 @@ def logs(
 
     if provision:
         # Stream provision logs
-        sys.exit(sdk.tail_provision_logs(cluster, follow=follow, tail=tail))
+        sys.exit(
+            sdk.tail_provision_logs(cluster_name=cluster,
+                                    worker=worker,
+                                    follow=follow,
+                                    tail=tail))
 
     if sync_down:
         with rich_utils.client_status(

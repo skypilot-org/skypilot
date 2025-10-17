@@ -925,6 +925,7 @@ def tail_logs(
 @annotations.client_api
 @rest.retry_transient_errors()
 def tail_provision_logs(cluster_name: str,
+                        worker: Optional[int] = None,
                         follow: bool = True,
                         tail: int = 0,
                         output_stream: Optional['io.TextIOBase'] = None) -> int:
@@ -932,17 +933,31 @@ def tail_provision_logs(cluster_name: str,
 
     Args:
         cluster_name: name of the cluster.
+        worker: worker id in multi-node cluster.
+             If None, stream the logs of the head node.
         follow: follow the logs.
         tail: lines from end to tail.
         output_stream: optional stream to write logs.
     Returns:
         Exit code 0 on streaming success; raises on HTTP error.
     """
-    body = payloads.ClusterNameBody(cluster_name=cluster_name)
+    body = payloads.ProvisionLogsBody(cluster_name=cluster_name)
+
+    if worker is not None:
+        remote_api_version = versions.get_remote_api_version()
+        if remote_api_version is not None and remote_api_version >= 21:
+            if worker < 1:
+                raise ValueError('Worker must be a positive integer.')
+            body.worker = worker
+        else:
+            raise exceptions.APINotSupportedError(
+                'Worker node provision logs are not supported in your API '
+                'server. Please upgrade to a newer API server to use it.')
     params = {
         'follow': str(follow).lower(),
         'tail': tail,
     }
+
     response = server_common.make_authenticated_request(
         'POST',
         '/provision_logs',
@@ -951,13 +966,21 @@ def tail_provision_logs(cluster_name: str,
         stream=True,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None))
+    # Check for HTTP errors before streaming the response
+    if response.status_code != 200:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.CommandError(response.status_code,
+                                          'tail_provision_logs',
+                                          'Failed to stream provision logs',
+                                          response.text)
+
     # Log request is idempotent when tail is 0, thus can resume previous
     # streaming point on retry.
     # request_id=None here because /provision_logs does not create an async
     # request. Instead, it streams a plain file from the server. This does NOT
     # violate the stream_response doc warning about None in multi-user
-    # environments: we are not asking stream_response to select “the latest
-    # request”. We already have the HTTP response to stream; request_id=None
+    # environments: we are not asking stream_response to select "the latest
+    # request". We already have the HTTP response to stream; request_id=None
     # merely disables the follow-up GET. It is also necessary for --no-follow
     # to return cleanly after printing the tailed lines. If we provided a
     # non-None request_id here, the get(request_id) in stream_response(

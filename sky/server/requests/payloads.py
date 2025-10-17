@@ -363,9 +363,10 @@ class CancelBody(RequestBody):
         return kwargs
 
 
-class ClusterNameBody(RequestBody):
+class ProvisionLogsBody(RequestBody):
     """Cluster node."""
     cluster_name: str
+    worker: Optional[int] = None
 
 
 class ClusterJobBody(RequestBody):
