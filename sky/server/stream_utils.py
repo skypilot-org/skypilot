@@ -305,9 +305,10 @@ async def _tail_log_file(
                             f' status for cluster {cluster_name} not found')
                         break
                     if cluster_status != status_lib.ClusterStatus.INIT:
-                        logger.debug(f'Stop tailing provision logs for cluster'
-                                    f' {cluster_name} has status {cluster_status} '
-                                    '(not in INIT state)')
+                        logger.debug(
+                            f'Stop tailing provision logs for cluster'
+                            f' {cluster_name} has status {cluster_status} '
+                            '(not in INIT state)')
             if current_time - last_heartbeat_time >= _HEARTBEAT_INTERVAL:
                 # Currently just used to keep the connection busy, refer to
                 # https://github.com/skypilot-org/skypilot/issues/5750 for
