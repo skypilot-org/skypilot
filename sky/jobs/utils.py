@@ -1621,6 +1621,7 @@ def _get_job_status_from_tasks(
 
 @typing.overload
 def format_job_table(tasks: List[Dict[str, Any]],
+                     pool_status: Optional[List[Dict[str, Any]]],
                      show_all: bool,
                      show_user: bool,
                      return_rows: Literal[False] = False,
@@ -1630,6 +1631,7 @@ def format_job_table(tasks: List[Dict[str, Any]],
 
 @typing.overload
 def format_job_table(tasks: List[Dict[str, Any]],
+                     pool_status: Optional[List[Dict[str, Any]]],
                      show_all: bool,
                      show_user: bool,
                      return_rows: Literal[True],
@@ -1639,6 +1641,7 @@ def format_job_table(tasks: List[Dict[str, Any]],
 
 def format_job_table(
         tasks: List[Dict[str, Any]],
+        pool_status: Optional[List[Dict[str, Any]]],
         show_all: bool,
         show_user: bool,
         return_rows: bool = False,
@@ -1666,6 +1669,30 @@ def format_job_table(
         if tasks_have_k8s_user:
             return (task['user'], task['job_id'])
         return task['job_id']
+
+    def get_job_id_to_worker_map(
+            pool_status: Optional[List[Dict[str, Any]]]) -> Dict[int, int]:
+        """Create a mapping from job_id to worker replica_id.
+
+        Args:
+            pool_status: List of pool status dictionaries with replica_info.
+
+        Returns:
+            Dictionary mapping job_id to replica_id (worker ID).
+        """
+        job_to_worker: Dict[int, int] = {}
+        if pool_status is None:
+            return job_to_worker
+        for pool in pool_status:
+            replica_info = pool.get('replica_info', [])
+            for replica in replica_info:
+                used_by = replica.get('used_by')
+                if used_by is not None:
+                    job_to_worker[used_by] = replica.get('replica_id')
+        return job_to_worker
+
+    # Create mapping from job_id to worker replica_id
+    job_to_worker = get_job_id_to_worker_map(pool_status)
 
     for task in tasks:
         # The tasks within the same job_id are already sorted
@@ -1808,7 +1835,12 @@ def format_job_table(
             if pool is None:
                 pool = '-'
 
+            # Add worker information if job is assigned to a worker
             job_id = job_hash[1] if tasks_have_k8s_user else job_hash
+            # job_id is now always an integer, use it to look up worker
+            if job_id in job_to_worker and pool != '-':
+                pool = f'{pool} (worker={job_to_worker[job_id]})'
+
             job_values = [
                 job_id,
                 '',
@@ -1851,6 +1883,12 @@ def format_job_table(
             pool = task.get('pool')
             if pool is None:
                 pool = '-'
+
+            # Add worker information if task is assigned to a worker
+            task_job_id = task['job_id']
+            if task_job_id in job_to_worker and pool != '-':
+                pool = f'{pool} (worker={job_to_worker[task_job_id]})'
+
             values = [
                 task['job_id'] if len(job_tasks) == 1 else ' \u21B3',
                 task['task_id'] if len(job_tasks) > 1 else '-',
