@@ -69,7 +69,8 @@ async def log_streamer(
         request_id: The request ID to check whether the log tailing process
             should be stopped.
         log_path: The path to the log file or directory containing the log
-        files.
+        files. If it is a directory, all *.log files in the directory will be
+        streamed.
         plain_logs: Whether to show plain logs.
         tail: The number of lines to tail. If None, tail the whole file.
         follow: Whether to follow the log file.
