@@ -20,4 +20,5 @@ Training
    Training on TPUs <tpu.md>
    Unsloth <unsloth.md>
    Verl (RLHF) <verl.md>
+   SkyRL <skyrl.md>
    Vertex AI <https://medium.com/google-cloud/streamline-ai-ml-model-development-on-gke-with-skypilot-and-vertex-ai-workbench-453729a8897c>
