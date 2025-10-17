@@ -2685,7 +2685,8 @@ def combine_pod_config_fields(
     cloud_str = 'ssh' if isinstance(cloud, clouds.SSH) else 'kubernetes'
     context_str = context
     if isinstance(cloud, clouds.SSH) and context is not None:
-        context_str = f'ssh-{context}'
+        assert context.startswith('ssh-'), 'SSH context must start with "ssh-"'
+        context_str = context[len('ssh-'):]
     kubernetes_config = skypilot_config.get_effective_region_config(
         cloud=cloud_str,
         region=context_str,
