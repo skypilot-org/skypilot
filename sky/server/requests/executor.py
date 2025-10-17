@@ -98,16 +98,22 @@ from multiprocessing import synchronize
 import traceback
 
 _orig_Semaphore = synchronize.Semaphore
+_orig_BoundedSemaphore = synchronize.BoundedSemaphore
 
-def debug_Semaphore(*args, **kwargs):
-    logger.info(f"[AYLEI DEBUG] SEMAPHORE CONSTRUCTOR CALLED")
-    sem = _orig_Semaphore(*args, **kwargs)
-    stack = "".join(traceback.format_stack(limit=10))
-    logger.info(f"[AYLEI DEBUG] Created semaphore name={getattr(sem._semlock, '_name', None)}\n{stack}")
-    return sem
+def _wrap_sem(name, ctor):
+    def _wrapper(*args, **kwargs):
+        logger.info(f'[AYLEI DEBUG] {name} CONSTRUCTOR CALLED')
+        obj = ctor(*args, **kwargs)
+        stack = ''.join(traceback.format_stack(limit=10))
+        name_attr = getattr(getattr(obj, '_semlock', None), '_name', None)
+        logger.info(f'[AYLEI DEBUG] Created {name} name={name_attr}\n{stack}')
+        return obj
+    return _wrapper
 
 # Hijack the Semaphore constructor to log the stack trace when a Semaphore is created.
-synchronize.Semaphore = debug_Semaphore
+synchronize.Semaphore = _wrap_sem('Semaphore', _orig_Semaphore)
+synchronize.BoundedSemaphore = _wrap_sem('BoundedSemaphore',
+                                         _orig_BoundedSemaphore)
 
 
 def get_request_thread_executor() -> threads.OnDemandThreadExecutor:
@@ -173,6 +179,9 @@ queue_backend = server_config.QueueBackend.MULTIPROCESSING
 def executor_initializer(proc_group: str):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
+    synchronize.Semaphore = _wrap_sem('Semaphore', _orig_Semaphore)
+    synchronize.BoundedSemaphore = _wrap_sem('BoundedSemaphore',
+                                         _orig_BoundedSemaphore)
     # Executor never stops, unless the whole process is killed.
     threading.Thread(target=metrics_lib.process_monitor,
                      args=(f'worker:{proc_group}', threading.Event()),
