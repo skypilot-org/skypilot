@@ -184,6 +184,7 @@ extras_require: Dict[str, List[str]] = {
     'docker': ['docker'] + local_ray,
     'lambda': [],  # No dependencies needed for lambda
     'cloudflare': aws_dependencies,
+    'cloudrift': [], # No dependencies needed for cloudrift
     'scp': local_ray,
     'oci': ['oci'],
     # Kubernetes 32.0.0 has an authentication bug: https://github.com/kubernetes-client/python/issues/2333 # pylint: disable=line-too-long
