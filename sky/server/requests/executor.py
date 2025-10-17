@@ -179,10 +179,6 @@ queue_backend = server_config.QueueBackend.MULTIPROCESSING
 def executor_initializer(proc_group: str):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
-    orig_semaphore = synchronize.Semaphore
-    orig_bounded_semaphore = synchronize.BoundedSemaphore
-    synchronize.Semaphore = _wrap_sem('Semaphore', orig_semaphore)
-    synchronize.BoundedSemaphore = _wrap_sem('BoundedSemaphore', orig_bounded_semaphore)
     # Executor never stops, unless the whole process is killed.
     threading.Thread(target=metrics_lib.process_monitor,
                      args=(f'worker:{proc_group}', threading.Event()),
@@ -403,6 +399,7 @@ def override_request_env_and_config(
 def _sigterm_handler(signum: int, frame: Optional['types.FrameType']) -> None:
     raise KeyboardInterrupt
 
+initialized = False
 
 def _request_execution_wrapper(request_id: str,
                                ignore_return_value: bool,
@@ -417,6 +414,13 @@ def _request_execution_wrapper(request_id: str,
     4. Handle the SIGTERM signal to abort the request gracefully.
     5. Maintain the lifecycle of the temp dir used by the request.
     """
+    global initialized
+    if not initialized:
+        orig_semaphore = synchronize.Semaphore
+        orig_bounded_semaphore = synchronize.BoundedSemaphore
+        synchronize.Semaphore = _wrap_sem('Semaphore', orig_semaphore)
+        synchronize.BoundedSemaphore = _wrap_sem('BoundedSemaphore', orig_bounded_semaphore)
+        initialized = True
     pid = multiprocessing.current_process().pid
     proc = psutil.Process(pid)
     rss_begin = proc.memory_info().rss
