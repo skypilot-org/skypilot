@@ -1483,7 +1483,8 @@ def test_update_request(isolated_database):
     assert sync_results[0].status == RequestStatus.RUNNING
     assert sync_results[1].name == test_requests[1].name
     assert sync_results[1].status == RequestStatus.SUCCEEDED
-
+    assert sync_results[0].error is None
+    assert sync_results[1].error is None
     # Test the update_request with two fields set.
     finished_time = time.time()
     request = requests.update_request(request_id=test_requests[1].request_id,
@@ -1676,46 +1677,6 @@ def test_set_request_failed(isolated_database):
     assert updated_request.error['type'] == 'ValueError'
     assert updated_request.error['message'] == 'Test error'
     assert updated_request.error['object'] is not None
-
-    test_request_2 = requests.Request(request_id='test-request-id-2',
-                                      name='test-name',
-                                      entrypoint=dummy,
-                                      request_body=payloads.RequestBody(),
-                                      status=RequestStatus.PENDING,
-                                      created_at=current_time - 10,
-                                      user_id='user-1',
-                                      cluster_name='cluster-1')
-    requests.create_if_not_exists(test_request_2)
-
-    test_request_2_updated = requests.get_request('test-request-id-2')
-    test_request_2_updated.pid = 12345
-    assert requests.get_request('test-request-id-2').pid == None
-    assert test_request_2.pid == None
-
-    # Create test request
-    with mock.patch(
-            'sky.server.requests.requests._get_request_no_lock',
-            return_value=test_request_2,
-            # simulate a race condition where the request in DB
-            # was updated after the initial read in _update_request.
-            side_effect=requests._update_request(test_request_2_updated,
-                                                 fields=['pid']),
-    ) as mock_get_request_no_lock:
-        # test set request failed
-        requests.set_request_failed('test-request-id-2',
-                                    ValueError('Test error'))
-        mock_get_request_no_lock.assert_called_once_with('test-request-id-2')
-        # verify the request was updated correctly
-    updated_request = requests.get_request('test-request-id-2')
-    assert updated_request.status == RequestStatus.FAILED
-    assert updated_request.finished_at is not None
-    assert updated_request.error is not None
-    assert updated_request.error['type'] == 'ValueError'
-    assert updated_request.error['message'] == 'Test error'
-    assert updated_request.error['object'] is not None
-    # make sure that _update_request does not rollback database changes
-    # that happened after the initial read in _update_request.
-    assert updated_request.pid == 12345
 
 
 def test_set_request_succeeded(isolated_database):

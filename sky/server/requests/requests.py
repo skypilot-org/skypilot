@@ -108,6 +108,17 @@ class ScheduleType(enum.Enum):
     SHORT = 'short'
 
 
+def _serialize_error(error: BaseException) -> Dict[str, Any]:
+    """Serialize an error into a dictionary."""
+    # TODO(zhwu): pickle.dump does not work well with custom exceptions if
+    # it has more than 1 arguments.
+    serialized = exceptions.serialize_exception(error)
+    return {
+        'object': encoders.pickle_and_encode(serialized),
+        'type': type(error).__name__,
+        'message': str(error),
+    }
+
 @dataclasses.dataclass
 class Request:
     """A SkyPilot API request."""
@@ -143,14 +154,7 @@ class Request:
 
     def set_error(self, error: BaseException) -> None:
         """Set the error."""
-        # TODO(zhwu): pickle.dump does not work well with custom exceptions if
-        # it has more than 1 arguments.
-        serialized = exceptions.serialize_exception(error)
-        self.error = {
-            'object': encoders.pickle_and_encode(serialized),
-            'type': type(error).__name__,
-            'message': str(error),
-        }
+        self.error = _serialize_error(error)
 
     def get_error(self) -> Optional[Dict[str, Any]]:
         """Get the error."""
@@ -609,6 +613,7 @@ def update_request(
     set_pid: Optional[int] = None,
     unset_pid: bool = False,
     set_finished_at: Optional[float] = None,
+    set_error: Optional[BaseException] = None,
     match_status: Optional[List[RequestStatus]] = None,
 ) -> Optional[Request]:
     """Update a SkyPilot API request in the database."""
@@ -631,6 +636,9 @@ def update_request(
     if set_finished_at is not None:
         filter_statements.append('finished_at = ?')
         update_params.append(set_finished_at)
+    if set_error is not None:
+        filter_statements.append('error = ?')
+        update_params.append(json.dumps(_serialize_error(set_error)))
     update_statement += f'{", ".join(filter_statements)} '
     update_statement += 'WHERE request_id = ? '
     update_params.append(request_id)
@@ -941,13 +949,10 @@ def set_request_failed(request_id: str, e: BaseException) -> None:
     with ux_utils.enable_traceback():
         stacktrace = traceback.format_exc()
     setattr(e, 'stacktrace', stacktrace)
-    request = _get_request_no_lock(request_id)
-    if request is None:
-        return
-    request.status = RequestStatus.FAILED
-    request.finished_at = time.time()
-    request.set_error(e)
-    _update_request(request, fields=['status', 'finished_at', 'error'])
+    update_request(request_id, 
+                set_status=RequestStatus.FAILED,
+                set_finished_at=time.time(), 
+                set_error=e)
 
 
 def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
