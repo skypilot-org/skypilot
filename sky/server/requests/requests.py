@@ -408,11 +408,13 @@ def kill_requests_with_prefixes(request_id_prefixes: Optional[List[str]] = None,
     """Kill requests with the given prefixes."""
     if request_id_prefixes is None:
         return _kill_requests(user_id=user_id)
-    # get the full request IDs from the prefixes
-    request_ids = [
-        get_request(request_id_prefix).request_id
-        for request_id_prefix in request_id_prefixes
-    ]
+    request_ids = []
+    for request_id_prefix in request_id_prefixes:
+        request = get_request(request_id_prefix)
+        if request is None:
+            logger.warning(f'No request ID found with prefix {request_id_prefix}')
+            continue
+        request_ids.append(request.request_id)
     return _kill_requests(request_ids, user_id=user_id)
 
 
