@@ -748,6 +748,7 @@ class RequestTaskFilter:
     finished_before: Optional[float] = None
     limit: Optional[int] = None
     fields: Optional[List[str]] = None
+    sort: bool = False
 
     def __post_init__(self):
         if (self.exclude_request_names is not None and
@@ -792,8 +793,11 @@ class RequestTaskFilter:
         columns_str = ', '.join(REQUEST_COLUMNS)
         if self.fields:
             columns_str = ', '.join(self.fields)
-        query_str = (f'SELECT {columns_str} FROM {REQUEST_TABLE}{filter_str} '
-                     'ORDER BY created_at DESC')
+        sort_str = ''
+        if self.sort:
+            sort_str = ' ORDER BY created_at DESC'
+        query_str = (f'SELECT {columns_str} FROM {REQUEST_TABLE}{filter_str}'
+                     f'{sort_str}')
         if self.limit is not None:
             query_str += f' LIMIT {self.limit}'
         return query_str, filter_params
