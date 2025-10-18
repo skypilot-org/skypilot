@@ -1370,12 +1370,21 @@ def get_config_schema():
                         'type': 'string',
                     },
                 },
-                'pod_config': {
+                'context_configs': {
                     'type': 'object',
                     'required': [],
-                    # Allow arbitrary keys since validating pod spec is hard
-                    'additionalProperties': True,
+                    'properties': {},
+                    # Properties are kubernetes context names.
+                    'additionalProperties': {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            **_CONTEXT_CONFIG_SCHEMA_KUBERNETES,
+                        },
+                    },
                 },
+                **_CONTEXT_CONFIG_SCHEMA_KUBERNETES,
             }
         },
         'oci': {
