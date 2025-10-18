@@ -45,6 +45,7 @@ import { statusGroups } from './jobs'; // Import statusGroups
 import yaml from 'js-yaml';
 import { CLOUD_CANONICALIZATIONS } from '@/data/connectors/constants';
 import { getUsers } from '@/data/connectors/users';
+import { dashboardCache } from '@/lib/cache';
 
 // Success display component
 const SuccessDisplay = ({ message }) => {
@@ -360,9 +361,16 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     try {
       const [clustersResponse, managedJobsResponse, enabledClouds] =
         await Promise.all([
-          getClusters(),
-          getManagedJobs({ allUsers: true }),
-          getEnabledClouds(workspaceName, true),
+          dashboardCache.get(getClusters),
+          dashboardCache.get(getManagedJobs, [
+            {
+              allUsers: true,
+              skipFinished: true,
+              workspaceMatch: workspaceName,
+              fields: ['workspace', 'status'],
+            },
+          ]),
+          dashboardCache.get(getEnabledClouds, [workspaceName, true]),
         ]);
 
       // Filter clusters for this workspace
@@ -388,16 +396,11 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
       let managedJobsCount = 0;
 
       jobs.forEach((job) => {
-        const jobClusterName =
-          job.cluster_name || (job.resources && job.resources.cluster_name);
-        if (jobClusterName) {
-          const jobWorkspace = clusterNameToWorkspace[jobClusterName];
-          if (
-            jobWorkspace === workspaceName &&
-            activeJobStatuses.has(job.status)
-          ) {
-            managedJobsCount++;
-          }
+        if (
+          job.workspace === workspaceName &&
+          activeJobStatuses.has(job.status)
+        ) {
+          managedJobsCount++;
         }
       });
 

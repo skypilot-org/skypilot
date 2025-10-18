@@ -9,7 +9,7 @@ export async function getCloudInfrastructure(forceRefresh = false) {
   const { getManagedJobs } = await import('@/data/connectors/jobs');
   try {
     const jobsData = await dashboardCache.get(getManagedJobs, [
-      { allUsers: true },
+      { allUsers: true, skipFinished: true, fields: ['cloud', 'region'] },
     ]);
     const jobs = jobsData?.jobs || [];
     const clustersData = await dashboardCache.get(getClusters);

@@ -663,12 +663,13 @@ def queue_v2_api(
     page: Optional[int] = None,
     limit: Optional[int] = None,
     statuses: Optional[List[str]] = None,
+    fields: Optional[List[str]] = None,
 ) -> Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int]:
     """Gets statuses of managed jobs and parse the
     jobs to responses.ManagedJobRecord."""
     jobs, total, status_counts, total_no_filter = queue_v2(
         refresh, skip_finished, all_users, job_ids, user_match, workspace_match,
-        name_match, pool_match, page, limit, statuses)
+        name_match, pool_match, page, limit, statuses, fields)
     return [responses.ManagedJobRecord(**job) for job in jobs
            ], total, status_counts, total_no_filter
 
@@ -686,6 +687,7 @@ def queue_v2(
     page: Optional[int] = None,
     limit: Optional[int] = None,
     statuses: Optional[List[str]] = None,
+    fields: Optional[List[str]] = None,
 ) -> Tuple[List[Dict[str, Any]], int, Dict[str, int], int]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets statuses of managed jobs with filtering.
@@ -790,7 +792,7 @@ def queue_v2(
     with metrics_lib.time_it('jobs.queue.generate_code', group='jobs'):
         code = managed_job_utils.ManagedJobCodeGen.get_job_table(
             skip_finished, accessible_workspaces, job_ids, workspace_match,
-            name_match, pool_match, page, limit, user_hashes, statuses)
+            name_match, pool_match, page, limit, user_hashes, statuses, fields)
     with metrics_lib.time_it('jobs.queue.run_on_head', group='jobs'):
         returncode, job_table_payload, stderr = backend.run_on_head(
             handle,

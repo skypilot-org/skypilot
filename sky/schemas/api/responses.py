@@ -160,6 +160,8 @@ class StorageRecord(ResponseBaseModel):
 # and therefore can be non-optional.
 class ManagedJobRecord(ResponseBaseModel):
     """A single managed job record."""
+    # The job_id in the spot table
+    task_job_id: Optional[int] = pydantic.Field(None, alias='_job_id')
     job_id: Optional[int] = None
     task_id: Optional[int] = None
     job_name: Optional[str] = None

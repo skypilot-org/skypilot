@@ -25,11 +25,7 @@ import {
   renderPoolLink,
 } from '@/components/utils';
 import { UI_CONFIG } from '@/lib/config';
-import {
-  getManagedJobs,
-  getManagedJobsWithClientPagination,
-  getPoolStatus,
-} from '@/data/connectors/jobs';
+import { getPoolStatus } from '@/data/connectors/jobs';
 import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { getClusters, downloadJobLogs } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
