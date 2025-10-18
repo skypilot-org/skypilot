@@ -1106,10 +1106,11 @@ def test_combine_pod_config_fields_ssh_cloud():
     ssh_cloud = clouds.SSH()
     cluster_config_overrides = {}
 
-    with patch('sky.utils.skypilot_config.get_effective_region_config',
+    with patch('sky.skypilot_config.get_effective_region_config',
                return_value={}):
-        result = utils.combine_pod_config_fields(
-            cluster_yaml_obj, cluster_config_overrides, cloud=ssh_cloud)
+        result = utils.combine_pod_config_fields(cluster_yaml_obj,
+                                                 cluster_config_overrides,
+                                                 cloud=ssh_cloud)
         assert result is not None
         assert 'available_node_types' in result
 
@@ -1123,35 +1124,35 @@ def test_combine_pod_config_fields_ssh_cloud():
         }
     }
 
-    with patch('sky.utils.skypilot_config.get_effective_region_config') as mock_get_config:
+    with patch('sky.skypilot_config.get_effective_region_config'
+              ) as mock_get_config:
         mock_get_config.return_value = pod_config_for_context
-        result = utils.combine_pod_config_fields(
-            cluster_yaml_obj,
-            cluster_config_overrides,
-            cloud=ssh_cloud,
-            context=ssh_context)
+        result = utils.combine_pod_config_fields(cluster_yaml_obj,
+                                                 cluster_config_overrides,
+                                                 cloud=ssh_cloud,
+                                                 context=ssh_context)
 
         # Verify that get_effective_region_config was called with 'ssh' cloud
         # and context without the "ssh-" prefix
-        mock_get_config.assert_called_once_with(
-            cloud='ssh',
-            region='my-cluster',
-            keys=('pod_config',),
-            default_value={})
+        mock_get_config.assert_called_once_with(cloud='ssh',
+                                                region='my-cluster',
+                                                keys=('pod_config',),
+                                                default_value={})
 
         # Verify the pod config was merged
-        node_config = result['available_node_types']['ray_head_default']['node_config']
+        node_config = result['available_node_types']['ray_head_default'][
+            'node_config']
         assert 'imagePullSecrets' in node_config['spec']
         assert node_config['spec']['imagePullSecrets'][0]['name'] == 'my-secret'
 
     # Test 3: SSH cloud with context that doesn't start with "ssh-" should raise assertion
     invalid_context = 'my-cluster'
-    with pytest.raises(AssertionError, match='SSH context must start with "ssh-"'):
-        utils.combine_pod_config_fields(
-            cluster_yaml_obj,
-            cluster_config_overrides,
-            cloud=ssh_cloud,
-            context=invalid_context)
+    with pytest.raises(AssertionError,
+                       match='SSH context must start with "ssh-"'):
+        utils.combine_pod_config_fields(cluster_yaml_obj,
+                                        cluster_config_overrides,
+                                        cloud=ssh_cloud,
+                                        context=invalid_context)
 
 
 def test_combine_pod_config_fields_kubernetes_cloud():
@@ -1178,31 +1179,25 @@ def test_combine_pod_config_fields_kubernetes_cloud():
     k8s_cloud = clouds.Kubernetes()
     k8s_context = 'my-k8s-cluster'
     cluster_config_overrides = {}
-    pod_config_for_context = {
-        'spec': {
-            'nodeSelector': {
-                'gpu': 'true'
-            }
-        }
-    }
+    pod_config_for_context = {'spec': {'nodeSelector': {'gpu': 'true'}}}
 
-    with patch('sky.utils.skypilot_config.get_effective_region_config') as mock_get_config:
+    with patch('sky.utils.skypilot_config.get_effective_region_config'
+              ) as mock_get_config:
         mock_get_config.return_value = pod_config_for_context
-        result = utils.combine_pod_config_fields(
-            cluster_yaml_obj,
-            cluster_config_overrides,
-            cloud=k8s_cloud,
-            context=k8s_context)
+        result = utils.combine_pod_config_fields(cluster_yaml_obj,
+                                                 cluster_config_overrides,
+                                                 cloud=k8s_cloud,
+                                                 context=k8s_context)
 
         # Verify that get_effective_region_config was called with 'kubernetes' cloud
         # and the context as-is
-        mock_get_config.assert_called_once_with(
-            cloud='kubernetes',
-            region=k8s_context,
-            keys=('pod_config',),
-            default_value={})
+        mock_get_config.assert_called_once_with(cloud='kubernetes',
+                                                region=k8s_context,
+                                                keys=('pod_config',),
+                                                default_value={})
 
         # Verify the pod config was merged
-        node_config = result['available_node_types']['ray_head_default']['node_config']
+        node_config = result['available_node_types']['ray_head_default'][
+            'node_config']
         assert 'nodeSelector' in node_config['spec']
         assert node_config['spec']['nodeSelector']['gpu'] == 'true'
