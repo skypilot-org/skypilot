@@ -146,7 +146,7 @@ def test_api_cancel_race_condition(isolated_database):
     assert requests_lib.create_if_not_exists(req) is True
 
     # Cancel the request before the executor starts.
-    cancelled = requests_lib.kill_requests(['race-cancel-before'])
+    cancelled = requests_lib.kill_requests_with_prefixes(['race-cancel-before'])
     assert cancelled == ['race-cancel-before']
 
     # Execute wrapper should detect CANCELLED and return immediately.

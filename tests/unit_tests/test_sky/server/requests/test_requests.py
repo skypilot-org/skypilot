@@ -7,6 +7,7 @@ import unittest.mock as mock
 import filelock
 import pytest
 
+from sky.server import daemons
 from sky.server.requests import payloads
 from sky.server.requests import requests
 from sky.server.requests.requests import RequestStatus
@@ -34,6 +35,19 @@ def isolated_database(tmp_path):
             yield
             # Clean up after the test
             requests._DB = None
+
+
+def test_create_if_not_exists_already_exists(isolated_database):
+    request = requests.Request(request_id='test-request-1',
+                               name='test-request',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.RUNNING,
+                               created_at=0.0,
+                               finished_at=0.0,
+                               user_id='test-user')
+    assert requests.create_if_not_exists(request) is True
+    assert requests.create_if_not_exists(request) is False
 
 
 def test_set_request_failed(isolated_database):
@@ -378,52 +392,6 @@ async def test_get_request_async_nonexistent(isolated_database):
 
 
 @pytest.mark.asyncio
-async def test_create_if_not_exists_async(isolated_database):
-    """Test creating a request asynchronously if it doesn't exist."""
-    request = requests.Request(request_id='test-request-async-create-1',
-                               name='test-request',
-                               entrypoint=dummy,
-                               request_body=payloads.RequestBody(),
-                               status=RequestStatus.PENDING,
-                               created_at=time.time(),
-                               user_id='test-user')
-
-    # Create the request asynchronously
-    created = await requests.create_if_not_exists_async(request)
-
-    # Verify the request was created
-    assert created is True
-
-    # Verify we can retrieve it
-    retrieved_request = await requests.get_request_async(
-        'test-request-async-create-1')
-    assert retrieved_request is not None
-    assert retrieved_request.request_id == 'test-request-async-create-1'
-    assert retrieved_request.name == 'test-request'
-    assert retrieved_request.status == RequestStatus.PENDING
-
-
-@pytest.mark.asyncio
-async def test_create_if_not_exists_async_already_exists(isolated_database):
-    """Test creating a request asynchronously when it already exists."""
-    request = requests.Request(request_id='test-request-async-create-2',
-                               name='test-request',
-                               entrypoint=dummy,
-                               request_body=payloads.RequestBody(),
-                               status=RequestStatus.PENDING,
-                               created_at=time.time(),
-                               user_id='test-user')
-
-    # Create the request first time
-    created_first = await requests.create_if_not_exists_async(request)
-    assert created_first is True
-
-    # Try to create the same request again
-    created_second = await requests.create_if_not_exists_async(request)
-    assert created_second is False
-
-
-@pytest.mark.asyncio
 async def test_async_database_operations(isolated_database):
     """Test async database operations work together correctly."""
     # Create a request asynchronously
@@ -436,7 +404,7 @@ async def test_async_database_operations(isolated_database):
                                user_id='test-user')
 
     # Test create and get operations work together
-    created = await requests.create_if_not_exists_async(request)
+    created = requests.create_if_not_exists(request)
     assert created is True
 
     retrieved = await requests.get_request_async('test-async-ops-1')
@@ -453,7 +421,7 @@ async def test_async_database_operations(isolated_database):
                                 created_at=time.time(),
                                 user_id='test-user-2')
 
-    created2 = await requests.create_if_not_exists_async(request2)
+    created2 = requests.create_if_not_exists(request2)
     assert created2 is True
 
     # Verify both requests exist
@@ -1199,36 +1167,302 @@ def test_update_request_row_fields_maintains_order():
     assert result[11] == 'user-1'  # user_id (later in REQUEST_COLUMNS)
 
 
-@pytest.mark.asyncio
-async def test_cancel_get_request_async():
+def test_update_request(isolated_database):
+    """Test the functionality of update_request."""
+    current_time = time.time()
 
-    async def mock_get_request_async_no_lock(id: str):
-        await asyncio.sleep(1)
-        return None
+    # Create test requests
+    test_requests = [
+        requests.Request(request_id='request-1-id',
+                         name='request-1-name',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.PENDING,
+                         created_at=current_time - 10,
+                         user_id='user-1',
+                         cluster_name='cluster-1'),
+        requests.Request(request_id='request-2-id',
+                         name='request-2-name',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.RUNNING,
+                         created_at=current_time - 20,
+                         user_id='user-1',
+                         cluster_name='cluster-1'),
+    ]
+    for req in test_requests:
+        requests.create_if_not_exists(req)
 
-    concurrency = 1000
+    filter_obj = requests.RequestTaskFilter(user_id='user-1')
+    sync_results = requests.get_request_tasks(filter_obj)
+    assert len(sync_results) == 2
 
-    with mock.patch('sky.server.requests.requests._get_request_no_lock_async',
-                    side_effect=mock_get_request_async_no_lock):
-        tasks = []
-        for i in range(concurrency):
-            task = asyncio.create_task(
-                requests.get_request_async(f'test-request-id-{i}'))
-            tasks.append(task)
-        await asyncio.sleep(0.2)
-        for task in tasks:
-            task.cancel()
-        try:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        except Exception:
-            pass
-        # Since get_request_async is shielded, task.cancel() will neither cancel or
-        # wait the get_request_async coroutine. So we have to wait for a enough time
-        # to ensure all the coroutines are done.
-        # TODO(aylei): this may have timing issue, but looks good for now.
-        await asyncio.sleep(10)
-        for i in range(concurrency):
-            lock = filelock.FileLock(
-                requests.request_lock_path(f'test-request-id-{i}'))
-            # The locks must be released properly
-            lock.acquire(blocking=False)
+    # Test the basic update_request functionality with one field set.
+    request = requests.update_request(test_requests[0].request_id,
+                                      set_status=RequestStatus.RUNNING)
+    assert request.status == RequestStatus.RUNNING
+    request = requests.update_request(test_requests[1].request_id,
+                                      set_status=RequestStatus.SUCCEEDED)
+    assert request.status == RequestStatus.SUCCEEDED
+
+    # Test the update_request actually updates the DB.
+    sync_results = requests.get_request_tasks(filter_obj)
+    assert len(sync_results) == 2
+    assert sync_results[0].name == test_requests[0].name
+    assert sync_results[0].status == RequestStatus.RUNNING
+    assert sync_results[1].name == test_requests[1].name
+    assert sync_results[1].status == RequestStatus.SUCCEEDED
+    assert sync_results[0].error is None
+    assert sync_results[1].error is None
+
+    # Test the update_request with two fields set.
+    finished_time = time.time()
+    request = requests.update_request(request_id=test_requests[1].request_id,
+                                      set_status=RequestStatus.CANCELLED,
+                                      set_finished_at=finished_time)
+    assert request.status == RequestStatus.CANCELLED
+    assert request.finished_at == finished_time
+
+    # Test the update_request actually updates the DB.
+    request = requests.get_request(request_id=test_requests[1].request_id)
+    assert request.name == test_requests[1].name
+    assert request.status == RequestStatus.CANCELLED
+    assert request.finished_at == finished_time
+
+    # Test the update_request returns the entire request object.
+    request = requests.update_request(request_id=test_requests[0].request_id,
+                                      set_status=RequestStatus.FAILED)
+    assert request.name == test_requests[0].name
+    assert request.status == RequestStatus.FAILED
+    # test the cluster_name field is available in the returned request object.
+    assert request.cluster_name == test_requests[0].cluster_name
+
+    # Test the update_request NOPs if match filter does not match.
+    # since the request[1] is CANCELLED at this point, this statement should be a NOP
+    request = requests.update_request(
+        request_id=test_requests[1].request_id,
+        set_status=RequestStatus.FAILED,
+        match_status=[RequestStatus.PENDING, RequestStatus.RUNNING])
+    assert request is None
+
+    request = requests.get_request(test_requests[1].request_id)
+    assert request.status == RequestStatus.CANCELLED
+
+    # Test the update_request works if match filter does match.
+    # since the request[1] is CANCELLED at this point, this statement should update the status to FAILED
+    request = requests.update_request(request_id=test_requests[1].request_id,
+                                      set_status=RequestStatus.FAILED,
+                                      match_status=[RequestStatus.CANCELLED])
+    assert request.status == RequestStatus.FAILED
+
+    request = requests.update_request(test_requests[0].request_id,
+                                      set_pid=12345)
+    assert request.pid == 12345
+    request = requests.get_request(test_requests[0].request_id)
+    assert request.pid == 12345
+
+    request = requests.update_request(test_requests[0].request_id,
+                                      unset_pid=True)
+    assert request.pid is None
+    request = requests.get_request(test_requests[0].request_id)
+    assert request.pid is None
+
+
+def test_kill_requests_with_prefixes(isolated_database):
+    current_time = time.time()
+
+    # Create test requests
+    test_requests = [
+        requests.Request(request_id='prefix1-request-id',
+                         name='request-name',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.PENDING,
+                         created_at=current_time - 10,
+                         user_id='user-1',
+                         cluster_name='cluster-1'),
+        requests.Request(request_id='prefix2-request-id',
+                         name='request-name',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.RUNNING,
+                         created_at=current_time - 20,
+                         user_id='user-1',
+                         cluster_name='cluster-1'),
+        requests.Request(request_id='prefix3-request-id',
+                         name='request-name',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.RUNNING,
+                         created_at=current_time - 30,
+                         user_id='user-2',
+                         cluster_name='cluster-1'),
+        requests.Request(request_id='prefix4-request-id',
+                         name='request-name',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.RUNNING,
+                         created_at=current_time - 30,
+                         user_id='user-2',
+                         cluster_name='cluster-1'),
+        requests.Request(request_id=daemons.INTERNAL_REQUEST_DAEMONS[0].id,
+                         name='request-name',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.RUNNING,
+                         created_at=current_time - 40,
+                         user_id='root'),
+        requests.Request(request_id='other-request-1',
+                         name='request-name',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.RUNNING,
+                         created_at=current_time - 50,
+                         user_id='user-3'),
+        requests.Request(request_id='other-request-2',
+                         name='request-name',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.RUNNING,
+                         created_at=current_time - 50,
+                         user_id='user-3'),
+        requests.Request(request_id='other-request-3',
+                         name='request-name',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.RUNNING,
+                         created_at=current_time - 50,
+                         user_id='user-3'),
+    ]
+    for req in test_requests:
+        requests.create_if_not_exists(req)
+
+    # test kill requests with request ID prefixes
+    result = requests.kill_requests_with_prefixes(
+        request_id_prefixes=['prefix1'])
+    assert len(result) == 1
+    # verify the full request ID is returned
+    assert test_requests[0].request_id in result
+
+    # verify cancelling a cancelled request is a NOP
+    result = requests.kill_requests_with_prefixes(
+        request_id_prefixes=['prefix1'])
+    assert len(result) == 0
+
+    # test kill requests with full request ID
+    result = requests.kill_requests_with_prefixes(
+        request_id_prefixes=['prefix2-request-id'])
+    assert len(result) == 1
+    # verify the full request ID is returned
+    assert test_requests[1].request_id in result
+
+    # verify cancelling a cancelled request is a NOP
+    result = requests.kill_requests_with_prefixes(
+        request_id_prefixes=['prefix2-request-id'])
+    assert len(result) == 0
+
+    # test kill requests with user ID
+    result = requests.kill_requests_with_prefixes(user_id='user-2')
+    assert len(result) == 2
+    # verify the full request IDs are returned
+    assert test_requests[2].request_id in result
+    assert test_requests[3].request_id in result
+
+    # test kill requests with internal daemon request ID
+    result = requests.kill_requests_with_prefixes(
+        request_id_prefixes=[daemons.INTERNAL_REQUEST_DAEMONS[0].id])
+    # kill_requests_with_prefixes cannot be used to kill internal daemon requests
+    assert len(result) == 0
+
+    # test kill requests with no request ID prefixes and no user ID
+    result = requests.kill_requests_with_prefixes()
+    assert len(result) == 3
+    # three requests (ones starting with 'other-request-') should be killed
+    assert test_requests[5].request_id in result
+    assert test_requests[6].request_id in result
+    assert test_requests[7].request_id in result
+
+
+def test_set_request_failed(isolated_database):
+    current_time = time.time()
+
+    # Create test request
+    test_request_1 = requests.Request(request_id='test-request-id-1',
+                                      name='test-name',
+                                      entrypoint=dummy,
+                                      request_body=payloads.RequestBody(),
+                                      status=RequestStatus.PENDING,
+                                      created_at=current_time - 10,
+                                      user_id='user-1',
+                                      cluster_name='cluster-1')
+    requests.create_if_not_exists(test_request_1)
+
+    # test set request failed
+    requests.set_request_failed('test-request-id-1', ValueError('Test error'))
+    # verify the request was updated correctly
+    updated_request = requests.get_request('test-request-id-1')
+    assert updated_request.status == RequestStatus.FAILED
+    assert updated_request.finished_at is not None
+    assert updated_request.error is not None
+    assert updated_request.error['type'] == 'ValueError'
+    assert updated_request.error['message'] == 'Test error'
+    assert updated_request.error['object'] is not None
+
+
+def test_set_request_succeeded(isolated_database):
+    current_time = time.time()
+
+    # Create test request
+    test_request_1 = requests.Request(request_id='test-request-id-1',
+                                      name='test-name',
+                                      entrypoint=dummy,
+                                      request_body=payloads.RequestBody(),
+                                      status=RequestStatus.PENDING,
+                                      created_at=current_time - 10,
+                                      user_id='user-1',
+                                      cluster_name='cluster-1')
+    requests.create_if_not_exists(test_request_1)
+
+    # test set request succeeded
+    requests.set_request_succeeded('test-request-id-1', 'Test result')
+    # verify the request was updated correctly
+    updated_request = requests.get_request('test-request-id-1')
+    assert updated_request.status == RequestStatus.SUCCEEDED
+    assert updated_request.finished_at is not None
+    assert updated_request.return_value == 'Test result'
+
+    test_request_2 = requests.Request(request_id='test-request-id-2',
+                                      name='test-name',
+                                      entrypoint=dummy,
+                                      request_body=payloads.RequestBody(),
+                                      status=RequestStatus.PENDING,
+                                      created_at=current_time - 10,
+                                      user_id='user-1',
+                                      cluster_name='cluster-1')
+    requests.create_if_not_exists(test_request_2)
+
+    test_request_2_updated = requests.get_request('test-request-id-2')
+    test_request_2_updated.pid = 12345
+    assert requests.get_request('test-request-id-2').pid == None
+    assert test_request_2.pid == None
+
+    # Create test request
+    with mock.patch(
+            'sky.server.requests.requests._get_request_no_lock',
+            return_value=test_request_2,
+            # simulate a race condition where the request in DB
+            # was updated after the initial read in _update_request.
+            side_effect=requests._update_request(test_request_2_updated,
+                                                 fields=['pid']),
+    ) as mock_get_request_no_lock:
+        # test set request succeeded
+        requests.set_request_succeeded('test-request-id-2', 'Test result')
+        mock_get_request_no_lock.assert_called_once_with('test-request-id-2')
+        # verify the request was updated correctly
+    updated_request = requests.get_request('test-request-id-2')
+    assert updated_request.status == RequestStatus.SUCCEEDED
+    assert updated_request.finished_at is not None
+    assert updated_request.return_value == 'Test result'
+    # make sure that _update_request does not rollback database changes
+    # that happened after the initial read in _update_request.
+    assert updated_request.pid == 12345
