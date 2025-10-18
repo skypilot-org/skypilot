@@ -343,6 +343,20 @@ def all_users_option(helptext: Optional[str] = None):
     return return_option_decorator
 
 
+def force_option(helptext: Optional[str] = None):
+    """A decorator for the --force option."""
+
+    def return_option_decorator(func):
+        return click.option('--force',
+                            '-f',
+                            is_flag=True,
+                            default=False,
+                            required=False,
+                            help=helptext)(func)
+
+    return return_option_decorator
+
+
 def wait_for_option(pair: str):
     """A decorator for the --wait-for option."""
 

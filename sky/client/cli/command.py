@@ -6169,19 +6169,22 @@ def api_logs(request_id: Optional[str], server_logs: bool,
                 **_get_shell_complete_args(_complete_api_request))
 @flags.all_option('Cancel all your requests.')
 @flags.all_users_option('Cancel all requests from all users.')
+@flags.force_option('Skip confirmation (for when -a or -u is specified).')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool):
+def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool,
+               force: bool):
     """Cancel a request running on SkyPilot API server."""
     if all or all_users:
-        keyword = 'ALL USERS\'' if all_users else 'YOUR'
-        user_input = click.prompt(
-            f'This will cancel all {keyword} requests.\n'
-            f'To proceed, please type {colorama.Style.BRIGHT}'
-            f'\'cancel all requests\'{colorama.Style.RESET_ALL}',
-            type=str)
-        if user_input != 'cancel all requests':
-            raise click.Abort()
+        if not force:
+            keyword = 'ALL USERS\'' if all_users else 'YOUR'
+            user_input = click.prompt(
+                f'This will cancel all {keyword} requests.\n'
+                f'To proceed, please type {colorama.Style.BRIGHT}'
+                f'\'cancel all requests\'{colorama.Style.RESET_ALL}',
+                type=str)
+            if user_input != 'cancel all requests':
+                raise click.Abort()
         request_ids = None
     cancelled_request_ids = sdk.get(
         sdk.api_cancel(request_ids=request_ids, all_users=all_users))
