@@ -492,7 +492,8 @@ def _request_execution_wrapper(request_id: str,
         logger.info(e.hint)
         # Retried request will undergo rescheduling and a new execution,
         # clear the pid of the request.
-        api_requests.update_request(request_id, unset_pid=True)
+        req = api_requests.update_request(request_id, unset_pid=True)
+        assert req is not None, request_id
         # Yield control to the scheduler for uniform handling of retries.
         _restore_output()
         raise

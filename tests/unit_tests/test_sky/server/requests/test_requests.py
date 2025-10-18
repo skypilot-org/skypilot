@@ -1485,6 +1485,7 @@ def test_update_request(isolated_database):
     assert sync_results[1].status == RequestStatus.SUCCEEDED
     assert sync_results[0].error is None
     assert sync_results[1].error is None
+
     # Test the update_request with two fields set.
     finished_time = time.time()
     request = requests.update_request(request_id=test_requests[1].request_id,
@@ -1608,27 +1609,25 @@ def test_kill_requests_with_prefixes(isolated_database):
         requests.create_if_not_exists(req)
 
     # test kill requests with request ID prefixes
-    result = requests.kill_requests_with_prefixes(
-        request_id_prefixes=['prefix1'])
+    result = requests.kill_requests_with_prefixes(request_ids=['prefix1'])
     assert len(result) == 1
     # verify the full request ID is returned
     assert test_requests[0].request_id in result
 
     # verify cancelling a cancelled request is a NOP
-    result = requests.kill_requests_with_prefixes(
-        request_id_prefixes=['prefix1'])
+    result = requests.kill_requests_with_prefixes(request_ids=['prefix1'])
     assert len(result) == 0
 
     # test kill requests with full request ID
     result = requests.kill_requests_with_prefixes(
-        request_id_prefixes=['prefix2-request-id'])
+        request_ids=['prefix2-request-id'])
     assert len(result) == 1
     # verify the full request ID is returned
     assert test_requests[1].request_id in result
 
     # verify cancelling a cancelled request is a NOP
     result = requests.kill_requests_with_prefixes(
-        request_id_prefixes=['prefix2-request-id'])
+        request_ids=['prefix2-request-id'])
     assert len(result) == 0
 
     # test kill requests with user ID
@@ -1640,7 +1639,7 @@ def test_kill_requests_with_prefixes(isolated_database):
 
     # test kill requests with internal daemon request ID
     result = requests.kill_requests_with_prefixes(
-        request_id_prefixes=[daemons.INTERNAL_REQUEST_DAEMONS[0].id])
+        request_ids=[daemons.INTERNAL_REQUEST_DAEMONS[0].id])
     # kill_requests_with_prefixes cannot be used to kill internal daemon requests
     assert len(result) == 0
 

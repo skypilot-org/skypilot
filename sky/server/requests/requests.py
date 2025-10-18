@@ -119,6 +119,7 @@ def _serialize_error(error: BaseException) -> Dict[str, Any]:
         'message': str(error),
     }
 
+
 @dataclasses.dataclass
 class Request:
     """A SkyPilot API request."""
@@ -408,20 +409,23 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
     _kill_requests(request_ids)
 
 
-def kill_requests_with_prefixes(request_id_prefixes: Optional[List[str]] = None,
+def kill_requests_with_prefixes(request_ids: Optional[List[str]] = None,
                                 user_id: Optional[str] = None) -> List[str]:
     """Kill requests with the given prefixes."""
+    # we need to keep this field as request_ids for backwards compatibility.
+    request_id_prefixes = request_ids
+    del request_ids
     if request_id_prefixes is None:
         return _kill_requests(user_id=user_id)
-    request_ids = []
+    full_request_ids = []
     for request_id_prefix in request_id_prefixes:
         request = get_request(request_id_prefix)
         if request is None:
             logger.warning(
                 f'No request ID found with prefix {request_id_prefix}')
             continue
-        request_ids.append(request.request_id)
-    return _kill_requests(request_ids, user_id=user_id)
+        full_request_ids.append(request.request_id)
+    return _kill_requests(full_request_ids, user_id=user_id)
 
 
 def _kill_requests(request_ids: Optional[List[str]] = None,
@@ -642,7 +646,6 @@ def update_request(
     update_statement += f'{", ".join(filter_statements)} '
     update_statement += 'WHERE request_id = ? '
     update_params.append(request_id)
-    logger.info(f'({update_statement}, {tuple(update_params)})')
     if match_status is not None:
         update_statement += (
             'AND status IN '
@@ -946,20 +949,22 @@ async def get_api_request_ids_start_with(incomplete: str) -> List[str]:
 
 def set_request_failed(request_id: str, e: BaseException) -> None:
     """Set a request to failed and populate the error message."""
+    assert request_id
     with ux_utils.enable_traceback():
         stacktrace = traceback.format_exc()
     setattr(e, 'stacktrace', stacktrace)
-    update_request(request_id, 
-                set_status=RequestStatus.FAILED,
-                set_finished_at=time.time(), 
-                set_error=e)
+    req = update_request(request_id,
+                         set_status=RequestStatus.FAILED,
+                         set_finished_at=time.time(),
+                         set_error=e)
+    assert req is not None
 
 
 def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
     """Set a request to succeeded and populate the result."""
+    assert request_id
     request = _get_request_no_lock(request_id)
-    if request is None:
-        return
+    assert request is not None
     update_fields = ['status', 'finished_at']
     request.status = RequestStatus.SUCCEEDED
     request.finished_at = time.time()
@@ -971,10 +976,13 @@ def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
 
 def set_request_cancelled(request_id: str) -> None:
     """Set a pending or running request to cancelled."""
-    update_request(request_id,
-                   set_status=RequestStatus.CANCELLED,
-                   set_finished_at=time.time(),
-                   match_status=[RequestStatus.PENDING, RequestStatus.RUNNING])
+    assert request_id
+    req = update_request(
+        request_id,
+        set_status=RequestStatus.CANCELLED,
+        set_finished_at=time.time(),
+        match_status=[RequestStatus.PENDING, RequestStatus.RUNNING])
+    assert req is not None
 
 
 @init_db
