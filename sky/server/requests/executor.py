@@ -490,6 +490,8 @@ def _request_execution_wrapper(request_id: str,
     except exceptions.ExecutionRetryableError as e:
         logger.error(e)
         logger.info(e.hint)
+        # Retried request will undergo rescheduling and a new execution,
+        # clear the pid of the request.
         api_requests.update_request(request_id, unset_pid=True)
         # Yield control to the scheduler for uniform handling of retries.
         _restore_output()
