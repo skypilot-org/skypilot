@@ -96,6 +96,10 @@ Below is the configuration syntax and some example values. See detailed explanat
         remote_identity: my-k8s-service-account
 
   :ref:`ssh <config-yaml-ssh>`:
+    # See :ref:`kubernetes.pod_config <config-yaml-kubernetes-pod-config>` for more details.
+    pod_config: ...
+    # See :ref:`kubernetes.context_configs <config-yaml-kubernetes-context-configs>` for more details.
+    context_configs: ...
     :ref:`allowed_node_pools <config-yaml-ssh-allowed-node-pools>`:
       - node-pool-1
       - node-pool-2
