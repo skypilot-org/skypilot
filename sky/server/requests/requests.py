@@ -400,16 +400,29 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
             cluster_names=[cluster_name],
             fields=['request_id']))
     ]
-    kill_requests(request_ids)
+    _kill_requests(request_ids)
 
 
-def kill_requests(request_ids: Optional[List[str]] = None,
-                  user_id: Optional[str] = None) -> List[str]:
+def kill_requests_with_prefixes(request_id_prefixes: Optional[List[str]] = None,
+                                user_id: Optional[str] = None) -> List[str]:
+    """Kill requests with the given prefixes."""
+    if request_id_prefixes is None:
+        return _kill_requests(user_id=user_id)
+    # get the full request IDs from the prefixes
+    request_ids = [
+        get_request(request_id_prefix).request_id
+        for request_id_prefix in request_id_prefixes
+    ]
+    return _kill_requests(request_ids, user_id=user_id)
+
+
+def _kill_requests(request_ids: Optional[List[str]] = None,
+                   user_id: Optional[str] = None) -> List[str]:
     """Kill a SkyPilot API request and set its status to cancelled.
 
     Args:
         request_ids: The request IDs to kill. If None, all requests for the
-            user are killed.
+            user are killed. Request IDs should be full IDs, not prefixes.
         user_id: The user ID to kill requests for. If None, all users are
             killed.
 
@@ -642,7 +655,6 @@ _update_request_status_msg_sql = (f'UPDATE {REQUEST_TABLE} SET '
 
 @init_db_async
 @metrics_lib.time_me
-@asyncio_utils.shield
 async def update_status_msg_async(request_id: str, status_msg: str) -> None:
     """Update the status message of a request"""
     assert _DB is not None
@@ -712,7 +724,6 @@ def get_request(request_id: str,
 
 @init_db_async
 @metrics_lib.time_me_async
-@asyncio_utils.shield
 async def get_request_async(
         request_id: str,
         fields: Optional[List[str]] = None) -> Optional[Request]:

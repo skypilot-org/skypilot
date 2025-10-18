@@ -1675,7 +1675,7 @@ async def api_cancel(request: fastapi.Request,
         request_id=request.state.request_id,
         request_name='api_cancel',
         request_body=request_cancel_body,
-        func=requests_lib.kill_requests,
+        func=requests_lib.kill_requests_with_prefixes,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
