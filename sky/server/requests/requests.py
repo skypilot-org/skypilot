@@ -578,6 +578,21 @@ def request_lock_path(request_id: str) -> str:
     return os.path.join(lock_path, f'.{request_id}.lock')
 
 
+_update_request_sql = (
+    f'UPDATE {REQUEST_TABLE} SET '
+    f'{", ".join([f"{col} = ?" for col in REQUEST_COLUMNS])} '
+    f'WHERE request_id LIKE ?')
+
+
+def _update_request_no_lock(request: Request):
+    """Update a REST request in the database."""
+    assert _DB is not None
+    with _DB.conn:
+        cursor = _DB.conn.cursor()
+        cursor.execute(_update_request_sql,
+                       request.to_row() + (request.request_id + '%',))
+
+
 @contextlib.contextmanager
 @init_db
 @metrics_lib.time_me
@@ -589,19 +604,22 @@ def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
         request = _get_request_no_lock(request_id)
         yield request
         if request is not None:
-            _add_or_update_request_no_lock(request)
+            _update_request_no_lock(request)
 
 
-@init_db
+_update_request_status_msg_sql = (f'UPDATE {REQUEST_TABLE} SET '
+                                  f'status_msg = ? '
+                                  f'WHERE request_id LIKE ?')
+
+
+@init_db_async
 @metrics_lib.time_me
 @asyncio_utils.shield
 async def update_status_msg_async(request_id: str, status_msg: str) -> None:
     """Update the status message of a request"""
-    async with filelock.AsyncFileLock(request_lock_path(request_id)):
-        request = await _get_request_no_lock_async(request_id)
-        if request is not None:
-            request.status_msg = status_msg
-            await _add_or_update_request_no_lock_async(request)
+    assert _DB is not None
+    await _DB.execute_and_commit_async(_update_request_status_msg_sql,
+                                       (status_msg, request_id + '%'))
 
 
 _get_request_sql = (f'SELECT {", ".join(REQUEST_COLUMNS)} FROM {REQUEST_TABLE} '
@@ -648,8 +666,7 @@ def get_latest_request_id() -> Optional[str]:
 @metrics_lib.time_me
 def get_request(request_id: str) -> Optional[Request]:
     """Get a SkyPilot API request."""
-    with filelock.FileLock(request_lock_path(request_id)):
-        return _get_request_no_lock(request_id)
+    return _get_request_no_lock(request_id)
 
 
 @init_db_async
@@ -657,9 +674,7 @@ def get_request(request_id: str) -> Optional[Request]:
 @asyncio_utils.shield
 async def get_request_async(request_id: str) -> Optional[Request]:
     """Async version of get_request."""
-    # TODO(aylei): figure out how to remove FileLock here to avoid the overhead
-    async with filelock.AsyncFileLock(request_lock_path(request_id)):
-        return await _get_request_no_lock_async(request_id)
+    return await _get_request_no_lock_async(request_id)
 
 
 class StatusWithMsg(NamedTuple):
@@ -696,26 +711,26 @@ async def get_request_status_async(
         return StatusWithMsg(status, status_msg)
 
 
+_add_or_ignore_request_sql = (
+    f'INSERT INTO {REQUEST_TABLE} '
+    f'({", ".join(REQUEST_COLUMNS)}) VALUES '
+    f'({", ".join(["?"] * len(REQUEST_COLUMNS))}) '
+    'ON CONFLICT(request_id) DO NOTHING RETURNING ROWID')
+
+
 @init_db
 @metrics_lib.time_me
 def create_if_not_exists(request: Request) -> bool:
     """Create a SkyPilot API request if it does not exist."""
-    with filelock.FileLock(request_lock_path(request.request_id)):
-        if _get_request_no_lock(request.request_id) is not None:
+    assert _DB is not None
+    with _DB.conn:
+        cursor = _DB.conn.cursor()
+        cursor.execute(_add_or_ignore_request_sql, request.to_row())
+        last_row = cursor.fetchone()
+        if last_row is None:
+            # Row already existed
             return False
-        _add_or_update_request_no_lock(request)
-        return True
-
-
-@init_db_async
-@metrics_lib.time_me_async
-@asyncio_utils.shield
-async def create_if_not_exists_async(request: Request) -> bool:
-    """Async version of create_if_not_exists."""
-    async with filelock.AsyncFileLock(request_lock_path(request.request_id)):
-        if await _get_request_no_lock_async(request.request_id) is not None:
-            return False
-        await _add_or_update_request_no_lock_async(request)
+        # Row was inserted
         return True
 
 
@@ -862,26 +877,6 @@ async def get_api_request_ids_start_with(incomplete: str) -> List[str]:
         if not rows:
             return []
     return [row[0] for row in rows]
-
-
-_add_or_update_request_sql = (f'INSERT OR REPLACE INTO {REQUEST_TABLE} '
-                              f'({", ".join(REQUEST_COLUMNS)}) VALUES '
-                              f'({", ".join(["?"] * len(REQUEST_COLUMNS))})')
-
-
-def _add_or_update_request_no_lock(request: Request):
-    """Add or update a REST request into the database."""
-    assert _DB is not None
-    with _DB.conn:
-        cursor = _DB.conn.cursor()
-        cursor.execute(_add_or_update_request_sql, request.to_row())
-
-
-async def _add_or_update_request_no_lock_async(request: Request):
-    """Async version of _add_or_update_request_no_lock."""
-    assert _DB is not None
-    await _DB.execute_and_commit_async(_add_or_update_request_sql,
-                                       request.to_row())
 
 
 def set_request_failed(request_id: str, e: BaseException) -> None:
