@@ -1437,42 +1437,88 @@ def test_update_request_row_fields_maintains_order():
     assert result[11] == 'user-1'  # user_id (later in REQUEST_COLUMNS)
 
 
-@pytest.mark.asyncio
-async def test_cancel_get_request_async():
-    import gc
+def test_update_request(isolated_database):
+    """Test the functionality of update_request."""
+    current_time = time.time()
 
-    async def mock_get_request_async_no_lock(id: str):
-        await asyncio.sleep(1)
-        return None
+    # Create test requests
+    test_requests = [
+        requests.Request(request_id='request-1-id',
+                         name='request-1-name',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.PENDING,
+                         created_at=current_time - 10,
+                         user_id='user-1',
+                         cluster_name='cluster-1'),
+        requests.Request(request_id='request-2-id',
+                         name='request-2-name',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.RUNNING,
+                         created_at=current_time - 20,
+                         user_id='user-1',
+                         cluster_name='cluster-1'),
+    ]
+    for req in test_requests:
+        requests.create_if_not_exists(req)
 
-    concurrency = 1000
+    filter_obj = requests.RequestTaskFilter(user_id='user-1')
+    sync_results = requests.get_request_tasks(filter_obj)
+    assert len(sync_results) == 2
 
-    with mock.patch('sky.server.requests.requests._get_request_no_lock_async',
-                    side_effect=mock_get_request_async_no_lock):
-        tasks = []
-        for i in range(concurrency):
-            task = asyncio.create_task(
-                requests.get_request_async(f'test-request-id-{i}'))
-            tasks.append(task)
-        await asyncio.sleep(0.2)
-        for task in tasks:
-            task.cancel()
-            # This is critical to proactively calls GC to ensure GC will not
-            # affect the lock release, refer to
-            # https://github.com/skypilot-org/skypilot/issues/7663
-            # for more details.
-            gc.collect()
-        try:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        except Exception:
-            pass
-        # Since get_request_async is shielded, task.cancel() will neither cancel or
-        # wait the get_request_async coroutine. So we have to wait for a enough time
-        # to ensure all the coroutines are done.
-        # TODO(aylei): this may have timing issue, but looks good for now.
-        await asyncio.sleep(10)
-        for i in range(concurrency):
-            lock = filelock.FileLock(
-                requests.request_lock_path(f'test-request-id-{i}'))
-            # The locks must be released properly
-            lock.acquire(blocking=False)
+    # Test the basic update_request functionality with one field set.
+    request = requests.update_request(test_requests[0].request_id,
+                                      set_status=RequestStatus.RUNNING)
+    assert request.status == RequestStatus.RUNNING
+    request = requests.update_request(test_requests[1].request_id,
+                                      set_status=RequestStatus.SUCCEEDED)
+    assert request.status == RequestStatus.SUCCEEDED
+
+    # Test the update_request actually updates the DB.
+    sync_results = requests.get_request_tasks(filter_obj)
+    assert len(sync_results) == 2
+    assert sync_results[0].name == test_requests[0].name
+    assert sync_results[0].status == RequestStatus.RUNNING
+    assert sync_results[1].name == test_requests[1].name
+    assert sync_results[1].status == RequestStatus.SUCCEEDED
+
+    # Test the update_request with two fields set.
+    finished_time = time.time()
+    request = requests.update_request(request_id=test_requests[1].request_id,
+                                      set_status=RequestStatus.CANCELLED,
+                                      set_finished_at=finished_time)
+    assert request.status == RequestStatus.CANCELLED
+    assert request.finished_at == finished_time
+
+    # Test the update_request actually updates the DB.
+    request = requests.get_request(request_id=test_requests[1].request_id)
+    assert request.name == test_requests[1].name
+    assert request.status == RequestStatus.CANCELLED
+    assert request.finished_at == finished_time
+
+    # Test the update_request returns the entire request object.
+    request = requests.update_request(request_id=test_requests[0].request_id,
+                                      set_status=RequestStatus.FAILED)
+    assert request.name == test_requests[0].name
+    assert request.status == RequestStatus.FAILED
+    # test the cluster_name field is available in the returned request object.
+    assert request.cluster_name == test_requests[0].cluster_name
+
+    # Test the update_request NOPs if match filter does not match.
+    # since the request[1] is CANCELLED at this point, this statement should be a NOP
+    request = requests.update_request(
+        request_id=test_requests[1].request_id,
+        set_status=RequestStatus.FAILED,
+        match_status=[RequestStatus.PENDING, RequestStatus.RUNNING])
+    assert request is None
+
+    request = requests.get_request(test_requests[1].request_id)
+    assert request.status == RequestStatus.CANCELLED
+
+    # Test the update_request works if match filter does match.
+    # since the request[1] is CANCELLED at this point, this statement should update the status to FAILED
+    request = requests.update_request(request_id=test_requests[1].request_id,
+                                      set_status=RequestStatus.FAILED,
+                                      match_status=[RequestStatus.CANCELLED])
+    assert request.status == RequestStatus.FAILED

@@ -436,18 +436,20 @@ def _request_execution_wrapper(request_id: str,
         # As soon as the request is updated with the executor PID, we can
         # receive SIGTERM from cancellation. So, we update the request inside
         # the try block to ensure we have the KeyboardInterrupt handling.
-        with api_requests.update_request(request_id) as request_task:
-            assert request_task is not None, request_id
-            if request_task.status != api_requests.RequestStatus.PENDING:
-                logger.debug(f'Request is already {request_task.status.value}, '
-                             f'skipping execution')
-                return
-            log_path = request_task.log_path
-            request_task.pid = pid
-            request_task.status = api_requests.RequestStatus.RUNNING
-            func = request_task.entrypoint
-            request_body = request_task.request_body
-            request_name = request_task.name
+        req = api_requests.update_request(
+            request_id,
+            set_pid=pid,
+            set_status=api_requests.RequestStatus.RUNNING,
+            match_status=[api_requests.RequestStatus.PENDING])
+        if req is None:
+            # the request is not pending, skip execution
+            logger.debug('Request is no longer pending, skipping execution.')
+            return
+        log_path = req.log_path
+        func = req.entrypoint
+        request_body = req.request_body
+        request_name = req.name
+        del req
 
         # Store copies of the original stdout and stderr file descriptors
         # We do this in two steps because we should make sure to restore the
@@ -488,11 +490,7 @@ def _request_execution_wrapper(request_id: str,
     except exceptions.ExecutionRetryableError as e:
         logger.error(e)
         logger.info(e.hint)
-        with api_requests.update_request(request_id) as request_task:
-            assert request_task is not None, request_id
-            # Retried request will undergo rescheduling and a new execution,
-            # clear the pid of the request.
-            request_task.pid = None
+        api_requests.update_request(request_id, unset_pid=True)
         # Yield control to the scheduler for uniform handling of retries.
         _restore_output()
         raise
@@ -622,8 +620,8 @@ async def _execute_request_coroutine(request: api_requests.Request):
     logger.info(f'Executing request {request.request_id} in coroutine')
     func = request.entrypoint
     request_body = request.request_body
-    with api_requests.update_request(request.request_id) as request_task:
-        request_task.status = api_requests.RequestStatus.RUNNING
+    api_requests.update_request(request.request_id,
+                                set_status=api_requests.RequestStatus.RUNNING)
     # Redirect stdout and stderr to the request log path.
     original_output = ctx.redirect_log(request.log_path)
     try:

@@ -187,16 +187,17 @@ class Server(uvicorn.Server):
 
     def interrupt_request_for_retry(self, request_id: str) -> None:
         """Interrupt a request for retry."""
-        with requests_lib.update_request(request_id) as req:
-            if req is None:
-                return
-            if req.pid is not None:
-                try:
-                    os.kill(req.pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    logger.debug(f'Process {req.pid} already finished.')
-            req.status = requests_lib.RequestStatus.CANCELLED
-            req.should_retry = True
+        req = requests_lib.update_request(
+            request_id,
+            set_status=requests_lib.RequestStatus.CANCELLED,
+            set_should_retry=True)
+        if req is None:
+            return
+        if req.pid is not None:
+            try:
+                os.kill(req.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                logger.debug(f'Process {req.pid} already finished.')
         logger.info(
             f'Request {request_id} interrupted and will be retried by client.')
 
