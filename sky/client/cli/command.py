@@ -6169,14 +6169,14 @@ def api_logs(request_id: Optional[str], server_logs: bool,
                 **_get_shell_complete_args(_complete_api_request))
 @flags.all_option('Cancel all your requests.')
 @flags.all_users_option('Cancel all requests from all users.')
-@flags.force_option('Skip confirmation (for when -a or -u is specified).')
+@flags.yes_option('Skip confirmation (for when -a or -u is specified).')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool,
-               force: bool):
+               yes: bool):
     """Cancel a request running on SkyPilot API server."""
     if all or all_users:
-        if not force:
+        if not yes:
             keyword = 'ALL USERS\'' if all_users else 'YOUR'
             user_input = click.prompt(
                 f'This will cancel all {keyword} requests.\n'
