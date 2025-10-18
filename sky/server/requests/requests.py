@@ -177,10 +177,12 @@ class Request:
         content = dict(zip(REQUEST_COLUMNS, row))
         return cls.decode(payloads.RequestPayload(**content))
 
-    def to_row(self) -> Tuple[Any, ...]:
+    def to_row(self, fields: Optional[List[str]] = None) -> Tuple[Any, ...]:
+        if fields is None:
+            fields = REQUEST_COLUMNS
         payload = self.encode()
         row = []
-        for k in REQUEST_COLUMNS:
+        for k in fields:
             row.append(getattr(payload, k))
         return tuple(row)
 
@@ -584,19 +586,18 @@ def reset_db_and_logs():
                   ignore_errors=True)
 
 
-_update_request_sql = (
-    f'UPDATE {REQUEST_TABLE} SET '
-    f'{", ".join([f"{col} = ?" for col in REQUEST_COLUMNS])} '
-    f'WHERE request_id = ?')
-
-
-def _update_request(request: Request):
+def _update_request(request: Request, fields: Optional[List[str]] = None):
     """Update a REST request in the database."""
+    if fields is None:
+        fields = REQUEST_COLUMNS
     assert _DB is not None
+    sql_statement = (f'UPDATE {REQUEST_TABLE} SET '
+                     f'{", ".join([f"{col} = ?" for col in fields])} '
+                     f'WHERE request_id = ?')
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute(_update_request_sql,
-                       request.to_row() + (request.request_id,))
+        cursor.execute(sql_statement,
+                       request.to_row(fields) + (request.request_id,))
 
 
 @init_db
@@ -946,7 +947,7 @@ def set_request_failed(request_id: str, e: BaseException) -> None:
     request.status = RequestStatus.FAILED
     request.finished_at = time.time()
     request.set_error(e)
-    _update_request(request)
+    _update_request(request, fields=['status', 'finished_at', 'error'])
 
 
 def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
@@ -954,11 +955,13 @@ def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
     request = _get_request_no_lock(request_id)
     if request is None:
         return
+    update_fields = ['status', 'finished_at']
     request.status = RequestStatus.SUCCEEDED
     request.finished_at = time.time()
     if result is not None:
+        update_fields.append('return_value')
         request.set_return_value(result)
-    _update_request(request)
+    _update_request(request, update_fields)
 
 
 def set_request_cancelled(request_id: str) -> None:

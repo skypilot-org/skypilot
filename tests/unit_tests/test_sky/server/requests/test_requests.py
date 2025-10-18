@@ -1524,6 +1524,18 @@ def test_update_request(isolated_database):
                                       match_status=[RequestStatus.CANCELLED])
     assert request.status == RequestStatus.FAILED
 
+    request = requests.update_request(test_requests[0].request_id,
+                                      set_pid=12345)
+    assert request.pid == 12345
+    request = requests.get_request(test_requests[0].request_id)
+    assert request.pid == 12345
+
+    request = requests.update_request(test_requests[0].request_id,
+                                      unset_pid=True)
+    assert request.pid is None
+    request = requests.get_request(test_requests[0].request_id)
+    assert request.pid is None
+
 
 def test_kill_requests_with_prefixes(isolated_database):
     current_time = time.time()
@@ -1638,3 +1650,128 @@ def test_kill_requests_with_prefixes(isolated_database):
     assert test_requests[5].request_id in result
     assert test_requests[6].request_id in result
     assert test_requests[7].request_id in result
+
+
+def test_set_request_failed(isolated_database):
+    current_time = time.time()
+
+    # Create test request
+    test_request_1 = requests.Request(request_id='test-request-id-1',
+                                      name='test-name',
+                                      entrypoint=dummy,
+                                      request_body=payloads.RequestBody(),
+                                      status=RequestStatus.PENDING,
+                                      created_at=current_time - 10,
+                                      user_id='user-1',
+                                      cluster_name='cluster-1')
+    requests.create_if_not_exists(test_request_1)
+
+    # test set request failed
+    requests.set_request_failed('test-request-id-1', ValueError('Test error'))
+    # verify the request was updated correctly
+    updated_request = requests.get_request('test-request-id-1')
+    assert updated_request.status == RequestStatus.FAILED
+    assert updated_request.finished_at is not None
+    assert updated_request.error is not None
+    assert updated_request.error['type'] == 'ValueError'
+    assert updated_request.error['message'] == 'Test error'
+    assert updated_request.error['object'] is not None
+
+    test_request_2 = requests.Request(request_id='test-request-id-2',
+                                      name='test-name',
+                                      entrypoint=dummy,
+                                      request_body=payloads.RequestBody(),
+                                      status=RequestStatus.PENDING,
+                                      created_at=current_time - 10,
+                                      user_id='user-1',
+                                      cluster_name='cluster-1')
+    requests.create_if_not_exists(test_request_2)
+
+    test_request_2_updated = requests.get_request('test-request-id-2')
+    test_request_2_updated.pid = 12345
+    assert requests.get_request('test-request-id-2').pid == None
+    assert test_request_2.pid == None
+
+    # Create test request
+    with mock.patch(
+            'sky.server.requests.requests._get_request_no_lock',
+            return_value=test_request_2,
+            # simulate a race condition where the request in DB
+            # was updated after the initial read in _update_request.
+            side_effect=requests._update_request(test_request_2_updated,
+                                                 fields=['pid']),
+    ) as mock_get_request_no_lock:
+        # test set request failed
+        requests.set_request_failed('test-request-id-2',
+                                    ValueError('Test error'))
+        mock_get_request_no_lock.assert_called_once_with('test-request-id-2')
+        # verify the request was updated correctly
+    updated_request = requests.get_request('test-request-id-2')
+    assert updated_request.status == RequestStatus.FAILED
+    assert updated_request.finished_at is not None
+    assert updated_request.error is not None
+    assert updated_request.error['type'] == 'ValueError'
+    assert updated_request.error['message'] == 'Test error'
+    assert updated_request.error['object'] is not None
+    # make sure that _update_request does not rollback database changes
+    # that happened after the initial read in _update_request.
+    assert updated_request.pid == 12345
+
+
+def test_set_request_succeeded(isolated_database):
+    current_time = time.time()
+
+    # Create test request
+    test_request_1 = requests.Request(request_id='test-request-id-1',
+                                      name='test-name',
+                                      entrypoint=dummy,
+                                      request_body=payloads.RequestBody(),
+                                      status=RequestStatus.PENDING,
+                                      created_at=current_time - 10,
+                                      user_id='user-1',
+                                      cluster_name='cluster-1')
+    requests.create_if_not_exists(test_request_1)
+
+    # test set request succeeded
+    requests.set_request_succeeded('test-request-id-1', 'Test result')
+    # verify the request was updated correctly
+    updated_request = requests.get_request('test-request-id-1')
+    assert updated_request.status == RequestStatus.SUCCEEDED
+    assert updated_request.finished_at is not None
+    assert updated_request.return_value == 'Test result'
+
+    test_request_2 = requests.Request(request_id='test-request-id-2',
+                                      name='test-name',
+                                      entrypoint=dummy,
+                                      request_body=payloads.RequestBody(),
+                                      status=RequestStatus.PENDING,
+                                      created_at=current_time - 10,
+                                      user_id='user-1',
+                                      cluster_name='cluster-1')
+    requests.create_if_not_exists(test_request_2)
+
+    test_request_2_updated = requests.get_request('test-request-id-2')
+    test_request_2_updated.pid = 12345
+    assert requests.get_request('test-request-id-2').pid == None
+    assert test_request_2.pid == None
+
+    # Create test request
+    with mock.patch(
+            'sky.server.requests.requests._get_request_no_lock',
+            return_value=test_request_2,
+            # simulate a race condition where the request in DB
+            # was updated after the initial read in _update_request.
+            side_effect=requests._update_request(test_request_2_updated,
+                                                 fields=['pid']),
+    ) as mock_get_request_no_lock:
+        # test set request succeeded
+        requests.set_request_succeeded('test-request-id-2', 'Test result')
+        mock_get_request_no_lock.assert_called_once_with('test-request-id-2')
+        # verify the request was updated correctly
+    updated_request = requests.get_request('test-request-id-2')
+    assert updated_request.status == RequestStatus.SUCCEEDED
+    assert updated_request.finished_at is not None
+    assert updated_request.return_value == 'Test result'
+    # make sure that _update_request does not rollback database changes
+    # that happened after the initial read in _update_request.
+    assert updated_request.pid == 12345
