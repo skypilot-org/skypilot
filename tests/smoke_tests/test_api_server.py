@@ -691,8 +691,8 @@ def test_high_logs_concurrency_not_blocking_operations(generic_cloud: str,
                 job_name=f'{name}-job',
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud)),
-            # sky api cancel does not support skip confirmation, just stop and start the API server to cancel all logs requests
-            'sky api stop && sky api start',
+            # Cancel all requests.
+            'sky api cancel -yu',
             f'sky down -y {name}',
             f'sky down -y {name}-another',
         ],
