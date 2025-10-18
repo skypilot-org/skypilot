@@ -1214,6 +1214,7 @@ def test_update_request(isolated_database):
     assert sync_results[1].status == RequestStatus.SUCCEEDED
     assert sync_results[0].error is None
     assert sync_results[1].error is None
+
     # Test the update_request with two fields set.
     finished_time = time.time()
     request = requests.update_request(request_id=test_requests[1].request_id,

@@ -407,13 +407,13 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
     _kill_requests(request_ids)
 
 
-def kill_requests_with_prefixes(request_id_prefixes: Optional[List[str]] = None,
+def kill_requests_with_prefixes(request_ids: Optional[List[str]] = None,
                                 user_id: Optional[str] = None) -> List[str]:
     """Kill requests with the given prefixes."""
-    if request_id_prefixes is None:
+    if request_ids is None:
         return _kill_requests(user_id=user_id)
     request_ids = []
-    for request_id_prefix in request_id_prefixes:
+    for request_id_prefix in request_ids:
         request = get_request(request_id_prefix)
         if request is None:
             logger.warning(
@@ -640,7 +640,6 @@ def update_request(
     update_statement += f'{", ".join(filter_statements)} '
     update_statement += 'WHERE request_id = ? '
     update_params.append(request_id)
-    logger.info(f'({update_statement}, {tuple(update_params)})')
     if match_status is not None:
         update_statement += (
             'AND status IN '
