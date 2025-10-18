@@ -570,7 +570,7 @@ def reset_db_and_logs():
 _update_request_sql = (
     f'UPDATE {REQUEST_TABLE} SET '
     f'{", ".join([f"{col} = ?" for col in REQUEST_COLUMNS])} '
-    f'WHERE request_id LIKE ?')
+    f'WHERE request_id = ?')
 
 
 def _update_request(request: Request):
@@ -579,7 +579,7 @@ def _update_request(request: Request):
     with _DB.conn:
         cursor = _DB.conn.cursor()
         cursor.execute(_update_request_sql,
-                       request.to_row() + (request.request_id + '%',))
+                       request.to_row() + (request.request_id,))
 
 
 @init_db
@@ -635,7 +635,7 @@ def update_request(
 
 _update_request_status_msg_sql = (f'UPDATE {REQUEST_TABLE} SET '
                                   f'status_msg = ? '
-                                  f'WHERE request_id LIKE ?')
+                                  f'WHERE request_id = ?')
 
 
 @init_db_async
@@ -645,7 +645,7 @@ async def update_status_msg_async(request_id: str, status_msg: str) -> None:
     """Update the status message of a request"""
     assert _DB is not None
     await _DB.execute_and_commit_async(_update_request_status_msg_sql,
-                                       (status_msg, request_id + '%'))
+                                       (status_msg, request_id))
 
 
 _get_request_sql = (f'SELECT {", ".join(REQUEST_COLUMNS)} FROM {REQUEST_TABLE} '
