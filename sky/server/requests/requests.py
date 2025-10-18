@@ -29,7 +29,6 @@ from sky.server import daemons
 from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
-from sky.utils import asyncio_utils
 from sky.utils import common_utils
 from sky.utils import ux_utils
 from sky.utils.db import db_utils
@@ -412,7 +411,8 @@ def kill_requests_with_prefixes(request_id_prefixes: Optional[List[str]] = None,
     for request_id_prefix in request_id_prefixes:
         request = get_request(request_id_prefix)
         if request is None:
-            logger.warning(f'No request ID found with prefix {request_id_prefix}')
+            logger.warning(
+                f'No request ID found with prefix {request_id_prefix}')
             continue
         request_ids.append(request.request_id)
     return _kill_requests(request_ids, user_id=user_id)
@@ -420,7 +420,7 @@ def kill_requests_with_prefixes(request_id_prefixes: Optional[List[str]] = None,
 
 def _kill_requests(request_ids: Optional[List[str]] = None,
                    user_id: Optional[str] = None) -> List[str]:
-    """Kill a SkyPilot API request and set its status to cancelled.
+    """Kill SkyPilot API requests and set their status to cancelled.
 
     Args:
         request_ids: The request IDs to kill. If None, all requests for the

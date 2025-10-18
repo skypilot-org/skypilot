@@ -7,6 +7,7 @@ import unittest.mock as mock
 import filelock
 import pytest
 
+from sky.server import daemons
 from sky.server.requests import payloads
 from sky.server.requests import requests
 from sky.server.requests.requests import RequestStatus
@@ -1522,3 +1523,118 @@ def test_update_request(isolated_database):
                                       set_status=RequestStatus.FAILED,
                                       match_status=[RequestStatus.CANCELLED])
     assert request.status == RequestStatus.FAILED
+
+
+def test_kill_requests_with_prefixes(isolated_database):
+    current_time = time.time()
+
+    # Create test requests
+    test_requests = [
+        requests.Request(request_id='prefix1-request-id',
+                         name='request-name',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.PENDING,
+                         created_at=current_time - 10,
+                         user_id='user-1',
+                         cluster_name='cluster-1'),
+        requests.Request(request_id='prefix2-request-id',
+                         name='request-name',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.RUNNING,
+                         created_at=current_time - 20,
+                         user_id='user-1',
+                         cluster_name='cluster-1'),
+        requests.Request(request_id='prefix3-request-id',
+                         name='request-name',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.RUNNING,
+                         created_at=current_time - 30,
+                         user_id='user-2',
+                         cluster_name='cluster-1'),
+        requests.Request(request_id='prefix4-request-id',
+                         name='request-name',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.RUNNING,
+                         created_at=current_time - 30,
+                         user_id='user-2',
+                         cluster_name='cluster-1'),
+        requests.Request(request_id=daemons.INTERNAL_REQUEST_DAEMONS[0].id,
+                         name='request-name',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.RUNNING,
+                         created_at=current_time - 40,
+                         user_id='root'),
+        requests.Request(request_id='other-request-1',
+                         name='request-name',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.RUNNING,
+                         created_at=current_time - 50,
+                         user_id='user-3'),
+        requests.Request(request_id='other-request-2',
+                         name='request-name',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.RUNNING,
+                         created_at=current_time - 50,
+                         user_id='user-3'),
+        requests.Request(request_id='other-request-3',
+                         name='request-name',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.RUNNING,
+                         created_at=current_time - 50,
+                         user_id='user-3'),
+    ]
+    for req in test_requests:
+        requests.create_if_not_exists(req)
+
+    # test kill requests with request ID prefixes
+    result = requests.kill_requests_with_prefixes(
+        request_id_prefixes=['prefix1'])
+    assert len(result) == 1
+    # verify the full request ID is returned
+    assert test_requests[0].request_id in result
+
+    # verify cancelling a cancelled request is a NOP
+    result = requests.kill_requests_with_prefixes(
+        request_id_prefixes=['prefix1'])
+    assert len(result) == 0
+
+    # test kill requests with full request ID
+    result = requests.kill_requests_with_prefixes(
+        request_id_prefixes=['prefix2-request-id'])
+    assert len(result) == 1
+    # verify the full request ID is returned
+    assert test_requests[1].request_id in result
+
+    # verify cancelling a cancelled request is a NOP
+    result = requests.kill_requests_with_prefixes(
+        request_id_prefixes=['prefix2-request-id'])
+    assert len(result) == 0
+
+    # test kill requests with user ID
+    result = requests.kill_requests_with_prefixes(user_id='user-2')
+    assert len(result) == 2
+    # verify the full request IDs are returned
+    assert test_requests[2].request_id in result
+    assert test_requests[3].request_id in result
+
+    # test kill requests with internal daemon request ID
+    result = requests.kill_requests_with_prefixes(
+        request_id_prefixes=[daemons.INTERNAL_REQUEST_DAEMONS[0].id])
+    # kill_requests_with_prefixes cannot be used to kill internal daemon requests
+    assert len(result) == 0
+
+    # test kill requests with no request ID prefixes and no user ID
+    result = requests.kill_requests_with_prefixes()
+    assert len(result) == 3
+    # three requests (ones starting with 'other-request-') should be killed
+    assert test_requests[5].request_id in result
+    assert test_requests[6].request_id in result
+    assert test_requests[7].request_id in result
