@@ -928,7 +928,7 @@ async def _delete_requests(requests: List[Request]):
 
 
 async def clean_finished_requests_with_retention(retention_seconds: int,
-                                                 limit: int = 1000):
+                                                 batch_size: int = 1000):
     """Clean up finished requests older than the retention period.
 
     This function removes old finished requests (SUCCEEDED, FAILED, CANCELLED)
@@ -937,9 +937,12 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
     Args:
         retention_seconds: Requests older than this many seconds will be
             deleted.
+        batch_size: The number of requests to delete at a time. All stale
+            requests older than the retention period will be deleted
+            regardless of the batch size.
     """
     total_deleted = 0
-    # batch deletes to 1000 requests at a time to
+    # batch deletes to 'batch_size' requests at a time to
     # avoid using too much memory and once and to let each db query complete
     # in a reasonable time.
     while True:
@@ -947,7 +950,7 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
             req_filter=RequestTaskFilter(status=RequestStatus.finished_status(),
                                          finished_before=time.time() -
                                          retention_seconds,
-                                         limit=limit))
+                                         limit=batch_size))
         if len(reqs) == 0:
             break
         futs = []

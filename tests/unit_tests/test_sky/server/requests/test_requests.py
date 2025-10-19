@@ -141,6 +141,210 @@ async def test_clean_finished_requests_with_retention(isolated_database):
 
 
 @pytest.mark.asyncio
+async def test_clean_finished_requests_with_retention_batch_size_functionality(
+        isolated_database):
+    """Test that the batch_size parameter controls batch size in cleanup operations."""
+    current_time = time.time()
+    retention_seconds = 60  # 1 minute retention
+
+    # Create 25 old finished requests
+    old_requests = []
+    for i in range(25):
+        request = requests.Request(
+            request_id=f'old-batch-{i:03d}',
+            name='test-request',
+            entrypoint=dummy,
+            request_body=payloads.RequestBody(),
+            status=RequestStatus.SUCCEEDED,
+            created_at=current_time - 180,
+            finished_at=current_time -
+            120,  # 2 minutes old (older than retention)
+            user_id='test-user')
+        old_requests.append(request)
+        requests.create_if_not_exists(request)
+
+    # Create 5 recent finished requests (should not be deleted)
+    recent_requests = []
+    for i in range(5):
+        request = requests.Request(
+            request_id=f'recent-batch-{i:03d}',
+            name='test-request',
+            entrypoint=dummy,
+            request_body=payloads.RequestBody(),
+            status=RequestStatus.SUCCEEDED,
+            created_at=current_time - 60,
+            finished_at=current_time -
+            30,  # 30 seconds old (newer than retention)
+            user_id='test-user')
+        recent_requests.append(request)
+        requests.create_if_not_exists(request)
+
+    # Verify all requests exist before cleanup
+    assert len([
+        req for req in old_requests
+        if requests.get_request(req.request_id) is not None
+    ]) == 25
+    assert len([
+        req for req in recent_requests
+        if requests.get_request(req.request_id) is not None
+    ]) == 5
+
+    # Test with limit=10 - should process in batches of 10
+    with mock.patch.object(pathlib.Path, 'unlink') as mock_unlink:
+        with mock.patch('sky.server.requests.requests.logger') as mock_logger:
+            # Track how get_request_tasks_async is called to verify batching
+            original_get_request_tasks_async = requests.get_request_tasks_async
+            call_counts = []
+
+            async def track_get_request_tasks_async(req_filter):
+                result = await original_get_request_tasks_async(req_filter)
+                call_counts.append(len(result))
+                return result
+
+            with mock.patch(
+                    'sky.server.requests.requests.get_request_tasks_async',
+                    side_effect=track_get_request_tasks_async):
+                await requests.clean_finished_requests_with_retention(
+                    retention_seconds, batch_size=10)
+
+    # Verify all old requests were deleted
+    for req in old_requests:
+        assert requests.get_request(req.request_id) is None
+
+    # Verify recent requests were NOT deleted
+    for req in recent_requests:
+        assert requests.get_request(req.request_id) is not None
+
+    # Verify batching occurred - should have made multiple calls with decreasing counts
+    # First call should return 10 (limited), second call should return 10, third call should return 5, fourth call should return 0
+    assert len(call_counts) >= 3  # At least 3 calls (10, 10, 5, 0)
+    assert call_counts[0] == 10  # First batch
+    assert call_counts[1] == 10  # Second batch
+    assert call_counts[2] == 5  # Third batch (remaining)
+    assert call_counts[3] == 0  # Final call returns empty (loop termination)
+
+    # Verify log file unlink was called for each deleted request
+    assert mock_unlink.call_count == 25
+
+    # Verify logging shows correct total
+    mock_logger.info.assert_called_once()
+    log_message = mock_logger.info.call_args[0][0]
+    assert 'Cleaned up 25 finished requests' in log_message
+
+
+@pytest.mark.asyncio
+async def test_clean_finished_requests_with_retention_limit_larger_than_total(
+        isolated_database):
+    """Test cleanup when batch_size is larger than total number of old requests."""
+    current_time = time.time()
+    retention_seconds = 60
+
+    # Create only 5 old finished requests
+    old_requests = []
+    for i in range(5):
+        request = requests.Request(
+            request_id=f'small-batch-{i:03d}',
+            name='test-request',
+            entrypoint=dummy,
+            request_body=payloads.RequestBody(),
+            status=RequestStatus.SUCCEEDED,
+            created_at=current_time - 180,
+            finished_at=current_time - 120,  # 2 minutes old
+            user_id='test-user')
+        old_requests.append(request)
+        requests.create_if_not_exists(request)
+
+    # Test with limit=100 (much larger than the 5 requests)
+    with mock.patch.object(pathlib.Path, 'unlink'):
+        with mock.patch('sky.server.requests.requests.logger') as mock_logger:
+            # Track calls to verify single batch processing
+            original_get_request_tasks_async = requests.get_request_tasks_async
+            call_counts = []
+
+            async def track_get_request_tasks_async(req_filter):
+                result = await original_get_request_tasks_async(req_filter)
+                call_counts.append(len(result))
+                return result
+
+            with mock.patch(
+                    'sky.server.requests.requests.get_request_tasks_async',
+                    side_effect=track_get_request_tasks_async):
+                await requests.clean_finished_requests_with_retention(
+                    retention_seconds, batch_size=100)
+
+    # Verify all old requests were deleted
+    for req in old_requests:
+        assert requests.get_request(req.request_id) is None
+
+    # Should only need 2 calls: one returning 5 requests, one returning 0 (termination)
+    assert len(call_counts) == 2
+    assert call_counts[0] == 5  # All 5 requests in first batch
+    assert call_counts[1] == 0  # Empty result terminates loop
+
+    # Verify logging
+    mock_logger.info.assert_called_once()
+    log_message = mock_logger.info.call_args[0][0]
+    assert 'Cleaned up 5 finished requests' in log_message
+
+
+@pytest.mark.asyncio
+async def test_clean_finished_requests_with_retention_batch_size_one(
+        isolated_database):
+    """Test cleanup with batch_size=1 to verify single-request batching."""
+    current_time = time.time()
+    retention_seconds = 60
+
+    # Create 3 old finished requests
+    old_requests = []
+    for i in range(3):
+        request = requests.Request(
+            request_id=f'single-batch-{i:03d}',
+            name='test-request',
+            entrypoint=dummy,
+            request_body=payloads.RequestBody(),
+            status=RequestStatus.SUCCEEDED,
+            created_at=current_time - 180,
+            finished_at=current_time - 120,  # 2 minutes old
+            user_id='test-user')
+        old_requests.append(request)
+        requests.create_if_not_exists(request)
+
+    # Test with limit=1 (process one at a time)
+    with mock.patch.object(pathlib.Path, 'unlink'):
+        with mock.patch('sky.server.requests.requests.logger') as mock_logger:
+            # Track calls to verify single-request processing
+            original_get_request_tasks_async = requests.get_request_tasks_async
+            call_counts = []
+
+            async def track_get_request_tasks_async(req_filter):
+                result = await original_get_request_tasks_async(req_filter)
+                call_counts.append(len(result))
+                return result
+
+            with mock.patch(
+                    'sky.server.requests.requests.get_request_tasks_async',
+                    side_effect=track_get_request_tasks_async):
+                await requests.clean_finished_requests_with_retention(
+                    retention_seconds, batch_size=1)
+
+    # Verify all old requests were deleted
+    for req in old_requests:
+        assert requests.get_request(req.request_id) is None
+
+    # Should need 4 calls: three returning 1 request each, one returning 0 (termination)
+    assert len(call_counts) == 4
+    assert call_counts[0] == 1  # First request
+    assert call_counts[1] == 1  # Second request
+    assert call_counts[2] == 1  # Third request
+    assert call_counts[3] == 0  # Empty result terminates loop
+
+    # Verify logging
+    mock_logger.info.assert_called_once()
+    log_message = mock_logger.info.call_args[0][0]
+    assert 'Cleaned up 3 finished requests' in log_message
+
+
+@pytest.mark.asyncio
 async def test_clean_finished_requests_with_retention_no_old_requests(
         isolated_database):
     """Test cleanup when there are no old requests to clean."""
