@@ -927,7 +927,8 @@ async def _delete_requests(requests: List[Request]):
         f'DELETE FROM {REQUEST_TABLE} WHERE request_id IN ({id_list_str})')
 
 
-async def clean_finished_requests_with_retention(retention_seconds: int):
+async def clean_finished_requests_with_retention(retention_seconds: int,
+                                                 limit: int = 1000):
     """Clean up finished requests older than the retention period.
 
     This function removes old finished requests (SUCCEEDED, FAILED, CANCELLED)
@@ -937,23 +938,32 @@ async def clean_finished_requests_with_retention(retention_seconds: int):
         retention_seconds: Requests older than this many seconds will be
             deleted.
     """
-    reqs = await get_request_tasks_async(
-        req_filter=RequestTaskFilter(status=RequestStatus.finished_status(),
-                                     finished_before=time.time() -
-                                     retention_seconds))
+    total_deleted = 0
+    # batch deletes to 1000 requests at a time to
+    # avoid using too much memory and once and to let each db query complete
+    # in a reasonable time.
+    while True:
+        reqs = await get_request_tasks_async(
+            req_filter=RequestTaskFilter(status=RequestStatus.finished_status(),
+                                         finished_before=time.time() -
+                                         retention_seconds,
+                                         limit=limit))
+        if len(reqs) == 0:
+            break
+        futs = []
+        for req in reqs:
+            futs.append(
+                asyncio.create_task(
+                    anyio.Path(
+                        req.log_path.absolute()).unlink(missing_ok=True)))
+        await asyncio.gather(*futs)
 
-    futs = []
-    for req in reqs:
-        futs.append(
-            asyncio.create_task(
-                anyio.Path(req.log_path.absolute()).unlink(missing_ok=True)))
-    await asyncio.gather(*futs)
-
-    await _delete_requests(reqs)
+        await _delete_requests(reqs)
+        total_deleted += len(reqs)
 
     # To avoid leakage of the log file, logs must be deleted before the
     # request task in the database.
-    logger.info(f'Cleaned up {len(reqs)} finished requests '
+    logger.info(f'Cleaned up {total_deleted} finished requests '
                 f'older than {retention_seconds} seconds')
 
 
