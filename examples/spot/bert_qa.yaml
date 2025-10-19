@@ -1,7 +1,7 @@
 name: bert_qa
 
 resources:
-    accelerators: V100:1
+    accelerators: H100:1
     
 file_mounts:
     /checkpoint:
