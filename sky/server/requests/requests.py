@@ -937,14 +937,13 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
     Args:
         retention_seconds: Requests older than this many seconds will be
             deleted.
-        batch_size: The number of requests to delete at a time. All stale
+        batch_size: batch delete 'batch_size' requests at a time to
+            avoid using too much memory and once and to let each
+            db query complete in a reasonable time. All stale
             requests older than the retention period will be deleted
             regardless of the batch size.
     """
     total_deleted = 0
-    # batch deletes to 'batch_size' requests at a time to
-    # avoid using too much memory and once and to let each db query complete
-    # in a reasonable time.
     while True:
         reqs = await get_request_tasks_async(
             req_filter=RequestTaskFilter(status=RequestStatus.finished_status(),
