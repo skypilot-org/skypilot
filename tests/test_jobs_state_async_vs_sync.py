@@ -1,4 +1,5 @@
 import asyncio
+import time
 from typing import Dict, List, Tuple
 
 import pytest
@@ -53,7 +54,8 @@ def _seed_one_job(_mock_jobs_db_conn) -> int:
                                                workspace='default',
                                                entrypoint='echo',
                                                pool=None,
-                                               pool_hash=None)
+                                               pool_hash=None,
+                                               user_hash='abcd1234')
     state.set_pending(
         job_id=job_id,
         task_id=0,
@@ -71,7 +73,8 @@ def _seed_complex_job(_mock_jobs_db_conn) -> int:
                                                workspace='default',
                                                entrypoint='echo',
                                                pool=None,
-                                               pool_hash=None)
+                                               pool_hash=None,
+                                               user_hash='abcd1234')
     # Create gaps in task ids to test ordering
     state.set_pending(job_id=job_id,
                       task_id=0,
@@ -183,7 +186,6 @@ async def test_get_job_schedule_state_same(_seed_one_job: int):
         dag_yaml_path='dummy.yaml',
         original_user_yaml_path='dummy_user.yaml',
         env_file_path='dummy.env',
-        user_hash='user',
         priority=1,
     )
 
@@ -199,7 +201,8 @@ async def test_schedule_state_transitions_same(_mock_jobs_db_conn):
                                                workspace='default',
                                                entrypoint='echo',
                                                pool=None,
-                                               pool_hash=None)
+                                               pool_hash=None,
+                                               user_hash='abcd1234')
 
     # INACTIVE
     assert state.get_job_schedule_state(
@@ -211,7 +214,6 @@ async def test_schedule_state_transitions_same(_mock_jobs_db_conn):
         dag_yaml_path='d.yaml',
         original_user_yaml_path='u.yaml',
         env_file_path='e.env',
-        user_hash='u',
         priority=10,
     )
     assert state.get_job_schedule_state(
@@ -282,7 +284,8 @@ async def test_get_status_no_tasks_returns_none(_mock_jobs_db_conn):
                                                workspace='default',
                                                entrypoint='echo',
                                                pool=None,
-                                               pool_hash=None)
+                                               pool_hash=None,
+                                               user_hash='abcd1234')
     assert state.get_latest_task_id_status(job_id) == (None, None)
     assert await state.get_latest_task_id_status_async(job_id) == (None, None)
     assert state.get_status(job_id) is None
@@ -316,12 +319,14 @@ async def test_override_terminal_failure_reason_prepend(_mock_jobs_db_conn):
                                                     workspace='default',
                                                     entrypoint='echo',
                                                     pool=None,
-                                                    pool_hash=None)
+                                                    pool_hash=None,
+                                                    user_hash='abcd1234')
     async_job_id = state.set_job_info_without_job_id(name='async_job',
                                                      workspace='default',
                                                      entrypoint='echo',
                                                      pool=None,
-                                                     pool_hash=None)
+                                                     pool_hash=None,
+                                                     user_hash='abcd1234')
 
     # Set up initial pending task for both jobs
     state.set_pending(sync_job_id,
@@ -390,7 +395,8 @@ async def test_set_backoff_pending_async_success(_mock_jobs_db_conn):
                                                workspace='default',
                                                entrypoint='echo',
                                                pool=None,
-                                               pool_hash=None)
+                                               pool_hash=None,
+                                               user_hash='abcd1234')
     state.set_pending(
         job_id=job_id,
         task_id=0,
@@ -424,7 +430,8 @@ async def test_set_backoff_pending_async_from_recovering(_mock_jobs_db_conn):
                                                workspace='default',
                                                entrypoint='echo',
                                                pool=None,
-                                               pool_hash=None)
+                                               pool_hash=None,
+                                               user_hash='abcd1234')
     state.set_pending(
         job_id=job_id,
         task_id=0,
@@ -458,7 +465,8 @@ async def test_set_backoff_pending_async_no_matching_rows(_mock_jobs_db_conn):
                                                workspace='default',
                                                entrypoint='echo',
                                                pool=None,
-                                               pool_hash=None)
+                                               pool_hash=None,
+                                               user_hash='abcd1234')
     state.set_pending(
         job_id=job_id,
         task_id=0,
@@ -472,5 +480,60 @@ async def test_set_backoff_pending_async_no_matching_rows(_mock_jobs_db_conn):
 
     # Call set_backoff_pending_async - should raise ManagedJobStatusError
     with pytest.raises(state.exceptions.ManagedJobStatusError,
-                       match='Failed to set the task back to pending'):
+                       match='Failed to set the task back to pending') as exc:
         await state.set_backoff_pending_async(job_id, 0)
+
+    message = str(exc.value)
+    assert 'rows matched job' in message
+    assert 'Status: RUNNING' in message
+
+
+@pytest.mark.asyncio
+async def test_set_recovered_async_error_details(_seed_one_job: int):
+    """Transition failure surfaces detailed status information."""
+    job_id = _seed_one_job
+
+    async def noop_callback(_):
+        return None
+
+    with pytest.raises(state.exceptions.ManagedJobStatusError) as exc_info:
+        await state.set_recovered_async(job_id, 0, time.time(), noop_callback)
+
+    message = str(exc_info.value)
+    assert 'rows matched job' in message
+    assert 'Status: PENDING' in message
+
+
+@pytest.mark.asyncio
+async def test_transition_failures_surface_details_for_all_functions(
+        _seed_one_job: int):
+    """Every transition failure includes contextual task details."""
+    job_id = _seed_one_job
+    missing_task_id = 1
+
+    async def noop_callback(_):
+        return None
+
+    async def expect_failure(coro_factory):
+        with pytest.raises(state.exceptions.ManagedJobStatusError) as exc:
+            await coro_factory()
+        message = str(exc.value)
+        assert (f'0 rows matched job {job_id} and task {missing_task_id}'
+                in message)
+        return message
+
+    await expect_failure(
+        lambda: state.set_backoff_pending_async(job_id, missing_task_id))
+    await expect_failure(
+        lambda: state.set_restarting_async(job_id, missing_task_id, False))
+    await expect_failure(lambda: state.set_starting_async(
+        job_id, missing_task_id, 'run-id', time.time(), '{}', {}, noop_callback)
+                        )
+    await expect_failure(lambda: state.set_started_async(
+        job_id, missing_task_id, time.time(), noop_callback))
+    await expect_failure(lambda: state.set_recovering_async(
+        job_id, missing_task_id, False, noop_callback))
+    await expect_failure(lambda: state.set_recovered_async(
+        job_id, missing_task_id, time.time(), noop_callback))
+    await expect_failure(lambda: state.set_succeeded_async(
+        job_id, missing_task_id, time.time(), noop_callback))

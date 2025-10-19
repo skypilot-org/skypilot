@@ -183,31 +183,34 @@ export function ManagedJobs() {
   const [poolsData, setPoolsData] = useState([]);
   const [filters, setFilters] = useState([]);
 
-  const fetchData = async (isRefreshButton = false) => {
-    setLoading(true);
-    // Only set poolsLoading on initial load, not on refresh button clicks
-    if (!isRefreshButton && isInitialLoad) {
-      setPoolsLoading(true);
-    }
-    try {
-      const [poolsResponse] = await Promise.all([
-        dashboardCache.get(getPoolStatus, [{}]),
-      ]);
-      setPoolsData(poolsResponse.pools || []);
-    } catch (error) {
-      console.error('Error fetching data:', error);
-    } finally {
-      setLoading(false);
+  const fetchData = React.useCallback(
+    async (isRefreshButton = false) => {
+      setLoading(true);
+      // Only set poolsLoading on initial load, not on refresh button clicks
       if (!isRefreshButton && isInitialLoad) {
-        setPoolsLoading(false);
-        setIsInitialLoad(false);
+        setPoolsLoading(true);
       }
-    }
-  };
+      try {
+        const [poolsResponse] = await Promise.all([
+          dashboardCache.get(getPoolStatus, [{}]),
+        ]);
+        setPoolsData(poolsResponse.pools || []);
+      } catch (error) {
+        console.error('Error fetching data:', error);
+      } finally {
+        setLoading(false);
+        if (!isRefreshButton && isInitialLoad) {
+          setPoolsLoading(false);
+          setIsInitialLoad(false);
+        }
+      }
+    },
+    [isInitialLoad]
+  );
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
 
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched for both jobs and pools
@@ -340,6 +343,24 @@ export function ManagedJobsTable({
   const isMobile = useMobile();
   // Guards multiple concurrent fetches: only latest response should commit
   const requestSeqRef = useRef(0);
+
+  // Determine if we should show the Workspace column
+  // Only show if there are multiple workspaces or a workspace other than 'default'
+  const shouldShowWorkspace = React.useMemo(() => {
+    if (!data || data.length === 0) return false;
+    const workspaces = new Set(data.map((job) => job.workspace || 'default'));
+    // Show if there's more than one workspace, or if the only workspace is not 'default'
+    return (
+      workspaces.size > 1 ||
+      (workspaces.size === 1 && !workspaces.has('default'))
+    );
+  }, [data]);
+
+  // Determine if we should show the Worker Pool column
+  // Only show if there are any pools defined
+  const shouldShowWorkerPool = React.useMemo(() => {
+    return poolsData && poolsData.length > 0;
+  }, [poolsData]);
 
   const handleRestartController = async () => {
     setConfirmationModal({
@@ -514,25 +535,43 @@ export function ManagedJobsTable({
     fetchDataRef.current = fetchData;
   }, [fetchData]);
 
-  // Initial load
+  // Prevent duplicate API requests on first load/page refresh
+  // Multiple useEffects below would normally all fire on mount with their default values,
+  // causing redundant requests to the same API server endpoints.
+  // This ref ensures only the initial fetch effect runs, and subsequent effects
+  // only trigger on actual user interactions (page change, filter change, etc.)
+  const isInitialFetch = React.useRef(true);
+
+  // Initial load - only runs once on mount
   React.useEffect(() => {
     fetchData({ includeStatus: true });
-  }, []);
+    // Mark that initial fetch is complete so other effects can run
+    isInitialFetch.current = false;
+  }, [fetchData]);
 
   // Fetch on pagination (page) changes without status request
+  // Skip on initial fetch (page defaults to 1)
   React.useEffect(() => {
-    fetchData({ includeStatus: false });
-  }, [currentPage]);
+    if (!isInitialFetch.current) {
+      fetchData({ includeStatus: false });
+    }
+  }, [currentPage, fetchData]);
 
   // Fetch on filters or page size changes with status request
+  // Skip on initial fetch (filters default to [] and pageSize to 10)
   React.useEffect(() => {
-    fetchData({ includeStatus: true });
-  }, [filters, pageSize]);
+    if (!isInitialFetch.current) {
+      fetchData({ includeStatus: true });
+    }
+  }, [filters, pageSize, fetchData]);
 
   // Fetch on status filter changes (activeTab, selectedStatuses, showAllMode)
+  // Skip on initial fetch (these have default values)
   React.useEffect(() => {
-    fetchData({ includeStatus: true });
-  }, [activeTab, selectedStatuses, showAllMode]);
+    if (!isInitialFetch.current) {
+      fetchData({ includeStatus: true });
+    }
+  }, [activeTab, selectedStatuses, showAllMode, fetchData]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -864,12 +903,14 @@ export function ManagedJobsTable({
                 >
                   User{getSortDirection('user')}
                 </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('workspace')}
-                >
-                  Workspace{getSortDirection('workspace')}
-                </TableHead>
+                {shouldShowWorkspace && (
+                  <TableHead
+                    className="sortable whitespace-nowrap"
+                    onClick={() => requestSort('workspace')}
+                  >
+                    Workspace{getSortDirection('workspace')}
+                  </TableHead>
+                )}
                 <TableHead
                   className="sortable whitespace-nowrap"
                   onClick={() => requestSort('submitted_at')}
@@ -890,12 +931,6 @@ export function ManagedJobsTable({
                 </TableHead>
                 <TableHead
                   className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('resources_str')}
-                >
-                  Requested{getSortDirection('resources_str')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
                   onClick={() => requestSort('infra')}
                 >
                   Infra{getSortDirection('infra')}
@@ -912,12 +947,14 @@ export function ManagedJobsTable({
                 >
                   Recoveries{getSortDirection('recoveries')}
                 </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('pool')}
-                >
-                  Worker Pool{getSortDirection('pool')}
-                </TableHead>
+                {shouldShowWorkerPool && (
+                  <TableHead
+                    className="sortable whitespace-nowrap"
+                    onClick={() => requestSort('pool')}
+                  >
+                    Worker Pool{getSortDirection('pool')}
+                  </TableHead>
+                )}
 
                 <TableHead>Details</TableHead>
                 <TableHead>Logs</TableHead>
@@ -927,7 +964,11 @@ export function ManagedJobsTable({
               {loading && isInitialLoad ? (
                 <TableRow>
                   <TableCell
-                    colSpan={12}
+                    colSpan={
+                      11 +
+                      (shouldShowWorkspace ? 1 : 0) +
+                      (shouldShowWorkerPool ? 1 : 0)
+                    }
                     className="text-center py-6 text-gray-500"
                   >
                     <div className="flex justify-center items-center">
@@ -963,14 +1004,16 @@ export function ManagedJobsTable({
                             userHash={item.user_hash}
                           />
                         </TableCell>
-                        <TableCell>
-                          <Link
-                            href="/workspaces"
-                            className="text-gray-700 hover:text-blue-600 hover:underline"
-                          >
-                            {item.workspace || 'default'}
-                          </Link>
-                        </TableCell>
+                        {shouldShowWorkspace && (
+                          <TableCell>
+                            <Link
+                              href="/workspaces"
+                              className="text-gray-700 hover:text-blue-600 hover:underline"
+                            >
+                              {item.workspace || 'default'}
+                            </Link>
+                          </TableCell>
+                        )}
                         <TableCell>
                           {formatSubmittedTime(item.submitted_at)}
                         </TableCell>
@@ -980,7 +1023,6 @@ export function ManagedJobsTable({
                         <TableCell>
                           <StatusBadge status={item.status} />
                         </TableCell>
-                        <TableCell>{item.requested_resources}</TableCell>
                         <TableCell>
                           {item.infra && item.infra !== '-' ? (
                             <NonCapitalizedTooltip
@@ -1040,23 +1082,25 @@ export function ManagedJobsTable({
                           </NonCapitalizedTooltip>
                         </TableCell>
                         <TableCell>{item.recoveries}</TableCell>
-                        <TableCell>
-                          <div
-                            className={
-                              poolsLoading
-                                ? 'blur-sm transition-all duration-300'
-                                : ''
-                            }
-                          >
-                            {poolsLoading
-                              ? '-'
-                              : renderPoolLink(
-                                  item.pool,
-                                  item.pool_hash,
-                                  poolsData
-                                )}
-                          </div>
-                        </TableCell>
+                        {shouldShowWorkerPool && (
+                          <TableCell>
+                            <div
+                              className={
+                                poolsLoading
+                                  ? 'blur-sm transition-all duration-300'
+                                  : ''
+                              }
+                            >
+                              {poolsLoading
+                                ? '-'
+                                : renderPoolLink(
+                                    item.pool,
+                                    item.pool_hash,
+                                    poolsData
+                                  )}
+                            </div>
+                          </TableCell>
+                        )}
                         <TableCell>
                           {item.details ? (
                             <TruncatedDetails
@@ -1081,7 +1125,11 @@ export function ManagedJobsTable({
                       {expandedRowId === item.id && (
                         <ExpandedDetailsRow
                           text={item.details}
-                          colSpan={13}
+                          colSpan={
+                            11 +
+                            (shouldShowWorkspace ? 1 : 0) +
+                            (shouldShowWorkerPool ? 1 : 0)
+                          }
                           innerRef={expandedRowRef}
                         />
                       )}
@@ -1090,7 +1138,14 @@ export function ManagedJobsTable({
                 </>
               ) : (
                 <TableRow>
-                  <TableCell colSpan={13} className="text-center py-6">
+                  <TableCell
+                    colSpan={
+                      11 +
+                      (shouldShowWorkspace ? 1 : 0) +
+                      (shouldShowWorkerPool ? 1 : 0)
+                    }
+                    className="text-center py-6"
+                  >
                     <div className="flex flex-col items-center space-y-4">
                       {controllerLaunching && (
                         <div className="flex flex-col items-center space-y-2">
@@ -1482,12 +1537,6 @@ export function ClusterJobs({
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
-                onClick={() => requestSort('workspace')}
-              >
-                Workspace{getSortDirection('workspace')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
                 onClick={() => requestSort('submitted_at')}
               >
                 Submitted{getSortDirection('submitted_at')}
@@ -1517,7 +1566,7 @@ export function ClusterJobs({
             {loading ? (
               <TableRow>
                 <TableCell
-                  colSpan={9}
+                  colSpan={8}
                   className="text-center py-12 text-gray-500"
                 >
                   <div className="flex justify-center items-center">
@@ -1560,14 +1609,6 @@ export function ClusterJobs({
                       />
                     </TableCell>
                     <TableCell>
-                      <Link
-                        href="/workspaces"
-                        className="text-gray-700 hover:text-blue-600 hover:underline"
-                      >
-                        {item.workspace || 'default'}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
                       {formatSubmittedTime(item.submitted_at)}
                     </TableCell>
                     <TableCell>{formatDuration(item.job_duration)}</TableCell>
@@ -1587,7 +1628,7 @@ export function ClusterJobs({
                   {expandedRowId === item.id && (
                     <ExpandedDetailsRow
                       text={item.job || 'Unnamed job'}
-                      colSpan={9}
+                      colSpan={8}
                       innerRef={expandedRowRef}
                     />
                   )}

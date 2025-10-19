@@ -44,6 +44,11 @@ cleanup() {
     if kubectl get namespace $NAMESPACE >/dev/null 2>&1; then
         echo "Deleting namespace $NAMESPACE..."
         kubectl delete namespace $NAMESPACE --ignore-not-found=true
+        # Wait until namespace actually terminated.
+        while kubectl get namespace $NAMESPACE >/dev/null 2>&1; do
+            echo "Waiting for namespace $NAMESPACE to be deleted..."
+            sleep 1
+        done
         echo "✅ Namespace $NAMESPACE deleted"
     else
         echo "Namespace $NAMESPACE does not exist, skipping deletion"
@@ -216,6 +221,24 @@ deploy_and_login() {
     echo "============================================="
     echo "Deploying SkyPilot with OAuth mode: $mode"
     echo "============================================="
+
+    # Check if namespace is actively being terminated, if so wait.
+    status=$(kubectl get namespace "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+
+    if [[ "$status" == "Terminating" ]]; then
+      echo "⏳ Namespace '$NAMESPACE' is terminating. Waiting for it to be deleted..."
+      # Poll until it's gone
+      while kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; do
+        sleep 2
+      done
+      echo "✅ Namespace '$NAMESPACE' has been fully deleted."
+    elif [[ "$status" == "Active" ]]; then
+      echo "✅ Namespace '$NAMESPACE' exists and is active — nothing to wait for."
+    else
+      echo "✅ Namespace '$NAMESPACE' does not exist."
+    fi
+
+    echo "✅ Namespace $NAMESPACE deleted"
 
     echo "Installing Skypilot Helm chart..."
     if [[ "$mode" == "legacy" ]]; then

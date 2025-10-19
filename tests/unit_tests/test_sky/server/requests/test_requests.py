@@ -4,6 +4,7 @@ import pathlib
 import time
 import unittest.mock as mock
 
+import filelock
 import pytest
 
 from sky.server.requests import payloads
@@ -614,7 +615,7 @@ async def test_get_request_tasks_async(isolated_database):
 
     # Test 1: Get all requests (no filter) - async
     all_requests = await requests.get_request_tasks_async(
-        requests.RequestTaskFilter())
+        requests.RequestTaskFilter(sort=True))
     assert len(all_requests) == 3
     # Should be ordered by created_at DESC
     assert all_requests[0].request_id == 'async-req-3'  # newest
@@ -622,19 +623,19 @@ async def test_get_request_tasks_async(isolated_database):
 
     # Test 2: Filter by status - async
     pending_requests = await requests.get_request_tasks_async(
-        requests.RequestTaskFilter(status=[RequestStatus.PENDING]))
+        requests.RequestTaskFilter(status=[RequestStatus.PENDING], sort=True))
     assert len(pending_requests) == 1
     assert pending_requests[0].request_id == 'async-req-1'
 
     # Test 3: Filter by user_id - async
     user1_requests = await requests.get_request_tasks_async(
-        requests.RequestTaskFilter(user_id='async-user1'))
+        requests.RequestTaskFilter(user_id='async-user1', sort=True))
     assert len(user1_requests) == 2
     assert all(req.user_id == 'async-user1' for req in user1_requests)
 
     # Test 4: Filter by cluster_names - async
     cluster1_requests = await requests.get_request_tasks_async(
-        requests.RequestTaskFilter(cluster_names=['async-cluster1']))
+        requests.RequestTaskFilter(cluster_names=['async-cluster1'], sort=True))
     assert len(cluster1_requests) == 2
     assert all(
         req.cluster_name == 'async-cluster1' for req in cluster1_requests)
@@ -643,7 +644,8 @@ async def test_get_request_tasks_async(isolated_database):
     combined_requests = await requests.get_request_tasks_async(
         requests.RequestTaskFilter(
             status=[RequestStatus.PENDING, RequestStatus.RUNNING],
-            user_id='async-user1'))
+            user_id='async-user1',
+            sort=True))
     assert len(combined_requests) == 2
     assert all(req.user_id == 'async-user1' and
                req.status in [RequestStatus.PENDING, RequestStatus.RUNNING]
@@ -655,7 +657,7 @@ async def test_get_request_tasks_async_empty_results(isolated_database):
     """Test async version with filters that return no results."""
     # Test with empty database
     empty_results = await requests.get_request_tasks_async(
-        requests.RequestTaskFilter())
+        requests.RequestTaskFilter(sort=True))
     assert len(empty_results) == 0
 
     # Create one test request
@@ -670,12 +672,12 @@ async def test_get_request_tasks_async_empty_results(isolated_database):
 
     # Test filtering that returns no results
     empty_results = await requests.get_request_tasks_async(
-        requests.RequestTaskFilter(status=[RequestStatus.CANCELLED]))
+        requests.RequestTaskFilter(status=[RequestStatus.CANCELLED], sort=True))
     assert len(empty_results) == 0
 
     # Test filtering with non-existent user
     empty_results = await requests.get_request_tasks_async(
-        requests.RequestTaskFilter(user_id='nonexistent-async-user'))
+        requests.RequestTaskFilter(user_id='nonexistent-async-user', sort=True))
     assert len(empty_results) == 0
 
 
@@ -709,7 +711,8 @@ async def test_get_request_tasks_async_consistency(isolated_database):
         requests.create_if_not_exists(req)
 
     # Test that sync and async versions return identical results
-    filter_obj = requests.RequestTaskFilter(user_id='consistency-user')
+    filter_obj = requests.RequestTaskFilter(user_id='consistency-user',
+                                            sort=True)
 
     sync_results = requests.get_request_tasks(filter_obj)
     async_results = await requests.get_request_tasks_async(filter_obj)
@@ -752,19 +755,20 @@ async def test_get_request_tasks_concurrent_access(isolated_database):
     # Define concurrent query functions
     async def query_all():
         return await requests.get_request_tasks_async(
-            requests.RequestTaskFilter())
+            requests.RequestTaskFilter(sort=True))
 
     async def query_by_status():
         return await requests.get_request_tasks_async(
-            requests.RequestTaskFilter(status=[RequestStatus.PENDING]))
+            requests.RequestTaskFilter(status=[RequestStatus.PENDING],
+                                       sort=True))
 
     async def query_by_user(user_id):
         return await requests.get_request_tasks_async(
-            requests.RequestTaskFilter(user_id=user_id))
+            requests.RequestTaskFilter(user_id=user_id, sort=True))
 
     async def query_by_cluster(cluster_name):
         return await requests.get_request_tasks_async(
-            requests.RequestTaskFilter(cluster_names=[cluster_name]))
+            requests.RequestTaskFilter(cluster_names=[cluster_name], sort=True))
 
     # Run multiple queries concurrently
     results = await asyncio.gather(query_all(),
@@ -804,7 +808,7 @@ def test_requests_filter():
     """Test RequestTaskFilter.build_query() generates correct SQL."""
 
     # Test empty filter - should return base query with no WHERE clause
-    filter_empty = requests.RequestTaskFilter()
+    filter_empty = requests.RequestTaskFilter(sort=True)
     sql, params = filter_empty.build_query()
     expected_columns = ', '.join(requests.REQUEST_COLUMNS)
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
@@ -814,7 +818,7 @@ def test_requests_filter():
 
     # Test status filter
     filter_status = requests.RequestTaskFilter(
-        status=[RequestStatus.PENDING, RequestStatus.RUNNING])
+        status=[RequestStatus.PENDING, RequestStatus.RUNNING], sort=True)
     sql, params = filter_status.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
                     'WHERE status IN (\'PENDING\',\'RUNNING\') '
@@ -824,7 +828,7 @@ def test_requests_filter():
 
     # Test cluster_names filter
     filter_clusters = requests.RequestTaskFilter(
-        cluster_names=['cluster1', 'cluster2'])
+        cluster_names=['cluster1', 'cluster2'], sort=True)
     sql, params = filter_clusters.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
                     'WHERE cluster_name IN (\'cluster1\',\'cluster2\') '
@@ -833,7 +837,7 @@ def test_requests_filter():
     assert params == []
 
     # Test user_id filter (uses parameterized query)
-    filter_user = requests.RequestTaskFilter(user_id='test-user-123')
+    filter_user = requests.RequestTaskFilter(user_id='test-user-123', sort=True)
     sql, params = filter_user.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
                     'WHERE user_id = ? ORDER BY created_at DESC')
@@ -842,7 +846,7 @@ def test_requests_filter():
 
     # Test exclude_request_names filter
     filter_exclude = requests.RequestTaskFilter(
-        exclude_request_names=['request1', 'request2'])
+        exclude_request_names=['request1', 'request2'], sort=True)
     sql, params = filter_exclude.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
                     'WHERE name NOT IN (\'request1\',\'request2\') '
@@ -852,7 +856,7 @@ def test_requests_filter():
 
     # Test include_request_names filter
     filter_include = requests.RequestTaskFilter(
-        include_request_names=['request3', 'request4'])
+        include_request_names=['request3', 'request4'], sort=True)
     sql, params = filter_include.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
                     'WHERE name IN (\'request3\',\'request4\') '
@@ -862,7 +866,8 @@ def test_requests_filter():
 
     # Test finished_before filter (uses parameterized query)
     timestamp = 1234567890.0
-    filter_finished = requests.RequestTaskFilter(finished_before=timestamp)
+    filter_finished = requests.RequestTaskFilter(finished_before=timestamp,
+                                                 sort=True)
     sql, params = filter_finished.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
                     'WHERE finished_at < ? ORDER BY created_at DESC')
@@ -875,7 +880,8 @@ def test_requests_filter():
         cluster_names=['prod-cluster'],
         user_id='admin-user',
         exclude_request_names=['internal-task'],
-        finished_before=9876543210.0)
+        finished_before=9876543210.0,
+        sort=True)
     sql, params = filter_combined.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
                     'WHERE status IN (\'SUCCEEDED\',\'FAILED\') AND '
@@ -889,11 +895,13 @@ def test_requests_filter():
     # Test mutually exclusive filters raise ValueError
     with pytest.raises(ValueError, match='Only one of exclude_request_names'):
         requests.RequestTaskFilter(exclude_request_names=['req1'],
-                                   include_request_names=['req2'])
+                                   include_request_names=['req2'],
+                                   sort=True)
 
     # Test special characters in names are properly escaped with repr()
     filter_special_chars = requests.RequestTaskFilter(
-        cluster_names=['cluster\'with\'quotes', 'cluster\"with\"double'])
+        cluster_names=['cluster\'with\'quotes', 'cluster\"with\"double'],
+        sort=True)
     sql, params = filter_special_chars.build_query()
     # repr() should properly escape the quotes
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
@@ -901,3 +909,326 @@ def test_requests_filter():
                     '\'cluster\"with\"double\') ORDER BY created_at DESC')
     assert sql == expected_sql
     assert params == []
+
+
+def test_encode_requests_empty_list():
+    """Test encoding an empty list of requests."""
+    result = requests.encode_requests([])
+    assert result == []
+
+
+def test_encode_requests_single_request():
+    """Test encoding a single request."""
+    from sky import models
+
+    current_time = time.time()
+    request = requests.Request(request_id='test-req-1',
+                               name='test-request',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.PENDING,
+                               created_at=current_time,
+                               user_id='user-123')
+
+    # Mock global_user_state.get_all_users()
+    mock_user = models.User(id='user-123', name='Test User')
+    with mock.patch('sky.global_user_state.get_all_users',
+                    return_value=[mock_user]):
+        result = requests.encode_requests([request])
+
+    assert len(result) == 1
+    payload = result[0]
+    assert payload.request_id == 'test-req-1'
+    assert payload.name == 'test-request'
+    assert payload.entrypoint == 'dummy'
+    assert payload.status == 'PENDING'
+    assert payload.created_at == current_time
+    assert payload.user_id == 'user-123'
+    assert payload.user_name == 'Test User'
+    assert payload.pid is None
+    assert payload.return_value == 'null'
+    assert payload.error == 'null'
+
+
+def test_encode_requests_multiple_requests():
+    """Test encoding multiple requests."""
+    from sky import models
+
+    current_time = time.time()
+    test_requests = [
+        requests.Request(request_id='req-1',
+                         name='request-1',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.RUNNING,
+                         created_at=current_time,
+                         user_id='user-1',
+                         cluster_name='cluster-1'),
+        requests.Request(request_id='req-2',
+                         name='request-2',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.SUCCEEDED,
+                         created_at=current_time - 10,
+                         finished_at=current_time - 5,
+                         user_id='user-2',
+                         cluster_name='cluster-2'),
+        requests.Request(request_id='req-3',
+                         name='request-3',
+                         entrypoint=dummy,
+                         request_body=payloads.RequestBody(),
+                         status=RequestStatus.FAILED,
+                         created_at=current_time - 20,
+                         finished_at=current_time - 15,
+                         user_id='user-1')
+    ]
+
+    # Mock global_user_state.get_all_users()
+    mock_users = [
+        models.User(id='user-1', name='User One'),
+        models.User(id='user-2', name='User Two')
+    ]
+    with mock.patch('sky.global_user_state.get_all_users',
+                    return_value=mock_users):
+        result = requests.encode_requests(test_requests)
+
+    assert len(result) == 3
+    # Check first request
+    assert result[0].request_id == 'req-1'
+    assert result[0].user_name == 'User One'
+    assert result[0].cluster_name == 'cluster-1'
+    # Check second request
+    assert result[1].request_id == 'req-2'
+    assert result[1].user_name == 'User Two'
+    assert result[1].cluster_name == 'cluster-2'
+    assert result[1].finished_at == current_time - 5
+    # Check third request
+    assert result[2].request_id == 'req-3'
+    assert result[2].user_name == 'User One'
+    assert result[2].cluster_name is None
+
+
+def test_encode_requests_user_not_found():
+    """Test encoding requests when user is not in the database."""
+    current_time = time.time()
+    request = requests.Request(request_id='test-req',
+                               name='test-request',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.PENDING,
+                               created_at=current_time,
+                               user_id='nonexistent-user')
+
+    # Mock get_all_users() to return empty list
+    with mock.patch('sky.global_user_state.get_all_users', return_value=[]):
+        result = requests.encode_requests([request])
+
+    assert len(result) == 1
+    payload = result[0]
+    assert payload.user_id == 'nonexistent-user'
+    assert payload.user_name is None  # User not found
+
+
+def test_encode_requests_with_none_request_body():
+    """Test encoding requests with None request_body."""
+    from sky import models
+
+    current_time = time.time()
+    request = requests.Request(request_id='test-req',
+                               name='test-request',
+                               entrypoint=None,
+                               request_body=None,
+                               status=RequestStatus.PENDING,
+                               created_at=current_time,
+                               user_id='user-123')
+
+    mock_user = models.User(id='user-123', name='Test User')
+    with mock.patch('sky.global_user_state.get_all_users',
+                    return_value=[mock_user]):
+        result = requests.encode_requests([request])
+
+    assert len(result) == 1
+    payload = result[0]
+    assert payload.entrypoint == ''
+    assert payload.request_body == 'null'
+
+
+def test_encode_requests_various_statuses():
+    """Test encoding requests with various status values."""
+    from sky import models
+
+    current_time = time.time()
+    statuses = [
+        RequestStatus.PENDING, RequestStatus.RUNNING, RequestStatus.SUCCEEDED,
+        RequestStatus.FAILED, RequestStatus.CANCELLED
+    ]
+
+    test_requests = []
+    for i, status in enumerate(statuses):
+        req = requests.Request(request_id=f'req-{i}',
+                               name=f'request-{i}',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=status,
+                               created_at=current_time - i,
+                               user_id='user-1')
+        test_requests.append(req)
+
+    mock_user = models.User(id='user-1', name='Test User')
+    with mock.patch('sky.global_user_state.get_all_users',
+                    return_value=[mock_user]):
+        result = requests.encode_requests(test_requests)
+
+    assert len(result) == len(statuses)
+    for i, status in enumerate(statuses):
+        assert result[i].status == status.value
+
+
+def test_update_request_row_fields_none_fields():
+    """Test _update_request_row_fields with None fields returns row as-is."""
+    original_row = ('req-1', 'test', 'entry', 'body', 'PENDING', 'ret', 'err',
+                    123, 100.0, 'cluster', 'long', 'user-1', 'msg', 1, 200.0)
+    result = requests._update_request_row_fields(original_row, None)
+    assert result == original_row
+
+
+def test_update_request_row_fields_partial_fields():
+    """Test _update_request_row_fields with partial fields provided."""
+    empty_pickled_value = 'gAROLg=='
+
+    # Only provide request_id and name
+    row = ('my-request', 'my-name')
+    fields = ['request_id', 'name']
+    result = requests._update_request_row_fields(row, fields)
+
+    assert len(result) == len(requests.REQUEST_COLUMNS)
+    # Provided fields
+    assert result[0] == 'my-request'  # request_id
+    assert result[1] == 'my-name'  # name
+    # Missing required fields should be filled with defaults
+    assert result[2] == empty_pickled_value  # entrypoint
+    assert result[3] == empty_pickled_value  # request_body
+    assert result[4] == RequestStatus.PENDING.value  # status
+    assert result[8] == 0  # created_at
+    assert result[11] == ''  # user_id
+
+
+def test_update_request_row_fields_partial_fields_entrypoint():
+    """Test _update_request_row_fields with partial fields provided."""
+    empty_pickled_value = 'gAROLg=='
+
+    # Only provide request_id and name
+    row = ('my-entrypoint',)
+    fields = ['entrypoint']
+    result = requests._update_request_row_fields(row, fields)
+
+    assert len(result) == len(requests.REQUEST_COLUMNS)
+    # Provided fields
+    assert result[0] == ''  # request_id
+    assert result[1] == ''  # name
+    # Missing required fields should be filled with defaults
+    assert result[2] == 'my-entrypoint'  # entrypoint
+    assert result[3] == empty_pickled_value  # request_body
+    assert result[4] == RequestStatus.PENDING.value  # status
+    assert result[8] == 0  # created_at
+    assert result[11] == ''  # user_id
+
+
+def test_update_request_row_fields_all_required_fields():
+    """Test _update_request_row_fields with all required fields."""
+    empty_pickled_value = 'gAROLg=='
+
+    row = ('req-1', 'test-name', 'entrypoint-data', 'body-data', 'RUNNING',
+           'null', 'null', 'short', 'user-123', 100.0)
+    fields = [
+        'request_id', 'name', 'entrypoint', 'request_body', 'status',
+        'return_value', 'error', 'schedule_type', 'user_id', 'created_at'
+    ]
+    result = requests._update_request_row_fields(row, fields)
+
+    assert len(result) == len(requests.REQUEST_COLUMNS)
+    # Check provided fields maintain their values
+    assert result[0] == 'req-1'
+    assert result[1] == 'test-name'
+    assert result[2] == 'entrypoint-data'
+    assert result[3] == 'body-data'
+    assert result[4] == 'RUNNING'
+    assert result[11] == 'user-123'
+    assert result[8] == 100.0
+    # Check optional fields are filled with defaults
+    assert result[7] is None  # pid
+    assert result[9] is None  # cluster_name
+    assert result[12] is None  # status_msg
+    assert result[13] is False  # should_retry
+    assert result[14] is None  # finished_at
+
+
+def test_update_request_row_fields_with_optional_fields():
+    """Test _update_request_row_fields includes optional fields."""
+    row = ('req-1', 'test', 'entry', 'body', 'SUCCEEDED', 'null', 'null', 12345,
+           100.0, 'my-cluster', 'long', 'user-1', 'All done', 1, 200.0)
+    fields = [
+        'request_id', 'name', 'entrypoint', 'request_body', 'status',
+        'return_value', 'error', 'pid', 'created_at', 'cluster_name',
+        'schedule_type', 'user_id', 'status_msg', 'should_retry', 'finished_at'
+    ]
+    result = requests._update_request_row_fields(row, fields)
+
+    assert len(result) == len(requests.REQUEST_COLUMNS)
+    # Verify all fields are present
+    assert result[0] == 'req-1'
+    assert result[7] == 12345  # pid
+    assert result[9] == 'my-cluster'  # cluster_name
+    assert result[12] == 'All done'  # status_msg
+    assert result[13] == 1  # should_retry
+    assert result[14] == 200.0  # finished_at
+
+
+def test_update_request_row_fields_maintains_order():
+    """Test _update_request_row_fields returns fields in REQUEST_COLUMNS order."""
+    # Provide fields in non-standard order
+    row = ('user-1', 'test-name', 'req-1')
+    fields = ['user_id', 'name', 'request_id']
+    result = requests._update_request_row_fields(row, fields)
+
+    # Result should be in REQUEST_COLUMNS order
+    assert len(result) == len(requests.REQUEST_COLUMNS)
+    # REQUEST_COLUMNS order: request_id, name, ..., user_id
+    assert result[0] == 'req-1'  # request_id (first in REQUEST_COLUMNS)
+    assert result[1] == 'test-name'  # name (second in REQUEST_COLUMNS)
+    assert result[11] == 'user-1'  # user_id (later in REQUEST_COLUMNS)
+
+
+@pytest.mark.asyncio
+async def test_cancel_get_request_async():
+
+    async def mock_get_request_async_no_lock(id: str):
+        await asyncio.sleep(1)
+        return None
+
+    concurrency = 1000
+
+    with mock.patch('sky.server.requests.requests._get_request_no_lock_async',
+                    side_effect=mock_get_request_async_no_lock):
+        tasks = []
+        for i in range(concurrency):
+            task = asyncio.create_task(
+                requests.get_request_async(f'test-request-id-{i}'))
+            tasks.append(task)
+        await asyncio.sleep(0.2)
+        for task in tasks:
+            task.cancel()
+        try:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        except Exception:
+            pass
+        # Since get_request_async is shielded, task.cancel() will neither cancel or
+        # wait the get_request_async coroutine. So we have to wait for a enough time
+        # to ensure all the coroutines are done.
+        # TODO(aylei): this may have timing issue, but looks good for now.
+        await asyncio.sleep(10)
+        for i in range(concurrency):
+            lock = filelock.FileLock(
+                requests.request_lock_path(f'test-request-id-{i}'))
+            # The locks must be released properly
+            lock.acquire(blocking=False)

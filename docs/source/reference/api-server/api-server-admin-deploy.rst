@@ -923,7 +923,7 @@ To reuse an existing ingress controller, you can set :ref:`ingress-nginx.enabled
 
     # The first API server, with niginx-ingress controller deployed
     # It is assumed that the first API server is already deployed. If it is not deployed yet,
-    # add neccessary values instead of specifying --reuse-values
+    # add necessary values instead of specifying --reuse-values
     helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
         --namespace $NAMESPACE \
         --reuse-values \

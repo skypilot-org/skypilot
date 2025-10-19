@@ -5,7 +5,7 @@ See `Stage` for a Task's life cycle.
 import enum
 import logging
 import typing
-from typing import List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple, Union
 
 import colorama
 
@@ -31,6 +31,7 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import sky
+    from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -111,7 +112,6 @@ def _execute(
     stages: Optional[List[Stage]] = None,
     cluster_name: Optional[str] = None,
     detach_setup: bool = False,
-    detach_run: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
@@ -156,8 +156,6 @@ def _execute(
         job itself. You can safely ctrl-c to detach from logging, and it will
         not interrupt the setup process. To see the logs again after detaching,
         use `sky logs`. To cancel setup, cancel the job via `sky cancel`.
-      detach_run: If True, as soon as a job is submitted, return from this
-        function and do not stream execution logs.
       idle_minutes_to_autostop: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
       no_setup: bool; whether to skip setup commands or not when (re-)launching.
@@ -216,7 +214,6 @@ def _execute(
             stages=stages,
             cluster_name=cluster_name,
             detach_setup=detach_setup,
-            detach_run=detach_run,
             no_setup=no_setup,
             clone_disk_from=clone_disk_from,
             skip_unnecessary_provisioning=skip_unnecessary_provisioning,
@@ -238,7 +235,6 @@ def _execute_dag(
     stages: Optional[List[Stage]],
     cluster_name: Optional[str],
     detach_setup: bool,
-    detach_run: bool,
     no_setup: bool,
     clone_disk_from: Optional[str],
     skip_unnecessary_provisioning: bool,
@@ -400,6 +396,26 @@ def _execute_dag(
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
 
+    # Note on race vs. lock: OPTIMIZE typically runs outside the per-cluster
+    # lock. After the backend acquires the lock and refreshes state, the
+    # original "do we need to optimize?" decision may be stale (e.g., the
+    # cluster just got terminated). To compensate without moving the optimizer
+    # into the backend, we inject a small planner the backend can call under
+    # the lock only when no reusable snapshot and no caller plan exist.
+    planner: Optional[Callable[['sky.Task'], 'resources_lib.Resources']] = None
+    if isinstance(backend,
+                  backends.CloudVmRayBackend) and Stage.OPTIMIZE in stages:
+
+        def _planner(_t: 'sky.Task'):
+            new_dag = optimizer.Optimizer.optimize(dag,
+                                                   minimize=optimize_target,
+                                                   quiet=_quiet_optimizer)
+            new_task = new_dag.tasks[0]
+            assert new_task.best_resources is not None, new_task
+            return new_task.best_resources.assert_launchable()
+
+        planner = _planner
+
     backend.register_info(
         dag=dag,
         optimize_target=optimize_target,
@@ -408,7 +424,8 @@ def _execute_dag(
         # after K8S pod recovers from a crash.
         # See `kubernetes-ray.yml.j2` for more details.
         dump_final_script=is_controller_high_availability_supported,
-        is_managed=is_managed)
+        is_managed=is_managed,
+        planner=planner)
 
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket
@@ -485,10 +502,7 @@ def _execute_dag(
         if Stage.EXEC in stages:
             try:
                 global_user_state.update_last_use(handle.get_cluster_name())
-                job_id = backend.execute(handle,
-                                         task,
-                                         detach_run,
-                                         dryrun=dryrun)
+                job_id = backend.execute(handle, task, dryrun=dryrun)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
                 backend.post_execute(handle, down)
@@ -685,7 +699,6 @@ def launch(
         stages=stages,
         cluster_name=cluster_name,
         detach_setup=detach_setup,
-        detach_run=True,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
@@ -780,6 +793,5 @@ def exec(  # pylint: disable=redefined-builtin
             Stage.EXEC,
         ],
         cluster_name=cluster_name,
-        detach_run=True,
         job_logger=job_logger,
     )

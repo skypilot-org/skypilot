@@ -5,13 +5,12 @@ from collections.abc import Mapping
 import contextvars
 import copy
 import functools
-import inspect
 import os
 import pathlib
 import subprocess
 import sys
-from typing import (Callable, Dict, Iterator, MutableMapping, Optional, TextIO,
-                    TYPE_CHECKING, TypeVar)
+from typing import (Any, Callable, Coroutine, Dict, Iterator, MutableMapping,
+                    Optional, TextIO, TYPE_CHECKING, TypeVar)
 
 from typing_extensions import ParamSpec
 
@@ -19,7 +18,7 @@ if TYPE_CHECKING:
     from sky.skypilot_config import ConfigContext
 
 
-class Context(object):
+class SkyPilotContext(object):
     """SkyPilot typed context vars for threads and coroutines.
 
     This is a wrapper around `contextvars.ContextVar` that provides a typed
@@ -114,7 +113,14 @@ class Context(object):
             self._log_file_handle.close()
             self._log_file_handle = None
 
-    def copy(self) -> 'Context':
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        del exc_type, exc_val, exc_tb
+        self.cleanup()
+
+    def copy(self) -> 'SkyPilotContext':
         """Create a copy of the context.
 
         Changes to the current context after this call will not affect the copy.
@@ -123,18 +129,18 @@ class Context(object):
         The new context will get an independent copy of the config context.
         Cancellation of the current context will not be propagated to the copy.
         """
-        new_context = Context()
+        new_context = SkyPilotContext()
         new_context.redirect_log(self._log_file)
         new_context.env_overrides = self.env_overrides.copy()
         new_context.config_context = copy.deepcopy(self.config_context)
         return new_context
 
 
-_CONTEXT = contextvars.ContextVar[Optional[Context]]('sky_context',
-                                                     default=None)
+_CONTEXT = contextvars.ContextVar[Optional[SkyPilotContext]]('sky_context',
+                                                             default=None)
 
 
-def get() -> Optional[Context]:
+def get() -> Optional[SkyPilotContext]:
     """Get the current SkyPilot context.
 
     If the context is not initialized, get() will return None. This helps
@@ -200,12 +206,13 @@ class ContextualEnviron(MutableMapping[str, str]):
 
     def __iter__(self) -> Iterator[str]:
 
-        def iter_from_context(ctx: Context) -> Iterator[str]:
+        def iter_from_context(ctx: SkyPilotContext) -> Iterator[str]:
             deleted_keys = set()
             for key, value in ctx.env_overrides.items():
                 if value is None:
                     deleted_keys.add(key)
-                yield key
+                else:
+                    yield key
             for key in self._environ:
                 # Deduplicate the keys
                 if key not in ctx.env_overrides and key not in deleted_keys:
@@ -230,13 +237,17 @@ class ContextualEnviron(MutableMapping[str, str]):
     def __delitem__(self, key: str) -> None:
         ctx = get()
         if ctx is not None:
-            if key in ctx.env_overrides:
-                del ctx.env_overrides[key]
-            elif key in self._environ:
-                # If the key is not set in the context but set in the environ
-                # of the process, we mark it as deleted in the context by
-                # setting the value to None.
+            if key in self._environ:
+                # If the key is set in the environ of the process, we mark it as
+                # deleted in the context by setting the value to None.
+                # Note: we must do this even if it was also set in the context,
+                # since it could be set in both, and deleting should delete it
+                # from both.
                 ctx.env_overrides[key] = None
+            elif key in ctx.env_overrides:
+                # If the key is set in the context, but not the original
+                # environ, we can just delete the override.
+                del ctx.env_overrides[key]
             else:
                 # The key is not set in the context nor the process.
                 raise KeyError(key)
@@ -306,56 +317,56 @@ def contextual(func: Callable[P, T]) -> Callable[P, T]:
     context that inherits the values from the existing context.
     """
 
+    def run_in_context(*args: P.args, **kwargs: P.kwargs) -> T:
+        # Within the new contextvars Context, set up the SkyPilotContext.
+        original_ctx = get()
+        with initialize(original_ctx):
+            return func(*args, **kwargs)
+
     @functools.wraps(func)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-        original_ctx = get()
-        initialize(original_ctx)
-        ctx = get()
-        cleanup_after_await = False
-
-        def cleanup():
-            try:
-                if ctx is not None:
-                    ctx.cleanup()
-            finally:
-                # Note: _CONTEXT.reset() is not reliable - may fail with
-                # ValueError: <Token ... at ...> was created in a different
-                # Context
-                # We must make sure this happens because otherwise we may try to
-                # write to the wrong log.
-                _CONTEXT.set(original_ctx)
-
-        # There are two cases:
-        # 1. The function is synchronous (that is, return type is not awaitable)
-        #    In this case, we use a finally block to cleanup the context.
-        # 2. The function is asynchronous (that is, return type is awaitable)
-        #    In this case, we need to construct an async def wrapper and await
-        #    the value, then call the cleanup function in the finally block.
-
-        async def await_with_cleanup(awaitable):
-            try:
-                return await awaitable
-            finally:
-                cleanup()
-
-        try:
-            ret = func(*args, **kwargs)
-            if inspect.isawaitable(ret):
-                cleanup_after_await = True
-                return await_with_cleanup(ret)
-            else:
-                return ret
-        finally:
-            if not cleanup_after_await:
-                cleanup()
+        # Create a copy of the current contextvars Context so that setting the
+        # SkyPilotContext does not affect the caller's context in async
+        # environments.
+        context = contextvars.copy_context()
+        return context.run(run_in_context, *args, **kwargs)
 
     return wrapper
 
 
-def initialize(base_context: Optional[Context] = None) -> None:
+def contextual_async(
+    func: Callable[P, Coroutine[Any, Any, T]]
+) -> Callable[P, Coroutine[Any, Any, T]]:
+    """Decorator to initialize a context before executing the function.
+
+    If a context is already initialized, this decorator will create a new
+    context that inherits the values from the existing context.
+    """
+
+    async def run_in_context(*args: P.args, **kwargs: P.kwargs) -> T:
+        # Within the new contextvars Context, set up the SkyPilotContext.
+        original_ctx = get()
+        with initialize(original_ctx):
+            return await func(*args, **kwargs)
+
+    @functools.wraps(func)
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+        # Create a copy of the current contextvars Context so that setting the
+        # SkyPilotContext does not affect the caller's context in async
+        # environments.
+        context = contextvars.copy_context()
+        return await context.run(run_in_context, *args, **kwargs)
+
+    return wrapper
+
+
+def initialize(
+        base_context: Optional[SkyPilotContext] = None) -> SkyPilotContext:
     """Initialize the current SkyPilot context."""
-    new_context = base_context.copy() if base_context is not None else Context()
+    new_context = base_context.copy(
+    ) if base_context is not None else SkyPilotContext()
     _CONTEXT.set(new_context)
+    return new_context
 
 
 class _ContextualStream:

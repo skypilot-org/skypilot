@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import contextlib
 import datetime
 import hashlib
@@ -16,6 +17,7 @@ import resource
 import shutil
 import sys
 import threading
+import traceback
 from typing import Dict, List, Literal, Optional, Set, Tuple
 import uuid
 import zipfile
@@ -38,6 +40,7 @@ from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky.data import storage_utils
+from sky.jobs import utils as managed_job_utils
 from sky.jobs.server import server as jobs_rest
 from sky.metrics import utils as metrics_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -52,6 +55,7 @@ from sky.server import state
 from sky.server import stream_utils
 from sky.server import versions
 from sky.server.auth import authn
+from sky.server.auth import loopback
 from sky.server.auth import oauth2_proxy
 from sky.server.requests import executor
 from sky.server.requests import payloads
@@ -71,6 +75,7 @@ from sky.utils import dag_utils
 from sky.utils import perf_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
+from sky.utils import ux_utils
 from sky.utils.db import db_utils
 from sky.volumes.server import server as volumes_rest
 from sky.workspaces import server as workspaces_rest
@@ -191,6 +196,10 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle HTTP Basic Auth."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
+        if managed_job_utils.is_consolidation_mode(
+        ) and loopback.is_loopback_request(request):
+            return await call_next(request)
+
         if request.url.path.startswith('/api/health'):
             # Try to set the auth user from basic auth
             _try_set_basic_auth_user(request)
@@ -655,6 +664,25 @@ try:
     resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
 except Exception:  # pylint: disable=broad-except
     pass  # no issue, we will warn the user later if its too low
+
+
+@app.exception_handler(exceptions.ConcurrentWorkerExhaustedError)
+def handle_concurrent_worker_exhausted_error(
+        request: fastapi.Request, e: exceptions.ConcurrentWorkerExhaustedError):
+    del request  # request is not used
+    # Print detailed error message to server log
+    logger.error('Concurrent worker exhausted: '
+                 f'{common_utils.format_exception(e)}')
+    with ux_utils.enable_traceback():
+        logger.error(f'  Traceback: {traceback.format_exc()}')
+    # Return human readable error message to client
+    return fastapi.responses.JSONResponse(
+        status_code=503,
+        content={
+            'detail':
+                ('The server has exhausted its concurrent worker limit. '
+                 'Please try again or scale the server if the load persists.')
+        })
 
 
 @app.get('/token')
@@ -1225,6 +1253,7 @@ async def logs(
     # TODO(zhwu): This should wait for the request on the cluster, e.g., async
     # launch, to finish, so that a user does not need to manually pull the
     # request status.
+    executor.check_request_thread_executor_available()
     request_task = executor.prepare_request(
         request_id=request.state.request_id,
         request_name='logs',
@@ -1237,7 +1266,7 @@ async def logs(
     background_tasks.add_task(task.cancel)
     # TODO(zhwu): This makes viewing logs in browser impossible. We should adopt
     # the same approach as /stream.
-    return stream_utils.stream_response(
+    return stream_utils.stream_response_for_long_request(
         request_id=request.state.request_id,
         logs_path=request_task.log_path,
         background_tasks=background_tasks,
@@ -1459,6 +1488,8 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
         # to avoid storming the DB and CPU in the meantime
         await asyncio.sleep(0.1)
     request_task = await requests_lib.get_request_async(request_id)
+    # TODO(aylei): refine this, /api/get will not be retried and this is
+    # meaningless to retry. It is the original request that should be retried.
     if request_task.should_retry:
         raise fastapi.HTTPException(
             status_code=503, detail=f'Request {request_id!r} should be retried')
@@ -1533,6 +1564,7 @@ async def stream(
                 'X-Accel-Buffering': 'no'
             })
 
+    polling_interval = stream_utils.DEFAULT_POLL_INTERVAL
     # Original plain text streaming logic
     if request_id is not None:
         request_task = await requests_lib.get_request_async(request_id)
@@ -1547,6 +1579,8 @@ async def stream(
             raise fastapi.HTTPException(
                 status_code=404,
                 detail=f'Log of request {request_id!r} has been deleted')
+        if request_task.schedule_type == requests_lib.ScheduleType.LONG:
+            polling_interval = stream_utils.LONG_REQUEST_POLL_INTERVAL
     else:
         assert log_path is not None, (request_id, log_path)
         if log_path == constants.API_SERVER_LOGS:
@@ -1594,7 +1628,8 @@ async def stream(
                                           log_path_to_stream,
                                           plain_logs=format == 'plain',
                                           tail=tail,
-                                          follow=follow),
+                                          follow=follow,
+                                          polling_interval=polling_interval),
         media_type='text/plain',
         headers=headers,
     )
@@ -1619,6 +1654,10 @@ async def api_status(
         None, description='Request IDs to get status for.'),
     all_status: bool = fastapi.Query(
         False, description='Get finished requests as well.'),
+    limit: Optional[int] = fastapi.Query(
+        None, description='Number of requests to show.'),
+    fields: Optional[List[str]] = fastapi.Query(
+        None, description='Fields to get. If None, get all fields.'),
 ) -> List[payloads.RequestPayload]:
     """Gets the list of requests."""
     if request_ids is None:
@@ -1629,8 +1668,13 @@ async def api_status(
                 requests_lib.RequestStatus.RUNNING,
             ]
         request_tasks = await requests_lib.get_request_tasks_async(
-            req_filter=requests_lib.RequestTaskFilter(status=statuses))
-        return [r.readable_encode() for r in request_tasks]
+            req_filter=requests_lib.RequestTaskFilter(
+                status=statuses,
+                limit=limit,
+                fields=fields,
+                sort=True,
+            ))
+        return requests_lib.encode_requests(request_tasks)
     else:
         encoded_request_tasks = []
         for request_id in request_ids:
@@ -1711,9 +1755,9 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
 
     # Run core.status in another thread to avoid blocking the event loop.
-    cluster_records = await context_utils.to_thread(core.status,
-                                                    cluster_name,
-                                                    all_users=True)
+    with ThreadPoolExecutor(max_workers=1) as thread_pool_executor:
+        cluster_records = await context_utils.to_thread_with_executor(
+            thread_pool_executor, core.status, cluster_name, all_users=True)
     cluster_record = cluster_records[0]
     if cluster_record['status'] != status_lib.ClusterStatus.UP:
         raise fastapi.HTTPException(
@@ -1937,6 +1981,7 @@ if __name__ == '__main__':
 
     from sky.server import uvicorn as skyuvicorn
 
+    logger.info('Initializing SkyPilot API server')
     skyuvicorn.add_timestamp_prefix_for_server_logs()
 
     parser = argparse.ArgumentParser()
@@ -1946,9 +1991,24 @@ if __name__ == '__main__':
     # Serve metrics on a separate port to isolate it from the application APIs:
     # metrics port will not be exposed to the public network typically.
     parser.add_argument('--metrics-port', default=9090, type=int)
+    parser.add_argument('--start-with-python', action='store_true')
     cmd_args = parser.parse_args()
     if cmd_args.port == cmd_args.metrics_port:
+        logger.error('port and metrics-port cannot be the same, exiting.')
         raise ValueError('port and metrics-port cannot be the same')
+
+    # Fail fast if the port is not available to avoid corrupt the state
+    # of potential running server instance.
+    # We might reach here because the running server is currently not
+    # responding, thus the healthz check fails and `sky api start` think
+    # we should start a new server instance.
+    if not common_utils.is_port_available(cmd_args.port):
+        logger.error(f'Port {cmd_args.port} is not available, exiting.')
+        raise RuntimeError(f'Port {cmd_args.port} is not available')
+
+    if not cmd_args.start_with_python:
+        # Maybe touch the signal file on API server startup.
+        managed_job_utils.is_consolidation_mode(on_api_restart=True)
 
     # Show the privacy policy if it is not already shown. We place it here so
     # that it is shown only when the API server is started.
@@ -1956,12 +2016,17 @@ if __name__ == '__main__':
 
     # Initialize global user state db
     db_utils.set_max_connections(1)
+    logger.info('Initializing database engine')
     global_user_state.initialize_and_get_db()
+    logger.info('Database engine initialized')
     # Initialize request db
     requests_lib.reset_db_and_logs()
     # Restore the server user hash
+    logger.info('Initializing server user hash')
     _init_or_restore_server_user_hash()
+
     max_db_connections = global_user_state.get_max_db_connections()
+    logger.info(f'Max db connections: {max_db_connections}')
     config = server_config.compute_server_config(cmd_args.deploy,
                                                  max_db_connections)
 
@@ -1992,7 +2057,8 @@ if __name__ == '__main__':
         uvicorn_config = uvicorn.Config('sky.server.server:app',
                                         host=cmd_args.host,
                                         port=cmd_args.port,
-                                        workers=num_workers)
+                                        workers=num_workers,
+                                        ws_per_message_deflate=False)
         skyuvicorn.run(uvicorn_config,
                        max_db_connections=config.num_db_connections_per_worker)
     except Exception as exc:  # pylint: disable=broad-except

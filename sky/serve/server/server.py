@@ -98,6 +98,7 @@ async def tail_logs(
     request: fastapi.Request, log_body: payloads.ServeLogsBody,
     background_tasks: fastapi.BackgroundTasks
 ) -> fastapi.responses.StreamingResponse:
+    executor.check_request_thread_executor_available()
     request_task = executor.prepare_request(
         request_id=request.state.request_id,
         request_name='serve.logs',
@@ -109,7 +110,7 @@ async def tail_logs(
     task = executor.execute_request_in_coroutine(request_task)
     # Cancel the coroutine after the request is done or client disconnects
     background_tasks.add_task(task.cancel)
-    return stream_utils.stream_response(
+    return stream_utils.stream_response_for_long_request(
         request_id=request_task.request_id,
         logs_path=request_task.log_path,
         background_tasks=background_tasks,
