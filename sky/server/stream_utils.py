@@ -68,7 +68,14 @@ async def log_streamer(
     if request_id is not None:
         status_msg = rich_utils.EncodedStatusMessage(
             f'[dim]Checking request: {request_id}[/dim]')
-        request_task = await requests_lib.get_request_async(request_id)
+        request_task = await requests_lib.get_request_async(request_id,
+                                                            fields=[
+                                                                'request_id',
+                                                                'name',
+                                                                'schedule_type',
+                                                                'status',
+                                                                'status_msg'
+                                                            ])
 
         if request_task is None:
             raise fastapi.HTTPException(
@@ -89,6 +96,7 @@ async def log_streamer(
                        f'scheduled: {request_id}')
         req_status = request_task.status
         req_msg = request_task.status_msg
+        del request_task
         # Slowly back off the database polling up to every 1 second, to avoid
         # overloading the CPU and DB.
         backoff = common_utils.Backoff(initial_backoff=polling_interval,
@@ -96,7 +104,7 @@ async def log_streamer(
                                        multiplier=1.2)
         while req_status < requests_lib.RequestStatus.RUNNING:
             if req_msg is not None:
-                waiting_msg = request_task.status_msg
+                waiting_msg = req_msg
             if show_request_waiting_spinner:
                 yield status_msg.update(f'[dim]{waiting_msg}[/dim]')
             elif plain_logs and waiting_msg != last_waiting_msg:
@@ -197,7 +205,7 @@ async def _tail_log_file(
                     if (req_status.status ==
                             requests_lib.RequestStatus.CANCELLED):
                         request_task = await requests_lib.get_request_async(
-                            request_id)
+                            request_id, fields=['name', 'should_retry'])
                         if request_task.should_retry:
                             buffer.append(
                                 message_utils.encode_payload(
@@ -206,6 +214,7 @@ async def _tail_log_file(
                             buffer.append(
                                 f'{request_task.name!r} request {request_id}'
                                 ' cancelled\n')
+                        del request_task
                     break
             if not follow:
                 # The below checks (cluster status, heartbeat) are not needed

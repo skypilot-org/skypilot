@@ -98,13 +98,15 @@ class Precondition(abc.ABC):
                 return False
 
             # Check if the request has been cancelled
-            request = await api_requests.get_request_async(self.request_id)
+            request = await api_requests.get_request_async(self.request_id,
+                                                           fields=['status'])
             if request is None:
                 logger.error(f'Request {self.request_id} not found')
                 return False
             if request.status == api_requests.RequestStatus.CANCELLED:
                 logger.debug(f'Request {self.request_id} cancelled')
                 return False
+            del request
 
             try:
                 met, status_msg = await self.check()

@@ -1567,11 +1567,14 @@ async def stream(
     polling_interval = stream_utils.DEFAULT_POLL_INTERVAL
     # Original plain text streaming logic
     if request_id is not None:
-        request_task = await requests_lib.get_request_async(request_id)
+        request_task = await requests_lib.get_request_async(
+            request_id, fields=['request_id', 'schedule_type'])
         if request_task is None:
             print(f'No task with request ID {request_id}')
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Request {request_id!r} not found')
+        # req.log_path is derived from request_id,
+        # so it's ok to just grab the request_id in the above query.
         log_path_to_stream = request_task.log_path
         if not log_path_to_stream.exists():
             # The log file might be deleted by the request GC daemon but the
@@ -1581,6 +1584,7 @@ async def stream(
                 detail=f'Log of request {request_id!r} has been deleted')
         if request_task.schedule_type == requests_lib.ScheduleType.LONG:
             polling_interval = stream_utils.LONG_REQUEST_POLL_INTERVAL
+        del request_task
     else:
         assert log_path is not None, (request_id, log_path)
         if log_path == constants.API_SERVER_LOGS:
