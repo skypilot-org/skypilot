@@ -216,12 +216,11 @@ async def test_clean_finished_requests_with_retention_batch_size_functionality(
         assert requests.get_request(req.request_id) is not None
 
     # Verify batching occurred - should have made multiple calls with decreasing counts
-    # First call should return 10 (limited), second call should return 10, third call should return 5, fourth call should return 0
-    assert len(call_counts) >= 3  # At least 3 calls (10, 10, 5, 0)
+    # First call should return 10 (limited), second call should return 10, third call should return 5
+    assert len(call_counts) == 3  # At 3 calls (10, 10, 5)
     assert call_counts[0] == 10  # First batch
     assert call_counts[1] == 10  # Second batch
     assert call_counts[2] == 5  # Third batch (remaining)
-    assert call_counts[3] == 0  # Final call returns empty (loop termination)
 
     # Verify log file unlink was called for each deleted request
     assert mock_unlink.call_count == 25
@@ -276,10 +275,9 @@ async def test_clean_finished_requests_with_retention_limit_larger_than_total(
     for req in old_requests:
         assert requests.get_request(req.request_id) is None
 
-    # Should only need 2 calls: one returning 5 requests, one returning 0 (termination)
-    assert len(call_counts) == 2
-    assert call_counts[0] == 5  # All 5 requests in first batch
-    assert call_counts[1] == 0  # Empty result terminates loop
+    # Should only need 1 calls: one returning 5 requests(termination)
+    assert len(call_counts) == 1
+    assert call_counts[0] == 5  # All 5 requests in the batch
 
     # Verify logging
     mock_logger.info.assert_called_once()

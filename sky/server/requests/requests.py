@@ -962,6 +962,8 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
 
         await _delete_requests(reqs)
         total_deleted += len(reqs)
+        if len(reqs) < batch_size:
+            break
 
     # To avoid leakage of the log file, logs must be deleted before the
     # request task in the database.
