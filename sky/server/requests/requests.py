@@ -647,12 +647,14 @@ def update_request(
     update_statement += 'WHERE request_id = ? '
     update_params.append(request_id)
     if match_status is not None:
-        update_statement += (
-            'AND status IN '
-            f'({", ".join([repr(status.value) for status in match_status])}) ')
+        match_status_str = ', '.join(
+            [repr(status.value) for status in match_status])
+        update_statement += ('AND status IN '
+                             f'{match_status_str}) ')
     if not update_params:
         raise ValueError('No fields to update')
-    update_statement += f'RETURNING {", ".join(REQUEST_COLUMNS)}'
+    req_columns_str = ', '.join(REQUEST_COLUMNS)
+    update_statement += f'RETURNING {req_columns_str}'
     with _DB.conn:
         cursor = _DB.conn.cursor()
         cursor.execute(update_statement, tuple(update_params))
