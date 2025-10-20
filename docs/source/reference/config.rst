@@ -98,8 +98,21 @@ Below is the configuration syntax and some example values. See detailed explanat
   :ref:`ssh <config-yaml-ssh>`:
     # See :ref:`kubernetes.pod_config <config-yaml-kubernetes-pod-config>` for more details.
     pod_config: ...
-    # See :ref:`kubernetes.context_configs <config-yaml-kubernetes-context-configs>` for more details.
-    context_configs: ...
+    # See :ref:`kubernetes.custom_metadata <config-yaml-kubernetes-custom-metadata>` for more details.
+    custom_metadata: ...
+    # See :ref:`kubernetes.provision_timeout <config-yaml-kubernetes-provision-timeout>` for more details.
+    provision_timeout: ...
+    # See :ref:`kubernetes.kueue <config-yaml-kubernetes-kueue>` for more details.
+    kueue: ...
+    # Specifying above fields but for a specific context.
+    context_configs:
+      node-pool-1:
+        pod_config:
+          metadata:
+            labels:
+              my-label: my-value
+      node-pool-2:
+        provision_timeout: 3600
     :ref:`allowed_node_pools <config-yaml-ssh-allowed-node-pools>`:
       - node-pool-1
       - node-pool-2
