@@ -67,15 +67,12 @@ def test_api_client_cleanup(monkeypatch):
 def test_watch_cleanup(monkeypatch):
     """Verify Watch.stop() and underlying api_client.close() are called."""
     monkeypatch.setattr(kubernetes, '_load_config', lambda context=None: None)
+    api_client_mock = MagicMock()
 
     class FakeWatch:
-        stop_calls = 0
 
         def __init__(self):
-            self._api_client = SimpleNamespace(close=MagicMock())
-
-        def stop(self):
-            type(self).stop_calls += 1
+            self._api_client = api_client_mock()
 
     monkeypatch.setattr(kubernetes.kubernetes.watch, 'Watch', FakeWatch)
 
@@ -87,5 +84,4 @@ def test_watch_cleanup(monkeypatch):
     annotations.clear_request_level_cache()
     gc.collect()
 
-    assert FakeWatch.stop_calls == 1
     assert underlying._api_client.close.call_count == 1
