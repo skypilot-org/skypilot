@@ -224,6 +224,13 @@ class RiftClient:
 
         return False
 
+    def get_providers(self) -> List[Dict]:
+        request_data = {}
+        response_data = self._make_request("providers/list", request_data)
+        if isinstance(response_data, dict):
+            return response_data.get("providers", [])
+        return []
+
 
     # def add_ssh_key(self, name: str, public_key: str) -> bool:
 
