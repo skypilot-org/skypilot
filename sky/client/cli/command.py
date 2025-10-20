@@ -6182,7 +6182,6 @@ def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool):
             type=str)
         if user_input != 'cancel all requests':
             raise click.Abort()
-    if all:
         request_ids = None
     cancelled_request_ids = sdk.get(
         sdk.api_cancel(request_ids=request_ids, all_users=all_users))

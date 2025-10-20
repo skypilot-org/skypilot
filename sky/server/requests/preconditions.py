@@ -112,10 +112,8 @@ class Precondition(abc.ABC):
                     return True
                 if status_msg is not None and status_msg != last_status_msg:
                     # Update the status message if it has changed.
-                    async with api_requests.update_request_async(
-                            self.request_id) as req:
-                        assert req is not None, self.request_id
-                        req.status_msg = status_msg
+                    await api_requests.update_status_msg_async(
+                        self.request_id, status_msg)
                     last_status_msg = status_msg
             except (Exception, SystemExit, KeyboardInterrupt) as e:  # pylint: disable=broad-except
                 api_requests.set_request_failed(self.request_id, e)
@@ -164,8 +162,8 @@ class ClusterStartCompletePrecondition(Precondition):
         requests = await api_requests.get_request_tasks_async(
             req_filter=api_requests.RequestTaskFilter(
                 status=[
-                    api_requests.RequestStatus.RUNNING,
-                    api_requests.RequestStatus.PENDING
+                    api_requests.RequestStatus.PENDING,
+                    api_requests.RequestStatus.RUNNING
                 ],
                 include_request_names=['sky.launch', 'sky.start'],
                 cluster_names=[self.cluster_name]))

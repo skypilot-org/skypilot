@@ -215,11 +215,18 @@ async def _tail_log_file(
             # periodically to see if provisioning is done.
             if cluster_name is not None and should_check_status:
                 last_status_check_time = current_time
-                cluster_record = await (
+                cluster_status = await (
                     global_user_state.get_status_from_cluster_name_async(
                         cluster_name))
-                if (cluster_record is None or
-                        cluster_record != status_lib.ClusterStatus.INIT):
+                if cluster_status is None:
+                    logger.debug(
+                        'Stop tailing provision logs for cluster'
+                        f' status for cluster {cluster_name} not found')
+                    break
+                if cluster_status != status_lib.ClusterStatus.INIT:
+                    logger.debug(f'Stop tailing provision logs for cluster'
+                                 f' {cluster_name} has status {cluster_status} '
+                                 '(not in INIT state)')
                     break
             if current_time - last_heartbeat_time >= _HEARTBEAT_INTERVAL:
                 # Currently just used to keep the connection busy, refer to

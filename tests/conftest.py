@@ -18,6 +18,7 @@ from sky import cloud_stores
 from sky import sky_logging
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import context_utils
 
 # Initialize logger at the top level
 logger = sky_logging.init_logger(__name__)
@@ -463,6 +464,13 @@ def _get_and_check_env_file(env_file_path: str) -> Tuple[bool, Optional[str]]:
 @pytest.fixture
 def generic_cloud(request) -> str:
     return _generic_cloud(request.config)
+
+
+@pytest.fixture
+def hijack_sys_attrs(request):
+    # Make skypilot context work in smoke test client side.
+    context_utils.hijack_sys_attrs()
+    yield
 
 
 @pytest.fixture(scope='session', autouse=True)

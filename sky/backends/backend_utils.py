@@ -48,6 +48,7 @@ from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.utils import auth_utils
 from sky.utils import cluster_utils
 from sky.utils import command_runner
 from sky.utils import common
@@ -755,7 +756,7 @@ def write_cluster_config(
             assert k not in credentials, f'{k} already in credentials'
             credentials[k] = v
 
-    private_key_path, _ = auth.get_or_generate_keys()
+    private_key_path, _ = auth_utils.get_or_generate_keys()
     auth_config = {'ssh_private_key': private_key_path}
     region_name = resources_vars.get('region')
 
@@ -3270,7 +3271,7 @@ def get_clusters(
                 expanded_private_key_path = os.path.expanduser(
                     ssh_private_key_path)
                 if not os.path.exists(expanded_private_key_path):
-                    success = auth.create_ssh_key_files_from_db(
+                    success = auth_utils.create_ssh_key_files_from_db(
                         ssh_private_key_path)
                     if not success:
                         # If the ssh key files are not found, we do not
@@ -3280,7 +3281,7 @@ def get_clusters(
                             f'at key path {ssh_private_key_path}')
                         continue
             else:
-                private_key_path, _ = auth.get_or_generate_keys()
+                private_key_path, _ = auth_utils.get_or_generate_keys()
                 expanded_private_key_path = os.path.expanduser(private_key_path)
             if expanded_private_key_path in cached_private_keys:
                 credential['ssh_private_key_content'] = cached_private_keys[
@@ -3340,6 +3341,9 @@ def get_clusters(
                                   force_refresh_statuses=force_refresh_statuses,
                                   include_user_info=True,
                                   summary_response=summary_response)
+        # record may be None if the cluster is deleted during refresh,
+        # e.g. all the Pods of a cluster on Kubernetes have been
+        # deleted before refresh.
         if record is not None and 'error' not in record:
             _update_records_with_handle_info([record])
             if include_credentials:
@@ -3355,13 +3359,15 @@ def get_clusters(
     requests = requests_lib.get_request_tasks(
         req_filter=requests_lib.RequestTaskFilter(
             status=[requests_lib.RequestStatus.RUNNING],
-            cluster_names=cluster_names,
-            include_request_names=['sky.launch']))
+            include_request_names=['sky.launch'],
+            cluster_names=cluster_names))
     cluster_names_with_launch_request = {
         request.cluster_name for request in requests
     }
+    # Preserve the index of the cluster name as it appears on "records"
     cluster_names_without_launch_request = [
-        cluster_name for cluster_name in cluster_names
+        (i, cluster_name)
+        for i, cluster_name in enumerate(cluster_names)
         if cluster_name not in cluster_names_with_launch_request
     ]
     # for clusters that have an active launch request, we do not refresh the status
@@ -3369,26 +3375,25 @@ def get_clusters(
     if len(cluster_names_without_launch_request) > 0:
         with progress:
             updated_records = subprocess_utils.run_in_parallel(
-                _refresh_cluster_record, cluster_names_without_launch_request)
-            
-    has_none = False
-    for record in updated_records:
-        if record is None:
-            has_none = True
-    assert has_none, 'what happened?'
-
-    updated_records_dict = {
-        record['cluster_hash']: record for record in updated_records
+                _refresh_cluster_record, [
+                    cluster_name
+                    for _, cluster_name in cluster_names_without_launch_request
+                ])
+    # Preserve the index of the cluster name as it appears on "records"
+    # before filtering for clusters being launched.
+    updated_records_dict: Dict[int, Optional[Dict[str, Any]]] = {
+        cluster_names_without_launch_request[i][0]: updated_records[i]
+        for i in range(len(cluster_names_without_launch_request))
     }
     # Show information for removed clusters.
     kept_records = []
     autodown_clusters, remaining_clusters, failed_clusters = [], [], []
-    for record in records:
-        if record['cluster_hash'] not in updated_records_dict:
+    for i, record in enumerate(records):
+        if i not in updated_records_dict:
             # record was not refreshed, keep the original record
             kept_records.append(record)
             continue
-        updated_record = updated_records_dict[record['cluster_hash']]
+        updated_record = updated_records_dict[i]
         if updated_record is None:
             if record['to_down']:
                 autodown_clusters.append(record['name'])
