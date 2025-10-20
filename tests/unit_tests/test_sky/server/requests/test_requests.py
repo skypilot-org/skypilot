@@ -1472,6 +1472,7 @@ def test_update_request_row_fields_maintains_order():
 
 @pytest.mark.asyncio
 async def test_cancel_get_request_async():
+    import gc
 
     async def mock_get_request_async_no_lock(id: str):
         await asyncio.sleep(1)
@@ -1489,6 +1490,11 @@ async def test_cancel_get_request_async():
         await asyncio.sleep(0.2)
         for task in tasks:
             task.cancel()
+            # This is critical to proactively calls GC to ensure GC will not
+            # affect the lock release, refer to
+            # https://github.com/skypilot-org/skypilot/issues/7663
+            # for more details.
+            gc.collect()
         try:
             await asyncio.gather(*tasks, return_exceptions=True)
         except Exception:
