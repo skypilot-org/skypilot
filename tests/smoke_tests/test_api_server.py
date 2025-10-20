@@ -695,7 +695,7 @@ def test_high_logs_concurrency_not_blocking_operations(generic_cloud: str,
             # Cancel all requests.
             'sky api cancel -yu',
             # print all non-completed requests for debugging
-            'sky api status',
+            'sky api status -v',
             f'sky down -y {name}',
             f'sky down -y {name}-another',
         ],
