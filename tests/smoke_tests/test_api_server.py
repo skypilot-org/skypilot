@@ -694,6 +694,8 @@ def test_high_logs_concurrency_not_blocking_operations(generic_cloud: str,
                 timeout=smoke_tests_utils.get_timeout(generic_cloud)),
             # Cancel all requests.
             'sky api cancel -yu',
+            # print all non-completed requests for debugging
+            'sky api status',
             f'sky down -y {name}',
             f'sky down -y {name}-another',
         ],
