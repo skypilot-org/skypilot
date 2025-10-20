@@ -918,13 +918,20 @@ def stream_logs_by_id(job_id: int,
             if managed_job_status.is_failed():
                 job_msg = ('\nFailure reason: '
                            f'{managed_job_state.get_failure_reason(job_id)}')
-            log_file_exists = False
+            log_file_ever_existed = False
             task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
                 job_id)
             num_tasks = len(task_info)
-            for task_id, task_name, task_status, log_file in task_info:
+            for (task_id, task_name, task_status, log_file,
+                 logs_cleaned_at) in task_info:
                 if log_file:
-                    log_file_exists = True
+                    log_file_ever_existed = True
+                    if logs_cleaned_at is not None:
+                        ts_str = datetime.datetime.fromtimestamp(
+                            logs_cleaned_at).strftime('%Y-%m-%d %H:%M:%S')
+                        print(f'Task {task_name}({task_id}) log was cleaned '
+                              f'at {ts_str}.')
+                        continue
                     task_str = (f'Task {task_name}({task_id})'
                                 if task_name else f'Task {task_id}')
                     if num_tasks > 1:
@@ -959,7 +966,7 @@ def stream_logs_by_id(job_id: int,
                                 f'{task_str} finished '
                                 f'(status: {task_status.value}).'),
                                   flush=True)
-            if log_file_exists:
+            if log_file_ever_existed:
                 # Add the "Job finished" message for terminal states
                 if managed_job_status.is_terminal():
                     print(ux_utils.finishing_message(

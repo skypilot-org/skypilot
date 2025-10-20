@@ -1,0 +1,4 @@
+resources:
+  infra: kubernetes
+
+run: echo start; for i in {1..10240000}; do echo $i; done; echo done

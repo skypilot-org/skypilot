@@ -11,6 +11,7 @@ import traceback
 import typing
 from typing import Dict, Optional, Set, Tuple
 
+import anyio
 import dotenv
 
 import sky
@@ -42,6 +43,9 @@ logger = sky_logging.init_logger('sky.jobs.controller')
 
 _background_tasks: Set[asyncio.Task] = set()
 _background_tasks_lock: asyncio.Lock = asyncio.Lock()
+
+_DEFAULT_TASK_LOGS_GC_RETENTION_HOURS = 24 * 7
+_DEFAULT_CONTROLLER_LOGS_GC_RETENTION_HOURS = 24 * 7
 
 
 async def create_background_task(coro: typing.Coroutine) -> None:
@@ -1173,6 +1177,56 @@ class Controller:
                     continue
 
             await self.start_job(job_id, dag_yaml_path, env_file_path, pool)
+
+    async def logs_gc(self):
+        """Garbage collect job and controller logs."""
+        while True:
+            logger.info('Running managed jobs log GC...')
+            skypilot_config.reload_config()
+            controller_logs_retention = skypilot_config.get_nested(
+                ('jobs', 'controller_logs_gc_retention_hours'),
+                _DEFAULT_CONTROLLER_LOGS_GC_RETENTION_HOURS) * 3600
+            task_logs_retention = skypilot_config.get_nested(
+                ('jobs', 'task_logs_gc_retention_hours'),
+                _DEFAULT_TASK_LOGS_GC_RETENTION_HOURS) * 3600
+            try:
+                # Negative value disables the GC
+                if controller_logs_retention >= 0:
+                    await self._clean_controller_logs_with_retention(
+                        controller_logs_retention)
+                if task_logs_retention >= 0:
+                    await self._clean_task_logs_with_retention(
+                        task_logs_retention)
+            except asyncio.CancelledError:
+                logger.info('Managed jobs logs GC task cancelled')
+                break
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Error running managed jobs log GC: {e}'
+                             f'traceback: {traceback.format_exc()}')
+            # Run the GC per hour is sufficent to ensure hourly accuracy.
+            await asyncio.sleep(3600)
+
+    async def _clean_controller_logs_with_retention(self,
+                                                    retention_seconds: int):
+        """Clean controller logs with retention."""
+        logger.info('Cleaning controller logs with retention '
+                    f'{retention_seconds} seconds')
+        _ = await managed_job_state.get_controller_logs_to_clean_async(
+            retention_seconds)
+        # TODO(aylei)
+
+    async def _clean_task_logs_with_retention(self, retention_seconds: int):
+        """Clean task logs with retention."""
+        logger.info(
+            f'Cleaning task logs with retention {retention_seconds} seconds')
+        to_clean = await managed_job_state.get_task_logs_to_clean_async(
+            retention_seconds)
+        for task_log in to_clean:
+            await anyio.Path(task_log['local_log_file']).unlink(missing_ok=True)
+            await managed_job_state.set_task_logs_cleaned_async(
+                spot_job_id=task_log['spot_job_id'],
+                task_id=task_log['task_id'],
+                logs_cleaned_at=time.time())
 
 
 async def main(controller_uuid: str):
