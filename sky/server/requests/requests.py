@@ -595,7 +595,7 @@ def reset_db_and_logs():
 
 
 def _update_request(request: Request, fields: Optional[List[str]] = None):
-    """Update a REST request in the database."""
+    """Update a request in the database."""
     if fields is None:
         fields = REQUEST_COLUMNS
     assert _DB is not None
@@ -625,25 +625,25 @@ def update_request(
 
     update_params = []
     update_statement = f'UPDATE {REQUEST_TABLE} SET '
-    filter_statements = []
+    field_update_statements = []
     if set_status is not None:
-        filter_statements.append('status = ?')
+        field_update_statements.append('status = ?')
         update_params.append(set_status.value)
     if set_should_retry is not None:
-        filter_statements.append('should_retry = ?')
+        field_update_statements.append('should_retry = ?')
         update_params.append(set_should_retry)
     if set_pid is not None:
-        filter_statements.append('pid = ?')
+        field_update_statements.append('pid = ?')
         update_params.append(set_pid)
     if unset_pid:
-        filter_statements.append('pid = NULL')
+        field_update_statements.append('pid = NULL')
     if set_finished_at is not None:
-        filter_statements.append('finished_at = ?')
+        field_update_statements.append('finished_at = ?')
         update_params.append(set_finished_at)
     if set_error is not None:
-        filter_statements.append('error = ?')
+        field_update_statements.append('error = ?')
         update_params.append(json.dumps(_serialize_error(set_error)))
-    update_statement += f'{", ".join(filter_statements)} '
+    update_statement += f'{", ".join(field_update_statements)} '
     update_statement += 'WHERE request_id = ? '
     update_params.append(request_id)
     if match_status is not None:
@@ -662,17 +662,14 @@ def update_request(
         return Request.from_row(row)
 
 
-_update_request_status_msg_sql = (f'UPDATE {REQUEST_TABLE} SET '
-                                  f'status_msg = ? '
-                                  f'WHERE request_id = ?')
-
-
 @init_db_async
 @metrics_lib.time_me
 async def update_status_msg_async(request_id: str, status_msg: str) -> None:
     """Update the status message of a request"""
     assert _DB is not None
-    await _DB.execute_and_commit_async(_update_request_status_msg_sql,
+    await _DB.execute_and_commit_async((f'UPDATE {REQUEST_TABLE} SET '
+                                        f'status_msg = ? '
+                                        f'WHERE request_id = ?'),
                                        (status_msg, request_id))
 
 
@@ -779,13 +776,6 @@ async def get_request_status_async(
         return StatusWithMsg(status, status_msg)
 
 
-_add_or_ignore_request_sql = (
-    f'INSERT INTO {REQUEST_TABLE} '
-    f'({", ".join(REQUEST_COLUMNS)}) VALUES '
-    f'({", ".join(["?"] * len(REQUEST_COLUMNS))}) '
-    'ON CONFLICT(request_id) DO NOTHING RETURNING ROWID')
-
-
 @init_db
 @metrics_lib.time_me
 def create_if_not_exists(request: Request) -> bool:
@@ -793,7 +783,11 @@ def create_if_not_exists(request: Request) -> bool:
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute(_add_or_ignore_request_sql, request.to_row())
+        cursor.execute((f'INSERT INTO {REQUEST_TABLE} '
+                        f'({", ".join(REQUEST_COLUMNS)}) VALUES '
+                        f'({", ".join(["?"] * len(REQUEST_COLUMNS))}) '
+                        'ON CONFLICT(request_id) DO NOTHING RETURNING ROWID'),
+                       request.to_row())
         last_row = cursor.fetchone()
         if last_row is None:
             # Row already existed
