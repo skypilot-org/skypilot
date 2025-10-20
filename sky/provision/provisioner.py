@@ -442,6 +442,14 @@ def _post_provision_setup(
                                               cluster_name.name_on_cloud,
                                               provider_config=provider_config)
 
+    # Update cluster info in handle so cluster instance ids are set. This
+    # allows us to expose provision logs to debug nodes that failed during post
+    # provision setup.
+    handle = global_user_state.get_handle_from_cluster_name(
+        cluster_name.display_name)
+    handle.cached_cluster_info = cluster_info
+    global_user_state.update_cluster_handle(cluster_name.display_name, handle)
+
     if cluster_info.num_instances > 1:
         # Only worker nodes have logs in the per-instance log directory. Head
         # node's log will be redirected to the main log file.
