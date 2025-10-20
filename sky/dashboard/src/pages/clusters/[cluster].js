@@ -108,7 +108,7 @@ function ClusterDetails() {
     try {
       const grafanaUrl = getGrafanaUrl();
       const endpoint =
-        '/api/datasources/proxy/1/api/v1/label/label_skypilot_cluster/values';
+        '/api/datasources/proxy/uid/prometheus/api/v1/label/label_skypilot_cluster/values';
 
       const response = await fetch(`${grafanaUrl}${endpoint}`, {
         method: 'GET',
