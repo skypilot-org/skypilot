@@ -28,6 +28,14 @@ _HEARTBEAT_INTERVAL = 30
 # If a SHORT request has been stuck in pending for
 # _SHORT_REQUEST_SPINNER_TIMEOUT seconds, we show the waiting spinner
 _SHORT_REQUEST_SPINNER_TIMEOUT = 2
+# If there is an issue during provisioning that causes the cluster to be stuck
+# in INIT state, we use this timeout to break the loop and stop streaming
+# provision logs.
+_PROVISION_LOG_TIMEOUT = 3
+# Maximum time to wait for new log files to appear when streaming worker node
+# provision logs. Worker logs are created sequentially during the provisioning
+# process, so we need to wait for new files to appear.
+_MAX_WAIT_FOR_NEW_LOG_FILES = 3  # seconds
 
 LONG_REQUEST_POLL_INTERVAL = 1
 DEFAULT_POLL_INTERVAL = 0.1
@@ -48,7 +56,7 @@ async def _yield_log_file_with_payloads_skipped(
 
 async def log_streamer(
     request_id: Optional[str],
-    log_path: pathlib.Path,
+    log_path: Optional[pathlib.Path] = None,
     plain_logs: bool = False,
     tail: Optional[int] = None,
     follow: bool = True,
@@ -60,7 +68,9 @@ async def log_streamer(
     Args:
         request_id: The request ID to check whether the log tailing process
             should be stopped.
-        log_path: The path to the log file.
+        log_path: The path to the log file or directory containing the log
+        files. If it is a directory, all *.log files in the directory will be
+        streamed.
         plain_logs: Whether to show plain logs.
         tail: The number of lines to tail. If None, tail the whole file.
         follow: Whether to follow the log file.
@@ -140,11 +150,57 @@ async def log_streamer(
         if show_request_waiting_spinner:
             yield status_msg.stop()
 
-    async with aiofiles.open(log_path, 'rb') as f:
-        async for chunk in _tail_log_file(f, request_id, plain_logs, tail,
-                                          follow, cluster_name,
-                                          polling_interval):
-            yield chunk
+    if log_path is not None and log_path.is_dir():
+        # Track which log files we've already streamed
+        streamed_files = set()
+        no_new_files_count = 0
+
+        while True:
+            # Get all *.log files in the log_path
+            log_files = sorted(log_path.glob('*.log'))
+
+            # Filter out already streamed files
+            new_files = [f for f in log_files if f not in streamed_files]
+
+            if len(new_files) == 0:
+                if not follow:
+                    break
+                # Wait a bit to see if new files appear
+                await asyncio.sleep(0.5)
+                no_new_files_count += 1
+                # Check if we've waited too long for new files
+                if no_new_files_count > _MAX_WAIT_FOR_NEW_LOG_FILES * 2:
+                    break
+                continue
+
+            # Reset the no-new-files counter when we find new files
+            no_new_files_count = 0
+
+            for log_file_path in new_files:
+                # Add header before each file (similar to tail -f behavior)
+                header = f'\n==> {log_file_path} <==\n\n'
+                yield header
+
+                async with aiofiles.open(log_file_path, 'rb') as f:
+                    async for chunk in _tail_log_file(f, request_id, plain_logs,
+                                                      tail, follow,
+                                                      cluster_name,
+                                                      polling_interval):
+                        yield chunk
+
+                # Mark this file as streamed
+                streamed_files.add(log_file_path)
+
+            # If not following, break after streaming all current files
+            if not follow:
+                break
+    else:
+        assert log_path is not None, (request_id, log_path)
+        async with aiofiles.open(log_path, 'rb') as f:
+            async for chunk in _tail_log_file(f, request_id, plain_logs, tail,
+                                              follow, cluster_name,
+                                              polling_interval):
+                yield chunk
 
 
 async def _tail_log_file(
@@ -235,21 +291,24 @@ async def _tail_log_file(
                 break
             # Provision logs pass in cluster_name, check cluster status
             # periodically to see if provisioning is done.
-            if cluster_name is not None and should_check_status:
-                last_status_check_time = current_time
-                cluster_status = await (
-                    global_user_state.get_status_from_cluster_name_async(
-                        cluster_name))
-                if cluster_status is None:
-                    logger.debug(
-                        'Stop tailing provision logs for cluster'
-                        f' status for cluster {cluster_name} not found')
+            if cluster_name is not None:
+                if current_time - last_flush_time > _PROVISION_LOG_TIMEOUT:
                     break
-                if cluster_status != status_lib.ClusterStatus.INIT:
-                    logger.debug(f'Stop tailing provision logs for cluster'
-                                 f' {cluster_name} has status {cluster_status} '
-                                 '(not in INIT state)')
-                    break
+                if should_check_status:
+                    last_status_check_time = current_time
+                    cluster_status = await (
+                        global_user_state.get_status_from_cluster_name_async(
+                            cluster_name))
+                    if cluster_status is None:
+                        logger.debug(
+                            'Stop tailing provision logs for cluster'
+                            f' status for cluster {cluster_name} not found')
+                        break
+                    if cluster_status != status_lib.ClusterStatus.INIT:
+                        logger.debug(
+                            f'Stop tailing provision logs for cluster'
+                            f' {cluster_name} has status {cluster_status} '
+                            '(not in INIT state)')
             if current_time - last_heartbeat_time >= _HEARTBEAT_INTERVAL:
                 # Currently just used to keep the connection busy, refer to
                 # https://github.com/skypilot-org/skypilot/issues/5750 for
