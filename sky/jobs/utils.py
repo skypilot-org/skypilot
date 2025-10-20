@@ -118,7 +118,9 @@ _CLUSTER_HANDLE_FIELDS = [
     'infra',
     'accelerators',
 ]
+
 # The response fields for managed jobs that are not stored in the database
+# These fields will be mapped to the DB fields in the `_update_fields`.
 _NON_DB_FIELDS = _CLUSTER_HANDLE_FIELDS + ['user_yaml', 'user_name', 'details']
 
 
@@ -1335,18 +1337,31 @@ def dump_managed_job_queue(
 
 
 def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
-    """Update the fields list to include the necessary fields."""
+    """Update the fields list to include the necessary fields.
+
+    Args:
+        fields: The fields to update.
+
+    It will:
+    - Add the necessary dependent fields to the list.
+    - Remove the fields that are not in the DB.
+    - Determine if cluster handle is required.
+
+    Returns:
+        A tuple containing the updated fields and a boolean indicating if
+        cluster handle is required.
+    """
     cluster_handle_required = True
     if _cluster_handle_not_required(fields):
         cluster_handle_required = False
     # Copy the list to avoid modifying the original list
     new_fields = fields.copy()
-    # Always include status and job_id
+    # status and job_id are always included
     if 'status' not in new_fields:
         new_fields.append('status')
     if 'job_id' not in new_fields:
         new_fields.append('job_id')
-    # Keep both fields
+    # user_hash is required if user_name is present
     if 'user_name' in new_fields and 'user_hash' not in new_fields:
         new_fields.append('user_hash')
     if 'job_duration' in new_fields:
@@ -1372,6 +1387,8 @@ def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
         if 'current_cluster_name' not in new_fields:
             new_fields.append('current_cluster_name')
     # Remove _NON_DB_FIELDS
+    # These fields have been mapped to the DB fields in the above code, so we
+    # don't need to include them in the updated fields.
     for field in _NON_DB_FIELDS:
         if field in new_fields:
             new_fields.remove(field)
@@ -1379,6 +1396,16 @@ def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
 
 
 def _cluster_handle_not_required(fields: List[str]) -> bool:
+    """Determine if cluster handle is not required.
+
+    Args:
+        fields: The fields to check if they contain any of the cluster handle
+        fields.
+
+    Returns:
+        True if the fields do not contain any of the cluster handle fields,
+        False otherwise.
+    """
     return not any(field in fields for field in _CLUSTER_HANDLE_FIELDS)
 
 
@@ -1395,10 +1422,31 @@ def get_managed_job_queue(
     statuses: Optional[List[str]] = None,
     fields: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    # Make sure to get all jobs - some logic below (e.g. high priority job
-    # detection) requires a full view of the jobs table.
+    """Get the managed job queue.
+
+    Args:
+        skip_finished: Whether to skip finished jobs.
+        accessible_workspaces: The accessible workspaces.
+        job_ids: The job ids.
+        workspace_match: The workspace name to match.
+        name_match: The job name to match.
+        pool_match: The pool name to match.
+        page: The page number.
+        limit: The limit number.
+        user_hashes: The user hashes.
+        statuses: The statuses.
+        fields: The fields to include in the response.
+
+    Returns:
+        A dictionary containing the managed job queue.
+    """
     cluster_handle_required = True
     updated_fields = None
+    # The caller only need to specify the fields in the
+    # `class ManagedJobRecord` in `response.py`, and the `_update_fields`
+    # function will add the necessary dependent fields to the list, for
+    # example, if the caller specifies `['user_name']`, the `_update_fields`
+    # function will add `['user_hash']` to the list.
     if fields:
         updated_fields, cluster_handle_required = _update_fields(fields)
 
@@ -1430,8 +1478,9 @@ def get_managed_job_queue(
     )
 
     if cluster_handle_required:
+        # Fetch the cluster name to handle map for managed clusters only.
         cluster_name_to_handle = (
-            global_user_state.get_cluster_name_to_handle_map())
+            global_user_state.get_cluster_name_to_handle_map(is_managed=True))
 
     highest_blocking_priority = constants.MIN_PRIORITY
     if not fields or 'details' in fields:

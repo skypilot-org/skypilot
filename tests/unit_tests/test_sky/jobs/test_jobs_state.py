@@ -206,11 +206,10 @@ class TestMapResponseFieldToDbColumn:
         result = state._map_response_field_to_db_column('workspace')
         assert result == state.job_info_table.c.workspace
 
-    def test_fallback_unknown_field(self):
+    def test_unknown_field(self):
         """Test fallback case for unknown fields."""
-        result = state._map_response_field_to_db_column('unknown_field')
-        # Should return a generic column expression
-        assert result.name == 'unknown_field'
+        with pytest.raises(ValueError, match='Unknown field: unknown_field'):
+            state._map_response_field_to_db_column('unknown_field')
 
 
 class TestGetManagedJobsTotal:

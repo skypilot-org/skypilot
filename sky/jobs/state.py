@@ -1208,11 +1208,11 @@ def _map_response_field_to_db_column(field: str):
     """
     # Explicit aliases differing from actual DB column names
     alias_mapping = {
-        '_job_id': spot_table.c.job_id,  # spot.job_id (PK of task row)
-        '_task_name': spot_table.c.job_name,  # deprecated alias for task name
-        'job_id': spot_table.c.spot_job_id,  # public/job id -> spot.spot_job_id
+        '_job_id': spot_table.c.job_id,  # spot.job_id
+        '_task_name': spot_table.c.job_name,  # deprecated, from spot table
+        'job_id': spot_table.c.spot_job_id,  # public job id -> spot.spot_job_id
         '_job_info_job_id': job_info_table.c.spot_job_id,
-        'job_name': job_info_table.c.name,  # public/job name -> job_info.name
+        'job_name': job_info_table.c.name,  # public job name -> job_info.name
     }
     if field in alias_mapping:
         return alias_mapping[field]
@@ -1225,9 +1225,7 @@ def _map_response_field_to_db_column(field: str):
     if field in job_info_table.c:
         return job_info_table.c[field]
 
-    # Fallback: create a generic column expression (best-effort)
-    # This avoids passing raw strings to SQLAlchemy.
-    return sqlalchemy.column(field)
+    raise ValueError(f'Unknown field: {field}')
 
 
 @_init_db

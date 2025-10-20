@@ -229,7 +229,7 @@ class TestGetManagedJobQueue:
     def _patch_global_user_state(self, monkeypatch: pytest.MonkeyPatch):
         """Patch global_user_state for testing."""
 
-        def fake_get_cluster_name_to_handle_map():
+        def fake_get_cluster_name_to_handle_map(is_managed: bool = True):
             return {}
 
         monkeypatch.setattr(jobs_utils.global_user_state,
@@ -531,7 +531,7 @@ class TestGetManagedJobQueue:
         mock_handle.launched_resources.zone = 'us-west-2a'
         mock_handle.launched_resources.accelerators = {'V100': 1}
 
-        def fake_get_cluster_name_to_handle_map():
+        def fake_get_cluster_name_to_handle_map(is_managed: bool = True):
             return {'test-cluster': mock_handle}
 
         def fake_get_readable_resources_repr(handle, simplify=False):
@@ -583,7 +583,7 @@ class TestGetManagedJobQueue:
         ]
         self._patch_managed_job_state(monkeypatch, jobs)
 
-        def fake_get_cluster_name_to_handle_map():
+        def fake_get_cluster_name_to_handle_map(is_managed: bool = True):
             return {}  # No handle available
 
         monkeypatch.setattr(jobs_utils.global_user_state,
@@ -611,7 +611,7 @@ class TestGetManagedJobQueue:
         ]
         self._patch_managed_job_state(monkeypatch, jobs)
 
-        def fake_get_cluster_name_to_handle_map():
+        def fake_get_cluster_name_to_handle_map(is_managed: bool = True):
             return {'test-cluster': None}  # Handle is None
 
         monkeypatch.setattr(jobs_utils.global_user_state,
@@ -641,7 +641,7 @@ class TestGetManagedJobQueue:
 
         generated_cluster_name = None
 
-        def fake_get_cluster_name_to_handle_map():
+        def fake_get_cluster_name_to_handle_map(is_managed: bool = True):
             return {}
 
         def fake_generate_managed_job_cluster_name(task_name, job_id):

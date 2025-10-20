@@ -542,6 +542,7 @@ class JobsQueueV2Body(RequestBody):
     limit: Optional[int] = None
     statuses: Optional[List[str]] = None
     # The fields to return in the response.
+    # Refer to the fields in the `class ManagedJobRecord` in `response.py`
     fields: Optional[List[str]] = None
 
 
