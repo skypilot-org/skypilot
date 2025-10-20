@@ -6169,7 +6169,7 @@ def api_logs(request_id: Optional[str], server_logs: bool,
                 **_get_shell_complete_args(_complete_api_request))
 @flags.all_option('Cancel all your requests.')
 @flags.all_users_option('Cancel all requests from all users.')
-@flags.yes_option('Skip confirmation (for when -a or -u is specified).')
+@flags.yes_option()
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool,
