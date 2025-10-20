@@ -431,7 +431,7 @@ def kill_requests(request_ids: Optional[List[str]] = None,
         ]
     cancelled_request_ids = []
     for request_id in request_ids:
-        with update_request(request_id) as request_record:
+        with update_request(request_id, force_unlock=True) as request_record:
             if request_record is None:
                 logger.debug(f'No request ID {request_id}')
                 continue
@@ -583,15 +583,36 @@ def request_lock_path(request_id: str) -> str:
 @contextlib.contextmanager
 @init_db
 @metrics_lib.time_me
-def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
+def update_request(
+        request_id: str,
+        force_unlock: bool = False) -> Generator[Optional[Request], None, None]:
     """Get and update a SkyPilot API request."""
     # Acquire the lock to avoid race conditions between multiple request
     # operations, e.g. execute and cancel.
-    with filelock.FileLock(request_lock_path(request_id)):
-        request = _get_request_no_lock(request_id)
-        yield request
-        if request is not None:
-            _add_or_update_request_no_lock(request)
+    try:
+        with filelock.FileLock(request_lock_path(request_id), timeout=2):
+            request = _get_request_no_lock(request_id)
+            yield request
+            if request is not None:
+                _add_or_update_request_no_lock(request)
+    except filelock.Timeout:
+        if force_unlock:
+            logger.warning(
+                f'Request {request_id} has hung. Force unlocking request lock')
+            common_utils.remove_file_if_exists(request_lock_path(request_id))
+            try:
+                with filelock.FileLock(request_lock_path(request_id),
+                                       timeout=2):
+                    request = _get_request_no_lock(request_id)
+                    yield request
+                    if request is not None:
+                        _add_or_update_request_no_lock(request)
+            except filelock.Timeout:
+                logger.error('Failed to grab the request lock after '
+                             f'force unlocking request lock for {request_id}')
+                raise
+        else:
+            raise
 
 
 @init_db
