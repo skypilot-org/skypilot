@@ -1181,7 +1181,7 @@ def test_combine_pod_config_fields_kubernetes_cloud():
     cluster_config_overrides = {}
     pod_config_for_context = {'spec': {'nodeSelector': {'gpu': 'true'}}}
 
-    with patch('sky.utils.skypilot_config.get_effective_region_config'
+    with patch('sky.skypilot_config.get_effective_region_config'
               ) as mock_get_config:
         mock_get_config.return_value = pod_config_for_context
         result = utils.combine_pod_config_fields(cluster_yaml_obj,
