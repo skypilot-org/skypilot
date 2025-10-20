@@ -246,4 +246,7 @@ def test_get_clusters_launch_refresh(monkeypatch):
                         get_request_tasks)
 
     assert len(
+        backend_utils.get_clusters(refresh=common.StatusRefreshMode.FORCE)) == 2
+
+    assert len(
         backend_utils.get_clusters(refresh=common.StatusRefreshMode.FORCE)) == 3
