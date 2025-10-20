@@ -328,10 +328,7 @@ def override_request_env_and_config(
         # through the execution.
         user = models.User(id=request_body.env_vars[constants.USER_ID_ENV_VAR],
                            name=request_body.env_vars[constants.USER_ENV_VAR])
-        global_user_state.add_or_update_user(user)
-        # Refetch the user to get the latest user info, including the created_at
-        # field.
-        user = global_user_state.get_user(user.id)
+        _, user = global_user_state.add_or_update_user(user, return_user=True)
 
         # Force color to be enabled.
         os.environ['CLICOLOR_FORCE'] = '1'

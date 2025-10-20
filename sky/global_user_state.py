@@ -374,17 +374,21 @@ def _init_db(func):
 
 @_init_db
 @metrics_lib.time_me
-def add_or_update_user(user: models.User,
-                       allow_duplicate_name: bool = True) -> bool:
+def add_or_update_user(
+    user: models.User,
+    allow_duplicate_name: bool = True,
+    return_user: bool = False
+) -> typing.Union[bool, typing.Tuple[bool, models.User]]:
     """Store the mapping from user hash to user name for display purposes.
 
     Returns:
-        Boolean: whether the user is newly added
+        If return_user=False: bool (whether the user is newly added)
+        If return_user=True: Tuple[bool, models.User]
     """
     assert _SQLALCHEMY_ENGINE is not None
 
     if user.name is None:
-        return False
+        return (False, user) if return_user else False
 
     # Set created_at if not already set
     created_at = user.created_at
@@ -396,7 +400,7 @@ def add_or_update_user(user: models.User,
             existing_user = session.query(user_table).filter(
                 user_table.c.name == user.name).first()
             if existing_user is not None:
-                return False
+                return (False, user) if return_user else False
 
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
@@ -427,7 +431,16 @@ def add_or_update_user(user: models.User,
                         {user_table.c.name: user.name})
 
             session.commit()
-            return was_inserted
+
+            if return_user:
+                row = session.query(user_table).filter_by(id=user.id).first()
+                complete_user = models.User(id=row.id,
+                                            name=row.name,
+                                            password=row.password,
+                                            created_at=row.created_at)
+                return was_inserted, complete_user
+            else:
+                return was_inserted
 
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
@@ -452,6 +465,9 @@ def add_or_update_user(user: models.User,
             upsert_stmnt = insert_stmnt.on_conflict_do_update(
                 index_elements=[user_table.c.id], set_=set_).returning(
                     user_table.c.id,
+                    user_table.c.name,
+                    user_table.c.password,
+                    user_table.c.created_at,
                     # This will be True for INSERT, False for UPDATE
                     sqlalchemy.literal_column('(xmax = 0)').label('was_inserted'
                                                                  ))
@@ -459,10 +475,17 @@ def add_or_update_user(user: models.User,
             result = session.execute(upsert_stmnt)
             row = result.fetchone()
 
-            ret = bool(row.was_inserted) if row else False
+            was_inserted = bool(row.was_inserted) if row else False
             session.commit()
 
-            return ret
+            if return_user:
+                complete_user = models.User(id=row.id,
+                                            name=row.name,
+                                            password=row.password,
+                                            created_at=row.created_at)
+                return was_inserted, complete_user
+            else:
+                return was_inserted
         else:
             raise ValueError('Unsupported database dialect')
 
