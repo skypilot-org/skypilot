@@ -32,6 +32,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.metrics import utils as metrics_lib
 from sky.skylet import constants
+from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import registry
@@ -342,6 +343,10 @@ def initialize_and_get_db() -> sqlalchemy.engine.Engine:
 
         # return engine
         _SQLALCHEMY_ENGINE = engine
+        # Cache the result of _sqlite_supports_returning()
+        # ahead of time, as it won't change throughout
+        # the lifetime of the engine.
+        _sqlite_supports_returning()
         return _SQLALCHEMY_ENGINE
 
 
@@ -370,6 +375,36 @@ def _init_db(func):
         return func(*args, **kwargs)
 
     return wrapper
+
+
+@annotations.lru_cache(scope='global', maxsize=1)
+def _sqlite_supports_returning() -> bool:
+    """Check if SQLite version supports RETURNING (3.35.0+) and SQLAlchemy >= 2.0.
+
+    See https://sqlite.org/lang_returning.html and
+    https://docs.sqlalchemy.org/en/20/dialects/sqlite.html#insert-update-delete-returning  # pylint: disable=line-too-long
+    """
+    sqlalchemy_version_parts = sqlalchemy.__version__.split('.')
+    assert len(sqlalchemy_version_parts) >= 1, \
+        f'Invalid SQLAlchemy version: {sqlalchemy.__version__}'
+    sqlalchemy_major = int(sqlalchemy_version_parts[0])
+    if sqlalchemy_major < 2:
+        return False
+
+    assert _SQLALCHEMY_ENGINE is not None
+    assert (
+        _SQLALCHEMY_ENGINE.dialect.name ==
+        db_utils.SQLAlchemyDialect.SQLITE.value), \
+        f'Expected SQLite, got {_SQLALCHEMY_ENGINE.dialect.name}'
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        result = session.execute(sqlalchemy.text('SELECT sqlite_version()'))
+        version_str = result.scalar()
+        version_parts = version_str.split('.')
+        assert len(version_parts) >= 2, \
+            f'Invalid version string: {version_str}'
+        major, minor = int(version_parts[0]), int(version_parts[1])
+        return (major > 3) or (major == 3 and minor >= 35)
 
 
 @_init_db
@@ -414,31 +449,52 @@ def add_or_update_user(
                                     name=user.name,
                                     password=user.password,
                                     created_at=created_at)
+            if _sqlite_supports_returning():
+                insert_stmnt = insert_stmnt.returning(
+                    user_table.c.id,
+                    user_table.c.name,
+                    user_table.c.password,
+                    user_table.c.created_at,
+                )
             result = session.execute(insert_stmnt)
 
             # Check if the INSERT actually inserted a row
             was_inserted = result.rowcount > 0
 
-            if not was_inserted:
+            row = None
+            if was_inserted:
+                if return_user and _sqlite_supports_returning():
+                    row = result.fetchone()
+            else:
                 # User existed, so update it (but don't update created_at)
+                update_values = {user_table.c.name: user.name}
                 if user.password:
-                    session.query(user_table).filter_by(id=user.id).update({
-                        user_table.c.name: user.name,
-                        user_table.c.password: user.password
-                    })
-                else:
-                    session.query(user_table).filter_by(id=user.id).update(
-                        {user_table.c.name: user.name})
+                    update_values[user_table.c.password] = user.password
+
+                update_stmnt = sqlite.update(user_table).where(
+                    user_table.c.id == user.id).values(**update_values)
+                if _sqlite_supports_returning() and return_user:
+                    update_stmnt = update_stmnt.returning(
+                        user_table.c.id, user_table.c.name,
+                        user_table.c.password, user_table.c.created_at)
+
+                result = session.execute(update_stmnt)
+                if return_user and _sqlite_supports_returning():
+                    row = result.fetchone()
 
             session.commit()
 
             if return_user:
-                row = session.query(user_table).filter_by(id=user.id).first()
-                complete_user = models.User(id=row.id,
-                                            name=row.name,
-                                            password=row.password,
-                                            created_at=row.created_at)
-                return was_inserted, complete_user
+                if row is None:
+                    # row=None means the sqlite used has no RETURNING support,
+                    # so we need to do a separate query
+                    row = session.query(user_table).filter_by(
+                        id=user.id).first()
+                updated_user = models.User(id=row.id,
+                                           name=row.name,
+                                           password=row.password,
+                                           created_at=row.created_at)
+                return was_inserted, updated_user
             else:
                 return was_inserted
 
@@ -479,11 +535,11 @@ def add_or_update_user(
             session.commit()
 
             if return_user:
-                complete_user = models.User(id=row.id,
-                                            name=row.name,
-                                            password=row.password,
-                                            created_at=row.created_at)
-                return was_inserted, complete_user
+                updated_user = models.User(id=row.id,
+                                           name=row.name,
+                                           password=row.password,
+                                           created_at=row.created_at)
+                return was_inserted, updated_user
             else:
                 return was_inserted
         else:
