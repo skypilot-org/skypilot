@@ -499,19 +499,19 @@ def create_table(cursor, conn):
     db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_FINISHED_AT,
                                  'REAL')
 
-    # Add an index on (status, name) to speed up queries
+    # Add an index on (status, name, cluster_name) to speed up queries
     # that filter on these columns.
     cursor.execute(f"""\
-        CREATE INDEX IF NOT EXISTS status_name_idx ON {REQUEST_TABLE} (status, name) WHERE status IN ('PENDING', 'RUNNING');
+        CREATE INDEX IF NOT EXISTS internal_request_idx ON {REQUEST_TABLE} (status, name, {COL_CLUSTER_NAME}) WHERE status IN ('PENDING', 'RUNNING');
     """)
-    # Add an index on cluster_name to speed up queries
+    # Add an index on (status, cluster_name) to speed up queries
     # that filter on this column.
     cursor.execute(f"""\
-        CREATE INDEX IF NOT EXISTS cluster_name_idx ON {REQUEST_TABLE} ({COL_CLUSTER_NAME}) WHERE status IN ('PENDING', 'RUNNING');
+        CREATE INDEX IF NOT EXISTS api_status_request_idx ON {REQUEST_TABLE} (status, created_at DESC) WHERE status IN ('PENDING', 'RUNNING');
     """)
     # Add an index on created_at to speed up queries that sort on this column.
     cursor.execute(f"""\
-        CREATE INDEX IF NOT EXISTS created_at_idx ON {REQUEST_TABLE} (created_at);
+        CREATE INDEX IF NOT EXISTS created_at_idx ON {REQUEST_TABLE} (created_at DESC);
     """)
 
 
