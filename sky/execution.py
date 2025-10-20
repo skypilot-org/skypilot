@@ -432,13 +432,12 @@ def _execute_dag(
         task.sync_storage_mounts()
 
     try:
-        provisioning_skipped = False
         if Stage.PROVISION in stages:
             assert handle is None or skip_unnecessary_provisioning, (
                 'Provisioning requested, but handle is already set. PROVISION '
                 'should be excluded from stages or '
                 'skip_unecessary_provisioning should be set. ')
-            (handle, provisioning_skipped) = backend.provision(
+            (handle, _) = backend.provision(
                 task,
                 task.best_resources,
                 dryrun=dryrun,
@@ -481,16 +480,12 @@ def _execute_dag(
         if no_setup:
             job_logger.info('Setup commands skipped.')
         elif Stage.SETUP in stages and not dryrun:
-            if skip_unnecessary_provisioning and provisioning_skipped:
-                job_logger.debug('Unnecessary provisioning was skipped, so '
-                                 'skipping setup as well.')
-            else:
-                if cluster_name is not None:
-                    global_user_state.add_cluster_event(
-                        cluster_name, status_lib.ClusterStatus.UP,
-                        'Running setup commands to install dependencies',
-                        global_user_state.ClusterEventType.STATUS_CHANGE)
-                backend.setup(handle, task, detach_setup=detach_setup)
+            if cluster_name is not None:
+                global_user_state.add_cluster_event(
+                    cluster_name, status_lib.ClusterStatus.UP,
+                    'Running setup commands to install dependencies',
+                    global_user_state.ClusterEventType.STATUS_CHANGE)
+            backend.setup(handle, task, detach_setup=detach_setup)
 
         if Stage.PRE_EXEC in stages and not dryrun:
             if idle_minutes_to_autostop is not None:
@@ -597,7 +592,8 @@ def launch(
             specified cluster. This is useful to migrate the cluster to a
             different availability zone or region.
         fast: [Experimental] If the cluster is already up and available,
-            skip provisioning and setup steps.
+            skip provisioning step. Setup step should be idempotent if
+            set to True.
 
     Raises:
         exceptions.ClusterOwnerIdentityMismatchError: if the cluster is
