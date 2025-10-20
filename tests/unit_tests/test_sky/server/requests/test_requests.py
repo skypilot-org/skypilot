@@ -10,6 +10,7 @@ import pytest
 from sky.server.requests import payloads
 from sky.server.requests import requests
 from sky.server.requests.requests import RequestStatus
+from sky.server.requests.requests import ScheduleType
 
 
 def dummy():
@@ -547,6 +548,40 @@ async def test_requests_gc_daemon_disabled(isolated_database):
                 mock_sleep.assert_any_call(3600)
 
 
+def test_get_request_with_fields(isolated_database):
+    """Test getting a request with specific fields."""
+    request = requests.Request(request_id='test-request-with-fields-1',
+                               name='test-request',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.PENDING,
+                               created_at=time.time(),
+                               user_id='test-user')
+    requests.create_if_not_exists(request)
+    retrieved_request = requests.get_request('test-request-with-fields-1',
+                                             fields=['request_id'])
+    assert retrieved_request is not None
+    assert retrieved_request.request_id == 'test-request-with-fields-1'
+    assert 'test-request-with-fields-1' in str(retrieved_request.log_path)
+
+    retrieved_request = requests.get_request('test-request-with-fields-1',
+                                             fields=['name'])
+    assert retrieved_request is not None
+    assert retrieved_request.name == 'test-request'
+
+    retrieved_request = requests.get_request('test-request-with-fields-1',
+                                             fields=['status'])
+    assert retrieved_request is not None
+    assert retrieved_request.status == RequestStatus.PENDING
+
+    retrieved_request = requests.get_request(
+        'test-request-with-fields-1', fields=['request_id', 'name', 'status'])
+    assert retrieved_request is not None
+    assert retrieved_request.request_id == 'test-request-with-fields-1'
+    assert retrieved_request.name == 'test-request'
+    assert retrieved_request.status == RequestStatus.PENDING
+
+
 @pytest.mark.asyncio
 async def test_get_request_async(isolated_database):
     """Test getting a request asynchronously."""
@@ -554,8 +589,11 @@ async def test_get_request_async(isolated_database):
                                name='test-request',
                                entrypoint=dummy,
                                request_body=payloads.RequestBody(),
+                               schedule_type=ScheduleType.LONG,
+                               status_msg='test-status-msg',
                                status=RequestStatus.PENDING,
                                created_at=time.time(),
+                               should_retry=True,
                                user_id='test-user')
 
     # Create the request
@@ -570,6 +608,37 @@ async def test_get_request_async(isolated_database):
     assert retrieved_request.name == 'test-request'
     assert retrieved_request.status == RequestStatus.PENDING
     assert retrieved_request.user_id == 'test-user'
+
+    retrieved_request = await requests.get_request_async('test-request-async-1',
+                                                         fields=['request_id'])
+    assert retrieved_request is not None
+    assert retrieved_request.request_id == 'test-request-async-1'
+    assert 'test-request-async-1' in str(retrieved_request.log_path)
+
+    retrieved_request = await requests.get_request_async('test-request-async-1',
+                                                         fields=['name'])
+    assert retrieved_request.name == 'test-request'
+
+    retrieved_request = await requests.get_request_async('test-request-async-1',
+                                                         fields=['status'])
+    assert retrieved_request is not None
+    assert retrieved_request.status == RequestStatus.PENDING
+
+    retrieved_request = await requests.get_request_async(
+        'test-request-async-1', fields=['name', 'should_retry'])
+    assert retrieved_request is not None
+    assert retrieved_request.name == 'test-request'
+    assert retrieved_request.should_retry is True
+
+    retrieved_request = await requests.get_request_async(
+        'test-request-async-1',
+        fields=['request_id', 'name', 'schedule_type', 'status', 'status_msg'])
+    assert retrieved_request is not None
+    assert retrieved_request.request_id == 'test-request-async-1'
+    assert retrieved_request.name == 'test-request'
+    assert retrieved_request.schedule_type == ScheduleType.LONG
+    assert retrieved_request.status == RequestStatus.PENDING
+    assert retrieved_request.status_msg == 'test-status-msg'
 
 
 @pytest.mark.asyncio
@@ -1403,6 +1472,7 @@ def test_update_request_row_fields_maintains_order():
 
 @pytest.mark.asyncio
 async def test_cancel_get_request_async():
+    import gc
 
     async def mock_get_request_async_no_lock(id: str):
         await asyncio.sleep(1)
@@ -1420,6 +1490,11 @@ async def test_cancel_get_request_async():
         await asyncio.sleep(0.2)
         for task in tasks:
             task.cancel()
+            # This is critical to proactively calls GC to ensure GC will not
+            # affect the lock release, refer to
+            # https://github.com/skypilot-org/skypilot/issues/7663
+            # for more details.
+            gc.collect()
         try:
             await asyncio.gather(*tasks, return_exceptions=True)
         except Exception:

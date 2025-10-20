@@ -2150,6 +2150,12 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
               is_flag=True,
               default=False,
               help='Stream the cluster provisioning logs (provision.log).')
+@click.option('--worker',
+              '-w',
+              default=None,
+              type=int,
+              help='The worker ID to stream the logs from. '
+              'If not set, stream the logs of the head node.')
 @click.option(
     '--sync-down',
     '-s',
@@ -2187,6 +2193,7 @@ def logs(
     cluster: str,
     job_ids: Tuple[str, ...],
     provision: bool,
+    worker: Optional[int],
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
     follow: bool,
@@ -2216,6 +2223,13 @@ def logs(
     4. If the job fails or fetching the logs fails, the command will exit with
     a non-zero return code.
     """
+    if worker is not None:
+        if not provision:
+            raise click.UsageError(
+                '--worker can only be used with --provision.')
+        if worker < 1:
+            raise click.UsageError('--worker must be a positive integer.')
+
     if provision and (sync_down or status or job_ids):
         raise click.UsageError(
             '--provision cannot be combined with job log options '
@@ -2235,7 +2249,11 @@ def logs(
 
     if provision:
         # Stream provision logs
-        sys.exit(sdk.tail_provision_logs(cluster, follow=follow, tail=tail))
+        sys.exit(
+            sdk.tail_provision_logs(cluster_name=cluster,
+                                    worker=worker,
+                                    follow=follow,
+                                    tail=tail))
 
     if sync_down:
         with rich_utils.client_status(
@@ -3251,9 +3269,11 @@ def _down_or_stop_clusters(
                 request_id = sdk.autostop(name, idle_minutes_to_autostop,
                                           wait_for, down)
                 request_ids.append(request_id)
+                progress.stop()
                 _async_call_or_wait(
                     request_id, async_call,
                     server_constants.REQUEST_NAME_PREFIX + operation)
+                progress.start()
             except (exceptions.NotSupportedError, exceptions.ClusterNotUpError,
                     exceptions.CloudError) as e:
                 message = str(e)
@@ -3281,9 +3301,11 @@ def _down_or_stop_clusters(
                 else:
                     request_id = sdk.stop(name, purge=purge)
                 request_ids.append(request_id)
+                progress.stop()
                 _async_call_or_wait(
                     request_id, async_call,
                     server_constants.REQUEST_NAME_PREFIX + operation)
+                progress.start()
                 if not async_call:
                     # Remove the cluster from the SSH config file as soon as it
                     # is stopped or downed.
@@ -3317,6 +3339,10 @@ def _down_or_stop_clusters(
         progress.start()
 
     with progress:
+        # we write a new line here to avoid the "Waiting for 'sky.down'
+        # request to be scheduled" message from being printed on the same line
+        # as the "Terminating <num> clusters..." message
+        click.echo('')
         subprocess_utils.run_in_parallel(_down_or_stop, clusters)
         progress.live.transient = False
         # Make sure the progress bar not mess up the terminal.
@@ -6169,19 +6195,22 @@ def api_logs(request_id: Optional[str], server_logs: bool,
                 **_get_shell_complete_args(_complete_api_request))
 @flags.all_option('Cancel all your requests.')
 @flags.all_users_option('Cancel all requests from all users.')
+@flags.yes_option()
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool):
+def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool,
+               yes: bool):
     """Cancel a request running on SkyPilot API server."""
     if all or all_users:
-        keyword = 'ALL USERS\'' if all_users else 'YOUR'
-        user_input = click.prompt(
-            f'This will cancel all {keyword} requests.\n'
-            f'To proceed, please type {colorama.Style.BRIGHT}'
-            f'\'cancel all requests\'{colorama.Style.RESET_ALL}',
-            type=str)
-        if user_input != 'cancel all requests':
-            raise click.Abort()
+        if not yes:
+            keyword = 'ALL USERS\'' if all_users else 'YOUR'
+            user_input = click.prompt(
+                f'This will cancel all {keyword} requests.\n'
+                f'To proceed, please type {colorama.Style.BRIGHT}'
+                f'\'cancel all requests\'{colorama.Style.RESET_ALL}',
+                type=str)
+            if user_input != 'cancel all requests':
+                raise click.Abort()
         request_ids = None
     cancelled_request_ids = sdk.get(
         sdk.api_cancel(request_ids=request_ids, all_users=all_users))

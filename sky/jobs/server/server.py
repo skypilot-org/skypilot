@@ -201,10 +201,13 @@ async def pool_tail_logs(
         request_cluster_name=common.JOB_CONTROLLER_NAME,
     )
 
-    request_task = api_requests.get_request(request.state.request_id)
+    request_task = api_requests.get_request(request.state.request_id,
+                                            fields=['request_id'])
 
     return stream_utils.stream_response_for_long_request(
         request_id=request_task.request_id,
+        # req.log_path is derived from request_id,
+        # so it's ok to just grab the request_id in the above query.
         logs_path=request_task.log_path,
         background_tasks=background_tasks,
     )
