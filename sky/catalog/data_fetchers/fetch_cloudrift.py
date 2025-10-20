@@ -19,12 +19,28 @@ from sky.provision.cloudrift.utils import get_cloudrift_client
 BYTES_TO_GIB = 1024 * 1024 * 1024  # 1 GiB = 1024^3 bytes
 
 
-def extract_region_from_dc(dc_name: str) -> str:
+def extract_region_from_dc(dc_name: str, providers_data: List[Dict]) -> str:
     """Extract region information from datacenter name.
     
-    Example: 'us-east-nc-nr-1' -> 'us-east-nc-nr'
+    Uses provider data to extract country code as region.
+    Falls back to original extraction method if datacenter not found in providers data.
+    
+    Args:
+        dc_name: The datacenter name, e.g. 'us-east-nc-nr-1'
+        providers_data: List of provider dictionaries from CloudRift API
+    
+    Returns:
+        Region string (country code) if found in providers data, otherwise
+        extracts region from datacenter name (e.g. 'us-east-nc-nr-1' -> 'us-east-nc-nr')
     """
-    # Extract everything before the last dash and number
+    # First try to find the datacenter in providers data
+    for provider in providers_data:
+        for datacenter in provider.get('datacenters', []):
+            if datacenter.get('name') == dc_name:
+                # Use country code as region
+                return datacenter.get('country_code', '')
+    
+    # Fall back to original extraction method
     parts = dc_name.split('-')
     if parts[-1].isdigit():
         return '-'.join(parts[:-1])
@@ -37,6 +53,9 @@ def create_catalog(output_dir: str) -> None:
     
     # Get instance types
     instance_types = client.get_instance_types()
+
+    # Get providers data to extract region information
+    providers = client.get_providers()
     
     with open(os.path.join(output_dir, 'vms.csv'), mode='w', encoding='utf-8') as f:
         writer = csv.writer(f, delimiter=',', quotechar='"')
@@ -95,7 +114,7 @@ def create_catalog(output_dir: str) -> None:
                 
                 # Write a row for each datacenter
                 for dc_name in dcs.keys():
-                    region = extract_region_from_dc(dc_name)
+                    region = extract_region_from_dc(dc_name, providers)
                     
                     writer.writerow([
                         instance_name,
