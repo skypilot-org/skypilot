@@ -3370,6 +3370,13 @@ def get_clusters(
         with progress:
             updated_records = subprocess_utils.run_in_parallel(
                 _refresh_cluster_record, cluster_names_without_launch_request)
+            
+    has_none = False
+    for record in updated_records:
+        if record is None:
+            has_none = True
+    assert has_none, 'what happened?'
+
     updated_records_dict = {
         record['cluster_hash']: record for record in updated_records
     }
