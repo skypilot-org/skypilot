@@ -25,6 +25,9 @@ logger = sky_logging.init_logger(__name__)
 _BUFFER_SIZE = 8 * 1024  # 8KB
 _BUFFER_TIMEOUT = 0.02  # 20ms
 _HEARTBEAT_INTERVAL = 30
+# If a SHORT request has been stuck in pending for
+# _SHORT_REQUEST_SPINNER_TIMEOUT seconds, we show the waiting spinner
+_SHORT_REQUEST_SPINNER_TIMEOUT = 2
 
 LONG_REQUEST_POLL_INTERVAL = 1
 DEFAULT_POLL_INTERVAL = 0.1
@@ -66,6 +69,7 @@ async def log_streamer(
     """
 
     if request_id is not None:
+        start_time = asyncio.get_event_loop().time()
         status_msg = rich_utils.EncodedStatusMessage(
             f'[dim]Checking request: {request_id}[/dim]')
         request_task = await requests_lib.get_request_async(request_id,
@@ -82,8 +86,9 @@ async def log_streamer(
                 status_code=404, detail=f'Request {request_id} not found')
         request_id = request_task.request_id
 
-        # Do not show the waiting spinner if the request is a fast, non-blocking
-        # request.
+        # By default, do not show the waiting spinner for SHORT requests.
+        # If the request has been stuck in pending for
+        # _SHORT_REQUEST_SPINNER_TIMEOUT seconds, we show the waiting spinner
         show_request_waiting_spinner = (not plain_logs and
                                         request_task.schedule_type
                                         == requests_lib.ScheduleType.LONG)
@@ -103,6 +108,14 @@ async def log_streamer(
                                        max_backoff_factor=10,
                                        multiplier=1.2)
         while req_status < requests_lib.RequestStatus.RUNNING:
+            current_time = asyncio.get_event_loop().time()
+            # Show the waiting spinner for a SHORT request if it has been stuck
+            # in pending for _SHORT_REQUEST_SPINNER_TIMEOUT seconds
+            if not show_request_waiting_spinner and (
+                    current_time - start_time > _SHORT_REQUEST_SPINNER_TIMEOUT):
+                show_request_waiting_spinner = True
+                yield status_msg.init()
+                yield status_msg.start()
             if req_msg is not None:
                 waiting_msg = req_msg
             if show_request_waiting_spinner:
