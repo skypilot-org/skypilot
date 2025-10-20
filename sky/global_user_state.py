@@ -471,8 +471,8 @@ def add_or_update_user(
                 if user.password:
                     update_values[user_table.c.password] = user.password
 
-                update_stmnt = sqlite.update(user_table).where(
-                    user_table.c.id == user.id).values(**update_values)
+                update_stmnt = sqlalchemy.update(user_table).where(
+                    user_table.c.id == user.id).values(update_values)
                 if _sqlite_supports_returning() and return_user:
                     update_stmnt = update_stmnt.returning(
                         user_table.c.id, user_table.c.name,
