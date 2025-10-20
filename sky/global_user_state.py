@@ -379,7 +379,7 @@ def _init_db(func):
 
 @annotations.lru_cache(scope='global', maxsize=1)
 def _sqlite_supports_returning() -> bool:
-    """Check if SQLite version supports RETURNING (3.35.0+) and SQLAlchemy >= 2.0.
+    """Check if SQLite (3.35.0+) and SQLAlchemy (2.0+) support RETURNING.
 
     See https://sqlite.org/lang_returning.html and
     https://docs.sqlalchemy.org/en/20/dialects/sqlite.html#insert-update-delete-returning  # pylint: disable=line-too-long
