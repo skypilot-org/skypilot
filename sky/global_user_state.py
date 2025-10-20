@@ -392,11 +392,9 @@ def _sqlite_supports_returning() -> bool:
         return False
 
     assert _SQLALCHEMY_ENGINE is not None
-    assert (
-        _SQLALCHEMY_ENGINE.dialect.name ==
-        db_utils.SQLAlchemyDialect.SQLITE.value), \
-        f'Expected SQLite, got {_SQLALCHEMY_ENGINE.dialect.name}'
-
+    if (_SQLALCHEMY_ENGINE.dialect.name !=
+            db_utils.SQLAlchemyDialect.SQLITE.value):
+        return False
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         result = session.execute(sqlalchemy.text('SELECT sqlite_version()'))
         version_str = result.scalar()
@@ -458,14 +456,16 @@ def add_or_update_user(
                 )
             result = session.execute(insert_stmnt)
 
-            # Check if the INSERT actually inserted a row
-            was_inserted = result.rowcount > 0
-
             row = None
-            if was_inserted:
-                if return_user and _sqlite_supports_returning():
-                    row = result.fetchone()
+            if _sqlite_supports_returning():
+                # With RETURNING, check if we got a row back.
+                row = result.fetchone()
+                was_inserted = row is not None
             else:
+                # Without RETURNING, use rowcount.
+                was_inserted = result.rowcount > 0
+
+            if not was_inserted:
                 # User existed, so update it (but don't update created_at)
                 update_values = {user_table.c.name: user.name}
                 if user.password:
