@@ -1636,8 +1636,7 @@ def load_managed_job_queue(
         if 'user_hash' in job and job['user_hash'] is not None:
             # Skip jobs that do not have user_hash info.
             # TODO(cooperc): Remove check before 0.12.0.
-            user_name = all_users_map.get(job['user_hash'], None)
-            job['user_name'] = user_name if user_name is not None else None
+            job['user_name'] = all_users_map.get(job['user_hash'])
     return jobs, total, result_type, total_no_filter, status_counts
 
 
