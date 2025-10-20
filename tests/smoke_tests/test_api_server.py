@@ -700,7 +700,7 @@ def test_high_logs_concurrency_not_blocking_operations(generic_cloud: str,
             f'sky down -y {name}-another',
         ],
         (f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api stop && '
-         f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api start; '
+         f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api start || cat ~/.sky/api_server/server.log; '
          f'sky down -y {name} || true; sky down -y {name}-another || true; '
          f'sky jobs cancel -n {name}-job -y || true;'),
     )
