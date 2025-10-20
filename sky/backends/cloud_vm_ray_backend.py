@@ -3632,9 +3632,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         gap_seconds = _RETRY_UNTIL_UP_INIT_GAP_SECONDS
                         retry_message = ux_utils.retry_message(
                             f'Retry after {gap_seconds:.0f}s ')
-                        hint_message = (f'\n{retry_message} '
-                                        f'{ux_utils.log_path_hint(log_path)}'
-                                        f'{colorama.Style.RESET_ALL}')
+                        hint_message = (
+                            f'\n{retry_message} '
+                            f'{ux_utils.provision_hint(cluster_name)}'
+                            f'{colorama.Style.RESET_ALL}')
 
                         # Add cluster event for retry.
                         global_user_state.add_cluster_event(
@@ -3663,7 +3664,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     logger.error(
                         ux_utils.error_message(
                             'Failed to provision resources. '
-                            f'{ux_utils.log_path_hint(log_path)}'))
+                            f'{ux_utils.provision_hint(cluster_name)}'))
                     error_message += (
                         '\nTo keep retrying until the cluster is up, use '
                         'the `--retry-until-up` flag.')
