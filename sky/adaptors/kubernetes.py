@@ -1,4 +1,5 @@
 """Kubernetes adaptors"""
+import functools
 import logging
 import os
 import platform
@@ -162,8 +163,58 @@ def list_kube_config_contexts():
     return kubernetes.config.list_kube_config_contexts(_get_config_file())
 
 
+def wrap_kubernetes_client():
+    """Wraps kubernetes API clients for proper cleanup.
+
+    This is needed because we cache kubernetes.client.ApiClient and other typed
+    clients (e.g. kubernetes.client.CoreV1Api) and lru_cache.cache_clear() does
+    not call close() on the client to cleanup external resources like
+    semaphores. This decorator wraps the client with __del__ to ensure the
+    external state of kubernetes clients are properly cleaned up on GC.
+    """
+
+    class ClientWrapper:
+        """Wrapper around the kubernetes API clients."""
+
+        def __init__(self, client):
+            self._client = client
+
+        def __getattr__(self, name):
+            """Delegate to the underlying client"""
+            return getattr(self._client, name)
+
+        def __del__(self):
+            """Clean up the underlying client"""
+            try:
+                if isinstance(self._client, kubernetes.client.ApiClient):
+                    # The client is a direct api_client, just close it.
+                    self._client.close()
+                    return
+                # Or the client is a typed client and the real client should be
+                # closed.
+                real_client = getattr(self._client, 'api_client', None)
+                if isinstance(real_client, kubernetes.client.ApiClient):
+                    real_client.close()
+            except Exception:  # pylint: disable=broad-except
+                pass
+
+    def decorator(func):
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            obj = func(*args, **kwargs)
+            if isinstance(obj, ClientWrapper):
+                return obj
+            return ClientWrapper(obj)
+
+        return wrapper
+
+    return decorator
+
+
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
+@wrap_kubernetes_client()
 def core_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.CoreV1Api()
@@ -171,6 +222,7 @@ def core_api(context: Optional[str] = None):
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
+@wrap_kubernetes_client()
 def storage_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.StorageV1Api()
@@ -178,6 +230,7 @@ def storage_api(context: Optional[str] = None):
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
+@wrap_kubernetes_client()
 def auth_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.RbacAuthorizationV1Api()
@@ -185,6 +238,7 @@ def auth_api(context: Optional[str] = None):
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
+@wrap_kubernetes_client()
 def networking_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.NetworkingV1Api()
@@ -192,6 +246,7 @@ def networking_api(context: Optional[str] = None):
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
+@wrap_kubernetes_client()
 def custom_objects_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.CustomObjectsApi()
@@ -199,6 +254,7 @@ def custom_objects_api(context: Optional[str] = None):
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='global')
+@wrap_kubernetes_client()
 def node_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.NodeV1Api()
@@ -206,6 +262,7 @@ def node_api(context: Optional[str] = None):
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
+@wrap_kubernetes_client()
 def apps_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.AppsV1Api()
@@ -213,6 +270,7 @@ def apps_api(context: Optional[str] = None):
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
+@wrap_kubernetes_client()
 def batch_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.BatchV1Api()
@@ -220,6 +278,7 @@ def batch_api(context: Optional[str] = None):
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
+@wrap_kubernetes_client()
 def api_client(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.ApiClient()
@@ -227,6 +286,7 @@ def api_client(context: Optional[str] = None):
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
+@wrap_kubernetes_client()
 def custom_resources_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.CustomObjectsApi()
@@ -234,6 +294,7 @@ def custom_resources_api(context: Optional[str] = None):
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
+@wrap_kubernetes_client()
 def watch(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.watch.Watch()
