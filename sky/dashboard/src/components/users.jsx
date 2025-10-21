@@ -191,6 +191,7 @@ export function Users() {
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [serviceAccountSearchQuery, setServiceAccountSearchQuery] =
     useState('');
+  const [deduplicateUsers, setDeduplicateUsers] = useState(false);
 
   // Handle URL parameters for tab selection
   useEffect(() => {
@@ -540,6 +541,32 @@ export function Users() {
               </button>
             )}
 
+          {/* Deduplicate Users Toggle - only show on users tab */}
+          {activeMainTab === 'users' && (
+            <label className="flex items-center cursor-pointer mr-2">
+              <input
+                type="checkbox"
+                checked={deduplicateUsers}
+                onChange={(e) => setDeduplicateUsers(e.target.checked)}
+                className="sr-only"
+              />
+              <div
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                  deduplicateUsers ? 'bg-sky-600' : 'bg-gray-300'
+                }`}
+              >
+                <span
+                  className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
+                    deduplicateUsers ? 'translate-x-5' : 'translate-x-1'
+                  }`}
+                />
+              </div>
+              <span className="ml-2 text-sm text-gray-700">
+                Deduplicate users
+              </span>
+            </label>
+          )}
+
           <button
             onClick={handleRefresh}
             disabled={loading}
@@ -653,6 +680,7 @@ export function Users() {
           currentUserId={userRoleCache?.id}
           searchQuery={userSearchQuery}
           setSearchQuery={setUserSearchQuery}
+          deduplicateUsers={deduplicateUsers}
         />
       ) : (
         <ServiceAccountTokensView
@@ -1073,6 +1101,7 @@ function UsersTable({
   currentUserId,
   searchQuery,
   setSearchQuery,
+  deduplicateUsers,
 }) {
   const [usersWithCounts, setUsersWithCounts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -1185,8 +1214,63 @@ function UsersTable({
       );
     }
 
+    // Deduplicate by username if toggle is enabled
+    if (deduplicateUsers) {
+      const deduped = {};
+      filtered.forEach((user) => {
+        const name = user.usernameDisplay;
+        if (!deduped[name]) {
+          // Initialize with first user
+          deduped[name] = {
+            ...user,
+            // Track all userIds for this username
+            userIds: [user.userId],
+            // Track counts that will be summed
+            clusterCount: user.clusterCount,
+            jobCount: user.jobCount,
+            // Track the oldest created_at
+            created_at: user.created_at,
+          };
+        } else {
+          // Merge with existing entry
+          deduped[name].userIds.push(user.userId);
+
+          // Sum cluster counts (handle loading state smartly)
+          if (user.clusterCount !== -1) {
+            // If current user has a valid count
+            if (deduped[name].clusterCount === -1) {
+              // Replace loading state with actual count
+              deduped[name].clusterCount = user.clusterCount;
+            } else {
+              // Add to existing valid count
+              deduped[name].clusterCount += user.clusterCount;
+            }
+          }
+          // If user.clusterCount === -1 and deduped already has valid count, keep existing
+
+          // Sum job counts (same logic)
+          if (user.jobCount !== -1) {
+            if (deduped[name].jobCount === -1) {
+              deduped[name].jobCount = user.jobCount;
+            } else {
+              deduped[name].jobCount += user.jobCount;
+            }
+          }
+
+          // Keep the oldest created_at
+          if (
+            user.created_at &&
+            (!deduped[name].created_at || user.created_at < deduped[name].created_at)
+          ) {
+            deduped[name].created_at = user.created_at;
+          }
+        }
+      });
+      filtered = Object.values(deduped);
+    }
+
     return sortData(filtered, sortConfig.key, sortConfig.direction);
-  }, [usersWithCounts, sortConfig, searchQuery]);
+  }, [usersWithCounts, sortConfig, searchQuery, deduplicateUsers]);
 
   const requestSort = (key) => {
     let direction = 'ascending';
@@ -1281,26 +1365,30 @@ function UsersTable({
     <Card>
       <div className="overflow-x-auto rounded-lg">
         <Table className="min-w-full">
-          <TableHeader>
-            <TableRow>
-              <TableHead
-                onClick={() => requestSort('usernameDisplay')}
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-              >
-                Name{getSortDirection('usernameDisplay')}
-              </TableHead>
-              <TableHead
-                onClick={() => requestSort('fullEmailID')}
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-              >
-                User ID{getSortDirection('fullEmailID')}
-              </TableHead>
-              <TableHead
-                onClick={() => requestSort('role')}
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-              >
-                Role{getSortDirection('role')}
-              </TableHead>
+            <TableHeader>
+              <TableRow>
+                <TableHead
+                  onClick={() => requestSort('usernameDisplay')}
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                >
+                  Name{getSortDirection('usernameDisplay')}
+                </TableHead>
+              {!deduplicateUsers && (
+                <TableHead
+                  onClick={() => requestSort('fullEmailID')}
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                >
+                  User ID{getSortDirection('fullEmailID')}
+                </TableHead>
+              )}
+              {!deduplicateUsers && (
+                <TableHead
+                  onClick={() => requestSort('role')}
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                >
+                  Role{getSortDirection('role')}
+                </TableHead>
+              )}
               <TableHead
                 onClick={() => requestSort('created_at')}
                 className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
@@ -1319,12 +1407,13 @@ function UsersTable({
               >
                 Jobs{getSortDirection('jobCount')}
               </TableHead>
-              {/* Show Actions column if basicAuthEnabled */}
-              {(basicAuthEnabled || currentUserRole === 'admin') && (
-                <TableHead className="whitespace-nowrap w-1/7">
-                  Actions
-                </TableHead>
-              )}
+              {/* Show Actions column if basicAuthEnabled and not deduplicating */}
+              {!deduplicateUsers &&
+                (basicAuthEnabled || currentUserRole === 'admin') && (
+                  <TableHead className="whitespace-nowrap w-1/7">
+                    Actions
+                  </TableHead>
+                )}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1333,57 +1422,61 @@ function UsersTable({
                 <TableCell className="truncate" title={user.username}>
                   {user.usernameDisplay}
                 </TableCell>
-                <TableCell className="truncate" title={user.fullEmailID}>
-                  {user.fullEmailID}
-                </TableCell>
-                <TableCell className="truncate" title={user.role}>
-                  <div className="flex items-center gap-2">
-                    {editingUserId === user.userId ? (
-                      <>
-                        <select
-                          value={currentEditingRole}
-                          onChange={(e) =>
-                            setCurrentEditingRole(e.target.value)
-                          }
-                          className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
-                        >
-                          <option value="admin">Admin</option>
-                          <option value="user">User</option>
-                        </select>
-                        <button
-                          onClick={() => handleSaveEdit(user.userId)}
-                          className="text-green-600 hover:text-green-800 p-1"
-                          title="Save"
-                        >
-                          <CheckIcon className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={handleCancelEdit}
-                          className="text-gray-500 hover:text-gray-700 p-1"
-                          title="Cancel"
-                        >
-                          <XIcon className="h-4 w-4" />
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <span className="capitalize">{user.role}</span>
-                        {/* Only show edit role button if admin */}
-                        {currentUserRole === 'admin' && (
-                          <button
-                            onClick={() =>
-                              handleEditClick(user.userId, user.role)
+                {!deduplicateUsers && (
+                  <TableCell className="truncate" title={user.fullEmailID}>
+                    {user.fullEmailID}
+                  </TableCell>
+                )}
+                {!deduplicateUsers && (
+                  <TableCell className="truncate" title={user.role}>
+                    <div className="flex items-center gap-2">
+                      {editingUserId === user.userId ? (
+                        <>
+                          <select
+                            value={currentEditingRole}
+                            onChange={(e) =>
+                              setCurrentEditingRole(e.target.value)
                             }
-                            className="text-blue-600 hover:text-blue-700 p-1"
-                            title="Edit role"
+                            className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
                           >
-                            <PenIcon className="h-3 w-3" />
+                            <option value="admin">Admin</option>
+                            <option value="user">User</option>
+                          </select>
+                          <button
+                            onClick={() => handleSaveEdit(user.userId)}
+                            className="text-green-600 hover:text-green-800 p-1"
+                            title="Save"
+                          >
+                            <CheckIcon className="h-4 w-4" />
                           </button>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </TableCell>
+                          <button
+                            onClick={handleCancelEdit}
+                            className="text-gray-500 hover:text-gray-700 p-1"
+                            title="Cancel"
+                          >
+                            <XIcon className="h-4 w-4" />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <span className="capitalize">{user.role}</span>
+                          {/* Only show edit role button if admin */}
+                          {currentUserRole === 'admin' && (
+                            <button
+                              onClick={() =>
+                                handleEditClick(user.userId, user.role)
+                              }
+                              className="text-blue-600 hover:text-blue-700 p-1"
+                              title="Edit role"
+                            >
+                              <PenIcon className="h-3 w-3" />
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </TableCell>
+                )}
                 <TableCell className="truncate">
                   {user.created_at ? (
                     <TimestampWithTooltip
@@ -1433,54 +1526,55 @@ function UsersTable({
                     </Link>
                   )}
                 </TableCell>
-                {/* Actions cell logic */}
-                {(basicAuthEnabled || currentUserRole === 'admin') && (
-                  <TableCell className="relative">
-                    <div className="flex items-center gap-2">
-                      {/* Reset password icon: admin can reset any, user can only reset self (basic auth only) */}
-                      {basicAuthEnabled && (
-                        <button
-                          onClick={
-                            currentUserRole === 'admin' ||
-                            user.userId === currentUserId
-                              ? async () => {
-                                  onResetPassword(user);
-                                }
-                              : undefined
-                          }
-                          className={
-                            currentUserRole === 'admin' ||
-                            user.userId === currentUserId
-                              ? 'text-blue-600 hover:text-blue-700 p-1'
-                              : 'text-gray-300 cursor-not-allowed p-1'
-                          }
-                          title={
-                            currentUserRole === 'admin' ||
-                            user.userId === currentUserId
-                              ? 'Reset Password'
-                              : 'You can only reset your own password'
-                          }
-                          disabled={
-                            currentUserRole !== 'admin' &&
-                            user.userId !== currentUserId
-                          }
-                        >
-                          <KeyRoundIcon className="h-4 w-4" />
-                        </button>
-                      )}
-                      {/* Delete button - only show for admin */}
-                      {currentUserRole === 'admin' && (
-                        <button
-                          onClick={() => onDeleteUser(user)}
-                          className="text-red-600 hover:text-red-700 p-1"
-                          title="Delete User"
-                        >
-                          <Trash2Icon className="h-4 w-4" />
-                        </button>
-                      )}
-                    </div>
-                  </TableCell>
-                )}
+                {/* Actions cell logic - hide when deduplicating */}
+                {!deduplicateUsers &&
+                  (basicAuthEnabled || currentUserRole === 'admin') && (
+                    <TableCell className="relative">
+                      <div className="flex items-center gap-2">
+                        {/* Reset password icon: admin can reset any, user can only reset self (basic auth only) */}
+                        {basicAuthEnabled && (
+                          <button
+                            onClick={
+                              currentUserRole === 'admin' ||
+                              user.userId === currentUserId
+                                ? async () => {
+                                    onResetPassword(user);
+                                  }
+                                : undefined
+                            }
+                            className={
+                              currentUserRole === 'admin' ||
+                              user.userId === currentUserId
+                                ? 'text-blue-600 hover:text-blue-700 p-1'
+                                : 'text-gray-300 cursor-not-allowed p-1'
+                            }
+                            title={
+                              currentUserRole === 'admin' ||
+                              user.userId === currentUserId
+                                ? 'Reset Password'
+                                : 'You can only reset your own password'
+                            }
+                            disabled={
+                              currentUserRole !== 'admin' &&
+                              user.userId !== currentUserId
+                            }
+                          >
+                            <KeyRoundIcon className="h-4 w-4" />
+                          </button>
+                        )}
+                        {/* Delete button - only show for admin */}
+                        {currentUserRole === 'admin' && (
+                          <button
+                            onClick={() => onDeleteUser(user)}
+                            className="text-red-600 hover:text-red-700 p-1"
+                            title="Delete User"
+                          >
+                            <Trash2Icon className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
+                    </TableCell>
+                  )}
               </TableRow>
             ))}
           </TableBody>
