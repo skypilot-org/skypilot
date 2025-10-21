@@ -749,17 +749,22 @@ async def get_request_status_async(
 @metrics_lib.time_me_async
 @asyncio_utils.shield
 async def create_if_not_exists_async(request: Request) -> bool:
-    """Async version of create_if_not_exists."""
+    """Create a request if it does not exist, otherwise do nothing.
+    
+    Returns:
+        True if a new request is created, False if the request already exists.
+    """
     assert _DB is not None
     request_columns = ', '.join(REQUEST_COLUMNS)
     values_str = ', '.join(['?'] * len(REQUEST_COLUMNS))
+    sql_statement = (
+        f'INSERT INTO {REQUEST_TABLE} '
+        f'({request_columns}) VALUES '
+        f'({values_str}) ON CONFLICT(request_id) DO NOTHING RETURNING ROWID')
     request_row = request.to_row()
     async with filelock.AsyncFileLock(request_lock_path(request.request_id)):
-        row = await _DB.execute_get_returning_value_async((
-            f'INSERT INTO {REQUEST_TABLE} '
-            f'({request_columns}) VALUES '
-            f'({values_str}) ON CONFLICT(request_id) DO NOTHING RETURNING ROWID'
-        ), request_row)
+        row = await _DB.execute_get_returning_value_async(
+            sql_statement, request_row)
         return True if row else False
 
 
