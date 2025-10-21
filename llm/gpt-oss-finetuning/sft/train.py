@@ -25,6 +25,24 @@ class ProfilingSFTTrainer(SFTTrainer):
             self.accelerator_profiler.step()
         return result
 
+    def train(self, resume_from_checkpoint=None, *args, **kwargs):
+        if resume_from_checkpoint or (self.args.resume_from_checkpoint and os.path.exists(self.args.output_dir)):
+            checkpoint_path = resume_from_checkpoint
+            if not checkpoint_path:
+                # Find the latest checkpoint
+                checkpoint_dirs = [
+                    d for d in os.listdir(self.args.output_dir)
+                    if d.startswith("checkpoint-") and os.path.isdir(os.path.join(self.args.output_dir, d))
+                ]
+                if checkpoint_dirs:
+                    checkpoint_dirs.sort(key=lambda x: int(x.split("-")[1]))
+                    checkpoint_path = os.path.join(self.args.output_dir, checkpoint_dirs[-1])
+
+            if checkpoint_path:
+                print(f"Resuming from checkpoint: {checkpoint_path}")
+
+        return super().train(resume_from_checkpoint=resume_from_checkpoint, *args, **kwargs)
+
 
 def main():
     # Parse command line arguments
@@ -53,6 +71,10 @@ def main():
                         type=int,
                         default=1,
                         help="Training batch size per device (default: 1)")
+    parser.add_argument("--resume_from_checkpoint",
+                        action="store_true",
+                        default=False,
+                        help="Enable resuming from the latest checkpoint (default: False)")
     args = parser.parse_args()
 
     # Setup profiling if enabled
@@ -121,9 +143,11 @@ def main():
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
 
+    report_to = "wandb" if os.environ.get("WANDB_API_KEY") else "none"
+
     # Train model
     training_args = SFTConfig(
-        output_dir=f"{model_id}-checkpoint",
+        output_dir=f"/checkpoints/{model_id.replace('/', '-')}",
         learning_rate=2e-4,
         num_train_epochs=1,
         logging_steps=1,
@@ -134,6 +158,12 @@ def main():
         lr_scheduler_type="cosine_with_min_lr",
         lr_scheduler_kwargs={"min_lr_rate": 0.1},
         dataset_num_proc=num_proc,
+        gradient_checkpointing=False,  # Disable gradient_checkpointing as we use FSDP activation_checkpointing
+        report_to=report_to,
+        save_strategy="steps",
+        save_steps=100,
+        save_total_limit=3,
+        resume_from_checkpoint=args.resume_from_checkpoint,
     )
 
     # Train model with optional profiling
