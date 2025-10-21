@@ -17,6 +17,7 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 
 import anyio
 import colorama
+import filelock
 
 from sky import exceptions
 from sky import global_user_state
@@ -43,6 +44,7 @@ COL_STATUS_MSG = 'status_msg'
 COL_SHOULD_RETRY = 'should_retry'
 COL_FINISHED_AT = 'finished_at'
 REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
+REQUEST_LOCK_PATH_PREFIX = '~/sky_logs/api_server/requests/locks'
 
 DEFAULT_REQUESTS_RETENTION_HOURS = 24  # 1 day
 
@@ -594,6 +596,12 @@ def reset_db_and_logs():
                   ignore_errors=True)
 
 
+def request_lock_path(request_id: str) -> str:
+    lock_path = os.path.expanduser(REQUEST_LOCK_PATH_PREFIX)
+    os.makedirs(lock_path, exist_ok=True)
+    return os.path.join(lock_path, f'.{request_id}.lock')
+
+
 @init_db
 @metrics_lib.time_me
 def update_request(
@@ -610,6 +618,10 @@ def update_request(
 ) -> Optional[Request]:
     """Update a SkyPilot API request in the database."""
     assert _DB is not None
+
+    if kill_pid and set_status != RequestStatus.CANCELLED:
+        raise ValueError(
+            'kill_pid is only allowed when set_status is CANCELLED')
 
     update_params = []
     update_statement = f'UPDATE {REQUEST_TABLE} SET '
@@ -648,17 +660,34 @@ def update_request(
     update_statement += f'RETURNING {req_columns_str}'
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute(update_statement, tuple(update_params))
-        row = cursor.fetchone()
-        if row is None:
-            return None
-        if kill_pid and row.pid is not None:
-            try:
-                logger.debug(f'Killing request process {row.pid}')
-                os.kill(row.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                logger.debug(f'Process {row.pid} already finished.')
-        return Request.from_row(row)
+        # Ensure request transition to a terminal state is
+        # serialized with request cancellation / process kill.
+        # This defends against the race condition where the executor
+        # finishes the ongoing request and picks up another request
+        # while the request is getting cancelled.
+        #
+        # This implicitly covers the case where kill_pid is True,
+        # because if kill_pid is True, set_status must be CANCELLED.
+        if set_status in RequestStatus.finished_status():
+            with filelock.FileLock(request_lock_path(request_id)):
+                cursor.execute(update_statement, tuple(update_params))
+                row = cursor.fetchone()
+                if row is None:
+                    return None
+                request = Request.from_row(row)
+                if kill_pid and request.pid is not None:
+                    try:
+                        logger.debug(f'Killing request process {row.pid}')
+                        os.kill(row.pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        logger.debug(f'Process {row.pid} already finished.')
+        else:
+            cursor.execute(update_statement, tuple(update_params))
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            request = Request.from_row(row)
+        return request
 
 
 @init_db_async
