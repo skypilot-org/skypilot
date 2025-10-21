@@ -18,7 +18,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
-  "id": 6,
+  "id": 1,
   "links": [],
   "panels": [
     {
@@ -71,8 +71,8 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 5,
-        "w": 3,
+        "h": 7,
+        "w": 6,
         "x": 0,
         "y": 0
       },
@@ -164,9 +164,9 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 5,
-        "w": 3,
-        "x": 3,
+        "h": 4,
+        "w": 4,
+        "x": 6,
         "y": 0
       },
       "id": 16,
@@ -267,9 +267,9 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 5,
-        "w": 9,
-        "x": 6,
+        "h": 7,
+        "w": 6,
+        "x": 10,
         "y": 0
       },
       "id": 11,
@@ -378,9 +378,9 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 5,
-        "w": 9,
-        "x": 15,
+        "h": 7,
+        "w": 8,
+        "x": 16,
         "y": 0
       },
       "id": 12,
@@ -449,6 +449,73 @@
       "fieldConfig": {
         "defaults": {
           "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 4,
+        "x": 6,
+        "y": 4
+      },
+      "id": 26,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.0.1",
+      "targets": [
+        {
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "sky_apiserver_websocket_connections",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        }
+      ],
+      "title": "Num SSH Conns.",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
             "mode": "palette-classic"
           },
           "custom": {
@@ -505,7 +572,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 5
+        "y": 7
       },
       "id": 4,
       "options": {
@@ -603,7 +670,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 5
+        "y": 7
       },
       "id": 2,
       "options": {
@@ -697,7 +764,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 5
+        "y": 7
       },
       "id": 3,
       "options": {
@@ -737,7 +804,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 13
+        "y": 15
       },
       "id": 19,
       "panels": [],
@@ -808,7 +875,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 14
+        "y": 16
       },
       "id": 8,
       "options": {
@@ -902,7 +969,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 14
+        "y": 16
       },
       "id": 15,
       "options": {
@@ -999,7 +1066,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 22
+        "y": 24
       },
       "id": 14,
       "options": {
@@ -1093,7 +1160,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 22
+        "y": 24
       },
       "id": 13,
       "options": {
@@ -1191,7 +1258,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 30
+        "y": 32
       },
       "id": 25,
       "options": {
@@ -1285,7 +1352,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 30
+        "y": 32
       },
       "id": 24,
       "options": {
@@ -1321,7 +1388,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 38
+        "y": 40
       },
       "id": 17,
       "panels": [
@@ -2351,5 +2418,5 @@
   "timezone": "browser",
   "title": "SkyPilot API Server",
   "uid": "skypilot-apiserver-overview",
-  "version": 14
+  "version": 1
 }
