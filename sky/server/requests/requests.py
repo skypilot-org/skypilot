@@ -1,7 +1,6 @@
 """Utilities for REST API."""
 import asyncio
 import atexit
-import contextlib
 import dataclasses
 import enum
 import functools
@@ -14,8 +13,7 @@ import sqlite3
 import threading
 import time
 import traceback
-from typing import (Any, Callable, Dict, Generator, List, NamedTuple, Optional,
-                    Tuple)
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 
 import anyio
 import colorama
@@ -32,7 +30,6 @@ from sky.server import daemons
 from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
-from sky.utils import asyncio_utils
 from sky.utils import common_utils
 from sky.utils import ux_utils
 from sky.utils.db import db_utils
@@ -47,6 +44,7 @@ COL_STATUS_MSG = 'status_msg'
 COL_SHOULD_RETRY = 'should_retry'
 COL_FINISHED_AT = 'finished_at'
 REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
+REQUEST_LOCK_PATH_PREFIX = '~/sky_logs/api_server/requests/locks'
 
 DEFAULT_REQUESTS_RETENTION_HOURS = 24  # 1 day
 
@@ -76,6 +74,10 @@ class RequestStatus(enum.Enum):
     @classmethod
     def finished_status(cls) -> List['RequestStatus']:
         return [cls.SUCCEEDED, cls.FAILED, cls.CANCELLED]
+
+    @classmethod
+    def unfinished_status(cls) -> List['RequestStatus']:
+        return [cls.PENDING, cls.RUNNING]
 
 
 _STATUS_TO_COLOR = {
@@ -110,6 +112,24 @@ class ScheduleType(enum.Enum):
     LONG = 'long'
     # Queue for requests that should be executed quickly for a quick response.
     SHORT = 'short'
+
+
+def _serialize_error(error: BaseException) -> Dict[str, Any]:
+    """Serialize an error into a dictionary."""
+    # TODO(zhwu): pickle.dump does not work well with custom exceptions if
+    # it has more than 1 arguments.
+    serialized = exceptions.serialize_exception(error)
+    return {
+        'object': encoders.pickle_and_encode(serialized),
+        'type': type(error).__name__,
+        'message': str(error),
+    }
+
+
+def _serialize_return_value(request_name: str,
+                            return_value: Any) -> Dict[str, Any]:
+    """Serialize a return value into a dictionary."""
+    return encoders.get_encoder(request_name)(return_value)
 
 
 @dataclasses.dataclass
@@ -147,14 +167,7 @@ class Request:
 
     def set_error(self, error: BaseException) -> None:
         """Set the error."""
-        # TODO(zhwu): pickle.dump does not work well with custom exceptions if
-        # it has more than 1 arguments.
-        serialized = exceptions.serialize_exception(error)
-        self.error = {
-            'object': encoders.pickle_and_encode(serialized),
-            'type': type(error).__name__,
-            'message': str(error),
-        }
+        self.error = _serialize_error(error)
 
     def get_error(self) -> Optional[Dict[str, Any]]:
         """Get the error."""
@@ -170,7 +183,7 @@ class Request:
 
     def set_return_value(self, return_value: Any) -> None:
         """Set the return value."""
-        self.return_value = encoders.get_encoder(self.name)(return_value)
+        self.return_value = _serialize_return_value(self.name, return_value)
 
     def get_return_value(self) -> Any:
         """Get the return value."""
@@ -398,21 +411,40 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
     request_ids = [
         request_task.request_id
         for request_task in get_request_tasks(req_filter=RequestTaskFilter(
-            status=[RequestStatus.PENDING, RequestStatus.RUNNING],
+            status=RequestStatus.unfinished_status(),
             exclude_request_names=[exclude_request_name],
             cluster_names=[cluster_name],
             fields=['request_id']))
     ]
-    kill_requests(request_ids)
+    _kill_requests(request_ids)
 
 
-def kill_requests(request_ids: Optional[List[str]] = None,
-                  user_id: Optional[str] = None) -> List[str]:
-    """Kill a SkyPilot API request and set its status to cancelled.
+def kill_requests_with_prefixes(request_ids: Optional[List[str]] = None,
+                                user_id: Optional[str] = None) -> List[str]:
+    """Kill requests with the given prefixes."""
+    # we need to keep this field as request_ids for backwards compatibility.
+    request_id_prefixes = request_ids
+    del request_ids
+    if request_id_prefixes is None:
+        return _kill_requests(user_id=user_id)
+    full_request_ids = []
+    for request_id_prefix in request_id_prefixes:
+        request = get_request(request_id_prefix)
+        if request is None:
+            logger.warning(
+                f'No request ID found with prefix {request_id_prefix}')
+            continue
+        full_request_ids.append(request.request_id)
+    return _kill_requests(full_request_ids, user_id=user_id)
+
+
+def _kill_requests(request_ids: Optional[List[str]] = None,
+                   user_id: Optional[str] = None) -> List[str]:
+    """Kill SkyPilot API requests and set their status to cancelled.
 
     Args:
         request_ids: The request IDs to kill. If None, all requests for the
-            user are killed.
+            user are killed. Request IDs should be full IDs, not prefixes.
         user_id: The user ID to kill requests for. If None, all users are
             killed.
 
@@ -423,7 +455,7 @@ def kill_requests(request_ids: Optional[List[str]] = None,
         request_ids = [
             request_task.request_id
             for request_task in get_request_tasks(req_filter=RequestTaskFilter(
-                status=[RequestStatus.PENDING, RequestStatus.RUNNING],
+                status=RequestStatus.unfinished_status(),
                 # Avoid cancelling the cancel request itself.
                 exclude_request_names=['sky.api_cancel'],
                 user_id=user_id,
@@ -431,29 +463,19 @@ def kill_requests(request_ids: Optional[List[str]] = None,
         ]
     cancelled_request_ids = []
     for request_id in request_ids:
-        with update_request(request_id) as request_record:
-            if request_record is None:
-                logger.debug(f'No request ID {request_id}')
-                continue
-            # Skip internal requests. The internal requests are scheduled with
-            # request_id in range(len(INTERNAL_REQUEST_EVENTS)).
-            if request_record.request_id in set(
-                    event.id for event in daemons.INTERNAL_REQUEST_DAEMONS):
-                continue
-            if request_record.status > RequestStatus.RUNNING:
-                logger.debug(f'Request {request_id} already finished')
-                continue
-            if request_record.pid is not None:
-                logger.debug(f'Killing request process {request_record.pid}')
-                # Use SIGTERM instead of SIGKILL:
-                # - The executor can handle SIGTERM gracefully
-                # - After SIGTERM, the executor can reuse the request process
-                #   for other requests, avoiding the overhead of forking a new
-                #   process for each request.
-                os.kill(request_record.pid, signal.SIGTERM)
-            request_record.status = RequestStatus.CANCELLED
-            request_record.finished_at = time.time()
-            cancelled_request_ids.append(request_id)
+        if request_id in set(
+                event.id for event in daemons.INTERNAL_REQUEST_DAEMONS):
+            continue
+        req = update_request(request_id,
+                             set_status=RequestStatus.CANCELLED,
+                             set_finished_at=time.time(),
+                             kill_pid=True,
+                             match_status=RequestStatus.unfinished_status())
+        if req is None:
+            logger.debug(
+                f'Request with ID {request_id} not found or already finished')
+            continue
+        cancelled_request_ids.append(request_id)
     return cancelled_request_ids
 
 
@@ -575,35 +597,108 @@ def reset_db_and_logs():
 
 
 def request_lock_path(request_id: str) -> str:
-    lock_path = os.path.expanduser(REQUEST_LOG_PATH_PREFIX)
+    lock_path = os.path.expanduser(REQUEST_LOCK_PATH_PREFIX)
     os.makedirs(lock_path, exist_ok=True)
     return os.path.join(lock_path, f'.{request_id}.lock')
 
 
-@contextlib.contextmanager
 @init_db
 @metrics_lib.time_me
-def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
-    """Get and update a SkyPilot API request."""
-    # Acquire the lock to avoid race conditions between multiple request
-    # operations, e.g. execute and cancel.
-    with filelock.FileLock(request_lock_path(request_id)):
-        request = _get_request_no_lock(request_id)
-        yield request
-        if request is not None:
-            _add_or_update_request_no_lock(request)
+def update_request(
+    request_id: str,
+    set_status: Optional[RequestStatus] = None,
+    set_should_retry: Optional[bool] = None,
+    set_pid: Optional[int] = None,
+    unset_pid: bool = False,
+    set_finished_at: Optional[float] = None,
+    set_return_value: Optional[Dict[str, Any]] = None,
+    set_error: Optional[BaseException] = None,
+    kill_pid: bool = False,
+    match_status: Optional[List[RequestStatus]] = None,
+) -> Optional[Request]:
+    """Update a SkyPilot API request in the database."""
+    assert _DB is not None
+
+    if kill_pid and set_status != RequestStatus.CANCELLED:
+        raise ValueError(
+            'kill_pid is only allowed when set_status is CANCELLED')
+
+    update_params = []
+    update_statement = f'UPDATE {REQUEST_TABLE} SET '
+    field_update_statements = []
+    if set_status is not None:
+        field_update_statements.append('status = ?')
+        update_params.append(set_status.value)
+    if set_should_retry is not None:
+        field_update_statements.append('should_retry = ?')
+        update_params.append(set_should_retry)
+    if set_pid is not None:
+        field_update_statements.append('pid = ?')
+        update_params.append(set_pid)
+    if unset_pid:
+        field_update_statements.append('pid = NULL')
+    if set_finished_at is not None:
+        field_update_statements.append('finished_at = ?')
+        update_params.append(set_finished_at)
+    if set_return_value is not None:
+        field_update_statements.append('return_value = ?')
+        update_params.append(json.dumps(set_return_value))
+    if set_error is not None:
+        field_update_statements.append('error = ?')
+        update_params.append(json.dumps(_serialize_error(set_error)))
+    update_statement += f'{", ".join(field_update_statements)} '
+    update_statement += 'WHERE request_id = ? '
+    update_params.append(request_id)
+    if match_status is not None:
+        match_status_str = ', '.join(
+            [repr(status.value) for status in match_status])
+        update_statement += ('AND status IN '
+                             f'({match_status_str}) ')
+    if not update_params:
+        raise ValueError('No fields to update')
+    req_columns_str = ', '.join(REQUEST_COLUMNS)
+    update_statement += f'RETURNING {req_columns_str}'
+    with _DB.conn:
+        cursor = _DB.conn.cursor()
+        # Ensure request transition to a terminal state is
+        # serialized with request cancellation / process kill.
+        # This defends against the race condition where the executor
+        # finishes the ongoing request and picks up another request
+        # while the request is getting cancelled.
+        #
+        # This implicitly covers the case where kill_pid is True,
+        # because if kill_pid is True, set_status must be CANCELLED.
+        if set_status in RequestStatus.finished_status():
+            with filelock.FileLock(request_lock_path(request_id)):
+                cursor.execute(update_statement, tuple(update_params))
+                row = cursor.fetchone()
+                if row is None:
+                    return None
+                request = Request.from_row(row)
+                if kill_pid and request.pid is not None:
+                    try:
+                        logger.debug(f'Killing request process {row.pid}')
+                        os.kill(row.pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        logger.debug(f'Process {row.pid} already finished.')
+        else:
+            cursor.execute(update_statement, tuple(update_params))
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            request = Request.from_row(row)
+        return request
 
 
-@init_db
+@init_db_async
 @metrics_lib.time_me
-@asyncio_utils.shield
 async def update_status_msg_async(request_id: str, status_msg: str) -> None:
     """Update the status message of a request"""
-    async with filelock.AsyncFileLock(request_lock_path(request_id)):
-        request = await _get_request_no_lock_async(request_id)
-        if request is not None:
-            request.status_msg = status_msg
-            await _add_or_update_request_no_lock_async(request)
+    assert _DB is not None
+    await _DB.execute_and_commit_async((f'UPDATE {REQUEST_TABLE} SET '
+                                        f'status_msg = ? '
+                                        f'WHERE request_id = ?'),
+                                       (status_msg, request_id))
 
 
 def _get_request_no_lock(
@@ -663,20 +758,16 @@ def get_latest_request_id() -> Optional[str]:
 def get_request(request_id: str,
                 fields: Optional[List[str]] = None) -> Optional[Request]:
     """Get a SkyPilot API request."""
-    with filelock.FileLock(request_lock_path(request_id)):
-        return _get_request_no_lock(request_id, fields)
+    return _get_request_no_lock(request_id, fields)
 
 
 @init_db_async
 @metrics_lib.time_me_async
-@asyncio_utils.shield
 async def get_request_async(
         request_id: str,
         fields: Optional[List[str]] = None) -> Optional[Request]:
     """Async version of get_request."""
-    # TODO(aylei): figure out how to remove FileLock here to avoid the overhead
-    async with filelock.AsyncFileLock(request_lock_path(request_id)):
-        return await _get_request_no_lock_async(request_id, fields)
+    return await _get_request_no_lock_async(request_id, fields)
 
 
 class StatusWithMsg(NamedTuple):
@@ -717,22 +808,19 @@ async def get_request_status_async(
 @metrics_lib.time_me
 def create_if_not_exists(request: Request) -> bool:
     """Create a SkyPilot API request if it does not exist."""
-    with filelock.FileLock(request_lock_path(request.request_id)):
-        if _get_request_no_lock(request.request_id) is not None:
+    assert _DB is not None
+    with _DB.conn:
+        cursor = _DB.conn.cursor()
+        cursor.execute((f'INSERT INTO {REQUEST_TABLE} '
+                        f'({", ".join(REQUEST_COLUMNS)}) VALUES '
+                        f'({", ".join(["?"] * len(REQUEST_COLUMNS))}) '
+                        'ON CONFLICT(request_id) DO NOTHING RETURNING ROWID'),
+                       request.to_row())
+        last_row = cursor.fetchone()
+        if last_row is None:
+            # Row already existed
             return False
-        _add_or_update_request_no_lock(request)
-        return True
-
-
-@init_db_async
-@metrics_lib.time_me_async
-@asyncio_utils.shield
-async def create_if_not_exists_async(request: Request) -> bool:
-    """Async version of create_if_not_exists."""
-    async with filelock.AsyncFileLock(request_lock_path(request.request_id)):
-        if await _get_request_no_lock_async(request.request_id) is not None:
-            return False
-        await _add_or_update_request_no_lock_async(request)
+        # Row was inserted
         return True
 
 
@@ -881,57 +969,42 @@ async def get_api_request_ids_start_with(incomplete: str) -> List[str]:
     return [row[0] for row in rows]
 
 
-_add_or_update_request_sql = (f'INSERT OR REPLACE INTO {REQUEST_TABLE} '
-                              f'({", ".join(REQUEST_COLUMNS)}) VALUES '
-                              f'({", ".join(["?"] * len(REQUEST_COLUMNS))})')
-
-
-def _add_or_update_request_no_lock(request: Request):
-    """Add or update a REST request into the database."""
-    assert _DB is not None
-    with _DB.conn:
-        cursor = _DB.conn.cursor()
-        cursor.execute(_add_or_update_request_sql, request.to_row())
-
-
-async def _add_or_update_request_no_lock_async(request: Request):
-    """Async version of _add_or_update_request_no_lock."""
-    assert _DB is not None
-    await _DB.execute_and_commit_async(_add_or_update_request_sql,
-                                       request.to_row())
-
-
 def set_request_failed(request_id: str, e: BaseException) -> None:
     """Set a request to failed and populate the error message."""
+    assert request_id
     with ux_utils.enable_traceback():
         stacktrace = traceback.format_exc()
     setattr(e, 'stacktrace', stacktrace)
-    with update_request(request_id) as request_task:
-        assert request_task is not None, request_id
-        request_task.status = RequestStatus.FAILED
-        request_task.finished_at = time.time()
-        request_task.set_error(e)
+    req = update_request(request_id,
+                         set_status=RequestStatus.FAILED,
+                         set_finished_at=time.time(),
+                         set_error=e)
+    assert req is not None
 
 
-def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
+def set_request_succeeded(request_id: str, request_name: str,
+                          result: Optional[Any]) -> None:
     """Set a request to succeeded and populate the result."""
-    with update_request(request_id) as request_task:
-        assert request_task is not None, request_id
-        request_task.status = RequestStatus.SUCCEEDED
-        request_task.finished_at = time.time()
-        if result is not None:
-            request_task.set_return_value(result)
+    assert request_id
+    if result is not None:
+        return_value = _serialize_return_value(request_name, result)
+    else:
+        return_value = None
+    req = update_request(request_id,
+                         set_status=RequestStatus.SUCCEEDED,
+                         set_finished_at=time.time(),
+                         set_return_value=return_value)
+    assert req is not None
 
 
 def set_request_cancelled(request_id: str) -> None:
     """Set a pending or running request to cancelled."""
-    with update_request(request_id) as request_task:
-        assert request_task is not None, request_id
-        # Already finished or cancelled.
-        if request_task.status > RequestStatus.RUNNING:
-            return
-        request_task.finished_at = time.time()
-        request_task.status = RequestStatus.CANCELLED
+    assert request_id
+    req = update_request(request_id,
+                         set_status=RequestStatus.CANCELLED,
+                         set_finished_at=time.time(),
+                         match_status=RequestStatus.unfinished_status())
+    assert req is not None
 
 
 @init_db

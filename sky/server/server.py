@@ -1675,7 +1675,7 @@ async def api_cancel(request: fastapi.Request,
         request_id=request.state.request_id,
         request_name='api_cancel',
         request_body=request_cancel_body,
-        func=requests_lib.kill_requests,
+        func=requests_lib.kill_requests_with_prefixes,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
@@ -1695,10 +1695,7 @@ async def api_status(
     if request_ids is None:
         statuses = None
         if not all_status:
-            statuses = [
-                requests_lib.RequestStatus.PENDING,
-                requests_lib.RequestStatus.RUNNING,
-            ]
+            statuses = requests_lib.RequestStatus.unfinished_status()
         request_tasks = await requests_lib.get_request_tasks_async(
             req_filter=requests_lib.RequestTaskFilter(
                 status=statuses,
