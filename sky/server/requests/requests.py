@@ -662,7 +662,7 @@ async def _get_request_no_lock_async(
     return Request.from_row(row)
 
 
-@init_db
+@init_db_async
 @metrics_lib.time_me
 async def get_latest_request_id_async() -> Optional[str]:
     """Get the latest request ID."""
