@@ -348,28 +348,36 @@ def stream_response_for_long_request(
     request_id: str,
     logs_path: pathlib.Path,
     background_tasks: fastapi.BackgroundTasks,
+    kill_request_on_disconnect: bool = True,
 ) -> fastapi.responses.StreamingResponse:
-    return stream_response(request_id,
-                           logs_path,
-                           background_tasks,
-                           polling_interval=LONG_REQUEST_POLL_INTERVAL)
+    """Stream the logs of a long request."""
+    return stream_response(
+        request_id,
+        logs_path,
+        background_tasks,
+        polling_interval=LONG_REQUEST_POLL_INTERVAL,
+        kill_request_on_disconnect=kill_request_on_disconnect,
+    )
 
 
 def stream_response(
     request_id: str,
     logs_path: pathlib.Path,
     background_tasks: fastapi.BackgroundTasks,
-    polling_interval: float = DEFAULT_POLL_INTERVAL
+    polling_interval: float = DEFAULT_POLL_INTERVAL,
+    kill_request_on_disconnect: bool = True,
 ) -> fastapi.responses.StreamingResponse:
 
-    async def on_disconnect():
-        logger.info(f'User terminated the connection for request '
-                    f'{request_id}')
-        requests_lib.kill_requests([request_id])
+    if kill_request_on_disconnect:
 
-    # The background task will be run after returning a response.
-    # https://fastapi.tiangolo.com/tutorial/background-tasks/
-    background_tasks.add_task(on_disconnect)
+        async def on_disconnect():
+            logger.info(f'User terminated the connection for request '
+                        f'{request_id}')
+            requests_lib.kill_requests([request_id])
+
+        # The background task will be run after returning a response.
+        # https://fastapi.tiangolo.com/tutorial/background-tasks/
+        background_tasks.add_task(on_disconnect)
 
     return fastapi.responses.StreamingResponse(
         log_streamer(request_id, logs_path, polling_interval=polling_interval),

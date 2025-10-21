@@ -109,6 +109,7 @@ async def logs(
         schedule_type=schedule_type,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
     )
+    kill_request_on_disconnect = False
     if schedule_type == api_requests.ScheduleType.SHORT:
         # For short request, run in the coroutine to avoid blocking
         # short workers.
@@ -117,11 +118,15 @@ async def logs(
         background_tasks.add_task(task.cancel)
     else:
         executor.schedule_prepared_request(request_task)
+        # When runs in long executor process, we should kill the request on
+        # disconnect to cancel the running routine.
+        kill_request_on_disconnect = True
 
     return stream_utils.stream_response_for_long_request(
         request_id=request_task.request_id,
         logs_path=request_task.log_path,
         background_tasks=background_tasks,
+        kill_request_on_disconnect=kill_request_on_disconnect,
     )
 
 
@@ -210,6 +215,7 @@ async def pool_tail_logs(
         # so it's ok to just grab the request_id in the above query.
         logs_path=request_task.log_path,
         background_tasks=background_tasks,
+        kill_request_on_disconnect=True,
     )
 
 
