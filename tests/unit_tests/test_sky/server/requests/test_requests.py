@@ -830,8 +830,7 @@ async def test_get_request_async_race_condition(isolated_database):
     """Test that get_request_async is concurrent safe."""
 
     async def write_then_read(req: requests.Request):
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, requests.create_if_not_exists, req)
+        await requests.create_if_not_exists_async(req)
         retrieved = await requests.get_request_async(req.request_id)
         assert retrieved is not None
 
