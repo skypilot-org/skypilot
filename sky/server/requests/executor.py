@@ -507,8 +507,12 @@ def _request_execution_wrapper(request_id: str,
                     f'{common_utils.format_exception(e)}')
         return
     else:
+        # if the codepath reaches the else block, there was no exception
+        # in the try block, so the request_name should be set.
+        assert request_name is not None
         api_requests.set_request_succeeded(
-            request_id, return_value if not ignore_return_value else None)
+            request_id, request_name,
+            return_value if not ignore_return_value else None)
         # Manually reset the original stdout and stderr file descriptors early
         # so that the "Request xxxx failed due to ..." log message will be
         # written to the original stdout and stderr file descriptors.
@@ -657,7 +661,8 @@ async def _execute_request_coroutine(request: api_requests.Request):
         if fut.done():
             try:
                 result = await fut
-                api_requests.set_request_succeeded(request_id, result)
+                api_requests.set_request_succeeded(request_id, request.name,
+                                                   result)
             except asyncio.CancelledError:
                 # The task is cancelled by ctx.cancel(), where the status
                 # should already be set to CANCELLED.

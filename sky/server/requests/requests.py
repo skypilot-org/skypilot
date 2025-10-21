@@ -124,6 +124,12 @@ def _serialize_error(error: BaseException) -> Dict[str, Any]:
     }
 
 
+def _serialize_return_value(request_name: str,
+                            return_value: Any) -> Dict[str, Any]:
+    """Serialize a return value into a dictionary."""
+    return encoders.get_encoder(request_name)(return_value)
+
+
 @dataclasses.dataclass
 class Request:
     """A SkyPilot API request."""
@@ -175,7 +181,7 @@ class Request:
 
     def set_return_value(self, return_value: Any) -> None:
         """Set the return value."""
-        self.return_value = encoders.get_encoder(self.name)(return_value)
+        self.return_value = _serialize_return_value(self.name, return_value)
 
     def get_return_value(self) -> Any:
         """Get the return value."""
@@ -186,12 +192,10 @@ class Request:
         content = dict(zip(REQUEST_COLUMNS, row))
         return cls.decode(payloads.RequestPayload(**content))
 
-    def to_row(self, fields: Optional[List[str]] = None) -> Tuple[Any, ...]:
-        if fields is None:
-            fields = REQUEST_COLUMNS
+    def to_row(self) -> Tuple[Any, ...]:
         payload = self.encode()
         row = []
-        for k in fields:
+        for k in REQUEST_COLUMNS:
             row.append(getattr(payload, k))
         return tuple(row)
 
@@ -597,20 +601,6 @@ def reset_db_and_logs():
                   ignore_errors=True)
 
 
-def _update_request(request: Request, fields: Optional[List[str]] = None):
-    """Update a request in the database."""
-    if fields is None:
-        fields = REQUEST_COLUMNS
-    assert _DB is not None
-    sql_statement = (f'UPDATE {REQUEST_TABLE} SET '
-                     f'{", ".join([f"{col} = ?" for col in fields])} '
-                     f'WHERE request_id = ?')
-    with _DB.conn:
-        cursor = _DB.conn.cursor()
-        cursor.execute(sql_statement,
-                       request.to_row(fields) + (request.request_id,))
-
-
 @init_db
 @metrics_lib.time_me
 def update_request(
@@ -620,6 +610,7 @@ def update_request(
     set_pid: Optional[int] = None,
     unset_pid: bool = False,
     set_finished_at: Optional[float] = None,
+    set_return_value: Optional[Dict[str, Any]] = None,
     set_error: Optional[BaseException] = None,
     match_status: Optional[List[RequestStatus]] = None,
 ) -> Optional[Request]:
@@ -643,6 +634,9 @@ def update_request(
     if set_finished_at is not None:
         field_update_statements.append('finished_at = ?')
         update_params.append(set_finished_at)
+    if set_return_value is not None:
+        field_update_statements.append('return_value = ?')
+        update_params.append(json.dumps(set_return_value))
     if set_error is not None:
         field_update_statements.append('error = ?')
         update_params.append(json.dumps(_serialize_error(set_error)))
@@ -959,18 +953,19 @@ def set_request_failed(request_id: str, e: BaseException) -> None:
     assert req is not None
 
 
-def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
+def set_request_succeeded(request_id: str, request_name: str,
+                          result: Optional[Any]) -> None:
     """Set a request to succeeded and populate the result."""
     assert request_id
-    request = _get_request_no_lock(request_id)
-    assert request is not None
-    update_fields = ['status', 'finished_at']
-    request.status = RequestStatus.SUCCEEDED
-    request.finished_at = time.time()
     if result is not None:
-        update_fields.append('return_value')
-        request.set_return_value(result)
-    _update_request(request, update_fields)
+        return_value = _serialize_return_value(request_name, result)
+    else:
+        return_value = None
+    req = update_request(request_id,
+                         set_status=RequestStatus.SUCCEEDED,
+                         set_finished_at=time.time(),
+                         set_return_value=return_value)
+    assert req is not None
 
 
 def set_request_cancelled(request_id: str) -> None:

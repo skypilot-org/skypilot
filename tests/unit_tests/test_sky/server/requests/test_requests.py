@@ -1693,7 +1693,8 @@ def test_set_request_succeeded(isolated_database):
     requests.create_if_not_exists(test_request_1)
 
     # test set request succeeded
-    requests.set_request_succeeded('test-request-id-1', 'Test result')
+    requests.set_request_succeeded('test-request-id-1', 'default',
+                                   'Test result')
     # verify the request was updated correctly
     updated_request = requests.get_request('test-request-id-1')
     assert updated_request.status == RequestStatus.SUCCEEDED
@@ -1709,29 +1710,3 @@ def test_set_request_succeeded(isolated_database):
                                       user_id='user-1',
                                       cluster_name='cluster-1')
     requests.create_if_not_exists(test_request_2)
-
-    test_request_2_updated = requests.get_request('test-request-id-2')
-    test_request_2_updated.pid = 12345
-    assert requests.get_request('test-request-id-2').pid == None
-    assert test_request_2.pid == None
-
-    # Create test request
-    with mock.patch(
-            'sky.server.requests.requests._get_request_no_lock',
-            return_value=test_request_2,
-            # simulate a race condition where the request in DB
-            # was updated after the initial read in _update_request.
-            side_effect=requests._update_request(test_request_2_updated,
-                                                 fields=['pid']),
-    ) as mock_get_request_no_lock:
-        # test set request succeeded
-        requests.set_request_succeeded('test-request-id-2', 'Test result')
-        mock_get_request_no_lock.assert_called_once_with('test-request-id-2')
-        # verify the request was updated correctly
-    updated_request = requests.get_request('test-request-id-2')
-    assert updated_request.status == RequestStatus.SUCCEEDED
-    assert updated_request.finished_at is not None
-    assert updated_request.return_value == 'Test result'
-    # make sure that _update_request does not rollback database changes
-    # that happened after the initial read in _update_request.
-    assert updated_request.pid == 12345
