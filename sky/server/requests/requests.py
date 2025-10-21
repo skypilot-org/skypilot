@@ -16,11 +16,11 @@ import time
 import traceback
 from typing import (Any, Callable, Dict, Generator, List, NamedTuple, Optional,
                     Tuple)
+import uuid
 
 import anyio
 import colorama
 import filelock
-import uuid
 
 from sky import exceptions
 from sky import global_user_state
@@ -292,6 +292,7 @@ class Request:
                 exc_info=e)
             # The error is unexpected, so we don't suppress the stack trace.
             raise
+
 
 def get_new_request_id() -> str:
     """Get a new request ID."""
