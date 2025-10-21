@@ -752,15 +752,13 @@ async def create_if_not_exists_async(request: Request) -> bool:
     """Async version of create_if_not_exists."""
     assert _DB is not None
     request_columns = ', '.join(REQUEST_COLUMNS)
-    values_str = ', '.join(["?"] * len(REQUEST_COLUMNS))
+    values_str = ', '.join(['?'] * len(REQUEST_COLUMNS))
     request_row = request.to_row()
     async with filelock.AsyncFileLock(request_lock_path(request.request_id)):
-        if await _get_request_no_lock_async(request.request_id) is not None:
-            return False
         await _DB.execute_and_commit_async(
-            (f'INSERT OR REPLACE INTO {REQUEST_TABLE} '
+            (f'INSERT INTO {REQUEST_TABLE} '
              f'({request_columns}) VALUES '
-             f'({values_str})'), request_row)
+             f'({values_str}) ON CONFLICT(request_id) DO NOTHING'), request_row)
         return True
 
 
