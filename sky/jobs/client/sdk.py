@@ -130,8 +130,11 @@ def queue(
     refresh: bool,
     skip_finished: bool = False,
     all_users: bool = False,
-    job_ids: Optional[List[int]] = None
-) -> server_common.RequestId[List[responses.ManagedJobRecord]]:
+    job_ids: Optional[List[int]] = None,
+    limit: Optional[int] = None,
+    fields: Optional[List[str]] = None,
+) -> server_common.RequestId[Union[List[responses.ManagedJobRecord], Tuple[
+        List[responses.ManagedJobRecord], int, Dict[str, int], int]]]:
     """Gets statuses of managed jobs.
 
     Please refer to sky.cli.job_queue for documentation.
@@ -141,6 +144,8 @@ def queue(
         skip_finished: Whether to skip finished jobs.
         all_users: Whether to show all users' jobs.
         job_ids: IDs of the managed jobs to show.
+        limit: Number of jobs to show.
+        fields: Fields to get for the managed jobs.
 
     Returns:
         The request ID of the queue request.
@@ -173,17 +178,33 @@ def queue(
           does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
-    body = payloads.JobsQueueBody(
-        refresh=refresh,
-        skip_finished=skip_finished,
-        all_users=all_users,
-        job_ids=job_ids,
-    )
-    response = server_common.make_authenticated_request(
-        'POST',
-        '/jobs/queue',
-        json=json.loads(body.model_dump_json()),
-        timeout=(5, None))
+    remote_api_version = versions.get_remote_api_version()
+    if remote_api_version and remote_api_version >= 18:
+        body = payloads.JobsQueueV2Body(
+            refresh=refresh,
+            skip_finished=skip_finished,
+            all_users=all_users,
+            job_ids=job_ids,
+            limit=limit,
+            fields=fields,
+        )
+        response = server_common.make_authenticated_request(
+            'POST',
+            '/jobs/queue/v2',
+            json=json.loads(body.model_dump_json()),
+            timeout=(5, None))
+    else:
+        body = payloads.JobsQueueBody(
+            refresh=refresh,
+            skip_finished=skip_finished,
+            all_users=all_users,
+            job_ids=job_ids,
+        )
+        response = server_common.make_authenticated_request(
+            'POST',
+            '/jobs/queue',
+            json=json.loads(body.model_dump_json()),
+            timeout=(5, None))
     return server_common.get_request_id(response=response)
 
 

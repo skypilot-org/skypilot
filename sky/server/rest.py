@@ -256,6 +256,41 @@ def handle_server_unavailable(response: 'requests.Response') -> None:
         raise exceptions.ServerTemporarilyUnavailableError(error_msg)
 
 
+async def handle_server_unavailable_async(
+        response: 'aiohttp.ClientResponse') -> None:
+    """Async version: Handle 503 (Service Unavailable) error
+
+    The client get 503 error in the following cases:
+    1. The reverse proxy cannot find any ready backend endpoints to serve the
+       request, e.g. when there is and rolling-update.
+    2. The skypilot API server has temporary resource issue, e.g. when the
+       cucurrency of the handling process is exhausted.
+
+    We expect the caller (CLI or SDK) retry on these cases and show clear wait
+    message to the user to let user decide whether keep waiting or abort the
+    request.
+    """
+    if response.status != 503:
+        return
+
+    # error_msg = 'SkyPilot API server is temporarily unavailable. '
+    error_msg = ''
+    try:
+        response_data = await response.json()
+        if 'detail' in response_data:
+            error_msg = response_data['detail']
+    except Exception:  # pylint: disable=broad-except
+        try:
+            text = await response.text()
+            if text:
+                error_msg = text
+        except Exception:  # pylint: disable=broad-except
+            pass
+
+    with ux_utils.print_exception_no_traceback():
+        raise exceptions.ServerTemporarilyUnavailableError(error_msg)
+
+
 @_retry_on_server_unavailable()
 def request(method, url, **kwargs) -> 'requests.Response':
     """Send a request to the API server, retry on server temporarily
@@ -332,7 +367,7 @@ async def request_without_retry_async(session: 'aiohttp.ClientSession',
         response = await session.request(method, url, **kwargs)
 
         # Handle server unavailability (503 status) - same as sync version
-        handle_server_unavailable(response)
+        await handle_server_unavailable_async(response)
 
         # Set remote API version and version from headers - same as sync version
         remote_api_version = response.headers.get(constants.API_VERSION_HEADER)
