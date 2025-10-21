@@ -675,8 +675,7 @@ def get_latest_request_id() -> Optional[str]:
 def get_request(request_id: str,
                 fields: Optional[List[str]] = None) -> Optional[Request]:
     """Get a SkyPilot API request."""
-    with filelock.FileLock(request_lock_path(request_id)):
-        return _get_request_no_lock(request_id, fields)
+    return _get_request_no_lock(request_id, fields)
 
 
 @init_db_async
@@ -686,9 +685,7 @@ async def get_request_async(
         request_id: str,
         fields: Optional[List[str]] = None) -> Optional[Request]:
     """Async version of get_request."""
-    # TODO(aylei): figure out how to remove FileLock here to avoid the overhead
-    async with filelock.AsyncFileLock(request_lock_path(request_id)):
-        return await _get_request_no_lock_async(request_id, fields)
+    return await _get_request_no_lock_async(request_id, fields)
 
 
 class StatusWithMsg(NamedTuple):
