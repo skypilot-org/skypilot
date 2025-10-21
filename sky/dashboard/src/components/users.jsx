@@ -191,7 +191,46 @@ export function Users() {
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [serviceAccountSearchQuery, setServiceAccountSearchQuery] =
     useState('');
-  const [deduplicateUsers, setDeduplicateUsers] = useState(false);
+
+  // Initialize deduplicateUsers from URL parameter
+  const getInitialDeduplicateUsers = () => {
+    if (typeof window !== 'undefined' && router.isReady) {
+      const deduplicateParam = router.query.deduplicate;
+      return deduplicateParam === 'true';
+    }
+    return false;
+  };
+
+  const [deduplicateUsers, setDeduplicateUsers] = useState(
+    getInitialDeduplicateUsers
+  );
+
+  // Sync deduplicateUsers state with URL parameter
+  useEffect(() => {
+    if (router.isReady) {
+      const deduplicateParam = router.query.deduplicate;
+      const expectedState = deduplicateParam === 'true';
+      if (deduplicateUsers !== expectedState) {
+        setDeduplicateUsers(expectedState);
+      }
+    }
+  }, [router.isReady, router.query.deduplicate, deduplicateUsers]);
+
+  // Helper function to update deduplicate in URL
+  const updateDeduplicateURL = (deduplicateValue) => {
+    const query = { ...router.query };
+    query.deduplicate = deduplicateValue.toString();
+
+    // Use replace to avoid adding to browser history
+    router.replace(
+      {
+        pathname: router.pathname,
+        query,
+      },
+      undefined,
+      { shallow: true }
+    );
+  };
 
   // Handle URL parameters for tab selection
   useEffect(() => {
@@ -547,7 +586,11 @@ export function Users() {
               <input
                 type="checkbox"
                 checked={deduplicateUsers}
-                onChange={(e) => setDeduplicateUsers(e.target.checked)}
+                onChange={(e) => {
+                  const newValue = e.target.checked;
+                  setDeduplicateUsers(newValue);
+                  updateDeduplicateURL(newValue);
+                }}
                 className="sr-only"
               />
               <div
@@ -1260,7 +1303,8 @@ function UsersTable({
           // Keep the oldest created_at
           if (
             user.created_at &&
-            (!deduped[name].created_at || user.created_at < deduped[name].created_at)
+            (!deduped[name].created_at ||
+              user.created_at < deduped[name].created_at)
           ) {
             deduped[name].created_at = user.created_at;
           }
@@ -1365,14 +1409,14 @@ function UsersTable({
     <Card>
       <div className="overflow-x-auto rounded-lg">
         <Table className="min-w-full">
-            <TableHeader>
-              <TableRow>
-                <TableHead
-                  onClick={() => requestSort('usernameDisplay')}
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-                >
-                  Name{getSortDirection('usernameDisplay')}
-                </TableHead>
+          <TableHeader>
+            <TableRow>
+              <TableHead
+                onClick={() => requestSort('usernameDisplay')}
+                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+              >
+                Name{getSortDirection('usernameDisplay')}
+              </TableHead>
               {!deduplicateUsers && (
                 <TableHead
                   onClick={() => requestSort('fullEmailID')}
