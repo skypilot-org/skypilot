@@ -622,8 +622,8 @@ async def _execute_request_coroutine(request: api_requests.Request):
     logger.info(f'Executing request {request.request_id} in coroutine')
     func = request.entrypoint
     request_body = request.request_body
-    with api_requests.update_request(request.request_id) as request_task:
-        request_task.status = api_requests.RequestStatus.RUNNING
+    await api_requests.update_status_async(request.request_id,
+                                           api_requests.RequestStatus.RUNNING)
     # Redirect stdout and stderr to the request log path.
     original_output = ctx.redirect_log(request.log_path)
     try:
@@ -633,7 +633,7 @@ async def _execute_request_coroutine(request: api_requests.Request):
             **request_body.to_kwargs())
     except Exception as e:  # pylint: disable=broad-except
         ctx.redirect_log(original_output)
-        api_requests.set_request_failed(request.request_id, e)
+        await api_requests.set_request_failed_async(request.request_id, e)
         logger.error(f'Failed to run request {request.request_id} due to '
                      f'{common_utils.format_exception(e)}')
         return
@@ -650,14 +650,15 @@ async def _execute_request_coroutine(request: api_requests.Request):
         if fut.done():
             try:
                 result = await fut
-                api_requests.set_request_succeeded(request_id, result)
+                await api_requests.set_request_succeeded_async(
+                    request_id, result)
             except asyncio.CancelledError:
                 # The task is cancelled by ctx.cancel(), where the status
                 # should already be set to CANCELLED.
                 pass
             except Exception as e:  # pylint: disable=broad-except
                 ctx.redirect_log(original_output)
-                api_requests.set_request_failed(request_id, e)
+                await api_requests.set_request_failed_async(request_id, e)
                 logger.error(f'Request {request_id} failed due to '
                              f'{common_utils.format_exception(e)}')
             return True
@@ -672,13 +673,13 @@ async def _execute_request_coroutine(request: api_requests.Request):
     except asyncio.CancelledError:
         # Current coroutine is cancelled due to client disconnect, set the
         # request status for consistency.
-        api_requests.set_request_cancelled(request.request_id)
+        await api_requests.set_request_cancelled_async(request.request_id)
         pass
     # pylint: disable=broad-except
     except (Exception, KeyboardInterrupt, SystemExit) as e:
         # Handle any other error
         ctx.redirect_log(original_output)
-        api_requests.set_request_failed(request.request_id, e)
+        await api_requests.set_request_failed_async(request.request_id, e)
         logger.error(f'Request {request.request_id} interrupted due to '
                      f'unhandled exception: {common_utils.format_exception(e)}')
         raise

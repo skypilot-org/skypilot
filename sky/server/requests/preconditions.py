@@ -90,7 +90,7 @@ class Precondition(abc.ABC):
         while True:
             if self.timeout > 0 and time.time() - start_time > self.timeout:
                 # Cancel the request on timeout.
-                api_requests.set_request_failed(
+                await api_requests.set_request_failed_async(
                     self.request_id,
                     exceptions.RequestCancelled(
                         f'Request {self.request_id} precondition wait timed '
@@ -118,7 +118,7 @@ class Precondition(abc.ABC):
                         self.request_id, status_msg)
                     last_status_msg = status_msg
             except (Exception, SystemExit, KeyboardInterrupt) as e:  # pylint: disable=broad-except
-                api_requests.set_request_failed(self.request_id, e)
+                await api_requests.set_request_failed_async(self.request_id, e)
                 logger.info(f'Request {self.request_id} failed due to '
                             f'{common_utils.format_exception(e)}')
                 return False
