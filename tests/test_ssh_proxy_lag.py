@@ -347,7 +347,8 @@ async def test_endpoint_api_stream(monitor, mock_blocking_operations):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_launch(monitor, mock_request, mock_schedule_request_async):
+async def test_endpoint_launch(monitor, mock_request,
+                               mock_schedule_request_async):
     """Test /launch endpoint for blocking operations."""
     print("\n🔍 Testing: /launch")
 
@@ -383,7 +384,8 @@ async def test_endpoint_exec(monitor, mock_request):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_stop(monitor, mock_request, mock_schedule_request_async):
+async def test_endpoint_stop(monitor, mock_request,
+                             mock_schedule_request_async):
     """Test /stop endpoint for blocking operations."""
     print("\n🔍 Testing: /stop")
 
@@ -400,7 +402,8 @@ async def test_endpoint_stop(monitor, mock_request, mock_schedule_request_async)
 
 
 @pytest.mark.asyncio
-async def test_endpoint_down(monitor, mock_request, mock_schedule_request_async):
+async def test_endpoint_down(monitor, mock_request,
+                             mock_schedule_request_async):
     """Test /down endpoint for blocking operations."""
     print("\n🔍 Testing: /down")
 
@@ -417,7 +420,8 @@ async def test_endpoint_down(monitor, mock_request, mock_schedule_request_async)
 
 
 @pytest.mark.asyncio
-async def test_endpoint_status(monitor, mock_request, mock_schedule_request_async):
+async def test_endpoint_status(monitor, mock_request,
+                               mock_schedule_request_async):
     """Test /status endpoint for blocking operations."""
     print("\n🔍 Testing: /status")
 
@@ -866,7 +870,8 @@ async def test_endpoint_jobs_cancel(monitor, mock_request,
 
 
 @pytest.mark.asyncio
-async def test_endpoint_serve_up(monitor, mock_request, mock_schedule_request_async):
+async def test_endpoint_serve_up(monitor, mock_request,
+                                 mock_schedule_request_async):
     """Test /serve/up endpoint for blocking operations."""
     print("\n🔍 Testing: /serve/up")
 
@@ -951,7 +956,8 @@ async def test_endpoint_validate(monitor):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_optimize(monitor, mock_request, mock_schedule_request_async):
+async def test_endpoint_optimize(monitor, mock_request,
+                                 mock_schedule_request_async):
     """Test /optimize endpoint for blocking operations."""
     print("\n🔍 Testing: /optimize")
 
