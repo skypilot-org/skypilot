@@ -826,13 +826,13 @@ Get Slack notifications when your managed jobs start, succeed, or fail.
 
   name: my-training-job
   
-  envs:
-    SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
-  
   run: |
     echo "Training model..."
     # Your training code here
   
+  envs:
+    SLACK_WEBHOOK_URL: null # Replace with your actual Slack webhook URL
+
   event_callback:
     - slack:
         webhook_url: ${SLACK_WEBHOOK_URL}
