@@ -755,11 +755,11 @@ async def create_if_not_exists_async(request: Request) -> bool:
     values_str = ', '.join(['?'] * len(REQUEST_COLUMNS))
     request_row = request.to_row()
     async with filelock.AsyncFileLock(request_lock_path(request.request_id)):
-        await _DB.execute_and_commit_async(
+        row = await _DB.execute_get_returning_value_async(
             (f'INSERT INTO {REQUEST_TABLE} '
              f'({request_columns}) VALUES '
-             f'({values_str}) ON CONFLICT(request_id) DO NOTHING'), request_row)
-        return True
+             f'({values_str}) ON CONFLICT(request_id) DO NOTHING RETURNING ROWID'), request_row)
+        return True if row else False
 
 
 @dataclasses.dataclass
