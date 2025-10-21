@@ -213,7 +213,8 @@ async def test_logs():
         mock_stream.assert_called_once_with(mock.ANY,
                                             mock_request_task.log_path,
                                             mock.ANY,
-                                            polling_interval=1)
+                                            polling_interval=1,
+                                            kill_request_on_disconnect=False)
 
 
 @mock.patch('sky.utils.context_utils.hijack_sys_attrs')
