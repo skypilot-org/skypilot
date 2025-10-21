@@ -196,9 +196,12 @@ class ClientWrapper:
             if real_client is not None:
                 real_client.close()
             else:
-                logger.debug(f'No client found for {self._client}')
+                # logger may already be cleaned up during __del__ at shutdown
+                if logger is not None:
+                    logger.debug(f'No client found for {self._client}')
         except Exception as e:  # pylint: disable=broad-except
-            logger.debug(f'Error closing Kubernetes client: {e}')
+            if logger is not None:
+                logger.debug(f'Error closing Kubernetes client: {e}')
 
 
 def wrap_kubernetes_client(func):
