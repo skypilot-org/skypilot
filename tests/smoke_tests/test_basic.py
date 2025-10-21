@@ -1607,7 +1607,7 @@ def test_launch_and_cancel_race_condition(generic_cloud: str):
 @pytest.mark.no_remote_server  # This case need to check the local process status
 def test_cancel_logs_request(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
-    exec_proxy_command = 'ssh'
+    exec_proxy_command = 'ssh -tt'
     if generic_cloud == 'kubernetes':
         exec_proxy_command = 'kubectl exec'
     test = smoke_tests_utils.Test(
