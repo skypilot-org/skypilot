@@ -981,6 +981,7 @@ async def set_request_cancelled_async(request_id: str) -> None:
             return
         request_task.finished_at = time.time()
         request_task.status = RequestStatus.CANCELLED
+        await _add_or_update_request_no_lock_async(request_task)
 
 
 @init_db
