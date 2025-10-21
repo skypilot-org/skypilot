@@ -653,7 +653,7 @@ def update_request(
         match_status_str = ', '.join(
             [repr(status.value) for status in match_status])
         update_statement += ('AND status IN '
-                             f'{match_status_str}) ')
+                             f'({match_status_str}) ')
     if not update_params:
         raise ValueError('No fields to update')
     req_columns_str = ', '.join(REQUEST_COLUMNS)
