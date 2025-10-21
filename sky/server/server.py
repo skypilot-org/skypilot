@@ -17,6 +17,7 @@ import resource
 import shutil
 import sys
 import threading
+import traceback
 from typing import Dict, List, Literal, Optional, Set, Tuple
 import uuid
 import zipfile
@@ -42,6 +43,7 @@ from sky.data import storage_utils
 from sky.jobs import utils as managed_job_utils
 from sky.jobs.server import server as jobs_rest
 from sky.metrics import utils as metrics_utils
+from sky.provision import metadata_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
 from sky.serve.server import server as serve_rest
@@ -74,6 +76,7 @@ from sky.utils import dag_utils
 from sky.utils import perf_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
+from sky.utils import ux_utils
 from sky.utils.db import db_utils
 from sky.volumes.server import server as volumes_rest
 from sky.workspaces import server as workspaces_rest
@@ -664,6 +667,25 @@ except Exception:  # pylint: disable=broad-except
     pass  # no issue, we will warn the user later if its too low
 
 
+@app.exception_handler(exceptions.ConcurrentWorkerExhaustedError)
+def handle_concurrent_worker_exhausted_error(
+        request: fastapi.Request, e: exceptions.ConcurrentWorkerExhaustedError):
+    del request  # request is not used
+    # Print detailed error message to server log
+    logger.error('Concurrent worker exhausted: '
+                 f'{common_utils.format_exception(e)}')
+    with ux_utils.enable_traceback():
+        logger.error(f'  Traceback: {traceback.format_exc()}')
+    # Return human readable error message to client
+    return fastapi.responses.JSONResponse(
+        status_code=503,
+        content={
+            'detail':
+                ('The server has exhausted its concurrent worker limit. '
+                 'Please try again or scale the server if the load persists.')
+        })
+
+
 @app.get('/token')
 async def token(request: fastapi.Request,
                 local_port: Optional[int] = None) -> fastapi.responses.Response:
@@ -1232,6 +1254,7 @@ async def logs(
     # TODO(zhwu): This should wait for the request on the cluster, e.g., async
     # launch, to finish, so that a user does not need to manually pull the
     # request status.
+    executor.check_request_thread_executor_available()
     request_task = executor.prepare_request(
         request_id=request.state.request_id,
         request_name='logs',
@@ -1341,38 +1364,65 @@ async def download(download_body: payloads.DownloadBody,
 
 # TODO(aylei): run it asynchronously after global_user_state support async op
 @app.post('/provision_logs')
-def provision_logs(cluster_body: payloads.ClusterNameBody,
+def provision_logs(provision_logs_body: payloads.ProvisionLogsBody,
                    follow: bool = True,
                    tail: int = 0) -> fastapi.responses.StreamingResponse:
     """Streams the provision.log for the latest launch request of a cluster."""
-    # Prefer clusters table first, then cluster_history as fallback.
-    log_path_str = global_user_state.get_cluster_provision_log_path(
-        cluster_body.cluster_name)
-    if not log_path_str:
-        log_path_str = global_user_state.get_cluster_history_provision_log_path(
-            cluster_body.cluster_name)
-    if not log_path_str:
-        raise fastapi.HTTPException(
-            status_code=404,
-            detail=('Provision log path is not recorded for this cluster. '
-                    'Please relaunch to generate provisioning logs.'))
+    log_path = None
+    cluster_name = provision_logs_body.cluster_name
+    worker = provision_logs_body.worker
+    # stream head node logs
+    if worker is None:
+        # Prefer clusters table first, then cluster_history as fallback.
+        log_path_str = global_user_state.get_cluster_provision_log_path(
+            cluster_name)
+        if not log_path_str:
+            log_path_str = (
+                global_user_state.get_cluster_history_provision_log_path(
+                    cluster_name))
+        if not log_path_str:
+            raise fastapi.HTTPException(
+                status_code=404,
+                detail=('Provision log path is not recorded for this cluster. '
+                        'Please relaunch to generate provisioning logs.'))
+        log_path = pathlib.Path(log_path_str).expanduser().resolve()
+        if not log_path.exists():
+            raise fastapi.HTTPException(
+                status_code=404,
+                detail=f'Provision log path does not exist: {str(log_path)}')
 
-    log_path = pathlib.Path(log_path_str).expanduser().resolve()
-    if not log_path.exists():
-        raise fastapi.HTTPException(
-            status_code=404,
-            detail=f'Provision log path does not exist: {str(log_path)}')
+    # stream worker node logs
+    else:
+        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+        if handle is None:
+            raise fastapi.HTTPException(
+                status_code=404,
+                detail=('Cluster handle is not recorded for this cluster. '
+                        'Please relaunch to generate provisioning logs.'))
+        # instance_ids includes head node
+        instance_ids = handle.instance_ids
+        if instance_ids is None:
+            raise fastapi.HTTPException(
+                status_code=400,
+                detail='Instance IDs are not recorded for this cluster. '
+                'Please relaunch to generate provisioning logs.')
+        if worker > len(instance_ids) - 1:
+            raise fastapi.HTTPException(
+                status_code=400,
+                detail=f'Worker {worker} is out of range. '
+                f'The cluster has {len(instance_ids)} nodes.')
+        log_path = metadata_utils.get_instance_log_dir(
+            handle.get_cluster_name_on_cloud(), instance_ids[worker])
 
     # Tail semantics: 0 means print all lines. Convert 0 -> None for streamer.
     effective_tail = None if tail is None or tail <= 0 else tail
 
     return fastapi.responses.StreamingResponse(
-        content=stream_utils.log_streamer(
-            None,
-            log_path,
-            tail=effective_tail,
-            follow=follow,
-            cluster_name=cluster_body.cluster_name),
+        content=stream_utils.log_streamer(None,
+                                          log_path,
+                                          tail=effective_tail,
+                                          follow=follow,
+                                          cluster_name=cluster_name),
         media_type='text/plain',
         headers={
             'Cache-Control': 'no-cache, no-transform',
@@ -1466,6 +1516,8 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
         # to avoid storming the DB and CPU in the meantime
         await asyncio.sleep(0.1)
     request_task = await requests_lib.get_request_async(request_id)
+    # TODO(aylei): refine this, /api/get will not be retried and this is
+    # meaningless to retry. It is the original request that should be retried.
     if request_task.should_retry:
         raise fastapi.HTTPException(
             status_code=503, detail=f'Request {request_id!r} should be retried')
@@ -1543,11 +1595,14 @@ async def stream(
     polling_interval = stream_utils.DEFAULT_POLL_INTERVAL
     # Original plain text streaming logic
     if request_id is not None:
-        request_task = await requests_lib.get_request_async(request_id)
+        request_task = await requests_lib.get_request_async(
+            request_id, fields=['request_id', 'schedule_type'])
         if request_task is None:
             print(f'No task with request ID {request_id}')
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Request {request_id!r} not found')
+        # req.log_path is derived from request_id,
+        # so it's ok to just grab the request_id in the above query.
         log_path_to_stream = request_task.log_path
         if not log_path_to_stream.exists():
             # The log file might be deleted by the request GC daemon but the
@@ -1557,6 +1612,7 @@ async def stream(
                 detail=f'Log of request {request_id!r} has been deleted')
         if request_task.schedule_type == requests_lib.ScheduleType.LONG:
             polling_interval = stream_utils.LONG_REQUEST_POLL_INTERVAL
+        del request_task
     else:
         assert log_path is not None, (request_id, log_path)
         if log_path == constants.API_SERVER_LOGS:
@@ -1643,14 +1699,13 @@ async def api_status(
                 requests_lib.RequestStatus.PENDING,
                 requests_lib.RequestStatus.RUNNING,
             ]
-        request_tasks = await requests_lib.get_request_tasks_with_fields_async(
+        request_tasks = await requests_lib.get_request_tasks_async(
             req_filter=requests_lib.RequestTaskFilter(
                 status=statuses,
                 limit=limit,
                 fields=fields,
-            ),
-            fields=fields,
-        )
+                sort=True,
+            ))
         return requests_lib.encode_requests(request_tasks)
     else:
         encoded_request_tasks = []
@@ -2034,7 +2089,8 @@ if __name__ == '__main__':
         uvicorn_config = uvicorn.Config('sky.server.server:app',
                                         host=cmd_args.host,
                                         port=cmd_args.port,
-                                        workers=num_workers)
+                                        workers=num_workers,
+                                        ws_per_message_deflate=False)
         skyuvicorn.run(uvicorn_config,
                        max_db_connections=config.num_db_connections_per_worker)
     except Exception as exc:  # pylint: disable=broad-except

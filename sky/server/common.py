@@ -490,6 +490,7 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
 def handle_request_error(response: 'requests.Response') -> None:
     # Keep the original HTTPError if the response code >= 400
     response.raise_for_status()
+
     # Other status codes are not expected neither, e.g. we do not expect to
     # handle redirection here.
     if response.status_code != 200:
@@ -916,12 +917,18 @@ def reload_for_new_request(client_entrypoint: Optional[str],
                            client_command: Optional[str],
                            using_remote_api_server: bool, user: 'models.User',
                            request_id: str) -> None:
-    """Reload modules, global variables, and usage message for a new request."""
+    """Reload modules, global variables, and usage message for a new request.
+
+    Must be called within the request's context.
+    """
     # This should be called first to make sure the logger is up-to-date.
     sky_logging.reload_logger()
 
     # Reload the skypilot config to make sure the latest config is used.
-    skypilot_config.safe_reload_config()
+    # We don't need to grab the lock here because this function is only
+    # run once we are inside the request's context, so there shouldn't
+    # be any race conditions when reloading the config.
+    skypilot_config.reload_config()
 
     # Reset the client entrypoint and command for the usage message.
     common_utils.set_request_context(

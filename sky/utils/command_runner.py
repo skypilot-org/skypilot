@@ -14,6 +14,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import log_lib
+from sky.utils import auth_utils
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import control_master_utils
@@ -649,6 +650,8 @@ class SSHCommandRunner(CommandRunner):
         self.disable_control_master = (
             disable_control_master or
             control_master_utils.should_disable_control_master())
+        # ensure the ssh key files are created from the database
+        auth_utils.create_ssh_key_files_from_db(ssh_private_key)
         if docker_user is not None:
             assert port is None or port == 22, (
                 f'port must be None or 22 for docker_user, got {port}.')

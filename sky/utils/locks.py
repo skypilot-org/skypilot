@@ -312,8 +312,11 @@ class PostgresLock(DistributedLock):
                 else:
                     self._connection.close()
             except Exception as e:  # pylint: disable=broad-except
-                logger.debug(
-                    f'Failed to invalidate or close postgres connection: {e}')
+                if invalidate:
+                    logger.debug(
+                        f'Failed to invalidate postgres connection: {e}')
+                else:
+                    logger.debug(f'Failed to close postgres connection: {e}')
             self._connection = None
 
     def is_locked(self) -> bool:

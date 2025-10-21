@@ -566,7 +566,7 @@ async def test_endpoint_provision_logs(monitor):
                                    side_effect=create_blocking_mock(
                                        None, delay=0.02)):
                 try:
-                    body = payloads.ClusterNameBody(cluster_name='test')
+                    body = payloads.ProvisionLogsBody(cluster_name='test')
                     await _run_endpoint_func(server.provision_logs,
                                              body,
                                              follow=False)

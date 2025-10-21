@@ -48,6 +48,7 @@ from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
 from sky.server.requests import requests as api_requests
+from sky.server.requests import threads
 from sky.server.requests.queues import local_queue
 from sky.server.requests.queues import mp_queue
 from sky.skylet import constants
@@ -81,23 +82,28 @@ logger = sky_logging.init_logger(__name__)
 # platforms, including macOS.
 multiprocessing.set_start_method('spawn', force=True)
 
-# Max threads that is equivalent to the number of thread workers in the
-# default thread pool executor of event loop.
-_REQUEST_THREADS_LIMIT = min(32, (os.cpu_count() or 0) + 4)
+# An upper limit of max threads for request execution per server process that
+# unlikely to be reached to allow higher concurrency while still prevent the
+# server process become overloaded.
+_REQUEST_THREADS_LIMIT = 128
 
 _REQUEST_THREAD_EXECUTOR_LOCK = threading.Lock()
-# A dedicated thread pool executor for synced requests execution in coroutine
-_REQUEST_THREAD_EXECUTOR: Optional[concurrent.futures.ThreadPoolExecutor] = None
+# A dedicated thread pool executor for synced requests execution in coroutine to
+# avoid:
+# 1. blocking the event loop;
+# 2. exhausting the default thread pool executor of event loop;
+_REQUEST_THREAD_EXECUTOR: Optional[threads.OnDemandThreadExecutor] = None
 
 
-def get_request_thread_executor() -> concurrent.futures.ThreadPoolExecutor:
+def get_request_thread_executor() -> threads.OnDemandThreadExecutor:
     """Lazy init and return the request thread executor for current process."""
     global _REQUEST_THREAD_EXECUTOR
     if _REQUEST_THREAD_EXECUTOR is not None:
         return _REQUEST_THREAD_EXECUTOR
     with _REQUEST_THREAD_EXECUTOR_LOCK:
         if _REQUEST_THREAD_EXECUTOR is None:
-            _REQUEST_THREAD_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+            _REQUEST_THREAD_EXECUTOR = threads.OnDemandThreadExecutor(
+                name='request_thread_executor',
                 max_workers=_REQUEST_THREADS_LIMIT)
         return _REQUEST_THREAD_EXECUTOR
 
@@ -208,10 +214,11 @@ class RequestWorker:
                 time.sleep(0.1)
                 return
             request_id, ignore_return_value, _ = request_element
-            request = api_requests.get_request(request_id)
+            request = api_requests.get_request(request_id, fields=['status'])
             assert request is not None, f'Request with ID {request_id} is None'
             if request.status == api_requests.RequestStatus.CANCELLED:
                 return
+            del request
             logger.info(f'[{self}] Submitting request: {request_id}')
             # Start additional process to run the request, so that it can be
             # cancelled when requested by a user.
@@ -561,6 +568,21 @@ class CoroutineTask:
             pass
 
 
+def check_request_thread_executor_available() -> None:
+    """Check if the request thread executor is available.
+
+    This is a best effort check to hint the client to retry other server
+    processes when there is no avaiable thread worker in current one. But
+    a request may pass this check and still cannot get worker on execution
+    time due to race condition. In this case, the client will see a failed
+    request instead of retry.
+
+    TODO(aylei): this can be refined with a refactor of our coroutine
+    execution flow.
+    """
+    get_request_thread_executor().check_available()
+
+
 def execute_request_in_coroutine(
         request: api_requests.Request) -> CoroutineTask:
     """Execute a request in current event loop.
@@ -604,10 +626,17 @@ async def _execute_request_coroutine(request: api_requests.Request):
         request_task.status = api_requests.RequestStatus.RUNNING
     # Redirect stdout and stderr to the request log path.
     original_output = ctx.redirect_log(request.log_path)
-    fut: asyncio.Future = context_utils.to_thread_with_executor(
-        get_request_thread_executor(), _execute_with_config_override, func,
-        request_body, request.request_id, request.name,
-        **request_body.to_kwargs())
+    try:
+        fut: asyncio.Future = context_utils.to_thread_with_executor(
+            get_request_thread_executor(), _execute_with_config_override, func,
+            request_body, request.request_id, request.name,
+            **request_body.to_kwargs())
+    except Exception as e:  # pylint: disable=broad-except
+        ctx.redirect_log(original_output)
+        api_requests.set_request_failed(request.request_id, e)
+        logger.error(f'Failed to run request {request.request_id} due to '
+                     f'{common_utils.format_exception(e)}')
+        return
 
     async def poll_task(request_id: str) -> bool:
         req_status = await api_requests.get_request_status_async(request_id)

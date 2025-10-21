@@ -2015,7 +2015,7 @@ class S3CompatibleStore(AbstractStore):
         except aws.botocore_exceptions().ClientError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
-                    f'Attempted to create a bucket {self.name} but failed.'
+                    f'Attempted to create S3 bucket {self.name} but failed.'
                 ) from e
         return self.config.resource_factory(bucket_name)
 
@@ -2554,7 +2554,7 @@ class GcsStore(AbstractStore):
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
-                    f'Attempted to create a bucket {self.name} but failed.'
+                    f'Attempted to create GCS bucket {self.name} but failed.'
                 ) from e
         logger.info(
             f'  {colorama.Style.DIM}Created GCS bucket {new_bucket.name!r} in '
