@@ -73,6 +73,10 @@ class RequestStatus(enum.Enum):
     def finished_status(cls) -> List['RequestStatus']:
         return [cls.SUCCEEDED, cls.FAILED, cls.CANCELLED]
 
+    @classmethod
+    def unfinished_status(cls) -> List['RequestStatus']:
+        return [cls.PENDING, cls.RUNNING]
+
 
 _STATUS_TO_COLOR = {
     RequestStatus.PENDING: colorama.Fore.BLUE,
@@ -401,7 +405,7 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
     request_ids = [
         request_task.request_id
         for request_task in get_request_tasks(req_filter=RequestTaskFilter(
-            status=[RequestStatus.PENDING, RequestStatus.RUNNING],
+            status=RequestStatus.unfinished_status(),
             exclude_request_names=[exclude_request_name],
             cluster_names=[cluster_name],
             fields=['request_id']))
@@ -445,7 +449,7 @@ def _kill_requests(request_ids: Optional[List[str]] = None,
         request_ids = [
             request_task.request_id
             for request_task in get_request_tasks(req_filter=RequestTaskFilter(
-                status=[RequestStatus.PENDING, RequestStatus.RUNNING],
+                status=RequestStatus.unfinished_status(),
                 # Avoid cancelling the cancel request itself.
                 exclude_request_names=['sky.api_cancel'],
                 user_id=user_id,
@@ -456,11 +460,10 @@ def _kill_requests(request_ids: Optional[List[str]] = None,
         if request_id in set(
                 event.id for event in daemons.INTERNAL_REQUEST_DAEMONS):
             continue
-        req = update_request(
-            request_id,
-            set_status=RequestStatus.CANCELLED,
-            set_finished_at=time.time(),
-            match_status=[RequestStatus.PENDING, RequestStatus.RUNNING])
+        req = update_request(request_id,
+                             set_status=RequestStatus.CANCELLED,
+                             set_finished_at=time.time(),
+                             match_status=RequestStatus.unfinished_status())
         if req is None:
             logger.debug(
                 f'Request with ID {request_id} not found or already finished')
@@ -973,11 +976,10 @@ def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
 def set_request_cancelled(request_id: str) -> None:
     """Set a pending or running request to cancelled."""
     assert request_id
-    req = update_request(
-        request_id,
-        set_status=RequestStatus.CANCELLED,
-        set_finished_at=time.time(),
-        match_status=[RequestStatus.PENDING, RequestStatus.RUNNING])
+    req = update_request(request_id,
+                         set_status=RequestStatus.CANCELLED,
+                         set_finished_at=time.time(),
+                         match_status=RequestStatus.unfinished_status())
     assert req is not None
 
 

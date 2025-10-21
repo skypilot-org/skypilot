@@ -623,8 +623,14 @@ async def _execute_request_coroutine(request: api_requests.Request):
     logger.info(f'Executing request {request.request_id} in coroutine')
     func = request.entrypoint
     request_body = request.request_body
-    api_requests.update_request(request.request_id,
-                                set_status=api_requests.RequestStatus.RUNNING)
+    req = api_requests.update_request(
+        request.request_id,
+        match_status=[api_requests.RequestStatus.PENDING],
+        set_status=api_requests.RequestStatus.RUNNING)
+    if req is None:
+        logger.info(f'Request {request.request_id} is no longer pending, '
+                    'skipping execution.')
+        return
     # Redirect stdout and stderr to the request log path.
     original_output = ctx.redirect_log(request.log_path)
     try:
