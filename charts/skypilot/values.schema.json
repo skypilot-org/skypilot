@@ -80,6 +80,22 @@
                         "null"
                     ]
                 },
+                "logs": {
+                    "type": "object",
+                    "properties": {
+                        "retention": {
+                            "type": "object",
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "size": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                },
                 "metrics": {
                     "type": "object",
                     "properties": {
