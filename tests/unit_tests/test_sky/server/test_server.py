@@ -182,7 +182,7 @@ async def test_logs():
         task = asyncio.create_task(asyncio.sleep(0.1))
         return executor.CoroutineTask(task)
 
-    with mock.patch('sky.server.requests.executor.prepare_request') as mock_prepare, \
+    with mock.patch('sky.server.requests.executor.prepare_request_async') as mock_prepare_async, \
          mock.patch('sky.server.requests.executor.execute_request_in_coroutine',
                    side_effect=slow_execute) as mock_execute, \
          mock.patch('sky.server.stream_utils.stream_response',
@@ -191,7 +191,7 @@ async def test_logs():
         # Mock prepare_request to return a request task
         mock_request_task = mock.MagicMock()
         mock_request_task.log_path = '/tmp/test.log'
-        mock_prepare.return_value = mock_request_task
+        mock_prepare_async.return_value = mock_request_task
 
         # Start logs endpoint in background
         logs_task = asyncio.create_task(
@@ -208,7 +208,7 @@ async def test_logs():
         await background_tasks()
 
         # Verify the executor calls
-        mock_prepare.assert_called_once()
+        mock_prepare_async.assert_called_once()
         mock_execute.assert_called_once_with(mock_request_task)
         mock_stream.assert_called_once_with(mock.ANY,
                                             mock_request_task.log_path,

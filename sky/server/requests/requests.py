@@ -725,17 +725,6 @@ async def get_request_status_async(
         return StatusWithMsg(status, status_msg)
 
 
-@init_db
-@metrics_lib.time_me
-def create_if_not_exists(request: Request) -> bool:
-    """Create a SkyPilot API request if it does not exist."""
-    with filelock.FileLock(request_lock_path(request.request_id)):
-        if _get_request_no_lock(request.request_id) is not None:
-            return False
-        _add_or_update_request_no_lock(request)
-        return True
-
-
 @init_db_async
 @metrics_lib.time_me_async
 @asyncio_utils.shield
