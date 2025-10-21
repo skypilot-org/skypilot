@@ -1114,6 +1114,12 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             type.value for type in kubernetes_enums.KubernetesNetworkingMode
         ],
     },
+    'ports': {
+        'type': 'string',
+        'case_insensitive_enum': [
+            type.value for type in kubernetes_enums.KubernetesPortMode
+        ],
+    },
     **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
     'autoscaler': {
         'type': 'string',
