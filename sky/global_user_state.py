@@ -447,7 +447,8 @@ def add_or_update_user(
                                     name=user.name,
                                     password=user.password,
                                     created_at=created_at)
-            if _sqlite_supports_returning():
+            use_returning = return_user and _sqlite_supports_returning()
+            if use_returning:
                 insert_stmnt = insert_stmnt.returning(
                     user_table.c.id,
                     user_table.c.name,
@@ -457,7 +458,7 @@ def add_or_update_user(
             result = session.execute(insert_stmnt)
 
             row = None
-            if _sqlite_supports_returning():
+            if use_returning:
                 # With RETURNING, check if we got a row back.
                 row = result.fetchone()
                 was_inserted = row is not None
@@ -473,13 +474,13 @@ def add_or_update_user(
 
                 update_stmnt = sqlalchemy.update(user_table).where(
                     user_table.c.id == user.id).values(update_values)
-                if _sqlite_supports_returning() and return_user:
+                if use_returning:
                     update_stmnt = update_stmnt.returning(
                         user_table.c.id, user_table.c.name,
                         user_table.c.password, user_table.c.created_at)
 
                 result = session.execute(update_stmnt)
-                if return_user and _sqlite_supports_returning():
+                if use_returning:
                     row = result.fetchone()
 
             session.commit()
