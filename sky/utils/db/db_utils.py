@@ -358,7 +358,6 @@ class SQLiteConn(threading.local):
         conn = await self._get_async_conn()
         return await conn.execute_fetchall(sql, parameters)
 
-    @aiosqlite.context.contextmanager
     async def execute_get_returning_value_async(self,
                                    sql: str,
                                    parameters: Optional[Iterable[Any]] = None
@@ -370,7 +369,9 @@ class SQLiteConn(threading.local):
 
         def exec_and_get_returning_value(sql: str, parameters: Optional[Iterable[Any]]):
             # pylint: disable=protected-access
-            return conn._conn.execute(sql, parameters).fetchone()
+            row = conn._conn.execute(sql, parameters).fetchone()
+            conn._conn.commit()
+            return row
 
         return await conn._execute(exec_and_get_returning_value, sql, parameters)
 
