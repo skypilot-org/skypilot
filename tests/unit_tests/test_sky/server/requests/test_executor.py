@@ -56,11 +56,20 @@ aws:
 
 @pytest.fixture()
 def mock_global_user_state():
-    with mock.patch('sky.global_user_state.add_or_update_user'), \
+    mock_user = mock.Mock()
+    mock_user.id = 'test-user-id'
+    mock_user.name = 'test-user'
+
+    def mock_add_or_update_user(user,
+                                allow_duplicate_name=True,
+                                return_user=False):
+        if return_user:
+            return True, mock_user
+        return True
+
+    with mock.patch('sky.global_user_state.add_or_update_user',
+                    side_effect=mock_add_or_update_user), \
          mock.patch('sky.global_user_state.get_user') as mock_get_user:
-        mock_user = mock.Mock()
-        mock_user.id = 'test-user-id'
-        mock_user.name = 'test-user'
         mock_get_user.return_value = mock_user
         yield
 
