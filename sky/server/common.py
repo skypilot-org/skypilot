@@ -922,7 +922,7 @@ def reload_for_new_request(client_entrypoint: Optional[str],
     sky_logging.reload_logger()
 
     # Reload the skypilot config to make sure the latest config is used.
-    skypilot_config.safe_reload_config()
+    skypilot_config.reload_config()
 
     # Reset the client entrypoint and command for the usage message.
     common_utils.set_request_context(
