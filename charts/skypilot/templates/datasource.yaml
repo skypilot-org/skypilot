@@ -2,10 +2,10 @@
 apiVersion: v1
 kind: Secret
 metadata:
-  name: {{ .Release.Name }}-prometheus-datasource
+  name: {{ include "skypilot.fullname" . }}-prometheus-datasource
   namespace: {{ .Release.Namespace }}
   labels:
-    app: {{ .Release.Name }}-api
+    app: {{ include "skypilot.fullname" . }}-api
     grafana_datasource: "true"
 stringData:
   prometheus.yaml: |-
@@ -13,7 +13,7 @@ stringData:
     datasources:
       - name: Prometheus
         type: prometheus
-        url: http://{{ .Release.Name }}-prometheus-server:80
+        url: http://{{ include "skypilot.fullname" . }}-prometheus-server:80
         editable: false
         uid: prometheus
 {{- end }}

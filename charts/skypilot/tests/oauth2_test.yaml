@@ -65,7 +65,7 @@ tests:
           of: Deployment
       - equal:
           path: metadata.name
-          value: RELEASE-NAME-oauth2-proxy
+          value: RELEASE-NAME-skypilot-oauth2-proxy
       - contains:
           path: spec.template.spec.containers[0].args
           content: "--oidc-issuer-url=https://example.okta.com/oauth2/default"
@@ -211,7 +211,7 @@ tests:
           of: Ingress
       - equal:
           path: metadata.name
-          value: RELEASE-NAME-oauth2-proxy
+          value: RELEASE-NAME-skypilot-oauth2-proxy
       - equal:
           path: spec.rules[0].host
           value: "api.example.com"
@@ -220,7 +220,7 @@ tests:
           value: "/oauth2"
       - equal:
           path: spec.rules[0].http.paths[0].backend.service.name
-          value: RELEASE-NAME-oauth2-proxy
+          value: RELEASE-NAME-skypilot-oauth2-proxy
 
   - it: should create oauth2-proxy resources when new auth config is enabled
     set:
@@ -256,7 +256,7 @@ tests:
           path: spec.template.spec.containers[0].env
           content:
             name: SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL
-            value: "http://RELEASE-NAME-oauth2-proxy:4180"
+            value: "http://RELEASE-NAME-skypilot-oauth2-proxy:4180"
 
   - it: should not create oauth2-proxy ingress when using new auth config
     set:
@@ -339,7 +339,7 @@ tests:
           of: Service
       - equal:
           path: metadata.name
-          value: RELEASE-NAME-oauth2-proxy
+          value: RELEASE-NAME-skypilot-oauth2-proxy
       - equal:
           path: spec.ports[0].port
           value: 4180
@@ -348,7 +348,7 @@ tests:
           value: 4180
       - equal:
           path: spec.selector.app
-          value: RELEASE-NAME-oauth2-proxy
+          value: RELEASE-NAME-skypilot-oauth2-proxy
 
   - it: should create redis deployment and service when session store is redis
     set:
@@ -368,7 +368,7 @@ tests:
         documentIndex: 1
       - equal:
           path: metadata.name
-          value: RELEASE-NAME-oauth2-proxy-redis
+          value: RELEASE-NAME-skypilot-oauth2-proxy-redis
         documentIndex: 0
       - equal:
           path: spec.template.spec.containers[0].image

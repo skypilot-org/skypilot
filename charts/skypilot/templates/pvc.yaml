@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ .Release.Name }}-state
+  name: {{ include "skypilot.fullname" . }}-state
   namespace: {{ .Release.Namespace }}
   {{- with .Values.storage.annotations }}
   annotations:
