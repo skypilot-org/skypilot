@@ -917,11 +917,17 @@ def reload_for_new_request(client_entrypoint: Optional[str],
                            client_command: Optional[str],
                            using_remote_api_server: bool, user: 'models.User',
                            request_id: str) -> None:
-    """Reload modules, global variables, and usage message for a new request."""
+    """Reload modules, global variables, and usage message for a new request.
+
+    Must be called within the request's context.
+    """
     # This should be called first to make sure the logger is up-to-date.
     sky_logging.reload_logger()
 
     # Reload the skypilot config to make sure the latest config is used.
+    # We don't need to grab the lock here because this function is only
+    # run once we are inside the request's context, so there shouldn't
+    # be any race conditions when reloading the config.
     skypilot_config.reload_config()
 
     # Reset the client entrypoint and command for the usage message.
