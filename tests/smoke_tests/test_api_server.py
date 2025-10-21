@@ -482,7 +482,7 @@ def test_api_server_start_stop(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
 
     test = smoke_tests_utils.Test(
-        'test_managed_jobs_force_disable_cloud_bucket',
+        'test_api_server_start_stop',
         [
             # To avoid interference with other tests, we launch a separate API server for this test.
             f'sky launch -n {name} --cloud {generic_cloud} tests/test_yamls/apiserver-start-stop.yaml -y {smoke_tests_utils.LOW_RESOURCE_ARG}'
