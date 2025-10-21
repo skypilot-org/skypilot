@@ -163,7 +163,7 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to add a request ID to each request."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
-        request_id = str(uuid.uuid4())
+        request_id = requests_lib.get_new_request_id()
         request.state.request_id = request_id
         response = await call_next(request)
         # TODO(syang): remove X-Request-ID when v0.10.0 is released.
@@ -1566,7 +1566,7 @@ async def stream(
             detail='Only one of request_id and log_path can be provided')
 
     if request_id is None and log_path is None:
-        request_id = requests_lib.get_latest_request_id()
+        request_id = await requests_lib.get_latest_request_id_async()
         if request_id is None:
             raise fastapi.HTTPException(status_code=404,
                                         detail='No request found')

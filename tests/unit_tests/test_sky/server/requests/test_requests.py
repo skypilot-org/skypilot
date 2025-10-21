@@ -1510,3 +1510,34 @@ async def test_cancel_get_request_async():
                 requests.request_lock_path(f'test-request-id-{i}'))
             # The locks must be released properly
             lock.acquire(blocking=False)
+
+
+@pytest.mark.asyncio
+async def test_get_latest_request_id_async(isolated_database):
+    """Test getting the latest request ID asynchronously."""
+    current_time = time.time()
+
+    request_id = await requests.get_latest_request_id_async()
+    assert request_id is None
+
+    request = requests.Request(request_id='test-request-id-1',
+                               name='test-request',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.PENDING,
+                               created_at=current_time,
+                               user_id='test-user')
+    await requests.create_if_not_exists_async(request)
+    request_id = await requests.get_latest_request_id_async()
+    assert request_id == 'test-request-id-1'
+
+    request = requests.Request(request_id='test-request-id-2',
+                               name='test-request',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.PENDING,
+                               created_at=current_time + 1,
+                               user_id='test-user')
+    await requests.create_if_not_exists_async(request)
+    request_id = await requests.get_latest_request_id_async()
+    assert request_id == 'test-request-id-2'
