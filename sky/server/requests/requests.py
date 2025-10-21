@@ -467,19 +467,12 @@ def _kill_requests(request_ids: Optional[List[str]] = None,
         req = update_request(request_id,
                              set_status=RequestStatus.CANCELLED,
                              set_finished_at=time.time(),
+                             kill_pid=True,
                              match_status=RequestStatus.unfinished_status())
         if req is None:
             logger.debug(
                 f'Request with ID {request_id} not found or already finished')
             continue
-        if req.pid is not None:
-            logger.debug(f'Killing request process {req.pid}')
-            # Use SIGTERM instead of SIGKILL:
-            # - The executor can handle SIGTERM gracefully
-            # - After SIGTERM, the executor can reuse the request process
-            #   for other requests, avoiding the overhead of forking a new
-            #   process for each request.
-            os.kill(req.pid, signal.SIGTERM)
         cancelled_request_ids.append(request_id)
     return cancelled_request_ids
 
@@ -612,6 +605,7 @@ def update_request(
     set_finished_at: Optional[float] = None,
     set_return_value: Optional[Dict[str, Any]] = None,
     set_error: Optional[BaseException] = None,
+    kill_pid: bool = False,
     match_status: Optional[List[RequestStatus]] = None,
 ) -> Optional[Request]:
     """Update a SkyPilot API request in the database."""
@@ -658,6 +652,12 @@ def update_request(
         row = cursor.fetchone()
         if row is None:
             return None
+        if kill_pid and row.pid is not None:
+            try:
+                logger.debug(f'Killing request process {row.pid}')
+                os.kill(row.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                logger.debug(f'Process {row.pid} already finished.')
         return Request.from_row(row)
 
 

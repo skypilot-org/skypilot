@@ -190,14 +190,10 @@ class Server(uvicorn.Server):
         req = requests_lib.update_request(
             request_id,
             set_status=requests_lib.RequestStatus.CANCELLED,
+            kill_pid=True,
             set_should_retry=True)
         if req is None:
             return
-        if req.pid is not None:
-            try:
-                os.kill(req.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                logger.debug(f'Process {req.pid} already finished.')
         logger.info(
             f'Request {request_id} interrupted and will be retried by client.')
 
