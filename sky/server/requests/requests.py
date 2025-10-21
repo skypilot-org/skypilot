@@ -597,6 +597,18 @@ def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
 @init_db
 @metrics_lib.time_me
 @asyncio_utils.shield
+async def update_status_async(request_id: str, status: RequestStatus) -> None:
+    """Update the status of a request"""
+    async with filelock.AsyncFileLock(request_lock_path(request_id)):
+        request = await _get_request_no_lock_async(request_id)
+        if request is not None:
+            request.status = status
+            await _add_or_update_request_no_lock_async(request)
+
+
+@init_db
+@metrics_lib.time_me
+@asyncio_utils.shield
 async def update_status_msg_async(request_id: str, status_msg: str) -> None:
     """Update the status message of a request"""
     async with filelock.AsyncFileLock(request_lock_path(request_id)):
@@ -913,6 +925,23 @@ def set_request_failed(request_id: str, e: BaseException) -> None:
         request_task.set_error(e)
 
 
+@init_db_async
+@metrics_lib.time_me_async
+@asyncio_utils.shield
+async def set_request_failed_async(request_id: str, e: BaseException) -> None:
+    """Set a request to failed and populate the error message."""
+    with ux_utils.enable_traceback():
+        stacktrace = traceback.format_exc()
+    setattr(e, 'stacktrace', stacktrace)
+    async with filelock.AsyncFileLock(request_lock_path(request_id)):
+        request_task = await _get_request_no_lock_async(request_id)
+        assert request_task is not None, request_id
+        request_task.status = RequestStatus.FAILED
+        request_task.finished_at = time.time()
+        request_task.set_error(e)
+        await _add_or_update_request_no_lock_async(request_task)
+
+
 def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
     """Set a request to succeeded and populate the result."""
     with update_request(request_id) as request_task:
@@ -923,9 +952,29 @@ def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
             request_task.set_return_value(result)
 
 
-def set_request_cancelled(request_id: str) -> None:
+@init_db_async
+@metrics_lib.time_me_async
+@asyncio_utils.shield
+async def set_request_succeeded_async(request_id: str,
+                                      result: Optional[Any]) -> None:
+    """Set a request to succeeded and populate the result."""
+    async with filelock.AsyncFileLock(request_lock_path(request_id)):
+        request_task = await _get_request_no_lock_async(request_id)
+        assert request_task is not None, request_id
+        request_task.status = RequestStatus.SUCCEEDED
+        request_task.finished_at = time.time()
+        if result is not None:
+            request_task.set_return_value(result)
+        await _add_or_update_request_no_lock_async(request_task)
+
+
+@init_db_async
+@metrics_lib.time_me_async
+@asyncio_utils.shield
+async def set_request_cancelled_async(request_id: str) -> None:
     """Set a pending or running request to cancelled."""
-    with update_request(request_id) as request_task:
+    async with filelock.AsyncFileLock(request_lock_path(request_id)):
+        request_task = await _get_request_no_lock_async(request_id)
         assert request_task is not None, request_id
         # Already finished or cancelled.
         if request_task.status > RequestStatus.RUNNING:
