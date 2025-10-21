@@ -489,7 +489,8 @@ def override_sky_config(
     temp_config_file.flush()
     # Update the environment variable to use the temporary file
     env_dict[skypilot_config.ENV_VAR_GLOBAL_CONFIG] = temp_config_file.name
-    if skypilot_config.ENV_VAR_GLOBAL_CONFIG in env_before_override:
+    if (env_before_override is not None and
+            skypilot_config.ENV_VAR_GLOBAL_CONFIG in env_before_override):
         env_dict[skypilot_config.ENV_VAR_GLOBAL_CONFIG +
                  '_ORIGINAL'] = env_before_override[
                      skypilot_config.ENV_VAR_GLOBAL_CONFIG]
