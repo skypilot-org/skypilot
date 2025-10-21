@@ -3332,14 +3332,22 @@ def _down_or_stop_clusters(
     if show_summary:
         click.echo('\nSummary:')
         if successes:
+            # Preserve the original order of clusters as provided by user.
             click.echo('  ✓ Succeeded: ' + ', '.join(successes))
         if failures:
-            failed_pretty = []
-            for name, reason in failures:
+            # Format failures: if one failure, keep on same line. If multiple,
+            # indent each failed cluster on its own line for readability.
+            if len(failures) == 1:
+                name, reason = failures[0]
                 first = reason.strip().splitlines()[0]
                 first = first if len(first) <= 120 else first[:120] + '…'
-                failed_pretty.append(f'{name} ({first})')
-            click.echo('  ✗ Failed: ' + ', '.join(failed_pretty))
+                click.echo(f'  ✗ Failed: {name} ({first})')
+            else:
+                click.echo('  ✗ Failed:')
+                for name, reason in failures:
+                    first = reason.strip().splitlines()[0]
+                    first = first if len(first) <= 120 else first[:120] + '…'
+                    click.echo(f'      {name} ({first})')
 
     if failures:
         raise click.ClickException('Cluster(s) failed. See details above.')
