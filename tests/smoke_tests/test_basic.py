@@ -1621,7 +1621,7 @@ def test_cancel_logs_request(generic_cloud: str):
             f'sky logs {name} & pid=$!; sleep 30; kill -s TERM $pid || true; wait $pid || true',
             # After cancelling the logs request, all the exec proxy process should be killed,
             # only the grep command itself should be left.
-            f'sleep 10; pgrep -f "{exec_proxy_command}" | wc -l | grep 0',
+            f'sleep 10; ps aux | grep "{exec_proxy_command}; "pgrep -f "{exec_proxy_command}" | wc -l | grep 0',
         ],
         f'sky down -y {name} || true',
     )
