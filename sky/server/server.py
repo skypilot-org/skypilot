@@ -1501,6 +1501,7 @@ async def local_down(request: fastapi.Request,
 @app.get('/api/get')
 async def api_get(request_id: str) -> payloads.RequestPayload:
     """Gets a request with a given request ID prefix."""
+    # TODO Validate request_id prefix.
     while True:
         req_status = await requests_lib.get_request_status_async(request_id)
         if req_status is None:
@@ -1564,6 +1565,10 @@ async def stream(
         raise fastapi.HTTPException(
             status_code=400,
             detail='Only one of request_id and log_path can be provided')
+
+    if request_id is not None:
+        # TODO Validate request_id prefix.
+        pass
 
     if request_id is None and log_path is None:
         request_id = await requests_lib.get_latest_request_id_async()
@@ -1672,6 +1677,10 @@ async def stream(
 async def api_cancel(request: fastapi.Request,
                      request_cancel_body: payloads.RequestCancelBody) -> None:
     """Cancels requests."""
+    if request_cancel_body.request_ids is not None:
+        for request_id in request_cancel_body.request_ids:
+            # TODO Validate request_id prefix.
+            pass
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='api_cancel',
@@ -1711,6 +1720,7 @@ async def api_status(
     else:
         encoded_request_tasks = []
         for request_id in request_ids:
+            # TODO Validate request_id prefix.
             request_task = await requests_lib.get_request_async(request_id)
             if request_task is None:
                 continue

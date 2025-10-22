@@ -715,6 +715,16 @@ async def get_request_async(
         return await _get_request_no_lock_async(request_id, fields)
 
 
+async def get_request_async_with_prefix(
+        request_id_prefix: str,
+        fields: Optional[List[str]] = None) -> Optional[Request]:
+    """Async version of get_request_with_prefix."""
+    assert _DB is not None
+    async with _DB.execute_fetchall_async(
+        (f'SELECT {columns_str} FROM {REQUEST_TABLE} '
+         'WHERE request_id LIKE ?'), (request_id_prefix + '%',)) as rows:
+        return [Request.from_row(row) for row in rows]
+
 class StatusWithMsg(NamedTuple):
     status: RequestStatus
     status_msg: Optional[str] = None
