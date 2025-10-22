@@ -350,6 +350,9 @@ ingress-nginx:
         service.beta.kubernetes.io/port_443_health-probe_protocol: "TCP"
         service.beta.kubernetes.io/port_80_health-probe_protocol: "TCP"
     config:
+      use-gzip: "true"
+      gzip-level: 5
+      gzip-min-length: 1000
       http-snippet: |
         map $http_upgrade $connection_upgrade {
             default upgrade;
