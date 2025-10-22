@@ -382,21 +382,28 @@ def get_max_connections():
 
 @typing.overload
 def get_engine(
-        db_name: str,
+        db_name: Optional[str],
         async_engine: Literal[False] = False) -> sqlalchemy.engine.Engine:
     ...
 
 
 @typing.overload
-def get_engine(db_name: str,
+def get_engine(db_name: Optional[str],
                async_engine: Literal[True]) -> sqlalchemy_async.AsyncEngine:
     ...
 
 
 def get_engine(
-    db_name: str,
+    db_name: Optional[str],
     async_engine: bool = False
 ) -> Union[sqlalchemy.engine.Engine, sqlalchemy_async.AsyncEngine]:
+    """Get the engine for the given database name.
+
+    Args:
+        db_name: The name of the database. ONLY used for SQLite. On Postgres,
+        we use a single database, which we get from the connection string.
+        async_engine: Whether to return an async engine.
+    """
     conn_string = None
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
@@ -429,6 +436,7 @@ def get_engine(
                             max_overflow=0))
             engine = _postgres_engine_cache[conn_string]
     else:
+        assert db_name is not None, 'db_name must be provided for SQLite'
         db_path = os.path.expanduser(f'~/.sky/{db_name}.db')
         pathlib.Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
         if async_engine:
