@@ -16,6 +16,7 @@ import time
 import traceback
 from typing import (Any, Callable, Dict, Generator, List, NamedTuple, Optional,
                     Tuple)
+import uuid
 
 import anyio
 import colorama
@@ -291,6 +292,11 @@ class Request:
                 exc_info=e)
             # The error is unexpected, so we don't suppress the stack trace.
             raise
+
+
+def get_new_request_id() -> str:
+    """Get a new request ID."""
+    return str(uuid.uuid4())
 
 
 def encode_requests(requests: List[Request]) -> List[payloads.RequestPayload]:
@@ -657,17 +663,15 @@ async def _get_request_no_lock_async(
     return Request.from_row(row)
 
 
-@init_db
+@init_db_async
 @metrics_lib.time_me
-def get_latest_request_id() -> Optional[str]:
+async def get_latest_request_id_async() -> Optional[str]:
     """Get the latest request ID."""
     assert _DB is not None
-    with _DB.conn:
-        cursor = _DB.conn.cursor()
-        cursor.execute(f'SELECT request_id FROM {REQUEST_TABLE} '
-                       'ORDER BY created_at DESC LIMIT 1')
-        row = cursor.fetchone()
-        return row[0] if row else None
+    async with _DB.execute_fetchall_async(
+        (f'SELECT request_id FROM {REQUEST_TABLE} '
+         'ORDER BY created_at DESC LIMIT 1')) as rows:
+        return rows[0][0] if rows else None
 
 
 @init_db
