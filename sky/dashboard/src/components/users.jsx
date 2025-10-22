@@ -196,9 +196,12 @@ export function Users() {
   const getInitialDeduplicateUsers = () => {
     if (typeof window !== 'undefined' && router.isReady) {
       const deduplicateParam = router.query.deduplicate;
-      return deduplicateParam === 'true';
+      // If parameter is explicitly set, use it; otherwise default to true
+      if (deduplicateParam !== undefined) {
+        return deduplicateParam === 'true';
+      }
     }
-    return false;
+    return true; // Default to deduplicated view
   };
 
   const [deduplicateUsers, setDeduplicateUsers] = useState(
@@ -209,12 +212,19 @@ export function Users() {
   useEffect(() => {
     if (router.isReady) {
       const deduplicateParam = router.query.deduplicate;
-      const expectedState = deduplicateParam === 'true';
-      if (deduplicateUsers !== expectedState) {
-        setDeduplicateUsers(expectedState);
+
+      // If URL has no deduplicate parameter, set it to the default (true)
+      if (deduplicateParam === undefined) {
+        updateDeduplicateURL(true);
+      } else {
+        const expectedState = deduplicateParam === 'true';
+        if (deduplicateUsers !== expectedState) {
+          setDeduplicateUsers(expectedState);
+        }
       }
     }
-  }, [router.isReady, router.query.deduplicate, deduplicateUsers]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.isReady, router.query.deduplicate]);
 
   // Helper function to update deduplicate in URL
   const updateDeduplicateURL = (deduplicateValue) => {
