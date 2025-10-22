@@ -284,7 +284,9 @@ export function Users() {
   const handleRefresh = () => {
     dashboardCache.invalidate(getUsers);
     dashboardCache.invalidate(getClusters);
-    dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
+    dashboardCache.invalidate(getManagedJobs, [
+      { allUsers: true, skipFinished: true, fields: ['user_hash', 'status'] },
+    ]);
 
     if (refreshDataRef.current) {
       refreshDataRef.current();
@@ -1111,7 +1113,13 @@ function UsersTable({
         // Step 2: Load clusters and jobs in background and update counts
         const [clustersData, managedJobsResponse] = await Promise.all([
           dashboardCache.get(getClusters),
-          dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
+          dashboardCache.get(getManagedJobs, [
+            {
+              allUsers: true,
+              skipFinished: true,
+              fields: ['user_hash', 'status'],
+            },
+          ]),
         ]);
 
         const jobsData = managedJobsResponse.jobs || [];
@@ -1569,7 +1577,13 @@ function ServiceAccountTokensView({
       // Step 2: Fetch clusters and jobs data in parallel
       const [clustersResponse, jobsResponse] = await Promise.all([
         dashboardCache.get(getClusters),
-        dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
+        dashboardCache.get(getManagedJobs, [
+          {
+            allUsers: true,
+            skipFinished: true,
+            fields: ['user_hash', 'status'],
+          },
+        ]),
       ]);
 
       const clustersData = clustersResponse || [];
