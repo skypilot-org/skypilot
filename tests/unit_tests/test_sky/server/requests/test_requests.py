@@ -10,6 +10,7 @@ import pytest
 from sky.server.requests import payloads
 from sky.server.requests import requests
 from sky.server.requests.requests import RequestStatus
+from sky.server.requests.requests import ScheduleType
 
 
 def dummy():
@@ -36,7 +37,8 @@ def isolated_database(tmp_path):
             requests._DB = None
 
 
-def test_set_request_failed(isolated_database):
+@pytest.mark.asyncio
+async def test_set_request_failed(isolated_database):
     request = requests.Request(request_id='test-request-1',
                                name='test-request',
                                entrypoint=dummy,
@@ -46,7 +48,7 @@ def test_set_request_failed(isolated_database):
                                finished_at=0.0,
                                user_id='test-user')
 
-    requests.create_if_not_exists(request)
+    await requests.create_if_not_exists_async(request)
     try:
         raise ValueError('Boom!')
     except ValueError as e:
@@ -112,9 +114,9 @@ async def test_clean_finished_requests_with_retention(isolated_database):
         user_id='test-user')
 
     # Create the requests in the database
-    requests.create_if_not_exists(old_finished_request)
-    requests.create_if_not_exists(recent_finished_request)
-    requests.create_if_not_exists(old_running_request)
+    await requests.create_if_not_exists_async(old_finished_request)
+    await requests.create_if_not_exists_async(recent_finished_request)
+    await requests.create_if_not_exists_async(old_running_request)
 
     # Mock log file unlinking
     with mock.patch.object(pathlib.Path, 'unlink') as mock_unlink:
@@ -141,6 +143,208 @@ async def test_clean_finished_requests_with_retention(isolated_database):
 
 
 @pytest.mark.asyncio
+async def test_clean_finished_requests_with_retention_batch_size_functionality(
+        isolated_database):
+    """Test that the batch_size parameter controls batch size in cleanup operations."""
+    current_time = time.time()
+    retention_seconds = 60  # 1 minute retention
+
+    # Create 25 old finished requests
+    old_requests = []
+    for i in range(25):
+        request = requests.Request(
+            request_id=f'old-batch-{i:03d}',
+            name='test-request',
+            entrypoint=dummy,
+            request_body=payloads.RequestBody(),
+            status=RequestStatus.SUCCEEDED,
+            created_at=current_time - 180,
+            finished_at=current_time -
+            120,  # 2 minutes old (older than retention)
+            user_id='test-user')
+        old_requests.append(request)
+        await requests.create_if_not_exists_async(request)
+
+    # Create 5 recent finished requests (should not be deleted)
+    recent_requests = []
+    for i in range(5):
+        request = requests.Request(
+            request_id=f'recent-batch-{i:03d}',
+            name='test-request',
+            entrypoint=dummy,
+            request_body=payloads.RequestBody(),
+            status=RequestStatus.SUCCEEDED,
+            created_at=current_time - 60,
+            finished_at=current_time -
+            30,  # 30 seconds old (newer than retention)
+            user_id='test-user')
+        recent_requests.append(request)
+        await requests.create_if_not_exists_async(request)
+
+    # Verify all requests exist before cleanup
+    assert len([
+        req for req in old_requests
+        if requests.get_request(req.request_id) is not None
+    ]) == 25
+    assert len([
+        req for req in recent_requests
+        if requests.get_request(req.request_id) is not None
+    ]) == 5
+
+    # Test with limit=10 - should process in batches of 10
+    with mock.patch.object(pathlib.Path, 'unlink') as mock_unlink:
+        with mock.patch('sky.server.requests.requests.logger') as mock_logger:
+            # Track how get_request_tasks_async is called to verify batching
+            original_get_request_tasks_async = requests.get_request_tasks_async
+            call_counts = []
+
+            async def track_get_request_tasks_async(req_filter):
+                result = await original_get_request_tasks_async(req_filter)
+                call_counts.append(len(result))
+                return result
+
+            with mock.patch(
+                    'sky.server.requests.requests.get_request_tasks_async',
+                    side_effect=track_get_request_tasks_async):
+                await requests.clean_finished_requests_with_retention(
+                    retention_seconds, batch_size=10)
+
+    # Verify all old requests were deleted
+    for req in old_requests:
+        assert requests.get_request(req.request_id) is None
+
+    # Verify recent requests were NOT deleted
+    for req in recent_requests:
+        assert requests.get_request(req.request_id) is not None
+
+    # Verify batching occurred - should have made multiple calls with decreasing counts
+    # First call should return 10 (limited), second call should return 10, third call should return 5
+    assert len(call_counts) == 3  # At 3 calls (10, 10, 5)
+    assert call_counts[0] == 10  # First batch
+    assert call_counts[1] == 10  # Second batch
+    assert call_counts[2] == 5  # Third batch (remaining)
+
+    # Verify log file unlink was called for each deleted request
+    assert mock_unlink.call_count == 25
+
+    # Verify logging shows correct total
+    mock_logger.info.assert_called_once()
+    log_message = mock_logger.info.call_args[0][0]
+    assert 'Cleaned up 25 finished requests' in log_message
+
+
+@pytest.mark.asyncio
+async def test_clean_finished_requests_with_retention_limit_larger_than_total(
+        isolated_database):
+    """Test cleanup when batch_size is larger than total number of old requests."""
+    current_time = time.time()
+    retention_seconds = 60
+
+    # Create only 5 old finished requests
+    old_requests = []
+    for i in range(5):
+        request = requests.Request(
+            request_id=f'small-batch-{i:03d}',
+            name='test-request',
+            entrypoint=dummy,
+            request_body=payloads.RequestBody(),
+            status=RequestStatus.SUCCEEDED,
+            created_at=current_time - 180,
+            finished_at=current_time - 120,  # 2 minutes old
+            user_id='test-user')
+        old_requests.append(request)
+        await requests.create_if_not_exists_async(request)
+
+    # Test with limit=100 (much larger than the 5 requests)
+    with mock.patch.object(pathlib.Path, 'unlink'):
+        with mock.patch('sky.server.requests.requests.logger') as mock_logger:
+            # Track calls to verify single batch processing
+            original_get_request_tasks_async = requests.get_request_tasks_async
+            call_counts = []
+
+            async def track_get_request_tasks_async(req_filter):
+                result = await original_get_request_tasks_async(req_filter)
+                call_counts.append(len(result))
+                return result
+
+            with mock.patch(
+                    'sky.server.requests.requests.get_request_tasks_async',
+                    side_effect=track_get_request_tasks_async):
+                await requests.clean_finished_requests_with_retention(
+                    retention_seconds, batch_size=100)
+
+    # Verify all old requests were deleted
+    for req in old_requests:
+        assert requests.get_request(req.request_id) is None
+
+    # Should only need 1 calls: one returning 5 requests(termination)
+    assert len(call_counts) == 1
+    assert call_counts[0] == 5  # All 5 requests in the batch
+
+    # Verify logging
+    mock_logger.info.assert_called_once()
+    log_message = mock_logger.info.call_args[0][0]
+    assert 'Cleaned up 5 finished requests' in log_message
+
+
+@pytest.mark.asyncio
+async def test_clean_finished_requests_with_retention_batch_size_one(
+        isolated_database):
+    """Test cleanup with batch_size=1 to verify single-request batching."""
+    current_time = time.time()
+    retention_seconds = 60
+
+    # Create 3 old finished requests
+    old_requests = []
+    for i in range(3):
+        request = requests.Request(
+            request_id=f'single-batch-{i:03d}',
+            name='test-request',
+            entrypoint=dummy,
+            request_body=payloads.RequestBody(),
+            status=RequestStatus.SUCCEEDED,
+            created_at=current_time - 180,
+            finished_at=current_time - 120,  # 2 minutes old
+            user_id='test-user')
+        old_requests.append(request)
+        await requests.create_if_not_exists_async(request)
+
+    # Test with limit=1 (process one at a time)
+    with mock.patch.object(pathlib.Path, 'unlink'):
+        with mock.patch('sky.server.requests.requests.logger') as mock_logger:
+            # Track calls to verify single-request processing
+            original_get_request_tasks_async = requests.get_request_tasks_async
+            call_counts = []
+
+            async def track_get_request_tasks_async(req_filter):
+                result = await original_get_request_tasks_async(req_filter)
+                call_counts.append(len(result))
+                return result
+
+            with mock.patch(
+                    'sky.server.requests.requests.get_request_tasks_async',
+                    side_effect=track_get_request_tasks_async):
+                await requests.clean_finished_requests_with_retention(
+                    retention_seconds, batch_size=1)
+
+    # Verify all old requests were deleted
+    for req in old_requests:
+        assert requests.get_request(req.request_id) is None
+
+    # Should need 4 calls: three returning 1 request each, one returning 0 (termination)
+    assert len(call_counts) == 4
+    assert call_counts[0] == 1  # First request
+    assert call_counts[1] == 1  # Second request
+    assert call_counts[2] == 1  # Third request
+    assert call_counts[3] == 0  # Empty result terminates loop
+
+    # Verify logging
+    mock_logger.info.assert_called_once()
+    log_message = mock_logger.info.call_args[0][0]
+    assert 'Cleaned up 3 finished requests' in log_message
+
+
+@pytest.mark.asyncio
 async def test_clean_finished_requests_with_retention_no_old_requests(
         isolated_database):
     """Test cleanup when there are no old requests to clean."""
@@ -158,7 +362,7 @@ async def test_clean_finished_requests_with_retention_no_old_requests(
         finished_at=current_time - 30,  # 30 seconds old
         user_id='test-user')
 
-    requests.create_if_not_exists(recent_request)
+    await requests.create_if_not_exists_async(recent_request)
 
     with mock.patch('sky.server.requests.requests.logger') as mock_logger:
         await requests.clean_finished_requests_with_retention(retention_seconds)
@@ -207,9 +411,9 @@ async def test_clean_finished_requests_with_retention_all_statuses(
                                          finished_at=current_time - 120,
                                          user_id='test-user')
 
-    requests.create_if_not_exists(succeeded_request)
-    requests.create_if_not_exists(failed_request)
-    requests.create_if_not_exists(cancelled_request)
+    await requests.create_if_not_exists_async(succeeded_request)
+    await requests.create_if_not_exists_async(failed_request)
+    await requests.create_if_not_exists_async(cancelled_request)
 
     with mock.patch.object(pathlib.Path, 'unlink'):
         with mock.patch('sky.server.requests.requests.logger') as mock_logger:
@@ -262,9 +466,9 @@ async def test_requests_gc_daemon(isolated_database):
                                        user_id='test-user')
 
     # Create the requests in the database
-    requests.create_if_not_exists(old_finished_request)
-    requests.create_if_not_exists(recent_finished_request)
-    requests.create_if_not_exists(running_request)
+    await requests.create_if_not_exists_async(old_finished_request)
+    await requests.create_if_not_exists_async(recent_finished_request)
+    await requests.create_if_not_exists_async(running_request)
 
     # Verify all requests exist before cleanup
     assert requests.get_request('old-finished-gc-1') is not None
@@ -346,18 +550,56 @@ async def test_requests_gc_daemon_disabled(isolated_database):
 
 
 @pytest.mark.asyncio
-async def test_get_request_async(isolated_database):
-    """Test getting a request asynchronously."""
-    request = requests.Request(request_id='test-request-async-1',
+async def test_get_request_with_fields(isolated_database):
+    """Test getting a request with specific fields."""
+    request = requests.Request(request_id='test-request-with-fields-1',
                                name='test-request',
                                entrypoint=dummy,
                                request_body=payloads.RequestBody(),
                                status=RequestStatus.PENDING,
                                created_at=time.time(),
                                user_id='test-user')
+    await requests.create_if_not_exists_async(request)
+    retrieved_request = requests.get_request('test-request-with-fields-1',
+                                             fields=['request_id'])
+    assert retrieved_request is not None
+    assert retrieved_request.request_id == 'test-request-with-fields-1'
+    assert 'test-request-with-fields-1' in str(retrieved_request.log_path)
+
+    retrieved_request = requests.get_request('test-request-with-fields-1',
+                                             fields=['name'])
+    assert retrieved_request is not None
+    assert retrieved_request.name == 'test-request'
+
+    retrieved_request = requests.get_request('test-request-with-fields-1',
+                                             fields=['status'])
+    assert retrieved_request is not None
+    assert retrieved_request.status == RequestStatus.PENDING
+
+    retrieved_request = requests.get_request(
+        'test-request-with-fields-1', fields=['request_id', 'name', 'status'])
+    assert retrieved_request is not None
+    assert retrieved_request.request_id == 'test-request-with-fields-1'
+    assert retrieved_request.name == 'test-request'
+    assert retrieved_request.status == RequestStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_get_request_async(isolated_database):
+    """Test getting a request asynchronously."""
+    request = requests.Request(request_id='test-request-async-1',
+                               name='test-request',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               schedule_type=ScheduleType.LONG,
+                               status_msg='test-status-msg',
+                               status=RequestStatus.PENDING,
+                               created_at=time.time(),
+                               should_retry=True,
+                               user_id='test-user')
 
     # Create the request
-    requests.create_if_not_exists(request)
+    await requests.create_if_not_exists_async(request)
 
     # Get the request asynchronously
     retrieved_request = await requests.get_request_async('test-request-async-1')
@@ -368,6 +610,37 @@ async def test_get_request_async(isolated_database):
     assert retrieved_request.name == 'test-request'
     assert retrieved_request.status == RequestStatus.PENDING
     assert retrieved_request.user_id == 'test-user'
+
+    retrieved_request = await requests.get_request_async('test-request-async-1',
+                                                         fields=['request_id'])
+    assert retrieved_request is not None
+    assert retrieved_request.request_id == 'test-request-async-1'
+    assert 'test-request-async-1' in str(retrieved_request.log_path)
+
+    retrieved_request = await requests.get_request_async('test-request-async-1',
+                                                         fields=['name'])
+    assert retrieved_request.name == 'test-request'
+
+    retrieved_request = await requests.get_request_async('test-request-async-1',
+                                                         fields=['status'])
+    assert retrieved_request is not None
+    assert retrieved_request.status == RequestStatus.PENDING
+
+    retrieved_request = await requests.get_request_async(
+        'test-request-async-1', fields=['name', 'should_retry'])
+    assert retrieved_request is not None
+    assert retrieved_request.name == 'test-request'
+    assert retrieved_request.should_retry is True
+
+    retrieved_request = await requests.get_request_async(
+        'test-request-async-1',
+        fields=['request_id', 'name', 'schedule_type', 'status', 'status_msg'])
+    assert retrieved_request is not None
+    assert retrieved_request.request_id == 'test-request-async-1'
+    assert retrieved_request.name == 'test-request'
+    assert retrieved_request.schedule_type == ScheduleType.LONG
+    assert retrieved_request.status == RequestStatus.PENDING
+    assert retrieved_request.status_msg == 'test-status-msg'
 
 
 @pytest.mark.asyncio
@@ -505,7 +778,7 @@ async def test_get_api_request_ids_start_with(isolated_database):
             finished_at=created_at +
             1 if status in RequestStatus.finished_status() else None,
             user_id='test-user')
-        requests.create_if_not_exists(request)
+        await requests.create_if_not_exists_async(request)
 
     # Test completion with prefix that matches multiple requests
     result = await requests.get_api_request_ids_start_with('pen'
@@ -545,7 +818,7 @@ async def test_get_api_request_ids_start_with(isolated_database):
             created_at=current_time + i,  # newest first due to ordering
             finished_at=current_time + i + 1,
             user_id='test-user')
-        requests.create_if_not_exists(request)
+        await requests.create_if_not_exists_async(request)
 
     # Test that limit is respected
     bulk_result = await requests.get_api_request_ids_start_with('bulk-')
@@ -557,8 +830,7 @@ async def test_get_request_async_race_condition(isolated_database):
     """Test that get_request_async is concurrent safe."""
 
     async def write_then_read(req: requests.Request):
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, requests.create_if_not_exists, req)
+        await requests.create_if_not_exists_async(req)
         retrieved = await requests.get_request_async(req.request_id)
         assert retrieved is not None
 
@@ -611,11 +883,11 @@ async def test_get_request_tasks_async(isolated_database):
 
     # Create all requests synchronously for setup
     for req in test_requests:
-        requests.create_if_not_exists(req)
+        await requests.create_if_not_exists_async(req)
 
     # Test 1: Get all requests (no filter) - async
     all_requests = await requests.get_request_tasks_async(
-        requests.RequestTaskFilter())
+        requests.RequestTaskFilter(sort=True))
     assert len(all_requests) == 3
     # Should be ordered by created_at DESC
     assert all_requests[0].request_id == 'async-req-3'  # newest
@@ -623,19 +895,19 @@ async def test_get_request_tasks_async(isolated_database):
 
     # Test 2: Filter by status - async
     pending_requests = await requests.get_request_tasks_async(
-        requests.RequestTaskFilter(status=[RequestStatus.PENDING]))
+        requests.RequestTaskFilter(status=[RequestStatus.PENDING], sort=True))
     assert len(pending_requests) == 1
     assert pending_requests[0].request_id == 'async-req-1'
 
     # Test 3: Filter by user_id - async
     user1_requests = await requests.get_request_tasks_async(
-        requests.RequestTaskFilter(user_id='async-user1'))
+        requests.RequestTaskFilter(user_id='async-user1', sort=True))
     assert len(user1_requests) == 2
     assert all(req.user_id == 'async-user1' for req in user1_requests)
 
     # Test 4: Filter by cluster_names - async
     cluster1_requests = await requests.get_request_tasks_async(
-        requests.RequestTaskFilter(cluster_names=['async-cluster1']))
+        requests.RequestTaskFilter(cluster_names=['async-cluster1'], sort=True))
     assert len(cluster1_requests) == 2
     assert all(
         req.cluster_name == 'async-cluster1' for req in cluster1_requests)
@@ -644,7 +916,8 @@ async def test_get_request_tasks_async(isolated_database):
     combined_requests = await requests.get_request_tasks_async(
         requests.RequestTaskFilter(
             status=[RequestStatus.PENDING, RequestStatus.RUNNING],
-            user_id='async-user1'))
+            user_id='async-user1',
+            sort=True))
     assert len(combined_requests) == 2
     assert all(req.user_id == 'async-user1' and
                req.status in [RequestStatus.PENDING, RequestStatus.RUNNING]
@@ -656,7 +929,7 @@ async def test_get_request_tasks_async_empty_results(isolated_database):
     """Test async version with filters that return no results."""
     # Test with empty database
     empty_results = await requests.get_request_tasks_async(
-        requests.RequestTaskFilter())
+        requests.RequestTaskFilter(sort=True))
     assert len(empty_results) == 0
 
     # Create one test request
@@ -667,16 +940,16 @@ async def test_get_request_tasks_async_empty_results(isolated_database):
                                     status=RequestStatus.PENDING,
                                     created_at=time.time(),
                                     user_id='async-test-user')
-    requests.create_if_not_exists(test_request)
+    await requests.create_if_not_exists_async(test_request)
 
     # Test filtering that returns no results
     empty_results = await requests.get_request_tasks_async(
-        requests.RequestTaskFilter(status=[RequestStatus.CANCELLED]))
+        requests.RequestTaskFilter(status=[RequestStatus.CANCELLED], sort=True))
     assert len(empty_results) == 0
 
     # Test filtering with non-existent user
     empty_results = await requests.get_request_tasks_async(
-        requests.RequestTaskFilter(user_id='nonexistent-async-user'))
+        requests.RequestTaskFilter(user_id='nonexistent-async-user', sort=True))
     assert len(empty_results) == 0
 
 
@@ -707,10 +980,11 @@ async def test_get_request_tasks_async_consistency(isolated_database):
 
     # Create all requests
     for req in test_requests:
-        requests.create_if_not_exists(req)
+        await requests.create_if_not_exists_async(req)
 
     # Test that sync and async versions return identical results
-    filter_obj = requests.RequestTaskFilter(user_id='consistency-user')
+    filter_obj = requests.RequestTaskFilter(user_id='consistency-user',
+                                            sort=True)
 
     sync_results = requests.get_request_tasks(filter_obj)
     async_results = await requests.get_request_tasks_async(filter_obj)
@@ -748,24 +1022,25 @@ async def test_get_request_tasks_concurrent_access(isolated_database):
             cluster_name=f'cluster-{i % 2}'  # 2 different clusters
         )
         test_requests.append(req)
-        requests.create_if_not_exists(req)
+        await requests.create_if_not_exists_async(req)
 
     # Define concurrent query functions
     async def query_all():
         return await requests.get_request_tasks_async(
-            requests.RequestTaskFilter())
+            requests.RequestTaskFilter(sort=True))
 
     async def query_by_status():
         return await requests.get_request_tasks_async(
-            requests.RequestTaskFilter(status=[RequestStatus.PENDING]))
+            requests.RequestTaskFilter(status=[RequestStatus.PENDING],
+                                       sort=True))
 
     async def query_by_user(user_id):
         return await requests.get_request_tasks_async(
-            requests.RequestTaskFilter(user_id=user_id))
+            requests.RequestTaskFilter(user_id=user_id, sort=True))
 
     async def query_by_cluster(cluster_name):
         return await requests.get_request_tasks_async(
-            requests.RequestTaskFilter(cluster_names=[cluster_name]))
+            requests.RequestTaskFilter(cluster_names=[cluster_name], sort=True))
 
     # Run multiple queries concurrently
     results = await asyncio.gather(query_all(),
@@ -805,7 +1080,7 @@ def test_requests_filter():
     """Test RequestTaskFilter.build_query() generates correct SQL."""
 
     # Test empty filter - should return base query with no WHERE clause
-    filter_empty = requests.RequestTaskFilter()
+    filter_empty = requests.RequestTaskFilter(sort=True)
     sql, params = filter_empty.build_query()
     expected_columns = ', '.join(requests.REQUEST_COLUMNS)
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
@@ -815,7 +1090,7 @@ def test_requests_filter():
 
     # Test status filter
     filter_status = requests.RequestTaskFilter(
-        status=[RequestStatus.PENDING, RequestStatus.RUNNING])
+        status=[RequestStatus.PENDING, RequestStatus.RUNNING], sort=True)
     sql, params = filter_status.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
                     'WHERE status IN (\'PENDING\',\'RUNNING\') '
@@ -825,7 +1100,7 @@ def test_requests_filter():
 
     # Test cluster_names filter
     filter_clusters = requests.RequestTaskFilter(
-        cluster_names=['cluster1', 'cluster2'])
+        cluster_names=['cluster1', 'cluster2'], sort=True)
     sql, params = filter_clusters.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
                     'WHERE cluster_name IN (\'cluster1\',\'cluster2\') '
@@ -834,7 +1109,7 @@ def test_requests_filter():
     assert params == []
 
     # Test user_id filter (uses parameterized query)
-    filter_user = requests.RequestTaskFilter(user_id='test-user-123')
+    filter_user = requests.RequestTaskFilter(user_id='test-user-123', sort=True)
     sql, params = filter_user.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
                     'WHERE user_id = ? ORDER BY created_at DESC')
@@ -843,7 +1118,7 @@ def test_requests_filter():
 
     # Test exclude_request_names filter
     filter_exclude = requests.RequestTaskFilter(
-        exclude_request_names=['request1', 'request2'])
+        exclude_request_names=['request1', 'request2'], sort=True)
     sql, params = filter_exclude.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
                     'WHERE name NOT IN (\'request1\',\'request2\') '
@@ -853,7 +1128,7 @@ def test_requests_filter():
 
     # Test include_request_names filter
     filter_include = requests.RequestTaskFilter(
-        include_request_names=['request3', 'request4'])
+        include_request_names=['request3', 'request4'], sort=True)
     sql, params = filter_include.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
                     'WHERE name IN (\'request3\',\'request4\') '
@@ -863,7 +1138,8 @@ def test_requests_filter():
 
     # Test finished_before filter (uses parameterized query)
     timestamp = 1234567890.0
-    filter_finished = requests.RequestTaskFilter(finished_before=timestamp)
+    filter_finished = requests.RequestTaskFilter(finished_before=timestamp,
+                                                 sort=True)
     sql, params = filter_finished.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
                     'WHERE finished_at < ? ORDER BY created_at DESC')
@@ -876,7 +1152,8 @@ def test_requests_filter():
         cluster_names=['prod-cluster'],
         user_id='admin-user',
         exclude_request_names=['internal-task'],
-        finished_before=9876543210.0)
+        finished_before=9876543210.0,
+        sort=True)
     sql, params = filter_combined.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
                     'WHERE status IN (\'SUCCEEDED\',\'FAILED\') AND '
@@ -890,11 +1167,13 @@ def test_requests_filter():
     # Test mutually exclusive filters raise ValueError
     with pytest.raises(ValueError, match='Only one of exclude_request_names'):
         requests.RequestTaskFilter(exclude_request_names=['req1'],
-                                   include_request_names=['req2'])
+                                   include_request_names=['req2'],
+                                   sort=True)
 
     # Test special characters in names are properly escaped with repr()
     filter_special_chars = requests.RequestTaskFilter(
-        cluster_names=['cluster\'with\'quotes', 'cluster\"with\"double'])
+        cluster_names=['cluster\'with\'quotes', 'cluster\"with\"double'],
+        sort=True)
     sql, params = filter_special_chars.build_query()
     # repr() should properly escape the quotes
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
@@ -1194,6 +1473,7 @@ def test_update_request_row_fields_maintains_order():
 
 @pytest.mark.asyncio
 async def test_cancel_get_request_async():
+    import gc
 
     async def mock_get_request_async_no_lock(id: str):
         await asyncio.sleep(1)
@@ -1211,6 +1491,11 @@ async def test_cancel_get_request_async():
         await asyncio.sleep(0.2)
         for task in tasks:
             task.cancel()
+            # This is critical to proactively calls GC to ensure GC will not
+            # affect the lock release, refer to
+            # https://github.com/skypilot-org/skypilot/issues/7663
+            # for more details.
+            gc.collect()
         try:
             await asyncio.gather(*tasks, return_exceptions=True)
         except Exception:
@@ -1225,3 +1510,34 @@ async def test_cancel_get_request_async():
                 requests.request_lock_path(f'test-request-id-{i}'))
             # The locks must be released properly
             lock.acquire(blocking=False)
+
+
+@pytest.mark.asyncio
+async def test_get_latest_request_id_async(isolated_database):
+    """Test getting the latest request ID asynchronously."""
+    current_time = time.time()
+
+    request_id = await requests.get_latest_request_id_async()
+    assert request_id is None
+
+    request = requests.Request(request_id='test-request-id-1',
+                               name='test-request',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.PENDING,
+                               created_at=current_time,
+                               user_id='test-user')
+    await requests.create_if_not_exists_async(request)
+    request_id = await requests.get_latest_request_id_async()
+    assert request_id == 'test-request-id-1'
+
+    request = requests.Request(request_id='test-request-id-2',
+                               name='test-request',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.PENDING,
+                               created_at=current_time + 1,
+                               user_id='test-user')
+    await requests.create_if_not_exists_async(request)
+    request_id = await requests.get_latest_request_id_async()
+    assert request_id == 'test-request-id-2'

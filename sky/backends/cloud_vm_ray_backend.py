@@ -2472,6 +2472,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     def get_cluster_name(self):
         return self.cluster_name
 
+    def get_cluster_name_on_cloud(self):
+        return self.cluster_name_on_cloud
+
     def _use_internal_ips(self):
         """Returns whether to use internal IPs for SSH connections."""
         # Directly load the `use_internal_ips` flag from the cluster yaml
@@ -2954,6 +2957,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     @cluster_yaml.setter
     def cluster_yaml(self, value: Optional[str]):
         self._cluster_yaml = value
+
+    @property
+    def instance_ids(self):
+        if self.cached_cluster_info is not None:
+            return self.cached_cluster_info.instance_ids()
+        return None
 
     @property
     def ssh_user(self):
@@ -3624,9 +3633,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         gap_seconds = _RETRY_UNTIL_UP_INIT_GAP_SECONDS
                         retry_message = ux_utils.retry_message(
                             f'Retry after {gap_seconds:.0f}s ')
-                        hint_message = (f'\n{retry_message} '
-                                        f'{ux_utils.log_path_hint(log_path)}'
-                                        f'{colorama.Style.RESET_ALL}')
+                        hint_message = (
+                            f'\n{retry_message} '
+                            f'{ux_utils.provision_hint(cluster_name)}'
+                            f'{colorama.Style.RESET_ALL}')
 
                         # Add cluster event for retry.
                         global_user_state.add_cluster_event(
@@ -3655,7 +3665,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     logger.error(
                         ux_utils.error_message(
                             'Failed to provision resources. '
-                            f'{ux_utils.log_path_hint(log_path)}'))
+                            f'{ux_utils.provision_hint(cluster_name)}'))
                     error_message += (
                         '\nTo keep retrying until the cluster is up, use '
                         'the `--retry-until-up` flag.')
@@ -3714,6 +3724,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # manually or by the cloud provider.
                 # Optimize the case where the cluster's IPs can be retrieved
                 # from cluster_info.
+                handle.cached_cluster_info = cluster_info
                 handle.docker_user = cluster_info.docker_user
                 handle.update_cluster_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
                                           cluster_info=cluster_info)

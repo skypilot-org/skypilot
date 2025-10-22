@@ -48,6 +48,7 @@ from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.utils import auth_utils
 from sky.utils import cluster_utils
 from sky.utils import command_runner
 from sky.utils import common
@@ -755,7 +756,7 @@ def write_cluster_config(
             assert k not in credentials, f'{k} already in credentials'
             credentials[k] = v
 
-    private_key_path, _ = auth.get_or_generate_keys()
+    private_key_path, _ = auth_utils.get_or_generate_keys()
     auth_config = {'ssh_private_key': private_key_path}
     region_name = resources_vars.get('region')
 
@@ -3129,12 +3130,12 @@ def refresh_cluster_records() -> None:
     # request info in backend_utils.py.
     # Refactor this to use some other info to
     # determine if a launch is in progress.
-    requests = requests_lib.get_request_tasks(
-        req_filter=requests_lib.RequestTaskFilter(
-            status=[requests_lib.RequestStatus.RUNNING],
-            include_request_names=['sky.launch']))
     cluster_names_with_launch_request = {
-        request.cluster_name for request in requests
+        request.cluster_name for request in requests_lib.get_request_tasks(
+            req_filter=requests_lib.RequestTaskFilter(
+                status=[requests_lib.RequestStatus.RUNNING],
+                include_request_names=['sky.launch'],
+                fields=['cluster_name']))
     }
     cluster_names_without_launch_request = (cluster_names -
                                             cluster_names_with_launch_request)
@@ -3272,7 +3273,7 @@ def get_clusters(
                 expanded_private_key_path = os.path.expanduser(
                     ssh_private_key_path)
                 if not os.path.exists(expanded_private_key_path):
-                    success = auth.create_ssh_key_files_from_db(
+                    success = auth_utils.create_ssh_key_files_from_db(
                         ssh_private_key_path)
                     if not success:
                         # If the ssh key files are not found, we do not
@@ -3282,7 +3283,7 @@ def get_clusters(
                             f'at key path {ssh_private_key_path}')
                         continue
             else:
-                private_key_path, _ = auth.get_or_generate_keys()
+                private_key_path, _ = auth_utils.get_or_generate_keys()
                 expanded_private_key_path = os.path.expanduser(private_key_path)
             if expanded_private_key_path in cached_private_keys:
                 credential['ssh_private_key_content'] = cached_private_keys[
@@ -3357,13 +3358,13 @@ def get_clusters(
     # request info in backend_utils.py.
     # Refactor this to use some other info to
     # determine if a launch is in progress.
-    requests = requests_lib.get_request_tasks(
-        req_filter=requests_lib.RequestTaskFilter(
-            status=[requests_lib.RequestStatus.RUNNING],
-            cluster_names=cluster_names,
-            include_request_names=['sky.launch']))
     cluster_names_with_launch_request = {
-        request.cluster_name for request in requests
+        request.cluster_name for request in requests_lib.get_request_tasks(
+            req_filter=requests_lib.RequestTaskFilter(
+                status=[requests_lib.RequestStatus.RUNNING],
+                include_request_names=['sky.launch'],
+                cluster_names=cluster_names,
+                fields=['cluster_name']))
     }
     # Preserve the index of the cluster name as it appears on "records"
     cluster_names_without_launch_request = [
