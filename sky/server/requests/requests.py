@@ -578,6 +578,26 @@ def reset_db_and_logs():
                  f'{server_common.API_SERVER_CLIENT_DIR.expanduser()}')
     shutil.rmtree(server_common.API_SERVER_CLIENT_DIR.expanduser(),
                   ignore_errors=True)
+    with _init_db_lock:
+        _init_db_within_lock()
+    assert _DB is not None
+    with _DB.conn:
+        cursor = _DB.conn.cursor()
+        cursor.execute('SELECT sqlite_version()')
+        row = cursor.fetchone()
+        if row is None:
+            raise RuntimeError('Failed to get SQLite version')
+        version_str = row[0]
+        version_parts = version_str.split('.')
+        assert len(version_parts) >= 2, \
+            f'Invalid version string: {version_str}'
+        major, minor = int(version_parts[0]), int(version_parts[1])
+        # SQLite 3.35.0+ supports RETURNING statements.
+        # 3.35.0 was released in March 2021.
+        if not ((major > 3) or (major == 3 and minor >= 35)):
+            raise RuntimeError(
+                f'SQLite version {version_str} is not supported. '
+                'Please upgrade to SQLite 3.35.0 or later.')
 
 
 def request_lock_path(request_id: str) -> str:
@@ -733,12 +753,25 @@ async def get_request_status_async(
 @metrics_lib.time_me_async
 @asyncio_utils.shield
 async def create_if_not_exists_async(request: Request) -> bool:
-    """Async version of create_if_not_exists."""
-    async with filelock.AsyncFileLock(request_lock_path(request.request_id)):
-        if await _get_request_no_lock_async(request.request_id) is not None:
-            return False
-        await _add_or_update_request_no_lock_async(request)
-        return True
+    """Create a request if it does not exist, otherwise do nothing.
+
+    Returns:
+        True if a new request is created, False if the request already exists.
+    """
+    assert _DB is not None
+    request_columns = ', '.join(REQUEST_COLUMNS)
+    values_str = ', '.join(['?'] * len(REQUEST_COLUMNS))
+    sql_statement = (
+        f'INSERT INTO {REQUEST_TABLE} '
+        f'({request_columns}) VALUES '
+        f'({values_str}) ON CONFLICT(request_id) DO NOTHING RETURNING ROWID')
+    request_row = request.to_row()
+    # Execute the SQL statement without getting the request lock.
+    # The request lock is used to prevent racing with cancellation codepath,
+    # but a request cannot be cancelled before it is created.
+    row = await _DB.execute_get_returning_value_async(sql_statement,
+                                                      request_row)
+    return True if row else False
 
 
 @dataclasses.dataclass
