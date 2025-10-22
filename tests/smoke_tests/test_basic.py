@@ -1607,9 +1607,9 @@ def test_launch_and_cancel_race_condition(generic_cloud: str):
 @pytest.mark.no_remote_server  # This case need to check the local process status
 def test_cancel_logs_request(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
-    exec_proxy_command = 'ssh -tt'
+    proxy_command_pattern = '[s]sh -tt'
     if generic_cloud == 'kubernetes':
-        exec_proxy_command = 'kubectl exec'
+        proxy_command_pattern = '[k]ubectl exec'
     test = smoke_tests_utils.Test(
         'cancel_logs_request',
         [
@@ -1619,9 +1619,8 @@ def test_cancel_logs_request(generic_cloud: str):
                 cluster_status=[sky.ClusterStatus.UP],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud)),
             f'sky logs {name} & pid=$!; sleep 30; kill -s TERM $pid || true; wait $pid || true',
-            # After cancelling the logs request, all the exec proxy process should be killed,
-            # only the grep command itself should be left.
-            f'sleep 10; ps aux | grep "{exec_proxy_command}"; ! pgrep -f "{exec_proxy_command}"',
+            # After cancelling the logs request, all the exec proxy process should be killed
+            f'sleep 10; ps aux | grep "{proxy_command_pattern}"; ! pgrep -f "{proxy_command_pattern}"'
         ],
         f'sky down -y {name} || true',
     )
