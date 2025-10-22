@@ -22,7 +22,7 @@ GLOBAL_USER_STATE_VERSION = '010'
 GLOBAL_USER_STATE_LOCK_PATH = '~/.sky/locks/.state_db.lock'
 
 SPOT_JOBS_DB_NAME = 'spot_jobs_db'
-SPOT_JOBS_VERSION = '003'
+SPOT_JOBS_VERSION = '004'
 SPOT_JOBS_LOCK_PATH = '~/.sky/locks/.spot_jobs_db.lock'
 
 SERVE_DB_NAME = 'serve_db'

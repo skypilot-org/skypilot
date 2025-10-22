@@ -6,7 +6,7 @@ ManagedJobCodeGen.
 """
 import asyncio
 import collections
-import datetime
+from datetime import datetime
 import enum
 import os
 import pathlib
@@ -886,6 +886,14 @@ def cancel_jobs_by_pool(pool_name: str,
     return cancel_jobs_by_id(job_ids, current_workspace=current_workspace)
 
 
+def controller_log_file_for_job(job_id: int,
+                                create_if_not_exists: bool = False) -> str:
+    log_dir = os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
+    if create_if_not_exists:
+        os.makedirs(log_dir, exist_ok=True)
+    return os.path.join(log_dir, f'{job_id}.log')
+
+
 def stream_logs_by_id(job_id: int,
                       follow: bool = True,
                       tail: Optional[int] = None) -> Tuple[str, int]:
@@ -927,7 +935,7 @@ def stream_logs_by_id(job_id: int,
                 if log_file:
                     log_file_ever_existed = True
                     if logs_cleaned_at is not None:
-                        ts_str = datetime.datetime.fromtimestamp(
+                        ts_str = datetime.fromtimestamp(
                             logs_cleaned_at).strftime('%Y-%m-%d %H:%M:%S')
                         print(f'Task {task_name}({task_id}) log was cleaned '
                               f'at {ts_str}.')
@@ -1217,9 +1225,7 @@ def stream_logs(job_id: Optional[int],
             job_id = managed_job_ids.pop()
         assert job_id is not None, (job_id, job_name)
 
-        controller_log_path = os.path.join(
-            os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR),
-            f'{job_id}.log')
+        controller_log_path = controller_log_file_for_job(job_id)
         job_status = None
 
         # Wait for the log file to be written

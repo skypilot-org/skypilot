@@ -2088,8 +2088,8 @@ def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:
 
 
 @_init_db_async
-async def get_task_logs_to_clean_async(
-        retention_seconds: int) -> List[Dict[str, Any]]:
+async def get_task_logs_to_clean_async(retention_seconds: int,
+                                       batch_size) -> List[Dict[str, Any]]:
     """Get the logs of job tasks to clean.
 
     The logs of a task will only cleaned when:
@@ -2114,7 +2114,7 @@ async def get_task_logs_to_clean_async(
                     spot_table.c.end_at.isnot(None),
                     spot_table.c.end_at < (now - retention_seconds),
                     spot_table.c.logs_cleaned_at.is_(None),
-                )))
+                )).limit(batch_size))
         rows = result.fetchall()
         return [{
             'spot_job_id': row[0],
@@ -2124,7 +2124,7 @@ async def get_task_logs_to_clean_async(
 
 
 async def get_controller_logs_to_clean_async(
-        retention_seconds: int) -> List[Dict[str, Any]]:
+        retention_seconds: int, batch_size: int) -> List[Dict[str, Any]]:
     """Get the controller logs to clean.
 
     The controller logs will only cleaned when:
@@ -2155,9 +2155,9 @@ async def get_controller_logs_to_clean_async(
                         sqlalchemy.func.max(
                             spot_table.c.end_at).isnot(None),).having(
                                 sqlalchemy.func.max(spot_table.c.end_at) < (
-                                    now - retention_seconds)))
+                                    now - retention_seconds)).limit(batch_size))
         rows = result.fetchall()
-        return [{'spot_job_id': row[0]} for row in rows]
+        return [{'job_id': row[0]} for row in rows]
 
 
 @_init_db_async
@@ -2171,4 +2171,17 @@ async def set_task_logs_cleaned_async(spot_job_id: int, task_id: int,
                 spot_table.c.spot_job_id == spot_job_id,
                 spot_table.c.task_id == task_id).values(
                     logs_cleaned_at=logs_cleaned_at))
+        session.commit()
+
+
+@_init_db_async
+async def set_controller_logs_cleaned_async(job_id: int,
+                                            logs_cleaned_at: float):
+    """Set the controller logs cleaned at."""
+    assert _SQLALCHEMY_ENGINE_ASYNC is not None
+    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        session.execute(
+            sqlalchemy.update(job_info_table).where(
+                job_info_table.c.spot_job_id == job_id).values(
+                    controller_logs_cleaned_at=logs_cleaned_at))
         session.commit()

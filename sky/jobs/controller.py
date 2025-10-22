@@ -1,6 +1,7 @@
 """Controller: handles scheduling and the life cycle of a managed job.
 """
 import asyncio
+from datetime import datetime
 import os
 import pathlib
 import resource
@@ -1072,10 +1073,8 @@ class Controller:
             env_file_path: Optional path to environment file for the job.
         """
         # Create log file path for job output redirection
-        log_dir = os.path.expanduser(jobs_constants.JOBS_CONTROLLER_LOGS_DIR)
-        os.makedirs(log_dir, exist_ok=True)
-        log_file = os.path.join(log_dir, f'{job_id}.log')
-
+        log_file = managed_job_utils.controller_log_file_for_job(
+            job_id, create_if_not_exists=True)
         logger.info(f'Starting job {job_id} with dag_yaml={dag_yaml}, '
                     f'env_file_path={env_file_path}, and log_file={log_file}')
 
@@ -1207,25 +1206,43 @@ class Controller:
             await asyncio.sleep(3600)
 
     async def _clean_controller_logs_with_retention(self,
-                                                    retention_seconds: int):
+                                                    retention_seconds: int,
+                                                    batch_size: int = 1000):
         """Clean controller logs with retention."""
         logger.info('Cleaning controller logs with retention '
                     f'{retention_seconds} seconds')
-        _ = await managed_job_state.get_controller_logs_to_clean_async(
-            retention_seconds)
-        # TODO(aylei)
+        jobs = await managed_job_state.get_controller_logs_to_clean_async(
+            retention_seconds, batch_size=batch_size)
+        for job in jobs:
+            log_file = managed_job_utils.controller_log_file_for_job(
+                job['job_id'])
+            if os.path.exists(log_file):
+                cleaned_at = time.time()
+                ts_str = datetime.fromtimestamp(cleaned_at).strftime(
+                    '%Y-%m-%d %H:%M:%S')
+                msg = f'Controller logs have been cleaned at {ts_str}.'
+                # Sync down logs will reference to this file directly, so we
+                # keep the file and delete the content.
+                # TODO(aylei): refactor sync down logs if the inode usage
+                # becomes an issue.
+                with open(log_file, 'w', encoding='utf-8') as f:
+                    f.write(msg + '\n')
+            await managed_job_state.set_controller_logs_cleaned_async(
+                job_id=job['job_id'], logs_cleaned_at=cleaned_at)
 
-    async def _clean_task_logs_with_retention(self, retention_seconds: int):
+    async def _clean_task_logs_with_retention(self,
+                                              retention_seconds: int,
+                                              batch_size: int = 1000):
         """Clean task logs with retention."""
         logger.info(
             f'Cleaning task logs with retention {retention_seconds} seconds')
-        to_clean = await managed_job_state.get_task_logs_to_clean_async(
-            retention_seconds)
-        for task_log in to_clean:
-            await anyio.Path(task_log['local_log_file']).unlink(missing_ok=True)
+        tasks = await managed_job_state.get_task_logs_to_clean_async(
+            retention_seconds, batch_size=batch_size)
+        for task in tasks:
+            await anyio.Path(task['local_log_file']).unlink(missing_ok=True)
             await managed_job_state.set_task_logs_cleaned_async(
-                spot_job_id=task_log['spot_job_id'],
-                task_id=task_log['task_id'],
+                spot_job_id=task['spot_job_id'],
+                task_id=task['task_id'],
                 logs_cleaned_at=time.time())
 
 
