@@ -2114,6 +2114,10 @@ async def get_task_logs_to_clean_async(retention_seconds: int,
                     spot_table.c.end_at.isnot(None),
                     spot_table.c.end_at < (now - retention_seconds),
                     spot_table.c.logs_cleaned_at.is_(None),
+                    # The local log file is set AFTER the task is finished,
+                    # add this condition to ensure the entire log file has
+                    # been written.
+                    spot_table.c.local_log_file.isnot(None),
                 )).limit(batch_size))
         rows = result.fetchall()
         return [{
@@ -2123,6 +2127,7 @@ async def get_task_logs_to_clean_async(retention_seconds: int,
         } for row in rows]
 
 
+@_init_db_async
 async def get_controller_logs_to_clean_async(
         retention_seconds: int, batch_size: int) -> List[Dict[str, Any]]:
     """Get the controller logs to clean.
@@ -2147,6 +2152,7 @@ async def get_controller_logs_to_clean_async(
                 )).where(
                     sqlalchemy.and_(
                         spot_table.c.status.in_(terminal_values),
+                        spot_table.c.local_log_file.isnot(None),
                         job_info_table.c.controller_logs_cleaned_at.is_(None),
                     )).group_by(
                         job_info_table.c.spot_job_id,
@@ -2166,12 +2172,12 @@ async def set_task_logs_cleaned_async(spot_job_id: int, task_id: int,
     """Set the task logs cleaned at."""
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
-        session.execute(
+        await session.execute(
             sqlalchemy.update(spot_table).where(
                 spot_table.c.spot_job_id == spot_job_id,
                 spot_table.c.task_id == task_id).values(
                     logs_cleaned_at=logs_cleaned_at))
-        session.commit()
+        await session.commit()
 
 
 @_init_db_async
@@ -2180,8 +2186,8 @@ async def set_controller_logs_cleaned_async(job_id: int,
     """Set the controller logs cleaned at."""
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
-        session.execute(
+        await session.execute(
             sqlalchemy.update(job_info_table).where(
                 job_info_table.c.spot_job_id == job_id).values(
                     controller_logs_cleaned_at=logs_cleaned_at))
-        session.commit()
+        await session.commit()

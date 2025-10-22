@@ -937,8 +937,8 @@ def stream_logs_by_id(job_id: int,
                     if logs_cleaned_at is not None:
                         ts_str = datetime.fromtimestamp(
                             logs_cleaned_at).strftime('%Y-%m-%d %H:%M:%S')
-                        print(f'Task {task_name}({task_id}) log was cleaned '
-                              f'at {ts_str}.')
+                        print(f'Task {task_name}({task_id}) log has been '
+                              f'cleaned at {ts_str}.')
                         continue
                     task_str = (f'Task {task_name}({task_id})'
                                 if task_name else f'Task {task_id}')

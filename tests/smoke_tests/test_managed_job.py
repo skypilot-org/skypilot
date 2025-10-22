@@ -21,6 +21,7 @@
 #
 # Change cloud for generic tests to aws
 # > pytest tests/smoke_tests/test_managed_job.py --generic-cloud aws
+import io
 import pathlib
 import re
 import tempfile
@@ -36,6 +37,7 @@ from sky import jobs
 from sky import skypilot_config
 from sky.clouds import gcp
 from sky.data import storage as storage_lib
+from sky.jobs.client import sdk as jobs_sdk
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import controller_utils
@@ -1591,3 +1593,48 @@ def test_managed_jobs_failed_precheck_storage_spec_error(
             timeout=15 * 60,
         )
         smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server  # Need an isolated API server for this test case
+@pytest.mark.managed_jobs
+def test_managed_jobs_logs_gc(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+
+    def wait_logs_gced(controller: bool = False):
+        now = time.time()
+        while time.time() - now < 300:
+            output = io.StringIO()
+            # Just tail the latest log since we assum isolated server
+            jobs_sdk.tail_logs(follow=False,
+                               controller=controller,
+                               output_stream=output)
+            if 'log has been cleaned' in output.getvalue():
+                return
+        raise RuntimeError('Tiemout wait logs get gced')
+
+    test = smoke_tests_utils.Test(
+        name='test-managed-jobs-logs-gc',
+        config_dict={
+            'jobs': {
+                'controller': {
+                    # GC immediately for testing
+                    'controller_logs_gc_retention_hours': 0,
+                    'task_logs_gc_retention_hours': 0,
+                }
+            }
+        },
+        commands=[
+            f'sky jobs launch -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y examples/managed_job.yaml -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}',
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=600),
+            lambda: wait_logs_gced(controller=False),
+            lambda: wait_logs_gced(controller=True),
+        ],
+        teardown=f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
