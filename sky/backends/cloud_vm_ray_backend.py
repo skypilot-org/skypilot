@@ -1554,6 +1554,7 @@ class RetryingVmProvisioner(object):
                     keep_launch_fields_in_existing_config=cluster_exists,
                     volume_mounts=volume_mounts,
                 )
+                # logger.critical(f'config_dict: {config_dict}')
             except exceptions.ResourcesUnavailableError as e:
                 # Failed due to catalog issue, e.g. image not found, or
                 # GPUs are requested in a Kubernetes cluster but the cluster
@@ -3990,6 +3991,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
                detach_setup: bool) -> None:
+
+        detach_setup = False 
         start = time.time()
 
         if task.setup is None:
@@ -4064,7 +4067,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     skip_num_lines=3)
                 return returncode
 
+            logger.critical(f"Setup cmd: {f'{create_script_code} && {setup_cmd}'}")
             returncode = _run_setup(f'{create_script_code} && {setup_cmd}',)
+            logger.critical(f"Setup returncode: {returncode}")
 
             def _load_setup_log_and_match(match_str: str) -> bool:
                 try:
@@ -4467,13 +4472,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             cmd = task_copy.run
             if isinstance(cmd, list):
                 cmd = ' '.join(cmd)
+            # TODO(jwj): Switch to SlurmCommandRunner
+            # The key is how much info is contained in handle, does it contain all info about the provisioned cluster?
             runner = handle.get_command_runners()[0]
 
+            # In this context, the cluster name means SkyPilot cluster name
+            # e.g., sky-3790-abaowei
+            # logger.debug(f"====={handle.get_cluster_name()}=====")
+
             provisioned_job_id = handle.cached_cluster_info.head_instance_id
-            rc, stdout, stderr = runner.run(f'srun --jobid={provisioned_job_id} {cmd}', require_outputs=True)
-
-            return job_id
-
+            rc, stdout, stderr = runner.run(f'srun --jobid={provisioned_job_id} bash -c \'{cmd}\'', require_outputs=True)
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
         if num_actual_nodes > 1:

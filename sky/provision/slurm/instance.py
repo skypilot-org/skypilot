@@ -184,14 +184,15 @@ def _create_jobs(region: str, cluster_name_on_cloud: str,
                                                    disable_control_master=True)
 
         provision_script = """#!/bin/bash
-    #SBATCH --job-name=interactive-bash
-    #SBATCH --output=interactive-bash.out
-    #SBATCH --error=interactive-bash.err
-    #SBATCH --ntasks=1
-    #SBATCH --cpus-per-task=2
-    #SBATCH --mem-per-cpu=1G
+#SBATCH --job-name=interactive-bash
+#SBATCH --output=interactive-bash.out
+#SBATCH --error=interactive-bash.err
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=2
+#SBATCH --mem-per-cpu=1G
+#SBATCH --gres=gpu:1
 
-    sleep infinity
+sleep infinity
     """
         # with tempfile.NamedTemporaryFile(mode='w+', delete=True) as f:
         with open('./provision.sh', 'w') as f:
@@ -265,6 +266,7 @@ def get_cluster_info(
                                            ['running'], cluster_name)
 
     jobs: Dict[str, List[common.InstanceInfo]] = {}
+    # TODO(jwj): Reconstruct the job_id as cluster-partition-job_id.
     head_job_id = None
     for i, job_id in enumerate(running_jobs):
         jobs[job_id] = [
