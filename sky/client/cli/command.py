@@ -1344,13 +1344,15 @@ def exec(
 
 
 def _handle_jobs_queue_request(
-        request_id: server_common.RequestId[Union[
-            List[responses.ManagedJobRecord],
-            Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int]]],
-        show_all: bool,
-        show_user: bool,
-        max_num_jobs_to_show: Optional[int],
-        is_called_by_user: bool = False) -> Tuple[Optional[int], str]:
+    request_id: server_common.RequestId[Union[
+        List[responses.ManagedJobRecord],
+        Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int]]],
+    show_all: bool,
+    show_user: bool,
+    max_num_jobs_to_show: Optional[int],
+    is_called_by_user: bool = False,
+    only_in_progress: bool = False,
+) -> Tuple[Optional[int], str]:
     """Get the in-progress managed jobs.
 
     Args:
@@ -1361,6 +1363,7 @@ def _handle_jobs_queue_request(
             and `sky jobs queue`.
         is_called_by_user: If this function is called by user directly, or an
             internal call.
+        only_in_progress: If True, only return the number of in-progress jobs.
 
     Returns:
         A tuple of (num_in_progress_jobs, msg). If num_in_progress_jobs is None,
@@ -1377,13 +1380,17 @@ def _handle_jobs_queue_request(
             usage_lib.messages.usage.set_internal()
         result = sdk.stream_and_get(request_id)
         if isinstance(result, tuple):
-            managed_jobs_, _, status_counts, _ = result
-            if status_counts:
+            managed_jobs_, total, status_counts, _ = result
+            if only_in_progress:
                 num_in_progress_jobs = 0
-                for status_value, count in status_counts.items():
-                    status_enum = managed_jobs.ManagedJobStatus(status_value)
-                    if not status_enum.is_terminal():
-                        num_in_progress_jobs += count
+                if status_counts:
+                    for status_value, count in status_counts.items():
+                        status_enum = managed_jobs.ManagedJobStatus(
+                            status_value)
+                        if not status_enum.is_terminal():
+                            num_in_progress_jobs += count
+            else:
+                num_in_progress_jobs = total
         else:
             managed_jobs_ = result
             num_in_progress_jobs = len(
@@ -1941,7 +1948,8 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     show_all=False,
                     show_user=all_users,
                     max_num_jobs_to_show=_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS,
-                    is_called_by_user=False)
+                    is_called_by_user=False,
+                    only_in_progress=True)
             except KeyboardInterrupt:
                 sdk.api_cancel(managed_jobs_queue_request_id, silent=True)
                 managed_jobs_query_interrupted = True
@@ -4778,7 +4786,8 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
             f'{colorama.Fore.CYAN}'
             f'Only showing the latest {max_num_jobs_to_show} '
             f'managed jobs'
-            f'(use --all to show all managed jobs) {colorama.Style.RESET_ALL} ')
+            f'(use --limit to show more managed jobs or '
+            f'--all to show all managed jobs) {colorama.Style.RESET_ALL} ')
 
 
 @jobs.command('cancel', cls=_DocumentedCodeCommand)

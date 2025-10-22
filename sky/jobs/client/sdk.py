@@ -188,11 +188,7 @@ def queue(
             limit=limit,
             fields=fields,
         )
-        response = server_common.make_authenticated_request(
-            'POST',
-            '/jobs/queue/v2',
-            json=json.loads(body.model_dump_json()),
-            timeout=(5, None))
+        path = '/jobs/queue/v2'
     else:
         body = payloads.JobsQueueBody(
             refresh=refresh,
@@ -200,11 +196,13 @@ def queue(
             all_users=all_users,
             job_ids=job_ids,
         )
-        response = server_common.make_authenticated_request(
-            'POST',
-            '/jobs/queue',
-            json=json.loads(body.model_dump_json()),
-            timeout=(5, None))
+        path = '/jobs/queue'
+
+    response = server_common.make_authenticated_request(
+        'POST',
+        path,
+        json=json.loads(body.model_dump_json()),
+        timeout=(5, None))
     return server_common.get_request_id(response=response)
 
 
