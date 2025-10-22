@@ -2,6 +2,7 @@
 from abc import abstractmethod
 from dataclasses import dataclass
 import enum
+import functools
 import hashlib
 import os
 import re
@@ -44,6 +45,20 @@ if typing.TYPE_CHECKING:
     import mypy_boto3_s3
 
 logger = sky_logging.init_logger(__name__)
+
+
+def requires_construction(func):
+    """Decorator that ensures storage is constructed before method call."""
+
+    @functools.wraps(func)
+    def wrapper(self, *args, **kwargs):
+        if self._constructed and not self._constructed:  # pylint: disable=protected-access
+            self._construct_impl()  # pylint: disable=protected-access
+            self._constructed = True  # pylint: disable=protected-access
+        return func(self, *args, **kwargs)
+
+    return wrapper
+
 
 StorageHandle = Any
 StorageStatus = status_lib.StorageStatus
@@ -701,7 +716,7 @@ class Storage(object):
         # external buckets, this can be deprecated.
         self.force_delete = False
 
-    def construct(self):
+    def _construct_impl(self):
         """Constructs the storage object.
 
         The Storage object is lazily initialized, so that when a user
@@ -796,6 +811,14 @@ class Storage(object):
                         self.source)
                     if store_type:
                         self.add_store(store_type)
+
+    def construct(self):
+        """Public method for backward compatibility.
+        This method is kept for backward compatibility with existing code
+        that explicitly calls construct(). With lazy construction, this is
+        no longer necessary as construction happens automatically when needed.
+        """
+        self._construct_impl()
 
     def get_bucket_sub_path_prefix(self, blob_path: str) -> str:
         """Adds the bucket sub path prefix to the blob path."""
@@ -1212,6 +1235,7 @@ class Storage(object):
                 global_user_state.add_or_update_storage(self.name, self.handle,
                                                         StorageStatus.INIT)
 
+    @requires_construction
     def delete(self, store_type: Optional[StoreType] = None) -> None:
         """Deletes data for all sky-managed storage objects.
 
@@ -1265,6 +1289,7 @@ class Storage(object):
             if self.name is not None:
                 global_user_state.remove_storage(self.name)
 
+    @requires_construction
     def sync_all_stores(self):
         """Syncs the source and destinations of all stores in the Storage"""
         for _, store in self.stores.items():
