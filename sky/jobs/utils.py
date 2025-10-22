@@ -1770,7 +1770,7 @@ def format_job_table(
             return (task['user'], task['job_id'])
         return task['job_id']
 
-    def get_job_id_to_worker_map(
+    def _get_job_id_to_worker_map(
             pool_status: Optional[List[Dict[str, Any]]]) -> Dict[int, int]:
         """Create a mapping from job_id to worker replica_id.
 
@@ -1792,7 +1792,7 @@ def format_job_table(
         return job_to_worker
 
     # Create mapping from job_id to worker replica_id
-    job_to_worker = get_job_id_to_worker_map(pool_status)
+    job_to_worker = _get_job_id_to_worker_map(pool_status)
 
     for task in tasks:
         # The tasks within the same job_id are already sorted
