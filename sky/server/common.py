@@ -17,7 +17,6 @@ import time
 import typing
 from typing import (Any, Callable, cast, Dict, Generic, Literal, Optional,
                     Tuple, TypeVar, Union)
-from urllib import parse
 import uuid
 
 import cachetools
@@ -342,18 +341,7 @@ def get_server_url(host: Optional[str] = None) -> str:
 @annotations.lru_cache(scope='global')
 def get_dashboard_url(server_url: str,
                       starting_page: Optional[str] = None) -> str:
-    # The server_url may include username or password with the
-    # format of https://username:password@example.com:8080/path
-    # We need to remove the username and password and only
-    # return `https://example.com:8080/path`
-    parsed = parse.urlparse(server_url)
-    # Reconstruct the URL without credentials but keeping the scheme
-    dashboard_url = f'{parsed.scheme}://{parsed.hostname}'
-    if parsed.port:
-        dashboard_url = f'{dashboard_url}:{parsed.port}'
-    if parsed.path:
-        dashboard_url = f'{dashboard_url}{parsed.path}'
-    dashboard_url = dashboard_url.rstrip('/')
+    dashboard_url = server_url.rstrip('/')
     dashboard_url = f'{dashboard_url}/dashboard'
     if starting_page:
         dashboard_url = f'{dashboard_url}/{starting_page}'
