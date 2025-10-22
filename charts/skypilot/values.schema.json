@@ -384,7 +384,16 @@
                         "config": {
                             "type": "object",
                             "properties": {
+                                "gzip-level": {
+                                    "type": "integer"
+                                },
+                                "gzip-min-length": {
+                                    "type": "integer"
+                                },
                                 "http-snippet": {
+                                    "type": "string"
+                                },
+                                "use-gzip": {
                                     "type": "string"
                                 }
                             }
