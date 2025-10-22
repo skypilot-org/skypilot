@@ -1377,8 +1377,13 @@ def _handle_jobs_queue_request(
             usage_lib.messages.usage.set_internal()
         result = sdk.stream_and_get(request_id)
         if isinstance(result, tuple):
-            managed_jobs_, total, status_counts, _ = result
-            num_in_progress_jobs = total
+            managed_jobs_, _, status_counts, _ = result
+            if status_counts:
+                num_in_progress_jobs = 0
+                for status_value, count in status_counts.items():
+                    status_enum = managed_jobs.ManagedJobStatus(status_value)
+                    if not status_enum.is_terminal():
+                        num_in_progress_jobs += count
         else:
             managed_jobs_ = result
             num_in_progress_jobs = len(
