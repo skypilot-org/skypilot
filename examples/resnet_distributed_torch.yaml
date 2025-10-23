@@ -7,16 +7,18 @@ resources:
 num_nodes: 2
 
 setup: |
-    pip3 install --upgrade pip
+    uv venv --python 3.10 --seed
+    source .venv/bin/activate
     git clone https://github.com/michaelzhiluo/pytorch-distributed-resnet
     cd pytorch-distributed-resnet
     # SkyPilot's default image on AWS/GCP has CUDA 11.6 (Azure 11.5).
-    pip3 install -r requirements.txt numpy==1.26.4 torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
+    uv pip install -r requirements.txt numpy==1.26.4 torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
     mkdir -p data  && mkdir -p saved_models && cd data && \
     wget -c --quiet https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz
     tar -xvzf cifar-10-python.tar.gz
 
 run: |
+    source .venv/bin/activate
     cd pytorch-distributed-resnet
 
     num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`

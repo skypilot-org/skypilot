@@ -52,6 +52,8 @@ export async function getClusters({ clusterNames = null } = {}) {
     const clusters = await apiClient.fetch('/status', {
       cluster_names: clusterNames,
       all_users: true,
+      include_credentials: false,
+      summary_response: clusterNames == null,
     });
 
     const clusterData = clusters.map((cluster) => {
@@ -93,6 +95,7 @@ export async function getClusters({ clusterNames = null } = {}) {
         autostop: cluster.autostop,
         last_event: cluster.last_event,
         to_down: cluster.to_down,
+        cluster_name_on_cloud: cluster.cluster_name_on_cloud,
         jobs: [],
         command: cluster.last_creation_command || cluster.last_use,
         task_yaml: cluster.last_creation_yaml || '{}',
@@ -111,11 +114,19 @@ export async function getClusters({ clusterNames = null } = {}) {
   }
 }
 
-export async function getClusterHistory() {
+export async function getClusterHistory(clusterHash = null, days = 30) {
   try {
-    const history = await apiClient.fetch('/cost_report', {
-      days: 30,
-    });
+    const requestBody = {
+      days: days,
+      dashboard_summary_response: true,
+    };
+
+    // If a specific cluster hash is provided, include it in the request
+    if (clusterHash) {
+      requestBody.cluster_hashes = [clusterHash];
+    }
+
+    const history = await apiClient.fetch('/cost_report', requestBody);
 
     console.log('Raw cluster history data:', history); // Debug log
 
@@ -155,6 +166,7 @@ export async function getClusterHistory() {
         autostop: -1,
         last_event: cluster.last_event,
         to_down: false,
+        cluster_name_on_cloud: null,
         usage_intervals: cluster.usage_intervals,
         command: cluster.last_creation_command || '',
         task_yaml: cluster.last_creation_yaml || '{}',
@@ -218,7 +230,7 @@ export async function downloadJobLogs({
     // Step 1: schedule server-side download; result is a mapping job_id -> folder path on API server
     const mapping = await apiClient.fetch('/download_logs', {
       cluster_name: clusterName,
-      job_ids: jobIds,
+      job_ids: jobIds ? jobIds.map(String) : null, // Convert to strings as expected by server
       override_skypilot_config: {
         active_workspace: workspace || 'default',
       },

@@ -1,12 +1,13 @@
 """Utils shared between all of sky"""
 
+import ctypes
 import difflib
 import enum
 import functools
+import gc
 import getpass
 import hashlib
 import inspect
-import io
 import os
 import platform
 import random
@@ -34,11 +35,9 @@ from sky.utils import validator
 if typing.TYPE_CHECKING:
     import jinja2
     import psutil
-    import yaml
 else:
     jinja2 = adaptors_common.LazyImport('jinja2')
     psutil = adaptors_common.LazyImport('psutil')
-    yaml = adaptors_common.LazyImport('yaml')
 
 USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
@@ -266,13 +265,16 @@ def get_global_job_id(job_timestamp: str,
 
 class Backoff:
     """Exponential backoff with jittering."""
-    MULTIPLIER = 1.6
     JITTER = 0.4
 
-    def __init__(self, initial_backoff: float = 5, max_backoff_factor: int = 5):
+    def __init__(self,
+                 initial_backoff: float = 5,
+                 max_backoff_factor: int = 5,
+                 multiplier: float = 1.6):
         self._initial = True
         self._backoff = 0.0
         self._initial_backoff = initial_backoff
+        self._multiplier = multiplier
         self._max_backoff = max_backoff_factor * self._initial_backoff
 
     # https://github.com/grpc/grpc/blob/2d4f3c56001cd1e1f85734b2f7c5ce5f2797c38a/doc/connection-backoff.md
@@ -284,7 +286,7 @@ class Backoff:
             self._initial = False
             self._backoff = min(self._initial_backoff, self._max_backoff)
         else:
-            self._backoff = min(self._backoff * self.MULTIPLIER,
+            self._backoff = min(self._backoff * self._multiplier,
                                 self._max_backoff)
         self._backoff += random.uniform(-self.JITTER * self._backoff,
                                         self.JITTER * self._backoff)
@@ -571,74 +573,6 @@ def user_and_hostname_hash() -> str:
     """
     hostname_hash = hashlib.md5(socket.gethostname().encode()).hexdigest()[-4:]
     return f'{getpass.getuser()}-{hostname_hash}'
-
-
-def read_yaml(path: Optional[str]) -> Dict[str, Any]:
-    if path is None:
-        raise ValueError('Attempted to read a None YAML.')
-    with open(path, 'r', encoding='utf-8') as f:
-        config = yaml.safe_load(f)
-    return config
-
-
-def read_yaml_all_str(yaml_str: str) -> List[Dict[str, Any]]:
-    stream = io.StringIO(yaml_str)
-    config = yaml.safe_load_all(stream)
-    configs = list(config)
-    if not configs:
-        # Empty YAML file.
-        return [{}]
-    return configs
-
-
-def read_yaml_all(path: str) -> List[Dict[str, Any]]:
-    with open(path, 'r', encoding='utf-8') as f:
-        return read_yaml_all_str(f.read())
-
-
-def dump_yaml(path: str,
-              config: Union[List[Dict[str, Any]], Dict[str, Any]],
-              blank: bool = False) -> None:
-    """Dumps a YAML file.
-
-    Args:
-        path: the path to the YAML file.
-        config: the configuration to dump.
-    """
-    with open(path, 'w', encoding='utf-8') as f:
-        contents = dump_yaml_str(config)
-        if blank and isinstance(config, dict) and len(config) == 0:
-            # when dumping to yaml, an empty dict will go in as {}.
-            contents = ''
-        f.write(contents)
-
-
-def dump_yaml_str(config: Union[List[Dict[str, Any]], Dict[str, Any]]) -> str:
-    """Dumps a YAML string.
-
-    Args:
-        config: the configuration to dump.
-
-    Returns:
-        The YAML string.
-    """
-
-    # https://github.com/yaml/pyyaml/issues/127
-    class LineBreakDumper(yaml.SafeDumper):
-
-        def write_line_break(self, data=None):
-            super().write_line_break(data)
-            if len(self.indents) == 1:
-                super().write_line_break()
-
-    if isinstance(config, list):
-        dump_func = yaml.dump_all  # type: ignore
-    else:
-        dump_func = yaml.dump  # type: ignore
-    return dump_func(config,
-                     Dumper=LineBreakDumper,
-                     sort_keys=False,
-                     default_flow_style=False)
 
 
 def make_decorator(cls, name_or_fn: Union[str, Callable],
@@ -1065,7 +999,17 @@ def get_mem_size_gb() -> float:
         except ValueError as e:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'Failed to parse the memory size from {mem_size}') from e
+                    f'Failed to parse the memory size from {mem_size} (GB)'
+                ) from e
+    mem_size = os.getenv('SKYPILOT_POD_MEMORY_BYTES_LIMIT')
+    if mem_size is not None:
+        try:
+            return float(mem_size) / (1024**3)
+        except ValueError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Failed to parse the memory size from {mem_size} (bytes)'
+                ) from e
     return _mem_size_gb()
 
 
@@ -1161,3 +1105,21 @@ def removeprefix(string: str, prefix: str) -> str:
     if string.startswith(prefix):
         return string[len(prefix):]
     return string
+
+
+def release_memory():
+    """Release the process memory"""
+    # Do the best effort to release the python heap and let malloc_trim
+    # be more efficient.
+    try:
+        gc.collect()
+        if sys.platform.startswith('linux'):
+            # Will fail on musl (alpine), but at least it works on our
+            # offical docker images.
+            libc = ctypes.CDLL('libc.so.6')
+            return libc.malloc_trim(0)
+        return 0
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to release memory: '
+                     f'{format_exception(e)}')
+        return 0

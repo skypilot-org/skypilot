@@ -1,9 +1,12 @@
 #!/bin/bash
-# Deletes the local kind cluster
-# Usage: ./delete_cluster.sh
-# Raises error code 100 if the local cluster does not exist
+# Deletes the local kind cluster of [name]
+# Usage: ./delete_cluster.sh [name]
+# Raises error code 100 if the specified local cluster does not exist
 
 set -e
+
+NAME="${1:-skypilot}"
+
 # Check if docker is running
 if ! docker info > /dev/null 2>&1; then
     >&2 echo "Docker is not running. Please start Docker and try again."
@@ -17,13 +20,13 @@ if ! kind version > /dev/null 2>&1; then
 fi
 
 # Check if the local cluster exists
-if ! kind get clusters | grep -q skypilot; then
-    echo "Local cluster does not exist. Exiting."
+if ! kind get clusters | grep -q $NAME; then
+    echo "Local cluster $NAME does not exist. Exiting."
     exit 100
 fi
 
-kind delete cluster --name skypilot
-echo "Local cluster deleted!"
+kind delete cluster --name $NAME
+echo "Local cluster $NAME deleted!"
 
 # Switch to the first available context
 AVAILABLE_CONTEXT=$(kubectl config get-contexts -o name | head -n 1)

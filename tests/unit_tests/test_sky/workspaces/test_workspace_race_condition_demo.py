@@ -6,7 +6,7 @@ import time
 import unittest
 from unittest import mock
 
-from sky.utils import common_utils
+from sky.utils import yaml_utils
 from sky.workspaces import core
 
 
@@ -30,7 +30,7 @@ class TestWorkspaceRaceConditionDemo(unittest.TestCase):
                 }
             }
         }
-        common_utils.dump_yaml(self.temp_config_file, self.initial_config)
+        yaml_utils.dump_yaml(self.temp_config_file, self.initial_config)
 
         # Patch the config path to use our temporary file
         self.config_path_patcher = mock.patch(
@@ -41,7 +41,7 @@ class TestWorkspaceRaceConditionDemo(unittest.TestCase):
         # Mock skypilot_config.to_dict to read from our temp file
         def mock_to_dict():
             if os.path.exists(self.temp_config_file):
-                return common_utils.read_yaml(self.temp_config_file)
+                return yaml_utils.read_yaml(self.temp_config_file)
             return {}
 
         self.to_dict_patcher = mock.patch('sky.skypilot_config.to_dict',
@@ -117,7 +117,7 @@ class TestWorkspaceRaceConditionDemo(unittest.TestCase):
                 results.append(result)
 
         # Verify both updates succeeded and no data was lost
-        final_config = common_utils.read_yaml(self.temp_config_file)
+        final_config = yaml_utils.read_yaml(self.temp_config_file)
         final_workspaces = final_config['workspaces']
 
         # Should have default + workspace_alpha + workspace_beta = 3 workspaces
@@ -230,7 +230,7 @@ class TestWorkspaceRaceConditionDemo(unittest.TestCase):
                 future.result()  # This will raise any exceptions
 
         # Verify final state is consistent
-        final_config = common_utils.read_yaml(self.temp_config_file)
+        final_config = yaml_utils.read_yaml(self.temp_config_file)
         final_workspaces = final_config['workspaces']
 
         # Should have: default, workspace_1 (updated), workspace_2, new_workspace

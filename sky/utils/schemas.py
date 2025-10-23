@@ -432,7 +432,7 @@ def get_volume_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
-        'required': ['name', 'type', 'infra'],
+        'required': ['name', 'type'],
         'additionalProperties': False,
         'properties': {
             'name': {
@@ -524,6 +524,9 @@ def get_storage_schema():
                 'case_insensitive_enum': [
                     mode.value for mode in storage.StorageMode
                 ]
+            },
+            'mount_options': {
+                'type': 'string'
             },
             'config': {
                 'type': 'object',
@@ -1071,6 +1074,7 @@ _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
 }
 
 _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
+    # TODO(kevin): Remove 'networking' in v0.13.0.
     'networking': {
         'type': 'string',
         'case_insensitive_enum': [
@@ -1234,6 +1238,9 @@ def get_config_schema():
                         'type': 'null',
                     }],
                 },
+                'use_ssm': {
+                    'type': 'boolean',
+                },
                 'post_provision_runcmd': {
                     'type': 'array',
                     'items': {
@@ -1328,10 +1335,15 @@ def get_config_schema():
             'additionalProperties': False,
             'properties': {
                 'allowed_contexts': {
-                    'type': 'array',
-                    'items': {
+                    'oneOf': [{
+                        'type': 'array',
+                        'items': {
+                            'type': 'string',
+                        },
+                    }, {
                         'type': 'string',
-                    },
+                        'pattern': '^all$'
+                    }]
                 },
                 'context_configs': {
                     'type': 'object',
@@ -1407,7 +1419,13 @@ def get_config_schema():
             'type': 'object',
             'required': [],
             'properties': {
-                **_NETWORK_CONFIG_SCHEMA, 'tenant_id': {
+                **_NETWORK_CONFIG_SCHEMA, 'use_static_ip_address': {
+                    'type': 'boolean',
+                },
+                'tenant_id': {
+                    'type': 'string',
+                },
+                'domain': {
                     'type': 'string',
                 },
                 'region_configs': {
@@ -1555,6 +1573,9 @@ def get_config_schema():
             'cluster_event_retention_hours': {
                 'type': 'number',
             },
+            'cluster_debug_event_retention_hours': {
+                'type': 'number',
+            },
         }
     }
 
@@ -1644,10 +1665,15 @@ def get_config_schema():
                     'required': [],
                     'properties': {
                         'allowed_contexts': {
-                            'type': 'array',
-                            'items': {
+                            'oneOf': [{
+                                'type': 'array',
+                                'items': {
+                                    'type': 'string',
+                                },
+                            }, {
                                 'type': 'string',
-                            },
+                                'pattern': '^all$'
+                            }]
                         },
                         'disabled': {
                             'type': 'boolean'
@@ -1663,6 +1689,9 @@ def get_config_schema():
                             'type': 'string',
                         },
                         'tenant_id': {
+                            'type': 'string',
+                        },
+                        'domain': {
                             'type': 'string',
                         },
                         'disabled': {

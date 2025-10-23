@@ -31,6 +31,7 @@ from smoke_tests import smoke_tests_utils
 from smoke_tests import test_mount_and_storage
 
 import sky
+from sky import clouds
 from sky import skypilot_config
 from sky.data import storage as storage_lib
 from sky.skylet import constants
@@ -239,6 +240,9 @@ def test_gcp_zone():
 # is running remotely. We should fix this.
 @pytest.mark.no_vast  # Requires AWS
 @pytest.mark.no_hyperbolic  # Requires AWS
+@pytest.mark.no_shadeform  # Requires AWS
+@pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
+@pytest.mark.no_dependency  # Requires full dependency installed
 @pytest.mark.parametrize(
     'image_id',
     [
@@ -255,11 +259,10 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     name = smoke_tests_utils.get_cluster_name()
     timestamp = str(time.time()).replace('.', '')
     storage_name = f'sky-test-{timestamp}'
+    empty_storage_name = f'sky-test-empty-{timestamp}'
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
     template = jinja2.Template(template_str)
-    # ubuntu 18.04 does not support fuse3, and blobfuse2 depends on fuse3.
-    azure_mount_unsupported_ubuntu_version = '18.04'
     # Commands to verify bucket upload. We need to check all three
     # storage types because the optimizer may pick any of them.
     s3_command = f'aws s3 ls {storage_name}/hello.txt'
@@ -273,21 +276,33 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     # created in the centralus region when getting the storage account. We
     # should set the cluster to be launched in the same region.
     region_str = f'/centralus' if generic_cloud == 'azure' else ''
-    if azure_mount_unsupported_ubuntu_version in image_id:
-        # The store for mount_private_mount is not specified in the template.
-        # If we're running on Azure, the private mount will be created on
-        # azure blob. Also, if we're running on Kubernetes, the private mount
-        # might be created on azure blob to avoid the issue of the fuse adapter
-        # not being able to access the mount point. That will not be supported on
-        # the ubuntu 18.04 image and thus fail. For other clouds, the private mount
-        # on other storage types (GCS/S3) should succeed.
-        include_private_mount = False if (
-            generic_cloud == 'azure' or generic_cloud == 'kubernetes') else True
-        content = template.render(storage_name=storage_name,
-                                  include_azure_mount=False,
-                                  include_private_mount=include_private_mount)
+
+    # Determine store type based on generic_cloud
+    if generic_cloud == 'aws':
+        store_type = 's3'
+    elif generic_cloud == 'gcp':
+        store_type = 'gcs'
     else:
-        content = template.render(storage_name=storage_name,)
+        store_type = 'azure'
+
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        enabled_cloud_storages = smoke_tests_utils.get_enabled_cloud_storages()
+        include_s3_mount = clouds.cloud_in_iterable(clouds.AWS(),
+                                                    enabled_cloud_storages)
+        include_gcs_mount = clouds.cloud_in_iterable(clouds.GCP(),
+                                                     enabled_cloud_storages)
+        include_azure_mount = clouds.cloud_in_iterable(clouds.Azure(),
+                                                       enabled_cloud_storages)
+        content = template.render(storage_name=storage_name,
+                                  include_s3_mount=include_s3_mount,
+                                  include_gcs_mount=include_gcs_mount,
+                                  include_azure_mount=include_azure_mount,
+                                  empty_storage_name=empty_storage_name,
+                                  store_type=store_type)
+    else:
+        content = template.render(storage_name=storage_name,
+                                  empty_storage_name=empty_storage_name,
+                                  store_type=store_type)
     cloud_dependencies_setup_cmd = ' && '.join(
         controller_utils._get_cloud_dependencies_installation_commands(
             controller_utils.Controllers.JOBS_CONTROLLER))
@@ -310,7 +325,7 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
         test = smoke_tests_utils.Test(
             'docker_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete -y {storage_name}',
+            f'sky down -y {name}; sky storage delete -y {storage_name} {empty_storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         smoke_tests_utils.run_one_test(test)

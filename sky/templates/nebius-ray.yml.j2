@@ -10,6 +10,7 @@ provider:
   module: sky.provision.nebius
   region: "{{region}}"
   use_internal_ips: {{use_internal_ips}}
+  use_static_ip_address: {{ use_static_ip_address }}
 
 {%- if docker_image is not none %}
 docker:
@@ -56,15 +57,11 @@ available_node_types:
           filesystem_mount_path: {{ fs.filesystem_mount_path }}
         {%- endfor %}
       UserData: |
-        runcmd:
-          - sudo sed -i 's/^#\?AllowTcpForwarding.*/AllowTcpForwarding yes/' /etc/ssh/sshd_config
-          - systemctl restart sshd
-
         {# Two available OS images:
-               1. ubuntu22.04-driverless - requires Docker installation
-               2. ubuntu22.04-cuda12 - comes with Docker pre-installed
-            To optimize deployment speed, Docker is only installed when using ubuntu22.04-driverless #}
-        {%- if docker_image is not none and image_id == 'ubuntu22.04-driverless' %}
+               1. ubuntu24.04-driverless - requires Docker installation
+               2. ubuntu24.04-cuda12 - comes with Docker pre-installed
+            To optimize deployment speed, Docker is only installed when using ubuntu24.04-driverless #}
+        {%- if docker_image is not none and image_id.endswith('-driverless') %}
         apt:
           sources:
             docker.list:

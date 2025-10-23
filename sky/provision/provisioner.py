@@ -18,6 +18,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import logs
 from sky import provision
+from sky import resources as resources_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import aws
@@ -69,6 +70,7 @@ def _bulk_provision(
 
     provision_record = provision.run_instances(provider_name,
                                                region_name,
+                                               str(cluster_name),
                                                cluster_name.name_on_cloud,
                                                config=config)
 
@@ -427,17 +429,26 @@ def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
 
 
 def _post_provision_setup(
-        cloud_name: str, cluster_name: resources_utils.ClusterName,
-        handle_cluster_yaml: str,
+        launched_resources: resources_lib.Resources,
+        cluster_name: resources_utils.ClusterName, handle_cluster_yaml: str,
         provision_record: provision_common.ProvisionRecord,
         custom_resource: Optional[str]) -> provision_common.ClusterInfo:
     config_from_yaml = global_user_state.get_cluster_yaml_dict(
         handle_cluster_yaml)
     provider_config = config_from_yaml.get('provider')
+    cloud_name = repr(launched_resources.cloud)
     cluster_info = provision.get_cluster_info(cloud_name,
                                               provision_record.region,
                                               cluster_name.name_on_cloud,
                                               provider_config=provider_config)
+
+    # Update cluster info in handle so cluster instance ids are set. This
+    # allows us to expose provision logs to debug nodes that failed during post
+    # provision setup.
+    handle = global_user_state.get_handle_from_cluster_name(
+        cluster_name.display_name)
+    handle.cached_cluster_info = cluster_info
+    global_user_state.update_cluster_handle(cluster_name.display_name, handle)
 
     if cluster_info.num_instances > 1:
         # Only worker nodes have logs in the per-instance log directory. Head
@@ -526,6 +537,7 @@ def _post_provision_setup(
             status.update(
                 ux_utils.spinner_message(
                     'Checking controller version compatibility'))
+
             try:
                 server_jobs_utils.check_version_mismatch_and_non_terminal_jobs()
             except exceptions.ClusterNotUpError:
@@ -692,8 +704,9 @@ def _post_provision_setup(
                                                     cluster_info,
                                                     ssh_credentials)
 
-        instance_setup.start_skylet_on_head_node(cluster_name.name_on_cloud,
-                                                 cluster_info, ssh_credentials)
+        instance_setup.start_skylet_on_head_node(cluster_name, cluster_info,
+                                                 ssh_credentials,
+                                                 launched_resources)
 
     logger.info(
         ux_utils.finishing_message(f'Cluster launched: {cluster_name}.',
@@ -704,8 +717,8 @@ def _post_provision_setup(
 
 @timeline.event
 def post_provision_runtime_setup(
-        cloud_name: str, cluster_name: resources_utils.ClusterName,
-        handle_cluster_yaml: str,
+        launched_resources: resources_lib.Resources,
+        cluster_name: resources_utils.ClusterName, handle_cluster_yaml: str,
         provision_record: provision_common.ProvisionRecord,
         custom_resource: Optional[str],
         log_dir: str) -> provision_common.ClusterInfo:
@@ -726,7 +739,7 @@ def post_provision_runtime_setup(
         try:
             logger.debug(_TITLE.format('System Setup After Provision'))
             return _post_provision_setup(
-                cloud_name,
+                launched_resources,
                 cluster_name,
                 handle_cluster_yaml=handle_cluster_yaml,
                 provision_record=provision_record,

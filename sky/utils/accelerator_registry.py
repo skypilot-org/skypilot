@@ -107,10 +107,12 @@ def canonicalize_accelerator_name(accelerator: str,
     if not names and cloud_str in ['Kubernetes', None]:
         with rich_utils.safe_status(
                 ux_utils.spinner_message('Listing accelerators on Kubernetes')):
+            # Only search for Kubernetes to reduce the lookup cost.
+            # For other clouds, the catalog has been searched in previous steps.
             searched = catalog.list_accelerators(
                 name_filter=accelerator,
                 case_sensitive=False,
-                clouds=cloud_str,
+                clouds='Kubernetes',
             )
         names = list(searched.keys())
         if accelerator in names:

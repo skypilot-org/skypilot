@@ -1,6 +1,17 @@
-"""Unit tests for CloudVmRayBackend task configuration redaction functionality."""
+"""Unit tests for CloudVmRayBackend task configuration redaction and locking."""
+
+import multiprocessing
+import socket
+import time
+from unittest.mock import MagicMock
+from unittest.mock import patch
+
+import pytest
 
 from sky import task
+from sky.backends import cloud_vm_ray_backend
+from sky.backends.cloud_vm_ray_backend import CloudVmRayResourceHandle
+from sky.backends.cloud_vm_ray_backend import SSHTunnelInfo
 
 
 class TestCloudVmRayBackendTaskRedaction:
@@ -283,3 +294,241 @@ class TestCloudVmRayBackendTaskRedaction:
         assert redacted_config['secrets']['API_KEY'] == '<redacted>'
         assert original_config['secrets']['DB_PASSWORD'] == 'secret-password'
         assert redacted_config['secrets']['DB_PASSWORD'] == '<redacted>'
+
+
+class TestCloudVmRayBackendGetGrpcChannel:
+    """Tests for CloudVmRayBackend get_grpc_channel."""
+    MOCK_HANDLE_KWARGS = {
+        'cluster_name': 'test-cluster',
+        'cluster_name_on_cloud': 'test-cluster-abc',
+        'cluster_yaml': None,
+        'launched_nodes': 1,
+        'launched_resources': MagicMock(),
+    }
+
+    INITIAL_TUNNEL_PORT = 10000
+    INITIAL_TUNNEL_PID = 12345
+
+    def _simulate_process_get_grpc_channel(self, queue, tunnel_creation_count,
+                                           tunnel_port, tunnel_pid,
+                                           socket_connect_side_effect):
+        """Simulate a process calling get_grpc_channel.
+
+        This test mocks:
+        - _get_skylet_ssh_tunnel: To avoid making an actual DB query
+        - _open_and_update_skylet_tunnel: To avoid actually opening an SSH tunnel
+        - grpc.insecure_channel: To just return the address instead of a Channel object
+        - socket.socket.connect: To avoid actually connecting to the tunnel
+
+        This test does not mock:
+        - lock.acquire
+        """
+        try:
+            # Different processes have different handle instances.
+            handle = CloudVmRayResourceHandle(**self.MOCK_HANDLE_KWARGS)
+
+            def mock_get_tunnel_side_effect():
+                # Return None if the tunnel is not created yet.
+                if tunnel_port.value == -1 or tunnel_pid.value == -1:
+                    return None
+                return SSHTunnelInfo(port=tunnel_port.value,
+                                     pid=tunnel_pid.value)
+
+            def mock_open_tunnel():
+                # Simulate time taken to create tunnel.
+                time.sleep(2)
+                with tunnel_creation_count.get_lock():
+                    tunnel_creation_count.value += 1
+                    created = tunnel_creation_count.value
+                with tunnel_port.get_lock(), tunnel_pid.get_lock():
+                    # First creation -> 10000/12345; second -> 10001/12346; and so on.
+                    tunnel_port.value = self.INITIAL_TUNNEL_PORT + (created - 1)
+                    tunnel_pid.value = self.INITIAL_TUNNEL_PID + (created - 1)
+                    return SSHTunnelInfo(port=tunnel_port.value,
+                                         pid=tunnel_pid.value)
+
+            with patch.object(handle, '_get_skylet_ssh_tunnel', side_effect=mock_get_tunnel_side_effect), \
+                patch.object(handle, '_open_and_update_skylet_tunnel', side_effect=mock_open_tunnel), \
+                patch('grpc.insecure_channel', side_effect=lambda addr, options: addr), \
+                patch('socket.socket') as mock_socket:
+
+                mock_socket.return_value.__enter__.return_value.connect.side_effect = socket_connect_side_effect
+
+                res = handle.get_grpc_channel()
+                assert res is not None
+                queue.put(res)
+
+        except Exception as e:
+            import traceback
+            error_msg = f"Error: {e}\nTraceback: {traceback.format_exc()}"
+            queue.put(error_msg)
+
+    def _socket_connect_side_effect(self, addr):
+        _, port = addr
+        # Force an error on the original port to test the retry logic.
+        if port == self.INITIAL_TUNNEL_PORT:
+            raise socket.error("Connection error")
+        return None
+
+    def test_get_grpc_channel_multiprocess_race_condition(self):
+        """Test get_grpc_channel with multiple processes racing for tunnel creation."""
+        tunnel_creation_count = multiprocessing.Value('i', 0)
+        tunnel_port = multiprocessing.Value('i', -1)
+        tunnel_pid = multiprocessing.Value('i', -1)
+
+        num_processes = 5
+        processes = []
+        queue = multiprocessing.Queue()
+        for _ in range(num_processes):
+            p = multiprocessing.Process(
+                target=self._simulate_process_get_grpc_channel,
+                args=(queue, tunnel_creation_count, tunnel_port, tunnel_pid,
+                      None))
+            processes.append(p)
+            p.start()
+
+        for p in processes:
+            p.join(timeout=15)
+            if p.is_alive():
+                p.terminate()
+                p.join()
+
+        results = []
+        while not queue.empty():
+            results.append(queue.get())
+        assert len(
+            results
+        ) == num_processes, f"Expected {num_processes} results, got {len(results)}"
+        # All processes should get the same channel (localhost:10000).
+        for item in results:
+            assert item == f'localhost:{self.INITIAL_TUNNEL_PORT}', f"Failed: {item}"
+
+        assert tunnel_creation_count.value == 1, f"Expected tunnel to be created exactly once, but was created {tunnel_creation_count.value} times"
+
+        # Try again, this tests the case where the tunnel is already created.
+        # This time, tunnel.port will be 10000, but the check should fail,
+        # as our _socket_connect_side_effect will raise an error. So we
+        # should invoke _open_and_update_skylet_tunnel again,
+        # this time returning another port.
+        for _ in range(num_processes):
+            p = multiprocessing.Process(
+                target=self._simulate_process_get_grpc_channel,
+                args=(queue, tunnel_creation_count, tunnel_port, tunnel_pid,
+                      self._socket_connect_side_effect))
+            processes.append(p)
+            p.start()
+
+        for p in processes:
+            p.join(timeout=15)
+            if p.is_alive():
+                p.terminate()
+                p.join()
+
+        results = []
+        while not queue.empty():
+            results.append(queue.get())
+        assert len(
+            results
+        ) == num_processes, f"Expected {num_processes} results, got {len(results)}"
+
+        # All processes should get the same channel (localhost:10001).
+        for i in range(num_processes):
+            assert results[
+                i] == f'localhost:{self.INITIAL_TUNNEL_PORT + 1}', f"Process {i} failed: {results[i]}"
+
+        assert tunnel_creation_count.value == 2, f"Expected tunnel to be created exactly once, but was created {tunnel_creation_count.value} times"
+
+
+class TestIsMessageTooLong:
+    """Tests for _is_message_too_long function."""
+
+    @pytest.mark.parametrize(
+        'returncode,message,expected',
+        [
+            # Valid matches with correct returncode
+            (255, 'too long', True),
+            (255, 'Argument list too long', True),
+            (1, 'request-uri too large', True),
+            (1, '414 Request-URI Too Large', True),
+            (1, 'request header fields too large', True),
+            (1, '431 Request Header Fields Too Large', True),
+            # CloudFlare 400 Bad Request patterns
+            (1, '400 bad request', True),
+            (1, '400 Bad request', True),
+            (1, '400 Bad Request', True),
+            (1,
+             'error: unable to upgrade connection: <html><body><h1>400 Bad request</h1>',
+             True),
+            # Case insensitivity
+            (255, 'TOO LONG', True),
+            (1, 'REQUEST HEADER FIELDS TOO LARGE', True),
+            (1, '400 BAD REQUEST', True),
+            # Wrong returncode
+            (1, 'too long', False),
+            (255, 'request-uri too large', False),
+            (127, 'too long', False),
+            (255, '400 bad request', False),
+            # Wrong message
+            (255, 'command not found', False),
+            (1, 'some other error', False),
+            (1, 'unable to upgrade connection', False),
+            # Empty output
+            (255, '', False),
+        ])
+    def test_detection_with_output(self, returncode, message, expected):
+        """Test message detection with various returncode/message combinations."""
+        assert cloud_vm_ray_backend._is_message_too_long(
+            returncode, output=message) == expected
+
+    def test_detection_with_file_path(self, tmp_path):
+        """Test detection when reading from file."""
+        log_file = tmp_path / "test.log"
+        log_file.write_text("Error: command too long")
+        assert cloud_vm_ray_backend._is_message_too_long(
+            255, file_path=str(log_file))
+
+        log_file.write_text("431 Request Header Fields Too Large")
+        assert cloud_vm_ray_backend._is_message_too_long(
+            1, file_path=str(log_file))
+
+    def test_file_read_error_returns_true(self, tmp_path):
+        """Test that file read errors return True for safety."""
+        # Non-existent file
+        assert cloud_vm_ray_backend._is_message_too_long(
+            255, file_path="/nonexistent/file.log")
+
+        # Unreadable file
+        log_file = tmp_path / "unreadable.log"
+        log_file.write_text("content")
+        log_file.chmod(0o000)
+        try:
+            assert cloud_vm_ray_backend._is_message_too_long(
+                255, file_path=str(log_file))
+        finally:
+            log_file.chmod(0o644)
+
+    def test_requires_either_output_or_file_path(self):
+        """Test that function requires either output or file_path."""
+        with pytest.raises(AssertionError):
+            cloud_vm_ray_backend._is_message_too_long(255)
+        with pytest.raises(AssertionError):
+            cloud_vm_ray_backend._is_message_too_long(255,
+                                                      output="test",
+                                                      file_path="/tmp/test")
+
+    def test_partial_match_in_long_output(self):
+        """Test that partial matches in longer messages are detected."""
+        long_output = """Error executing command on remote server:
+        bash: /usr/bin/ssh: Argument list too long
+        Failed to run setup script"""
+        assert cloud_vm_ray_backend._is_message_too_long(255,
+                                                         output=long_output)
+
+        http_error = "<html><h1>414 Request-URI Too Large</h1></html>"
+        assert cloud_vm_ray_backend._is_message_too_long(1, output=http_error)
+
+    def test_multiple_patterns_match_by_returncode(self):
+        """Test that returncode determines which pattern to match."""
+        mixed = "too long and request-uri too large"
+        assert cloud_vm_ray_backend._is_message_too_long(255, output=mixed)
+        assert cloud_vm_ray_backend._is_message_too_long(1, output=mixed)

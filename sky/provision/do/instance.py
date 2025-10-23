@@ -26,10 +26,10 @@ def _get_head_instance(
     return None
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
-
+    del cluster_name  # unused
     pending_status = ['new']
     newly_started_instances = utils.filter_instances(cluster_name_on_cloud,
                                                      pending_status + ['off'])

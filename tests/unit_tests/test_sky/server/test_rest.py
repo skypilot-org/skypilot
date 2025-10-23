@@ -36,6 +36,66 @@ class TestHandleServerUnavailable:
             rest.handle_server_unavailable(mock_response)
 
 
+class TestHandleServerUnavailableAsync:
+    """Test cases for handle_server_unavailable_async function."""
+
+    @pytest.mark.asyncio
+    async def test_handle_server_unavailable_async_with_503_status(self):
+        """Test that 503 status code raises ServerTemporarilyUnavailableError."""
+        mock_response = mock.Mock()
+        mock_response.status = 503
+        mock_response.json = mock.AsyncMock(
+            return_value={'detail': 'Service unavailable'})
+        mock_response.text = mock.AsyncMock(return_value='Service unavailable')
+
+        with pytest.raises(
+                exceptions.ServerTemporarilyUnavailableError) as exc_info:
+            await rest.handle_server_unavailable_async(mock_response)
+
+        assert 'Service unavailable' in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_handle_server_unavailable_async_with_503_and_text_fallback(
+            self):
+        """Test that 503 status with text fallback raises ServerTemporarilyUnavailableError."""
+        mock_response = mock.Mock()
+        mock_response.status = 503
+        # Simulate json() failing and falling back to text()
+        mock_response.json = mock.AsyncMock(
+            side_effect=Exception("JSON parse error"))
+        mock_response.text = mock.AsyncMock(return_value='Server error text')
+
+        with pytest.raises(
+                exceptions.ServerTemporarilyUnavailableError) as exc_info:
+            await rest.handle_server_unavailable_async(mock_response)
+
+        assert 'Server error text' in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_handle_server_unavailable_async_with_503_and_both_fail(self):
+        """Test that 503 status with both json and text failing raises ServerTemporarilyUnavailableError with empty message."""
+        mock_response = mock.Mock()
+        mock_response.status = 503
+        # Simulate both json() and text() failing
+        mock_response.json = mock.AsyncMock(
+            side_effect=Exception("JSON parse error"))
+        mock_response.text = mock.AsyncMock(
+            side_effect=Exception("Text parse error"))
+
+        with pytest.raises(exceptions.ServerTemporarilyUnavailableError):
+            await rest.handle_server_unavailable_async(mock_response)
+
+    @pytest.mark.asyncio
+    async def test_handle_server_unavailable_async_with_non_503_status(self):
+        """Test that non-503 status codes do not raise exception."""
+        for status_code in [200, 400, 404, 500, 502, 504]:
+            mock_response = mock.Mock()
+            mock_response.status = status_code
+
+            # Should not raise any exception
+            await rest.handle_server_unavailable_async(mock_response)
+
+
 class TestRetryTransientErrorsDecorator:
     """Test cases for retry_transient_errors decorator."""
 

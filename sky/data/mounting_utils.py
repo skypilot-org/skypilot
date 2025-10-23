@@ -23,7 +23,7 @@ FUSERMOUNT3_SOFT_LINK_CMD = ('[ ! -f /bin/fusermount3 ] && '
                              'sudo ln -s /bin/fusermount /bin/fusermount3 || '
                              'true')
 # https://github.com/Azure/azure-storage-fuse/releases
-BLOBFUSE2_VERSION = '2.2.0'
+BLOBFUSE2_VERSION = '2.5.0'
 _BLOBFUSE_CACHE_ROOT_DIR = '~/.sky/blobfuse2_cache'
 _BLOBFUSE_CACHE_DIR = ('~/.sky/blobfuse2_cache/'
                        '{storage_account_name}_{container_name}')
@@ -38,6 +38,29 @@ _GOOFYS_WRAPPER = ('$(if [ -S /dev/log ] ; then '
                    'fi)')
 
 
+def get_rclone_install_cmd() -> str:
+    """ RClone installation for both apt-get and rpm.
+    This would be common command.
+    """
+    # pylint: disable=line-too-long
+    install_cmd = (
+        'ARCH=$(uname -m) && '
+        'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+        '  ARCH_SUFFIX="arm64"; '
+        'else '
+        '  ARCH_SUFFIX="amd64"; '
+        'fi && '
+        f'(which dpkg > /dev/null 2>&1 && (which rclone > /dev/null || (cd ~ > /dev/null'
+        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
+        f' && sudo dpkg -i rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
+        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb)))'
+        f' || (which rclone > /dev/null || (cd ~ > /dev/null'
+        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm'
+        f' && sudo yum --nogpgcheck install rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm -y'
+        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm))')
+    return install_cmd
+
+
 def get_s3_mount_install_cmd() -> str:
     """Returns command for basic S3 mounting (goofys by default, rclone for
     ARM64)."""
@@ -47,18 +70,7 @@ def get_s3_mount_install_cmd() -> str:
         'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
         # Use rclone for ARM64 since goofys doesn't support it
         # Extract core rclone installation logic without redundant ARCH check
-        '  ARCH_SUFFIX="arm" && '
-        f'  (which dpkg > /dev/null 2>&1 && (which rclone > /dev/null || '
-        f'(cd ~ > /dev/null && curl -O https://downloads.rclone.org/'
-        f'{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb '
-        f'&& sudo dpkg -i rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb '
-        f'&& rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb))) || '
-        f'(which rclone > /dev/null || (cd ~ > /dev/null && curl -O '
-        f'https://downloads.rclone.org/{RCLONE_VERSION}/'
-        f'rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm && '
-        f'sudo yum --nogpgcheck install '
-        f'rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm -y && '
-        f'rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm)); '
+        f'  {get_rclone_install_cmd()}; '
         'else '
         '  sudo wget -nc https://github.com/aylei/goofys/'
         'releases/download/0.24.0-aylei-upstream/goofys '
@@ -84,7 +96,9 @@ def get_s3_mount_cmd(bucket_name: str,
     rclone_mount = (
         f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
         f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
-        '--daemon --allow-other')
+        # Have to add --s3-env-auth=true to allow rclone to access private
+        # buckets.
+        '--daemon --allow-other --s3-env-auth=true')
     goofys_mount = (f'{_GOOFYS_WRAPPER} -o allow_other '
                     f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                     f'--type-cache-ttl {_TYPE_CACHE_TTL} '
@@ -171,27 +185,63 @@ def get_gcs_mount_cmd(bucket_name: str,
 def get_az_mount_install_cmd() -> str:
     """Returns a command to install AZ Container mount utility blobfuse2."""
     install_cmd = (
-        'sudo apt-get update; '
-        'sudo apt-get install -y '
-        '-o Dpkg::Options::="--force-confdef" '
-        'fuse3 libfuse3-dev || { '
-        '  echo "fuse3 not available, falling back to fuse"; '
-        '  sudo apt-get install -y '
-        '  -o Dpkg::Options::="--force-confdef" '
-        '  fuse libfuse-dev; '
-        '} && '
+        # Check architecture first - blobfuse2 only supports x86_64
         'ARCH=$(uname -m) && '
         'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
         '  echo "blobfuse2 is not supported on $ARCH" && '
         f'  exit {exceptions.ARCH_NOT_SUPPORTED_EXIT_CODE}; '
-        'else '
-        '  ARCH_SUFFIX="x86_64"; '
         'fi && '
-        'wget -nc https://github.com/Azure/azure-storage-fuse'
-        f'/releases/download/blobfuse2-{BLOBFUSE2_VERSION}'
-        f'/blobfuse2-{BLOBFUSE2_VERSION}-Debian-11.0.${{ARCH_SUFFIX}}.deb '
+        # Try to install fuse3 from default repos
+        'sudo apt-get update && '
+        'FUSE3_INSTALLED=0 && '
+        'if sudo apt-get install -y '
+        '-o Dpkg::Options::="--force-confdef" '
+        'fuse3 libfuse3-dev; then '
+        '  FUSE3_INSTALLED=1; '
+        '  echo "fuse3 installed from default repos"; '
+        'else '
+        # If fuse3 not available, try focal for Ubuntu <= 20.04
+        '  DISTRO=$(grep "^ID=" /etc/os-release | cut -d= -f2 | '
+        'tr -d \'"\' | tr "[:upper:]" "[:lower:]") && '
+        '  VERSION=$(grep "^VERSION_ID=" /etc/os-release | cut -d= -f2 | '
+        'tr -d \'"\') && '
+        '  if [ "$DISTRO" = "ubuntu" ] && '
+        '[ "$(echo "$VERSION 20.04" | '
+        'awk \'{ print ($1 <= $2) }\')" = "1" ]; then '
+        '    echo "Trying to install fuse3 from focal for '
+        'Ubuntu $VERSION"; '
+        '    echo "deb http://archive.ubuntu.com/ubuntu '
+        'focal main universe" | '
+        'sudo tee /etc/apt/sources.list.d/focal-fuse3.list && '
+        '    sudo apt-get update && '
+        '    if sudo apt-get install -y '
+        '-o Dpkg::Options::="--force-confdef" '
+        '-o Dpkg::Options::="--force-confold" '
+        'fuse3 libfuse3-3 libfuse3-dev; then '
+        '      FUSE3_INSTALLED=1; '
+        '      echo "fuse3 installed from focal"; '
+        '      sudo rm /etc/apt/sources.list.d/focal-fuse3.list; '
+        '      sudo apt-get update; '
+        '    else '
+        '      sudo rm -f /etc/apt/sources.list.d/focal-fuse3.list; '
+        '      sudo apt-get update; '
+        '    fi; '
+        '  fi; '
+        'fi && '
+        # Install blobfuse2 only if fuse3 is available
+        'if [ "$FUSE3_INSTALLED" = "1" ]; then '
+        '  echo "Installing blobfuse2 with libfuse3 support"; '
+        '  wget -nc https://github.com/Azure/azure-storage-fuse'
+        f'/releases/download/blobfuse2-{BLOBFUSE2_VERSION}/'
+        f'blobfuse2-{BLOBFUSE2_VERSION}-Debian-11.0.x86_64.deb '
         '-O /tmp/blobfuse2.deb && '
-        'sudo dpkg --install /tmp/blobfuse2.deb && '
+        '  sudo dpkg --install /tmp/blobfuse2.deb; '
+        'else '
+        '  echo "Error: libfuse3 is required for Azure storage '
+        'mounting with fusermount-wrapper."; '
+        '  echo "libfuse3 could not be installed on this system."; '
+        f'  exit {exceptions.ARCH_NOT_SUPPORTED_EXIT_CODE}; '
+        'fi && '
         f'mkdir -p {_BLOBFUSE_CACHE_ROOT_DIR};')
 
     return install_cmd
@@ -202,7 +252,8 @@ def get_az_mount_cmd(container_name: str,
                      storage_account_name: str,
                      mount_path: str,
                      storage_account_key: Optional[str] = None,
-                     _bucket_sub_path: Optional[str] = None) -> str:
+                     _bucket_sub_path: Optional[str] = None,
+                     custom_mount_options: Optional[str] = None) -> str:
     """Returns a command to mount an AZ Container using blobfuse2.
 
     Args:
@@ -247,10 +298,21 @@ def get_az_mount_cmd(container_name: str,
         f'-o {opt}' for opt in mount_options) if mount_options else ''
     # TODO(zpoint): clear old cache that has been created in the previous boot.
     # Do not set umask to avoid permission problems for non-root users.
-    blobfuse2_cmd = ('blobfuse2 --no-symlinks '
-                     f'--tmp-path {cache_path}_$({remote_boot_time_cmd}) '
-                     f'{bucket_sub_path_arg}'
-                     f'--container-name {container_name}')
+    custom_mount_options = (custom_mount_options or '').replace(
+        '--tmp-path default',
+        f'--tmp-path {cache_path}_$({remote_boot_time_cmd})')
+    if custom_mount_options:
+        blobfuse2_cmd = (
+            'blobfuse2 --no-symlinks '
+            f'{bucket_sub_path_arg}'
+            f'--container-name {container_name} {custom_mount_options}'
+        ).strip()
+    else:
+        blobfuse2_cmd = ('blobfuse2 --no-symlinks '
+                         f'--tmp-path {cache_path}_$({remote_boot_time_cmd}) '
+                         f'{bucket_sub_path_arg}'
+                         f'--container-name {container_name}').strip()
+
     # 1. Set -o nonempty to bypass empty directory check of blobfuse2 when using
     # fusermount-wrapper, since the mount is delegated to fusermount and
     # blobfuse2 only get the mounted fd.
@@ -263,7 +325,10 @@ def get_az_mount_cmd(container_name: str,
                f'-- {blobfuse2_cmd} -o nonempty --foreground {{}}')
     original = f'{blobfuse2_cmd} {blobfuse2_options} {mount_path}'
     # If fusermount-wrapper is available, use it to wrap the blobfuse2 command
-    # to avoid requiring root privilege.
+    # to avoid requiring privileged containers.
+    # fusermount-wrapper requires libfuse3;
+    # we install libfuse3 even on older distros like Ubuntu 18.04 by using
+    # Ubuntu 20.04 (focal) repositories.
     # TODO(aylei): feeling hacky, refactor this.
     get_mount_cmd = ('command -v fusermount-wrapper >/dev/null 2>&1 && '
                      f'echo "{wrapped}" || echo "{original}"')
@@ -349,9 +414,9 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
     # the filename length limit.
     # The hash is a non-negative integer in string form.
     hashed_mount_path = hashlib.md5(mount_path.encode()).hexdigest()
-    log_file_path = os.path.join(constants.RCLONE_LOG_DIR,
+    log_file_path = os.path.join(constants.RCLONE_MOUNT_CACHED_LOG_DIR,
                                  f'{hashed_mount_path}.log')
-    create_log_cmd = (f'mkdir -p {constants.RCLONE_LOG_DIR} && '
+    create_log_cmd = (f'mkdir -p {constants.RCLONE_MOUNT_CACHED_LOG_DIR} && '
                       f'touch {log_file_path}')
     # when mounting multiple directories with vfs cache mode, it's handled by
     # rclone to create separate cache directories at ~/.cache/rclone/vfs. It is
@@ -390,29 +455,6 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         # produce any output, so we aren't dropping any logs.
         '> /dev/null 2>&1')
     return mount_cmd
-
-
-def get_rclone_install_cmd() -> str:
-    """ RClone installation for both apt-get and rpm.
-    This would be common command.
-    """
-    # pylint: disable=line-too-long
-    install_cmd = (
-        'ARCH=$(uname -m) && '
-        'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
-        '  ARCH_SUFFIX="arm"; '
-        'else '
-        '  ARCH_SUFFIX="amd64"; '
-        'fi && '
-        f'(which dpkg > /dev/null 2>&1 && (which rclone > /dev/null || (cd ~ > /dev/null'
-        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
-        f' && sudo dpkg -i rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
-        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb)))'
-        f' || (which rclone > /dev/null || (cd ~ > /dev/null'
-        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm'
-        f' && sudo yum --nogpgcheck install rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm -y'
-        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm))')
-    return install_cmd
 
 
 def get_oci_mount_cmd(mount_path: str, store_name: str, region: str,
@@ -494,13 +536,20 @@ def get_mounting_script(
 
         {command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}
 
-        MOUNT_PATH={mount_path}
+        MOUNT_PATH=$(eval echo {mount_path})
         MOUNT_BINARY={mount_binary}
 
         # Check if path is already mounted
-        if grep -q $MOUNT_PATH /proc/mounts ; then
+        if findmnt -rn -T "$MOUNT_PATH" >/dev/null 2>&1; then
             echo "Path already mounted - unmounting..."
-            fusermount -uz "$MOUNT_PATH"
+            (command -v fusermount >/dev/null 2>&1 && fusermount -uz "$MOUNT_PATH") \
+            || (command -v fusermount3 >/dev/null 2>&1 && fusermount3 -uz "$MOUNT_PATH") \
+            || sudo umount -l "$MOUNT_PATH" || true
+            # Ensure it's really gone (avoids races)
+            for i in $(seq 1 20); do
+                if ! findmnt -rn -T "$MOUNT_PATH" >/dev/null 2>&1; then break; fi
+                sleep 0.2
+            done
             echo "Successfully unmounted $MOUNT_PATH."
         fi
 
@@ -515,14 +564,16 @@ def get_mounting_script(
         # Check if mount path exists
         if [ ! -d "$MOUNT_PATH" ]; then
           echo "Mount path $MOUNT_PATH does not exist. Creating..."
-          sudo mkdir -p $MOUNT_PATH
-          sudo chmod 777 $MOUNT_PATH
+          sudo mkdir -p "$MOUNT_PATH"
+          sudo chmod 777 "$MOUNT_PATH"
         else
-          # Check if mount path contains files
-          if [ "$(ls -A $MOUNT_PATH)" ]; then
-            echo "Mount path $MOUNT_PATH is not empty. Please mount to another path or remove it first."
-            exit {exceptions.MOUNT_PATH_NON_EMPTY_CODE}
-          fi
+            # If not a mountpoint and contains files, clean it to satisfy SkyPilot check
+            if ! findmnt -rn -T "$MOUNT_PATH" >/dev/null 2>&1; then
+                if [ -n "$(ls -A "$MOUNT_PATH" 2>/dev/null)" ]; then
+                  echo "Cleaning non-empty mount path before mount..."
+                  sudo bash -lc 'shopt -s dotglob nullglob; rm -rf --one-file-system -- '"$MOUNT_PATH"'/*' 2>/dev/null || true
+                fi
+            fi
         fi
         echo "Mounting $SOURCE_BUCKET to $MOUNT_PATH with $MOUNT_BINARY..."
         {mount_cmd}

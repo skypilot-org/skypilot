@@ -39,14 +39,15 @@ def _filter_instances(cluster_name_on_cloud: str,
 
 def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
     for inst_id, inst in instances.items():
-        if inst['name'].endswith('-head'):
+        if inst.get('name') and inst['name'].endswith('-head'):
             return inst_id
     return None
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
+    del cluster_name  # unused
     pending_status = ['CREATED', 'RESTARTING']
 
     created_instance_ids = []

@@ -140,7 +140,7 @@ def _check_active_resources(resource_operations: List[Tuple[str, str]],
 
 def check_users_workspaces_active_resources(
         user_ids: List[str],
-        workspace_names: List[str]) -> Tuple[str, List[str]]:
+        workspace_names: List[str]) -> Tuple[str, List[str], Dict[str, str]]:
     """Check if all the active clusters or managed jobs in workspaces
        belong to the user_ids. If not, return the error message.
 
@@ -151,6 +151,7 @@ def check_users_workspaces_active_resources(
     Returns:
         resource_error_summary: str
         missed_users_names: List[str]
+        missed_user_dict: Dict[str, str]
     """
     all_clusters, all_managed_jobs = _get_active_resources_for_workspaces(
         workspace_names)
@@ -187,14 +188,14 @@ def check_users_workspaces_active_resources(
     if resource_errors:
         resource_error_summary = ' and '.join(resource_errors)
     missed_users_names = []
+    missed_user_dict = {}
     if missed_users:
         all_users = global_user_state.get_all_users()
-        missed_users_names = [
-            user.name if user.name else user.id
-            for user in all_users
-            if user.id in missed_users
-        ]
-    return resource_error_summary, missed_users_names
+        for user in all_users:
+            if user.id in missed_users:
+                missed_users_names.append(user.name if user.name else user.id)
+                missed_user_dict[user.id] = user.name if user.name else user.id
+    return resource_error_summary, missed_users_names, missed_user_dict
 
 
 def _get_active_resources_for_workspaces(
@@ -269,16 +270,16 @@ def _get_active_resources(
         all_managed_jobs: List[Dict[str, Any]]
     """
 
-    def get_all_clusters():
+    def get_all_clusters() -> List[Dict[str, Any]]:
         return global_user_state.get_clusters()
 
-    def get_all_managed_jobs():
+    def get_all_managed_jobs() -> List[Dict[str, Any]]:
         # pylint: disable=import-outside-toplevel
         from sky.jobs.server import core as managed_jobs_core
         try:
-            return managed_jobs_core.queue(refresh=False,
-                                           skip_finished=True,
-                                           all_users=True)
+            filtered_jobs, _, _, _ = managed_jobs_core.queue_v2(
+                refresh=False, skip_finished=True, all_users=True)
+            return filtered_jobs
         except exceptions.ClusterNotUpError:
             logger.warning('All jobs should be finished.')
             return []

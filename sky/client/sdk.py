@@ -31,6 +31,7 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import oauth as oauth_lib
+from sky.jobs import scheduler
 from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import rest
@@ -53,6 +54,7 @@ from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 from sky.utils.kubernetes import ssh_utils
 
 if typing.TYPE_CHECKING:
@@ -96,11 +98,15 @@ def reload_config() -> None:
     skypilot_config.safe_reload_config()
 
 
+# The overloads are not comprehensive - e.g. get_result Literal[False] could be
+# specified to return None. We can add more overloads if needed. To do that see
+# https://github.com/python/mypy/issues/8634#issuecomment-609411104
 @typing.overload
 def stream_response(request_id: None,
                     response: 'requests.Response',
                     output_stream: Optional['io.TextIOBase'] = None,
-                    resumable: bool = False) -> None:
+                    resumable: bool = False,
+                    get_result: bool = True) -> None:
     ...
 
 
@@ -108,14 +114,25 @@ def stream_response(request_id: None,
 def stream_response(request_id: server_common.RequestId[T],
                     response: 'requests.Response',
                     output_stream: Optional['io.TextIOBase'] = None,
-                    resumable: bool = False) -> T:
+                    resumable: bool = False,
+                    get_result: Literal[True] = True) -> T:
+    ...
+
+
+@typing.overload
+def stream_response(request_id: server_common.RequestId[T],
+                    response: 'requests.Response',
+                    output_stream: Optional['io.TextIOBase'] = None,
+                    resumable: bool = False,
+                    get_result: bool = True) -> Optional[T]:
     ...
 
 
 def stream_response(request_id: Optional[server_common.RequestId[T]],
                     response: 'requests.Response',
                     output_stream: Optional['io.TextIOBase'] = None,
-                    resumable: bool = False) -> Optional[T]:
+                    resumable: bool = False,
+                    get_result: bool = True) -> Optional[T]:
     """Streams the response to the console.
 
     Args:
@@ -128,6 +145,9 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
             console.
         resumable: Whether the response is resumable on retry. If True, the
             streaming will start from the previous failure point on retry.
+        get_result: Whether to get the result of the request. This will
+            typically be set to False for `--no-follow` flags as requests may
+            continue to run for long periods of time without further streaming.
     """
 
     retry_context: Optional[rest.RetryContext] = None
@@ -143,7 +163,7 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
                 elif line_count > retry_context.line_processed:
                     print(line, flush=True, end='', file=output_stream)
                     retry_context.line_processed = line_count
-        if request_id is not None:
+        if request_id is not None and get_result:
             return get(request_id)
         else:
             return None
@@ -571,7 +591,7 @@ def launch(
                     idle_minutes=idle_minutes_to_autostop,
                     wait_for=wait_for)
             if resource.autostop_config is not None:
-                # For backward-compatbility, get the final autostop config for
+                # For backward-compatibility, get the final autostop config for
                 # admin policy.
                 # TODO(aylei): remove this after 0.12.0
                 down = resource.autostop_config.down
@@ -905,6 +925,7 @@ def tail_logs(
 @annotations.client_api
 @rest.retry_transient_errors()
 def tail_provision_logs(cluster_name: str,
+                        worker: Optional[int] = None,
                         follow: bool = True,
                         tail: int = 0,
                         output_stream: Optional['io.TextIOBase'] = None) -> int:
@@ -912,17 +933,31 @@ def tail_provision_logs(cluster_name: str,
 
     Args:
         cluster_name: name of the cluster.
+        worker: worker id in multi-node cluster.
+             If None, stream the logs of the head node.
         follow: follow the logs.
         tail: lines from end to tail.
         output_stream: optional stream to write logs.
     Returns:
         Exit code 0 on streaming success; raises on HTTP error.
     """
-    body = payloads.ClusterNameBody(cluster_name=cluster_name)
+    body = payloads.ProvisionLogsBody(cluster_name=cluster_name)
+
+    if worker is not None:
+        remote_api_version = versions.get_remote_api_version()
+        if remote_api_version is not None and remote_api_version >= 21:
+            if worker < 1:
+                raise ValueError('Worker must be a positive integer.')
+            body.worker = worker
+        else:
+            raise exceptions.APINotSupportedError(
+                'Worker node provision logs are not supported in your API '
+                'server. Please upgrade to a newer API server to use it.')
     params = {
         'follow': str(follow).lower(),
         'tail': tail,
     }
+
     response = server_common.make_authenticated_request(
         'POST',
         '/provision_logs',
@@ -931,21 +966,32 @@ def tail_provision_logs(cluster_name: str,
         stream=True,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None))
+    # Check for HTTP errors before streaming the response
+    if response.status_code != 200:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.CommandError(response.status_code,
+                                          'tail_provision_logs',
+                                          'Failed to stream provision logs',
+                                          response.text)
+
     # Log request is idempotent when tail is 0, thus can resume previous
     # streaming point on retry.
     # request_id=None here because /provision_logs does not create an async
     # request. Instead, it streams a plain file from the server. This does NOT
     # violate the stream_response doc warning about None in multi-user
-    # environments: we are not asking stream_response to select “the latest
-    # request”. We already have the HTTP response to stream; request_id=None
+    # environments: we are not asking stream_response to select "the latest
+    # request". We already have the HTTP response to stream; request_id=None
     # merely disables the follow-up GET. It is also necessary for --no-follow
     # to return cleanly after printing the tailed lines. If we provided a
     # non-None request_id here, the get(request_id) in stream_response(
     # would fail since /provision_logs does not create a request record.
+    # By virtue of this, we set get_result to False to block get() from
+    # running.
     stream_response(request_id=None,
                     response=response,
                     output_stream=output_stream,
-                    resumable=(tail == 0))
+                    resumable=(tail == 0),
+                    get_result=False)
     return 0
 
 
@@ -1256,9 +1302,11 @@ def autostop(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def queue(cluster_name: str,
-          skip_finished: bool = False,
-          all_users: bool = False) -> server_common.RequestId[List[dict]]:
+def queue(
+    cluster_name: str,
+    skip_finished: bool = False,
+    all_users: bool = False
+) -> server_common.RequestId[List[responses.ClusterJobRecord]]:
     """Gets the job queue of a cluster.
 
     Args:
@@ -1271,8 +1319,8 @@ def queue(cluster_name: str,
         The request ID of the queue request.
 
     Request Returns:
-        job_records (List[Dict[str, Any]]): A list of dicts for each job in the
-            queue.
+        job_records (List[responses.ClusterJobRecord]): A list of job records
+            for each job in the queue.
 
             .. code-block:: python
 
@@ -1416,6 +1464,9 @@ def status(
     cluster_names: Optional[List[str]] = None,
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
+    *,
+    _include_credentials: bool = False,
+    _summary_response: bool = False,
 ) -> server_common.RequestId[List[responses.StatusResponse]]:
     """Gets cluster statuses.
 
@@ -1464,6 +1515,8 @@ def status(
             provider(s).
         all_users: whether to include all users' clusters. By default, only
             the current user's clusters are included.
+        _include_credentials: (internal) whether to include cluster ssh
+            credentials in the response (default: False).
 
     Returns:
         The request ID of the status request.
@@ -1498,6 +1551,8 @@ def status(
         cluster_names=cluster_names,
         refresh=refresh,
         all_users=all_users,
+        include_credentials=_include_credentials,
+        summary_response=_summary_response,
     )
     response = server_common.make_authenticated_request(
         'POST', '/status', json=json.loads(body.model_dump_json()))
@@ -1598,26 +1653,15 @@ def cost_report(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def storage_ls() -> server_common.RequestId[List[Dict[str, Any]]]:
+def storage_ls() -> server_common.RequestId[List[responses.StorageRecord]]:
     """Gets the storages.
 
     Returns:
         The request ID of the storage list request.
 
     Request Returns:
-        storage_records (List[Dict[str, Any]]): A list of dicts, with each dict
-            containing the information of a storage.
-
-            .. code-block:: python
-
-                {
-                    'name': (str) storage name,
-                    'launched_at': (int) timestamp of creation,
-                    'store': (List[sky.StoreType]) storage type,
-                    'last_use': (int) timestamp of last use,
-                    'status': (sky.StorageStatus) storage status,
-                }
-        ]
+        storage_records (List[responses.StorageRecord]):
+            A list of storage records.
     """
     response = server_common.make_authenticated_request('GET', '/storage/ls')
     return server_common.get_request_id(response)
@@ -1659,7 +1703,9 @@ def local_up(gpus: bool,
              ssh_key: Optional[str],
              cleanup: bool,
              context_name: Optional[str] = None,
-             password: Optional[str] = None) -> server_common.RequestId[None]:
+             password: Optional[str] = None,
+             name: Optional[str] = None,
+             port_start: Optional[int] = None) -> server_common.RequestId[None]:
     """Launches a Kubernetes cluster on local machines.
 
     Returns:
@@ -1670,8 +1716,8 @@ def local_up(gpus: bool,
     # TODO: move this check to server.
     if not server_common.is_api_server_local():
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'sky local up is only supported when running SkyPilot locally.')
+            raise ValueError('`sky local up` is only supported when '
+                             'running SkyPilot locally.')
 
     body = payloads.LocalUpBody(gpus=gpus,
                                 ips=ips,
@@ -1679,7 +1725,9 @@ def local_up(gpus: bool,
                                 ssh_key=ssh_key,
                                 cleanup=cleanup,
                                 context_name=context_name,
-                                password=password)
+                                password=password,
+                                name=name,
+                                port_start=port_start)
     response = server_common.make_authenticated_request(
         'POST', '/local_up', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
@@ -1688,16 +1736,19 @@ def local_up(gpus: bool,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def local_down() -> server_common.RequestId[None]:
+def local_down(name: Optional[str]) -> server_common.RequestId[None]:
     """Tears down the Kubernetes cluster started by local_up."""
     # We do not allow local up when the API server is running remotely since it
     # will modify the kubeconfig.
     # TODO: move this check to remote server.
     if not server_common.is_api_server_local():
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('sky local down is only supported when running '
+            raise ValueError('`sky local down` is only supported when running '
                              'SkyPilot locally.')
-    response = server_common.make_authenticated_request('POST', '/local_down')
+
+    body = payloads.LocalDownBody(name=name)
+    response = server_common.make_authenticated_request(
+        'POST', '/local_down', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -1885,10 +1936,10 @@ def kubernetes_node_info(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def status_kubernetes() -> server_common.RequestId[Tuple[
-    List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
-    List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'], List[Dict[
-        str, Any]], Optional[str]]]:
+def status_kubernetes() -> server_common.RequestId[
+    Tuple[List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
+          List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
+          List[responses.ManagedJobRecord], Optional[str]]]:
     """Gets all SkyPilot clusters and jobs in the Kubernetes cluster.
 
     Managed jobs and services are also included in the clusters returned.
@@ -2025,6 +2076,8 @@ def stream_and_get(
     Returns:
         The ``Request Returns`` of the specified request. See the documentation
         of the specific requests above for more details.
+        If follow is False, will always return None. See note on
+        stream_response.
 
     Raises:
         Exception: It raises the same exceptions as the specific requests,
@@ -2046,6 +2099,12 @@ def stream_and_get(
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None),
         stream=True)
+    stream_request_id: Optional[server_common.RequestId[
+        T]] = server_common.get_stream_request_id(response)
+    if request_id is not None and stream_request_id is not None:
+        assert request_id == stream_request_id
+    if request_id is None:
+        request_id = stream_request_id
     if response.status_code in [404, 400]:
         detail = response.json().get('detail')
         with ux_utils.print_exception_no_traceback():
@@ -2056,7 +2115,11 @@ def stream_and_get(
         if request_id is None:
             return None
         return get(request_id)
-    return stream_response(request_id, response, output_stream)
+    return stream_response(request_id,
+                           response,
+                           output_stream,
+                           resumable=True,
+                           get_result=follow)
 
 
 @usage_lib.entrypoint
@@ -2130,7 +2193,9 @@ def _local_api_server_running(kill: bool = False) -> bool:
 def api_status(
     request_ids: Optional[List[Union[server_common.RequestId[T], str]]] = None,
     # pylint: disable=redefined-builtin
-    all_status: bool = False
+    all_status: bool = False,
+    limit: Optional[int] = None,
+    fields: Optional[List[str]] = None,
 ) -> List[payloads.RequestPayload]:
     """Lists all requests.
 
@@ -2139,6 +2204,8 @@ def api_status(
             If None, all requests are queried.
         all_status: Whether to list all finished requests as well. This argument
             is ignored if request_ids is not None.
+        limit: The number of requests to show. If None, show all requests.
+        fields: The fields to get. If None, get all fields.
 
     Returns:
         A list of request payloads.
@@ -2147,8 +2214,12 @@ def api_status(
         logger.info('SkyPilot API server is not running.')
         return []
 
-    body = payloads.RequestStatusBody(request_ids=request_ids,
-                                      all_status=all_status)
+    body = payloads.RequestStatusBody(
+        request_ids=request_ids,
+        all_status=all_status,
+        limit=limit,
+        fields=fields,
+    )
     response = server_common.make_authenticated_request(
         'GET',
         '/api/status',
@@ -2267,10 +2338,30 @@ def api_stop() -> None:
                 f'Cannot kill the API server at {server_url} because it is not '
                 f'the default SkyPilot API server started locally.')
 
-    found = _local_api_server_running(kill=True)
+    # Acquire the api server creation lock to prevent multiple processes from
+    # stopping and starting the API server at the same time.
+    with filelock.FileLock(
+            os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
+        try:
+            with open(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH),
+                      'r',
+                      encoding='utf-8') as f:
+                pids = f.read().split('\n')[:-1]
+                for pid in pids:
+                    if subprocess_utils.is_process_alive(int(pid.strip())):
+                        subprocess_utils.kill_children_processes(
+                            parent_pids=[int(pid.strip())], force=True)
+            os.remove(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH))
+        except FileNotFoundError:
+            # its fine we will create it
+            pass
+        except Exception as e:  # pylint: disable=broad-except
+            # in case we get perm issues or something is messed up, just ignore
+            # it and assume the process is dead
+            logger.error(f'Error looking at job controller pid file: {e}')
+            pass
 
-    # Remove the database for requests.
-    server_common.clear_local_api_server_database()
+        found = _local_api_server_running(kill=True)
 
     if found:
         logger.info(f'{colorama.Fore.GREEN}SkyPilot API server stopped.'
@@ -2332,7 +2423,7 @@ def _save_config_updates(endpoint: Optional[str] = None,
             config['api_server'][
                 'service_account_token'] = service_account_token
 
-        common_utils.dump_yaml(str(config_path), config)
+        yaml_utils.dump_yaml(str(config_path), config)
         skypilot_config.reload_config()
 
 
@@ -2346,9 +2437,12 @@ def _clear_api_server_config() -> None:
 
         config = skypilot_config.get_user_config()
         config = dict(config)
-        del config['api_server']
+        if 'api_server' in config:
+            # We might not have set the endpoint in the config file, so we
+            # need to check before deleting.
+            del config['api_server']
 
-        common_utils.dump_yaml(str(config_path), config, blank=True)
+        yaml_utils.dump_yaml(str(config_path), config, blank=True)
         skypilot_config.reload_config()
 
 
@@ -2361,6 +2455,20 @@ def _validate_endpoint(endpoint: Optional[str]) -> str:
             not endpoint.startswith('https://')):
         raise click.BadParameter('Endpoint must be a valid URL.')
     return endpoint.rstrip('/')
+
+
+def _check_endpoint_in_env_var(is_login: bool) -> None:
+    # If the user has set the endpoint via the environment variable, we should
+    # not do anything as we can't disambiguate between the env var and the
+    # config file.
+    """Check if the endpoint is set in the environment variable."""
+    if constants.SKY_API_SERVER_URL_ENV_VAR in os.environ:
+        with ux_utils.print_exception_no_traceback():
+            action = 'login to' if is_login else 'logout of'
+            raise RuntimeError(f'Cannot {action} API server when the endpoint '
+                               'is set via the environment variable. Run unset '
+                               f'{constants.SKY_API_SERVER_URL_ENV_VAR} to '
+                               'clear the environment variable.')
 
 
 @usage_lib.entrypoint
@@ -2385,6 +2493,8 @@ def api_login(endpoint: Optional[str] = None,
     Returns:
         None
     """
+    _check_endpoint_in_env_var(is_login=True)
+
     # Validate and normalize endpoint
     endpoint = _validate_endpoint(endpoint)
 
@@ -2415,6 +2525,12 @@ def api_login(endpoint: Optional[str] = None,
             f'{dashboard_msg}',
             fg='green')
 
+    def _set_user_hash(user_hash: Optional[str]) -> None:
+        if user_hash is not None:
+            if not common_utils.is_valid_user_hash(user_hash):
+                raise ValueError(f'Invalid user hash: {user_hash}')
+            common_utils.set_user_hash_locally(user_hash)
+
     # Handle service account token authentication
     if service_account_token:
         if not service_account_token.startswith('sky_'):
@@ -2430,6 +2546,8 @@ def api_login(endpoint: Optional[str] = None,
             server_status, api_server_info = server_common.check_server_healthy(
                 endpoint)
             dashboard_url = server_common.get_dashboard_url(endpoint)
+            if api_server_info.user is not None:
+                _set_user_hash(api_server_info.user.get('id'))
             _show_logged_in_message(endpoint, dashboard_url,
                                     api_server_info.user, server_status)
 
@@ -2574,14 +2692,14 @@ def api_login(endpoint: Optional[str] = None,
         # Now that the cookies are parsed, save them to the cookie jar.
         server_common.set_api_cookie_jar(cookie_jar)
 
-        # If we have a user_hash, save it to the local file
-        if user_hash is not None:
-            if not common_utils.is_valid_user_hash(user_hash):
-                raise ValueError(f'Invalid user hash: {user_hash}')
-            with open(os.path.expanduser('~/.sky/user_hash'),
-                      'w',
-                      encoding='utf-8') as f:
-                f.write(user_hash)
+        # Set the user hash in the local file.
+        # If the server already has a token for this user set it to the local
+        # file, otherwise use the new user hash.
+        if (api_server_info.user is not None and
+                api_server_info.user.get('id') is not None):
+            _set_user_hash(api_server_info.user.get('id'))
+        else:
+            _set_user_hash(user_hash)
     else:
         # Check if basic auth is enabled
         if api_server_info.basic_auth_enabled:
@@ -2589,14 +2707,10 @@ def api_login(endpoint: Optional[str] = None,
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'Basic auth is enabled but no valid user is found')
-            # Set the user hash in the local file
-            user_hash = api_server_info.user.get('id')
-            if not user_hash or not common_utils.is_valid_user_hash(user_hash):
-                raise ValueError(f'Invalid user hash: {user_hash}')
-            with open(os.path.expanduser('~/.sky/user_hash'),
-                      'w',
-                      encoding='utf-8') as f:
-                f.write(user_hash)
+
+        # Set the user hash in the local file.
+        if api_server_info.user is not None:
+            _set_user_hash(api_server_info.user.get('id'))
 
     # Set the endpoint in the config file
     _save_config_updates(endpoint=endpoint)
@@ -2619,6 +2733,8 @@ def api_logout() -> None:
     """Logout of the API server.
 
     Clears all cookies and settings stored in ~/.sky/config.yaml"""
+    _check_endpoint_in_env_var(is_login=False)
+
     if server_common.is_api_server_local():
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError('Local api server cannot be logged out. '

@@ -36,9 +36,9 @@ def ssh_options_list(
 
 
 class SshMode(enum.Enum):
-    NON_INTERACTIVE: int
-    INTERACTIVE: int
-    LOGIN: int
+    NON_INTERACTIVE = ...
+    INTERACTIVE = ...
+    LOGIN = ...
 
 
 class CommandRunner:
@@ -106,6 +106,13 @@ class CommandRunner:
               max_retry: int = ...) -> None:
         ...
 
+    def port_forward_command(
+            self,
+            port_forward: List[Tuple[int, int]],
+            connect_timeout: int = 1,
+            ssh_mode: SshMode = SshMode.INTERACTIVE) -> List[str]:
+        ...
+
     @classmethod
     def make_runner_list(cls: typing.Type[CommandRunner],
                          node_list: Iterable[Tuple[Any, ...]],
@@ -127,6 +134,7 @@ class SSHCommandRunner(CommandRunner):
     ssh_control_name: Optional[str]
     docker_user: str
     disable_control_master: Optional[bool]
+    port_forward_execute_remote_command: Optional[bool]
 
     def __init__(
         self,
@@ -134,8 +142,10 @@ class SSHCommandRunner(CommandRunner):
         ssh_user: str,
         ssh_private_key: str,
         ssh_control_name: Optional[str] = ...,
+        ssh_proxy_command: Optional[str] = ...,
         docker_user: Optional[str] = ...,
         disable_control_master: Optional[bool] = ...,
+        port_forward_execute_remote_command: Optional[bool] = ...,
     ) -> None:
         ...
 
@@ -190,6 +200,15 @@ class SSHCommandRunner(CommandRunner):
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...
 
+    def ssh_base_command(
+        self,
+        *,
+        ssh_mode: SshMode,
+        port_forward: Optional[List[Tuple[int, int]]],
+        connect_timeout: Optional[int],
+    ) -> List[str]:
+        ...
+
     def rsync(self,
               source: str,
               target: str,
@@ -198,6 +217,13 @@ class SSHCommandRunner(CommandRunner):
               log_path: str = ...,
               stream_logs: bool = ...,
               max_retry: int = ...) -> None:
+        ...
+
+    def port_forward_command(
+            self,
+            port_forward: List[Tuple[int, int]],
+            connect_timeout: int = 1,
+            ssh_mode: SshMode = SshMode.INTERACTIVE) -> List[str]:
         ...
 
 
@@ -270,6 +296,13 @@ class KubernetesCommandRunner(CommandRunner):
               log_path: str = ...,
               stream_logs: bool = ...,
               max_retry: int = ...) -> None:
+        ...
+
+    def port_forward_command(
+            self,
+            port_forward: List[Tuple[int, int]],
+            connect_timeout: int = 1,
+            ssh_mode: SshMode = SshMode.INTERACTIVE) -> List[str]:
         ...
 
 

@@ -8,10 +8,13 @@ from typing import AsyncGenerator, Deque, List, Optional
 import aiofiles
 import fastapi
 
+from sky import global_user_state
 from sky import sky_logging
 from sky.server.requests import requests as requests_lib
+from sky.utils import common_utils
 from sky.utils import message_utils
 from sky.utils import rich_utils
+from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -22,6 +25,20 @@ logger = sky_logging.init_logger(__name__)
 _BUFFER_SIZE = 8 * 1024  # 8KB
 _BUFFER_TIMEOUT = 0.02  # 20ms
 _HEARTBEAT_INTERVAL = 30
+# If a SHORT request has been stuck in pending for
+# _SHORT_REQUEST_SPINNER_TIMEOUT seconds, we show the waiting spinner
+_SHORT_REQUEST_SPINNER_TIMEOUT = 2
+# If there is an issue during provisioning that causes the cluster to be stuck
+# in INIT state, we use this timeout to break the loop and stop streaming
+# provision logs.
+_PROVISION_LOG_TIMEOUT = 3
+# Maximum time to wait for new log files to appear when streaming worker node
+# provision logs. Worker logs are created sequentially during the provisioning
+# process, so we need to wait for new files to appear.
+_MAX_WAIT_FOR_NEW_LOG_FILES = 3  # seconds
+
+LONG_REQUEST_POLL_INTERVAL = 1
+DEFAULT_POLL_INTERVAL = 0.1
 
 
 async def _yield_log_file_with_payloads_skipped(
@@ -37,34 +54,51 @@ async def _yield_log_file_with_payloads_skipped(
         yield line_str
 
 
-async def log_streamer(request_id: Optional[str],
-                       log_path: pathlib.Path,
-                       plain_logs: bool = False,
-                       tail: Optional[int] = None,
-                       follow: bool = True) -> AsyncGenerator[str, None]:
+async def log_streamer(
+    request_id: Optional[str],
+    log_path: Optional[pathlib.Path] = None,
+    plain_logs: bool = False,
+    tail: Optional[int] = None,
+    follow: bool = True,
+    cluster_name: Optional[str] = None,
+    polling_interval: float = DEFAULT_POLL_INTERVAL
+) -> AsyncGenerator[str, None]:
     """Streams the logs of a request.
 
     Args:
         request_id: The request ID to check whether the log tailing process
             should be stopped.
-        log_path: The path to the log file.
+        log_path: The path to the log file or directory containing the log
+        files. If it is a directory, all *.log files in the directory will be
+        streamed.
         plain_logs: Whether to show plain logs.
         tail: The number of lines to tail. If None, tail the whole file.
         follow: Whether to follow the log file.
+        cluster_name: The cluster name to check status for provision logs.
+            If provided and cluster status is UP, streaming will terminate.
     """
 
     if request_id is not None:
+        start_time = asyncio.get_event_loop().time()
         status_msg = rich_utils.EncodedStatusMessage(
             f'[dim]Checking request: {request_id}[/dim]')
-        request_task = requests_lib.get_request(request_id)
+        request_task = await requests_lib.get_request_async(request_id,
+                                                            fields=[
+                                                                'request_id',
+                                                                'name',
+                                                                'schedule_type',
+                                                                'status',
+                                                                'status_msg'
+                                                            ])
 
         if request_task is None:
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Request {request_id} not found')
         request_id = request_task.request_id
 
-        # Do not show the waiting spinner if the request is a fast, non-blocking
-        # request.
+        # By default, do not show the waiting spinner for SHORT requests.
+        # If the request has been stuck in pending for
+        # _SHORT_REQUEST_SPINNER_TIMEOUT seconds, we show the waiting spinner
         show_request_waiting_spinner = (not plain_logs and
                                         request_task.schedule_type
                                         == requests_lib.ScheduleType.LONG)
@@ -75,9 +109,25 @@ async def log_streamer(request_id: Optional[str],
         last_waiting_msg = ''
         waiting_msg = (f'Waiting for {request_task.name!r} request to be '
                        f'scheduled: {request_id}')
-        while request_task.status < requests_lib.RequestStatus.RUNNING:
-            if request_task.status_msg is not None:
-                waiting_msg = request_task.status_msg
+        req_status = request_task.status
+        req_msg = request_task.status_msg
+        del request_task
+        # Slowly back off the database polling up to every 1 second, to avoid
+        # overloading the CPU and DB.
+        backoff = common_utils.Backoff(initial_backoff=polling_interval,
+                                       max_backoff_factor=10,
+                                       multiplier=1.2)
+        while req_status < requests_lib.RequestStatus.RUNNING:
+            current_time = asyncio.get_event_loop().time()
+            # Show the waiting spinner for a SHORT request if it has been stuck
+            # in pending for _SHORT_REQUEST_SPINNER_TIMEOUT seconds
+            if not show_request_waiting_spinner and (
+                    current_time - start_time > _SHORT_REQUEST_SPINNER_TIMEOUT):
+                show_request_waiting_spinner = True
+                yield status_msg.init()
+                yield status_msg.start()
+            if req_msg is not None:
+                waiting_msg = req_msg
             if show_request_waiting_spinner:
                 yield status_msg.update(f'[dim]{waiting_msg}[/dim]')
             elif plain_logs and waiting_msg != last_waiting_msg:
@@ -86,26 +136,82 @@ async def log_streamer(request_id: Optional[str],
                 # Use smaller padding (1024 bytes) to force browser rendering
                 yield f'{waiting_msg}' + ' ' * 4096 + '\n'
             # Sleep shortly to avoid storming the DB and CPU and allow other
-            # coroutines to run. This busy waiting loop is performance critical
-            # for short-running requests, so we do not want to yield too long.
-            await asyncio.sleep(0.1)
-            request_task = requests_lib.get_request(request_id)
+            # coroutines to run.
+            # TODO(aylei): we should use a better mechanism to avoid busy
+            # polling the DB, which can be a bottleneck for high-concurrency
+            # requests.
+            await asyncio.sleep(backoff.current_backoff())
+            status_with_msg = await requests_lib.get_request_status_async(
+                request_id, include_msg=True)
+            req_status = status_with_msg.status
+            req_msg = status_with_msg.status_msg
             if not follow:
                 break
         if show_request_waiting_spinner:
             yield status_msg.stop()
 
-    async with aiofiles.open(log_path, 'rb') as f:
-        async for chunk in _tail_log_file(f, request_id, plain_logs, tail,
-                                          follow):
-            yield chunk
+    if log_path is not None and log_path.is_dir():
+        # Track which log files we've already streamed
+        streamed_files = set()
+        no_new_files_count = 0
+
+        while True:
+            # Get all *.log files in the log_path
+            log_files = sorted(log_path.glob('*.log'))
+
+            # Filter out already streamed files
+            new_files = [f for f in log_files if f not in streamed_files]
+
+            if len(new_files) == 0:
+                if not follow:
+                    break
+                # Wait a bit to see if new files appear
+                await asyncio.sleep(0.5)
+                no_new_files_count += 1
+                # Check if we've waited too long for new files
+                if no_new_files_count > _MAX_WAIT_FOR_NEW_LOG_FILES * 2:
+                    break
+                continue
+
+            # Reset the no-new-files counter when we find new files
+            no_new_files_count = 0
+
+            for log_file_path in new_files:
+                # Add header before each file (similar to tail -f behavior)
+                header = f'\n==> {log_file_path} <==\n\n'
+                yield header
+
+                async with aiofiles.open(log_file_path, 'rb') as f:
+                    async for chunk in _tail_log_file(f, request_id, plain_logs,
+                                                      tail, follow,
+                                                      cluster_name,
+                                                      polling_interval):
+                        yield chunk
+
+                # Mark this file as streamed
+                streamed_files.add(log_file_path)
+
+            # If not following, break after streaming all current files
+            if not follow:
+                break
+    else:
+        assert log_path is not None, (request_id, log_path)
+        async with aiofiles.open(log_path, 'rb') as f:
+            async for chunk in _tail_log_file(f, request_id, plain_logs, tail,
+                                              follow, cluster_name,
+                                              polling_interval):
+                yield chunk
 
 
-async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
-                         request_id: Optional[str] = None,
-                         plain_logs: bool = False,
-                         tail: Optional[int] = None,
-                         follow: bool = True) -> AsyncGenerator[str, None]:
+async def _tail_log_file(
+    f: aiofiles.threadpool.binary.AsyncBufferedReader,
+    request_id: Optional[str] = None,
+    plain_logs: bool = False,
+    tail: Optional[int] = None,
+    follow: bool = True,
+    cluster_name: Optional[str] = None,
+    polling_interval: float = DEFAULT_POLL_INTERVAL
+) -> AsyncGenerator[str, None]:
     """Tail the opened log file, buffer the lines and flush in chunks."""
 
     if tail is not None:
@@ -121,6 +227,7 @@ async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
             yield line_str
 
     last_heartbeat_time = asyncio.get_event_loop().time()
+    last_status_check_time = asyncio.get_event_loop().time()
 
     # Buffer the lines in memory and flush them in chunks to improve log
     # tailing throughput.
@@ -150,11 +257,24 @@ async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
 
         line: Optional[bytes] = await f.readline()
         if not line:
-            if request_id is not None:
-                request_task = requests_lib.get_request(request_id)
-                if request_task.status > requests_lib.RequestStatus.RUNNING:
-                    if (request_task.status ==
+            # Avoid checking the status too frequently to avoid overloading the
+            # DB.
+            should_check_status = (current_time -
+                                   last_status_check_time) >= polling_interval
+            if not follow:
+                # We will only hit this path once, but we should make sure to
+                # check the status so that we display the final request status
+                # if the request is complete.
+                should_check_status = True
+            if request_id is not None and should_check_status:
+                last_status_check_time = current_time
+                req_status = await requests_lib.get_request_status_async(
+                    request_id)
+                if req_status.status > requests_lib.RequestStatus.RUNNING:
+                    if (req_status.status ==
                             requests_lib.RequestStatus.CANCELLED):
+                        request_task = await requests_lib.get_request_async(
+                            request_id, fields=['name', 'should_retry'])
                         if request_task.should_retry:
                             buffer.append(
                                 message_utils.encode_payload(
@@ -163,10 +283,32 @@ async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
                             buffer.append(
                                 f'{request_task.name!r} request {request_id}'
                                 ' cancelled\n')
+                        del request_task
                     break
             if not follow:
+                # The below checks (cluster status, heartbeat) are not needed
+                # for non-follow logs.
                 break
-
+            # Provision logs pass in cluster_name, check cluster status
+            # periodically to see if provisioning is done.
+            if cluster_name is not None:
+                if current_time - last_flush_time > _PROVISION_LOG_TIMEOUT:
+                    break
+                if should_check_status:
+                    last_status_check_time = current_time
+                    cluster_status = await (
+                        global_user_state.get_status_from_cluster_name_async(
+                            cluster_name))
+                    if cluster_status is None:
+                        logger.debug(
+                            'Stop tailing provision logs for cluster'
+                            f' status for cluster {cluster_name} not found')
+                        break
+                    if cluster_status != status_lib.ClusterStatus.INIT:
+                        logger.debug(
+                            f'Stop tailing provision logs for cluster'
+                            f' {cluster_name} has status {cluster_status} '
+                            '(not in INIT state)')
             if current_time - last_heartbeat_time >= _HEARTBEAT_INTERVAL:
                 # Currently just used to keep the connection busy, refer to
                 # https://github.com/skypilot-org/skypilot/issues/5750 for
@@ -202,22 +344,43 @@ async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
         yield chunk
 
 
+def stream_response_for_long_request(
+    request_id: str,
+    logs_path: pathlib.Path,
+    background_tasks: fastapi.BackgroundTasks,
+    kill_request_on_disconnect: bool = True,
+) -> fastapi.responses.StreamingResponse:
+    """Stream the logs of a long request."""
+    return stream_response(
+        request_id,
+        logs_path,
+        background_tasks,
+        polling_interval=LONG_REQUEST_POLL_INTERVAL,
+        kill_request_on_disconnect=kill_request_on_disconnect,
+    )
+
+
 def stream_response(
-    request_id: str, logs_path: pathlib.Path,
-    background_tasks: fastapi.BackgroundTasks
+    request_id: str,
+    logs_path: pathlib.Path,
+    background_tasks: fastapi.BackgroundTasks,
+    polling_interval: float = DEFAULT_POLL_INTERVAL,
+    kill_request_on_disconnect: bool = True,
 ) -> fastapi.responses.StreamingResponse:
 
-    async def on_disconnect():
-        logger.info(f'User terminated the connection for request '
-                    f'{request_id}')
-        requests_lib.kill_requests([request_id])
+    if kill_request_on_disconnect:
 
-    # The background task will be run after returning a response.
-    # https://fastapi.tiangolo.com/tutorial/background-tasks/
-    background_tasks.add_task(on_disconnect)
+        async def on_disconnect():
+            logger.info(f'User terminated the connection for request '
+                        f'{request_id}')
+            requests_lib.kill_requests([request_id])
+
+        # The background task will be run after returning a response.
+        # https://fastapi.tiangolo.com/tutorial/background-tasks/
+        background_tasks.add_task(on_disconnect)
 
     return fastapi.responses.StreamingResponse(
-        log_streamer(request_id, logs_path),
+        log_streamer(request_id, logs_path, polling_interval=polling_interval),
         media_type='text/plain',
         headers={
             'Cache-Control': 'no-cache, no-transform',

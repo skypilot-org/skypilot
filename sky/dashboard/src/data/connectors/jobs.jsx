@@ -11,11 +11,35 @@ import { apiClient } from './client';
 
 // Configuration
 const DEFAULT_TAIL_LINES = 10000;
+const DEFAULT_FIELDS = [
+  'job_id',
+  '_job_id',
+  'job_name',
+  'user_name',
+  'user_hash',
+  'workspace',
+  'submitted_at',
+  'job_duration',
+  'status',
+  'resources',
+  'cloud',
+  'region',
+  'accelerators',
+  'cluster_resources',
+  'cluster_resources_full',
+  'recovery_count',
+  'pool',
+  'pool_hash',
+  'details',
+  'failure_reason',
+];
 
 export async function getManagedJobs(options = {}) {
   try {
     const {
       allUsers = true,
+      skipFinished = false,
+      allFields = false,
       nameMatch,
       userMatch,
       workspaceMatch,
@@ -23,11 +47,14 @@ export async function getManagedJobs(options = {}) {
       page,
       limit,
       statuses,
+      fields,
+      jobIDs,
     } = options;
 
     const body = {
       all_users: allUsers,
       verbose: true,
+      skip_finished: skipFinished,
     };
     if (nameMatch !== undefined) body.name_match = nameMatch;
     if (userMatch !== undefined) body.user_match = userMatch;
@@ -36,8 +63,16 @@ export async function getManagedJobs(options = {}) {
     if (page !== undefined) body.page = page;
     if (limit !== undefined) body.limit = limit;
     if (statuses !== undefined && statuses.length > 0) body.statuses = statuses;
+    if (jobIDs !== undefined && jobIDs.length > 0) body.job_ids = jobIDs;
+    if (!allFields) {
+      if (fields && fields.length > 0) {
+        body.fields = fields;
+      } else {
+        body.fields = DEFAULT_FIELDS;
+      }
+    }
 
-    const response = await apiClient.post(`/jobs/queue`, body);
+    const response = await apiClient.post(`/jobs/queue/v2`, body);
     const id = response.headers.get('X-Skypilot-Request-ID');
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
     if (fetchedData.status === 500) {
@@ -57,7 +92,13 @@ export async function getManagedJobs(options = {}) {
       } catch (parseError) {
         console.error('Error parsing JSON:', parseError);
       }
-      return { jobs: [], total: 0, controllerStopped: false };
+      // For non-CLUSTER_NOT_UP 500 errors, signal cache to skip update
+      return {
+        __skipCache: true,
+        jobs: [],
+        total: 0,
+        controllerStopped: false,
+      };
     }
     // print out the response for debugging
     const data = await fetchedData.json();
@@ -172,7 +213,9 @@ export async function getManagedJobs(options = {}) {
     };
   } catch (error) {
     console.error('Error fetching managed job data:', error);
+    // Signal to the cache to not overwrite previously cached data
     return {
+      __skipCache: true,
       jobs: [],
       total: 0,
       totalNoFilter: 0,
@@ -191,12 +234,15 @@ export async function getManagedJobs(options = {}) {
  * @param {string} options.userMatch - Filter by user
  * @param {string} options.workspaceMatch - Filter by workspace
  * @param {string} options.poolMatch - Filter by pool
+ * @param {Array} options.jobIDs - Filter by job IDs
  * @param {number} options.page - Page page (1-based)
  * @param {number} options.limit - Page size
+ * @param {Array} options.fields - Fields to return
+ * @param {boolean} options.allFields - Whether to return all fields (default: false)
  * @param {boolean} options.useClientPagination - Whether to use client-side pagination (default: true)
- * @returns {Promise<{jobs: Array, total: number, controllerStopped: boolean}>}
+ * @returns {Promise<{jobs: Array, total: number, controllerStopped: boolean, __skipCache?: boolean}>}
  */
-export async function getManagedJobsWithClientPagination(options = {}) {
+export async function getManagedJobsWithClientPagination(options) {
   const {
     allUsers = true,
     nameMatch,
@@ -205,8 +251,11 @@ export async function getManagedJobsWithClientPagination(options = {}) {
     poolMatch,
     page = 1,
     limit = 10,
+    jobIDs,
+    fields,
+    allFields = false,
     useClientPagination = true,
-  } = options;
+  } = options || {};
 
   try {
     // If client pagination is disabled, fall back to server-side pagination
@@ -221,6 +270,9 @@ export async function getManagedJobsWithClientPagination(options = {}) {
       userMatch,
       workspaceMatch,
       poolMatch,
+      jobIDs,
+      fields,
+      allFields,
     };
 
     // Fetch all data without pagination parameters
@@ -248,7 +300,8 @@ export async function getManagedJobsWithClientPagination(options = {}) {
       'Error fetching managed job data with client pagination:',
       error
     );
-    return { jobs: [], total: 0, controllerStopped: false };
+    // Signal to the cache to not overwrite previously cached data
+    return { __skipCache: true, jobs: [], controllerStopped: false, total: 0 };
   }
 }
 
@@ -286,7 +339,13 @@ export async function getPoolStatus() {
     // Also fetch managed jobs to get job counts by pool
     let jobsData = { jobs: [] };
     try {
-      const jobsResponse = await getManagedJobs({ allUsers: true });
+      const jobsResponse = await dashboardCache.get(getManagedJobs, [
+        {
+          allUsers: true,
+          skipFinished: true,
+          fields: ['pool', 'status'],
+        },
+      ]);
       if (!jobsResponse.controllerStopped) {
         jobsData = jobsResponse;
       }
@@ -334,33 +393,6 @@ export async function getPoolStatus() {
   }
 }
 
-export function useManagedJobDetails(refreshTrigger = 0) {
-  const [jobData, setJobData] = useState(null);
-  const [loadingJobData, setLoadingJobData] = useState(true);
-
-  const loading = loadingJobData;
-
-  useEffect(() => {
-    async function fetchJobData() {
-      try {
-        setLoadingJobData(true);
-        const data = await dashboardCache.get(getManagedJobs, [
-          { allUsers: true },
-        ]);
-        setJobData(data);
-      } catch (error) {
-        console.error('Error fetching managed job data:', error);
-      } finally {
-        setLoadingJobData(false);
-      }
-    }
-
-    fetchJobData();
-  }, [refreshTrigger]);
-
-  return { jobData, loading };
-}
-
 // Hook for individual job details that reuses the main jobs cache
 export function useSingleManagedJob(jobId, refreshTrigger = 0) {
   const [jobData, setJobData] = useState(null);
@@ -377,7 +409,7 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
 
         // Always get all jobs data (cache handles freshness automatically)
         const allJobsData = await dashboardCache.get(getManagedJobs, [
-          { allUsers: true },
+          { allUsers: true, allFields: true, jobIDs: [jobId] },
         ]);
 
         // Filter for the specific job client-side
@@ -541,7 +573,7 @@ export async function handleJobAction(action, jobId, cluster) {
     case 'restartcontroller':
       logStarter = 'Restarting';
       logMiddle = 'restarted';
-      apiPath = 'jobs/queue';
+      apiPath = 'jobs/queue/v2';
       requestBody = { all_users: true, refresh: true };
       jobId = 'controller';
       break;

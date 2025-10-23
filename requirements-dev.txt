@@ -16,7 +16,7 @@ isort==5.12.0
 
 # type checking
 # match the version with .pre-commit-config.yaml
-mypy==1.4.0
+mypy==1.14.1
 types-PyYAML
 types-paramiko
 # 2.31 requires urlib3>2, which is incompatible with IBM and
@@ -66,3 +66,11 @@ grpcio-tools==1.63.0
 grpcio==1.63.0
 # The oldest version of protobuf that grpcio 1.63.0 supports.
 protobuf==5.26.1
+
+# Pin to avoid a runtime break between pydantic>=2.12 (which requires
+# pydantic-core 2.41.x) and typing_extensions 4.13.x. In 2.41.x,
+# pydantic-core does `from typing_extensions import Sentinel`, but 4.13.x no
+# longer exports the public `Sentinel` symbol, causing ImportError. Keeping
+# pydantic<2.12 avoids pulling pydantic-core 2.41.x. Revisit once upstream
+# resolves the import or we align versions accordingly.
+pydantic<2.12

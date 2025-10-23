@@ -9,6 +9,7 @@ import typing
 from typing import Any, Callable, cast, Optional, TypeVar
 
 import colorama
+import urllib3.exceptions
 
 from sky import exceptions
 from sky import sky_logging
@@ -53,6 +54,7 @@ _session.headers[constants.VERSION_HEADER] = (
 _transient_errors = [
     requests.exceptions.RequestException,
     ConnectionError,
+    urllib3.exceptions.HTTPError,
 ]
 
 
@@ -176,14 +178,16 @@ def _retry_on_server_unavailable(max_wait_seconds: int = 600,
     Notes(dev):
     """
 
+    def _readable_error_msg(message: str) -> str:
+        return (f'{colorama.Fore.YELLOW}API server is temporarily '
+                f'unavailable: {message}.\nRetrying...'
+                f'{colorama.Style.RESET_ALL}')
+
     def decorator(func: F) -> F:
 
         @functools.wraps(func)
         def wrapper(*args, **kwargs) -> Any:
-            msg = (
-                f'{colorama.Fore.YELLOW}API server is temporarily unavailable: '
-                'upgrade in progress. Waiting to resume...'
-                f'{colorama.Style.RESET_ALL}')
+
             backoff = common_utils.Backoff(
                 initial_backoff=initial_backoff,
                 max_backoff_factor=max_backoff_factor)
@@ -201,7 +205,8 @@ def _retry_on_server_unavailable(max_wait_seconds: int = 600,
                         # stop the status spinner before retrying func() to
                         # avoid the status spinner get stuck if the func() runs
                         # for a long time without update status, e.g. sky logs.
-                        with rich_utils.client_status(msg):
+                        with rich_utils.client_status(
+                                _readable_error_msg(e.message)):
                             if time.time() - start_time > max_wait_seconds:
                                 # pylint: disable=line-too-long
                                 raise exceptions.ServerTemporarilyUnavailableError(
@@ -222,14 +227,67 @@ def _retry_on_server_unavailable(max_wait_seconds: int = 600,
 
 
 def handle_server_unavailable(response: 'requests.Response') -> None:
-    if response.status_code == 503:
-        # TODO(aylei): Hacky, depends on how nginx controller handles backends
-        # with no ready endpoints. Should use self-defined status code or header
-        # to distinguish retryable server error from general 503 errors.
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ServerTemporarilyUnavailableError(
-                'SkyPilot API server is temporarily unavailable. '
-                'Please try again later.')
+    """Handle 503 (Service Unavailable) error
+
+    The client get 503 error in the following cases:
+    1. The reverse proxy cannot find any ready backend endpoints to serve the
+       request, e.g. when there is and rolling-update.
+    2. The skypilot API server has temporary resource issue, e.g. when the
+       cucurrency of the handling process is exhausted.
+
+    We expect the caller (CLI or SDK) retry on these cases and show clear wait
+    message to the user to let user decide whether keep waiting or abort the
+    request.
+    """
+    if response.status_code != 503:
+        return
+
+    # error_msg = 'SkyPilot API server is temporarily unavailable. '
+    error_msg = ''
+    try:
+        response_data = response.json()
+        if 'detail' in response_data:
+            error_msg = response_data['detail']
+    except Exception:  # pylint: disable=broad-except
+        if response.text:
+            error_msg = response.text
+
+    with ux_utils.print_exception_no_traceback():
+        raise exceptions.ServerTemporarilyUnavailableError(error_msg)
+
+
+async def handle_server_unavailable_async(
+        response: 'aiohttp.ClientResponse') -> None:
+    """Async version: Handle 503 (Service Unavailable) error
+
+    The client get 503 error in the following cases:
+    1. The reverse proxy cannot find any ready backend endpoints to serve the
+       request, e.g. when there is and rolling-update.
+    2. The skypilot API server has temporary resource issue, e.g. when the
+       cucurrency of the handling process is exhausted.
+
+    We expect the caller (CLI or SDK) retry on these cases and show clear wait
+    message to the user to let user decide whether keep waiting or abort the
+    request.
+    """
+    if response.status != 503:
+        return
+
+    error_msg = ''
+    try:
+        response_data = await response.json()
+        if 'detail' in response_data:
+            error_msg = response_data['detail']
+    except Exception:  # pylint: disable=broad-except
+        try:
+            text = await response.text()
+            if text:
+                error_msg = text
+        except Exception:  # pylint: disable=broad-except
+            pass
+
+    with ux_utils.print_exception_no_traceback():
+        raise exceptions.ServerTemporarilyUnavailableError(error_msg)
 
 
 @_retry_on_server_unavailable()
@@ -308,11 +366,7 @@ async def request_without_retry_async(session: 'aiohttp.ClientSession',
         response = await session.request(method, url, **kwargs)
 
         # Handle server unavailability (503 status) - same as sync version
-        if response.status == 503:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.ServerTemporarilyUnavailableError(
-                    'SkyPilot API server is temporarily unavailable. '
-                    'Please try again later.')
+        await handle_server_unavailable_async(response)
 
         # Set remote API version and version from headers - same as sync version
         remote_api_version = response.headers.get(constants.API_VERSION_HEADER)

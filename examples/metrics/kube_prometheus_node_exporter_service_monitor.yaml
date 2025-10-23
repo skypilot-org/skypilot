@@ -1,0 +1,26 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  annotations:
+    meta.helm.sh/release-name: kube-prometheus
+    meta.helm.sh/release-namespace: skypilot
+  labels:
+    app.kubernetes.io/instance: kube-prometheus
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: node-exporter
+  name: kube-prometheus-node-exporter
+  namespace: skypilot
+spec:
+  endpoints:
+  - port: metrics
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_pod_node_name]
+      targetLabel: node
+  jobLabel: jobLabel
+  namespaceSelector:
+    matchNames:
+    - skypilot
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: kube-prometheus
+      app.kubernetes.io/name: node-exporter

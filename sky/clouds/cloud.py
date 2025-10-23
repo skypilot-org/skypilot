@@ -341,6 +341,14 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
+    def get_arch_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> Optional[str]:
+        """Returns the arch of the instance type, if any."""
+        raise NotImplementedError
+
+    @classmethod
     def get_default_instance_type(cls,
                                   cpus: Optional[str] = None,
                                   memory: Optional[str] = None,
@@ -394,6 +402,21 @@ class Cloud:
         # If a cloud does not support labels, they are ignored. Only clouds
         # that support labels implement this method.
         del label_key, label_value
+        return True, None
+
+    @classmethod
+    def is_volume_name_valid(cls,
+                             volume_name: str) -> Tuple[bool, Optional[str]]:
+        """Validates that the volume name is valid for this cloud.
+
+        Returns:
+            A tuple of a boolean indicating whether the volume name is valid
+            and an optional string describing the reason if the volume name
+            is invalid.
+        """
+        # If a cloud does not support volume, they are ignored. Only clouds
+        # that support volume implement this method.
+        del volume_name
         return True, None
 
     @timeline.event

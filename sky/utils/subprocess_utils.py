@@ -10,7 +10,8 @@ import sys
 import threading
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, Union
+from typing import (Any, Callable, Dict, List, Optional, Protocol, Set, Tuple,
+                    Union)
 
 import colorama
 
@@ -18,6 +19,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import log_lib
+from sky.skylet import subprocess_daemon
 from sky.utils import common_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -107,7 +109,7 @@ def get_parallel_threads(cloud_str: Optional[str] = None) -> int:
 
 
 def run_in_parallel(func: Callable,
-                    args: List[Any],
+                    args: Union[List[Any], Set[Any]],
                     num_threads: Optional[int] = None) -> List[Any]:
     """Run a function in parallel on a list of arguments.
 
@@ -128,7 +130,7 @@ def run_in_parallel(func: Callable,
     if len(args) == 0:
         return []
     if len(args) == 1:
-        return [func(args[0])]
+        return [func(list(args)[0])]
 
     processes = (num_threads
                  if num_threads is not None else get_parallel_threads())
@@ -305,11 +307,17 @@ def run_with_retries(
     return returncode, stdout, stderr
 
 
-def kill_process_daemon(process_pid: int) -> None:
+def kill_process_daemon(process_pid: int, use_kill_pg: bool = False) -> None:
     """Start a daemon as a safety net to kill the process.
 
     Args:
         process_pid: The PID of the process to kill.
+        use_kill_pg: Whether to use kill process group to kill the process. If
+            True, the process will use os.killpg() to kill the target process
+            group on UNIX system, which is more efficient than using the daemon
+            to refresh the process tree in the daemon. Note that both
+            implementations have corner cases where subprocesses might not be
+            killed. Refer to subprocess_daemon.py for more details.
     """
     # Get initial children list
     try:
@@ -336,6 +344,10 @@ def kill_process_daemon(process_pid: int) -> None:
         ','.join(map(str, initial_children)),
     ]
 
+    env = os.environ.copy()
+    if use_kill_pg:
+        env[subprocess_daemon.USE_KILL_PG_ENV_VAR] = '1'
+
     # We do not need to set `start_new_session=True` here, as the
     # daemon script will detach itself from the parent process with
     # fork to avoid being killed by parent process. See the reason we
@@ -347,6 +359,7 @@ def kill_process_daemon(process_pid: int) -> None:
         stderr=subprocess.DEVNULL,
         # Disable input
         stdin=subprocess.DEVNULL,
+        env=env,
     )
 
 
@@ -437,3 +450,12 @@ def slow_start_processes(processes: List[Startable],
             break
         batch_size = min(batch_size * 2, max_batch_size)
         time.sleep(delay)
+
+
+def is_process_alive(pid: int) -> bool:
+    """Check if a process is alive."""
+    try:
+        process = psutil.Process(pid)
+        return process.is_running()
+    except psutil.NoSuchProcess:
+        return False

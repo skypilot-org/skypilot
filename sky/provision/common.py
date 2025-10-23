@@ -97,6 +97,8 @@ class InstanceInfo:
     external_ip: Optional[str]
     tags: Dict[str, str]
     ssh_port: int = 22
+    # The internal service address of the instance on Kubernetes.
+    internal_svc: Optional[str] = None
 
     def get_feasible_ip(self) -> str:
         """Get the most feasible IPs of the instance. This function returns

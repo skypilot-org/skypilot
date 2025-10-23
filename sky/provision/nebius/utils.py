@@ -14,6 +14,8 @@ logger = sky_logging.init_logger(__name__)
 
 POLL_INTERVAL = 5
 
+_MAX_OPERATIONS_TO_FETCH = 1000
+
 
 def retry(func):
     """Decorator to retry a function."""
@@ -100,15 +102,23 @@ def delete_cluster(name: str, region: str) -> None:
 def list_instances(project_id: str) -> Dict[str, Dict[str, Any]]:
     """Lists instances associated with API key."""
     service = nebius.compute().InstanceServiceClient(nebius.sdk())
-    result = nebius.sync_call(
-        service.list(
-            nebius.compute().ListInstancesRequest(parent_id=project_id),
-            timeout=nebius.READ_TIMEOUT))
-
-    instances = result
+    page_token = ''
+    instances = []
+    while True:
+        result = nebius.sync_call(
+            service.list(nebius.compute().ListInstancesRequest(
+                parent_id=project_id,
+                page_size=100,
+                page_token=page_token,
+            ),
+                         timeout=nebius.READ_TIMEOUT))
+        instances.extend(result.items)
+        if not result.next_page_token:  # "" means no more pages
+            break
+        page_token = result.next_page_token
 
     instance_dict: Dict[str, Dict[str, Any]] = {}
-    for instance in instances.items:
+    for instance in instances:
         info = {}
         info['status'] = instance.status.state.name
         info['name'] = instance.metadata.name
@@ -178,6 +188,7 @@ def launch(cluster_name_on_cloud: str,
            user_data: str,
            associate_public_ip_address: bool,
            filesystems: List[Dict[str, Any]],
+           use_static_ip_address: bool = False,
            use_spot: bool = False,
            network_tier: Optional[resources_utils.NetworkTier] = None) -> str:
     # Each node must have a unique name to avoid conflicts between
@@ -293,7 +304,8 @@ def launch(cluster_name_on_cloud: str,
                         subnet_id=sub_net.items[0].metadata.id,
                         ip_address=nebius.compute().IPAddress(),
                         name='network-interface-0',
-                        public_ip_address=nebius.compute().PublicIPAddress()
+                        public_ip_address=nebius.compute().PublicIPAddress(
+                            static=use_static_ip_address)
                         if associate_public_ip_address else None,
                     )
                 ],
@@ -313,11 +325,43 @@ def launch(cluster_name_on_cloud: str,
                 parent_id=project_id,
                 name=instance_name,
             )))
+        instance_id = instance.metadata.id
         if instance.status.state.name == 'STARTING':
-            instance_id = instance.metadata.id
             break
+
+        # All Instances initially have state=STOPPED and reconciling=True,
+        # so we need to wait until reconciling is False.
+        if instance.status.state.name == 'STOPPED' and \
+                not instance.status.reconciling:
+            next_token = ''
+            total_operations = 0
+            while True:
+                operations_response = nebius.sync_call(
+                    service.list_operations_by_parent(
+                        nebius.compute().ListOperationsByParentRequest(
+                            parent_id=project_id,
+                            page_size=100,
+                            page_token=next_token,
+                        )))
+                total_operations += len(operations_response.operations)
+                for operation in operations_response.operations:
+                    # Find the most recent operation for the instance.
+                    if operation.resource_id == instance_id:
+                        error_msg = operation.description
+                        if operation.status:
+                            error_msg += f' {operation.status.message}'
+                        raise RuntimeError(error_msg)
+                # If we've fetched too many operations, or there are no more
+                # operations to fetch, just raise a generic error.
+                if total_operations > _MAX_OPERATIONS_TO_FETCH or \
+                        not operations_response.next_page_token:
+                    raise RuntimeError(
+                        f'Instance {instance_name} failed to start.')
+                next_token = operations_response.next_page_token
         time.sleep(POLL_INTERVAL)
-        logger.debug(f'Waiting for instance {instance_name} start running.')
+        logger.debug(f'Waiting for instance {instance_name} to start running. '
+                     f'State: {instance.status.state.name}, '
+                     f'Reconciling: {instance.status.reconciling}')
         retry_count += 1
 
     if retry_count == nebius.MAX_RETRIES_TO_INSTANCE_READY:

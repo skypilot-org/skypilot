@@ -49,6 +49,8 @@ ALLOWED_TERMS = {
     'Okta',
     'Prometheus',
     'Grafana',
+    # Providers/brands
+    'PrimeIntellect',
     # Framework names
     'vLLM',
     'TGI',
@@ -58,6 +60,8 @@ ALLOWED_TERMS = {
     'Qwen',
     # Area
     'Europe',
+    'WARP',
+    'Cloudflare'
 }
 
 # Add multi-word terms that should be treated as a single entity
@@ -79,6 +83,10 @@ MULTI_WORD_TERMS = {
     'Google Auth Platform',
     'Google Cloud Logging',
     'AWS Systems Manager',
+    'Microsoft Entra ID',
+    # Providers/brands
+    'Prime Intellect',
+    'Cloudflare Zero Trust',
 }
 
 
