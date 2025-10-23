@@ -118,6 +118,17 @@ _DEFAULT_REQUEST_FIELDS_TO_SHOW = [
 _VERBOSE_REQUEST_FIELDS_TO_SHOW = _DEFAULT_REQUEST_FIELDS_TO_SHOW + [
     'cluster_name'
 ]
+_DEFAULT_MANAGED_JOB_FIELDS_TO_GET = [
+    'job_id', 'task_id', 'workspace', 'job_name', 'task_name', 'resources',
+    'submitted_at', 'end_at', 'job_duration', 'recovery_count', 'status', 'pool'
+]
+_VERBOSE_MANAGED_JOB_FIELDS_TO_GET = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET + [
+    'current_cluster_name', 'job_id_on_pool_cluster', 'start_at', 'infra',
+    'cloud', 'region', 'zone', 'cluster_resources', 'schedule_state', 'details',
+    'failure_reason', 'metadata'
+]
+_USER_NAME_FIELD = ['user_name']
+_USER_HASH_FIELD = ['user_hash']
 
 _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE = (
     '{cluster_num} cluster{plural} {verb}. Please specify {cause} '
@@ -1333,11 +1344,15 @@ def exec(
 
 
 def _handle_jobs_queue_request(
-        request_id: server_common.RequestId[List[responses.ManagedJobRecord]],
-        show_all: bool,
-        show_user: bool,
-        max_num_jobs_to_show: Optional[int],
-        is_called_by_user: bool = False) -> Tuple[Optional[int], str]:
+    request_id: server_common.RequestId[Union[
+        List[responses.ManagedJobRecord],
+        Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int]]],
+    show_all: bool,
+    show_user: bool,
+    max_num_jobs_to_show: Optional[int],
+    is_called_by_user: bool = False,
+    only_in_progress: bool = False,
+) -> Tuple[Optional[int], str]:
     """Get the in-progress managed jobs.
 
     Args:
@@ -1348,6 +1363,7 @@ def _handle_jobs_queue_request(
             and `sky jobs queue`.
         is_called_by_user: If this function is called by user directly, or an
             internal call.
+        only_in_progress: If True, only return the number of in-progress jobs.
 
     Returns:
         A tuple of (num_in_progress_jobs, msg). If num_in_progress_jobs is None,
@@ -1358,11 +1374,27 @@ def _handle_jobs_queue_request(
     # TODO(SKY-980): remove unnecessary fallbacks on the client side.
     num_in_progress_jobs = None
     msg = ''
+    status_counts: Optional[Dict[str, int]] = None
     try:
         if not is_called_by_user:
             usage_lib.messages.usage.set_internal()
-        managed_jobs_ = sdk.stream_and_get(request_id)
-        num_in_progress_jobs = len(set(job['job_id'] for job in managed_jobs_))
+        result = sdk.stream_and_get(request_id)
+        if isinstance(result, tuple):
+            managed_jobs_, total, status_counts, _ = result
+            if only_in_progress:
+                num_in_progress_jobs = 0
+                if status_counts:
+                    for status_value, count in status_counts.items():
+                        status_enum = managed_jobs.ManagedJobStatus(
+                            status_value)
+                        if not status_enum.is_terminal():
+                            num_in_progress_jobs += count
+            else:
+                num_in_progress_jobs = total
+        else:
+            managed_jobs_ = result
+            num_in_progress_jobs = len(
+                set(job['job_id'] for job in managed_jobs_))
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
         msg = str(e)
@@ -1406,10 +1438,13 @@ def _handle_jobs_queue_request(
         msg += ('Failed to query managed jobs: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
     else:
-        msg = table_utils.format_job_table(managed_jobs_,
-                                           show_all=show_all,
-                                           show_user=show_user,
-                                           max_jobs=max_num_jobs_to_show)
+        msg = table_utils.format_job_table(
+            managed_jobs_,
+            show_all=show_all,
+            show_user=show_user,
+            max_jobs=max_num_jobs_to_show,
+            status_counts=status_counts,
+        )
     return num_in_progress_jobs, msg
 
 
@@ -1798,9 +1833,16 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
 
     # Phase 2: Parallel submission of all API requests
     def submit_managed_jobs():
-        return managed_jobs.queue(refresh=False,
-                                  skip_finished=True,
-                                  all_users=all_users)
+        fields = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET
+        if all_users:
+            fields = fields + _USER_NAME_FIELD
+        return managed_jobs.queue(
+            refresh=False,
+            skip_finished=True,
+            all_users=all_users,
+            fields=fields,
+            limit=_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS,
+        )
 
     def submit_services(
     ) -> Optional[server_common.RequestId[List[Dict[str, Any]]]]:
@@ -1906,7 +1948,8 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     show_all=False,
                     show_user=all_users,
                     max_num_jobs_to_show=_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS,
-                    is_called_by_user=False)
+                    is_called_by_user=False,
+                    only_in_progress=True)
             except KeyboardInterrupt:
                 sdk.api_cancel(managed_jobs_queue_request_id, silent=True)
                 managed_jobs_query_interrupted = True
@@ -2937,13 +2980,22 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
         controller_name, expect_exact_match=False)
     assert controller is not None, controller_name
 
+    status_counts: Optional[Dict[str, int]] = None
     with rich_utils.client_status(
             '[bold cyan]Checking for in-progress managed jobs and pools[/]'):
         try:
-            request_id = managed_jobs.queue(refresh=False,
-                                            skip_finished=True,
-                                            all_users=True)
-            managed_jobs_ = sdk.stream_and_get(request_id)
+            fields = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET + _USER_NAME_FIELD
+            request_id = managed_jobs.queue(
+                refresh=False,
+                skip_finished=True,
+                all_users=True,
+                fields=fields,
+            )
+            result = sdk.stream_and_get(request_id)
+            if isinstance(result, tuple):
+                managed_jobs_, _, status_counts, _ = result
+            else:
+                managed_jobs_ = result
             request_id_pools = managed_jobs.pool_status(pool_names=None)
             pools_ = sdk.stream_and_get(request_id_pools)
         except exceptions.ClusterNotUpError as e:
@@ -2974,10 +3026,17 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
                 }}):
                 # Check again with the consolidation mode disabled. This is to
                 # make sure there is no in-progress managed jobs.
-                request_id = managed_jobs.queue(refresh=False,
-                                                skip_finished=True,
-                                                all_users=True)
-                managed_jobs_ = sdk.stream_and_get(request_id)
+                request_id = managed_jobs.queue(
+                    refresh=False,
+                    skip_finished=True,
+                    all_users=True,
+                    fields=fields,
+                )
+                result = sdk.stream_and_get(request_id)
+                if isinstance(result, tuple):
+                    managed_jobs_, _, status_counts, _ = result
+                else:
+                    managed_jobs_ = result
                 request_id_pools = managed_jobs.pool_status(pool_names=None)
                 pools_ = sdk.stream_and_get(request_id_pools)
 
@@ -2988,9 +3047,12 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
            'jobs (output of `sky jobs queue`) will be lost.')
     click.echo(msg)
     if managed_jobs_:
-        job_table = table_utils.format_job_table(managed_jobs_,
-                                                 show_all=False,
-                                                 show_user=True)
+        job_table = table_utils.format_job_table(
+            managed_jobs_,
+            show_all=False,
+            show_user=True,
+            status_counts=status_counts,
+        )
         msg = controller.value.decline_down_for_dirty_controller_hint
         # Add prefix to each line to align with the bullet point.
         msg += '\n'.join(
@@ -4606,6 +4668,14 @@ def jobs_launch(
 @flags.config_option(expose_value=False)
 @flags.verbose_option()
 @click.option(
+    '--limit',
+    '-l',
+    default=_NUM_MANAGED_JOBS_TO_SHOW,
+    type=int,
+    required=False,
+    help=(f'Number of jobs to show, default is {_NUM_MANAGED_JOBS_TO_SHOW},'
+          f' use "-a/--all" to show all jobs.'))
+@click.option(
     '--refresh',
     '-r',
     default=False,
@@ -4624,7 +4694,7 @@ def jobs_launch(
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
-               all_users: bool, all: bool):
+               all_users: bool, all: bool, limit: int):
     """Show statuses of managed jobs.
 
     Each managed jobs can have one of the following statuses:
@@ -4675,12 +4745,29 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
 
       watch -n60 sky jobs queue
 
+    (Tip) To show only the latest 10 jobs, use ``-l/--limit 10``:
+
+    .. code-block:: bash
+
+      sky jobs queue -l 10
+
     """
     click.secho('Fetching managed job statuses...', fg='cyan')
     with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
+        max_num_jobs_to_show = (limit if not all else None)
+        fields = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET
+        if verbose:
+            fields = _VERBOSE_MANAGED_JOB_FIELDS_TO_GET
+        if all_users:
+            fields = fields + _USER_NAME_FIELD
+            if verbose:
+                fields = fields + _USER_HASH_FIELD
         managed_jobs_request_id = managed_jobs.queue(
-            refresh=refresh, skip_finished=skip_finished, all_users=all_users)
-        max_num_jobs_to_show = (_NUM_MANAGED_JOBS_TO_SHOW if not all else None)
+            refresh=refresh,
+            skip_finished=skip_finished,
+            all_users=all_users,
+            limit=max_num_jobs_to_show,
+            fields=fields)
         num_jobs, msg = _handle_jobs_queue_request(
             managed_jobs_request_id,
             show_all=verbose,
@@ -4699,7 +4786,8 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
             f'{colorama.Fore.CYAN}'
             f'Only showing the latest {max_num_jobs_to_show} '
             f'managed jobs'
-            f'(use --all to show all managed jobs) {colorama.Style.RESET_ALL} ')
+            f'(use --limit to show more managed jobs or '
+            f'--all to show all managed jobs) {colorama.Style.RESET_ALL} ')
 
 
 @jobs.command('cancel', cls=_DocumentedCodeCommand)

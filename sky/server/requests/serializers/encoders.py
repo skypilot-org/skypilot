@@ -148,12 +148,13 @@ def encode_jobs_queue_v2(
     else:
         jobs = jobs_or_tuple
         total = None
-    for job in jobs:
+    jobs_dict = [job.model_dump(by_alias=True) for job in jobs]
+    for job in jobs_dict:
         job['status'] = job['status'].value
     if total is None:
-        return [job.model_dump(by_alias=True) for job in jobs]
+        return jobs_dict
     return {
-        'jobs': [job.model_dump(by_alias=True) for job in jobs],
+        'jobs': jobs_dict,
         'total': total,
         'total_no_filter': total_no_filter,
         'status_counts': status_counts
