@@ -27,6 +27,34 @@ logger = sky_logging.init_logger(__name__)
 def apply(volume: volume_lib.Volume) -> server_common.RequestId[None]:
     """Creates or registers a volume.
 
+    Example:
+        .. code-block:: python
+
+            import sky.volumes
+            cfg = {
+                'name': 'pvc',
+                'type': 'k8s-pvc',
+                'size': '100GB',
+                'labels': {
+                    'key': 'value',
+                },
+            }
+            vol = sky.volumes.Volume.from_yaml_config(cfg)
+            request_id = sky.volumes.apply(vol)
+            sky.get(request_id)
+
+            or
+
+            import sky.volumes
+            vol = sky.volumes.Volume(
+                name='vol',
+                type='runpod-network-volume',
+                infra='runpod/ca/CA-MTL-1',
+                size='100GB',
+            )
+            request_id = sky.volumes.apply(vol)
+            sky.get(request_id)
+
     Args:
         volume: The volume to apply.
 

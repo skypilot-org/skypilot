@@ -19,10 +19,15 @@ router = fastapi.APIRouter()
 @router.get('')
 async def volume_list(request: fastapi.Request) -> None:
     """Gets the volumes."""
+    auth_user = request.state.auth_user
+    auth_user_env_vars_kwargs = {
+        'env_vars': auth_user.to_env_vars()
+    } if auth_user else {}
+    volume_list_body = payloads.VolumeListBody(**auth_user_env_vars_kwargs)
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='volume_list',
-        request_body=payloads.RequestBody(),
+        request_body=volume_list_body,
         func=core.volume_list,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
@@ -76,6 +81,11 @@ async def volume_apply(request: fastapi.Request,
         elif access_mode not in supported_access_modes:
             raise fastapi.HTTPException(
                 status_code=400, detail=f'Invalid access mode: {access_mode}')
+    elif volume_type == volume.VolumeType.RUNPOD_NETWORK_VOLUME.value:
+        if not cloud.is_same_cloud(clouds.RunPod()):
+            raise fastapi.HTTPException(
+                status_code=400,
+                detail='Runpod network volume is only supported on Runpod')
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='volume_apply',

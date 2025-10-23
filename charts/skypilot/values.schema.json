@@ -173,6 +173,12 @@
                                 "null"
                             ]
                         },
+                        "redis-image": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
                         "redis-secret": {
                             "type": [
                                 "string",
@@ -187,6 +193,9 @@
                         },
                         "session-store-type": {
                             "type": "string"
+                        },
+                        "use-https": {
+                            "type": "boolean"
                         }
                     }
                 },
@@ -475,6 +484,12 @@
                             "type": "string"
                         },
                         "oidc-issuer-url": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
+                        "redis-image": {
                             "type": [
                                 "string",
                                 "null"

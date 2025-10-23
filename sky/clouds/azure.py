@@ -15,6 +15,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import azure
+from sky.adaptors import common as adaptors_common
 from sky.clouds.utils import azure_utils
 from sky.utils import annotations
 from sky.utils import common_utils
@@ -546,6 +547,7 @@ class Azure(clouds.Cloud):
     @classmethod
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
+
         help_str = (
             ' Run the following commands:'
             f'\n{cls._INDENT_PREFIX}  $ az login'
@@ -560,6 +562,16 @@ class Azure(clouds.Cloud):
         if not os.path.isfile(os.path.expanduser(azure_token_cache_file)):
             return (False,
                     f'{azure_token_cache_file} does not exist.' + help_str)
+
+        dependency_installation_hints = (
+            'Azure dependencies are not installed. '
+            'Run the following commands:'
+            f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[azure]'
+            f'\n{cls._INDENT_PREFIX}Credentials may also need to be set.')
+        # Check if the azure blob storage dependencies are installed.
+        if not adaptors_common.can_import_modules(
+            ['azure.storage.blob', 'msgraph']):
+            return False, dependency_installation_hints
 
         try:
             _run_output('az --version')
@@ -580,19 +592,6 @@ class Azure(clouds.Cloud):
             return False, (f'Getting user\'s Azure identity failed.{help_str}\n'
                            f'{cls._INDENT_PREFIX}Details: '
                            f'{common_utils.format_exception(e)}')
-
-        # Check if the azure blob storage dependencies are installed.
-        try:
-            # pylint: disable=redefined-outer-name, import-outside-toplevel, unused-import
-            from azure.storage import blob
-            import msgraph
-        except ImportError as e:
-            return False, (
-                f'Azure blob storage depdencies are not installed. '
-                'Run the following commands:'
-                f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[azure]'
-                f'\n{cls._INDENT_PREFIX}Details: '
-                f'{common_utils.format_exception(e)}')
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:

@@ -42,4 +42,5 @@ class KubernetesAutoscalerType(enum.Enum):
     """Enum for the different types of cluster autoscalers for Kubernetes."""
     GKE = 'gke'
     KARPENTER = 'karpenter'
+    COREWEAVE = 'coreweave'
     GENERIC = 'generic'

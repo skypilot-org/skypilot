@@ -16,6 +16,7 @@ import pathlib
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from typing import Optional, Tuple
 
@@ -133,19 +134,45 @@ def _build_sky_wheel() -> pathlib.Path:
         # It is important to normalize the path, otherwise 'pip wheel' would
         # treat the directory as a file and generate an empty wheel.
         norm_path = str(tmp_dir) + os.sep
+        # TODO(#5046): Consider adding native UV support for building wheels.
+        # Use `python -m pip` instead of `pip3` for better compatibility across
+        # different environments (conda, venv, UV, system Python, etc.)
         try:
-            # TODO(suquark): For python>=3.7, 'subprocess.run' supports capture
-            # of the output.
             subprocess.run([
-                'pip3', 'wheel', '--no-deps', norm_path, '--wheel-dir',
+                sys.executable, '-m', 'pip', 'wheel', '--no-deps', norm_path,
+                '--wheel-dir',
                 str(tmp_dir)
             ],
-                           stdout=subprocess.DEVNULL,
-                           stderr=subprocess.PIPE,
-                           check=True)
+                           capture_output=True,
+                           check=True,
+                           text=True)
         except subprocess.CalledProcessError as e:
-            raise RuntimeError('Failed to build pip wheel for SkyPilot. '
-                               f'Error message: {e.stderr.decode()}') from e
+            error_msg = e.stderr
+            if 'No module named pip' in error_msg:
+                # pip module not found - provide helpful suggestions based on
+                # the available package managers
+                if shutil.which('uv'):
+                    msg = ('pip module not found. Since you have UV installed, '
+                           'you can install pip by running:\n'
+                           '  uv pip install pip')
+                elif shutil.which('conda'):
+                    msg = (
+                        'pip module not found. Since you have conda installed, '
+                        'you can install pip by running:\n'
+                        '  conda install pip')
+                else:
+                    msg = ('pip module not found. Please install pip for your '
+                           f'Python environment ({sys.executable}).')
+            else:
+                # Other pip errors
+                msg = f'pip wheel command failed. Error: {error_msg}'
+            raise RuntimeError('Failed to build pip wheel for SkyPilot.\n' +
+                               msg) from e
+        except FileNotFoundError as e:
+            # Python executable not found (extremely rare)
+            raise RuntimeError(
+                f'Failed to build pip wheel for SkyPilot. '
+                f'Python executable not found: {sys.executable}') from e
 
         try:
             wheel_path = next(tmp_dir.glob(_WHEEL_PATTERN))

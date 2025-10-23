@@ -3,9 +3,12 @@ import time
 from unittest import mock
 
 import pytest
+import requests
 
 from sky import exceptions
 from sky.server import rest
+
+request_err = requests.exceptions.ChunkedEncodingError("Test error")
 
 
 class TestHandleServerUnavailable:
@@ -143,7 +146,7 @@ class TestRetryTransientErrorsDecorator:
             nonlocal call_count
             call_count += 1
             if call_count < 3:
-                raise ValueError("Test error")
+                raise request_err
             return "success"
 
         with mock.patch('time.sleep'):
@@ -168,7 +171,7 @@ class TestRetryTransientErrorsDecorator:
             call_count += 1
             if call_count < 10:
                 retry_context.line_processed += 1
-                raise ValueError("Test error")
+                raise request_err
             return "success"
 
         with mock.patch('time.sleep'):
@@ -193,12 +196,12 @@ class TestRetryTransientErrorsDecorator:
             call_count += 1
             if call_count < 10:
                 retry_context.line_processed += 1
-                raise ValueError("Test error")
+                raise request_err
 
-            raise ValueError("Test error")
+            raise request_err
 
         with mock.patch('time.sleep'):
-            with pytest.raises(ValueError):
+            with pytest.raises(request_err.__class__):
                 function_failing_after_making_progress()
 
         # Check that debug logging was called

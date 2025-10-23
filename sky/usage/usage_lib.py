@@ -19,6 +19,7 @@ from sky.usage import constants
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     import inspect
@@ -402,7 +403,7 @@ def _clean_yaml(yaml_info: Dict[str, Optional[str]]):
                     contents = inspect.getsource(contents)
 
                 if type(contents) in constants.USAGE_MESSAGE_REDACT_TYPES:
-                    lines = common_utils.dump_yaml_str({
+                    lines = yaml_utils.dump_yaml_str({
                         redact_type: contents
                     }).strip().split('\n')
                     message = (f'{len(lines)} lines {redact_type.upper()}'
@@ -431,7 +432,7 @@ def prepare_json_from_yaml_config(
         with open(yaml_config_or_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
             comment_lines = [line for line in lines if line.startswith('#')]
-        yaml_info = common_utils.read_yaml_all(yaml_config_or_path)
+        yaml_info = yaml_utils.read_yaml_all(yaml_config_or_path)
 
     for i in range(len(yaml_info)):
         if yaml_info[i] is None:

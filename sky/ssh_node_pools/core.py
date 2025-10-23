@@ -5,6 +5,8 @@ from typing import Any, Dict, List
 
 import yaml
 
+from sky.utils import yaml_utils
+
 
 class SSHNodePoolManager:
     """Manager for SSH Node Pool configurations."""
@@ -21,7 +23,7 @@ class SSHNodePoolManager:
 
         try:
             with open(self.config_path, 'r', encoding='utf-8') as f:
-                return yaml.safe_load(f) or {}
+                return yaml_utils.safe_load(f) or {}
         except Exception as e:
             raise RuntimeError(
                 f'Failed to read SSH Node Pool config: {e}') from e

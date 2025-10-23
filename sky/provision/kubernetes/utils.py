@@ -1,4 +1,5 @@
 """Kubernetes utilities for SkyPilot."""
+import copy
 import dataclasses
 import datetime
 import enum
@@ -38,6 +39,7 @@ from sky.utils import schemas
 from sky.utils import status_lib
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     import jinja2
@@ -233,6 +235,40 @@ def normalize_tpu_accelerator_name(accelerator: str) -> Tuple[str, int]:
     return accelerator, 1
 
 
+def _is_cloudflare_403_error(exception: Exception) -> bool:
+    """Check if an exception is a transient CloudFlare 403 error.
+
+    CloudFlare proxy 403 errors with CF-specific headers are transient and
+    should be retried, unlike real RBAC 403 errors.
+
+    Args:
+        exception: The exception to check
+
+    Returns:
+        True if this is a CloudFlare 403 error that should be retried
+    """
+    if not isinstance(exception, kubernetes.api_exception()):
+        return False
+
+    # Only check for 403 errors
+    if exception.status != 403:
+        return False
+
+    # Check for CloudFlare-specific headers
+    headers = exception.headers if hasattr(exception, 'headers') else {}
+    if not headers:
+        return False
+
+    # CloudFlare errors have CF-RAY header and/or Server: cloudflare
+    for k, v in headers.items():
+        if 'cf-ray' in k.lower():
+            return True
+        if 'server' in k.lower() and 'cloudflare' in str(v).lower():
+            return True
+
+    return False
+
+
 def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                     retry_interval=DEFAULT_RETRY_INTERVAL_SECONDS,
                     resource_type: Optional[str] = None):
@@ -267,19 +303,25 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                         kubernetes.api_exception(),
                         kubernetes.config_exception()) as e:
                     last_exception = e
+
+                    # Check if this is a CloudFlare transient 403 error
+                    is_cloudflare_403 = _is_cloudflare_403_error(e)
+
                     # Don't retry on permanent errors like 401 (Unauthorized)
-                    # or 403 (Forbidden)
+                    # or 403 (Forbidden), unless it's a CloudFlare transient 403
                     if (isinstance(e, kubernetes.api_exception()) and
-                            e.status in (401, 403)):
+                            e.status in (401, 403) and not is_cloudflare_403):
                         # Raise KubeAPIUnreachableError exception so that the
                         # optimizer/provisioner can failover to other clouds.
                         raise exceptions.KubeAPIUnreachableError(
                             f'Kubernetes API error: {str(e)}') from e
                     if attempt < max_retries - 1:
                         sleep_time = backoff.current_backoff()
-                        logger.debug(f'Kubernetes API call {func.__name__} '
-                                     f'failed with {str(e)}. Retrying in '
-                                     f'{sleep_time:.1f}s...')
+                        error_type = 'CloudFlare 403' if is_cloudflare_403 else 'error'
+                        logger.debug(
+                            f'Kubernetes API call {func.__name__} '
+                            f'failed with {error_type} {str(e)}. Retrying in '
+                            f'{sleep_time:.1f}s...')
                         time.sleep(sleep_time)
                         continue
 
@@ -693,6 +735,9 @@ def detect_gpu_label_formatter(
         for _, label_list in node_labels.items():
             for label, value in label_list:
                 if lf.match_label_key(label):
+                    # Skip empty label values
+                    if not value or value.strip() == '':
+                        continue
                     valid, reason = lf.validate_label_value(value)
                     if valid:
                         return lf(), node_labels
@@ -1078,6 +1123,14 @@ class KarpenterAutoscaler(Autoscaler):
     can_query_backend: bool = False
 
 
+class CoreweaveAutoscaler(Autoscaler):
+    """CoreWeave autoscaler
+    """
+
+    label_formatter: Any = CoreWeaveLabelFormatter
+    can_query_backend: bool = False
+
+
 class GenericAutoscaler(Autoscaler):
     """Generic autoscaler
     """
@@ -1090,6 +1143,7 @@ class GenericAutoscaler(Autoscaler):
 AUTOSCALER_TYPE_TO_AUTOSCALER = {
     kubernetes_enums.KubernetesAutoscalerType.GKE: GKEAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.KARPENTER: KarpenterAutoscaler,
+    kubernetes_enums.KubernetesAutoscalerType.COREWEAVE: CoreweaveAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.GENERIC: GenericAutoscaler,
 }
 
@@ -1895,7 +1949,7 @@ def is_kubeconfig_exec_auth(
 
     # Load the kubeconfig for the context
     kubeconfig_text = _get_kubeconfig_text_for_context(context)
-    kubeconfig = yaml.safe_load(kubeconfig_text)
+    kubeconfig = yaml_utils.safe_load(kubeconfig_text)
 
     # Get the user details
     user_details = kubeconfig['users']
@@ -2598,7 +2652,7 @@ def fill_ssh_jump_template(ssh_key_secret: str, ssh_jump_image: str,
                               image=ssh_jump_image,
                               secret=ssh_key_secret,
                               service_type=service_type)
-    content = yaml.safe_load(cont)
+    content = yaml_utils.safe_load(cont)
     return content
 
 
@@ -2702,11 +2756,11 @@ def get_endpoint_debug_message(context: Optional[str] = None) -> str:
 
 
 def combine_pod_config_fields(
-    cluster_yaml_path: str,
+    cluster_yaml_obj: Dict[str, Any],
     cluster_config_overrides: Dict[str, Any],
     cloud: Optional[clouds.Cloud] = None,
     context: Optional[str] = None,
-) -> None:
+) -> Dict[str, Any]:
     """Adds or updates fields in the YAML with fields from the
     ~/.sky/config.yaml's kubernetes.pod_spec dict.
     This can be used to add fields to the YAML that are not supported by
@@ -2745,9 +2799,7 @@ def combine_pod_config_fields(
                     - name: my-secret
         ```
     """
-    with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
-        yaml_content = f.read()
-    yaml_obj = yaml.safe_load(yaml_content)
+    merged_cluster_yaml_obj = copy.deepcopy(cluster_yaml_obj)
     # We don't use override_configs in `get_effective_region_config`, as merging
     # the pod config requires special handling.
     if isinstance(cloud, clouds.SSH):
@@ -2774,26 +2826,20 @@ def combine_pod_config_fields(
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.
     config_utils.merge_k8s_configs(
-        yaml_obj['available_node_types']['ray_head_default']['node_config'],
-        kubernetes_config)
-
-    # Write the updated YAML back to the file
-    common_utils.dump_yaml(cluster_yaml_path, yaml_obj)
+        merged_cluster_yaml_obj['available_node_types']['ray_head_default']
+        ['node_config'], kubernetes_config)
+    return merged_cluster_yaml_obj
 
 
-def combine_metadata_fields(cluster_yaml_path: str,
+def combine_metadata_fields(cluster_yaml_obj: Dict[str, Any],
                             cluster_config_overrides: Dict[str, Any],
-                            context: Optional[str] = None) -> None:
+                            context: Optional[str] = None) -> Dict[str, Any]:
     """Updates the metadata for all Kubernetes objects created by SkyPilot with
     fields from the ~/.sky/config.yaml's kubernetes.custom_metadata dict.
 
     Obeys the same add or update semantics as combine_pod_config_fields().
     """
-
-    with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
-        yaml_content = f.read()
-    yaml_obj = yaml.safe_load(yaml_content)
-
+    merged_cluster_yaml_obj = copy.deepcopy(cluster_yaml_obj)
     # Get custom_metadata from global config
     custom_metadata = skypilot_config.get_effective_region_config(
         cloud='kubernetes',
@@ -2815,22 +2861,42 @@ def combine_metadata_fields(cluster_yaml_path: str,
     # List of objects in the cluster YAML to be updated
     combination_destinations = [
         # Service accounts
-        yaml_obj['provider']['autoscaler_service_account']['metadata'],
-        yaml_obj['provider']['autoscaler_role']['metadata'],
-        yaml_obj['provider']['autoscaler_role_binding']['metadata'],
-        yaml_obj['provider']['autoscaler_service_account']['metadata'],
-        # Pod spec
-        yaml_obj['available_node_types']['ray_head_default']['node_config']
+        merged_cluster_yaml_obj['provider']['autoscaler_service_account']
         ['metadata'],
+        merged_cluster_yaml_obj['provider']['autoscaler_role']['metadata'],
+        merged_cluster_yaml_obj['provider']['autoscaler_role_binding']
+        ['metadata'],
+        merged_cluster_yaml_obj['provider']['autoscaler_service_account']
+        ['metadata'],
+        # Pod spec
+        merged_cluster_yaml_obj['available_node_types']['ray_head_default']
+        ['node_config']['metadata'],
         # Services for pods
-        *[svc['metadata'] for svc in yaml_obj['provider']['services']]
+        *[
+            svc['metadata']
+            for svc in merged_cluster_yaml_obj['provider']['services']
+        ]
     ]
 
     for destination in combination_destinations:
         config_utils.merge_k8s_configs(destination, custom_metadata)
 
-    # Write the updated YAML back to the file
-    common_utils.dump_yaml(cluster_yaml_path, yaml_obj)
+    return merged_cluster_yaml_obj
+
+
+def combine_pod_config_fields_and_metadata(
+        cluster_yaml_obj: Dict[str, Any],
+        cluster_config_overrides: Dict[str, Any],
+        cloud: Optional[clouds.Cloud] = None,
+        context: Optional[str] = None) -> Dict[str, Any]:
+    """Combines pod config fields and metadata fields"""
+    combined_yaml_obj = combine_pod_config_fields(cluster_yaml_obj,
+                                                  cluster_config_overrides,
+                                                  cloud, context)
+    combined_yaml_obj = combine_metadata_fields(combined_yaml_obj,
+                                                cluster_config_overrides,
+                                                context)
+    return combined_yaml_obj
 
 
 def merge_custom_metadata(
@@ -2863,7 +2929,8 @@ def merge_custom_metadata(
     config_utils.merge_k8s_configs(original_metadata, custom_metadata)
 
 
-def check_nvidia_runtime_class(context: Optional[str] = None) -> bool:
+@_retry_on_error(resource_type='runtimeclass')
+def check_nvidia_runtime_class(*, context: Optional[str] = None) -> bool:
     """Checks if the 'nvidia' RuntimeClass exists in the cluster"""
     # Fetch the list of available RuntimeClasses
     runtime_classes = kubernetes.node_api(context).list_runtime_class()
@@ -3686,7 +3753,7 @@ def format_kubeconfig_exec_auth_with_cache(kubeconfig_path: str) -> str:
     """
     # TODO(kyuds): GC cache files
     with open(kubeconfig_path, 'r', encoding='utf-8') as file:
-        config = yaml.safe_load(file)
+        config = yaml_utils.safe_load(file)
     normalized = yaml.dump(config, sort_keys=True)
     hashed = hashlib.sha1(normalized.encode('utf-8')).hexdigest()
     path = os.path.expanduser(

@@ -1,0 +1,46 @@
+# SkyPilot configuration for TorchTitan multi-node training
+# This configuration reproduces the functionality of multinode_trainer.slurm
+#
+# To launch:
+#   sky launch -c torchtitan-cluster sky.yaml
+#
+# To stop:
+#   sky down torchtitan-cluster
+#
+# To monitor:
+#   sky status --refresh
+
+name: torchtitan-multinode
+
+resources:
+  accelerators: {H100:8, H200:8}
+  disk_size: 1024GB
+
+num_nodes: 2
+
+workdir: .
+
+envs:
+  CONFIG_FILE: "./torchtitan/models/llama3/train_configs/llama3_8b.toml"
+  HF_TOKEN: ""
+
+setup: |
+  pip3 install --pre torch --index-url https://download.pytorch.org/whl/nightly/cu126 --force-reinstall
+  pip install -r requirements.txt
+  python scripts/download_hf_assets.py --repo_id meta-llama/Llama-3.1-8B --assets tokenizer --hf_token=$HF_TOKEN
+
+run: |
+  # Get head node IP (first node in the list)
+  HEAD_NODE_IP=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+  echo "Head node IP: $HEAD_NODE_IP"
+  
+  # SKYPILOT_NODE_RANK is automatically set by SkyPilot
+  torchrun \
+    --nnodes $SKYPILOT_NUM_NODES \
+    --nproc_per_node $SKYPILOT_NUM_GPUS_PER_NODE \
+    --node_rank $SKYPILOT_NODE_RANK \
+    --master_addr=$HEAD_NODE_IP \
+    --master_port=8008 \
+    -m torchtitan.train \
+    --job.config_file $CONFIG_FILE \
+    --training.dataset c4_test

@@ -313,7 +313,9 @@ from the client and return an error during validation.
 
 #### Adding new fields to API response body
 
-When adding new fields to objects that are serialized in API response bodies (such as resource handles), special care must be taken to ensure older clients can deserialize objects from newer servers. This commonly occurs with objects that are pickled and sent over the API.
+##### Adding new fields to the existing objects in the API response body
+
+When adding new fields to the existing objects that are serialized in API response bodies (such as resource handles), special care must be taken to ensure older clients can deserialize objects from newer servers. This commonly occurs with objects that are pickled and sent over the API.
 
 For example, if you add a new field like `SSHTunnelInfo` to `CloudVmRayResourceHandle`, older clients without this class definition will fail during deserialization with errors like:
 ```
@@ -330,9 +332,13 @@ backwards compatibility processing.
 
 See the `prepare_handle_for_backwards_compatibility` function and its usage for a concrete example of this.
 
+##### Adding new fields to the API response body
+
+When you need to add a brand-new field to the response body or change the response type (e.g., from `List` to `Dict`), prefer introducing a new API instead. See [Refactoring existing APIs](#refactoring-existing-apis) for details.
+
 #### Refactoring existing APIs
 
-Refactoring existing APIs can be tricky. It is recommended to add an new API instead. Then the compatibility issue can be addressed in the same way as [Adding new APIs](#adding-new-apis), e.g.:
+Refactoring existing APIs can be tricky. It is recommended to add a new API instead. Then the compatibility issue can be addressed in the same way as [Adding new APIs](#adding-new-apis), e.g.:
 
 - `constants.py`:
 

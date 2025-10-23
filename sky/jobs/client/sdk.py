@@ -243,7 +243,7 @@ def tail_logs(name: Optional[str] = None,
               controller: bool = False,
               refresh: bool = False,
               tail: Optional[int] = None,
-              output_stream: Optional['io.TextIOBase'] = None) -> int:
+              output_stream: Optional['io.TextIOBase'] = None) -> Optional[int]:
     """Tails logs of managed jobs.
 
     You can provide either a job name or a job ID to tail logs. If both are not
@@ -263,6 +263,8 @@ def tail_logs(name: Optional[str] = None,
         Exit code based on success or failure of the job. 0 if success,
         100 if the job failed. See exceptions.JobExitCode for possible exit
         codes.
+        Will return None if follow is False
+        (see note in sky/client/sdk.py::stream_response)
 
     Request Raises:
         ValueError: invalid arguments.
@@ -289,7 +291,8 @@ def tail_logs(name: Optional[str] = None,
     return sdk.stream_response(request_id=request_id,
                                response=response,
                                output_stream=output_stream,
-                               resumable=(tail == 0))
+                               resumable=(tail == 0),
+                               get_result=follow)
 
 
 @usage_lib.entrypoint

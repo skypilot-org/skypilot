@@ -17,7 +17,7 @@ Install SkyPilot using pip:
         .. code-block:: shell
 
           # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.11.
+          # SkyPilot requires 3.7 <= python <= 3.13.
           conda create -y -n sky python=3.10
           conda activate sky
 
@@ -28,15 +28,19 @@ Install SkyPilot using pip:
           pip install "skypilot[gcp]"
           pip install "skypilot[azure]"
           pip install "skypilot[oci]"
+          pip install "skypilot[nebius]"
           pip install "skypilot[lambda]"
           pip install "skypilot[runpod]"
           pip install "skypilot[fluidstack]"
           pip install "skypilot[paperspace]"
           pip install "skypilot[cudo]"
+          # IBM is only supported for Python <= 3.11
           pip install "skypilot[ibm]"
+          # SCP is only supported for Python <= 3.11
           pip install "skypilot[scp]"
           pip install "skypilot[vsphere]"
-          pip install "skypilot[nebius]"
+          # Nebius is only supported for Python >= 3.10
+
           pip install "skypilot[all]"
 
 
@@ -46,7 +50,7 @@ Install SkyPilot using pip:
         .. code-block:: shell
 
           # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.11.
+          # SkyPilot requires 3.7 <= python <= 3.13.
           conda create -y -n sky python=3.10
           conda activate sky
 
@@ -57,6 +61,7 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[gcp]"
           pip install "skypilot-nightly[azure]"
           pip install "skypilot-nightly[oci]"
+          pip install "skypilot-nightly[nebius]"
           pip install "skypilot-nightly[lambda]"
           pip install "skypilot-nightly[runpod]"
           pip install "skypilot-nightly[fluidstack]"
@@ -66,7 +71,6 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[ibm]"
           pip install "skypilot-nightly[scp]"
           pip install "skypilot-nightly[vsphere]"
-          pip install "skypilot-nightly[nebius]"
           pip install "skypilot-nightly[all]"
 
 
@@ -76,7 +80,7 @@ Install SkyPilot using pip:
         .. code-block:: shell
 
           # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.11.
+          # SkyPilot requires 3.7 <= python <= 3.13.
           conda create -y -n sky python=3.10
           conda activate sky
 
@@ -90,6 +94,7 @@ Install SkyPilot using pip:
           pip install -e ".[gcp]"
           pip install -e ".[azure]"
           pip install -e ".[oci]"
+          pip install -e ".[nebius]"
           pip install -e ".[lambda]"
           pip install -e ".[runpod]"
           pip install -e ".[fluidstack]"
@@ -98,7 +103,6 @@ Install SkyPilot using pip:
           pip install -e ".[ibm]"
           pip install -e ".[scp]"
           pip install -e ".[vsphere]"
-          pip install -e ".[nebius]"
           pip install -e ".[all]"
 
 To use more than one cloud, combine the pip extras:
@@ -127,15 +131,52 @@ To use more than one cloud, combine the pip extras:
           pip install -e ".[kubernetes,aws,gcp]"
 
 
-Installing via ``uv`` is also supported:
+Installing via ``uv``
+----------------------
 
-.. code-block:: shell
+SkyPilot can be installed using `uv <https://github.com/astral-sh/uv>`_, a fast Python package installer:
 
-  uv venv --seed --python 3.10
-  uv pip install "skypilot[kubernetes,aws,gcp]"
-  # Azure CLI has an issue with uv, and requires '--prerelease allow'.
-  uv pip install --prerelease allow azure-cli
-  uv pip install "skypilot[all]"
+.. tab-set::
+
+    .. tab-item:: uv venv
+        :sync: uv-venv-tab
+
+        .. code-block:: shell
+
+          # Create a virtual environment with pip pre-installed (required for SkyPilot)
+          uv venv --seed --python 3.10
+          source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+          
+          # Install SkyPilot with your chosen cloud providers
+          uv pip install "skypilot[kubernetes,aws,gcp]"
+          
+          # Azure CLI has an issue with uv, and requires '--prerelease allow'.
+          uv pip install --prerelease allow azure-cli
+          uv pip install "skypilot[azure]"
+
+        .. note::
+          
+          The ``--seed`` flag is **required** as it ensures ``pip`` is installed in the virtual environment. 
+          SkyPilot needs ``pip`` to build wheels for remote cluster setup.
+
+    .. tab-item:: uv tool
+        :sync: uv-tool-tab
+
+        .. code-block:: shell
+
+          # Install as a globally available tool with pip included
+          uv tool install --with pip "skypilot[aws,gcp]"
+          
+          # Or with all cloud providers
+          uv tool install --with pip "skypilot[all]"
+          
+          # Now you can use sky directly
+          sky check
+
+        .. note::
+          
+          The ``--with pip`` flag is **required** when using ``uv tool install``. 
+          Without it, SkyPilot will fail when building wheels for remote clusters.
 
 
 Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.
@@ -214,11 +255,14 @@ If you already have cloud access set up on your local machine, run ``sky check``
 
 Otherwise, configure access to at least one cloud using the following guides.
 
+
+.. _kubernetes-installation:
+
 Kubernetes
 ~~~~~~~~~~
 
 SkyPilot can run workloads on on-prem or cloud-hosted Kubernetes clusters
-(e.g., EKS, GKE). The only requirement is a valid kubeconfig at
+(e.g., EKS, GKE, Nebius Managed Kubernetes). The only requirement is a valid kubeconfig at
 :code:`~/.kube/config`.
 
 .. code-block:: shell
@@ -298,6 +342,60 @@ Azure
 Hint: run ``az account subscription list`` to get a list of subscription IDs under your account.
 
 
+Nebius
+~~~~~~
+
+`Nebius <https://nebius.com/>`__ is the ultimate cloud for AI explorers. To configure Nebius access, install and configure `Nebius CLI <https://docs.nebius.com/cli/quickstart>`__:
+
+.. code-block:: shell
+
+  mkdir -p ~/.nebius
+  nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt
+  nebius --format json iam whoami|jq -r '.user_profile.tenants[0].tenant_id' > ~/.nebius/NEBIUS_TENANT_ID.txt
+
+
+**Optional**: You can specify specific project ID and fabric in `~/.sky/config.yaml`, see :ref:`Configuration project_id and fabric for Nebius <config-yaml-nebius>`.
+
+Alternatively, you can also use a service account to access Nebius, see :ref:`Using Service Account for Nebius <nebius-service-account>`.
+
+To use `Nebius Managed Kubernetes <https://nebius.com/services/managed-kubernetes>`_, see :ref:`Kubernetes Installation <kubernetes-installation>`. Retrieve the Kubernetes credential with:
+
+.. code-block:: shell
+
+  nebius mk8s cluster get-credentials --id <cluster_id> --external --kubeconfig $HOME/.kube/config
+
+Nebius also offers `Object Storage <https://nebius.com/services/storage>`_, an S3-compatible object storage without any egress charges.
+SkyPilot can download/upload data to Nebius buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up Nebius support, run:
+
+.. code-block:: shell
+
+  # Install boto
+  pip install boto3
+  # Configure your Nebius Object Storage credentials
+  aws configure --profile nebius
+
+In the prompt, enter your Nebius Access Key ID and Secret Access Key (see `instructions to generate Nebius credentials <https://docs.nebius.com/object-storage/quickstart#env-configure>`_). Select :code:`auto` for the default region and :code:`json` for the default output format.
+
+.. code-block:: bash
+
+  aws configure set aws_access_key_id $NB_ACCESS_KEY_AWS_ID --profile nebius
+  aws configure set aws_secret_access_key $NB_SECRET_ACCESS_KEY --profile nebius
+  aws configure set region <REGION> --profile nebius
+  aws configure set endpoint_url <ENDPOINT>  --profile nebius
+
+
+RunPod
+~~~~~~~~~~
+
+`RunPod <https://runpod.io/>`__ is a specialized AI cloud provider that offers low-cost GPUs. To configure RunPod access, go to the `Settings <https://www.runpod.io/console/user/settings>`_ page on your RunPod console and generate an **API key**. Then, run:
+
+.. code-block:: shell
+
+  pip install "runpod>=1.6.1"
+  runpod config
+
+
+
 OCI
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -361,15 +459,6 @@ Vast
   mkdir -p ~/.config/vastai
   echo "<your_api_key_here>" > ~/.config/vastai/vast_api_key
 
-RunPod
-~~~~~~~~~~
-
-`RunPod <https://runpod.io/>`__ is a specialized AI cloud provider that offers low-cost GPUs. To configure RunPod access, go to the `Settings <https://www.runpod.io/console/user/settings>`_ page on your RunPod console and generate an **API key**. Then, run:
-
-.. code-block:: shell
-
-  pip install "runpod>=1.6.1"
-  runpod config
 
 
 Fluidstack
@@ -540,40 +629,6 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 
   Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
 
-Nebius
-~~~~~~
-
-`Nebius <https://nebius.com/>`__ is the ultimate cloud for AI explorers. To configure Nebius access, install and configure `Nebius CLI <https://docs.nebius.com/cli/quickstart>`__:
-
-.. code-block:: shell
-
-  mkdir -p ~/.nebius
-  nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt
-  nebius --format json iam whoami|jq -r '.user_profile.tenants[0].tenant_id' > ~/.nebius/NEBIUS_TENANT_ID.txt
-
-
-**Optional**: You can specify specific project ID and fabric in `~/.sky/config.yaml`, see :ref:`Configuration project_id and fabric for Nebius <config-yaml-nebius>`.
-
-Alternatively, you can also use a service account to access Nebius, see :ref:`Using Service Account for Nebius <nebius-service-account>`.
-
-Nebius also offers `Object Storage <https://nebius.com/services/storage>`_, an S3-compatible object storage without any egress charges.
-SkyPilot can download/upload data to Nebius buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up Nebius support, run:
-
-.. code-block:: shell
-
-  # Install boto
-  pip install boto3
-  # Configure your Nebius Object Storage credentials
-  aws configure --profile nebius
-
-In the prompt, enter your Nebius Access Key ID and Secret Access Key (see `instructions to generate Nebius credentials <https://docs.nebius.com/object-storage/quickstart#env-configure>`_). Select :code:`auto` for the default region and :code:`json` for the default output format.
-
-.. code-block:: bash
-
-  aws configure set aws_access_key_id $NB_ACCESS_KEY_AWS_ID --profile nebius
-  aws configure set aws_secret_access_key $NB_SECRET_ACCESS_KEY --profile nebius
-  aws configure set region <REGION> --profile nebius
-  aws configure set endpoint_url <ENDPOINT>  --profile nebius
 
 Request quotas for first time users
 --------------------------------------

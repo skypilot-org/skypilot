@@ -1,5 +1,6 @@
 """Tests for Kubernetes cloud implementation."""
 
+import copy
 import unittest
 from unittest import mock
 from unittest.mock import patch
@@ -624,11 +625,9 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         self.assertEqual(deploy_vars['k8s_resource_key'], 'nvidia.com/gpu')
         self.assertFalse(deploy_vars['tpu_requested'])  # H100 is GPU, not TPU
 
-    @patch('yaml.safe_load')
-    @patch('sky.utils.common_utils.dump_yaml')
     @patch('sky.skypilot_config.get_effective_region_config')
     def test_user_security_context_merged_with_ipc_lock_capability(
-            self, mock_get_cloud_config_value, mock_dump_yaml, mock_safe_load):
+            self, mock_get_cloud_config_value):
         """Test that user-specified securityContext is correctly merged with IPC_LOCK capability."""
 
         # Create a YAML structure with IPC_LOCK capability set
@@ -671,53 +670,35 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         }
 
         # Set up mocks
-        mock_safe_load.return_value = cluster_yaml_with_ipc_lock
         mock_get_cloud_config_value.return_value = user_pod_config
 
-        # Use a temporary file to avoid file not found error
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', delete=False,
-                                         suffix='.yaml') as tmp_file:
-            tmp_path = tmp_file.name
+        # Call the combine_pod_config_fields function
+        combined_yaml_obj = kubernetes_utils.combine_pod_config_fields(
+            cluster_yaml_with_ipc_lock, {}, None)
 
-        try:
-            # Call the combine_pod_config_fields function
-            kubernetes_utils.combine_pod_config_fields(tmp_path, {}, None)
+        # Get the modified YAML
+        container = combined_yaml_obj['available_node_types'][
+            'ray_head_default']['node_config']['spec']['containers'][0]
 
-            # Verify the YAML was loaded and written
-            mock_safe_load.assert_called_once()
-            mock_dump_yaml.assert_called_once()
+        # Verify that both IPC_LOCK and user-specified capabilities are present
+        security_context = container['securityContext']
 
-            # Get the modified YAML
-            modified_yaml = mock_dump_yaml.call_args[0][1]
-            container = modified_yaml['available_node_types'][
-                'ray_head_default']['node_config']['spec']['containers'][0]
+        # Check that runAsUser and runAsGroup from user config are preserved
+        self.assertEqual(security_context['runAsUser'], 1000)
+        self.assertEqual(security_context['runAsGroup'], 1000)
 
-            # Verify that both IPC_LOCK and user-specified capabilities are present
-            security_context = container['securityContext']
+        # Check that capabilities are merged correctly
+        add_capabilities = security_context['capabilities']['add']
+        self.assertIn('IPC_LOCK', add_capabilities)  # From template
+        self.assertIn('SYS_ADMIN', add_capabilities)  # From user config
 
-            # Check that runAsUser and runAsGroup from user config are preserved
-            self.assertEqual(security_context['runAsUser'], 1000)
-            self.assertEqual(security_context['runAsGroup'], 1000)
+        # Check that drop capabilities from user config are preserved
+        drop_capabilities = security_context['capabilities']['drop']
+        self.assertIn('NET_RAW', drop_capabilities)
 
-            # Check that capabilities are merged correctly
-            add_capabilities = security_context['capabilities']['add']
-            self.assertIn('IPC_LOCK', add_capabilities)  # From template
-            self.assertIn('SYS_ADMIN', add_capabilities)  # From user config
-
-            # Check that drop capabilities from user config are preserved
-            drop_capabilities = security_context['capabilities']['drop']
-            self.assertIn('NET_RAW', drop_capabilities)
-        finally:
-            import os
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-
-    @patch('yaml.safe_load')
-    @patch('sky.utils.common_utils.dump_yaml')
     @patch('sky.skypilot_config.get_effective_region_config')
     def test_user_security_context_without_ipc_lock_capability(
-            self, mock_get_cloud_config_value, mock_dump_yaml, mock_safe_load):
+            self, mock_get_cloud_config_value):
         """Test that user-specified securityContext works when IPC_LOCK capability is not needed."""
 
         # Create a YAML structure without IPC_LOCK capability
@@ -755,54 +736,38 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         }
 
         # Set up mocks
-        mock_safe_load.return_value = cluster_yaml_without_ipc_lock
         mock_get_cloud_config_value.return_value = user_pod_config
 
-        # Use a temporary file to avoid file not found error
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', delete=False,
-                                         suffix='.yaml') as tmp_file:
-            tmp_path = tmp_file.name
+        # Call the combine_pod_config_fields function
+        combined_yaml_obj = kubernetes_utils.combine_pod_config_fields(
+            cluster_yaml_without_ipc_lock, {}, None)
 
-        try:
-            # Call the combine_pod_config_fields function
-            kubernetes_utils.combine_pod_config_fields(tmp_path, {}, None)
+        # Get the modified YAML
+        container = combined_yaml_obj['available_node_types'][
+            'ray_head_default']['node_config']['spec']['containers'][0]
 
-            # Get the modified YAML
-            modified_yaml = mock_dump_yaml.call_args[0][1]
-            container = modified_yaml['available_node_types'][
-                'ray_head_default']['node_config']['spec']['containers'][0]
+        # Verify that only user-specified securityContext is present
+        security_context = container['securityContext']
 
-            # Verify that only user-specified securityContext is present
-            security_context = container['securityContext']
+        # Check that runAsUser from user config is preserved
+        self.assertEqual(security_context['runAsUser'], 1000)
 
-            # Check that runAsUser from user config is preserved
-            self.assertEqual(security_context['runAsUser'], 1000)
+        # Check that only user capabilities are present (no IPC_LOCK)
+        add_capabilities = security_context['capabilities']['add']
+        self.assertIn('SYS_ADMIN', add_capabilities)
+        self.assertNotIn('IPC_LOCK', add_capabilities)
 
-            # Check that only user capabilities are present (no IPC_LOCK)
-            add_capabilities = security_context['capabilities']['add']
-            self.assertIn('SYS_ADMIN', add_capabilities)
-            self.assertNotIn('IPC_LOCK', add_capabilities)
-
-            # Check that drop capabilities from user config are preserved
-            drop_capabilities = security_context['capabilities']['drop']
-            self.assertIn('NET_RAW', drop_capabilities)
-        finally:
-            import os
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
+        # Check that drop capabilities from user config are preserved
+        drop_capabilities = security_context['capabilities']['drop']
+        self.assertIn('NET_RAW', drop_capabilities)
 
 
 class TestKubernetesVolumeMerging(unittest.TestCase):
     """Test cases for merging user-specified volume mounts and volumes with pod_config."""
 
-    @patch('yaml.safe_load')
-    @patch('sky.utils.common_utils.dump_yaml')
     @patch('sky.skypilot_config.get_effective_region_config')
     def test_user_volume_mounts_merged_correctly(self,
-                                                 mock_get_cloud_config_value,
-                                                 mock_dump_yaml,
-                                                 mock_safe_load):
+                                                 mock_get_cloud_config_value):
         """Test that user-specified volume mounts and volumes are correctly merged."""
 
         # Based on kubernetes-ray.yml.j2
@@ -873,96 +838,77 @@ class TestKubernetesVolumeMerging(unittest.TestCase):
             }
         }
 
-        mock_safe_load.return_value = cluster_yaml_with_system_volumes
         mock_get_cloud_config_value.return_value = user_pod_config
 
-        # Use a temporary file to avoid file not found error
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', delete=False,
-                                         suffix='.yaml') as tmp_file:
-            tmp_path = tmp_file.name
+        combined_yaml_obj = kubernetes_utils.combine_pod_config_fields(
+            cluster_yaml_with_system_volumes, {}, None)
 
-        try:
-            kubernetes_utils.combine_pod_config_fields(tmp_path, {}, None)
-            mock_safe_load.assert_called_once()
-            mock_dump_yaml.assert_called_once()
+        # Get the modified YAML
+        container = combined_yaml_obj['available_node_types'][
+            'ray_head_default']['node_config']['spec']['containers'][0]
+        pod_spec = combined_yaml_obj['available_node_types'][
+            'ray_head_default']['node_config']['spec']
 
-            # Get the modified YAML
-            modified_yaml = mock_dump_yaml.call_args[0][1]
-            container = modified_yaml['available_node_types'][
-                'ray_head_default']['node_config']['spec']['containers'][0]
-            pod_spec = modified_yaml['available_node_types'][
-                'ray_head_default']['node_config']['spec']
+        # Verify that both system and user volume mounts are present
+        volume_mounts = container['volumeMounts']
+        self.assertEqual(len(volume_mounts), 4)  # 2 system + 2 user
 
-            # Verify that both system and user volume mounts are present
-            volume_mounts = container['volumeMounts']
-            self.assertEqual(len(volume_mounts), 4)  # 2 system + 2 user
+        # Check system volume mounts are preserved
+        secret_mount = next(
+            (vm for vm in volume_mounts if vm['name'] == 'secret-volume'), None)
+        self.assertIsNotNone(secret_mount)
+        self.assertEqual(secret_mount['mountPath'], '/etc/secret-volume')
+        self.assertTrue(secret_mount['readOnly'])
 
-            # Check system volume mounts are preserved
-            secret_mount = next(
-                (vm for vm in volume_mounts if vm['name'] == 'secret-volume'),
-                None)
-            self.assertIsNotNone(secret_mount)
-            self.assertEqual(secret_mount['mountPath'], '/etc/secret-volume')
-            self.assertTrue(secret_mount['readOnly'])
+        dshm_mount = next((vm for vm in volume_mounts if vm['name'] == 'dshm'),
+                          None)
+        self.assertIsNotNone(dshm_mount)
+        self.assertEqual(dshm_mount['mountPath'], '/dev/shm')
 
-            dshm_mount = next(
-                (vm for vm in volume_mounts if vm['name'] == 'dshm'), None)
-            self.assertIsNotNone(dshm_mount)
-            self.assertEqual(dshm_mount['mountPath'], '/dev/shm')
+        # Check user volume mounts are added
+        data_mount = next(
+            (vm for vm in volume_mounts if vm['name'] == 'data-volume'), None)
+        self.assertIsNotNone(data_mount)
+        self.assertEqual(data_mount['mountPath'], '/data')
+        self.assertFalse(data_mount['readOnly'])
 
-            # Check user volume mounts are added
-            data_mount = next(
-                (vm for vm in volume_mounts if vm['name'] == 'data-volume'),
-                None)
-            self.assertIsNotNone(data_mount)
-            self.assertEqual(data_mount['mountPath'], '/data')
-            self.assertFalse(data_mount['readOnly'])
+        logs_mount = next(
+            (vm for vm in volume_mounts if vm['name'] == 'logs-volume'), None)
+        self.assertIsNotNone(logs_mount)
+        self.assertEqual(logs_mount['mountPath'], '/logs')
+        self.assertFalse(logs_mount['readOnly'])
 
-            logs_mount = next(
-                (vm for vm in volume_mounts if vm['name'] == 'logs-volume'),
-                None)
-            self.assertIsNotNone(logs_mount)
-            self.assertEqual(logs_mount['mountPath'], '/logs')
-            self.assertFalse(logs_mount['readOnly'])
+        # Verify that both system and user volumes are present
+        volumes = pod_spec['volumes']
+        self.assertEqual(len(volumes), 4)  # 2 system + 2 user
 
-            # Verify that both system and user volumes are present
-            volumes = pod_spec['volumes']
-            self.assertEqual(len(volumes), 4)  # 2 system + 2 user
+        # Check system volumes are preserved
+        secret_volume = next(
+            (v for v in volumes if v['name'] == 'secret-volume'), None)
+        self.assertIsNotNone(secret_volume)
+        self.assertIn('secret', secret_volume)
+        self.assertEqual(secret_volume['secret']['secretName'],
+                         kubernetes.Kubernetes.SKY_SSH_KEY_SECRET_NAME)
 
-            # Check system volumes are preserved
-            secret_volume = next(
-                (v for v in volumes if v['name'] == 'secret-volume'), None)
-            self.assertIsNotNone(secret_volume)
-            self.assertIn('secret', secret_volume)
-            self.assertEqual(secret_volume['secret']['secretName'],
-                             kubernetes.Kubernetes.SKY_SSH_KEY_SECRET_NAME)
+        dshm_volume = next((v for v in volumes if v['name'] == 'dshm'), None)
+        self.assertIsNotNone(dshm_volume)
+        self.assertIn('emptyDir', dshm_volume)
+        self.assertEqual(dshm_volume['emptyDir']['medium'], 'Memory')
 
-            dshm_volume = next((v for v in volumes if v['name'] == 'dshm'),
-                               None)
-            self.assertIsNotNone(dshm_volume)
-            self.assertIn('emptyDir', dshm_volume)
-            self.assertEqual(dshm_volume['emptyDir']['medium'], 'Memory')
+        # Check user volumes are added
+        data_volume = next((v for v in volumes if v['name'] == 'data-volume'),
+                           None)
+        self.assertIsNotNone(data_volume)
+        self.assertIn('persistentVolumeClaim', data_volume)
+        self.assertEqual(data_volume['persistentVolumeClaim']['claimName'],
+                         'data-pvc')
 
-            # Check user volumes are added
-            data_volume = next(
-                (v for v in volumes if v['name'] == 'data-volume'), None)
-            self.assertIsNotNone(data_volume)
-            self.assertIn('persistentVolumeClaim', data_volume)
-            self.assertEqual(data_volume['persistentVolumeClaim']['claimName'],
-                             'data-pvc')
-
-            logs_volume = next(
-                (v for v in volumes if v['name'] == 'logs-volume'), None)
-            self.assertIsNotNone(logs_volume)
-            self.assertIn('persistentVolumeClaim', logs_volume)
-            self.assertEqual(logs_volume['persistentVolumeClaim']['claimName'],
-                             'logs-pvc')
-
-        finally:
-            import os
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
+        logs_volume = next((v for v in volumes if v['name'] == 'logs-volume'),
+                           None)
+        self.assertIsNotNone(logs_volume)
+        self.assertIn('persistentVolumeClaim', logs_volume)
+        self.assertEqual(logs_volume['persistentVolumeClaim']['claimName'],
+                         'logs-pvc')
 
 
 class TestGKEDWSConfig(unittest.TestCase):
@@ -1045,6 +991,242 @@ class TestGKEDWSConfig(unittest.TestCase):
             keys=('dws',),
             default_value={},
             override_configs=cluster_overrides)
+
+
+class TestKubernetesVolumeNameValidation(unittest.TestCase):
+
+    def test_valid_volume_names(self):
+        valid_names = [
+            'data',
+            'data1',
+            'data-1',
+            'data-1.volume',
+            'a-b.c-d',
+            'a' * 10 + '.' + 'b' * 10,
+        ]
+        for name in valid_names:
+            ok, reason = kubernetes.Kubernetes.is_volume_name_valid(name)
+            self.assertTrue(ok, msg=f'{name} should be valid, got: {reason}')
+
+    def test_invalid_due_to_length(self):
+        too_long = 'a' * 254  # > 253
+        ok, reason = kubernetes.Kubernetes.is_volume_name_valid(too_long)
+        self.assertFalse(ok)
+        self.assertIn('maximum length', reason or '')
+
+    def test_invalid_characters(self):
+        # Uppercase and underscore are invalid
+        for name in ['Data', 'data_volume', 'data@vol', 'data+vol']:
+            ok, _ = kubernetes.Kubernetes.is_volume_name_valid(name)
+            self.assertFalse(ok, msg=f'{name} should be invalid')
+
+    def test_invalid_start_or_end(self):
+        for name in ['-data', 'data-', '.data', 'data.']:
+            ok, _ = kubernetes.Kubernetes.is_volume_name_valid(name)
+            self.assertFalse(ok, msg=f'{name} should be invalid')
+
+    def test_invalid_double_dot(self):
+        ok, _ = kubernetes.Kubernetes.is_volume_name_valid('a..b')
+        self.assertFalse(ok)
+
+    def test_empty_string_invalid(self):
+        ok, _ = kubernetes.Kubernetes.is_volume_name_valid('')
+        self.assertFalse(ok)
+
+
+class TestCloudFlare403ErrorDetection(unittest.TestCase):
+    """Test cases for CloudFlare 403 error detection and retry."""
+
+    def test_cloudflare_403_with_cf_ray_header(self):
+        """Test that 403 with CF-RAY header is detected as CloudFlare error."""
+        mock_exception = mock.Mock()
+        mock_exception.status = 403
+        mock_exception.headers = {
+            'Date': 'Wed, 08 Oct 2025 19:26:17 GMT',
+            'CF-RAY': '98b8076cfae4058d-IAD',
+            'Server': 'cloudflare'
+        }
+
+        with patch('sky.adaptors.kubernetes.api_exception',
+                   return_value=type(mock_exception)):
+            result = kubernetes_utils._is_cloudflare_403_error(mock_exception)
+
+        self.assertTrue(result)
+
+    def test_cloudflare_403_with_server_cloudflare(self):
+        """Test that 403 with Server: cloudflare header is detected."""
+        mock_exception = mock.Mock()
+        mock_exception.status = 403
+        mock_exception.headers = {
+            'Date': 'Wed, 08 Oct 2025 19:26:17 GMT',
+            'Server': 'cloudflare',
+            'Content-Length': '0'
+        }
+
+        with patch('sky.adaptors.kubernetes.api_exception',
+                   return_value=type(mock_exception)):
+            result = kubernetes_utils._is_cloudflare_403_error(mock_exception)
+
+        self.assertTrue(result)
+
+    def test_real_rbac_403_not_cloudflare(self):
+        """Test that real RBAC 403 without CloudFlare headers is NOT detected."""
+        mock_exception = mock.Mock()
+        mock_exception.status = 403
+        mock_exception.headers = {
+            'Date': 'Wed, 08 Oct 2025 19:26:17 GMT',
+            'Content-Type': 'application/json'
+        }
+
+        with patch('sky.adaptors.kubernetes.api_exception',
+                   return_value=type(mock_exception)):
+            result = kubernetes_utils._is_cloudflare_403_error(mock_exception)
+
+        self.assertFalse(result)
+
+    def test_other_status_codes_not_checked(self):
+        """Test that non-403 status codes return False (only 403 is checked)."""
+        # Test 401
+        mock_401 = mock.Mock()
+        mock_401.status = 401
+        mock_401.headers = {'CF-RAY': '12345-IAD', 'Server': 'cloudflare'}
+
+        with patch('sky.adaptors.kubernetes.api_exception',
+                   return_value=type(mock_401)):
+            result = kubernetes_utils._is_cloudflare_403_error(mock_401)
+            self.assertFalse(result)
+
+        # Test 404
+        mock_404 = mock.Mock()
+        mock_404.status = 404
+        mock_404.headers = {'CF-RAY': '12345-IAD', 'Server': 'cloudflare'}
+
+        with patch('sky.adaptors.kubernetes.api_exception',
+                   return_value=type(mock_404)):
+            result = kubernetes_utils._is_cloudflare_403_error(mock_404)
+            self.assertFalse(result)
+
+        # Test 429
+        mock_429 = mock.Mock()
+        mock_429.status = 429
+        mock_429.headers = {'CF-RAY': '12345-IAD', 'Server': 'cloudflare'}
+
+        with patch('sky.adaptors.kubernetes.api_exception',
+                   return_value=type(mock_429)):
+            result = kubernetes_utils._is_cloudflare_403_error(mock_429)
+            self.assertFalse(result)
+
+    def test_no_headers_not_detected(self):
+        """Test that 403 without headers is not detected as CloudFlare."""
+        mock_exception = mock.Mock()
+        mock_exception.status = 403
+        # Simulate hasattr returning False
+        del mock_exception.headers
+
+        with patch('sky.adaptors.kubernetes.api_exception',
+                   return_value=type(mock_exception)):
+            result = kubernetes_utils._is_cloudflare_403_error(mock_exception)
+
+        self.assertFalse(result)
+
+    def test_case_insensitive_header_matching(self):
+        """Test that header matching is case-insensitive."""
+        mock_exception = mock.Mock()
+        mock_exception.status = 403
+        mock_exception.headers = {
+            'cf-ray': '12345-IAD',  # lowercase
+            'server': 'CloudFlare'  # mixed case
+        }
+
+        with patch('sky.adaptors.kubernetes.api_exception',
+                   return_value=type(mock_exception)):
+            result = kubernetes_utils._is_cloudflare_403_error(mock_exception)
+
+        self.assertTrue(result)
+
+    def test_check_nvidia_runtime_class_retries_on_cloudflare_403(self):
+        """Test that check_nvidia_runtime_class retries on CloudFlare 403.
+        
+        Simulates CloudFlare proxy returning transient 403 on first
+        call, then succeeding on retry.
+        """
+
+        # Create a CloudFlare 403 exception class
+        class CloudFlare403Exception(Exception):
+
+            def __init__(self):
+                self.status = 403
+                self.headers = {
+                    'Date': 'Wed, 08 Oct 2025 19:26:17 GMT',
+                    'CF-RAY': '98b8076cfae4058d-IAD',
+                    'Server': 'cloudflare',
+                    'Content-Length': '0'
+                }
+                super().__init__('Forbidden')
+
+        # Successful response
+        mock_runtime_class = mock.Mock()
+        mock_runtime_class.metadata.name = 'nvidia'
+        successful_response = mock.Mock()
+        successful_response.items = [mock_runtime_class]
+
+        call_count = {'count': 0}
+
+        def mock_list_runtime_class():
+            call_count['count'] += 1
+            if call_count['count'] == 1:
+                raise CloudFlare403Exception()
+            else:
+                return successful_response
+
+        mock_node_api = mock.Mock()
+        mock_node_api.list_runtime_class = mock_list_runtime_class
+
+        with patch('sky.adaptors.kubernetes.node_api',
+                   return_value=mock_node_api), \
+             patch('sky.adaptors.kubernetes.api_exception', return_value=CloudFlare403Exception), \
+             patch('time.sleep'):
+
+            result = kubernetes_utils.check_nvidia_runtime_class(
+                context='test-context')
+
+            self.assertTrue(result)
+            self.assertEqual(call_count['count'], 2)
+
+    def test_check_nvidia_runtime_class_fails_on_real_rbac_403(self):
+        """Test that real RBAC 403 errors fail immediately without retry."""
+
+        # Real RBAC 403 (no CloudFlare headers)
+        class RBACApiException(Exception):
+
+            def __init__(self):
+                self.status = 403
+                self.headers = {
+                    'Date': 'Wed, 08 Oct 2025 19:26:17 GMT',
+                    'Content-Type': 'application/json'
+                }
+                super().__init__('Forbidden: User does not have permission')
+
+        call_count = {'count': 0}
+
+        def mock_list_runtime_class():
+            call_count['count'] += 1
+            raise RBACApiException()
+
+        mock_node_api = mock.Mock()
+        mock_node_api.list_runtime_class = mock_list_runtime_class
+
+        from sky import exceptions as sky_exceptions
+
+        with patch('sky.adaptors.kubernetes.node_api',
+                   return_value=mock_node_api), \
+             patch('sky.adaptors.kubernetes.api_exception', return_value=RBACApiException):
+
+            with self.assertRaises(sky_exceptions.KubeAPIUnreachableError):
+                kubernetes_utils.check_nvidia_runtime_class(
+                    context='test-context')
+
+            self.assertEqual(call_count['count'], 1)
 
 
 if __name__ == '__main__':

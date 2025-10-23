@@ -269,16 +269,16 @@ def _get_active_resources(
         all_managed_jobs: List[Dict[str, Any]]
     """
 
-    def get_all_clusters():
+    def get_all_clusters() -> List[Dict[str, Any]]:
         return global_user_state.get_clusters()
 
-    def get_all_managed_jobs():
+    def get_all_managed_jobs() -> List[Dict[str, Any]]:
         # pylint: disable=import-outside-toplevel
         from sky.jobs.server import core as managed_jobs_core
         try:
-            return managed_jobs_core.queue(refresh=False,
-                                           skip_finished=True,
-                                           all_users=True)
+            filtered_jobs, _, _, _ = managed_jobs_core.queue_v2(
+                refresh=False, skip_finished=True, all_users=True)
+            return filtered_jobs
         except exceptions.ClusterNotUpError:
             logger.warning('All jobs should be finished.')
             return []

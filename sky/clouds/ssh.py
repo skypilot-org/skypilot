@@ -4,8 +4,6 @@ import os
 import typing
 from typing import Dict, List, Optional, Set, Tuple, Union
 
-import yaml
-
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
@@ -14,6 +12,7 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -66,7 +65,7 @@ class SSH(kubernetes.Kubernetes):
         if os.path.exists(SSH_NODE_POOLS_PATH):
             try:
                 with open(SSH_NODE_POOLS_PATH, 'r', encoding='utf-8') as f:
-                    ssh_config = yaml.safe_load(f)
+                    ssh_config = yaml_utils.safe_load(f)
                     if ssh_config:
                         # Get cluster names and prepend 'ssh-' to match
                         # context naming convention

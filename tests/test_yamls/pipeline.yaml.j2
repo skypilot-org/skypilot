@@ -7,9 +7,7 @@ resources:
   cpus: 2+
   memory: 4+
   use_spot: true
-  any_of:
-    - infra: aws
-    - infra: gcp
+  infra: {{cloud}}
 
 setup: |
   echo setup for train
@@ -26,9 +24,7 @@ name: b
 resources:
   cpus: 2+
   memory: 4+
-  any_of:
-    - infra: aws
-    - infra: gcp
+  infra: {{cloud}}
 
 setup: |
   echo setup for train
@@ -46,6 +42,8 @@ name: eval1
 resources:
   cpus: 2+
   memory: 4+
+  infra: {{cloud}}
+
 setup: |
   echo setup for eval
   sleep 20
@@ -62,6 +60,8 @@ name: eval2
 resources:
   cpus: 2+
   memory: 4+
+  infra: {{cloud}}
+
 setup: |
   echo setup for eval
   sleep 20

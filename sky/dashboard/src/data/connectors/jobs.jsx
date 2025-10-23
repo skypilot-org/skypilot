@@ -37,7 +37,7 @@ export async function getManagedJobs(options = {}) {
     if (limit !== undefined) body.limit = limit;
     if (statuses !== undefined && statuses.length > 0) body.statuses = statuses;
 
-    const response = await apiClient.post(`/jobs/queue`, body);
+    const response = await apiClient.post(`/jobs/queue/v2`, body);
     const id = response.headers.get('X-Skypilot-Request-ID');
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
     if (fetchedData.status === 500) {
@@ -541,7 +541,7 @@ export async function handleJobAction(action, jobId, cluster) {
     case 'restartcontroller':
       logStarter = 'Restarting';
       logMiddle = 'restarted';
-      apiPath = 'jobs/queue';
+      apiPath = 'jobs/queue/v2';
       requestBody = { all_users: true, refresh: true };
       jobId = 'controller';
       break;

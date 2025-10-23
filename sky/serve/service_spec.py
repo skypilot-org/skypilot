@@ -2,11 +2,9 @@
 import json
 import os
 import textwrap
-import typing
 from typing import Any, Dict, List, Optional, Union
 
 from sky import serve
-from sky.adaptors import common as adaptors_common
 from sky.serve import constants
 from sky.serve import load_balancing_policies as lb_policies
 from sky.serve import serve_utils
@@ -14,11 +12,7 @@ from sky.serve import spot_placer as spot_placer_lib
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
-
-if typing.TYPE_CHECKING:
-    import yaml
-else:
-    yaml = adaptors_common.LazyImport('yaml')
+from sky.utils import yaml_utils
 
 
 class SkyServiceSpec:
@@ -274,7 +268,7 @@ class SkyServiceSpec:
     @staticmethod
     def from_yaml(yaml_path: str) -> 'SkyServiceSpec':
         with open(os.path.expanduser(yaml_path), 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
+            config = yaml_utils.safe_load(f)
 
         if isinstance(config, str):
             with ux_utils.print_exception_no_traceback():
