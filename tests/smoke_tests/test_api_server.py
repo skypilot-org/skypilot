@@ -544,7 +544,7 @@ def test_tail_jobs_logs_blocks_ssh(generic_cloud: str):
         # Wait for the job to start.
         def is_job_started(job_id: int):
             req_id = jobs.queue(refresh=True, job_ids=[job_id])
-            job_records = sky.stream_and_get(req_id)
+            job_records = sky.stream_and_get(req_id)[0]
             assert len(job_records) == 1
             return job_records[0]['status'] == sky.ManagedJobStatus.RUNNING
 
@@ -608,7 +608,8 @@ def test_tail_jobs_logs_blocks_ssh(generic_cloud: str):
 
         # Join threads.
         for thread in threads:
-            thread.join()
+            if thread:
+                thread.join()
 
 
 # TODO(aylei): support running this test on remote server.
