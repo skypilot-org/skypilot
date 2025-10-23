@@ -23,6 +23,7 @@ from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect
 
 from sky.server import constants
+from sky.server.server import KubernetesSSHMessageType
 
 BUFFER_SIZE = 2**16  # 64KB
 HEARTBEAT_INTERVAL_SECONDS = 5
@@ -81,65 +82,61 @@ async def main(url: str, timestamps_supported: bool) -> None:
                 asyncio.streams.FlowControlMixin, sys.stdout)  # type: ignore
             stdout_writer = asyncio.StreamWriter(transport, protocol, None,
                                                  loop)
-            latency_send_time_queue : Optional[asyncio.Queue[float]] = None
-            latency_results_queue : Optional[asyncio.Queue[float]] = None
+            # Dictionary to store last ping time for latency measurement
+            last_ping_time_dict: Optional[dict] = None
             if timestamps_supported:
-                latency_send_time_queue = asyncio.Queue(maxsize=1024)
-                latency_results_queue = asyncio.Queue(maxsize=1024)
+                last_ping_time_dict = {}
 
-            websocket_closed = False
+            # Use an Event to signal when websocket is closed
+            websocket_closed_event = asyncio.Event()
 
-            await asyncio.gather(
-                stdin_to_websocket(stdin_reader, websocket,
-                                   timestamps_supported,
-                                   latency_send_time_queue,
-                                   websocket_closed),
-                websocket_to_stdout(websocket, stdout_writer, 
-                    timestamps_supported, latency_send_time_queue, latency_results_queue, websocket_closed),
-                latency_monitor(websocket, latency_results_queue, websocket_closed)
-            )
+            await asyncio.gather(stdin_to_websocket(stdin_reader, websocket,
+                                                    timestamps_supported,
+                                                    websocket_closed_event),
+                                 websocket_to_stdout(websocket, stdout_writer,
+                                                     timestamps_supported,
+                                                     last_ping_time_dict,
+                                                     websocket_closed_event),
+                                 latency_monitor(websocket, last_ping_time_dict,
+                                                 websocket_closed_event),
+                                 return_exceptions=True)
         finally:
             if old_settings:
                 termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN,
                                   old_settings)
 
+
 async def latency_monitor(websocket: ClientConnection,
-                          latency_results_queue: Optional[asyncio.Queue[float]],
-                          websocket_closed: bool):
-    if latency_results_queue is None:
+                          last_ping_time_dict: Optional[dict],
+                          websocket_closed_event: asyncio.Event):
+    """Periodically send PING messages (type 1) to measure latency."""
+    if last_ping_time_dict is None:
         return
-    while not websocket_closed:
-        await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
-        while True:
-            # Grab all the latency results from the queue.
-            results = []
+    while not websocket_closed_event.is_set():
+        try:
+            await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
+            ping_time = time.time()
+            last_ping_time_dict['time'] = ping_time
+            message_type_bytes = struct.pack(
+                '!B', KubernetesSSHMessageType.PINGPONG.value)
             try:
-                print(f'Latency results queue size: {latency_results_queue.qsize()}')
-                print(f'Websocket closed: {websocket_closed}')
-                results.append(latency_results_queue.get_nowait())
-            except asyncio.QueueEmpty:
+                await websocket.send(message_type_bytes)
+            except websockets.exceptions.ConnectionClosed as e:
+                # Websocket is already closed.
+                print(f'Failed to send PING message: {e}', file=sys.stderr)
                 break
-        # raise Exception(f'Results: {results}')
-        if len(results) == 0:
-            continue
-        average_latency = sum(results) / len(results)
-        print(f'Average latency: {average_latency}')
-        if average_latency > 0:
-            average_latency_ms = int(average_latency * 1000)
-            message_type_bytes = struct.pack('!B', 1)
-            latency_bytes = struct.pack('!Q', average_latency_ms)
-            data = message_type_bytes + latency_bytes
-            await websocket.send(data)
-        else:
-            break
+        except Exception as e:
+            print(f'Error in latency_monitor: {e}', file=sys.stderr)
+            websocket_closed_event.set()
+            raise e
+
 
 async def stdin_to_websocket(reader: asyncio.StreamReader,
                              websocket: ClientConnection,
                              timestamps_supported: bool,
-                             latency_send_time_queue: Optional[asyncio.Queue[float]],
-                             websocket_closed: bool):
+                             websocket_closed_event: asyncio.Event):
     try:
-        while not websocket_closed:
+        while not websocket_closed_event.is_set():
             # Read at most BUFFER_SIZE bytes, this not affect
             # responsiveness since it will return as soon as
             # there is at least one byte.
@@ -151,61 +148,68 @@ async def stdin_to_websocket(reader: asyncio.StreamReader,
                 break
             if timestamps_supported:
                 # Send message with type 0 to indicate data.
-                send_time = time.time()
-                message_type_bytes = struct.pack('!B', 0)
+                message_type_bytes = struct.pack(
+                    '!B', KubernetesSSHMessageType.REGULAR_DATA.value)
                 data = message_type_bytes + data
-                await websocket.send(data)
-                try:
-                    latency_send_time_queue.put_nowait(send_time)
-                except asyncio.QueueFull:
-                    pass
-            else:
-                await websocket.send(data)
+            await websocket.send(data)
 
     except Exception as e:  # pylint: disable=broad-except
         print(f'Error in stdin_to_websocket: {e}', file=sys.stderr)
     finally:
         await websocket.close()
-        websocket_closed = True
+        websocket_closed_event.set()
 
 
 async def websocket_to_stdout(websocket: ClientConnection,
                               writer: asyncio.StreamWriter,
                               timestamps_supported: bool,
-                              latency_send_time_queue: Optional[asyncio.Queue[float]],
-                              latency_results_queue: Optional[asyncio.Queue[float]],
-                              websocket_closed: bool):
+                              last_ping_time_dict: Optional[dict],
+                              websocket_closed_event: asyncio.Event):
     try:
-        while not websocket_closed:
+        while not websocket_closed_event.is_set():
             message = await websocket.recv()
-            writer.write(message)
-            await writer.drain()
-            if timestamps_supported:
-                receive_time = time.time()
-                try:
-                    send_time = latency_send_time_queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    # We don't have a send time to match this receive time.
-                    pass
-                # raise Exception(f'Send time: {send_time}, Receive time: {receive_time}')
-                try:
-                    latency_results_queue.put_nowait(receive_time - send_time)
-                except asyncio.QueueFull:
-                    # We have too many latency results to process.
-                    pass
-                # raise Exception(f'Latency results queue size: {latency_results_queue.qsize()}')
-                # except asyncio.QueueFull:
-                #     # We have too many latency results to process.
-                #     pass
+            if timestamps_supported and len(message) > 0:
+                message_type = struct.unpack('!B', message[:1])[0]
+                if message_type == KubernetesSSHMessageType.REGULAR_DATA.value:
+                    # Regular data - strip type byte and write to stdout
+                    data = message[1:]
+                    writer.write(data)
+                    await writer.drain()
+                elif message_type == KubernetesSSHMessageType.PINGPONG.value:
+                    # PONG response - calculate latency and send measurement
+                    pong_time = time.time()
+                    if last_ping_time_dict and 'time' in last_ping_time_dict:
+                        ping_time = last_ping_time_dict['time']
+                        latency_seconds = pong_time - ping_time
+                        latency_ms = int(latency_seconds * 1000)
+
+                        # Send latency measurement (type 2)
+                        message_type_bytes = struct.pack(
+                            '!B',
+                            KubernetesSSHMessageType.LATENCY_MEASUREMENT.value)
+                        latency_bytes = struct.pack('!Q', latency_ms)
+                        data = message_type_bytes + latency_bytes
+                        try:
+                            await websocket.send(data)
+                        except Exception as e:  # pylint: disable=broad-except
+                            print(f'Failed to send latency measurement: {e}',
+                                  file=sys.stderr)
+                else:
+                    # Unknown message type, write as-is
+                    writer.write(message)
+                    await writer.drain()
+            else:
+                # No timestamps support, write directly
+                writer.write(message)
+                await writer.drain()
     except websockets.exceptions.ConnectionClosed:
         print('WebSocket connection closed', file=sys.stderr)
     except Exception as e:  # pylint: disable=broad-except
-        # print(f'Error in websocket_to_stdout: {e}', file=sys.stderr)
+        print(f'Error in websocket_to_stdout: {e}', file=sys.stderr)
         raise e
     finally:
         await websocket.close()
-        print(f'Websocket closed manually: {websocket_closed}')
-        websocket_closed = True
+        websocket_closed_event.set()
 
 
 if __name__ == '__main__':
