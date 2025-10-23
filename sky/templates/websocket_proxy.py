@@ -222,7 +222,7 @@ if __name__ == '__main__':
     health_url = f'{server_url}/api/health'
     health_response = requests.get(health_url)
     health_data = health_response.json()
-    timestamps_are_supported = int(health_data['api_version']) > 20
+    timestamps_are_supported = int(health_data['api_version']) > 21
     print(f'Timestamps are supported: {timestamps_are_supported}')
 
     server_proto, server_fqdn = server_url.split('://')

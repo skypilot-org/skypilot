@@ -1797,7 +1797,7 @@ async def kubernetes_pod_ssh_proxy(
     await websocket.accept()
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
 
-    timestamps_supported = client_version is not None and client_version > 20
+    timestamps_supported = client_version is not None and client_version > 21
     logger.info(f'Websocket timestamps supported: {timestamps_supported}, \
         client_version = {client_version}')
 
