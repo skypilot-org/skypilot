@@ -550,7 +550,9 @@ export function Workspaces() {
 
     // Set up refresh interval
     const interval = setInterval(() => {
-      fetchData(false); // Don't show loading on background refresh
+      if (window.document.visibilityState === 'visible') {
+        fetchData(false); // Don't show loading on background refresh
+      }
     }, REFRESH_INTERVALS.REFRESH_INTERVAL);
 
     return () => clearInterval(interval);

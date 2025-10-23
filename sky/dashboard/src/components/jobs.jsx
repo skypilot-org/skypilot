@@ -571,7 +571,10 @@ export function ManagedJobsTable({
 
   useEffect(() => {
     const interval = setInterval(() => {
-      if (fetchDataRef.current) {
+      if (
+        fetchDataRef.current &&
+        window.document.visibilityState === 'visible'
+      ) {
         fetchDataRef.current({ includeStatus: true });
       }
     }, refreshInterval);
@@ -1834,7 +1837,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
     fetchData();
 
     const interval = setInterval(() => {
-      if (isCurrent) {
+      if (isCurrent && window.document.visibilityState === 'visible') {
         fetchData();
       }
     }, refreshInterval);

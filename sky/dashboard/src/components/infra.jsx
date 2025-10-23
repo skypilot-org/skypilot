@@ -1909,7 +1909,11 @@ export function GPUs() {
   useEffect(() => {
     let isCurrent = true;
     const interval = setInterval(() => {
-      if (isCurrent && refreshDataRef.current) {
+      if (
+        isCurrent &&
+        refreshDataRef.current &&
+        window.document.visibilityState === 'visible'
+      ) {
         // Calls the latest fetchData from the ref, with showLoadingIndicators: false
         refreshDataRef.current({ showLoadingIndicators: false });
       }

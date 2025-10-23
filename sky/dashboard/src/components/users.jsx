@@ -1257,7 +1257,9 @@ function UsersTable({
     initializeData();
 
     const interval = setInterval(() => {
-      fetchDataAndProcess(false); // Don't show loading on background refresh
+      if (window.document.visibilityState === 'visible') {
+        fetchDataAndProcess(false); // Don't show loading on background refresh
+      }
     }, refreshInterval);
     return () => clearInterval(interval);
   }, [fetchDataAndProcess, refreshInterval]);
