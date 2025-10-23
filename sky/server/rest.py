@@ -273,7 +273,6 @@ async def handle_server_unavailable_async(
     if response.status != 503:
         return
 
-    # error_msg = 'SkyPilot API server is temporarily unavailable. '
     error_msg = ''
     try:
         response_data = await response.json()
