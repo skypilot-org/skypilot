@@ -309,22 +309,7 @@ export function InfrastructureSection({
                                 <CircularProgress size={16} />
                               </div>
                             ) : (
-                              <span
-                                className={
-                                  totalGpus === 0 && nodes.length === 0
-                                    ? 'text-gray-400'
-                                    : ''
-                                }
-                                title={
-                                  totalGpus === 0 && nodes.length === 0
-                                    ? 'Context may be unavailable or timed out'
-                                    : ''
-                                }
-                              >
-                                {totalGpus === 0 && nodes.length === 0
-                                  ? '0*'
-                                  : totalGpus}
-                              </span>
+                              totalGpus
                             )}
                           </td>
                         </tr>
