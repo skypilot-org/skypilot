@@ -11,6 +11,34 @@ app
   .then(() => {
     const server = express();
 
+    if (process.env.SKYPILOT_ACCESS_TOKEN) {
+      server.use((req, _, next) => {
+        req.headers['X-Skypilot-Auth-Mode'] = 'token';
+        req.headers['Authorization'] =
+          `Bearer ${process.env.SKYPILOT_ACCESS_TOKEN}`;
+        next();
+      });
+    }
+
+    if (process.env.SKYPILOT_OAUTH_COOKIE) {
+      server.use((req, _, next) => {
+        // Parse existing cookies
+        const cookies = req.headers.cookie
+          ? req.headers.cookie.split(';').map((c) => c.trim())
+          : [];
+        // Remove any existing _oauth2_proxy cookie
+        const filteredCookies = cookies.filter(
+          (c) => !c.startsWith('_oauth2_proxy=')
+        );
+        // Add/replace _oauth2_proxy cookie
+        filteredCookies.push(
+          `_oauth2_proxy=${process.env.SKYPILOT_OAUTH_COOKIE || ''}`
+        );
+        req.headers.cookie = filteredCookies.join('; ');
+        next();
+      });
+    }
+
     // Proxy API requests
     server.use(
       '/internal/dashboard',
