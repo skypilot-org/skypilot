@@ -1,8 +1,7 @@
+"""Unit tests for the SkyPilot API."""
 import asyncio
 import pathlib
 import tempfile
-import time
-from unittest import mock
 
 import sky
 from sky.clouds.cloud import Cloud
@@ -59,7 +58,7 @@ def test_api_stream_heartbeat(monkeypatch):
                 self.schedule_type = requests_lib.ScheduleType.LONG
                 self.status_msg = None
 
-        async def mock_get_request(request_id):
+        async def mock_get_request(request_id, fields):
             return MockRequest()
 
         async def mock_get_request_status(request_id):
@@ -151,7 +150,7 @@ def test_heartbeat_not_displayed_to_users(monkeypatch):
                 self.schedule_type = requests_lib.ScheduleType.LONG
                 self.status_msg = None
 
-        async def mock_get_request(request_id):
+        async def mock_get_request(request_id, fields):
             return MockRequest()
 
         async def mock_get_request_status(request_id):

@@ -305,7 +305,10 @@ def _get_route_tables(ec2: 'mypy_boto3_ec2.ServiceResource',
     Returns:
         A list of route tables associated with the options VPC and region
     """
-    filters = [{'Name': 'association.main', 'Values': [str(main).lower()]}]
+    filters: List['ec2_type_defs.FilterTypeDef'] = [{
+        'Name': 'association.main',
+        'Values': [str(main).lower()],
+    }]
     if vpc_id is not None:
         filters.append({'Name': 'vpc-id', 'Values': [vpc_id]})
     logger.debug(

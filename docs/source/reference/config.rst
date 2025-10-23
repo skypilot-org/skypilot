@@ -170,7 +170,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`use_static_ip_address <config-yaml-nebius-use-static-ip-address>`: true
     :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
     :ref:`tenant_id <config-yaml-nebius-tenant-id>`: tenant-1234567890
-    :ref:`domain <config-yaml-nebius-domain>`: api.nebius.com:443
+    :ref:`domain <config-yaml-nebius-domain>`: api.nebius.cloud:443
 
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
@@ -1132,6 +1132,17 @@ List of allowed Kubernetes contexts (optional).
 
 List of context names that SkyPilot is allowed to use.
 
+If you want all available contexts to be allowed, set it to 'all' like this:
+
+.. code-block:: yaml
+
+  kubernetes:
+    allowed_contexts: all
+
+
+You can also set ``SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS`` environment variable to ``"true"``
+for the same effect. Configuration option overrides the environment variable if set.
+
 .. _config-yaml-kubernetes-custom-metadata:
 
 ``kubernetes.custom_metadata``
@@ -1148,7 +1159,7 @@ Custom labels and annotations to apply to all Kubernetes resources.
 
 Timeout for resource provisioning (optional).
 
-Timeout in minutes for resource provisioning.
+Timeout in seconds for resource provisioning.
 
 Default: ``10``.
 
@@ -1220,6 +1231,17 @@ Example:
             emptyDir:
                 medium: Memory
                 sizeLimit: 3Gi
+
+By default, SkyPilot automatically creates a single container named ``ray-node`` in the Pod. While you typically don't need to explicitly set the container name, if you do specify ``pod_config.spec.containers[0].name``, it must be set to ``ray-node``:
+
+.. code-block:: yaml
+
+  kubernetes:
+    pod_config:
+      spec:
+        containers:
+          - name: ray-node
+            ...
 
 .. _config-yaml-kubernetes-kueue:
 
@@ -1493,7 +1515,7 @@ Example:
 .. code-block:: yaml
 
   nebius:
-    domain: api.nebius.com:443
+    domain: api.nebius.cloud:443
 
 
 .. _config-yaml-rbac:

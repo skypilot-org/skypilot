@@ -24,15 +24,17 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.utils import common_utils
-from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import subprocess_utils
 from sky.utils.db import db_utils
 
 if typing.TYPE_CHECKING:
     import psutil
+
+    from sky.schemas.generated import jobsv1_pb2
 else:
     psutil = adaptors_common.LazyImport('psutil')
+    jobsv1_pb2 = adaptors_common.LazyImport('sky.schemas.generated.jobsv1_pb2')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -219,6 +221,45 @@ class JobStatus(enum.Enum):
     def colored_str(self) -> str:
         color = _JOB_STATUS_TO_COLOR[self]
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
+
+    @classmethod
+    def from_protobuf(
+            cls,
+            protobuf_value: 'jobsv1_pb2.JobStatus') -> Optional['JobStatus']:
+        """Convert protobuf JobStatus enum to Python enum value."""
+        protobuf_to_enum = {
+            jobsv1_pb2.JOB_STATUS_INIT: cls.INIT,
+            jobsv1_pb2.JOB_STATUS_PENDING: cls.PENDING,
+            jobsv1_pb2.JOB_STATUS_SETTING_UP: cls.SETTING_UP,
+            jobsv1_pb2.JOB_STATUS_RUNNING: cls.RUNNING,
+            jobsv1_pb2.JOB_STATUS_FAILED_DRIVER: cls.FAILED_DRIVER,
+            jobsv1_pb2.JOB_STATUS_SUCCEEDED: cls.SUCCEEDED,
+            jobsv1_pb2.JOB_STATUS_FAILED: cls.FAILED,
+            jobsv1_pb2.JOB_STATUS_FAILED_SETUP: cls.FAILED_SETUP,
+            jobsv1_pb2.JOB_STATUS_CANCELLED: cls.CANCELLED,
+            jobsv1_pb2.JOB_STATUS_UNSPECIFIED: None,
+        }
+        if protobuf_value not in protobuf_to_enum:
+            raise ValueError(
+                f'Unknown protobuf JobStatus value: {protobuf_value}')
+        return protobuf_to_enum[protobuf_value]
+
+    def to_protobuf(self) -> 'jobsv1_pb2.JobStatus':
+        """Convert this Python enum value to protobuf enum value."""
+        enum_to_protobuf = {
+            JobStatus.INIT: jobsv1_pb2.JOB_STATUS_INIT,
+            JobStatus.PENDING: jobsv1_pb2.JOB_STATUS_PENDING,
+            JobStatus.SETTING_UP: jobsv1_pb2.JOB_STATUS_SETTING_UP,
+            JobStatus.RUNNING: jobsv1_pb2.JOB_STATUS_RUNNING,
+            JobStatus.FAILED_DRIVER: jobsv1_pb2.JOB_STATUS_FAILED_DRIVER,
+            JobStatus.SUCCEEDED: jobsv1_pb2.JOB_STATUS_SUCCEEDED,
+            JobStatus.FAILED: jobsv1_pb2.JOB_STATUS_FAILED,
+            JobStatus.FAILED_SETUP: jobsv1_pb2.JOB_STATUS_FAILED_SETUP,
+            JobStatus.CANCELLED: jobsv1_pb2.JOB_STATUS_CANCELLED,
+        }
+        if self not in enum_to_protobuf:
+            raise ValueError(f'Unknown JobStatus value: {self}')
+        return enum_to_protobuf[self]
 
 
 # We have two steps for job submissions:
@@ -475,6 +516,11 @@ def get_status(job_id: int) -> Optional[JobStatus]:
 
 @init_db
 def get_statuses_payload(job_ids: List[Optional[int]]) -> str:
+    return message_utils.encode_payload(get_statuses(job_ids))
+
+
+@init_db
+def get_statuses(job_ids: List[int]) -> Dict[int, Optional[str]]:
     assert _DB is not None
     # Per-job lock is not required here, since the staled job status will not
     # affect the caller.
@@ -482,10 +528,51 @@ def get_statuses_payload(job_ids: List[Optional[int]]) -> str:
     rows = _DB.cursor.execute(
         f'SELECT job_id, status FROM jobs WHERE job_id IN ({query_str})',
         job_ids)
-    statuses = {job_id: None for job_id in job_ids}
+    statuses: Dict[int, Optional[str]] = {job_id: None for job_id in job_ids}
     for (job_id, status) in rows:
         statuses[job_id] = status
-    return message_utils.encode_payload(statuses)
+    return statuses
+
+
+@init_db
+def get_jobs_info(user_hash: Optional[str] = None,
+                  all_jobs: bool = False) -> List['jobsv1_pb2.JobInfo']:
+    """Get detailed job information.
+
+    Similar to dump_job_queue but returns structured protobuf objects instead
+    of encoded strings.
+
+    Args:
+        user_hash: The user hash to show jobs for. Show all the users if None.
+        all_jobs: Whether to show all jobs, not just the pending/running ones.
+    """
+    assert _DB is not None
+
+    status_list: Optional[List[JobStatus]] = [
+        JobStatus.SETTING_UP, JobStatus.PENDING, JobStatus.RUNNING
+    ]
+    if all_jobs:
+        status_list = None
+
+    jobs = _get_jobs(user_hash, status_list=status_list)
+    jobs_info = []
+    for job in jobs:
+        jobs_info.append(
+            jobsv1_pb2.JobInfo(job_id=job['job_id'],
+                               job_name=job['job_name'],
+                               username=job['username'],
+                               submitted_at=job['submitted_at'],
+                               status=job['status'].to_protobuf(),
+                               run_timestamp=job['run_timestamp'],
+                               start_at=job['start_at'],
+                               end_at=job['end_at'],
+                               resources=job['resources'],
+                               pid=job['pid'],
+                               log_path=os.path.join(
+                                   constants.SKY_LOGS_DIRECTORY,
+                                   job['run_timestamp']),
+                               metadata=json.dumps(job['metadata'])))
+    return jobs_info
 
 
 def load_statuses_payload(
@@ -524,16 +611,27 @@ def get_job_submitted_or_ended_timestamp_payload(job_id: int,
     PENDING state.
 
     The normal job duration will use `start_at` instead of `submitted_at` (in
-    `format_job_queue()`), because the job may stay in PENDING if the cluster is
-    busy.
+    `table_utils.format_job_queue()`), because the job may stay in PENDING if
+    the cluster is busy.
+    """
+    return message_utils.encode_payload(
+        get_job_submitted_or_ended_timestamp(job_id, get_ended_time))
+
+
+@init_db
+def get_job_submitted_or_ended_timestamp(
+        job_id: int, get_ended_time: bool) -> Optional[float]:
+    """Get the job submitted timestamp.
+
+    Returns the raw timestamp or None if job doesn't exist.
     """
     assert _DB is not None
     field = 'end_at' if get_ended_time else 'submitted_at'
     rows = _DB.cursor.execute(f'SELECT {field} FROM jobs WHERE job_id=(?)',
                               (job_id,))
     for (timestamp,) in rows:
-        return message_utils.encode_payload(timestamp)
-    return message_utils.encode_payload(None)
+        return timestamp
+    return None
 
 
 def get_ray_port():
@@ -842,35 +940,6 @@ def is_cluster_idle() -> bool:
     assert False, 'Should not reach here'
 
 
-def format_job_queue(jobs: List[Dict[str, Any]]):
-    """Format the job queue for display.
-
-    Usage:
-        jobs = get_job_queue()
-        print(format_job_queue(jobs))
-    """
-    job_table = log_utils.create_table([
-        'ID', 'NAME', 'USER', 'SUBMITTED', 'STARTED', 'DURATION', 'RESOURCES',
-        'STATUS', 'LOG', 'GIT COMMIT'
-    ])
-    for job in jobs:
-        job_table.add_row([
-            job['job_id'],
-            job['job_name'],
-            job['username'],
-            log_utils.readable_time_duration(job['submitted_at']),
-            log_utils.readable_time_duration(job['start_at']),
-            log_utils.readable_time_duration(job['start_at'],
-                                             job['end_at'],
-                                             absolute=True),
-            job['resources'],
-            job['status'].colored_str(),
-            job['log_path'],
-            job.get('metadata', {}).get('git_commit', '-'),
-        ])
-    return job_table
-
-
 def dump_job_queue(user_hash: Optional[str], all_jobs: bool) -> str:
     """Get the job queue in encoded json format.
 
@@ -947,6 +1016,13 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
         Encoded job IDs that are actually cancelled. Caller should use
         message_utils.decode_payload() to parse.
     """
+    return message_utils.encode_payload(cancel_jobs(jobs, cancel_all,
+                                                    user_hash))
+
+
+def cancel_jobs(jobs: Optional[List[int]],
+                cancel_all: bool = False,
+                user_hash: Optional[str] = None) -> List[int]:
     job_records = []
     all_status = [JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING]
     if jobs is None and not cancel_all:
@@ -1010,7 +1086,7 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                 cancelled_ids.append(job['job_id'])
 
         scheduler.schedule_step()
-    return message_utils.encode_payload(cancelled_ids)
+    return cancelled_ids
 
 
 @init_db
@@ -1030,6 +1106,17 @@ def get_run_timestamp(job_id: Optional[int]) -> Optional[str]:
 
 @init_db
 def get_log_dir_for_jobs(job_ids: List[Optional[str]]) -> str:
+    """Returns the relative paths to the log files for jobs with globbing,
+    encoded."""
+    job_to_dir = get_job_log_dirs(job_ids)
+    job_to_dir_str: Dict[str, str] = {}
+    for job_id, log_dir in job_to_dir.items():
+        job_to_dir_str[str(job_id)] = log_dir
+    return message_utils.encode_payload(job_to_dir_str)
+
+
+@init_db
+def get_job_log_dirs(job_ids: List[int]) -> Dict[int, str]:
     """Returns the relative paths to the log files for jobs with globbing."""
     assert _DB is not None
     query_str = ' OR '.join(['job_id GLOB (?)'] * len(job_ids))
@@ -1038,16 +1125,16 @@ def get_log_dir_for_jobs(job_ids: List[Optional[str]]) -> str:
             SELECT * FROM jobs
             WHERE {query_str}""", job_ids)
     rows = _DB.cursor.fetchall()
-    job_to_dir = {}
+    job_to_dir: Dict[int, str] = {}
     for row in rows:
         job_id = row[JobInfoLoc.JOB_ID.value]
         if row[JobInfoLoc.LOG_PATH.value]:
-            job_to_dir[str(job_id)] = row[JobInfoLoc.LOG_PATH.value]
+            job_to_dir[job_id] = row[JobInfoLoc.LOG_PATH.value]
         else:
             run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
-            job_to_dir[str(job_id)] = os.path.join(constants.SKY_LOGS_DIRECTORY,
-                                                   run_timestamp)
-    return message_utils.encode_payload(job_to_dir)
+            job_to_dir[job_id] = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                                              run_timestamp)
+    return job_to_dir
 
 
 class JobLibCodeGen:

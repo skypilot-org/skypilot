@@ -9,6 +9,7 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import sdk
+from sky.schemas.api import responses
 from sky.serve.client import impl
 from sky.server import common as server_common
 from sky.server import rest
@@ -129,8 +130,11 @@ def queue(
     refresh: bool,
     skip_finished: bool = False,
     all_users: bool = False,
-    job_ids: Optional[List[int]] = None
-) -> server_common.RequestId[List[Dict[str, Any]]]:
+    job_ids: Optional[List[int]] = None,
+    limit: Optional[int] = None,
+    fields: Optional[List[str]] = None,
+) -> server_common.RequestId[Union[List[responses.ManagedJobRecord], Tuple[
+        List[responses.ManagedJobRecord], int, Dict[str, int], int]]]:
     """Gets statuses of managed jobs.
 
     Please refer to sky.cli.job_queue for documentation.
@@ -140,12 +144,14 @@ def queue(
         skip_finished: Whether to skip finished jobs.
         all_users: Whether to show all users' jobs.
         job_ids: IDs of the managed jobs to show.
+        limit: Number of jobs to show.
+        fields: Fields to get for the managed jobs.
 
     Returns:
         The request ID of the queue request.
 
     Request Returns:
-        job_records (List[Dict[str, Any]]): A list of dicts, with each dict
+        job_records (List[responses.ManagedJobRecord]): A list of dicts, with each dict
           containing the information of a job.
 
           .. code-block:: python
@@ -172,15 +178,29 @@ def queue(
           does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
-    body = payloads.JobsQueueBody(
-        refresh=refresh,
-        skip_finished=skip_finished,
-        all_users=all_users,
-        job_ids=job_ids,
-    )
+    remote_api_version = versions.get_remote_api_version()
+    if remote_api_version and remote_api_version >= 18:
+        body = payloads.JobsQueueV2Body(
+            refresh=refresh,
+            skip_finished=skip_finished,
+            all_users=all_users,
+            job_ids=job_ids,
+            limit=limit,
+            fields=fields,
+        )
+        path = '/jobs/queue/v2'
+    else:
+        body = payloads.JobsQueueBody(
+            refresh=refresh,
+            skip_finished=skip_finished,
+            all_users=all_users,
+            job_ids=job_ids,
+        )
+        path = '/jobs/queue'
+
     response = server_common.make_authenticated_request(
         'POST',
-        '/jobs/queue',
+        path,
         json=json.loads(body.model_dump_json()),
         timeout=(5, None))
     return server_common.get_request_id(response=response)
@@ -383,15 +403,24 @@ def dashboard() -> None:
 @server_common.check_server_healthy_or_start
 @versions.minimal_api_version(12)
 def pool_apply(
-    task: Union['sky.Task', 'sky.Dag'],
+    task: Optional[Union['sky.Task', 'sky.Dag']],
     pool_name: str,
     mode: 'serve_utils.UpdateMode',
+    workers: Optional[int] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False
 ) -> server_common.RequestId[None]:
     """Apply a config to a pool."""
+    remote_api_version = versions.get_remote_api_version()
+    if (workers is not None and
+        (remote_api_version is None or remote_api_version < 19)):
+        raise click.UsageError('Updating the number of workers in a pool is '
+                               'not supported in your API server. Please '
+                               'upgrade to a newer API server to use this '
+                               'feature.')
     return impl.apply(task,
+                      workers,
                       pool_name,
                       mode,
                       pool=True,

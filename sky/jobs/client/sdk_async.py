@@ -1,12 +1,13 @@
 """Async SDK functions for managed jobs."""
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 from sky import backends
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.client import sdk_async
 from sky.jobs.client import sdk
+from sky.schemas.api import responses
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common_utils
@@ -28,6 +29,8 @@ logger = sky_logging.init_logger(__name__)
 async def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
+    pool: Optional[str] = None,
+    num_jobs: Optional[int] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -35,8 +38,8 @@ async def launch(
         sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Async version of launch() that launches a managed job."""
-    request_id = await context_utils.to_thread(sdk.launch, task, name,
-                                               _need_confirmation)
+    request_id = await context_utils.to_thread(sdk.launch, task, name, pool,
+                                               num_jobs, _need_confirmation)
     if stream_logs is not None:
         return await sdk_async._stream_and_get(request_id, stream_logs)  # pylint: disable=protected-access
     else:
@@ -48,12 +51,17 @@ async def queue(
     refresh: bool,
     skip_finished: bool = False,
     all_users: bool = False,
+    job_ids: Optional[List[int]] = None,
+    limit: Optional[int] = None,
+    fields: Optional[List[str]] = None,
     stream_logs: Optional[
         sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG
-) -> List[Dict[str, Any]]:
+) -> Union[List[responses.ManagedJobRecord], Tuple[
+        List[responses.ManagedJobRecord], int, Dict[str, int], int]]:
     """Async version of queue() that gets statuses of managed jobs."""
     request_id = await context_utils.to_thread(sdk.queue, refresh,
-                                               skip_finished, all_users)
+                                               skip_finished, all_users,
+                                               job_ids, limit, fields)
     if stream_logs is not None:
         return await sdk_async._stream_and_get(request_id, stream_logs)  # pylint: disable=protected-access
     else:

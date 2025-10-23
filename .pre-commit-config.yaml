@@ -33,7 +33,7 @@ repos:
         files: "^sky/skylet/providers/ibm/.*"  # Only match IBM-specific directory
 
 -   repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.4.0  # Match the version from requirements
+    rev: v1.14.1  # Match the version from requirements
     hooks:
     -   id: mypy
         args:
@@ -41,6 +41,8 @@ repos:
             - "sky"
             - "--exclude"
             - "sky/benchmark|sky/callbacks|sky/backends/monkey_patches"
+            - "--cache-dir"
+            - "/dev/null"
         pass_filenames: false
         additional_dependencies:
             - types-aiofiles

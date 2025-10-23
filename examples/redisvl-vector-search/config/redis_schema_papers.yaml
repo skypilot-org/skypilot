@@ -1,0 +1,42 @@
+version: "0.1.0"
+
+index:
+  name: paper_search
+  prefix: "paper:"
+
+fields:
+  - name: paper_embedding
+    type: vector
+    attrs:
+      algorithm: HNSW
+      dims: 768
+      distance_metric: COSINE
+      initial_cap: 950
+      ef_construction: 200
+      m: 16
+
+  - name: title
+    type: text
+    attrs:
+      weight: 2.0
+      
+  - name: abstract  
+    type: text
+    attrs:
+      weight: 1.5
+
+  - name: authors
+    type: text
+
+  - name: venue
+    type: tag
+    
+  - name: year
+    type: numeric
+    attrs:
+      sortable: true
+      
+  - name: n_citation
+    type: numeric
+    attrs:
+      sortable: true

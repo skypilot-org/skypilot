@@ -17,7 +17,6 @@ import time
 import typing
 from typing import (Any, Callable, cast, Dict, Generic, Literal, Optional,
                     Tuple, TypeVar, Union)
-from urllib import parse
 import uuid
 
 import cachetools
@@ -342,18 +341,7 @@ def get_server_url(host: Optional[str] = None) -> str:
 @annotations.lru_cache(scope='global')
 def get_dashboard_url(server_url: str,
                       starting_page: Optional[str] = None) -> str:
-    # The server_url may include username or password with the
-    # format of https://username:password@example.com:8080/path
-    # We need to remove the username and password and only
-    # return `https://example.com:8080/path`
-    parsed = parse.urlparse(server_url)
-    # Reconstruct the URL without credentials but keeping the scheme
-    dashboard_url = f'{parsed.scheme}://{parsed.hostname}'
-    if parsed.port:
-        dashboard_url = f'{dashboard_url}:{parsed.port}'
-    if parsed.path:
-        dashboard_url = f'{dashboard_url}{parsed.path}'
-    dashboard_url = dashboard_url.rstrip('/')
+    dashboard_url = server_url.rstrip('/')
     dashboard_url = f'{dashboard_url}/dashboard'
     if starting_page:
         dashboard_url = f'{dashboard_url}/{starting_page}'
@@ -490,6 +478,7 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
 def handle_request_error(response: 'requests.Response') -> None:
     # Keep the original HTTPError if the response code >= 400
     response.raise_for_status()
+
     # Other status codes are not expected neither, e.g. we do not expect to
     # handle redirection here.
     if response.status_code != 200:
@@ -515,6 +504,19 @@ def get_request_id(response: 'requests.Response') -> RequestId[T]:
     return RequestId[T](request_id)
 
 
+def get_stream_request_id(
+        response: 'requests.Response') -> Optional[RequestId[T]]:
+    """This is same as the above function, but just for `sdk.stream_and_get.
+    We do this because `/api/stream` may choose the latest request id, and
+    we need to keep track of that information. Request id in this case can
+    be None."""
+    handle_request_error(response)
+    request_id = response.headers.get(server_constants.STREAM_REQUEST_HEADER)
+    if request_id is not None:
+        return RequestId[T](request_id)
+    return None
+
+
 def _start_api_server(deploy: bool = False,
                       host: str = '127.0.0.1',
                       foreground: bool = False,
@@ -538,12 +540,17 @@ def _start_api_server(deploy: bool = False,
 
         # Check available memory before starting the server.
         avail_mem_size_gb: float = common_utils.get_mem_size_gb()
-        if avail_mem_size_gb <= server_constants.MIN_AVAIL_MEM_GB:
+        # pylint: disable=import-outside-toplevel
+        import sky.jobs.utils as job_utils
+        max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
+                      if job_utils.is_consolidation_mode(on_api_restart=True)
+                      else server_constants.MIN_AVAIL_MEM_GB)
+        if avail_mem_size_gb <= max_memory:
             logger.warning(
                 f'{colorama.Fore.YELLOW}Your SkyPilot API server machine only '
                 f'has {avail_mem_size_gb:.1f}GB memory available. '
-                f'At least {server_constants.MIN_AVAIL_MEM_GB}GB is '
-                'recommended to support higher load with better performance.'
+                f'At least {max_memory}GB is recommended to support higher '
+                'load with better performance.'
                 f'{colorama.Style.RESET_ALL}')
 
         args = [sys.executable, *API_SERVER_CMD.split()]
@@ -553,6 +560,8 @@ def _start_api_server(deploy: bool = False,
             args += [f'--host={host}']
         if metrics_port is not None:
             args += [f'--metrics-port={metrics_port}']
+        # Use this argument to disable the internal signal file check.
+        args += ['--start-with-python']
 
         if foreground:
             # Replaces the current process with the API server
@@ -762,6 +771,7 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
                 os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
             # Check again if server is already running. Other processes may
             # have started the server while we were waiting for the lock.
+            get_api_server_status.cache_clear()  # type: ignore[attr-defined]
             api_server_info = get_api_server_status(endpoint)
             if api_server_info.status == ApiServerStatus.UNHEALTHY:
                 _start_api_server(deploy, host, foreground, metrics,
@@ -823,7 +833,7 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
     for task_config in task_configs:
         if task_config is None:
             continue
-        file_mounts_mapping = task_config.get('file_mounts_mapping', {})
+        file_mounts_mapping = task_config.pop('file_mounts_mapping', {})
         if not file_mounts_mapping:
             # We did not mount any files to new paths on the remote server
             # so no need to resolve filepaths.
@@ -895,12 +905,18 @@ def reload_for_new_request(client_entrypoint: Optional[str],
                            client_command: Optional[str],
                            using_remote_api_server: bool, user: 'models.User',
                            request_id: str) -> None:
-    """Reload modules, global variables, and usage message for a new request."""
+    """Reload modules, global variables, and usage message for a new request.
+
+    Must be called within the request's context.
+    """
     # This should be called first to make sure the logger is up-to-date.
     sky_logging.reload_logger()
 
     # Reload the skypilot config to make sure the latest config is used.
-    skypilot_config.safe_reload_config()
+    # We don't need to grab the lock here because this function is only
+    # run once we are inside the request's context, so there shouldn't
+    # be any race conditions when reloading the config.
+    skypilot_config.reload_config()
 
     # Reset the client entrypoint and command for the usage message.
     common_utils.set_request_context(
@@ -931,6 +947,7 @@ def clear_local_api_server_database() -> None:
     db_path = os.path.expanduser(server_constants.API_SERVER_REQUEST_DB_PATH)
     for extension in ['', '-shm', '-wal']:
         try:
+            logger.debug(f'Removing database file {db_path}{extension}')
             os.remove(f'{db_path}{extension}')
         except FileNotFoundError:
             logger.debug(f'Database file {db_path}{extension} not found.')

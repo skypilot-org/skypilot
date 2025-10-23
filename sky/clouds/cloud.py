@@ -341,6 +341,14 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
+    def get_arch_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> Optional[str]:
+        """Returns the arch of the instance type, if any."""
+        raise NotImplementedError
+
+    @classmethod
     def get_default_instance_type(cls,
                                   cpus: Optional[str] = None,
                                   memory: Optional[str] = None,

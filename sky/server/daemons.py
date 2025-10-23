@@ -8,9 +8,9 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.server import constants as server_constants
 from sky.utils import annotations
-from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import env_options
+from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 
@@ -38,9 +38,11 @@ class InternalRequestDaemon:
         try:
             # Refresh config within the while loop.
             # Since this is a long running daemon,
-            # reload_config_for_new_request()
+            # reload_for_new_request()
             # is not called in between the event runs.
-            skypilot_config.safe_reload_config()
+            # We don't need to grab the lock here because each of the daemons
+            # run in their own process and thus have their own request context.
+            skypilot_config.reload_config()
             # Get the configured log level for the daemon inside the event loop
             # in case the log level changes after the API server is started.
             level_str = skypilot_config.get_nested(
@@ -74,6 +76,10 @@ class InternalRequestDaemon:
                 # using too much memory.
                 annotations.clear_request_level_cache()
                 timeline.save_timeline()
+                # Kill all children processes related to this request.
+                # Each executor handles a single request, so we can safely
+                # kill all children processes related to this request.
+                subprocess_utils.kill_children_processes()
                 common_utils.release_memory()
             except Exception:  # pylint: disable=broad-except
                 # It is OK to fail to run the event, as the event is not
@@ -89,13 +95,13 @@ class InternalRequestDaemon:
 def refresh_cluster_status_event():
     """Periodically refresh the cluster status."""
     # pylint: disable=import-outside-toplevel
-    from sky import core
+    from sky.backends import backend_utils
 
     logger.info('=== Refreshing cluster status ===')
     # This periodically refresh will hold the lock for the cluster being
     # refreshed, but it is OK because other operations will just wait for
     # the lock and get the just refreshed status without refreshing again.
-    core.status(refresh=common.StatusRefreshMode.FORCE, all_users=True)
+    backend_utils.refresh_cluster_records()
     logger.info('Status refreshed. Sleeping '
                 f'{server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS}'
                 ' seconds for the next refresh...\n')
@@ -123,21 +129,16 @@ def managed_job_status_refresh_event():
     """Refresh the managed job status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
     from sky.jobs import utils as managed_job_utils
-    from sky.utils import controller_utils
 
     # We run the recovery logic before starting the event loop as those two are
     # conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for details.
-    if controller_utils.high_availability_specified(
-            controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name):
-        managed_job_utils.ha_recovery_for_consolidation_mode()
+    managed_job_utils.ha_recovery_for_consolidation_mode()
 
     # After recovery, we start the event loop.
     from sky.skylet import events
     refresh_event = events.ManagedJobEvent()
-    scheduling_event = events.ManagedJobSchedulingEvent()
     logger.info('=== Running managed job event ===')
     refresh_event.run()
-    scheduling_event.run()
     time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
 
 
@@ -152,14 +153,10 @@ def _serve_status_refresh_event(pool: bool):
     """Refresh the sky serve status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
     from sky.serve import serve_utils
-    from sky.utils import controller_utils
 
     # We run the recovery logic before starting the event loop as those two are
     # conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for details.
-    controller = controller_utils.get_controller_for_pool(pool)
-    if controller_utils.high_availability_specified(
-            controller.value.cluster_name):
-        serve_utils.ha_recovery_for_consolidation_mode(pool=pool)
+    serve_utils.ha_recovery_for_consolidation_mode(pool=pool)
 
     # After recovery, we start the event loop.
     from sky.skylet import events

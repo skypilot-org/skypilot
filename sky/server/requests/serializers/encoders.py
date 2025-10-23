@@ -92,10 +92,14 @@ def encode_start(resource_handle: 'backends.CloudVmRayResourceHandle') -> str:
 
 
 @register_encoder('queue')
-def encode_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
+def encode_queue(
+    jobs: List[responses.ClusterJobRecord],) -> List[Dict[str, Any]]:
+    response = []
     for job in jobs:
-        job['status'] = job['status'].value
-    return jobs
+        response_job = job.model_dump()
+        response_job['status'] = job['status'].value
+        response.append(response_job)
+    return response
 
 
 @register_encoder('status_kubernetes')
@@ -103,7 +107,7 @@ def encode_status_kubernetes(
     return_value: Tuple[
         List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
         List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
-        List[Dict[str, Any]], Optional[str]]
+        List[responses.ManagedJobRecord], Optional[str]]
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]],
            Optional[str]]:
     all_clusters, unmanaged_clusters, all_jobs, context = return_value
@@ -117,6 +121,7 @@ def encode_status_kubernetes(
         encoded_cluster = dataclasses.asdict(cluster)
         encoded_cluster['status'] = encoded_cluster['status'].value
         encoded_unmanaged_clusters.append(encoded_cluster)
+    all_jobs = [job.model_dump(by_alias=True) for job in all_jobs]
     return encoded_all_clusters, encoded_unmanaged_clusters, all_jobs, context
 
 
@@ -131,7 +136,7 @@ def encode_jobs_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
 def encode_jobs_queue_v2(
         jobs_or_tuple) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
     # Support returning either a plain jobs list or a (jobs, total) tuple
-    status_counts = {}
+    status_counts: Dict[str, int] = {}
     if isinstance(jobs_or_tuple, tuple):
         if len(jobs_or_tuple) == 2:
             jobs, total = jobs_or_tuple
@@ -143,12 +148,13 @@ def encode_jobs_queue_v2(
     else:
         jobs = jobs_or_tuple
         total = None
-    for job in jobs:
+    jobs_dict = [job.model_dump(by_alias=True) for job in jobs]
+    for job in jobs_dict:
         job['status'] = job['status'].value
     if total is None:
-        return jobs
+        return jobs_dict
     return {
-        'jobs': jobs,
+        'jobs': jobs_dict,
         'total': total,
         'total_no_filter': total_no_filter,
         'status_counts': status_counts
@@ -185,8 +191,9 @@ def encode_cost_report(
     for cluster_report in cost_report:
         if cluster_report['status'] is not None:
             cluster_report['status'] = cluster_report['status'].value
-        cluster_report['resources'] = pickle_and_encode(
-            cluster_report['resources'])
+        if 'resources' in cluster_report:
+            cluster_report['resources'] = pickle_and_encode(
+                cluster_report['resources'])
     return cost_report
 
 
@@ -198,11 +205,17 @@ def encode_enabled_clouds(clouds: List['clouds.Cloud']) -> List[str]:
 
 @register_encoder('storage_ls')
 def encode_storage_ls(
-        return_value: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return_value: List[responses.StorageRecord]) -> List[Dict[str, Any]]:
     for storage_info in return_value:
         storage_info['status'] = storage_info['status'].value
         storage_info['store'] = [store.value for store in storage_info['store']]
-    return return_value
+    return [storage_info.model_dump() for storage_info in return_value]
+
+
+@register_encoder('volume_list')
+def encode_volume_list(
+        return_value: List[responses.VolumeRecord]) -> List[Dict[str, Any]]:
+    return [volume_info.model_dump() for volume_info in return_value]
 
 
 @register_encoder('job_status')

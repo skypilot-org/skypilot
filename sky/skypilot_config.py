@@ -64,7 +64,6 @@ from sqlalchemy import orm
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.ext import declarative
-from sqlalchemy.pool import NullPool
 
 from sky import exceptions
 from sky import sky_logging
@@ -77,6 +76,7 @@ from sky.utils import schemas
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
 from sky.utils.db import db_utils
+from sky.utils.db import migration_utils
 from sky.utils.kubernetes import config_map_utils
 
 if typing.TYPE_CHECKING:
@@ -121,7 +121,8 @@ _PROJECT_CONFIG_PATH = '.sky.yaml'
 
 API_SERVER_CONFIG_KEY = 'api_server_config'
 
-_DB_USE_LOCK = threading.Lock()
+_SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
+_SQLALCHEMY_ENGINE_LOCK = threading.Lock()
 
 Base = declarative.declarative_base()
 
@@ -415,10 +416,17 @@ def local_active_workspace_ctx(workspace: str) -> Iterator[None]:
 def get_active_workspace(force_user_workspace: bool = False) -> str:
     context_workspace = getattr(_active_workspace_context, 'workspace', None)
     if not force_user_workspace and context_workspace is not None:
-        logger.debug(f'Get context workspace: {context_workspace}')
+        logger.debug(f'Got context workspace: {context_workspace}')
         return context_workspace
-    return get_nested(keys=('active_workspace',),
-                      default_value=constants.SKYPILOT_DEFAULT_WORKSPACE)
+    active_workspace = get_nested(keys=('active_workspace',),
+                                  default_value=None)
+    if active_workspace is None:
+        logger.debug(f'No active workspace found, using default workspace: '
+                     f'{constants.SKYPILOT_DEFAULT_WORKSPACE}')
+        active_workspace = constants.SKYPILOT_DEFAULT_WORKSPACE
+    else:
+        logger.debug(f'Got active workspace: {active_workspace}')
+    return active_workspace
 
 
 def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
@@ -474,7 +482,7 @@ def safe_reload_config() -> None:
         reload_config()
 
 
-def reload_config() -> None:
+def reload_config(init_db: bool = False) -> None:
     internal_config_path = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
     if internal_config_path is not None:
         # {ENV_VAR_SKYPILOT_CONFIG} is used internally.
@@ -486,7 +494,7 @@ def reload_config() -> None:
         return
 
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-        _reload_config_as_server()
+        _reload_config_as_server(init_db=init_db)
     else:
         _reload_config_as_client()
 
@@ -557,7 +565,43 @@ def _reload_config_from_internal_file(internal_config_path: str) -> None:
     _set_loaded_config_path(config_path)
 
 
-def _reload_config_as_server() -> None:
+def _create_table(engine: sqlalchemy.engine.Engine):
+    """Initialize the config database with migrations."""
+    migration_utils.safe_alembic_upgrade(
+        engine, migration_utils.SKYPILOT_CONFIG_DB_NAME,
+        migration_utils.SKYPILOT_CONFIG_VERSION)
+
+
+def _initialize_and_get_db() -> sqlalchemy.engine.Engine:
+    """Initialize and return the config database engine.
+
+    This function should only be called by the API Server during initialization.
+    Client-side code should never call this function.
+    """
+    assert os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None, (
+        'initialize_and_get_db() can only be called by the API Server')
+
+    global _SQLALCHEMY_ENGINE
+
+    if _SQLALCHEMY_ENGINE is not None:
+        return _SQLALCHEMY_ENGINE
+
+    with _SQLALCHEMY_ENGINE_LOCK:
+        if _SQLALCHEMY_ENGINE is not None:
+            return _SQLALCHEMY_ENGINE
+
+        # We only store config in the DB when using Postgres,
+        # so no need to pass in db_name here.
+        engine = db_utils.get_engine(None)
+
+        # Run migrations if needed
+        _create_table(engine)
+
+        _SQLALCHEMY_ENGINE = engine
+        return _SQLALCHEMY_ENGINE
+
+
+def _reload_config_as_server(init_db: bool = False) -> None:
     # Reset the global variables, to avoid using stale values.
     _set_loaded_config(config_utils.Config())
     _set_loaded_config_path(None)
@@ -573,37 +617,24 @@ def _reload_config_as_server() -> None:
             raise ValueError(
                 'If db config is specified, no other config is allowed')
         logger.debug('retrieving config from database')
-        with _DB_USE_LOCK:
-            dispose_engine = False
-            if db_utils.get_max_connections() == 0:
-                dispose_engine = True
-                sqlalchemy_engine = sqlalchemy.create_engine(db_url,
-                                                             poolclass=NullPool)
-            else:
-                sqlalchemy_engine = db_utils.get_engine('config')
-            db_utils.add_all_tables_to_db_sqlalchemy(Base.metadata,
-                                                     sqlalchemy_engine)
 
-            def _get_config_yaml_from_db(
-                    key: str) -> Optional[config_utils.Config]:
-                assert sqlalchemy_engine is not None
-                with orm.Session(sqlalchemy_engine) as session:
-                    row = session.query(config_yaml_table).filter_by(
-                        key=key).first()
-                if row:
-                    db_config = config_utils.Config(
-                        yaml_utils.safe_load(row.value))
-                    db_config.pop_nested(('db',), None)
-                    return db_config
-                return None
+        if init_db:
+            _initialize_and_get_db()
 
-            db_config = _get_config_yaml_from_db(API_SERVER_CONFIG_KEY)
-            if db_config:
-                server_config = overlay_skypilot_config(server_config,
-                                                        db_config)
-            # Close the engine to avoid connection leaks
-            if dispose_engine:
-                sqlalchemy_engine.dispose()
+        def _get_config_yaml_from_db(key: str) -> Optional[config_utils.Config]:
+            assert _SQLALCHEMY_ENGINE is not None
+            with orm.Session(_SQLALCHEMY_ENGINE) as session:
+                row = session.query(config_yaml_table).filter_by(
+                    key=key).first()
+            if row:
+                db_config = config_utils.Config(yaml_utils.safe_load(row.value))
+                db_config.pop_nested(('db',), None)
+                return db_config
+            return None
+
+        db_config = _get_config_yaml_from_db(API_SERVER_CONFIG_KEY)
+        if db_config:
+            server_config = overlay_skypilot_config(server_config, db_config)
     if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
         logger.debug(f'server config: \n'
                      f'{yaml_utils.dump_yaml_str(dict(server_config))}')
@@ -659,7 +690,7 @@ def loaded_config_path_serialized() -> Optional[str]:
 
 
 # Load on import, synchronization is guaranteed by python interpreter.
-reload_config()
+reload_config(init_db=True)
 
 
 def loaded() -> bool:
@@ -818,7 +849,8 @@ def _compose_cli_config(cli_config: Optional[List[str]]) -> config_utils.Config:
     except ValueError as e:
         raise ValueError(f'Invalid config override: {cli_config}. '
                          f'Check if config file exists or if the dotlist '
-                         f'is formatted as: key1=value1,key2=value2') from e
+                         f'is formatted as: key1=value1,key2=value2.\n'
+                         f'Details: {e}') from e
     logger.debug('CLI overrides config syntax check passed.')
 
     return parsed_config
@@ -872,44 +904,32 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
         if new_db_url and new_db_url != existing_db_url:
             raise ValueError('Cannot change db url while server is running')
         if existing_db_url:
-            with _DB_USE_LOCK:
-                dispose_engine = False
-                if db_utils.get_max_connections() == 0:
-                    dispose_engine = True
-                    sqlalchemy_engine = sqlalchemy.create_engine(
-                        existing_db_url, poolclass=NullPool)
-                else:
-                    sqlalchemy_engine = db_utils.get_engine('config')
-                db_utils.add_all_tables_to_db_sqlalchemy(
-                    Base.metadata, sqlalchemy_engine)
 
-                def _set_config_yaml_to_db(key: str,
-                                           config: config_utils.Config):
-                    assert sqlalchemy_engine is not None
-                    config_str = yaml_utils.dump_yaml_str(dict(config))
-                    with orm.Session(sqlalchemy_engine) as session:
-                        if (sqlalchemy_engine.dialect.name ==
-                                db_utils.SQLAlchemyDialect.SQLITE.value):
-                            insert_func = sqlite.insert
-                        elif (sqlalchemy_engine.dialect.name ==
-                              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-                            insert_func = postgresql.insert
-                        else:
-                            raise ValueError('Unsupported database dialect')
-                        insert_stmnt = insert_func(config_yaml_table).values(
-                            key=key, value=config_str)
-                        do_update_stmt = insert_stmnt.on_conflict_do_update(
-                            index_elements=[config_yaml_table.c.key],
-                            set_={config_yaml_table.c.value: config_str})
-                        session.execute(do_update_stmt)
-                        session.commit()
+            def _set_config_yaml_to_db(key: str, config: config_utils.Config):
+                # reload_config(init_db=True) is called when this module is
+                # imported, so the database engine must already be initialized.
+                assert _SQLALCHEMY_ENGINE is not None
+                config_str = yaml_utils.dump_yaml_str(dict(config))
+                with orm.Session(_SQLALCHEMY_ENGINE) as session:
+                    if (_SQLALCHEMY_ENGINE.dialect.name ==
+                            db_utils.SQLAlchemyDialect.SQLITE.value):
+                        insert_func = sqlite.insert
+                    elif (_SQLALCHEMY_ENGINE.dialect.name ==
+                          db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+                        insert_func = postgresql.insert
+                    else:
+                        raise ValueError('Unsupported database dialect')
+                    insert_stmnt = insert_func(config_yaml_table).values(
+                        key=key, value=config_str)
+                    do_update_stmt = insert_stmnt.on_conflict_do_update(
+                        index_elements=[config_yaml_table.c.key],
+                        set_={config_yaml_table.c.value: config_str})
+                    session.execute(do_update_stmt)
+                    session.commit()
 
-                logger.debug('saving api_server config to db')
-                _set_config_yaml_to_db(API_SERVER_CONFIG_KEY, config)
-                db_updated = True
-                # Close the engine to avoid connection leaks
-                if dispose_engine:
-                    sqlalchemy_engine.dispose()
+            logger.debug('saving api_server config to db')
+            _set_config_yaml_to_db(API_SERVER_CONFIG_KEY, config)
+            db_updated = True
 
     if not db_updated:
         # save to the local file (PVC in Kubernetes, local file otherwise)

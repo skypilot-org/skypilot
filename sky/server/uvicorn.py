@@ -46,11 +46,11 @@ except ValueError:
 
 # TODO(aylei): use decorator to register requests that need to be proactively
 # cancelled instead of hardcoding here.
-_RETRIABLE_REQUEST_NAMES = [
+_RETRIABLE_REQUEST_NAMES = {
     'sky.logs',
     'sky.jobs.logs',
     'sky.serve.logs',
-]
+}
 
 
 def add_timestamp_prefix_for_server_logs() -> None:
@@ -151,37 +151,38 @@ class Server(uvicorn.Server):
                 requests_lib.RequestStatus.PENDING,
                 requests_lib.RequestStatus.RUNNING,
             ]
-            reqs = requests_lib.get_request_tasks(
-                req_filter=requests_lib.RequestTaskFilter(status=statuses))
-            if not reqs:
+            requests = [(request_task.request_id, request_task.name)
+                        for request_task in requests_lib.get_request_tasks(
+                            req_filter=requests_lib.RequestTaskFilter(
+                                status=statuses, fields=['request_id', 'name']))
+                       ]
+            if not requests:
                 break
-            logger.info(f'{len(reqs)} on-going requests '
+            logger.info(f'{len(requests)} on-going requests '
                         'found, waiting for them to finish...')
             # Proactively cancel internal requests and logs requests since
             # they can run for infinite time.
-            internal_request_ids = [
+            internal_request_ids = {
                 d.id for d in daemons.INTERNAL_REQUEST_DAEMONS
-            ]
+            }
             if time.time() - start_time > _WAIT_REQUESTS_TIMEOUT_SECONDS:
                 logger.warning('Timeout waiting for on-going requests to '
                                'finish, cancelling all on-going requests.')
-                for req in reqs:
-                    self.interrupt_request_for_retry(req.request_id)
+                for request_id, _ in requests:
+                    self.interrupt_request_for_retry(request_id)
                 break
             interrupted = 0
-            for req in reqs:
-                if req.request_id in internal_request_ids:
-                    self.interrupt_request_for_retry(req.request_id)
-                    interrupted += 1
-                elif req.name in _RETRIABLE_REQUEST_NAMES:
-                    self.interrupt_request_for_retry(req.request_id)
+            for request_id, name in requests:
+                if (name in _RETRIABLE_REQUEST_NAMES or
+                        request_id in internal_request_ids):
+                    self.interrupt_request_for_retry(request_id)
                     interrupted += 1
                 # TODO(aylei): interrupt pending requests to accelerate the
                 # shutdown.
             # If some requests are not interrupted, wait for them to finish,
             # otherwise we just check again immediately to accelerate the
             # shutdown process.
-            if interrupted < len(reqs):
+            if interrupted < len(requests):
                 time.sleep(_WAIT_REQUESTS_INTERVAL_SECONDS)
 
     def interrupt_request_for_retry(self, request_id: str) -> None:
@@ -213,11 +214,17 @@ class Server(uvicorn.Server):
             # Same as set PYTHONASYNCIODEBUG=1, but with custom threshold.
             event_loop.set_debug(True)
             event_loop.slow_callback_duration = lag_threshold
-        threading.Thread(target=metrics_lib.process_monitor,
-                         args=('server',),
-                         daemon=True).start()
-        with self.capture_signals():
-            asyncio.run(self.serve(*args, **kwargs))
+        stop_monitor = threading.Event()
+        monitor = threading.Thread(target=metrics_lib.process_monitor,
+                                   args=('server', stop_monitor),
+                                   daemon=True)
+        monitor.start()
+        try:
+            with self.capture_signals():
+                asyncio.run(self.serve(*args, **kwargs))
+        finally:
+            stop_monitor.set()
+            monitor.join()
 
 
 def run(config: uvicorn.Config, max_db_connections: Optional[int] = None):

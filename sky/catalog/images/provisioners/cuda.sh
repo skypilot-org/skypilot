@@ -24,13 +24,20 @@ sudo apt-get update
 
 # Make sure CUDA toolkit and driver versions are compatible: https://docs.nvidia.com/deploy/cuda-compatibility/index.html
 # Current State: Driver Version 535.183.06 and CUDA Version 12.2
-sudo apt-get install -y cuda-drivers-535
-sudo apt-get install -y cuda-toolkit-12-4
-
-# Install cuDNN
-# https://docs.nvidia.com/deeplearning/cudnn/latest/installation/linux.html#installing-on-linux
-sudo apt-get install libcudnn8
-sudo apt-get install libcudnn8-dev
+if [ "$ARCH_PATH" = "arm64" ]; then
+    sudo apt install -y nvidia-driver-535
+    sudo apt install -y nvidia-modprobe
+    sudo apt-get install -y cuda-toolkit-12-4
+    sudo apt-get install libcudnn9-cuda-12
+    sudo apt-get install libcudnn9-dev-cuda-12
+else
+    sudo apt-get install -y cuda-drivers-535
+    sudo apt-get install -y cuda-toolkit-12-4
+    # Install cuDNN
+    # https://docs.nvidia.com/deeplearning/cudnn/latest/installation/linux.html#installing-on-linux
+    sudo apt-get install libcudnn8
+    sudo apt-get install libcudnn8-dev
+fi
 
 # Cleanup
 rm cuda-keyring_1.1-1_all.deb

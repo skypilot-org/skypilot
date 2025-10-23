@@ -149,7 +149,7 @@ Work with managed jobs
 
 For a list of all commands and options, run :code:`sky jobs --help` or read the :ref:`CLI reference <cli>`.
 
-See a list of all managed jobs:
+See a list of managed jobs:
 
 .. code-block:: console
 
@@ -162,6 +162,8 @@ See a list of all managed jobs:
   ID NAME     RESOURCES           SUBMITTED   TOT. DURATION   JOB DURATION   #RECOVERIES  STATUS
   2  roberta  1x [A100:8][Spot]   2 hrs ago   2h 47m 18s      2h 36m 18s     0            RUNNING
   1  bert-qa  1x [V100:1][Spot]   4 hrs ago   4h 24m 26s      4h 17m 54s     0            RUNNING
+
+This command shows 50 managed jobs by default, use ``--limit <num>`` to show more jobs or use ``--all`` to show all jobs.
 
 Stream the logs of a running managed job:
 
@@ -454,8 +456,15 @@ To submit the pipeline, the same command :code:`sky jobs launch` is used. The pi
 
 .. _pool:
 
-Using pools
------------
+Using pools (experimental)
+--------------------------
+
+.. warning::
+
+  Pools are currently in alpha so some features are not currently supported:
+
+  - Pools does not currently support heterogeneous clusters (e.g., mixed H100 and H200 workers)
+  - Pools does not currently support multiple jobs running concurrently on the same worker
 
 SkyPilot supports spawning a **pool** for launching many jobs that share the same environment — for example, batch inference or large-scale data processing.
 
@@ -482,8 +491,8 @@ Here is a simple example of creating a pool:
     workers: 3
 
   resources:
-    # Specify the resources for each worker, e.g. use either H100 or H200.
-    accelerators: {H100:1, H200:1}
+    # Specify the resources for each worker.
+    accelerators: H100
 
   file_mounts:
     /my-data:
@@ -498,6 +507,13 @@ Notice that the :code:`pool` section is the only difference from a normal SkyPil
 To specify the number of workers in the pool, use the :code:`workers` field under :code:`pool`.
 When creating a pool, the :code:`run` section is ignored.
 
+The setup commands **must not be blocking**. If a long-running server is required, it should be launched in the background. The :code:`setsid` command ensures that setup processes are not terminated when the shell exits. An example using vLLM server is shown below:
+
+.. code-block:: yaml
+
+  setup: |
+    # Start a long-running vLLM server in the background
+    setsid bash -c "vllm serve $MODEL_NAME > ./vllm.log 2>&1" > /dev/null 2>&1 &
 
 To create a pool, use :code:`sky jobs pool apply`:
 
@@ -601,6 +617,7 @@ Submit multiple jobs at once
 
 Pools support a :code:`--num-jobs` flag to conveniently submit multiple jobs at once.
 Each job will be assigned a unique environment variable :code:`$SKYPILOT_JOB_RANK`, which can be used to determine the job partition.
+Additionally, the :code:`$SKYPILOT_NUM_JOBS` environment variable will be set to the total number of jobs submitted.
 
 For example, if you have 1000 prompts to evaluate, each job can process prompts with sequence numbers
 :code:`$SKYPILOT_JOB_RANK * 100` to :code:`($SKYPILOT_JOB_RANK + 1) * 100`.
@@ -616,7 +633,7 @@ Here is a simple example:
     accelerators: {H100:1, H200:1}
 
   run: |
-    echo "Job rank: $SKYPILOT_JOB_RANK"
+    echo "Job rank: $SKYPILOT_JOB_RANK out of $SKYPILOT_NUM_JOBS"
     echo "Processing prompts from $(($SKYPILOT_JOB_RANK * 100)) to $((($SKYPILOT_JOB_RANK + 1) * 100))"
     # Actual business logic here...
     echo "Job $SKYPILOT_JOB_RANK finished"
@@ -713,6 +730,11 @@ If no such pool exists, it will create a new one; this is equivalent to the beha
 
 Pools will automatically detect changes in the worker configuration. If only the pool configuration (e.g. number of workers) is changed, the pool will be updated in place to reuse the previous workers; otherwise, if the setup, file mounts, workdir, or resources configuration is changed, new worker clusters will be created and the old ones will be terminated gradually.
 
+You can also update the number of workers in a pool without a YAML file by using the :code:`--workers` flag:
+
+.. code-block:: console
+
+  $ sky jobs pool apply -p gpu-pool --workers 10
 
 .. note::
 
@@ -747,7 +769,7 @@ For managed jobs, SkyPilot uses an intermediate bucket to store files used in th
 
 If you do not configure a bucket, SkyPilot will automatically create a temporary bucket named :code:`skypilot-filemounts-{username}-{run_id}` for each job launch. SkyPilot automatically deletes the bucket after the job completes.
 
-**Object store access is not necessary to use managed jobs.** If cloud object storage is not available (e.g., Kubernetes deployments), SkyPilot automatically falls back to a two-hop upload that copies files to the jobs controller and then downloads them to the jobs. 
+**Object store access is not necessary to use managed jobs.** If cloud object storage is not available (e.g., Kubernetes deployments), SkyPilot automatically falls back to a two-hop upload that copies files to the jobs controller and then downloads them to the jobs.
 
 .. tip::
 
@@ -815,6 +837,26 @@ you can still tear it down manually with
 
 To adjust the size of the jobs controller instance, see :ref:`jobs-controller-custom-resources`.
 
+.. _managed-jobs-high-availability-controller:
+
+High availability controller
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+High availability mode ensures the controller for Managed Jobs remains resilient to failures by running it as a Kubernetes Deployment with automatic restarts and persistent storage. This helps maintain management capabilities even if the controller pod crashes or the node fails.
+
+To enable high availability for Managed Jobs, simply set the ``high_availability`` flag to ``true`` under ``jobs.controller`` in your ``~/.sky/config.yaml``, and ensure the controller runs on Kubernetes:
+
+.. code-block:: yaml
+    :emphasize-lines: 4-5
+
+    jobs:
+      controller:
+        resources:
+          cloud: kubernetes
+        high_availability: true
+
+This will deploy the controller as a Kubernetes Deployment with persistent storage, allowing automatic recovery on failures. For prerequisites, setup steps, and recovery behavior, see the detailed page: :ref:`high-availability-controller`.
+
 
 Setup and best practices
 ------------------------
@@ -839,9 +881,9 @@ To set up credentials:
 Customizing jobs controller resources
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-You may want to customize the resources of the jobs controller for several reasons:
+You may want to customize the jobs controller resources for several reasons:
 
-#. Increasing the maximum number of jobs that can be run concurrently, which is based on the instance size of the controller. (Default: 90, see :ref:`best practices <jobs-controller-sizing>`)
+#. Increasing the maximum number of jobs that can be run concurrently, which is based on the controller's memory allocation. (Default: ~600, see :ref:`best practices <jobs-controller-sizing>`)
 #. Use a lower-cost controller (if you have a low number of concurrent managed jobs).
 #. Enforcing the jobs controller to run on a specific location. (Default: cheapest location)
 #. Changing the disk_size of the jobs controller to store more logs. (Default: 50GB)
@@ -861,7 +903,7 @@ To achieve the above, you can specify custom configs in :code:`~/.sky/config.yam
         # Bump cpus to allow more managed jobs to be launched concurrently. (Default: 4+)
         cpus: 8+
         # Bump memory to allow more managed jobs to be running at once.
-        # By default, it scales with CPU (8x).
+        # By default, it scales with CPU (4x).
         memory: 64+
         # Specify the disk_size in GB of the jobs controller.
         disk_size: 100
@@ -883,7 +925,7 @@ To see your current jobs controller, use :code:`sky status`.
   NAME                          INFRA             RESOURCES                                  STATUS   AUTOSTOP  LAUNCHED
   my-cluster-1                  AWS (us-east-1)   1x(cpus=16, m6i.4xlarge, ...)              STOPPED  -         1 week ago
   my-other-cluster              GCP (us-central1) 1x(cpus=16, n2-standard-16, ...)           STOPPED  -         1 week ago
-  sky-jobs-controller-919df126  AWS (us-east-1)   1x(cpus=2, r6i.xlarge, disk_size=50)       STOPPED  10m       1 day ago
+  sky-jobs-controller-919df126  AWS (us-east-1)   1x(cpus=4, m6i.xlarge, disk_size=50)       STOPPED  10m       1 day ago
 
   Managed jobs
   No in-progress managed jobs.
@@ -891,7 +933,7 @@ To see your current jobs controller, use :code:`sky status`.
   Services
   No live services.
 
-In this example, you can see the jobs controller (:code:`sky-jobs-controller-919df126`) is an r6i.xlarge on AWS, which is the default size.
+In this example, you can see the jobs controller (:code:`sky-jobs-controller-919df126`) is an m6i.xlarge on AWS, which is the default size.
 
 To tear down the current controller, so that new resource config is picked up, use :code:`sky down`.
 
@@ -919,54 +961,61 @@ Best practices for scaling up the jobs controller
 
 The number of active jobs that the controller supports is based on the controller size. There are two limits that apply:
 
-- **Actively launching job count**: maxes out at ``4 * vCPU count``.
+- **Actively launching job count**: limit is ``8 * floor((memory - 2GiB) / 3.59GiB)``, with a maximum of 512 jobs.
   A job counts towards this limit when it is first starting, launching instances, or recovering.
 
-  - The default controller size has 4 CPUs, meaning **16 jobs** can be actively launching at once.
+  - The default controller size has 16 GiB memory, meaning **24 jobs** can be actively launching at once.
 
-- **Running job count**: maxes out at ``memory / 350MiB``, up to a max of ``2000`` jobs.
+- **Running job count**: limit is ``200 * floor((memory - 2GiB) / 3.59GiB)``, with a maximum of 2000 jobs.
 
-  - The default controller size has 32GiB of memory, meaning around **90 jobs** can be running in parallel.
+  - The default controller size supports up to **600 jobs** running in parallel.
 
-The default size is appropriate for most moderate use cases, but if you need to run hundreds or thousands of jobs at once, you should increase the controller size.
+The default size is appropriate for most moderate use cases, but if you need to run hundreds or thousands of jobs at once, you should increase the controller size. Each additional ~3.6 GiB of controller memory adds capacity for 8 concurrent launches and 200 concurrently running jobs.
 
-For maximum parallelism, the following configuration is recommended:
+Increase CPU modestly as memory grows to keep controller responsiveness high, but note that the hard parallelism limits are driven by available memory.
+A ratio of 4 GiB memory per CPU works well in our testing.
 
-.. code-block:: yaml
+For absolute maximum parallelism, the following per-cloud configurations are recommended:
 
-  jobs:
-    controller:
-      resources:
-        # In our testing, aws > gcp > azure
-        infra: aws
-        cpus: 128
-        # Azure does not have 128+ CPU instances, so use 96 instead
-        # cpus: 96
-        memory: 600+
-        disk_size: 500
+.. tab-set::
+
+    .. tab-item:: AWS
+
+        .. code-block:: yaml
+
+            jobs:
+              controller:
+                resources:
+                  infra: aws
+                  cpus: 192
+                  memory: 4x
+                  disk_size: 500
+
+    .. tab-item:: GCP
+
+        .. code-block:: yaml
+
+            jobs:
+              controller:
+                resources:
+                  infra: gcp
+                  cpus: 128
+                  memory: 4x
+                  disk_size: 500
+
+    .. tab-item:: Azure
+
+        .. code-block:: yaml
+
+            jobs:
+              controller:
+                resources:
+                  infra: azure
+                  cpus: 96
+                  memory: 4x
+                  disk_size: 500
 
 .. note::
   Remember to tear down your controller to apply these changes, as described above.
 
-With this configuration, you'll get the following performance:
-
-.. list-table::
-   :widths: 1 2 2 2
-   :header-rows: 1
-
-   * - Cloud
-     - Instance type
-     - Launching jobs
-     - Running jobs
-   * - AWS
-     - r6i.32xlarge
-     - **512 launches at once**
-     - **2000 running at once**
-   * - GCP
-     - n2-highmem-128
-     - **512 launches at once**
-     - **2000 running at once**
-   * - Azure
-     - Standard_E96s_v5
-     - **384 launches at once**
-     - **1930 running at once**
+With this configuration, you can launch up to 512 jobs at once. Once the jobs are launched, up to 2000 jobs can be running in parallel.

@@ -59,6 +59,9 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
+import { statusGroups } from '@/components/jobs';
+
+const ACTIVE_JOB_STATUSES = new Set(statusGroups.active);
 
 // Helper functions for username parsing
 const parseUsername = (username, userId) => {
@@ -189,6 +192,56 @@ export function Users() {
   const [serviceAccountSearchQuery, setServiceAccountSearchQuery] =
     useState('');
 
+  // Initialize deduplicateUsers from URL parameter
+  const getInitialDeduplicateUsers = () => {
+    if (typeof window !== 'undefined' && router.isReady) {
+      const deduplicateParam = router.query.deduplicate;
+      // If parameter is explicitly set, use it; otherwise default to true
+      if (deduplicateParam !== undefined) {
+        return deduplicateParam === 'true';
+      }
+    }
+    return true; // Default to deduplicated view
+  };
+
+  const [deduplicateUsers, setDeduplicateUsers] = useState(
+    getInitialDeduplicateUsers
+  );
+
+  // Sync deduplicateUsers state with URL parameter
+  useEffect(() => {
+    if (router.isReady) {
+      const deduplicateParam = router.query.deduplicate;
+
+      // If URL has no deduplicate parameter, set it to the default (true)
+      if (deduplicateParam === undefined) {
+        updateDeduplicateURL(true);
+      } else {
+        const expectedState = deduplicateParam === 'true';
+        if (deduplicateUsers !== expectedState) {
+          setDeduplicateUsers(expectedState);
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.isReady, router.query.deduplicate]);
+
+  // Helper function to update deduplicate in URL
+  const updateDeduplicateURL = (deduplicateValue) => {
+    const query = { ...router.query };
+    query.deduplicate = deduplicateValue.toString();
+
+    // Use replace to avoid adding to browser history
+    router.replace(
+      {
+        pathname: router.pathname,
+        query,
+      },
+      undefined,
+      { shallow: true }
+    );
+  };
+
   // Handle URL parameters for tab selection
   useEffect(() => {
     if (router.isReady) {
@@ -281,7 +334,9 @@ export function Users() {
   const handleRefresh = () => {
     dashboardCache.invalidate(getUsers);
     dashboardCache.invalidate(getClusters);
-    dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
+    dashboardCache.invalidate(getManagedJobs, [
+      { allUsers: true, skipFinished: true, fields: ['user_hash', 'status'] },
+    ]);
 
     if (refreshDataRef.current) {
       refreshDataRef.current();
@@ -537,6 +592,36 @@ export function Users() {
               </button>
             )}
 
+          {/* Deduplicate Users Toggle - only show on users tab */}
+          {activeMainTab === 'users' && (
+            <label className="flex items-center cursor-pointer mr-2">
+              <input
+                type="checkbox"
+                checked={deduplicateUsers}
+                onChange={(e) => {
+                  const newValue = e.target.checked;
+                  setDeduplicateUsers(newValue);
+                  updateDeduplicateURL(newValue);
+                }}
+                className="sr-only"
+              />
+              <div
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                  deduplicateUsers ? 'bg-sky-600' : 'bg-gray-300'
+                }`}
+              >
+                <span
+                  className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
+                    deduplicateUsers ? 'translate-x-5' : 'translate-x-1'
+                  }`}
+                />
+              </div>
+              <span className="ml-2 text-sm text-gray-700">
+                Deduplicate users
+              </span>
+            </label>
+          )}
+
           <button
             onClick={handleRefresh}
             disabled={loading}
@@ -650,6 +735,7 @@ export function Users() {
           currentUserId={userRoleCache?.id}
           searchQuery={userSearchQuery}
           setSearchQuery={setUserSearchQuery}
+          deduplicateUsers={deduplicateUsers}
         />
       ) : (
         <ServiceAccountTokensView
@@ -1070,6 +1156,7 @@ function UsersTable({
   currentUserId,
   searchQuery,
   setSearchQuery,
+  deduplicateUsers,
 }) {
   const [usersWithCounts, setUsersWithCounts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -1108,7 +1195,13 @@ function UsersTable({
         // Step 2: Load clusters and jobs in background and update counts
         const [clustersData, managedJobsResponse] = await Promise.all([
           dashboardCache.get(getClusters),
-          dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
+          dashboardCache.get(getManagedJobs, [
+            {
+              allUsers: true,
+              skipFinished: true,
+              fields: ['user_hash', 'status'],
+            },
+          ]),
         ]);
 
         const jobsData = managedJobsResponse.jobs || [];
@@ -1118,15 +1211,16 @@ function UsersTable({
           const userClusters = (clustersData || []).filter(
             (c) => c.user_hash === user.userId
           );
-          const userJobs = (jobsData || []).filter(
-            (j) => j.user_hash === user.userId
-          );
+          const activeJobCount = (jobsData || []).filter(
+            (j) =>
+              j.user_hash === user.userId && ACTIVE_JOB_STATUSES.has(j.status)
+          ).length;
           return {
             ...user,
             usernameDisplay: parseUsername(user.username, user.userId),
             fullEmailID: getFullEmailID(user.username, user.userId),
             clusterCount: userClusters.length,
-            jobCount: userJobs.length,
+            jobCount: activeJobCount,
           };
         });
 
@@ -1163,7 +1257,9 @@ function UsersTable({
     initializeData();
 
     const interval = setInterval(() => {
-      fetchDataAndProcess(false); // Don't show loading on background refresh
+      if (window.document.visibilityState === 'visible') {
+        fetchDataAndProcess(false); // Don't show loading on background refresh
+      }
     }, refreshInterval);
     return () => clearInterval(interval);
   }, [fetchDataAndProcess, refreshInterval]);
@@ -1181,8 +1277,64 @@ function UsersTable({
       );
     }
 
+    // Deduplicate by username if toggle is enabled
+    if (deduplicateUsers) {
+      const deduped = {};
+      filtered.forEach((user) => {
+        const name = user.usernameDisplay;
+        if (!deduped[name]) {
+          // Initialize with first user
+          deduped[name] = {
+            ...user,
+            // Track all userIds for this username
+            userIds: [user.userId],
+            // Track counts that will be summed
+            clusterCount: user.clusterCount,
+            jobCount: user.jobCount,
+            // Track the oldest created_at
+            created_at: user.created_at,
+          };
+        } else {
+          // Merge with existing entry
+          deduped[name].userIds.push(user.userId);
+
+          // Sum cluster counts (handle loading state smartly)
+          if (user.clusterCount !== -1) {
+            // If current user has a valid count
+            if (deduped[name].clusterCount === -1) {
+              // Replace loading state with actual count
+              deduped[name].clusterCount = user.clusterCount;
+            } else {
+              // Add to existing valid count
+              deduped[name].clusterCount += user.clusterCount;
+            }
+          }
+          // If user.clusterCount === -1 and deduped already has valid count, keep existing
+
+          // Sum job counts (same logic)
+          if (user.jobCount !== -1) {
+            if (deduped[name].jobCount === -1) {
+              deduped[name].jobCount = user.jobCount;
+            } else {
+              deduped[name].jobCount += user.jobCount;
+            }
+          }
+
+          // Keep the oldest created_at
+          if (
+            user.created_at &&
+            (!deduped[name].created_at ||
+              user.created_at < deduped[name].created_at)
+          ) {
+            deduped[name].created_at = user.created_at;
+          }
+        }
+      });
+      filtered = Object.values(deduped);
+    }
+
     return sortData(filtered, sortConfig.key, sortConfig.direction);
-  }, [usersWithCounts, sortConfig, searchQuery]);
+  }, [usersWithCounts, sortConfig, searchQuery, deduplicateUsers]);
 
   const requestSort = (key) => {
     let direction = 'ascending';
@@ -1285,18 +1437,22 @@ function UsersTable({
               >
                 Name{getSortDirection('usernameDisplay')}
               </TableHead>
-              <TableHead
-                onClick={() => requestSort('fullEmailID')}
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-              >
-                User ID{getSortDirection('fullEmailID')}
-              </TableHead>
-              <TableHead
-                onClick={() => requestSort('role')}
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-              >
-                Role{getSortDirection('role')}
-              </TableHead>
+              {!deduplicateUsers && (
+                <TableHead
+                  onClick={() => requestSort('fullEmailID')}
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                >
+                  User ID{getSortDirection('fullEmailID')}
+                </TableHead>
+              )}
+              {!deduplicateUsers && (
+                <TableHead
+                  onClick={() => requestSort('role')}
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                >
+                  Role{getSortDirection('role')}
+                </TableHead>
+              )}
               <TableHead
                 onClick={() => requestSort('created_at')}
                 className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
@@ -1315,12 +1471,13 @@ function UsersTable({
               >
                 Jobs{getSortDirection('jobCount')}
               </TableHead>
-              {/* Show Actions column if basicAuthEnabled */}
-              {(basicAuthEnabled || currentUserRole === 'admin') && (
-                <TableHead className="whitespace-nowrap w-1/7">
-                  Actions
-                </TableHead>
-              )}
+              {/* Show Actions column if basicAuthEnabled and not deduplicating */}
+              {!deduplicateUsers &&
+                (basicAuthEnabled || currentUserRole === 'admin') && (
+                  <TableHead className="whitespace-nowrap w-1/7">
+                    Actions
+                  </TableHead>
+                )}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1329,57 +1486,61 @@ function UsersTable({
                 <TableCell className="truncate" title={user.username}>
                   {user.usernameDisplay}
                 </TableCell>
-                <TableCell className="truncate" title={user.fullEmailID}>
-                  {user.fullEmailID}
-                </TableCell>
-                <TableCell className="truncate" title={user.role}>
-                  <div className="flex items-center gap-2">
-                    {editingUserId === user.userId ? (
-                      <>
-                        <select
-                          value={currentEditingRole}
-                          onChange={(e) =>
-                            setCurrentEditingRole(e.target.value)
-                          }
-                          className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
-                        >
-                          <option value="admin">Admin</option>
-                          <option value="user">User</option>
-                        </select>
-                        <button
-                          onClick={() => handleSaveEdit(user.userId)}
-                          className="text-green-600 hover:text-green-800 p-1"
-                          title="Save"
-                        >
-                          <CheckIcon className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={handleCancelEdit}
-                          className="text-gray-500 hover:text-gray-700 p-1"
-                          title="Cancel"
-                        >
-                          <XIcon className="h-4 w-4" />
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <span className="capitalize">{user.role}</span>
-                        {/* Only show edit role button if admin */}
-                        {currentUserRole === 'admin' && (
-                          <button
-                            onClick={() =>
-                              handleEditClick(user.userId, user.role)
+                {!deduplicateUsers && (
+                  <TableCell className="truncate" title={user.fullEmailID}>
+                    {user.fullEmailID}
+                  </TableCell>
+                )}
+                {!deduplicateUsers && (
+                  <TableCell className="truncate" title={user.role}>
+                    <div className="flex items-center gap-2">
+                      {editingUserId === user.userId ? (
+                        <>
+                          <select
+                            value={currentEditingRole}
+                            onChange={(e) =>
+                              setCurrentEditingRole(e.target.value)
                             }
-                            className="text-blue-600 hover:text-blue-700 p-1"
-                            title="Edit role"
+                            className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
                           >
-                            <PenIcon className="h-3 w-3" />
+                            <option value="admin">Admin</option>
+                            <option value="user">User</option>
+                          </select>
+                          <button
+                            onClick={() => handleSaveEdit(user.userId)}
+                            className="text-green-600 hover:text-green-800 p-1"
+                            title="Save"
+                          >
+                            <CheckIcon className="h-4 w-4" />
                           </button>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </TableCell>
+                          <button
+                            onClick={handleCancelEdit}
+                            className="text-gray-500 hover:text-gray-700 p-1"
+                            title="Cancel"
+                          >
+                            <XIcon className="h-4 w-4" />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <span className="capitalize">{user.role}</span>
+                          {/* Only show edit role button if admin */}
+                          {currentUserRole === 'admin' && (
+                            <button
+                              onClick={() =>
+                                handleEditClick(user.userId, user.role)
+                              }
+                              className="text-blue-600 hover:text-blue-700 p-1"
+                              title="Edit role"
+                            >
+                              <PenIcon className="h-3 w-3" />
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </TableCell>
+                )}
                 <TableCell className="truncate">
                   {user.created_at ? (
                     <TimestampWithTooltip
@@ -1423,60 +1584,61 @@ function UsersTable({
                           ? 'bg-green-100 text-green-600 hover:bg-green-200 hover:text-green-700'
                           : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
                       }`}
-                      title={`View ${user.jobCount} job${user.jobCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
+                      title={`View ${user.jobCount} active job${user.jobCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
                     >
                       {user.jobCount}
                     </Link>
                   )}
                 </TableCell>
-                {/* Actions cell logic */}
-                {(basicAuthEnabled || currentUserRole === 'admin') && (
-                  <TableCell className="relative">
-                    <div className="flex items-center gap-2">
-                      {/* Reset password icon: admin can reset any, user can only reset self (basic auth only) */}
-                      {basicAuthEnabled && (
-                        <button
-                          onClick={
-                            currentUserRole === 'admin' ||
-                            user.userId === currentUserId
-                              ? async () => {
-                                  onResetPassword(user);
-                                }
-                              : undefined
-                          }
-                          className={
-                            currentUserRole === 'admin' ||
-                            user.userId === currentUserId
-                              ? 'text-blue-600 hover:text-blue-700 p-1'
-                              : 'text-gray-300 cursor-not-allowed p-1'
-                          }
-                          title={
-                            currentUserRole === 'admin' ||
-                            user.userId === currentUserId
-                              ? 'Reset Password'
-                              : 'You can only reset your own password'
-                          }
-                          disabled={
-                            currentUserRole !== 'admin' &&
-                            user.userId !== currentUserId
-                          }
-                        >
-                          <KeyRoundIcon className="h-4 w-4" />
-                        </button>
-                      )}
-                      {/* Delete button - only show for admin */}
-                      {currentUserRole === 'admin' && (
-                        <button
-                          onClick={() => onDeleteUser(user)}
-                          className="text-red-600 hover:text-red-700 p-1"
-                          title="Delete User"
-                        >
-                          <Trash2Icon className="h-4 w-4" />
-                        </button>
-                      )}
-                    </div>
-                  </TableCell>
-                )}
+                {/* Actions cell logic - hide when deduplicating */}
+                {!deduplicateUsers &&
+                  (basicAuthEnabled || currentUserRole === 'admin') && (
+                    <TableCell className="relative">
+                      <div className="flex items-center gap-2">
+                        {/* Reset password icon: admin can reset any, user can only reset self (basic auth only) */}
+                        {basicAuthEnabled && (
+                          <button
+                            onClick={
+                              currentUserRole === 'admin' ||
+                              user.userId === currentUserId
+                                ? async () => {
+                                    onResetPassword(user);
+                                  }
+                                : undefined
+                            }
+                            className={
+                              currentUserRole === 'admin' ||
+                              user.userId === currentUserId
+                                ? 'text-blue-600 hover:text-blue-700 p-1'
+                                : 'text-gray-300 cursor-not-allowed p-1'
+                            }
+                            title={
+                              currentUserRole === 'admin' ||
+                              user.userId === currentUserId
+                                ? 'Reset Password'
+                                : 'You can only reset your own password'
+                            }
+                            disabled={
+                              currentUserRole !== 'admin' &&
+                              user.userId !== currentUserId
+                            }
+                          >
+                            <KeyRoundIcon className="h-4 w-4" />
+                          </button>
+                        )}
+                        {/* Delete button - only show for admin */}
+                        {currentUserRole === 'admin' && (
+                          <button
+                            onClick={() => onDeleteUser(user)}
+                            className="text-red-600 hover:text-red-700 p-1"
+                            title="Delete User"
+                          >
+                            <Trash2Icon className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
+                    </TableCell>
+                  )}
               </TableRow>
             ))}
           </TableBody>
@@ -1565,7 +1727,13 @@ function ServiceAccountTokensView({
       // Step 2: Fetch clusters and jobs data in parallel
       const [clustersResponse, jobsResponse] = await Promise.all([
         dashboardCache.get(getClusters),
-        dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
+        dashboardCache.get(getManagedJobs, [
+          {
+            allUsers: true,
+            skipFinished: true,
+            fields: ['user_hash', 'status'],
+          },
+        ]),
       ]);
 
       const clustersData = clustersResponse || [];
@@ -1582,7 +1750,9 @@ function ServiceAccountTokensView({
 
         // Count jobs owned by this service account
         const serviceAccountJobs = jobsData.filter(
-          (job) => job.user_hash === serviceAccountId
+          (job) =>
+            job.user_hash === serviceAccountId &&
+            ACTIVE_JOB_STATUSES.has(job.status)
         );
 
         return {
@@ -1922,7 +2092,7 @@ function ServiceAccountTokensView({
                             ? 'bg-green-100 text-green-600 hover:bg-green-200 hover:text-green-700'
                             : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
                         }`}
-                        title={`View ${token.jobCount} job${token.jobCount !== 1 ? 's' : ''} for ${token.token_name}`}
+                        title={`View ${token.jobCount} active job${token.jobCount !== 1 ? 's' : ''} for ${token.token_name}`}
                       >
                         {token.jobCount}
                       </Link>

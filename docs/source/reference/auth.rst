@@ -480,6 +480,133 @@ If the ``X-Auth-Request-Email`` header is set by your auth proxy, SkyPilot will 
     export SKYPILOT_AUTH_USER_HEADER=X-Custom-User-Header
     sky api start --deploy
 
+.. _cloudflare-zero-trust:
+
+Optional: Cloudflare Zero Trust and WARP
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+You can configure Cloudflare Zero Trust with WARP to provide seamless authentication for your SkyPilot API server. This setup allows CLI/API requests to bypass login when the device is connected to Warp, while browser users are still challenged with SSO.
+
+Prerequisites
+^^^^^^^^^^^^^
+
+* A domain managed by Cloudflare (e.g. ``skypilot.org``)
+* Cloudflare Zero Trust subscription
+* DNS record pointing your API ingress LoadBalancer IP from the SSO setup in the same Cloudflare account as your Zero Trust setup (this example uses ``zerotrust.skypilot.org``)
+* SkyPilot API server configured with SSO (you will need your client ID and secret)
+
+
+Step 1: Create policies
+^^^^^^^^^^^^^^^^^^^^^^^
+
+* Navigate to **Zero Trust → Access → Policies → Add a policy**
+
+  * **Policy 1: allow-<yourorg>**
+
+    * **Action**: ``Allow``
+    * **Include**: 
+       
+      * **Selector**: ``Emails ending in``
+      * **Value**: ``@<yourorg>.com``
+
+  * **Policy 2: bypass-warp**
+
+    * **Action**: ``Bypass``
+    * **Include**: 
+       
+      * **Selector**: ``Warp``
+      * **Value**: ``Warp``
+
+Step 2: Configure your SSO provider as an identity provider
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+1. Navigate to **Zero Trust → Settings → Authentication → Login methods → Add new**
+
+2. Configure the identity provider in Cloudflare:
+
+   * **App ID**: ``<SSO_CLIENT_ID>``
+   * **Client secret**: ``<SSO_CLIENT_SECRET>``
+
+3. Add Cloudflare Authorized JavaScript origins and redirect URIs to your SSO client:
+
+   * **Authorized JavaScript origins**: ``https://<your-team-name>.cloudflareaccess.com``
+   * **Redirect URIs**: ``https://<your-team-name>.cloudflareaccess.com/cdn-cgi/access/callback``
+
+.. note::
+    
+    You can find your team name under **Zero Trust → Settings → Custom Pages → Team Domain**.
+    It will be listed as ``<your-team-name>.cloudflareaccess.com``.
+
+Step 3: Create a Cloudflare access application
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+1. Navigate to **Zero Trust → Access → Applications → Add an application**
+
+2. Configure the application:
+
+   * **Application type**: ``Self-hosted``
+   * **Application name**: ``SkyPilot API``
+   * **Session duration**: ``24 hours``
+   * **Public hostname**:
+   
+     * **Subdomain**: ``DNS_RECORD_NAME`` (e.g. ``zerotrust``)
+     * **Domain**: ``DNS_RECORD_DOMAIN`` (e.g. ``skypilot.org``)
+   * **Access policies → Select existing policies**:
+
+     * **Allow policy**: ``allow-<yourorg>``
+     * **Bypass policy**: ``bypass-warp``
+
+3. Save the application.
+
+This configuration allows:
+
+* CLI/API requests to bypass login if the device is on WARP
+* Browser users to be challenged with SSO
+
+
+Step 4: Enable device enrollment for WARP
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+1. Navigate to **Zero Trust → Settings → WARP client → Device enrollment permissions → Manage**
+
+2. Create an enrollment rule:
+
+   * **Select existing policies**: ``allow-<yourorg>``
+
+3. Save
+
+This restricts WARP enrollment to only your team members.
+
+Step 5: Deploy WARP client to your team
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+You you deploy the WARP client to your team in one of two ways:
+
+1. Manual deployment (`Cloudflare WARP client manual deployment <https://developers.cloudflare.com/cloudflare-one/connections/connect-devices/warp/deployment/manual-deployment/>`__)
+2. Automatic deployment (`Cloudflare WARP client MDM deployment <https://developers.cloudflare.com/cloudflare-one/connections/connect-devices/warp/deployment/mdm-deployment/>`__)
+
+Each user performs this setup once per device.
+
+
+Step 6: Test access
+^^^^^^^^^^^^^^^^^^^
+
+Test that the configuration is working:
+
+.. code-block:: console
+
+    # Set your DNS record variables
+    $ DNS_RECORD_NAME=<your_dns_record_name>  # e.g. zerotrust
+    $ DNS_RECORD_DOMAIN=<your_dns_record_domain>  # e.g. skypilot.org
+
+    # Test the API health endpoint
+    $ curl -i https://${DNS_RECORD_NAME}.${DNS_RECORD_DOMAIN}/api/health
+    # Should return 200 OK
+
+    # Test SkyPilot API login
+    $ sky api login -e https://${DNS_RECORD_NAME}.${DNS_RECORD_DOMAIN}
+    # Should complete login without browser redirect
+
 
 SkyPilot RBAC
 -------------

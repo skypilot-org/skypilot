@@ -83,7 +83,8 @@ class TestRunPodVolume:
             'size': '100'
         }
         with pytest.raises(ValueError) as exc_info:
-            volume_lib.Volume.from_yaml_config(cfg)
+            vol = volume_lib.Volume.from_yaml_config(cfg)
+            vol.validate()
         assert 'RunPod DataCenterId is required to create a network volume' in str(
             exc_info.value)
 
@@ -98,7 +99,8 @@ class TestRunPodVolume:
             'size': str(too_small)
         }
         with pytest.raises(ValueError) as exc_info:
-            volume_lib.Volume.from_yaml_config(cfg)
+            vol = volume_lib.Volume.from_yaml_config(cfg)
+            vol.validate()
         assert 'RunPod network volume size must be at least' in str(
             exc_info.value)
 
@@ -124,7 +126,8 @@ class TestRunPodVolume:
             'size': '50Mi'  # invalid in our adjust (expects Gi or integer)
         }
         with pytest.raises(ValueError) as exc_info:
-            volume_lib.Volume.from_yaml_config(cfg)
+            vol = volume_lib.Volume.from_yaml_config(cfg)
+            vol.validate()
         assert 'Invalid size' in str(exc_info.value)
 
     def test_cloud_mismatch_raises(self, monkeypatch):
@@ -142,7 +145,8 @@ class TestRunPodVolume:
             'size': '100'
         }
         with pytest.raises(ValueError) as exc_info:
-            volume_lib.Volume.from_yaml_config(cfg)
+            vol = volume_lib.Volume.from_yaml_config(cfg)
+            vol.validate()
         assert 'Invalid cloud' in str(exc_info.value)
 
     def test_resource_name_without_size_ok(self, monkeypatch):
@@ -178,7 +182,8 @@ class TestRunPodVolume:
             'size': '100'
         }
         with pytest.raises(ValueError) as exc_info:
-            volume_lib.Volume.from_yaml_config(cfg)
+            vol = volume_lib.Volume.from_yaml_config(cfg)
+            vol.validate()
         assert 'Invalid volume name: Volume name exceeds' in str(exc_info.value)
         # Max length boundary (30) should pass
         ok_cfg = {

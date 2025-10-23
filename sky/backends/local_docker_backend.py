@@ -189,6 +189,15 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
                     ' a NoOp. If you are running sky exec, your workdir has not'
                     ' been updated.')
 
+    def _download_file(self, handle: LocalDockerResourceHandle,
+                       local_file_path: str, remote_file_path: str) -> None:
+        """Syncs file from remote to local."""
+        # Copy from docker container to local
+        container = self.containers[handle]
+        copy_cmd = (
+            f'docker cp {container.name}:{remote_file_path} {local_file_path}')
+        subprocess.run(copy_cmd, shell=True, check=True)
+
     def _sync_file_mounts(
         self,
         handle: LocalDockerResourceHandle,
@@ -274,13 +283,8 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
     def _execute(self,
                  handle: LocalDockerResourceHandle,
                  task: 'task_lib.Task',
-                 detach_run: bool,
                  dryrun: bool = False) -> None:
         """ Launches the container."""
-        if detach_run:
-            raise NotImplementedError('detach_run=True is not supported in '
-                                      'LocalDockerBackend.')
-
         if task.num_nodes > 1:
             raise NotImplementedError(
                 'Tasks with num_nodes > 1 is currently not supported in '

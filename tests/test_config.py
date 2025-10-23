@@ -15,14 +15,11 @@ from sky.sky_logging import INFO
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import config_utils
-from sky.utils import kubernetes_enums
 from sky.utils import yaml_utils
 
 DISK_ENCRYPTED = True
 VPC_NAME = 'vpc-12345678'
 PROXY_COMMAND = 'ssh -W %h:%p -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no'
-NODEPORT_MODE_NAME = kubernetes_enums.KubernetesNetworkingMode.NODEPORT.value
-PORT_FORWARD_MODE_NAME = kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value
 RUN_DURATION = 30
 RUN_DURATION_OVERRIDE = 10
 PROVISION_TIMEOUT = 600
@@ -60,7 +57,6 @@ def _create_config_file(config_file_path: pathlib.Path) -> None:
                     provision_timeout: {PROVISION_TIMEOUT}
 
             kubernetes:
-                networking: {NODEPORT_MODE_NAME}
                 pod_config:
                     metadata:
                         annotations:
@@ -318,18 +314,13 @@ def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
     assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
                                       None) == PROXY_COMMAND
     assert skypilot_config.get_nested(('gcp', 'vpc_name'), None) == VPC_NAME
-    assert skypilot_config.get_nested(('kubernetes', 'networking'),
-                                      None) == NODEPORT_MODE_NAME
     # Check set_nested() will copy the config dict and return a new dict
     new_config = skypilot_config.set_nested(('aws', 'ssh_proxy_command'),
                                             'new_value')
     assert new_config['aws']['ssh_proxy_command'] == 'new_value'
     assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
                                       None) == PROXY_COMMAND
-    new_config = skypilot_config.set_nested(('kubernetes', 'networking'),
-                                            PORT_FORWARD_MODE_NAME)
-    assert skypilot_config.get_nested(('kubernetes', 'networking'),
-                                      None) == NODEPORT_MODE_NAME
+
     # Check that dumping the config to a file with the new None can be reloaded
     new_config2 = skypilot_config.set_nested(('aws', 'ssh_proxy_command'), None)
     new_config_path = tmp_path / 'new_config.yaml'
@@ -542,6 +533,31 @@ def test_get_override_skypilot_config_from_client(mock_to_dict, mock_logger,
 
         # Verify disallowed keys are not trimmed at client-side
         assert result['aws']['security_group'] == 'test-sg'
+
+
+@annotations.client_api
+def test_get_override_skypilot_config_from_client_get_latest_config(tmp_path):
+    """Test that get_override_skypilot_config_from_client returns the loaded config path."""
+    old_path = tmp_path / 'old_config.yaml'
+    old_path.write_text(
+        textwrap.dedent(f"""\
+        kubernetes:
+            ports: loadbalancer
+        """))
+    new_path = tmp_path / 'new_config.yaml'
+    new_path.write_text(
+        textwrap.dedent(f"""\
+        kubernetes:
+            ports: ingress
+        """))
+    with mock.patch('os.environ.get', return_value=old_path):
+        skypilot_config.reload_config()
+        result_old = payloads.get_override_skypilot_config_from_client()
+        assert result_old['kubernetes']['ports'] == 'loadbalancer'
+    with mock.patch('os.environ.get', return_value=new_path):
+        skypilot_config.reload_config()
+        result_new = payloads.get_override_skypilot_config_from_client()
+        assert result_new['kubernetes']['ports'] == 'ingress'
 
 
 def test_override_skypilot_config(monkeypatch, tmp_path):

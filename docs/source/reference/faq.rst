@@ -16,23 +16,29 @@ Git and GitHub
 How to clone private GitHub repositories in a job?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Currently, SkyPilot does not support secret management or SSH agent forwarding to your sky clusters.
-You will need to use `file_mounts` to sync your Github SSH private key to your sky cluster.
+Use ``workdir`` to clone private GitHub repositories in a job.
 
 .. code-block:: yaml
 
   # your_task.yaml
-  file_mounts:
-    ~/.ssh/id_rsa: ~/.ssh/your-ssh-private-key
-
-  setup: |
-    chmod 600 ~/.ssh/id_rsa
-    git clone git@github.com:your-proj/your-repo.git
+  workdir:
+    url: git@github.com:your-proj/your-repo.git
+    ref: main
 
   run: |
     cd your-repo
     git pull
 
+**Authentication**:
+
+*For HTTPS URLs*: Set the ``GIT_TOKEN`` environment variable. SkyPilot will automatically use this token for authentication.
+
+*For SSH/SCP URLs*: SkyPilot will attempt to authenticate using SSH keys in the following order:
+
+1. SSH key specified by the ``GIT_SSH_KEY_PATH`` environment variable
+2. SSH key configured in ``~/.ssh/config`` for the git host
+3. Default SSH key at ``~/.ssh/id_rsa``
+4. Default SSH key at ``~/.ssh/id_ed25519`` (if ``~/.ssh/id_rsa`` does not exist)
 
 How to ensure my workdir's ``.git`` is synced up for managed spot jobs?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

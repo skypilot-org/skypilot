@@ -329,7 +329,7 @@ class TestResourceChecker:
         authorized_users = ['user123', 'user456', 'sa-service123']
         workspaces = ['default', 'production']
 
-        error_summary, missed_users = resource_checker.check_users_workspaces_active_resources(
+        error_summary, missed_users, _ = resource_checker.check_users_workspaces_active_resources(
             authorized_users, workspaces)
 
         # Should return empty results since all resources belong to authorized users
@@ -364,7 +364,7 @@ class TestResourceChecker:
         authorized_users = ['user123']  # Missing user456 and sa-service123
         workspaces = ['default', 'production']
 
-        error_summary, missed_users = resource_checker.check_users_workspaces_active_resources(
+        error_summary, missed_users, _ = resource_checker.check_users_workspaces_active_resources(
             authorized_users, workspaces)
 
         # Should identify unauthorized resources and users
@@ -387,7 +387,7 @@ class TestResourceChecker:
         authorized_users = ['user123', 'user456']
         workspaces = ['empty-workspace']
 
-        error_summary, missed_users = resource_checker.check_users_workspaces_active_resources(
+        error_summary, missed_users, _ = resource_checker.check_users_workspaces_active_resources(
             authorized_users, workspaces)
 
         # Should return empty results
@@ -419,7 +419,7 @@ class TestResourceChecker:
         authorized_users = ['user123']  # Missing user456
         workspaces = ['default', 'production']
 
-        error_summary, missed_users = resource_checker.check_users_workspaces_active_resources(
+        error_summary, missed_users, _ = resource_checker.check_users_workspaces_active_resources(
             authorized_users, workspaces)
 
         # Should only report cluster issues
@@ -452,7 +452,7 @@ class TestResourceChecker:
         authorized_users = ['user123']  # Missing sa-service123
         workspaces = ['production']
 
-        error_summary, missed_users = resource_checker.check_users_workspaces_active_resources(
+        error_summary, missed_users, _ = resource_checker.check_users_workspaces_active_resources(
             authorized_users, workspaces)
 
         # Should only report job issues
@@ -578,7 +578,7 @@ class TestResourceChecker:
         authorized_users = ['user123']  # Missing user456 and sa-service123
         workspaces = ['default', 'production']
 
-        error_summary, missed_users = resource_checker.check_users_workspaces_active_resources(
+        error_summary, missed_users, _ = resource_checker.check_users_workspaces_active_resources(
             authorized_users, workspaces)
 
         # Should use user ID when name is not available
@@ -655,7 +655,7 @@ class TestResourceChecker:
         authorized_users = ['user123']
         workspaces = []
 
-        error_summary, missed_users = resource_checker.check_users_workspaces_active_resources(
+        error_summary, missed_users, _ = resource_checker.check_users_workspaces_active_resources(
             authorized_users, workspaces)
 
         assert error_summary == ''
@@ -715,7 +715,7 @@ class TestResourceChecker:
         authorized_users = ['user123']  # user456 and user789 not authorized
         workspaces = ['target', 'default']  # Excludes 'other' workspace
 
-        error_summary, missed_users = resource_checker.check_users_workspaces_active_resources(
+        error_summary, missed_users, _ = resource_checker.check_users_workspaces_active_resources(
             authorized_users, workspaces)
 
         # Should only report resources from specified workspaces

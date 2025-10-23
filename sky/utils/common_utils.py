@@ -265,13 +265,16 @@ def get_global_job_id(job_timestamp: str,
 
 class Backoff:
     """Exponential backoff with jittering."""
-    MULTIPLIER = 1.6
     JITTER = 0.4
 
-    def __init__(self, initial_backoff: float = 5, max_backoff_factor: int = 5):
+    def __init__(self,
+                 initial_backoff: float = 5,
+                 max_backoff_factor: int = 5,
+                 multiplier: float = 1.6):
         self._initial = True
         self._backoff = 0.0
         self._initial_backoff = initial_backoff
+        self._multiplier = multiplier
         self._max_backoff = max_backoff_factor * self._initial_backoff
 
     # https://github.com/grpc/grpc/blob/2d4f3c56001cd1e1f85734b2f7c5ce5f2797c38a/doc/connection-backoff.md
@@ -283,7 +286,7 @@ class Backoff:
             self._initial = False
             self._backoff = min(self._initial_backoff, self._max_backoff)
         else:
-            self._backoff = min(self._backoff * self.MULTIPLIER,
+            self._backoff = min(self._backoff * self._multiplier,
                                 self._max_backoff)
         self._backoff += random.uniform(-self.JITTER * self._backoff,
                                         self.JITTER * self._backoff)
@@ -996,7 +999,17 @@ def get_mem_size_gb() -> float:
         except ValueError as e:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'Failed to parse the memory size from {mem_size}') from e
+                    f'Failed to parse the memory size from {mem_size} (GB)'
+                ) from e
+    mem_size = os.getenv('SKYPILOT_POD_MEMORY_BYTES_LIMIT')
+    if mem_size is not None:
+        try:
+            return float(mem_size) / (1024**3)
+        except ValueError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Failed to parse the memory size from {mem_size} (bytes)'
+                ) from e
     return _mem_size_gb()
 
 

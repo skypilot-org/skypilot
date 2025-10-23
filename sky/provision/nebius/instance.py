@@ -65,9 +65,10 @@ def _wait_until_no_pending(region: str, cluster_name_on_cloud: str) -> None:
                            f' to be ready.')
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
+    del cluster_name  # unused
     _wait_until_no_pending(region, cluster_name_on_cloud)
     running_instances = _filter_instances(region, cluster_name_on_cloud,
                                           ['RUNNING'])

@@ -143,12 +143,15 @@ Kubernetes = clouds.Kubernetes
 K8s = Kubernetes
 OCI = clouds.OCI
 Paperspace = clouds.Paperspace
+PrimeIntellect = clouds.PrimeIntellect
 RunPod = clouds.RunPod
 Vast = clouds.Vast
 Vsphere = clouds.Vsphere
 Fluidstack = clouds.Fluidstack
 Nebius = clouds.Nebius
 Hyperbolic = clouds.Hyperbolic
+Shadeform = clouds.Shadeform
+Seeweb = clouds.Seeweb
 
 __all__ = [
     '__version__',
@@ -162,6 +165,7 @@ __all__ = [
     'Lambda',
     'OCI',
     'Paperspace',
+    'PrimeIntellect',
     'RunPod',
     'Vast',
     'SCP',
@@ -169,6 +173,8 @@ __all__ = [
     'Fluidstack',
     'Nebius',
     'Hyperbolic',
+    'Shadeform',
+    'Seeweb',
     'Optimizer',
     'OptimizeTarget',
     'backends',

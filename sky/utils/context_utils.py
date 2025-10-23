@@ -1,5 +1,6 @@
 """Utilities for SkyPilot context."""
 import asyncio
+import concurrent.futures
 import contextvars
 import functools
 import io
@@ -10,11 +11,15 @@ import sys
 import typing
 from typing import Any, Callable, IO, Optional, Tuple, TypeVar
 
+from typing_extensions import ParamSpec
+
 from sky import sky_logging
 from sky.utils import context
 from sky.utils import subprocess_utils
 
 StreamHandler = Callable[[IO[Any], IO[Any]], str]
+
+logger = sky_logging.init_logger(__name__)
 
 
 # TODO(aylei): call hijack_sys_attrs() proactivly in module init at server-side
@@ -57,7 +62,7 @@ def passthrough_stream_handler(in_stream: IO[Any], out_stream: IO[Any]) -> str:
 
 
 def pipe_and_wait_process(
-        ctx: context.Context,
+        ctx: context.SkyPilotContext,
         proc: subprocess.Popen,
         poll_interval: float = 0.5,
         cancel_callback: Optional[Callable[[], None]] = None,
@@ -110,7 +115,7 @@ def pipe_and_wait_process(
         return stdout, stderr
 
 
-def wait_process(ctx: context.Context,
+def wait_process(ctx: context.SkyPilotContext,
                  proc: subprocess.Popen,
                  poll_interval: float = 0.5,
                  cancel_callback: Optional[Callable[[], None]] = None):
@@ -128,7 +133,11 @@ def wait_process(ctx: context.Context,
             # Kill the process despite the caller's callback, the utility
             # function gracefully handles the case where the process is
             # already terminated.
-            subprocess_utils.kill_process_with_grace_period(proc)
+            # Bash script typically does not forward SIGTERM to childs, thus
+            # cannot be killed gracefully, shorten the grace period for faster
+            # termination.
+            subprocess_utils.kill_process_with_grace_period(proc,
+                                                            grace_period=1)
             raise asyncio.CancelledError()
         try:
             proc.wait(poll_interval)
@@ -173,15 +182,29 @@ def cancellation_guard(func: F) -> F:
     return typing.cast(F, wrapper)
 
 
+P = ParamSpec('P')
+T = TypeVar('T')
+
+
 # TODO(aylei): replace this with asyncio.to_thread once we drop support for
 # python 3.8
-def to_thread(func, /, *args, **kwargs):
+def to_thread(func: Callable[P, T], /, *args: P.args,
+              **kwargs: P.kwargs) -> 'asyncio.Future[T]':
     """Asynchronously run function *func* in a separate thread.
 
     This is same as asyncio.to_thread added in python 3.9
     """
+    return to_thread_with_executor(None, func, *args, **kwargs)
+
+
+def to_thread_with_executor(executor: Optional[concurrent.futures.Executor],
+                            func: Callable[P, T], /, *args: P.args,
+                            **kwargs: P.kwargs) -> 'asyncio.Future[T]':
+    """Asynchronously run function *func* in a separate thread with
+    a custom executor."""
+
     loop = asyncio.get_running_loop()
-    # This is critical to pass the current coroutine context to the new thread
     pyctx = contextvars.copy_context()
-    func_call = functools.partial(pyctx.run, func, *args, **kwargs)
-    return loop.run_in_executor(None, func_call)
+    func_call: Callable[..., T] = functools.partial(pyctx.run, func, *args,
+                                                    **kwargs)
+    return loop.run_in_executor(executor, func_call)
