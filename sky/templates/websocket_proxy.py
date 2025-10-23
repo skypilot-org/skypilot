@@ -26,7 +26,7 @@ from sky.server import constants
 from sky.server.server import KubernetesSSHMessageType
 
 BUFFER_SIZE = 2**16  # 64KB
-HEARTBEAT_INTERVAL_SECONDS = 5
+HEARTBEAT_INTERVAL_SECONDS = 60
 
 # Environment variable for a file path to the API cookie file.
 # Keep in sync with server/constants.py
