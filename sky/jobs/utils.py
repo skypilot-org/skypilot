@@ -1710,29 +1710,37 @@ def _get_job_status_from_tasks(
 
 
 @typing.overload
-def format_job_table(tasks: List[Dict[str, Any]],
-                     show_all: bool,
-                     show_user: bool,
-                     return_rows: Literal[False] = False,
-                     max_jobs: Optional[int] = None) -> str:
+def format_job_table(
+    tasks: List[Dict[str, Any]],
+    show_all: bool,
+    show_user: bool,
+    return_rows: Literal[False] = False,
+    max_jobs: Optional[int] = None,
+    job_status_counts: Optional[Dict[str, int]] = None,
+) -> str:
     ...
 
 
 @typing.overload
-def format_job_table(tasks: List[Dict[str, Any]],
-                     show_all: bool,
-                     show_user: bool,
-                     return_rows: Literal[True],
-                     max_jobs: Optional[int] = None) -> List[List[str]]:
+def format_job_table(
+    tasks: List[Dict[str, Any]],
+    show_all: bool,
+    show_user: bool,
+    return_rows: Literal[True],
+    max_jobs: Optional[int] = None,
+    job_status_counts: Optional[Dict[str, int]] = None,
+) -> List[List[str]]:
     ...
 
 
 def format_job_table(
-        tasks: List[Dict[str, Any]],
-        show_all: bool,
-        show_user: bool,
-        return_rows: bool = False,
-        max_jobs: Optional[int] = None) -> Union[str, List[List[str]]]:
+    tasks: List[Dict[str, Any]],
+    show_all: bool,
+    show_user: bool,
+    return_rows: bool = False,
+    max_jobs: Optional[int] = None,
+    job_status_counts: Optional[Dict[str, int]] = None,
+) -> Union[str, List[List[str]]]:
     """Returns managed jobs as a formatted string.
 
     Args:
@@ -1741,6 +1749,7 @@ def format_job_table(
         max_jobs: The maximum number of jobs to show in the table.
         return_rows: If True, return the rows as a list of strings instead of
           all rows concatenated into a single string.
+        job_status_counts: The counts of each job status.
 
     Returns: A formatted string of managed jobs, if not `return_rows`; otherwise
       a list of "rows" (each of which is a list of str).
@@ -1762,12 +1771,8 @@ def format_job_table(
         # by the task_id.
         jobs[get_hash(task)].append(task)
 
-    status_counts: Dict[str, int] = collections.defaultdict(int)
     workspaces = set()
     for job_tasks in jobs.values():
-        managed_job_status = _get_job_status_from_tasks(job_tasks)[0]
-        if not managed_job_status.is_terminal():
-            status_counts[managed_job_status.value] += 1
         workspaces.add(job_tasks[0].get('workspace',
                                         constants.SKYPILOT_DEFAULT_WORKSPACE))
 
@@ -1810,9 +1815,15 @@ def format_job_table(
     job_table = log_utils.create_table(columns)
 
     status_counts: Dict[str, int] = collections.defaultdict(int)
-    for task in tasks:
-        if not task['status'].is_terminal():
-            status_counts[task['status'].value] += 1
+    if job_status_counts:
+        for status_value, count in job_status_counts.items():
+            status = managed_job_state.ManagedJobStatus(status_value)
+            if not status.is_terminal():
+                status_counts[status_value] = count
+    else:
+        for task in tasks:
+            if not task['status'].is_terminal():
+                status_counts[task['status'].value] += 1
 
     all_tasks = tasks
     if max_jobs is not None:

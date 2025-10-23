@@ -88,15 +88,21 @@ def format_storage_table(storages: List[responses.StorageRecord],
         return 'No existing storage.'
 
 
-def format_job_table(jobs: List[responses.ManagedJobRecord],
-                     show_all: bool,
-                     show_user: bool,
-                     max_jobs: Optional[int] = None):
+def format_job_table(
+    jobs: List[responses.ManagedJobRecord],
+    show_all: bool,
+    show_user: bool,
+    max_jobs: Optional[int] = None,
+    status_counts: Optional[Dict[str, int]] = None,
+):
     jobs = [job.model_dump() for job in jobs]
-    return managed_jobs.format_job_table(jobs,
-                                         show_all=show_all,
-                                         show_user=show_user,
-                                         max_jobs=max_jobs)
+    return managed_jobs.format_job_table(
+        jobs,
+        show_all=show_all,
+        show_user=show_user,
+        max_jobs=max_jobs,
+        job_status_counts=status_counts,
+    )
 
 
 _BASIC_COLUMNS = [
