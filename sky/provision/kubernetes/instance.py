@@ -545,11 +545,16 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
         missing_pods = expected_pod_names - found_pod_names
         if missing_pods:
             if missing_pods_retry >= _MAX_MISSING_PODS_RETRIES:
+                for pod in missing_pods:
+                    reason = _get_pod_missing_reason(context, namespace,
+                                                     cluster_name,
+                                                     pod.metadata.name)
+                    logger.info(f'Pod {pod.metadata.name} missing: {reason}')
                 raise config_lib.KubernetesError(
                     f'Failed to get all pods after {missing_pods_retry} '
                     f'retries. Some pods may have been terminated or failed '
-                    f'unexpectedly. Run `sky status {cluster_name} -v -r` or '
-                    f'`sky api logs skypilot-status-refresh-daemon` for more '
+                    f'unexpectedly. Run `sky status {cluster_name} -v` or '
+                    f'`sky logs --provision {cluster_name}` for more '
                     f'details.')
             logger.info('Retrying running pods check: '
                         f'Missing pods: {missing_pods}')
@@ -565,11 +570,14 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
             # Check if pod is terminated/preempted/failed.
             if (pod.metadata.deletion_timestamp is not None or
                     pod.status.phase == 'Failed'):
+                # Get the reason and write to cluster events before
+                # the pod gets completely deleted from the API.
+                reason = _get_pod_termination_reason(pod, cluster_name)
+                logger.info(f'Pod {pod.metadata.name} terminated: {reason}')
                 raise config_lib.KubernetesError(
                     f'Pod {pod.metadata.name} has terminated or failed '
-                    f'unexpectedly. Run `sky status {cluster_name} -v -r` or '
-                    f'`sky api logs skypilot-status-refresh-daemon` for more '
-                    f'details.')
+                    f'unexpectedly. Run `sky status {cluster_name} -v` or '
+                    f'`sky logs --provision {cluster_name}` for more details.')
 
             # Continue if pod and all the containers within the
             # pod are successfully created and running.
