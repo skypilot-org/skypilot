@@ -2886,6 +2886,15 @@ def get_head_pod_name(cluster_name_on_cloud: str):
     return f'{cluster_name_on_cloud}-head'
 
 
+def get_cluster_name_from_cloud_name(cluster_name_on_cloud: str) -> str:
+    """Extracts the cluster name from cluster_name_on_cloud.
+
+    cluster_name_on_cloud has the format: {cluster_name}-{user_hash}
+    (e.g., 'mycluster-2ea4').
+    """
+    return cluster_name_on_cloud.rsplit('-', 1)[0]
+
+
 def get_custom_config_k8s_contexts() -> List[str]:
     """Returns the list of context names from the config"""
     contexts = skypilot_config.get_effective_region_config(
@@ -3440,9 +3449,7 @@ def process_skypilot_pods(
 
     for pod in pods:
         cluster_name_on_cloud = pod.metadata.labels.get('skypilot-cluster')
-        cluster_name = cluster_name_on_cloud.rsplit(
-            '-', 1
-        )[0]  # Remove the user hash to get cluster name (e.g., mycluster-2ea4)
+        cluster_name = get_cluster_name_from_cloud_name(cluster_name_on_cloud)
         if cluster_name_on_cloud not in clusters:
             # Parse the start time for the cluster
             start_time = pod.status.start_time
