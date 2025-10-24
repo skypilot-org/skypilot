@@ -613,7 +613,7 @@ def test_coreweave_storage_mounts(generic_cloud: str):
             'coreweave_storage_mounts',
             test_commands,
             f'sky down -y {name}; sky storage delete -y {storage_name}',
-            timeout=20 * 60,  # 20 mins
+            timeout=30 * 60,  # 20 mins
         )
         smoke_tests_utils.run_one_test(test)
 

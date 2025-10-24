@@ -2084,8 +2084,9 @@ class S3CompatibleStore(AbstractStore):
         try:
             with rich_utils.safe_status(
                     ux_utils.spinner_message(hint_operating)):
-                subprocess.check_output(command.split(' '),
-                                        stderr=subprocess.STDOUT)
+                subprocess.check_output(command,
+                                        stderr=subprocess.STDOUT,
+                                        shell=True)
         except subprocess.CalledProcessError as e:
             if 'NoSuchBucket' in e.output.decode('utf-8'):
                 logger.debug(
