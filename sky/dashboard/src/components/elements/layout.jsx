@@ -8,7 +8,6 @@ import {
   useUpgradeDetection,
   UpgradeDetectionProvider,
 } from '@/hooks/useUpgradeDetection';
-import { useUpgradePolling } from '@/hooks/useUpgradePolling';
 import { installUpgradeInterceptor } from '@/utils/apiInterceptor';
 
 function LayoutContent({ children, highlighted }) {
@@ -19,9 +18,6 @@ function LayoutContent({ children, highlighted }) {
   useEffect(() => {
     installUpgradeInterceptor(reportUpgrade, clearUpgrade);
   }, [reportUpgrade, clearUpgrade]);
-
-  // Poll for server availability during upgrades
-  useUpgradePolling(isUpgrading);
 
   return (
     <div className="min-h-screen bg-gray-50">
