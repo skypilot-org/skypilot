@@ -2076,14 +2076,21 @@ export function GPUs() {
   const handleContextClick = (context) => {
     setSelectedContext(context);
     // Use push instead of replace for proper browser history
-    router.push(`/infra/${encodeURIComponent(context)}`);
+    const targetPath = `/infra/${encodeURIComponent(context)}`;
+    // Only navigate if we're not already on the target path
+    if (router.asPath !== targetPath) {
+      router.push(targetPath);
+    }
   };
 
   // Handler to go back to main view
   const handleBackClick = () => {
     setSelectedContext(null);
     // Use push instead of replace for proper browser history
-    router.push('/infra');
+    // Only navigate if we're not already on the infra page
+    if (router.asPath !== '/infra') {
+      router.push('/infra');
+    }
   };
 
   // Render context details
