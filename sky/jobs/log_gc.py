@@ -24,8 +24,8 @@ logger = sky_logging.init_logger(__name__)
 _JOB_CONTROLLER_GC_LOCK_PATH = os.path.expanduser(
     '~/.sky/locks/job_controller_gc.lock')
 
-_DEFAULT_TASK_LOGS_GC_RETENTION_HOURS = 0
-_DEFAULT_CONTROLLER_LOGS_GC_RETENTION_HOURS = 0
+_DEFAULT_TASK_LOGS_GC_RETENTION_HOURS = 24 * 7
+_DEFAULT_CONTROLLER_LOGS_GC_RETENTION_HOURS = 24 * 7
 
 
 def _next_gc_interval(retention_seconds: int) -> int:
