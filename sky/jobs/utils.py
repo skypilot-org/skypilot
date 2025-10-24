@@ -1714,8 +1714,8 @@ def format_job_table(
     tasks: List[Dict[str, Any]],
     show_all: bool,
     show_user: bool,
-    pool_status: Optional[List[Dict[str, Any]]] = None,
     return_rows: Literal[False] = False,
+    pool_status: Optional[List[Dict[str, Any]]] = None,
     max_jobs: Optional[int] = None,
     job_status_counts: Optional[Dict[str, int]] = None,
 ) -> str:

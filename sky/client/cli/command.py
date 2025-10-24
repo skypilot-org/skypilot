@@ -1350,12 +1350,10 @@ def _handle_jobs_queue_request(
     show_all: bool,
     show_user: bool,
     max_num_jobs_to_show: Optional[int],
-    pool_status_request_id: Optional[server_common.RequestId[List[Dict[str,
-                                                                Any]]]] = None,
-    is_called_by_user: bool = False,
-    only_in_progress: bool = False,
     pool_status_request_id: Optional[server_common.RequestId[List[Dict[
         str, Any]]]] = None,
+    is_called_by_user: bool = False,
+    only_in_progress: bool = False,
 ) -> Tuple[Optional[int], str]:
     """Get the in-progress managed jobs.
 
