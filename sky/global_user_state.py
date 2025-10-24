@@ -18,6 +18,7 @@ import time
 import typing
 from typing import Any, Dict, List, Optional, Set, Tuple
 import uuid
+import dataclasses
 
 import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
@@ -46,6 +47,7 @@ if typing.TYPE_CHECKING:
     from sky import clouds
     from sky.clouds import cloud
     from sky.data import Storage
+    from sky.provision import common as provision_common
 
 logger = sky_logging.init_logger(__name__)
 
@@ -91,6 +93,13 @@ cluster_table = sqlalchemy.Table(
     sqlalchemy.Column('name', sqlalchemy.Text, primary_key=True),
     sqlalchemy.Column('launched_at', sqlalchemy.Integer),
     sqlalchemy.Column('handle', sqlalchemy.LargeBinary),
+    sqlalchemy.Column('launched_nodes', sqlalchemy.Integer, server_default=None),
+    sqlalchemy.Column('launched_resources', sqlalchemy.LargeBinary, server_default=None),
+    sqlalchemy.Column('cluster_name_on_cloud', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('cluster_yaml_path', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('stable_internal_external_ips_json', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('stable_ssh_ports_json', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('cached_cluster_info_json', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('last_use', sqlalchemy.Text),
     sqlalchemy.Column('status', sqlalchemy.Text),
     sqlalchemy.Column('autostop', sqlalchemy.Integer, server_default='-1'),
@@ -405,6 +414,110 @@ def _sqlite_supports_returning() -> bool:
         return (major > 3) or (major == 3 and minor >= 35)
 
 
+
+
+def _serialize_cluster_info(
+        cluster_info: Optional['provision_common.ClusterInfo']
+) -> Optional[str]:
+    """Convert ClusterInfo to JSON string.
+    
+    Args:
+        cluster_info: ClusterInfo object or None
+        
+    Returns:
+        JSON string representation or None
+    """
+    if cluster_info is None:
+        return None
+    return json.dumps(dataclasses.asdict(cluster_info))
+
+
+def _deserialize_cluster_info(
+        json_str: Optional[str]
+) -> Optional['provision_common.ClusterInfo']:
+    """Reconstruct ClusterInfo from JSON string.
+    
+    Args:
+        json_str: JSON string representation or None
+        
+    Returns:
+        ClusterInfo object or None
+    """
+    if json_str is None:
+        return None
+    # Import here to avoid circular imports
+    from sky.provision import common as provision_common
+    
+    data = json.loads(json_str)
+    instances = {}
+    for inst_id, inst_list in data['instances'].items():
+        instances[inst_id] = [
+            provision_common.InstanceInfo(**inst_dict)
+            for inst_dict in inst_list
+        ]
+    return provision_common.ClusterInfo(
+        instances=instances,
+        head_instance_id=data['head_instance_id'],
+        provider_name=data['provider_name'],
+        provider_config=data.get('provider_config'),
+        docker_user=data.get('docker_user'),
+        ssh_user=data.get('ssh_user'),
+        custom_ray_options=data.get('custom_ray_options'),
+    )
+
+
+def _reconstruct_handle_from_row(row) -> Optional['backends.ResourceHandle']:
+    """Reconstruct CloudVmRayResourceHandle from database row.
+    
+    Tries to use denormalized columns first for performance, falls back to
+    unpickling the full handle for backward compatibility with old data.
+    
+    Args:
+        row: SQLAlchemy row object with cluster data
+        
+    Returns:
+        CloudVmRayResourceHandle or None
+    """
+    # Import here to avoid circular imports
+    from sky.backends import cloud_vm_ray_backend
+    
+    # Try to reconstruct from denormalized columns first
+    if (hasattr(row, 'launched_nodes') and 
+        row.launched_nodes is not None and
+        row.launched_resources is not None):
+        try:
+            launched_resources = pickle.loads(row.launched_resources)
+            stable_ips = None
+            if row.stable_internal_external_ips_json is not None:
+                stable_ips = json.loads(row.stable_internal_external_ips_json)
+            stable_ports = None
+            if row.stable_ssh_ports_json is not None:
+                stable_ports = json.loads(row.stable_ssh_ports_json)
+            cluster_info = _deserialize_cluster_info(
+                row.cached_cluster_info_json if hasattr(row, 'cached_cluster_info_json') else None)
+            
+            handle = cloud_vm_ray_backend.CloudVmRayResourceHandle(
+                cluster_name=row.name,
+                cluster_name_on_cloud=row.cluster_name_on_cloud,
+                cluster_yaml=row.cluster_yaml_path,
+                launched_nodes=row.launched_nodes,
+                launched_resources=launched_resources,
+                stable_internal_external_ips=stable_ips,
+                stable_ssh_ports=stable_ports,
+                cluster_info=cluster_info,
+            )
+            return handle
+        except Exception:  # pylint: disable=broad-except
+            # Fall through to unpickle the full handle if reconstruction fails
+            pass
+    
+    # Fall back to unpickling the full handle (for old data)
+    if hasattr(row, 'handle') and row.handle is not None:
+        return pickle.loads(row.handle)
+    
+    return None
+
+
 @_init_db
 @metrics_lib.time_me
 def add_or_update_user(
@@ -660,6 +773,21 @@ def add_or_update_cluster(cluster_name: str,
 
     # FIXME: launched_at will be changed when `sky launch -c` is called.
     handle = pickle.dumps(cluster_handle)
+
+    launched_nodes_col = cluster_handle.launched_nodes
+    launched_resources_col = pickle.dumps(
+        cluster_handle.launched_resources)
+    cluster_name_on_cloud_col = cluster_handle.cluster_name_on_cloud
+    cluster_yaml_path_col = cluster_handle._cluster_yaml
+    stable_internal_external_ips_json_col = (
+        json.dumps(cluster_handle.stable_internal_external_ips)
+        if cluster_handle.stable_internal_external_ips else None)
+    stable_ssh_ports_json_col = (
+        json.dumps(cluster_handle.stable_ssh_ports)
+        if cluster_handle.stable_ssh_ports else None)
+    cached_cluster_info_json_col = _serialize_cluster_info(
+        cluster_handle.cached_cluster_info)
+    
     cluster_launched_at = int(time.time()) if is_launch else None
     last_use = common_utils.get_current_command() if is_launch else None
     status = status_lib.ClusterStatus.INIT
@@ -757,6 +885,13 @@ def add_or_update_cluster(cluster_name: str,
             count = session.query(cluster_table).filter_by(
                 name=cluster_name, cluster_hash=existing_cluster_hash).update({
                     **conditional_values, cluster_table.c.handle: handle,
+                    cluster_table.c.launched_nodes: launched_nodes_col,
+                    cluster_table.c.launched_resources: launched_resources_col,
+                    cluster_table.c.cluster_name_on_cloud: cluster_name_on_cloud_col,
+                    cluster_table.c.cluster_yaml_path: cluster_yaml_path_col,
+                    cluster_table.c.stable_internal_external_ips_json: stable_internal_external_ips_json_col,
+                    cluster_table.c.stable_ssh_ports_json: stable_ssh_ports_json_col,
+                    cluster_table.c.cached_cluster_info_json: cached_cluster_info_json_col,
                     cluster_table.c.status: status.value,
                     cluster_table.c.status_updated_at: status_updated_at
                 })
@@ -769,6 +904,13 @@ def add_or_update_cluster(cluster_name: str,
                 name=cluster_name,
                 **conditional_values,
                 handle=handle,
+                launched_nodes=launched_nodes_col,
+                launched_resources=launched_resources_col,
+                cluster_name_on_cloud=cluster_name_on_cloud_col,
+                cluster_yaml_path=cluster_yaml_path_col,
+                stable_internal_external_ips_json=stable_internal_external_ips_json_col,
+                stable_ssh_ports_json=stable_ssh_ports_json_col,
+                cached_cluster_info_json=cached_cluster_info_json_col,
                 status=status.value,
                 # set metadata to server default ('{}')
                 # set owner to server default (null)
@@ -782,6 +924,13 @@ def add_or_update_cluster(cluster_name: str,
                 set_={
                     **conditional_values,
                     cluster_table.c.handle: handle,
+                    cluster_table.c.launched_nodes: launched_nodes_col,
+                    cluster_table.c.launched_resources: launched_resources_col,
+                    cluster_table.c.cluster_name_on_cloud: cluster_name_on_cloud_col,
+                    cluster_table.c.cluster_yaml_path: cluster_yaml_path_col,
+                    cluster_table.c.stable_internal_external_ips_json: stable_internal_external_ips_json_col,
+                    cluster_table.c.stable_ssh_ports_json: stable_ssh_ports_json_col,
+                    cluster_table.c.cached_cluster_info_json: cached_cluster_info_json_col,
                     cluster_table.c.status: status.value,
                     # do not update metadata value
                     # do not update owner value
@@ -1138,11 +1287,10 @@ def get_handle_from_cluster_name(
     assert _SQLALCHEMY_ENGINE is not None
     assert cluster_name is not None, 'cluster_name cannot be None'
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = (session.query(
-            cluster_table.c.handle).filter_by(name=cluster_name).first())
+        row = (session.query(cluster_table).filter_by(name=cluster_name).first())
     if row is None:
         return None
-    return pickle.loads(row.handle)
+    return _reconstruct_handle_from_row(row)
 
 
 @_init_db
@@ -1152,11 +1300,10 @@ def get_handles_from_cluster_names(
 ) -> Dict[str, Optional['backends.ResourceHandle']]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(cluster_table.c.name,
-                             cluster_table.c.handle).filter(
-                                 cluster_table.c.name.in_(cluster_names)).all()
+        rows = session.query(cluster_table).filter(
+                                cluster_table.c.name.in_(cluster_names)).all()
         return {
-            row.name: pickle.loads(row.handle) if row is not None else None
+            row.name: _reconstruct_handle_from_row(row) if row is not None else None
             for row in rows
         }
 
@@ -1168,16 +1315,13 @@ def get_cluster_name_to_handle_map(
 ) -> Dict[str, Optional['backends.ResourceHandle']]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        query = session.query(cluster_table.c.name, cluster_table.c.handle)
+        query = session.query(cluster_table)
         if is_managed is not None:
             query = query.filter(cluster_table.c.is_managed == int(is_managed))
         rows = query.all()
     name_to_handle = {}
     for row in rows:
-        if row.handle and len(row.handle) > 0:
-            name_to_handle[row.name] = pickle.loads(row.handle)
-        else:
-            name_to_handle[row.name] = None
+        name_to_handle[row.name] = _reconstruct_handle_from_row(row)
     return name_to_handle
 
 
@@ -1606,7 +1750,14 @@ def get_cluster_from_name(
                 cluster_table.c.cluster_ever_up,
                 cluster_table.c.status_updated_at, cluster_table.c.user_hash,
                 cluster_table.c.config_hash, cluster_table.c.workspace,
-                cluster_table.c.is_managed)
+                cluster_table.c.is_managed,
+                cluster_table.c.launched_nodes,
+                cluster_table.c.launched_resources,
+                cluster_table.c.cluster_name_on_cloud,
+                cluster_table.c.cluster_yaml_path,
+                cluster_table.c.stable_internal_external_ips_json,
+                cluster_table.c.stable_ssh_ports_json,
+                cluster_table.c.cached_cluster_info_json)
         else:
             query = session.query(
                 cluster_table.c.name,
@@ -1628,7 +1779,14 @@ def get_cluster_from_name(
                 cluster_table.c.is_managed,
                 # extra fields compared to above query
                 cluster_table.c.last_creation_yaml,
-                cluster_table.c.last_creation_command)
+                cluster_table.c.last_creation_command,
+                cluster_table.c.launched_nodes,
+                cluster_table.c.launched_resources,
+                cluster_table.c.cluster_name_on_cloud,
+                cluster_table.c.cluster_yaml_path,
+                cluster_table.c.stable_internal_external_ips_json,
+                cluster_table.c.stable_ssh_ports_json,
+                cluster_table.c.cached_cluster_info_json)
         row = query.filter_by(name=cluster_name).first()
     if row is None:
         return None
@@ -1643,7 +1801,7 @@ def get_cluster_from_name(
     record = {
         'name': row.name,
         'launched_at': row.launched_at,
-        'handle': pickle.loads(row.handle),
+        'handle': _reconstruct_handle_from_row(row),
         'last_use': row.last_use,
         'status': status_lib.ClusterStatus[row.status],
         'autostop': row.autostop,
@@ -1722,6 +1880,13 @@ def get_clusters(
                 cluster_table.c.status_updated_at, cluster_table.c.user_hash,
                 cluster_table.c.config_hash,
                 cluster_table.c.workspace, cluster_table.c.is_managed,
+                cluster_table.c.launched_nodes,
+                cluster_table.c.launched_resources,
+                cluster_table.c.cluster_name_on_cloud,
+                cluster_table.c.cluster_yaml_path,
+                cluster_table.c.stable_internal_external_ips_json,
+                cluster_table.c.stable_ssh_ports_json,
+                cluster_table.c.cached_cluster_info_json,
                 user_table.c.name.label('user_name')).outerjoin(
                     user_table, cluster_table.c.user_hash == user_table.c.id)
         else:
@@ -1743,6 +1908,13 @@ def get_clusters(
                 cluster_table.c.config_hash,
                 cluster_table.c.workspace,
                 cluster_table.c.is_managed,
+                cluster_table.c.launched_nodes,
+                cluster_table.c.launched_resources,
+                cluster_table.c.cluster_name_on_cloud,
+                cluster_table.c.cluster_yaml_path,
+                cluster_table.c.stable_internal_external_ips_json,
+                cluster_table.c.stable_ssh_ports_json,
+                cluster_table.c.cached_cluster_info_json,
                 # extra fields compared to above query
                 cluster_table.c.last_creation_yaml,
                 cluster_table.c.last_creation_command,
@@ -1790,7 +1962,7 @@ def get_clusters(
         record = {
             'name': row.name,
             'launched_at': row.launched_at,
-            'handle': pickle.loads(row.handle),
+            'handle': _reconstruct_handle_from_row(row),
             'last_use': row.last_use,
             'status': status_lib.ClusterStatus[row.status],
             'autostop': row.autostop,
@@ -1803,9 +1975,9 @@ def get_clusters(
             'cluster_ever_up': bool(row.cluster_ever_up),
             'status_updated_at': row.status_updated_at,
             'user_hash': (row.user_hash
-                          if row.user_hash is not None else current_user_hash),
+                        if row.user_hash is not None else current_user_hash),
             'user_name': (row.user_name
-                          if row.user_name is not None else current_user_name),
+                        if row.user_name is not None else current_user_name),
             'workspace': row.workspace,
             'is_managed': bool(row.is_managed),
             'config_hash': row.config_hash,

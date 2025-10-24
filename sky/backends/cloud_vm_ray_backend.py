@@ -2412,7 +2412,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     - (optional) Launched resources
     - (optional) Docker user name
     - (optional) If TPU(s) are managed, a path to a deletion script.
-    - (optional) Skylet SSH tunnel info.
+    - (optional) Whether gRPC is enabled or not.
     """
     # Bump if any fields get added/removed/changed, and add backward
     # compatibility logic in __setstate__ and/or __getstate__.
