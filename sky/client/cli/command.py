@@ -1347,11 +1347,11 @@ def _handle_jobs_queue_request(
     request_id: server_common.RequestId[Union[
         List[responses.ManagedJobRecord],
         Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int]]],
-    pool_status_request_id: Optional[server_common.RequestId[List[Dict[
-            str, Any]]]],
     show_all: bool,
     show_user: bool,
     max_num_jobs_to_show: Optional[int],
+    pool_status_request_id: Optional[server_common.RequestId[List[Dict[str,
+                                                                Any]]]] = None,
     is_called_by_user: bool = False,
     only_in_progress: bool = False,
 ) -> Tuple[Optional[int], str]:
