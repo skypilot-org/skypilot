@@ -1610,6 +1610,8 @@ def test_managed_jobs_logs_gc(generic_cloud: str):
                                output_stream=output)
             if 'log has been cleaned' in output.getvalue():
                 return
+            yield f'Waiting for logs to be garbage collected, controller: {controller}'
+            time.sleep(15)
         raise RuntimeError('Tiemout wait logs get gced')
 
     test = smoke_tests_utils.Test(
