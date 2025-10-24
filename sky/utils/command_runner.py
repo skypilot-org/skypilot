@@ -1313,25 +1313,32 @@ class SlurmCommandRunner(SSHCommandRunner):
             or
             A tuple of (returncode, stdout, stderr).
         """
+        orig_cmd = cmd
+
+        # NOTE(jwj): if user doesn't select a base_cmd, we use a default srun?
+        # then e.g., for setting up ray cluster, it's compatible with the original runner.run.
+        # For setting up instances, we can't force a limited set of Slurm base commands.
+        # We must allow linux bash commands here.
         if isinstance(cmd, str):
             cmd = cmd.split(' ')
         base_cmd = cmd[0]
         cmd = cmd[1:]
         if base_cmd not in self.USER_COMMANDS:
-            raise ValueError(
-                f'{base_cmd} is not an Slurm-supported user command.')
+            # raise ValueError(
+            #     f'{base_cmd} is not an Slurm-supported user command.')
+            return super().run(orig_cmd, **kwargs)
+        else:
+            # TODO(jwj): Support multi-cluster, multi-partition operations.
+            vnode_args = [
+                f'--partition={self.partition}',
+            ]
+            self.cluster_name = None
+            if self.cluster_name:
+                vnode_args += [f'--clusters={self.cluster_name}']
 
-        # TODO(jwj): Support multi-cluster, multi-partition operations.
-        vnode_args = [
-            f'--partition={self.partition}',
-        ]
-        self.cluster_name = None
-        if self.cluster_name:
-            vnode_args += [f'--clusters={self.cluster_name}']
+            # Specify the Slurm virtual instance ID
+            if self.job_id is not None:
+                vnode_args += [f'--jobid={self.job_id}']
 
-        # Specify the Slurm virtual instance ID
-        if self.job_id is not None:
-            vnode_args += [f'--jobid={self.job_id}']
-
-        ssh_cmd = [base_cmd, *vnode_args, *cmd]
-        return super().run(ssh_cmd, **kwargs)
+            ssh_cmd = [base_cmd, *vnode_args, *cmd]
+            return super().run(ssh_cmd, **kwargs)

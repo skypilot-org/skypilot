@@ -404,3 +404,41 @@ def cleanup_ports(
 ) -> None:
     """See sky/provision/__init__.py"""
     pass
+
+
+def get_command_runners(
+    cluster_info: common.ClusterInfo,
+    **credentials: Dict[str, Any],
+) -> List[command_runner.CommandRunner]:
+    """Get a command runner for the given cluster."""
+    assert cluster_info.provider_config is not None, cluster_info
+    instances = cluster_info.instances
+    cluster_name = slurm_utils.get_cluster_name_from_config(
+        cluster_info.provider_config)
+    partition = slurm_utils.get_partition_from_config(
+        cluster_info.provider_config)
+
+    # TODO(jwj): Support runners for multiple virtual instances.
+    runners: List[command_runner.CommandRunner] = []
+    if cluster_info.head_instance_id is not None:
+        # NOTE: Expect head_instance_id to be f'{cluster_name}-{partition}-{head_job_id}'.
+        # It now returns head_job_id only
+        head_job_id = cluster_info.head_instance_id
+
+        head_instance_info = instances[head_job_id][0]
+        head_runner = command_runner.SlurmCommandRunner(
+            (head_instance_info.external_ip, head_instance_info.ssh_port),
+            cluster_name=cluster_name,
+            partition=partition,
+            job_id=head_job_id,
+            **credentials)
+        runners.append(head_runner)
+
+    # node_list = [((namespace, context), pod_name)
+    #              for pod_name in instances.keys()
+    #              if pod_name != cluster_info.head_instance_id]
+    # runners.extend(
+    #     command_runner.KubernetesCommandRunner.make_runner_list(
+    #         node_list, **credentials))
+
+    return runners

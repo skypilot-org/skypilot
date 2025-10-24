@@ -4472,8 +4472,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             cmd = task_copy.run
             if isinstance(cmd, list):
                 cmd = ' '.join(cmd)
-            # TODO(jwj): Switch to SlurmCommandRunner
-            # The key is how much info is contained in handle, does it contain all info about the provisioned cluster?
             runner = handle.get_command_runners()[0]
 
             # In this context, the cluster name means SkyPilot cluster name
@@ -4482,6 +4480,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             provisioned_job_id = handle.cached_cluster_info.head_instance_id
             rc, stdout, stderr = runner.run(f'srun --jobid={provisioned_job_id} bash -c \'{cmd}\'', require_outputs=True)
+
+            return job_id
+
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
         if num_actual_nodes > 1:
