@@ -36,9 +36,6 @@ import { formatYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { YamlHighlighter } from '@/components/YamlHighlighter';
 
-// Converts a string to a URL-friendly slug (lowercase, replaces . and _ with -)
-const toSlug = (s) => (s || '').replace(/[._]/g, '-').toLowerCase();
-
 // Helper function to format autostop information, similar to _get_autostop in CLI utils
 const formatAutostop = (autostop, toDown) => {
   let autostopStr = '';
@@ -126,7 +123,7 @@ function ClusterDetails() {
         if (data.data && data.data.length > 0) {
           // Find cluster that matches our current cluster name as prefix
           const matchingCluster = data.data.find((cluster) =>
-            cluster.startsWith(toSlug(clusterData.cluster))
+            cluster.startsWith(clusterData.cluster_name_on_cloud)
           );
           if (matchingCluster) {
             setMatchedClusterName(matchingCluster);
