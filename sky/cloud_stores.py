@@ -641,7 +641,7 @@ class CoreWeaveCloudStorage(CloudStorage):
         """Downloads using AWS CLI."""
         # AWS Sync by default uses 10 threads to upload files to the bucket.
         # To increase parallelism, modify max_concurrent_requests in your
-        # aws config file (Default path: ~/.aws/config).
+        # aws config file (Default path: ~/.coreweave/cw.config).
         assert 'cw://' in source, 'cw:// is not in source'
         source = source.replace('cw://', 's3://')
         download_via_awscli = (

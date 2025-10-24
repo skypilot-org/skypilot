@@ -1422,8 +1422,8 @@ class TestStorageWithCredentials:
         # Coreweave yields the bucket after being created immediately, but any action will fail...
         # Wait for bucket to be available using ls
         import time
-        max_retries = 30
-        retry_delay = 2
+        max_retries = 36
+        retry_delay = 5
         for attempt in range(max_retries):
             try:
                 subprocess.check_call(
@@ -1436,7 +1436,7 @@ class TestStorageWithCredentials:
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay)
                 else:
-                    # If we can't list after max retries, still try to delete
+                    # If we can't list after max retries, still try to continue
                     break
 
         yield tmp_bucket_name, f'cw://{tmp_bucket_name}'

@@ -264,19 +264,6 @@ def coreweave_profile_in_cred() -> bool:
     return coreweave_profile_exists
 
 
-# def coreweave_profile_in_aws_config() -> bool:
-#     """Checks if CoreWeave profile is set in aws config"""
-#     conf_path = os.path.expanduser(COREWEAVE_CONFIG_PATH)
-#     coreweave_profile_exists = False
-#     if os.path.isfile(conf_path):
-#         with open(conf_path, 'r', encoding='utf-8') as file:
-#             for line in file:
-#                 if f'[profile {COREWEAVE_PROFILE_NAME}]' in line:
-#                     coreweave_profile_exists = True
-#                     break
-#     return coreweave_profile_exists
-
-
 def get_credential_file_mounts() -> Dict[str, str]:
     """Returns credential file mounts for CoreWeave.
 
@@ -288,34 +275,4 @@ def get_credential_file_mounts() -> Dict[str, str]:
         COREWEAVE_CREDENTIALS_PATH: COREWEAVE_CREDENTIALS_PATH,
         COREWEAVE_CONFIG_PATH: COREWEAVE_CONFIG_PATH
     }
-
-    # Add AWS credentials if CoreWeave profile exists
-    # if coreweave_profile_in_cred():
-    #     coreweave_credential_mounts[
-    #         COREWEAVE_CREDENTIALS_PATH] = COREWEAVE_CREDENTIALS_PATH
-
-    # Add AWS config if CoreWeave profile exists
-    # if coreweave_profile_in_aws_config():
-    #     coreweave_credential_mounts[
-    #         COREWEAVE_CONFIG_PATH] = COREWEAVE_CONFIG_PATH
-
-    # Add any additional credential file paths
-    # for path in get_credential_file_paths():
-    #     if os.path.exists(os.path.expanduser(path)):
-    #         coreweave_credential_mounts[path] = path
-
     return coreweave_credential_mounts
-
-
-# def get_credential_file_paths() -> List[str]:
-#     """Get the list of credential file paths based on current configuration."""
-#     paths = set()
-
-#     # Add workspace-specific credentials path if set
-#     workspace_cred_path = _get_workspace_credentials_path()
-#     if workspace_cred_path is not None:
-#         paths.add(workspace_cred_path)
-#     # Always add default path in case it's needed for fallback
-#     paths.add(_get_default_credentials_path())
-
-#     return list(paths)
