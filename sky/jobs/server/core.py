@@ -337,6 +337,7 @@ def launch(
     def _submit_one(
         consolidation_mode_job_id: Optional[int] = None,
         job_rank: Optional[int] = None,
+        num_jobs: Optional[int] = None,
     ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
         rank_suffix = '' if job_rank is None else f'-{job_rank}'
         remote_original_user_yaml_path = (
@@ -359,6 +360,7 @@ def launch(
             for task_ in dag.tasks:
                 if job_rank is not None:
                     task_.update_envs({'SKYPILOT_JOB_RANK': str(job_rank)})
+                    task_.update_envs({'SKYPILOT_NUM_JOBS': str(num_jobs)})
 
             dag_utils.dump_chain_dag_to_yaml(dag, f.name)
 
@@ -475,7 +477,7 @@ def launch(
     for job_rank in range(num_jobs):
         job_id = (consolidation_mode_job_ids[job_rank]
                   if consolidation_mode_job_ids is not None else None)
-        jid, handle = _submit_one(job_id, job_rank)
+        jid, handle = _submit_one(job_id, job_rank, num_jobs=num_jobs)
         assert jid is not None, (job_id, handle)
         ids.append(jid)
         all_handle = handle
@@ -663,12 +665,13 @@ def queue_v2_api(
     page: Optional[int] = None,
     limit: Optional[int] = None,
     statuses: Optional[List[str]] = None,
+    fields: Optional[List[str]] = None,
 ) -> Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int]:
     """Gets statuses of managed jobs and parse the
     jobs to responses.ManagedJobRecord."""
     jobs, total, status_counts, total_no_filter = queue_v2(
         refresh, skip_finished, all_users, job_ids, user_match, workspace_match,
-        name_match, pool_match, page, limit, statuses)
+        name_match, pool_match, page, limit, statuses, fields)
     return [responses.ManagedJobRecord(**job) for job in jobs
            ], total, status_counts, total_no_filter
 
@@ -686,6 +689,7 @@ def queue_v2(
     page: Optional[int] = None,
     limit: Optional[int] = None,
     statuses: Optional[List[str]] = None,
+    fields: Optional[List[str]] = None,
 ) -> Tuple[List[Dict[str, Any]], int, Dict[str, int], int]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets statuses of managed jobs with filtering.
@@ -790,7 +794,7 @@ def queue_v2(
     with metrics_lib.time_it('jobs.queue.generate_code', group='jobs'):
         code = managed_job_utils.ManagedJobCodeGen.get_job_table(
             skip_finished, accessible_workspaces, job_ids, workspace_match,
-            name_match, pool_match, page, limit, user_hashes, statuses)
+            name_match, pool_match, page, limit, user_hashes, statuses, fields)
     with metrics_lib.time_it('jobs.queue.run_on_head', group='jobs'):
         returncode, job_table_payload, stderr = backend.run_on_head(
             handle,

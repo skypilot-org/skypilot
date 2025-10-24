@@ -32,6 +32,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.metrics import utils as metrics_lib
 from sky.skylet import constants
+from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import registry
@@ -342,6 +343,10 @@ def initialize_and_get_db() -> sqlalchemy.engine.Engine:
 
         # return engine
         _SQLALCHEMY_ENGINE = engine
+        # Cache the result of _sqlite_supports_returning()
+        # ahead of time, as it won't change throughout
+        # the lifetime of the engine.
+        _sqlite_supports_returning()
         return _SQLALCHEMY_ENGINE
 
 
@@ -372,19 +377,51 @@ def _init_db(func):
     return wrapper
 
 
+@annotations.lru_cache(scope='global', maxsize=1)
+def _sqlite_supports_returning() -> bool:
+    """Check if SQLite (3.35.0+) and SQLAlchemy (2.0+) support RETURNING.
+
+    See https://sqlite.org/lang_returning.html and
+    https://docs.sqlalchemy.org/en/20/dialects/sqlite.html#insert-update-delete-returning  # pylint: disable=line-too-long
+    """
+    sqlalchemy_version_parts = sqlalchemy.__version__.split('.')
+    assert len(sqlalchemy_version_parts) >= 1, \
+        f'Invalid SQLAlchemy version: {sqlalchemy.__version__}'
+    sqlalchemy_major = int(sqlalchemy_version_parts[0])
+    if sqlalchemy_major < 2:
+        return False
+
+    assert _SQLALCHEMY_ENGINE is not None
+    if (_SQLALCHEMY_ENGINE.dialect.name !=
+            db_utils.SQLAlchemyDialect.SQLITE.value):
+        return False
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        result = session.execute(sqlalchemy.text('SELECT sqlite_version()'))
+        version_str = result.scalar()
+        version_parts = version_str.split('.')
+        assert len(version_parts) >= 2, \
+            f'Invalid version string: {version_str}'
+        major, minor = int(version_parts[0]), int(version_parts[1])
+        return (major > 3) or (major == 3 and minor >= 35)
+
+
 @_init_db
 @metrics_lib.time_me
-def add_or_update_user(user: models.User,
-                       allow_duplicate_name: bool = True) -> bool:
+def add_or_update_user(
+    user: models.User,
+    allow_duplicate_name: bool = True,
+    return_user: bool = False
+) -> typing.Union[bool, typing.Tuple[bool, models.User]]:
     """Store the mapping from user hash to user name for display purposes.
 
     Returns:
-        Boolean: whether the user is newly added
+        If return_user=False: bool (whether the user is newly added)
+        If return_user=True: Tuple[bool, models.User]
     """
     assert _SQLALCHEMY_ENGINE is not None
 
     if user.name is None:
-        return False
+        return (False, user) if return_user else False
 
     # Set created_at if not already set
     created_at = user.created_at
@@ -396,7 +433,7 @@ def add_or_update_user(user: models.User,
             existing_user = session.query(user_table).filter(
                 user_table.c.name == user.name).first()
             if existing_user is not None:
-                return False
+                return (False, user) if return_user else False
 
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
@@ -410,24 +447,57 @@ def add_or_update_user(user: models.User,
                                     name=user.name,
                                     password=user.password,
                                     created_at=created_at)
+            use_returning = return_user and _sqlite_supports_returning()
+            if use_returning:
+                insert_stmnt = insert_stmnt.returning(
+                    user_table.c.id,
+                    user_table.c.name,
+                    user_table.c.password,
+                    user_table.c.created_at,
+                )
             result = session.execute(insert_stmnt)
 
-            # Check if the INSERT actually inserted a row
-            was_inserted = result.rowcount > 0
+            row = None
+            if use_returning:
+                # With RETURNING, check if we got a row back.
+                row = result.fetchone()
+                was_inserted = row is not None
+            else:
+                # Without RETURNING, use rowcount.
+                was_inserted = result.rowcount > 0
 
             if not was_inserted:
                 # User existed, so update it (but don't update created_at)
+                update_values = {user_table.c.name: user.name}
                 if user.password:
-                    session.query(user_table).filter_by(id=user.id).update({
-                        user_table.c.name: user.name,
-                        user_table.c.password: user.password
-                    })
-                else:
-                    session.query(user_table).filter_by(id=user.id).update(
-                        {user_table.c.name: user.name})
+                    update_values[user_table.c.password] = user.password
+
+                update_stmnt = sqlalchemy.update(user_table).where(
+                    user_table.c.id == user.id).values(update_values)
+                if use_returning:
+                    update_stmnt = update_stmnt.returning(
+                        user_table.c.id, user_table.c.name,
+                        user_table.c.password, user_table.c.created_at)
+
+                result = session.execute(update_stmnt)
+                if use_returning:
+                    row = result.fetchone()
 
             session.commit()
-            return was_inserted
+
+            if return_user:
+                if row is None:
+                    # row=None means the sqlite used has no RETURNING support,
+                    # so we need to do a separate query
+                    row = session.query(user_table).filter_by(
+                        id=user.id).first()
+                updated_user = models.User(id=row.id,
+                                           name=row.name,
+                                           password=row.password,
+                                           created_at=row.created_at)
+                return was_inserted, updated_user
+            else:
+                return was_inserted
 
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
@@ -452,6 +522,9 @@ def add_or_update_user(user: models.User,
             upsert_stmnt = insert_stmnt.on_conflict_do_update(
                 index_elements=[user_table.c.id], set_=set_).returning(
                     user_table.c.id,
+                    user_table.c.name,
+                    user_table.c.password,
+                    user_table.c.created_at,
                     # This will be True for INSERT, False for UPDATE
                     sqlalchemy.literal_column('(xmax = 0)').label('was_inserted'
                                                                  ))
@@ -459,10 +532,17 @@ def add_or_update_user(user: models.User,
             result = session.execute(upsert_stmnt)
             row = result.fetchone()
 
-            ret = bool(row.was_inserted) if row else False
+            was_inserted = bool(row.was_inserted) if row else False
             session.commit()
 
-            return ret
+            if return_user:
+                updated_user = models.User(id=row.id,
+                                           name=row.name,
+                                           password=row.password,
+                                           created_at=row.created_at)
+                return was_inserted, updated_user
+            else:
+                return was_inserted
         else:
             raise ValueError('Unsupported database dialect')
 
@@ -1079,6 +1159,26 @@ def get_handles_from_cluster_names(
             row.name: pickle.loads(row.handle) if row is not None else None
             for row in rows
         }
+
+
+@_init_db
+@metrics_lib.time_me
+def get_cluster_name_to_handle_map(
+    is_managed: Optional[bool] = None,
+) -> Dict[str, Optional['backends.ResourceHandle']]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        query = session.query(cluster_table.c.name, cluster_table.c.handle)
+        if is_managed is not None:
+            query = query.filter(cluster_table.c.is_managed == int(is_managed))
+        rows = query.all()
+    name_to_handle = {}
+    for row in rows:
+        if row.handle and len(row.handle) > 0:
+            name_to_handle[row.name] = pickle.loads(row.handle)
+        else:
+            name_to_handle[row.name] = None
+    return name_to_handle
 
 
 @_init_db_async

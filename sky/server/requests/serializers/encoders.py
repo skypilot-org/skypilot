@@ -121,7 +121,7 @@ def encode_status_kubernetes(
         encoded_cluster = dataclasses.asdict(cluster)
         encoded_cluster['status'] = encoded_cluster['status'].value
         encoded_unmanaged_clusters.append(encoded_cluster)
-    all_jobs = [job.model_dump() for job in all_jobs]
+    all_jobs = [job.model_dump(by_alias=True) for job in all_jobs]
     return encoded_all_clusters, encoded_unmanaged_clusters, all_jobs, context
 
 
@@ -148,12 +148,13 @@ def encode_jobs_queue_v2(
     else:
         jobs = jobs_or_tuple
         total = None
-    for job in jobs:
+    jobs_dict = [job.model_dump(by_alias=True) for job in jobs]
+    for job in jobs_dict:
         job['status'] = job['status'].value
     if total is None:
-        return [job.model_dump() for job in jobs]
+        return jobs_dict
     return {
-        'jobs': [job.model_dump() for job in jobs],
+        'jobs': jobs_dict,
         'total': total,
         'total_no_filter': total_no_filter,
         'status_counts': status_counts

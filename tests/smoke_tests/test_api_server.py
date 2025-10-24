@@ -13,6 +13,7 @@ from smoke_tests import smoke_tests_utils
 
 import sky
 from sky import jobs
+from sky import skypilot_config
 from sky.client import common as client_common
 from sky.server import common as server_common
 from sky.skylet import constants
@@ -481,7 +482,7 @@ def test_api_server_start_stop(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
 
     test = smoke_tests_utils.Test(
-        'test_managed_jobs_force_disable_cloud_bucket',
+        'test_api_server_start_stop',
         [
             # To avoid interference with other tests, we launch a separate API server for this test.
             f'sky launch -n {name} --cloud {generic_cloud} tests/test_yamls/apiserver-start-stop.yaml -y {smoke_tests_utils.LOW_RESOURCE_ARG}'
@@ -691,11 +692,16 @@ def test_high_logs_concurrency_not_blocking_operations(generic_cloud: str,
                 job_name=f'{name}-job',
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud)),
-            # sky api cancel does not support skip confirmation, just stop and start the API server to cancel all logs requests
-            'sky api stop && sky api start',
+            # Cancel all requests.
+            'sky api cancel -yu',
+            # print all non-completed requests for debugging
+            'sky api status',
             f'sky down -y {name}',
             f'sky down -y {name}-another',
         ],
-        f'sky api stop && sky api start; sky down -y {name} || true; sky down -y {name}-another || true; sky jobs cancel -n {name}-job -y || true;',
+        (f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api stop && '
+         f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api start; '
+         f'sky down -y {name} || true; sky down -y {name}-another || true; '
+         f'sky jobs cancel -n {name}-job -y || true;'),
     )
     smoke_tests_utils.run_one_test(test)

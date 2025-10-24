@@ -363,9 +363,10 @@ class CancelBody(RequestBody):
         return kwargs
 
 
-class ClusterNameBody(RequestBody):
+class ProvisionLogsBody(RequestBody):
     """Cluster node."""
     cluster_name: str
+    worker: Optional[int] = None
 
 
 class ClusterJobBody(RequestBody):
@@ -541,6 +542,9 @@ class JobsQueueV2Body(RequestBody):
     page: Optional[int] = None
     limit: Optional[int] = None
     statuses: Optional[List[str]] = None
+    # The fields to return in the response.
+    # Refer to the fields in the `class ManagedJobRecord` in `response.py`
+    fields: Optional[List[str]] = None
 
 
 class JobsCancelBody(RequestBody):

@@ -25,11 +25,7 @@ import {
   renderPoolLink,
 } from '@/components/utils';
 import { UI_CONFIG } from '@/lib/config';
-import {
-  getManagedJobs,
-  getManagedJobsWithClientPagination,
-  getPoolStatus,
-} from '@/data/connectors/jobs';
+import { getPoolStatus } from '@/data/connectors/jobs';
 import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { getClusters, downloadJobLogs } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
@@ -575,7 +571,10 @@ export function ManagedJobsTable({
 
   useEffect(() => {
     const interval = setInterval(() => {
-      if (fetchDataRef.current) {
+      if (
+        fetchDataRef.current &&
+        window.document.visibilityState === 'visible'
+      ) {
         fetchDataRef.current({ includeStatus: true });
       }
     }, refreshInterval);
@@ -1838,7 +1837,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
     fetchData();
 
     const interval = setInterval(() => {
-      if (isCurrent) {
+      if (isCurrent && window.document.visibilityState === 'visible') {
         fetchData();
       }
     }, refreshInterval);

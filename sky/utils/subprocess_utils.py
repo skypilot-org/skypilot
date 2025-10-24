@@ -19,6 +19,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import log_lib
+from sky.skylet import subprocess_daemon
 from sky.utils import common_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -306,11 +307,17 @@ def run_with_retries(
     return returncode, stdout, stderr
 
 
-def kill_process_daemon(process_pid: int) -> None:
+def kill_process_daemon(process_pid: int, use_kill_pg: bool = False) -> None:
     """Start a daemon as a safety net to kill the process.
 
     Args:
         process_pid: The PID of the process to kill.
+        use_kill_pg: Whether to use kill process group to kill the process. If
+            True, the process will use os.killpg() to kill the target process
+            group on UNIX system, which is more efficient than using the daemon
+            to refresh the process tree in the daemon. Note that both
+            implementations have corner cases where subprocesses might not be
+            killed. Refer to subprocess_daemon.py for more details.
     """
     # Get initial children list
     try:
@@ -337,6 +344,10 @@ def kill_process_daemon(process_pid: int) -> None:
         ','.join(map(str, initial_children)),
     ]
 
+    env = os.environ.copy()
+    if use_kill_pg:
+        env[subprocess_daemon.USE_KILL_PG_ENV_VAR] = '1'
+
     # We do not need to set `start_new_session=True` here, as the
     # daemon script will detach itself from the parent process with
     # fork to avoid being killed by parent process. See the reason we
@@ -348,6 +359,7 @@ def kill_process_daemon(process_pid: int) -> None:
         stderr=subprocess.DEVNULL,
         # Disable input
         stdin=subprocess.DEVNULL,
+        env=env,
     )
 
 

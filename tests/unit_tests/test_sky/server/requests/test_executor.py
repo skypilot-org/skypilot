@@ -56,11 +56,20 @@ aws:
 
 @pytest.fixture()
 def mock_global_user_state():
-    with mock.patch('sky.global_user_state.add_or_update_user'), \
+    mock_user = mock.Mock()
+    mock_user.id = 'test-user-id'
+    mock_user.name = 'test-user'
+
+    def mock_add_or_update_user(user,
+                                allow_duplicate_name=True,
+                                return_user=False):
+        if return_user:
+            return True, mock_user
+        return True
+
+    with mock.patch('sky.global_user_state.add_or_update_user',
+                    side_effect=mock_add_or_update_user), \
          mock.patch('sky.global_user_state.get_user') as mock_get_user:
-        mock_user = mock.Mock()
-        mock_user.id = 'test-user-id'
-        mock_user.name = 'test-user'
         mock_get_user.return_value = mock_user
         yield
 
@@ -106,7 +115,7 @@ async def test_execute_request_coroutine_ctx_cancelled_on_cancellation(
         entrypoint=dummy_entrypoint,
         request_body=payloads.RequestBody(),
     )
-    requests_lib.create_if_not_exists(request)
+    await requests_lib.create_if_not_exists_async(request)
 
     # Mock the context and its methods
     mock_ctx = mock.Mock()
@@ -132,7 +141,8 @@ def dummy_entrypoint(called_flag):
     return 'ok'
 
 
-def test_api_cancel_race_condition(isolated_database):
+@pytest.mark.asyncio
+async def test_api_cancel_race_condition(isolated_database):
     """Cancel before execution: wrapper must no-op and not run entrypoint."""
     CALLED_FLAG[0] = False
     req = requests_lib.Request(request_id='race-cancel-before',
@@ -143,7 +153,7 @@ def test_api_cancel_race_condition(isolated_database):
                                created_at=0.0,
                                user_id='test-user')
 
-    assert requests_lib.create_if_not_exists(req) is True
+    assert await requests_lib.create_if_not_exists_async(req) is True
 
     # Cancel the request before the executor starts.
     cancelled = requests_lib.kill_requests(['race-cancel-before'])
@@ -263,7 +273,7 @@ async def test_execute_with_isolated_env_and_config(isolated_database,
             expected_env_b=env_b,
             expected_labels=expected_labels)
 
-        request = executor.prepare_request(
+        request = await executor.prepare_request_async(
             request_id=request_id,
             request_name='test.isolation',
             request_body=request_body,
@@ -442,6 +452,7 @@ def _keyboard_interrupt_entrypoint():
     raise KeyboardInterrupt()
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize('test_case', [
     pytest.param(
         {
@@ -472,7 +483,7 @@ def _keyboard_interrupt_entrypoint():
         },
         id='keyboard_interrupt'),
 ])
-def test_stdout_stderr_restoration(mock_fd_operations, test_case):
+async def test_stdout_stderr_restoration(mock_fd_operations, test_case):
     """Test stdout and stderr fd handling across different execution paths."""
     req = requests_lib.Request(request_id=test_case['request_id'],
                                name='test',
@@ -481,7 +492,7 @@ def test_stdout_stderr_restoration(mock_fd_operations, test_case):
                                status=requests_lib.RequestStatus.PENDING,
                                created_at=0.0,
                                user_id='test-user')
-    requests_lib.create_if_not_exists(req)
+    await requests_lib.create_if_not_exists_async(req)
 
     if test_case['expected_exception'] is not None:
         with pytest.raises(test_case['expected_exception']):
