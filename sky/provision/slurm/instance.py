@@ -193,7 +193,7 @@ def _create_jobs(region: str, cluster_name_on_cloud: str,
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task={int(resources['cpus'])}
 #SBATCH --mem-per-cpu={int(resources['memory'])}G
-#SBATCH --gres=gpu:{resources['accelerator_count']}
+#SBATCH --gres=gpu:{resources['accelerator_type'].lower()}:{resources['accelerator_count']}
 
 sleep infinity
     """
