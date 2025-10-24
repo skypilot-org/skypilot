@@ -103,7 +103,10 @@ def check_version_mismatch_and_non_terminal_jobs() -> None:
     if not version_matches and has_non_terminal_jobs:
         # Format job table locally using the same method as queue()
         formatted_job_table = managed_job_utils.format_job_table(
-            non_terminal_jobs, show_all=False, show_user=False)
+            non_terminal_jobs,
+            pool_status=None,
+            show_all=False,
+            show_user=False)
 
         error_msg = (
             f'Controller SKYLET_VERSION ({controller_version}) does not match '
