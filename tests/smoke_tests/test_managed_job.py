@@ -1600,6 +1600,8 @@ def test_managed_jobs_failed_precheck_storage_spec_error(
 def test_managed_jobs_logs_gc(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
 
+    log_cleaned_hint = 'log has been cleaned'
+
     def wait_logs_gced(controller: bool = False):
         now = time.time()
         while time.time() - now < 300:
@@ -1608,7 +1610,7 @@ def test_managed_jobs_logs_gc(generic_cloud: str):
             jobs_sdk.tail_logs(follow=False,
                                controller=controller,
                                output_stream=output)
-            if 'log has been cleaned' in output.getvalue():
+            if log_cleaned_hint in output.getvalue():
                 return
             yield f'Waiting for logs to be garbage collected, controller: {controller}'
             time.sleep(15)
@@ -1634,6 +1636,11 @@ def test_managed_jobs_logs_gc(generic_cloud: str):
                 timeout=600),
             lambda: wait_logs_gced(controller=False),
             lambda: wait_logs_gced(controller=True),
+            # jobs logs should still work, but show cleaned hint
+            f's=$(sky jobs logs) && echo "$s" && echo "$s" | grep "{log_cleaned_hint} && echo "$s" | grep "SUCCEEDED"',
+            f's=$(sky jobs logs --controller) && echo "$s" && echo "$s" | grep "{log_cleaned_hint}" && echo "$s" | grep "SUCCEEDED"',
+            # sync down should still work
+            'sky jobs logs --sync-down'
         ],
         teardown=f'sky jobs cancel -y -n {name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
