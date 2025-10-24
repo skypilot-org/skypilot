@@ -183,14 +183,17 @@ def _create_jobs(region: str, cluster_name_on_cloud: str,
                                                    partition,
                                                    disable_control_master=True)
 
-        provision_script = """#!/bin/bash
+        # TODO(jwj): Support accelerator_type.
+        # Requested resources of the Slurm virtual instance.
+        resources = config.node_config
+        provision_script = f"""#!/bin/bash
 #SBATCH --job-name=interactive-bash
 #SBATCH --output=interactive-bash.out
 #SBATCH --error=interactive-bash.err
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=2
-#SBATCH --mem-per-cpu=1G
-#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task={int(resources['cpus'])}
+#SBATCH --mem-per-cpu={int(resources['memory'])}G
+#SBATCH --gres=gpu:{resources['accelerator_count']}
 
 sleep infinity
     """

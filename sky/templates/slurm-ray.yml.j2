@@ -11,7 +11,8 @@ provider:
   type: external
   module: sky.provision.slurm
 
-  region: slurm
+  cluster_name: localcluster
+  partition: debug
 
   ssh:
     hostname: {{ssh_hostname}}
@@ -20,7 +21,7 @@ provider:
     private_key: {{slurm_private_key}}
 
 auth:
-  ssh_user: ubuntu
+  ssh_user: {{ssh_user}}
   # TODO(jwj): Modify this tmp workaround.
   # ssh_private_key: {{ssh_private_key}}
   ssh_private_key: {{slurm_private_key}}
@@ -29,8 +30,14 @@ available_node_types:
   ray_head_default:
     resources: {}
     node_config:
-      InstanceType: {{instance_type}}
-      DiskSize: {{disk_size}}
+      # From clouds/slurm.py::Slurm.make_deploy_resources_variables.
+      instance_type: {{instance_type}}
+      disk_size: {{disk_size}}
+      cpus: {{cpus}}
+      memory: {{memory}}
+      accelerator_type: {{accelerator_type}}
+      accelerator_count: {{accelerator_count}}
+
       # TODO: more configs that is required by the provisioner to create new
       # instances on the FluffyCloud:
       # sky/provision/fluffycloud/instance.py::run_instances
@@ -73,15 +80,19 @@ setup_commands:
     sudo systemctl disable unattended-upgrades || true;
     sudo sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true;
     sudo kill -9 `sudo lsof /var/lib/dpkg/lock-frontend | awk '{print $2}' | tail -n 1` || true;
-    sudo pkill -9 apt-get;
-    sudo pkill -9 dpkg;
-    sudo dpkg --configure -a;
-    mkdir -p ~/.ssh; touch ~/.ssh/config;
-    UV_SYSTEM_PYTHON=false "$HOME/.local/bin"/uv -V >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR="$HOME/.local/bin" sh;
-    [ -d ~/skypilot-runtime ] || "$HOME/.local/bin"/uv venv --seed ~/skypilot-runtime --python 3.10;
-    echo "$(echo ~/skypilot-runtime)/bin/python" > "~/.sky/python_path";
-    VIRTUAL_ENV=~/skypilot-runtime USE_SYSTEM_PYTHON=false $HOME/.local/bin/uv pip install paramiko;
-    {{ ray_skypilot_installation_commands }}
+
+# Run to here helps prevent "need sudo pwd" err and go into step 3 in _post_provision_setup
+# How skypilot-runtime virtual env is created...
+# How ray job is submitted with "echo hi"...
+#sudo pkill -9 apt-get;
+#sudo pkill -9 dpkg;
+#sudo dpkg --configure -a;
+#mkdir -p ~/.ssh; touch ~/.ssh/config;
+#UV_SYSTEM_PYTHON=false "$HOME/.local/bin"/uv -V >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR="$HOME/.local/bin" sh;
+#[ -d ~/skypilot-runtime ] || "$HOME/.local/bin"/uv venv --seed ~/skypilot-runtime --python 3.10;
+#echo "$(echo ~/skypilot-runtime)/bin/python" > "~/.sky/python_path";
+#VIRTUAL_ENV=~/skypilot-runtime USE_SYSTEM_PYTHON=false $HOME/.local/bin/uv pip install paramiko;
+#{{ ray_skypilot_installation_commands }}
 
 # Command to start ray on the head node. You don't need to change this.
 # NOTE: these are very performance-sensitive. Each new item opens/closes an SSH

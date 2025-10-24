@@ -203,6 +203,7 @@ class Slurm(clouds.Cloud):
             'cpus': str(cpus),
             'memory': str(mem),
             'accelerator_count': str(acc_count),
+            'accelerator_type': acc_type,
             # TODO(jwj): Pass SSH config in a smarter way
             'ssh_hostname': ssh_config_dict['hostname'],
             'ssh_port': ssh_config_dict['port'],
@@ -244,30 +245,39 @@ class Slurm(clouds.Cloud):
 
         # Currently, handle a filter on accelerators only.
         accelerators = resources.accelerators
-        if accelerators is None:
-            # Return a default instance type
-            default_instance_type = Slurm.get_default_instance_type(
-                cpus=resources.cpus)
-            if default_instance_type is None:
-                return resources_utils.FeasibleResources([], [], None)
-            else:
-                return resources_utils.FeasibleResources(
-                    _make([default_instance_type]), [], None)
 
-        assert len(accelerators) == 1, resources
-        acc, acc_count = list(accelerators.items())[0]
-        (instance_list,
-         fuzzy_candidate_list) = catalog.get_instance_type_for_accelerator(
-             acc,
-             acc_count,
-             use_spot=resources.use_spot,
-             cpus=resources.cpus,
-             region=resources.region,
-             zone=resources.zone,
-             clouds='slurm')
-        if instance_list is None:
-            return ([], fuzzy_candidate_list)
-        return (_make(instance_list), fuzzy_candidate_list)
+        default_instance_type = Slurm.get_default_instance_type(
+            cpus=resources.cpus,
+            memory=resources.memory,
+            disk_tier=resources.disk_tier,
+            region=resources.region,
+            zone=resources.zone)
+
+        if accelerators is None:
+            chosen_instance_type = default_instance_type
+        else:
+            assert len(accelerators) == 1, resources
+
+            # Build GPU-enabled instance type.
+            acc_type, acc_count = list(accelerators.items())[0]
+
+            slurm_instance_type = (slurm_utils.SlurmInstanceType.
+                                   from_instance_type(default_instance_type))
+
+            gpu_task_cpus = slurm_instance_type.cpus
+            gpu_task_memory = slurm_instance_type.memory
+            # if resources.cpus is None:
+            #     gpu_task_cpus = self._DEFAULT_NUM_VCPUS_WITH_GPU * acc_count
+            # gpu_task_memory = (float(resources.memory.strip('+')) if
+            #                    resources.memory is not None else gpu_task_cpus *
+            #                    self._DEFAULT_MEMORY_CPU_RATIO_WITH_GPU)
+
+            chosen_instance_type = (
+                slurm_utils.SlurmInstanceType.from_resources(
+                    gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name)
+
+        return resources_utils.FeasibleResources(_make([chosen_instance_type]),
+                                                 [], None)
 
     @classmethod
     def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
