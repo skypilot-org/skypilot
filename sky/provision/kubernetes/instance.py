@@ -548,8 +548,9 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
                 raise config_lib.KubernetesError(
                     f'Failed to get all pods after {missing_pods_retry} '
                     f'retries. Some pods may have been terminated or failed '
-                    f'unexpectedly. Run `sky status {cluster_name} -v -r` '
-                    f'for more details.')
+                    f'unexpectedly. Run `sky status {cluster_name} -v -r` or '
+                    f'`sky api logs skypilot-status-refresh-daemon` for more '
+                    f'details.')
             logger.info('Retrying running pods check: '
                         f'Missing pods: {missing_pods}')
             time.sleep(0.5)
@@ -566,8 +567,9 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
                     pod.status.phase == 'Failed'):
                 raise config_lib.KubernetesError(
                     f'Pod {pod.metadata.name} has terminated or failed '
-                    f'unexpectedly. Run `sky status {cluster_name} -v -r` '
-                    f'for more details.')
+                    f'unexpectedly. Run `sky status {cluster_name} -v -r` or '
+                    f'`sky api logs skypilot-status-refresh-daemon` for more '
+                    f'details.')
 
             # Continue if pod and all the containers within the
             # pod are successfully created and running.
