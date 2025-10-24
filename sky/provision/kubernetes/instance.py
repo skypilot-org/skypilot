@@ -1478,7 +1478,8 @@ def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
         # Get last known readiness state.
         if condition.type == 'Ready':
             ready_state = f'{reason} ({message})' if message else reason
-        # Kueue preemption.
+        # Kueue preemption, as defined in:
+        # https://pkg.go.dev/sigs.k8s.io/kueue/pkg/controller/jobs/pod#pkg-constants
         elif condition.type == 'TerminationTarget':
             termination_reason = f'Preempted by Kueue: {reason}'
             if message:
