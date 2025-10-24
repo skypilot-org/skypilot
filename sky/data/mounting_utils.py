@@ -148,7 +148,8 @@ def get_nebius_mount_cmd(nebius_profile_name: str,
     return mount_cmd
 
 
-def get_coreweave_mount_cmd(coreweave_profile_name: str,
+def get_coreweave_mount_cmd(cw_credentials_path: str,
+                            coreweave_profile_name: str,
                             bucket_name: str,
                             endpoint_url: str,
                             mount_path: str,
@@ -163,11 +164,13 @@ def get_coreweave_mount_cmd(coreweave_profile_name: str,
     arch_check = 'ARCH=$(uname -m) && '
     rclone_mount = (
         f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
+        f'AWS_SHARED_CREDENTIALS_FILE={cw_credentials_path} '
         f'AWS_PROFILE={coreweave_profile_name} '
         f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
         f'--s3-force-path-style=false '
         f'--s3-endpoint {endpoint_url} --daemon --allow-other')
-    goofys_mount = (f'AWS_PROFILE={coreweave_profile_name} {_GOOFYS_WRAPPER} '
+    goofys_mount = (f'AWS_SHARED_CREDENTIALS_FILE={cw_credentials_path} '
+                    f'AWS_PROFILE={coreweave_profile_name} {_GOOFYS_WRAPPER} '
                     '-o allow_other '
                     f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                     f'--type-cache-ttl {_TYPE_CACHE_TTL} '

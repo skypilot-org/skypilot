@@ -246,7 +246,6 @@ This will produce a summary like:
     Seeweb: enabled
     vSphere: enabled
     Cloudflare (for R2 object store): enabled
-    CoreWeave (for object store): enabled
     Kubernetes: enabled
 
 If any cloud's credentials or dependencies are missing, ``sky check`` will
@@ -696,46 +695,52 @@ Seeweb |community-badge|
 
 
 CoreWeave
-~~~~~~~~~~~~~~~~~~
+~~~~~~~~~
 
-`CoreWeave <https://www.coreweave.com/>`__ provides cloud infrastructure with a focus on object storage. SkyPilot supports CoreWeave Object Storage, which is S3-compatible.
+`CoreWeave <https://www.coreweave.com/>`__ provides S3-compatible object storage that can be used with SkyPilot for storing and accessing data in your workloads.
 
-To configure CoreWeave Object Storage access, you can use AWS CLI commands:
+**Step 1: Configure CoreWeave credentials**
+
+SkyPilot uses separate configuration files for CoreWeave to avoid conflicts with your AWS credentials. Run the following command to configure your CoreWeave access credentials:
 
 .. code-block:: shell
 
-  # Configure your CoreWeave credentials
-  aws configure --profile coreweave
+  AWS_SHARED_CREDENTIALS_FILE=~/.coreweave/cw.credentials aws configure --profile cw
 
-In the prompt, enter your CoreWeave Access Key ID and Secret Access Key. Select your preferred region and :code:`json` for the default output format.
+When prompted, enter your CoreWeave Object Storage credentials:
 
 .. code-block:: text
 
   AWS Access Key ID [None]: <your_access_key_id>
   AWS Secret Access Key [None]: <your_secret_access_key>
-  Default region name [None]: <REGION>
+  Default region name [None]:
   Default output format [None]: json
 
-Then set the endpoint URL and S3 addressing style:
+**Step 2: Configure the S3 endpoint**
+
+Next, configure the endpoint URL and addressing style for CoreWeave Object Storage. This tells AWS CLI how to connect to CoreWeave's S3-compatible service:
 
 .. code-block:: shell
 
   # For external access (outside CoreWeave CKS clusters)
-  aws configure set endpoint_url https://cwobject.com --profile coreweave
-  aws configure set s3.addressing_style virtual --profile coreweave
+  AWS_CONFIG_FILE=~/.coreweave/cw.config aws configure set endpoint_url https://cwobject.com --profile cw
+  AWS_CONFIG_FILE=~/.coreweave/cw.config aws configure set s3.addressing_style virtual --profile cw
 
 .. note::
 
-  **Endpoint selection**: 
-  
-  - Use ``https://cwobject.com`` for external access (outside CoreWeave infrastructure)
-  - Use ``http://cwlota.com`` only if running inside CoreWeave CKS clusters (LOTA endpoint only supports HTTP, not HTTPS)
+  **Choosing the right endpoint**:
 
-To obtain your CoreWeave Object Storage credentials:
+  - **External access (recommended)**: Use ``https://cwobject.com`` when launching SkyPilot clusters in non-CoreWeave CKS clusters. This endpoint is accessible from anywhere and uses secure HTTPS.
+
+  - **Internal access (advanced)**: Use ``http://cwlota.com`` only if you are launching SkyPilot clusters inside CoreWeave CKS clusters and do not need to upload local data to the bucket. The LOTA endpoint provides faster access within CoreWeave's network but only supports HTTP and is not accessible externally. Refer to `LOTA documentation <https://docs.coreweave.com/docs/products/storage/object-storage/lota/about>`_ for more details.
+
+**Obtaining your credentials**
+
+To get your CoreWeave Object Storage Access Key ID and Secret Access Key:
 
 1. Log into your `CoreWeave Cloud console <https://cloud.coreweave.com/>`__.
-2. Navigate to the Object Storage section.
-3. Generate or retrieve your Access Key ID and Secret Access Key.
+2. Navigate to **Object Storage** → **Keys** in the left sidebar.
+3. Generate a new key pair.
 
 
 Request quotas for first time users

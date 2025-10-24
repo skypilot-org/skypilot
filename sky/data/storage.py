@@ -1442,6 +1442,7 @@ class S3CompatibleConfig:
     aws_profile: Optional[str] = None
     get_endpoint_url: Optional[Callable[[], str]] = None
     credentials_file: Optional[str] = None
+    config_file: Optional[str] = None
     extra_cli_args: Optional[List[str]] = None
 
     # Provider-specific settings
@@ -1462,8 +1463,8 @@ class S3CompatibleStore(AbstractStore):
     """Base class for S3-compatible object storage providers.
 
     This class provides a unified interface for all S3-compatible storage
-    providers (AWS S3, Cloudflare R2, Nebius, MinIO, etc.) by leveraging
-    a configuration-driven approach that eliminates code duplication.
+    providers (AWS S3, Cloudflare R2, Nebius, MinIO, CoreWeave, etc.) by
+    leveraging a configuration-driven approach that eliminates code duplication
 
     ## Adding a New S3-Compatible Store
 
@@ -1889,6 +1890,9 @@ class S3CompatibleStore(AbstractStore):
             if self.config.credentials_file:
                 cmd = 'AWS_SHARED_CREDENTIALS_FILE=' + \
                 f'{self.config.credentials_file} {cmd}'
+            if self.config.config_file:
+                cmd = 'AWS_CONFIG_FILE=' + \
+                f'{self.config.config_file} {cmd}'
 
             return cmd
 
@@ -1934,6 +1938,9 @@ class S3CompatibleStore(AbstractStore):
             if self.config.credentials_file:
                 cmd = 'AWS_SHARED_CREDENTIALS_FILE=' + \
                 f'{self.config.credentials_file} {cmd}'
+            if self.config.config_file:
+                cmd = 'AWS_CONFIG_FILE=' + \
+                f'{self.config.config_file} {cmd}'
 
             return cmd
 
@@ -1987,6 +1994,9 @@ class S3CompatibleStore(AbstractStore):
                 if self.config.credentials_file:
                     command = (f'AWS_SHARED_CREDENTIALS_FILE='
                                f'{self.config.credentials_file} {command}')
+                if self.config.config_file:
+                    command = 'AWS_CONFIG_FILE=' + \
+                    f'{self.config.config_file} {command}'
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
                         _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
@@ -2059,7 +2069,9 @@ class S3CompatibleStore(AbstractStore):
             remove_command = (f'AWS_SHARED_CREDENTIALS_FILE='
                               f'{self.config.credentials_file} '
                               f'{remove_command}')
-
+        if self.config.config_file:
+            remove_command = 'AWS_CONFIG_FILE=' + \
+            f'{self.config.config_file} {remove_command}'
         return self._execute_remove_command(
             remove_command, bucket_name,
             f'Deleting {self.config.store_type} bucket {bucket_name}',
@@ -2116,7 +2128,9 @@ class S3CompatibleStore(AbstractStore):
             remove_command = (f'AWS_SHARED_CREDENTIALS_FILE='
                               f'{self.config.credentials_file} '
                               f'{remove_command}')
-
+        if self.config.config_file:
+            remove_command = 'AWS_CONFIG_FILE=' + \
+            f'{self.config.config_file} {remove_command}'
         return self._execute_remove_command(
             remove_command, bucket_name,
             (f'Removing objects from {self.config.store_type} bucket '
@@ -2193,6 +2207,10 @@ class GcsStore(AbstractStore):
             elif self.source.startswith('oci://'):
                 raise NotImplementedError(
                     'Moving data from OCI to GCS is currently not supported.')
+            elif self.source.startswith('cw://'):
+                raise NotImplementedError(
+                    'Moving data from CoreWeave Object Storage to GCS is'
+                    ' currently not supported.')
         # Validate name
         self.name = self.validate_name(self.name)
         # Check if the storage is enabled
@@ -2808,6 +2826,10 @@ class AzureBlobStore(AbstractStore):
             elif self.source.startswith('oci://'):
                 raise NotImplementedError(
                     'Moving data from OCI to AZureBlob is not supported.')
+            elif self.source.startswith('cw://'):
+                raise NotImplementedError(
+                    'Moving data from CoreWeave Object Storage to AzureBlob is'
+                    ' currently not supported.')
         # Validate name
         self.name = self.validate_name(self.name)
 
@@ -3179,6 +3201,8 @@ class AzureBlobStore(AbstractStore):
                     raise NotImplementedError(error_message.format('OCI'))
                 elif self.source.startswith('nebius://'):
                     raise NotImplementedError(error_message.format('NEBIUS'))
+                elif self.source.startswith('cw://'):
+                    raise NotImplementedError(error_message.format('CoreWeave'))
                 else:
                     self.batch_az_blob_sync([self.source])
         except exceptions.StorageUploadError:
@@ -3597,6 +3621,10 @@ class IBMCosStore(AbstractStore):
                 assert self.name == data_utils.split_cos_path(self.source)[0], (
                     'COS Bucket is specified as path, the name should be '
                     'the same as COS bucket.')
+            elif self.source.startswith('cw://'):
+                raise NotImplementedError(
+                    'Moving data from CoreWeave Object Storage to COS is '
+                    'currently not supported.')
         # Validate name
         self.name = IBMCosStore.validate_name(self.name)
 
@@ -3695,6 +3723,9 @@ class IBMCosStore(AbstractStore):
                 elif self.source.startswith('r2://'):
                     raise Exception('IBM COS currently not supporting'
                                     'data transfers between COS and r2')
+                elif self.source.startswith('cw://'):
+                    raise Exception('IBM COS currently not supporting'
+                                    'data transfers between COS and CoreWeave')
                 else:
                     self.batch_ibm_rsync([self.source])
 
@@ -4634,15 +4665,15 @@ class CoreWeaveStore(S3CompatibleStore):
         return S3CompatibleConfig(
             store_type='COREWEAVE',
             url_prefix='cw://',
-            client_factory=data_utils.create_coreweave_client,
+            client_factory=lambda region: data_utils.create_coreweave_client(),
             resource_factory=lambda name: coreweave.resource('s3').Bucket(name),
             split_path=data_utils.split_coreweave_path,
             verify_bucket=data_utils.verify_coreweave_bucket,
             aws_profile=coreweave.COREWEAVE_PROFILE_NAME,
-            get_endpoint_url=lambda: data_utils.create_coreweave_client().meta.
-            endpoint_url,
-            extra_cli_args=[],
-            cloud_name='CoreWeave',
+            get_endpoint_url=lambda: coreweave.get_endpoint(),  # pylint: disable=unnecessary-lambda
+            credentials_file=coreweave.COREWEAVE_CREDENTIALS_PATH,
+            config_file=coreweave.COREWEAVE_CONFIG_PATH,
+            cloud_name=coreweave.NAME,
             default_region=coreweave.DEFAULT_REGION,
             mount_cmd_factory=cls._get_coreweave_mount_cmd,
         )
@@ -4677,9 +4708,9 @@ class CoreWeaveStore(S3CompatibleStore):
     def _get_coreweave_mount_cmd(cls, bucket_name: str, mount_path: str,
                                  bucket_sub_path: Optional[str]) -> str:
         """Factory method for CoreWeave mount command."""
-        client = data_utils.create_coreweave_client()
-        endpoint_url = client.meta.endpoint_url
+        endpoint_url = coreweave.get_endpoint()
         return mounting_utils.get_coreweave_mount_cmd(
+            coreweave.COREWEAVE_CREDENTIALS_PATH,
             coreweave.COREWEAVE_PROFILE_NAME, bucket_name, endpoint_url,
             mount_path, bucket_sub_path)
 
@@ -4700,6 +4731,9 @@ class CoreWeaveStore(S3CompatibleStore):
         """Create bucket using S3 API with timing handling for CoreWeave."""
         result = super()._create_bucket(bucket_name)
         # Ensure bucket is created
-        data_utils.verify_coreweave_bucket(bucket_name)
+        # The newly created bucket ever takes about 18min to be accessible,
+        # here we just retry for 36 times (5s * 36 = 180s) to avoid waiting
+        # too long
+        data_utils.verify_coreweave_bucket(bucket_name, retry=36)
 
         return result

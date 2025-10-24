@@ -614,18 +614,28 @@ class CoreWeaveCloudStorage(CloudStorage):
 
     def is_directory(self, url: str) -> bool:
         """Checks if the coreweave object is a directory.
+
+        In cloud object stores, a "directory" refers to a regular object whose
+        name is a prefix of other objects.
+
         Args:
             url: coreweave object URL.
         """
-        assert 'cw://' in url, 'cw:// is not in source'
+        cw = coreweave.resource('s3')
         bucket_name, path = data_utils.split_coreweave_path(url)
-        if path.endswith('/') or path == '':
-            return True
-        coreweave_client = data_utils.create_coreweave_client()
-        objects = coreweave_client.list_objects_v2(Bucket=bucket_name,
-                                                   Prefix=path,
-                                                   MaxKeys=1)
-        return objects.get('KeyCount', 0) > 0
+        bucket = cw.Bucket(bucket_name)
+
+        num_objects = 0
+        for obj in bucket.objects.filter(Prefix=path):
+            num_objects += 1
+            if obj.key == path:
+                return False
+            # If there are more than 1 object in filter, then it is a directory
+            if num_objects == 3:
+                return True
+
+        # A directory with few or no items
+        return True
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:
         """Downloads using AWS CLI."""
@@ -634,10 +644,14 @@ class CoreWeaveCloudStorage(CloudStorage):
         # aws config file (Default path: ~/.aws/config).
         assert 'cw://' in source, 'cw:// is not in source'
         source = source.replace('cw://', 's3://')
-        download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
-                               'sync --no-follow-symlinks '
-                               f'{source} {destination} '
-                               f'--profile={coreweave.COREWEAVE_PROFILE_NAME}')
+        download_via_awscli = (
+            'AWS_SHARED_CREDENTIALS_FILE='
+            f'{coreweave.COREWEAVE_CREDENTIALS_PATH} '
+            f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} '
+            f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+            'sync --no-follow-symlinks '
+            f'{source} {destination} '
+            f'--profile={coreweave.COREWEAVE_PROFILE_NAME}')
 
         all_commands = list(self._GET_AWSCLI)
         all_commands.append(download_via_awscli)
@@ -647,9 +661,13 @@ class CoreWeaveCloudStorage(CloudStorage):
         """Downloads a file using AWS CLI."""
         assert 'cw://' in source, 'cw:// is not in source'
         source = source.replace('cw://', 's3://')
-        download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
-                               f'cp {source} {destination} '
-                               f'--profile={coreweave.COREWEAVE_PROFILE_NAME}')
+        download_via_awscli = (
+            'AWS_SHARED_CREDENTIALS_FILE='
+            f'{coreweave.COREWEAVE_CREDENTIALS_PATH} '
+            f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} '
+            f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+            f'cp {source} {destination} '
+            f'--profile={coreweave.COREWEAVE_PROFILE_NAME}')
 
         all_commands = list(self._GET_AWSCLI)
         all_commands.append(download_via_awscli)

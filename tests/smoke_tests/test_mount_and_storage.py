@@ -595,7 +595,7 @@ def test_coreweave_storage_mounts(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}-coreweave'
     template_str = pathlib.Path(
-        'tests/test_yamls/test_coreweave_storage_mounting.yaml').read_text()
+        'tests/test_yamls/test_coreweave_storage_mounting.yaml.j2').read_text()
     template = jinja2.Template(template_str)
     content = template.render(storage_name=storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
@@ -606,7 +606,7 @@ def test_coreweave_storage_mounts(generic_cloud: str):
             *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
             f'sky launch -y -c {name} --infra {generic_cloud} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'aws s3 ls s3://{storage_name}/hello.txt --profile={coreweave.COREWEAVE_PROFILE_NAME}'
+            f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} AWS_SHARED_CREDENTIALS_FILE={coreweave.COREWEAVE_CREDENTIALS_PATH} aws s3 ls s3://{storage_name}/hello.txt --profile={coreweave.COREWEAVE_PROFILE_NAME}'
         ]
 
         test = smoke_tests_utils.Test(
@@ -947,7 +947,7 @@ class TestStorageWithCredentials:
 
         if store_type == storage_lib.StoreType.COREWEAVE:
             url = f's3://{bucket_name}'
-            return f'aws s3 rb {url} --force --profile={coreweave.COREWEAVE_PROFILE_NAME}'
+            return f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} AWS_SHARED_CREDENTIALS_FILE={coreweave.COREWEAVE_CREDENTIALS_PATH} aws s3 rb {url} --force --profile={coreweave.COREWEAVE_PROFILE_NAME}'
 
         if store_type == storage_lib.StoreType.IBM:
             rclone_profile_name = (data_utils.Rclone.RcloneStores.IBM.
@@ -1050,7 +1050,7 @@ class TestStorageWithCredentials:
             else:
                 url = f's3://{bucket_name}'
             recursive_flag = '--recursive' if recursive else ''
-            return f'aws s3 ls {url} --profile={coreweave.COREWEAVE_PROFILE_NAME} {recursive_flag}'
+            return f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} AWS_SHARED_CREDENTIALS_FILE={coreweave.COREWEAVE_CREDENTIALS_PATH} aws s3 ls {url} --profile={coreweave.COREWEAVE_PROFILE_NAME} {recursive_flag}'
 
         if store_type == storage_lib.StoreType.IBM:
             # rclone ls is recursive by default
@@ -1122,9 +1122,9 @@ class TestStorageWithCredentials:
                 return f'aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --profile={nebius.NEBIUS_PROFILE_NAME}'
         elif store_type == storage_lib.StoreType.COREWEAVE:
             if suffix:
-                return f'aws s3api list-objects --bucket "{bucket_name}" --prefix {suffix} --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --profile={coreweave.COREWEAVE_PROFILE_NAME}'
+                return f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} AWS_SHARED_CREDENTIALS_FILE={coreweave.COREWEAVE_CREDENTIALS_PATH} aws s3api list-objects --bucket "{bucket_name}" --prefix {suffix} --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --profile={coreweave.COREWEAVE_PROFILE_NAME}'
             else:
-                return f'aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --profile={coreweave.COREWEAVE_PROFILE_NAME}'
+                return f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} AWS_SHARED_CREDENTIALS_FILE={coreweave.COREWEAVE_CREDENTIALS_PATH} aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --profile={coreweave.COREWEAVE_PROFILE_NAME}'
 
     @staticmethod
     def cli_count_file_in_bucket(store_type, bucket_name):
@@ -1149,7 +1149,7 @@ class TestStorageWithCredentials:
         elif store_type == storage_lib.StoreType.NEBIUS:
             return f'aws s3 ls s3://{bucket_name} --recursive --profile={nebius.NEBIUS_PROFILE_NAME} | wc -l'
         elif store_type == storage_lib.StoreType.COREWEAVE:
-            return f'aws s3 ls s3://{bucket_name} --recursive --profile={coreweave.COREWEAVE_PROFILE_NAME} | wc -l'
+            return f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} AWS_SHARED_CREDENTIALS_FILE={coreweave.COREWEAVE_CREDENTIALS_PATH} aws s3 ls s3://{bucket_name} --recursive --profile={coreweave.COREWEAVE_PROFILE_NAME} | wc -l'
 
     @pytest.fixture
     def tmp_source(self, tmp_path):
@@ -1417,7 +1417,7 @@ class TestStorageWithCredentials:
         # Creates a temporary bucket using awscli with CoreWeave profile
         bucket_uri = f's3://{tmp_bucket_name}'
         subprocess.check_call(
-            f'aws s3 mb {bucket_uri} --profile={coreweave.COREWEAVE_PROFILE_NAME}',
+            f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} AWS_SHARED_CREDENTIALS_FILE={coreweave.COREWEAVE_CREDENTIALS_PATH} aws s3 mb {bucket_uri} --profile={coreweave.COREWEAVE_PROFILE_NAME}',
             shell=True)
         # Coreweave yields the bucket after being created immediately, but any action will fail...
         # Wait for bucket to be available using ls
@@ -1427,7 +1427,7 @@ class TestStorageWithCredentials:
         for attempt in range(max_retries):
             try:
                 subprocess.check_call(
-                    f'aws s3 ls {bucket_uri} --profile={coreweave.COREWEAVE_PROFILE_NAME}',
+                    f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} AWS_SHARED_CREDENTIALS_FILE={coreweave.COREWEAVE_CREDENTIALS_PATH} aws s3 ls {bucket_uri} --profile={coreweave.COREWEAVE_PROFILE_NAME}',
                     shell=True,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL)
@@ -1441,7 +1441,7 @@ class TestStorageWithCredentials:
 
         yield tmp_bucket_name, f'cw://{tmp_bucket_name}'
         subprocess.check_call(
-            f'aws s3 rb {bucket_uri} --force --profile={coreweave.COREWEAVE_PROFILE_NAME}',
+            f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} AWS_SHARED_CREDENTIALS_FILE={coreweave.COREWEAVE_CREDENTIALS_PATH} aws s3 rb {bucket_uri} --force --profile={coreweave.COREWEAVE_PROFILE_NAME}',
             shell=True)
 
     @pytest.fixture
@@ -1574,6 +1574,8 @@ class TestStorageWithCredentials:
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
         pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius),
+        pytest.param(storage_lib.StoreType.COREWEAVE,
+                     marks=pytest.mark.coreweave),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm)
     ])
     def test_multiple_buckets_creation_and_deletion(
@@ -1622,6 +1624,8 @@ class TestStorageWithCredentials:
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.COREWEAVE,
+                     marks=pytest.mark.coreweave),
         pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius)
     ])
     def test_upload_source_with_spaces(self, store_type,
@@ -1655,6 +1659,8 @@ class TestStorageWithCredentials:
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.COREWEAVE,
+                     marks=pytest.mark.coreweave),
         pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius)
     ])
     def test_bucket_external_deletion(self, tmp_scratch_storage_obj,
@@ -1692,6 +1698,8 @@ class TestStorageWithCredentials:
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.COREWEAVE,
+                     marks=pytest.mark.coreweave),
         pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius)
     ])
     def test_bucket_bulk_deletion(self, store_type, tmp_bulk_del_storage_obj):
@@ -1746,6 +1754,7 @@ class TestStorageWithCredentials:
                 marks=pytest.mark.azure),
             pytest.param('cos://us-east/{random_name}', marks=pytest.mark.ibm),
             pytest.param('r2://{random_name}', marks=pytest.mark.cloudflare),
+            pytest.param('cw://{random_name}', marks=pytest.mark.coreweave),
             pytest.param('nebius://{random_name}', marks=pytest.mark.nebius)
         ])
     def test_nonexistent_bucket(self, nonexist_bucket_url):
@@ -1770,6 +1779,9 @@ class TestStorageWithCredentials:
             elif nonexist_bucket_url.startswith('r2'):
                 endpoint_url = cloudflare.create_endpoint()
                 command = f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api head-bucket --bucket {nonexist_bucket_name} --endpoint {endpoint_url} --profile=r2'
+                expected_output = '404'
+            elif nonexist_bucket_url.startswith('cw'):
+                command = f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} AWS_SHARED_CREDENTIALS_FILE={coreweave.COREWEAVE_CREDENTIALS_PATH} aws s3api head-bucket --bucket {nonexist_bucket_name} --profile={coreweave.COREWEAVE_PROFILE_NAME}'
                 expected_output = '404'
             elif nonexist_bucket_url.startswith('nebius'):
                 command = f'aws s3api head-bucket --bucket {nonexist_bucket_name} --profile={nebius.NEBIUS_PROFILE_NAME}'
@@ -1871,6 +1883,9 @@ class TestStorageWithCredentials:
                               pytest.param('tmp_awscli_bucket_r2',
                                            storage_lib.StoreType.R2,
                                            marks=pytest.mark.cloudflare),
+                              pytest.param('tmp_awscli_bucket_coreweave',
+                                           storage_lib.StoreType.COREWEAVE,
+                                           marks=pytest.mark.coreweave),
                               pytest.param('tmp_awscli_bucket_nebius',
                                            storage_lib.StoreType.NEBIUS,
                                            marks=pytest.mark.nebius)])
@@ -1938,6 +1953,8 @@ class TestStorageWithCredentials:
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.COREWEAVE,
+                     marks=pytest.mark.coreweave),
         pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius)
     ])
     def test_list_source(self, tmp_local_list_storage_obj, store_type):
@@ -1984,6 +2001,9 @@ class TestStorageWithCredentials:
                               pytest.param(AWS_INVALID_NAMES,
                                            storage_lib.StoreType.R2,
                                            marks=pytest.mark.cloudflare),
+                              pytest.param(AWS_INVALID_NAMES,
+                                           storage_lib.StoreType.COREWEAVE,
+                                           marks=pytest.mark.coreweave),
                               pytest.param(AWS_INVALID_NAMES,
                                            storage_lib.StoreType.NEBIUS,
                                            marks=pytest.mark.nebius)])
