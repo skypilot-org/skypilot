@@ -1,4 +1,5 @@
 """SDK functions for managed jobs."""
+import concurrent.futures
 import ipaddress
 import os
 import pathlib
@@ -501,15 +502,40 @@ def launch(
         assert len(consolidation_mode_job_ids) == 1
         return _submit_one(consolidation_mode_job_ids[0])
 
-    ids = []
-    all_handle = None
-    for job_rank in range(num_jobs):
-        job_id = (consolidation_mode_job_ids[job_rank]
-                  if consolidation_mode_job_ids is not None else None)
-        jid, handle = _submit_one(job_id, job_rank, num_jobs=num_jobs)
-        assert jid is not None, (job_id, handle)
-        ids.append(jid)
-        all_handle = handle
+    ids: List[int] = []
+    all_handle: Optional[backends.ResourceHandle] = None
+
+    # Submit jobs in parallel using ThreadPoolExecutor
+    with concurrent.futures.ThreadPoolExecutor(
+            max_workers=min(num_jobs,
+                            os.cpu_count() or 1)) as executor:
+        # Submit jobs concurrently
+        future_to_rank = {}
+        for job_rank in range(num_jobs):
+            job_id = (consolidation_mode_job_ids[job_rank]
+                      if consolidation_mode_job_ids is not None else None)
+            future = executor.submit(_submit_one, job_id, job_rank, num_jobs)
+            future_to_rank[future] = job_rank
+
+        # Collect results in order of job_rank to maintain consistent ordering
+        results: List[Optional[Tuple[
+            int, Optional[backends.ResourceHandle]]]] = [None] * num_jobs
+        for future in concurrent.futures.as_completed(future_to_rank):
+            job_rank = future_to_rank[future]
+            try:
+                jid, handle = future.result()
+                assert jid is not None, (job_id, handle)
+                results[job_rank] = (jid, handle)
+                all_handle = handle  # Keep the last handle (any handle works)
+            except Exception as e:
+                logger.error(f'Error launching job {job_rank}: {e}')
+                raise e
+
+        # Extract job IDs in order
+        for res in results:
+            if res is not None:
+                ids.append(res[0])
+
     return ids, all_handle
 
 
