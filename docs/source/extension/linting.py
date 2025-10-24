@@ -61,7 +61,8 @@ ALLOWED_TERMS = {
     # Area
     'Europe',
     'WARP',
-    'Cloudflare'
+    'Cloudflare',
+    'CloudRift'
 }
 
 # Add multi-word terms that should be treated as a single entity
