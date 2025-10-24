@@ -1,6 +1,7 @@
 """Unit tests for sky.jobs.state."""
 import contextlib
 import time
+from typing import Optional
 
 import filelock
 import pytest
@@ -43,9 +44,9 @@ def _insert_task(
     task_id: int,
     *,
     status: ManagedJobStatus,
-    end_at: float | None,
-    local_log_file: str | None = None,
-    logs_cleaned_at: float | None = None,
+    end_at: Optional[float] = None,
+    local_log_file: Optional[str] = None,
+    logs_cleaned_at: Optional[float] = None,
 ):
     with orm.Session(engine) as session:
         session.execute(
@@ -61,7 +62,9 @@ def _insert_task(
         session.commit()
 
 
-def _insert_job_info(engine, *, controller_logs_cleaned_at: float | None):
+def _insert_job_info(engine,
+                     *,
+                     controller_logs_cleaned_at: Optional[float] = None):
     with orm.Session(engine) as session:
         # Insert row; let PK autoincrement.
         if (state._SQLALCHEMY_ENGINE.dialect.name ==
