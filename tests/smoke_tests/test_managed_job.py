@@ -1628,6 +1628,8 @@ def test_managed_jobs_logs_gc(generic_cloud: str):
             }
         },
         commands=[
+            # Restart the API server to apply the server-side config
+            'sky api stop && sky api start --deploy',
             f'sky jobs launch -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y "echo hello" -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
