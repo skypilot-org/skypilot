@@ -25,30 +25,16 @@ metadata:
 spec:
   ingressClassName: {{ .Values.grafana.ingress.ingressClassName }}
   rules:
-  {{- $release := .Release.Name -}}
-  {{- $path := .Values.grafana.ingress.path -}}
-  {{- if .Values.grafana.ingress.hosts  }}
-  {{- range .Values.grafana.ingress.hosts }}
-    - host: {{ . | quote }}
-      http:
-        paths:
-        - backend:
-            service:
-              name: {{ $release }}-grafana
-              port:
-                number: 80
-          path: {{ $path }}
-          pathType: Prefix
-  {{- end }}
-  {{- else }}
-    - http:
-        paths:
-        - backend:
-            service:
-              name: {{ $release }}-grafana
-              port:
-                number: 80
-          path: {{ $path }}
-          pathType: Prefix
-  {{- end -}}
+  - {{- if .Values.ingress.host }}
+    host: {{ .Values.ingress.host | quote }}
+    {{- end }}
+    http:
+      paths:
+      - backend:
+          service:
+            name: {{ .Release.Name }}-grafana
+            port:
+              number: 80
+        path: {{ .Values.grafana.ingress.path }}
+        pathType: Prefix
 {{- end}}
