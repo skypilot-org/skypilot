@@ -48,6 +48,7 @@ import {
 } from 'lucide-react';
 import { Layout } from '@/components/elements/layout';
 import { useMobile } from '@/hooks/useMobile';
+import { useSidebar } from '@/components/elements/sidebar';
 import { Card } from '@/components/ui/card';
 import { apiClient } from '@/data/connectors/client';
 import {
@@ -148,6 +149,7 @@ const SuccessDisplay = ({ message, onDismiss }) => {
 
 export function Users() {
   const router = useRouter();
+  const { userEmail } = useSidebar();
   const [loading, setLoading] = useState(false);
   const refreshDataRef = useRef(null);
   const isMobile = useMobile();
@@ -592,36 +594,6 @@ export function Users() {
               </button>
             )}
 
-          {/* Deduplicate Users Toggle - only show on users tab */}
-          {activeMainTab === 'users' && (
-            <label className="flex items-center cursor-pointer mr-2">
-              <input
-                type="checkbox"
-                checked={deduplicateUsers}
-                onChange={(e) => {
-                  const newValue = e.target.checked;
-                  setDeduplicateUsers(newValue);
-                  updateDeduplicateURL(newValue);
-                }}
-                className="sr-only"
-              />
-              <div
-                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                  deduplicateUsers ? 'bg-sky-600' : 'bg-gray-300'
-                }`}
-              >
-                <span
-                  className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
-                    deduplicateUsers ? 'translate-x-5' : 'translate-x-1'
-                  }`}
-                />
-              </div>
-              <span className="ml-2 text-sm text-gray-700">
-                Deduplicate users
-              </span>
-            </label>
-          )}
-
           <button
             onClick={handleRefresh}
             disabled={loading}
@@ -687,6 +659,36 @@ export function Users() {
             </button>
           )}
         </div>
+
+        {/* Deduplicate Users Toggle - only show on users tab when NOT using SSO/OAuth2 */}
+        {activeMainTab === 'users' && !userEmail && (
+          <label className="flex items-center cursor-pointer ml-4">
+            <input
+              type="checkbox"
+              checked={deduplicateUsers}
+              onChange={(e) => {
+                const newValue = e.target.checked;
+                setDeduplicateUsers(newValue);
+                updateDeduplicateURL(newValue);
+              }}
+              className="sr-only"
+            />
+            <div
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                deduplicateUsers ? 'bg-sky-600' : 'bg-gray-300'
+              }`}
+            >
+              <span
+                className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
+                  deduplicateUsers ? 'translate-x-5' : 'translate-x-1'
+                }`}
+              />
+            </div>
+            <span className="ml-2 text-sm text-gray-700">
+              Deduplicate users
+            </span>
+          </label>
+        )}
 
         {/* Create Service Account Button for Service Accounts Tab */}
         {activeMainTab === 'service-accounts' && (
