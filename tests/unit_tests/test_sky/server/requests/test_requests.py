@@ -2,6 +2,7 @@
 import asyncio
 import pathlib
 import time
+from typing import List, Optional
 import unittest.mock as mock
 
 import filelock
@@ -1475,7 +1476,9 @@ def test_update_request_row_fields_maintains_order():
 async def test_cancel_get_request_async():
     import gc
 
-    async def mock_get_request_async_no_lock(id: str):
+    async def mock_get_request_async_no_lock(id: str,
+                                             fields: Optional[List[str]] = None
+                                            ):
         await asyncio.sleep(1)
         return None
 
@@ -1497,8 +1500,9 @@ async def test_cancel_get_request_async():
             # for more details.
             gc.collect()
         try:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        except Exception:
+            await asyncio.gather(*tasks)
+        except asyncio.CancelledError:
+            # Expected when tasks are cancelled
             pass
         # Since get_request_async is shielded, task.cancel() will neither cancel or
         # wait the get_request_async coroutine. So we have to wait for a enough time
