@@ -1637,7 +1637,7 @@ def test_managed_jobs_logs_gc(generic_cloud: str):
             lambda: wait_logs_gced(controller=False),
             lambda: wait_logs_gced(controller=True),
             # jobs logs should still work, but show cleaned hint
-            f's=$(sky jobs logs) && echo "$s" && echo "$s" | grep "{log_cleaned_hint} && echo "$s" | grep "SUCCEEDED"',
+            f's=$(sky jobs logs) && echo "$s" && echo "$s" | grep "{log_cleaned_hint}" && echo "$s" | grep "SUCCEEDED"',
             f's=$(sky jobs logs --controller) && echo "$s" && echo "$s" | grep "{log_cleaned_hint}" && echo "$s" | grep "SUCCEEDED"',
             # sync down should still work
             'sky jobs logs --sync-down'
