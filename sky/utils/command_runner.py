@@ -964,13 +964,15 @@ class KubernetesCommandRunner(CommandRunner):
         kubectl_args = [
             '--pod-running-timeout', f'{connect_timeout}s', '-n', self.namespace
         ]
+        # The same logic to either set `--context` to the k8s context where
+        # the sky cluster is hosted, or `--kubeconfig` to /dev/null for
+        # in-cluster k8s is used below in the `run()` method.
         if self.context:
             kubectl_args += ['--context', self.context]
-
         # If context is none, it means the cluster is hosted on in-cluster k8s.
-        # In this case, we need to set KUBECONFIG to /dev/null to avoid using
-        # kubeconfig file.
-        if self.context is None:
+        # In this case, we need to set KUBECONFIG to /dev/null to avoid looking
+        # for the cluster in whatever active context is set in the kubeconfig.
+        else:
             kubectl_args += ['--kubeconfig', '/dev/null']
         local_port, remote_port = port_forward[0]
         local_port_str = f'{local_port}' if local_port is not None else ''
