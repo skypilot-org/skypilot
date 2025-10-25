@@ -6,6 +6,7 @@ import pathlib
 import resource
 import shutil
 import sys
+import threading
 import time
 import traceback
 import typing
@@ -22,6 +23,7 @@ from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.data import data_utils
 from sky.jobs import constants as jobs_constants
+from sky.jobs import log_gc
 from sky.jobs import recovery_strategy
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
@@ -1068,10 +1070,8 @@ class Controller:
             env_file_path: Optional path to environment file for the job.
         """
         # Create log file path for job output redirection
-        log_dir = os.path.expanduser(jobs_constants.JOBS_CONTROLLER_LOGS_DIR)
-        os.makedirs(log_dir, exist_ok=True)
-        log_file = os.path.join(log_dir, f'{job_id}.log')
-
+        log_file = managed_job_utils.controller_log_file_for_job(
+            job_id, create_if_not_exists=True)
         logger.info(f'Starting job {job_id} with dag_yaml={dag_yaml}, '
                     f'env_file_path={env_file_path}, and log_file={log_file}')
 
@@ -1199,9 +1199,13 @@ async def main(controller_uuid: str):
     # Will loop forever, do it in the background
     cancel_job_task = asyncio.create_task(controller.cancel_job())
     monitor_loop_task = asyncio.create_task(controller.monitor_loop())
-
+    # Run the garbage collector in a dedicated thread to avoid affecting
+    # the main event loop.
+    gc_thread = threading.Thread(target=log_gc.elect_for_log_gc, daemon=True)
+    gc_thread.start()
     try:
         await asyncio.gather(cancel_job_task, monitor_loop_task)
+        gc_thread.join()
     except Exception as e:  # pylint: disable=broad-except
         logger.error(f'Controller server crashed: {e}')
         sys.exit(1)

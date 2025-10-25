@@ -1190,7 +1190,13 @@ def get_config_schema():
                         'consolidation_mode': {
                             'type': 'boolean',
                             'default': False,
-                        }
+                        },
+                        'controller_logs_gc_retention_hours': {
+                            'type': 'integer',
+                        },
+                        'task_logs_gc_retention_hours': {
+                            'type': 'integer',
+                        },
                     },
                 },
                 'bucket': {

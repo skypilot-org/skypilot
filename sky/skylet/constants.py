@@ -422,6 +422,8 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     #   but the configs won't be applied)
     ('jobs', 'controller', 'consolidation_mode'),
     ('serve', 'controller', 'consolidation_mode'),
+    ('jobs', 'controller', 'controller_logs_gc_retention_hours'),
+    ('jobs', 'controller', 'task_logs_gc_retention_hours'),
 ]
 
 # Constants for Azure blob storage
