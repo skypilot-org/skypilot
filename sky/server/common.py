@@ -539,6 +539,9 @@ def _start_api_server(deploy: bool = False,
                                'is not a local URL')
 
         # Check available memory before starting the server.
+        # TODO(tian,aylei): this job_utils.is_consolidation_mode will be empty
+        # if pg is used, so the warning might not correctly show up. This is
+        # ok for now since realistically, pg is only used with helm deployment.
         avail_mem_size_gb: float = common_utils.get_mem_size_gb()
         # pylint: disable=import-outside-toplevel
         import sky.jobs.utils as job_utils
@@ -560,8 +563,6 @@ def _start_api_server(deploy: bool = False,
             args += [f'--host={host}']
         if metrics_port is not None:
             args += [f'--metrics-port={metrics_port}']
-        # Use this argument to disable the internal signal file check.
-        args += ['--start-with-python']
 
         if foreground:
             # Replaces the current process with the API server
