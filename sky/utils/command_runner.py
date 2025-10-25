@@ -966,6 +966,12 @@ class KubernetesCommandRunner(CommandRunner):
         ]
         if self.context:
             kubectl_args += ['--context', self.context]
+
+        # If context is none, it means the cluster is hosted on in-cluster k8s.
+        # In this case, we need to set KUBECONFIG to /dev/null to avoid using
+        # kubeconfig file.
+        if self.context is None:
+            kubectl_args += ['--kubeconfig', '/dev/null']
         local_port, remote_port = port_forward[0]
         local_port_str = f'{local_port}' if local_port is not None else ''
 
