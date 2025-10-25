@@ -328,7 +328,8 @@ def encode_requests(requests: List[Request]) -> List[payloads.RequestPayload]:
             entrypoint=request.entrypoint.__name__
             if request.entrypoint is not None else '',
             request_body=request.request_body.model_dump_json()
-            if request.request_body is not None else orjson.dumps(None).decode('utf-8'),
+            if request.request_body is not None else
+            orjson.dumps(None).decode('utf-8'),
             status=request.status.value,
             return_value=orjson.dumps(None).decode('utf-8'),
             error=orjson.dumps(None).decode('utf-8'),
