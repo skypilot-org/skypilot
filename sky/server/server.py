@@ -6,6 +6,7 @@ import base64
 from concurrent.futures import ThreadPoolExecutor
 import contextlib
 import datetime
+from enum import IntEnum
 import hashlib
 import json
 import multiprocessing
@@ -15,6 +16,7 @@ import posixpath
 import re
 import resource
 import shutil
+import struct
 import sys
 import threading
 import traceback
@@ -1780,12 +1782,24 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
     )
 
 
+class KubernetesSSHMessageType(IntEnum):
+    REGULAR_DATA = 0
+    PINGPONG = 1
+    LATENCY_MEASUREMENT = 2
+
+
 @app.websocket('/kubernetes-pod-ssh-proxy')
-async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
-                                   cluster_name: str) -> None:
+async def kubernetes_pod_ssh_proxy(
+        websocket: fastapi.WebSocket,
+        cluster_name: str,
+        client_version: Optional[int] = None) -> None:
     """Proxies SSH to the Kubernetes pod with websocket."""
     await websocket.accept()
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
+
+    timestamps_supported = client_version is not None and client_version > 21
+    logger.info(f'Websocket timestamps supported: {timestamps_supported}, \
+        client_version = {client_version}')
 
     # Run core.status in another thread to avoid blocking the event loop.
     with ThreadPoolExecutor(max_workers=1) as thread_pool_executor:
@@ -1841,6 +1855,30 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
         async def websocket_to_ssh():
             try:
                 async for message in websocket.iter_bytes():
+                    if timestamps_supported:
+                        message_type = struct.unpack('!B', message[:1])[0]
+                        if (message_type ==
+                                KubernetesSSHMessageType.REGULAR_DATA):
+                            # Regular data - strip type byte and forward to SSH
+                            message = message[1:]
+                        elif message_type == KubernetesSSHMessageType.PINGPONG:
+                            # PING message - respond with PONG (type 1)
+                            pong_message = struct.pack(
+                                '!B', KubernetesSSHMessageType.PINGPONG.value)
+                            await websocket.send_bytes(pong_message)
+                            continue
+                        elif (message_type ==
+                              KubernetesSSHMessageType.LATENCY_MEASUREMENT):
+                            # Latency measurement from client
+                            avg_latency_ms = struct.unpack('!Q',
+                                                           message[1:9])[0]
+                            latency_seconds = avg_latency_ms / 1000
+                            metrics_utils.SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS.labels(pid=os.getpid()).observe(latency_seconds)  # pylint: disable=line-too-long
+                            continue
+                        else:
+                            # Unknown message type.
+                            raise ValueError(
+                                f'Unknown message type: {message_type}')
                     writer.write(message)
                     try:
                         await writer.drain()
@@ -1871,6 +1909,11 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
                             nonlocal ssh_failed
                             ssh_failed = True
                         break
+                    if timestamps_supported:
+                        # Prepend message type byte (0 = regular data)
+                        message_type_bytes = struct.pack(
+                            '!B', KubernetesSSHMessageType.REGULAR_DATA.value)
+                        data = message_type_bytes + data
                     await websocket.send_bytes(data)
             except Exception:  # pylint: disable=broad-except
                 pass
