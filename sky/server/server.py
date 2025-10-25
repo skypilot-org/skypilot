@@ -25,6 +25,7 @@ import zipfile
 import aiofiles
 import anyio
 import fastapi
+from fastapi import responses as fastapi_responses
 from fastapi.middleware import cors
 import starlette.middleware.base
 import uvloop
@@ -1498,7 +1499,7 @@ async def local_down(request: fastapi.Request,
 
 
 # === API server related APIs ===
-@app.get('/api/get')
+@app.get('/api/get', response_class=fastapi_responses.ORJSONResponse)
 async def api_get(request_id: str) -> payloads.RequestPayload:
     """Gets a request with a given request ID prefix."""
     while True:

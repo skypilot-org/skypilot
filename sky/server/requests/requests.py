@@ -5,7 +5,6 @@ import contextlib
 import dataclasses
 import enum
 import functools
-import json
 import os
 import pathlib
 import shutil
@@ -21,6 +20,7 @@ import uuid
 import anyio
 import colorama
 import filelock
+import orjson
 
 from sky import exceptions
 from sky import global_user_state
@@ -213,8 +213,8 @@ class Request:
             entrypoint=self.entrypoint.__name__,
             request_body=self.request_body.model_dump_json(),
             status=self.status.value,
-            return_value=json.dumps(None),
-            error=json.dumps(None),
+            return_value=orjson.dumps(None).decode('utf-8'),
+            error=orjson.dumps(None).decode('utf-8'),
             pid=None,
             created_at=self.created_at,
             schedule_type=self.schedule_type.value,
@@ -237,8 +237,8 @@ class Request:
                 entrypoint=encoders.pickle_and_encode(self.entrypoint),
                 request_body=encoders.pickle_and_encode(self.request_body),
                 status=self.status.value,
-                return_value=json.dumps(self.return_value),
-                error=json.dumps(self.error),
+                return_value=orjson.dumps(self.return_value).decode('utf-8'),
+                error=orjson.dumps(self.error).decode('utf-8'),
                 pid=self.pid,
                 created_at=self.created_at,
                 schedule_type=self.schedule_type.value,
@@ -270,8 +270,8 @@ class Request:
                 entrypoint=decoders.decode_and_unpickle(payload.entrypoint),
                 request_body=decoders.decode_and_unpickle(payload.request_body),
                 status=RequestStatus(payload.status),
-                return_value=json.loads(payload.return_value),
-                error=json.loads(payload.error),
+                return_value=orjson.loads(payload.return_value),
+                error=orjson.loads(payload.error),
                 pid=payload.pid,
                 created_at=payload.created_at,
                 schedule_type=ScheduleType(payload.schedule_type),
@@ -328,10 +328,11 @@ def encode_requests(requests: List[Request]) -> List[payloads.RequestPayload]:
             entrypoint=request.entrypoint.__name__
             if request.entrypoint is not None else '',
             request_body=request.request_body.model_dump_json()
-            if request.request_body is not None else json.dumps(None),
+            if request.request_body is not None else
+            orjson.dumps(None).decode('utf-8'),
             status=request.status.value,
-            return_value=json.dumps(None),
-            error=json.dumps(None),
+            return_value=orjson.dumps(None).decode('utf-8'),
+            error=orjson.dumps(None).decode('utf-8'),
             pid=None,
             created_at=request.created_at,
             schedule_type=request.schedule_type.value,
@@ -372,9 +373,9 @@ def _update_request_row_fields(
     if 'user_id' not in fields:
         content['user_id'] = ''
     if 'return_value' not in fields:
-        content['return_value'] = json.dumps(None)
+        content['return_value'] = orjson.dumps(None).decode('utf-8')
     if 'error' not in fields:
-        content['error'] = json.dumps(None)
+        content['error'] = orjson.dumps(None).decode('utf-8')
     if 'schedule_type' not in fields:
         content['schedule_type'] = ScheduleType.SHORT.value
     # Optional fields in RequestPayload
