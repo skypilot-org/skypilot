@@ -1624,11 +1624,13 @@ def query_instances(
     is_ssh = context.startswith('ssh-') if context else False
     identity = 'SSH Node Pool' if is_ssh else 'Kubernetes cluster'
 
-    # Get all the pods with the label skypilot-cluster: <cluster_name>
+    # Get all the pods with the label skypilot-cluster-name: <cluster_name>
     try:
+        label_selector = (f'{k8s_constants.TAG_SKYPILOT_CLUSTER_NAME}='
+                          f'{cluster_name_on_cloud}')
         pods = kubernetes.core_api(context).list_namespaced_pod(
             namespace,
-            label_selector=f'skypilot-cluster={cluster_name_on_cloud}',
+            label_selector=label_selector,
             _request_timeout=kubernetes.API_TIMEOUT).items
     except kubernetes.max_retry_error():
         with ux_utils.print_exception_no_traceback():

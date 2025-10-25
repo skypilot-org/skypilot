@@ -2053,7 +2053,7 @@ SkyPilot provides a minimal Prometheus configuration by default. If you want to 
     kube-state-metrics:
       enabled: true
       metricLabelsAllowlist:
-        - pods=[skypilot-cluster]
+        - pods=[skypilot-cluster-name]
     prometheus-node-exporter:
       enabled: false
     prometheus-pushgateway:
