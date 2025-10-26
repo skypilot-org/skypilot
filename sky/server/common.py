@@ -510,8 +510,7 @@ def get_stream_request_id(
     We do this because `/api/stream` may choose the latest request id, and
     we need to keep track of that information. Request id in this case can
     be None."""
-    if response.status_code not in [200, 400, 404]:
-        handle_request_error(response)
+    handle_request_error(response)
     request_id = response.headers.get(server_constants.STREAM_REQUEST_HEADER)
     if request_id is not None:
         return RequestId[T](request_id)
