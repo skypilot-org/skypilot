@@ -219,11 +219,11 @@ def encode_volume_list(
 
 
 @register_encoder('job_status')
-def encode_job_status(return_value: Dict[int, Any]) -> Dict[int, str]:
+def encode_job_status(return_value: Dict[int, Any]) -> Dict[str, str]:
     for job_id in return_value.keys():
         if return_value[job_id] is not None:
             return_value[job_id] = return_value[job_id].value
-    return return_value
+    return {str(k): v for k, v in return_value.items()}
 
 
 @register_encoder('kubernetes_node_info')
