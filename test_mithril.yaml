@@ -1,0 +1,23 @@
+name: mithril-test
+
+resources:
+  cloud: mithril
+  accelerators: A100:1
+
+setup: |
+  echo "Setting up environment..."
+
+run: |
+  echo "========================================="
+  echo "Testing Mithril Cloud Integration"
+  echo "========================================="
+  echo ""
+  echo "Hostname: $(hostname)"
+  echo "Date: $(date)"
+  echo ""
+  echo "GPU Information:"
+  nvidia-smi
+  echo ""
+  echo "========================================="
+  echo "Test completed successfully!"
+  echo "========================================="
