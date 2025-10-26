@@ -158,7 +158,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 logger.warning(f'Failed to read public key from {public_key_path}: {e}')
         
         instance_id, ssh_command = utils.launch_instance(
-            instance_type, cluster_name_on_cloud, public_key)
+            instance_type, cluster_name_on_cloud, region, public_key)
         logger.info(f'Launched instance {instance_id} with SSH command: '
                     f'{ssh_command}')
         created_instance_ids = [instance_id]

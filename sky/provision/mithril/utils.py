@@ -316,12 +316,14 @@ class MithrilClient:
 
     def launch_instance(self, instance_type: str,
                         name: str,
+                        region: Optional[str] = None,
                         public_key: Optional[str] = None) -> Tuple[str, str]:
         """Launch a new instance by creating a spot bid.
         
         Args:
             instance_type: The instance type to launch
             name: The name for the instance
+            region: The region to launch in (defaults to us-central1-b)
             public_key: The SSH public key to upload/use for SSH access
         """
         # Get instance type FID from name
@@ -333,10 +335,14 @@ class MithrilClient:
         # Add timestamp to name to ensure uniqueness
         unique_name = f'{name}-{int(time.time())}'
         
+        # Use provided region or default to us-central3-a (where instances were successfully created)
+        if region is None or region == 'default':
+            region = 'us-central3-a'
+        
         # Create spot bid payload according to Mithril API
         bid_payload = {
             'project': self.project,
-            'region': 'us-central3-a',  # Default region, can be made configurable
+            'region': region,
             'instance_type': instance_type_fid,
             'limit_price': '$8.00',  # Default bid price limit
             'instance_quantity': 1,
@@ -585,9 +591,9 @@ def get_client() -> MithrilClient:
 
 
 # Backward-compatible wrapper functions
-def launch_instance(instance_type: str, name: str, public_key: Optional[str] = None) -> Tuple[str, str]:
+def launch_instance(instance_type: str, name: str, region: Optional[str] = None, public_key: Optional[str] = None) -> Tuple[str, str]:
     """Launch a new instance with the specified configuration."""
-    return get_client().launch_instance(instance_type, name, public_key)
+    return get_client().launch_instance(instance_type, name, region, public_key)
 
 
 def list_instances(

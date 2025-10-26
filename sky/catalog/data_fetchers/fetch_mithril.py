@@ -98,6 +98,17 @@ def create_catalog(output_path: str) -> None:
     
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
+    # Track unique instance type names to handle duplicates
+    # Mithril API can return multiple configs with the same name
+    seen_names = {}
+    
+    # Define available regions per GPU type based on Mithril's availability
+    # Based on past successful instances, us-central3-a is the primary working region
+    gpu_to_regions = {
+        'H100': ['us-central3-a'],
+        'A100': ['us-central3-a'],
+    }
+    
     with open(output_path, mode='w', encoding='utf-8') as f:
         writer = csv.writer(f, delimiter=',', quotechar='"')
         writer.writerow([
@@ -106,15 +117,28 @@ def create_catalog(output_path: str) -> None:
         ])
         
         for instance in instance_types:
-            instance_type = instance.get('name')
+            base_instance_type = instance.get('name')
             gpu_name = instance.get('gpu_type')
             gpu_count = instance.get('num_gpus', 0)
             vcpus = instance.get('num_cpus', 0)
             memory_gb = instance.get('ram_gb', 0)
+            
+            # Handle duplicate instance type names by making them unique
+            # Append CPU count if there's a conflict
+            if base_instance_type in seen_names:
+                instance_type = f"{base_instance_type}_{vcpus}cpu"
+                print(f'Duplicate instance type name found: {base_instance_type}, '
+                      f'renaming to {instance_type}')
+            else:
+                instance_type = base_instance_type
+                seen_names[base_instance_type] = True
+            
             # Mithril uses spot bidding, use a default price per GPU hour
             # Default to $2.50/hr for now (typical A100 spot price)
             price = 2.50 if 'a100' in instance_type.lower() else 3.50
-            region = 'default'  # Mithril doesn't have region-specific pricing
+            
+            # Get available regions for this GPU type
+            regions = gpu_to_regions.get(gpu_name, ['us-central1-b'])
             
             # Create GPU info if GPUs are present
             gpu_info = ''
@@ -124,17 +148,19 @@ def create_catalog(output_path: str) -> None:
             # Mithril doesn't support spot instances currently
             spot_price = ''
             
-            writer.writerow([
-                instance_type,
-                gpu_name if gpu_name else '',
-                gpu_count if gpu_count else '',
-                vcpus,
-                memory_gb,
-                price,
-                spot_price,
-                region,
-                gpu_info
-            ])
+            # Write one row per region
+            for region in regions:
+                writer.writerow([
+                    instance_type,
+                    gpu_name if gpu_name else '',
+                    gpu_count if gpu_count else '',
+                    vcpus,
+                    memory_gb,
+                    price,
+                    spot_price,
+                    region,
+                    gpu_info
+                ])
     
     print(f'Successfully created catalog at {output_path}')
 

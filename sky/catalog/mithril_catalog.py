@@ -133,5 +133,7 @@ def get_instance_type_from_catalog() -> dict:
 
 
 def regions() -> List[cloud.Region]:
-    return [cloud.Region('default')]
+    # Return regions from the catalog
+    unique_regions = _df['Region'].unique()
+    return [cloud.Region(region) for region in unique_regions if region]
 
