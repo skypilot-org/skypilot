@@ -6,5 +6,5 @@ AI Performance
 
    AWS EFA <aws_efa>
    GCP/GKE GPUDirect <gcp_gpu_direct_tcpx>
-   Coreweave with Infiniband <coreweave_infiniband>
+   Coreweave with InfiniBand <coreweave_infiniband>
    Nebius with InfiniBand <nebius_infiniband>
