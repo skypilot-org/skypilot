@@ -4253,6 +4253,10 @@ def volumes():
     pass
 
 
+# Add 'volume' as an alias for 'volumes'
+cli.add_command(volumes, name='volume')
+
+
 @volumes.command('apply', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @click.argument('entrypoint',
