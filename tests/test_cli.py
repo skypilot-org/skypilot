@@ -675,8 +675,7 @@ def test_batch_continues_on_errors_helper(monkeypatch, capsys, mode):
             "status": None
         } for n in names])
 
-    with pytest.raises(click.ClickException):
-        command._down_or_stop_clusters(**kwargs)
+    command._down_or_stop_clusters(**kwargs)
 
     captured = capsys.readouterr()
 
@@ -688,23 +687,18 @@ def test_batch_continues_on_errors_helper(monkeypatch, capsys, mode):
     assert "✗ Failed: sky-nebius-fail" in out
     assert "Failed:" in out
 
-    if mode in ("down", "stop"):
-        if mode == "down":
-            assert "Terminating cluster sky-ok-1...done" in out
-            assert "Terminating cluster sky-ok-2...done" in out
-        else:
-            assert "Stopping cluster sky-ok-1...done" in out
-            assert "Stopping cluster sky-ok-2...done" in out
-
-        assert "✓ Succeeded:" in out
-        summary_line = next(line for line in out.splitlines()
-                            if line.strip().startswith("✓ Succeeded:"))
-        succ_list = [
-            n.strip() for n in summary_line.split(":", 1)[1].split(",")
-        ]
-        assert set(succ_list) == {"sky-ok-1", "sky-ok-2"}
-
-    else:
-        assert "✓ Succeeded:" not in out
+    if mode == "down":
+        assert "Terminating cluster sky-ok-1...done" in out
+        assert "Terminating cluster sky-ok-2...done" in out
+    elif mode == "stop":
+        assert "Stopping cluster sky-ok-1...done" in out
+        assert "Stopping cluster sky-ok-2...done" in out
+    else:  # autostop
         assert "Scheduling autostop on cluster 'sky-ok-1'...done" in out
         assert "Scheduling autostop on cluster 'sky-ok-2'...done" in out
+
+    assert "✓ Succeeded:" in out
+    summary_line = next(line for line in out.splitlines()
+                        if line.strip().startswith("✓ Succeeded:"))
+    succ_list = [n.strip() for n in summary_line.split(":", 1)[1].split(",")]
+    assert set(succ_list) == {"sky-ok-1", "sky-ok-2"}
