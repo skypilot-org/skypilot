@@ -242,18 +242,20 @@ def format_resource(resource: 'resources_lib.Resources',
         return resources_str_simple, resources_str_full
 
 
-def get_readable_resources_repr(handle: 'backends.CloudVmRayResourceHandle',
-                                simplify: bool = False) -> str:
+def get_readable_resources_repr(
+        handle: 'backends.CloudVmRayResourceHandle',
+        simplified_only: bool = False) -> Tuple[str, Optional[str]]:
     resource_str_simple, resource_str_full = format_resource(
-        handle.launched_resources, simplify)
+        handle.launched_resources, simplified_only)
+    if not simplified_only:
+        assert resource_str_full is not None
     if (handle.launched_nodes is not None and
             handle.launched_resources is not None):
-        if simplify:
-            return f'{handle.launched_nodes}x{resource_str_simple}'
-        else:
-            assert resource_str_full is not None
-            return f'{handle.launched_nodes}x{resource_str_full}'
-    return _DEFAULT_MESSAGE_HANDLE_INITIALIZING
+        return (f'{handle.launched_nodes}x{resource_str_simple}',
+                None if simplified_only else
+                f'{handle.launched_nodes}x{resource_str_full}')
+    return (_DEFAULT_MESSAGE_HANDLE_INITIALIZING,
+            _DEFAULT_MESSAGE_HANDLE_INITIALIZING)
 
 
 def make_ray_custom_resources_str(
