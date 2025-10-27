@@ -1545,3 +1545,118 @@ async def test_get_latest_request_id_async(isolated_database):
     await requests.create_if_not_exists_async(request)
     request_id = await requests.get_latest_request_id_async()
     assert request_id == 'test-request-id-2'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('test_async', [True, False])
+async def test_get_requests_with_prefix(isolated_database, test_async):
+    """Test get_requests_with_prefix."""
+    current_time = time.time()
+
+    # Create multiple matching requests
+    matching_requests = []
+    for i in range(3):
+        request = requests.Request(request_id=f'batch-request-{i:03d}',
+                                   name=f'test-request-{i}',
+                                   entrypoint=dummy,
+                                   request_body=payloads.RequestBody(),
+                                   status=RequestStatus.PENDING if i %
+                                   2 == 0 else RequestStatus.RUNNING,
+                                   created_at=current_time + i,
+                                   user_id=f'test-user-{i}',
+                                   cluster_name=f'cluster-{i}')
+        matching_requests.append(request)
+        await requests.create_if_not_exists_async(request)
+
+    # Create another request
+    non_matching_request = requests.Request(request_id='other-request-1',
+                                            name='other-request',
+                                            entrypoint=dummy,
+                                            request_body=payloads.RequestBody(),
+                                            status=RequestStatus.SUCCEEDED,
+                                            created_at=current_time + 100,
+                                            user_id='other-user')
+    await requests.create_if_not_exists_async(non_matching_request)
+
+    # Test with non-matching prefix
+    if test_async:
+        result = await requests.get_requests_async_with_prefix(
+            'nonexistent-prefix')
+    else:
+        result = requests.get_requests_with_prefix('nonexistent-prefix')
+    assert result is None
+
+    # Test with prefix that matches exactly one request
+    if test_async:
+        result = await requests.get_requests_async_with_prefix(
+            'batch-request-000')
+    else:
+        result = requests.get_requests_with_prefix('batch-request-000')
+    assert result is not None
+    assert len(result) == 1
+    assert result[0].request_id == 'batch-request-000'
+    assert result[0].name == 'test-request-0'
+    assert result[0].user_id == 'test-user-0'
+    assert result[0].cluster_name == 'cluster-0'
+    assert result[0].status == RequestStatus.PENDING
+
+    # Test with prefix that matches multiple requests
+    if test_async:
+        result = await requests.get_requests_async_with_prefix('batch-request')
+    else:
+        result = requests.get_requests_with_prefix('batch-request')
+    assert result is not None
+    assert len(result) == 3
+
+    # Verify all returned requests match the prefix
+    returned_ids = [req.request_id for req in result]
+    expected_ids = [
+        'batch-request-000', 'batch-request-001', 'batch-request-002'
+    ]
+    assert set(returned_ids) == set(expected_ids)
+
+    # Verify request details
+    for req in result:
+        assert req.request_id.startswith('batch-request')
+        assert req.name.startswith('test-request')
+        assert req.user_id.startswith('test-user')
+
+    # Test with empty prefix (should match all requests)
+    if test_async:
+        result = await requests.get_requests_async_with_prefix('')
+    else:
+        result = requests.get_requests_with_prefix('')
+    assert result is not None
+    assert len(result) == 4
+    returned_ids = [req.request_id for req in result]
+    expected_ids = [
+        'batch-request-000', 'batch-request-001', 'batch-request-002',
+        'other-request-1'
+    ]
+    assert set(returned_ids) == set(expected_ids)
+
+    # Test with specific fields - only request_id and name
+    if test_async:
+        result = await requests.get_requests_async_with_prefix(
+            'batch-request', fields=['request_id', 'name'])
+    else:
+        result = requests.get_requests_with_prefix(
+            'batch-request', fields=['request_id', 'name'])
+    assert result is not None
+    assert len(result) == 3
+
+    # Verify that only the requested fields are meaningful
+    for req in result:
+        assert req.request_id in [
+            'batch-request-000', 'batch-request-001', 'batch-request-002'
+        ]
+        if req.request_id == 'batch-request-000':
+            assert req.name == 'test-request-0'
+        elif req.request_id == 'batch-request-001':
+            assert req.name == 'test-request-1'
+        else:
+            assert req.name == 'test-request-2'
+        assert req.pid is None
+        assert req.finished_at is None
+        assert req.should_retry is False
+        assert req.status_msg is None

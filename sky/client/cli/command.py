@@ -6354,7 +6354,7 @@ INT_OR_NONE = IntOrNone()
 
 @api.command('status', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
-@click.argument('request_ids',
+@click.argument('request_id_prefixes',
                 required=False,
                 type=str,
                 nargs=-1,
@@ -6376,15 +6376,16 @@ INT_OR_NONE = IntOrNone()
 @flags.verbose_option('Show more details.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def api_status(request_ids: Optional[List[str]], all_status: bool,
+def api_status(request_id_prefixes: Optional[List[str]], all_status: bool,
                verbose: bool, limit: Optional[int]):
     """List requests on SkyPilot API server."""
-    if not request_ids:
-        request_ids = None
+    if not request_id_prefixes:
+        request_id_prefixes = None
     fields = _DEFAULT_REQUEST_FIELDS_TO_SHOW
     if verbose:
         fields = _VERBOSE_REQUEST_FIELDS_TO_SHOW
-    request_list = sdk.api_status(request_ids, all_status, limit, fields)
+    request_list = sdk.api_status(request_id_prefixes, all_status, limit,
+                                  fields)
     columns = ['ID', 'User', 'Name']
     if verbose:
         columns.append('Cluster')
