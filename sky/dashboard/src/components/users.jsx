@@ -64,6 +64,47 @@ import { statusGroups } from '@/components/jobs';
 
 const ACTIVE_JOB_STATUSES = new Set(statusGroups.active);
 
+// Helper function to get GPU count with validation
+const getGPUCount = (accelerators, source) => {
+  if (!accelerators) return 0;
+
+  let parsed = accelerators;
+
+  // Handle string format (from clusters): "{'V100': 4}"
+  if (typeof accelerators === 'string') {
+    try {
+      const jsonStr = accelerators
+        .replace(/'/g, '"')
+        .replace(/None/g, 'null');
+      parsed = JSON.parse(jsonStr);
+    } catch (e) {
+      console.error('Failed to parse accelerators string:', accelerators, e);
+      return 0;
+    }
+  }
+
+  // Validate and extract GPU count
+  if (typeof parsed === 'object' && parsed !== null) {
+    const entries = Object.entries(parsed);
+
+    if (entries.length === 0) {
+      return 0;
+    }
+
+    if (entries.length > 1) {
+      console.warn(
+        `${source} has ${entries.length} accelerator entries:`,
+        parsed
+      );
+    }
+
+    // Return the first (and ideally only) GPU count
+    return Number(entries[0][1]) || 0;
+  }
+
+  return 0;
+};
+
 // Helper functions for username parsing
 const parseUsername = (username, userId) => {
   if (username && username.includes('@')) {
@@ -1185,6 +1226,7 @@ function UsersTable({
           fullEmailID: getFullEmailID(user.username, user.userId),
           clusterCount: -1, // Use -1 as loading indicator
           jobCount: -1, // Use -1 as loading indicator
+          gpuCount: -1, // Use -1 as loading indicator
         }));
 
         setUsersWithCounts(initialProcessedUsers);
@@ -1201,7 +1243,7 @@ function UsersTable({
             {
               allUsers: true,
               skipFinished: true,
-              fields: ['user_hash', 'status'],
+              fields: ['user_hash', 'status', 'accelerators', 'job_name', 'job_id'],
             },
           ]),
         ]);
@@ -1210,19 +1252,40 @@ function UsersTable({
 
         // Update users with actual counts
         const finalProcessedUsers = (usersData || []).map((user) => {
-          const userClusters = (clustersData || []).filter(
-            (c) => c.user_hash === user.userId
-          );
-          const activeJobCount = (jobsData || []).filter(
-            (j) =>
-              j.user_hash === user.userId && ACTIVE_JOB_STATUSES.has(j.status)
-          ).length;
+          let clusterCount = 0;
+          let clusterGPUCount = 0;
+          let jobCount = 0;
+          let jobGPUCount = 0;
+
+          // Count clusters and sum GPUs in one pass
+          for (const cluster of (clustersData || [])) {
+            if (cluster.user_hash === user.userId) {
+              clusterCount++;
+              clusterGPUCount += getGPUCount(
+                cluster.gpus,
+                `Cluster ${cluster.cluster}`
+              );
+            }
+          }
+
+          // Count active jobs and sum GPUs in one pass
+          for (const job of (jobsData || [])) {
+            if (job.user_hash === user.userId && ACTIVE_JOB_STATUSES.has(job.status)) {
+              jobCount++;
+              jobGPUCount += getGPUCount(
+                job.accelerators,
+                `Job ${job.job_id}`
+              );
+            }
+          }
+
           return {
             ...user,
             usernameDisplay: parseUsername(user.username, user.userId),
             fullEmailID: getFullEmailID(user.username, user.userId),
-            clusterCount: userClusters.length,
-            jobCount: activeJobCount,
+            clusterCount,
+            jobCount,
+            gpuCount: clusterGPUCount + jobGPUCount,
           };
         });
 
@@ -1293,6 +1356,7 @@ function UsersTable({
             // Track counts that will be summed
             clusterCount: user.clusterCount,
             jobCount: user.jobCount,
+            gpuCount: user.gpuCount,
             // Track the oldest created_at
             created_at: user.created_at,
           };
@@ -1319,6 +1383,15 @@ function UsersTable({
               deduped[name].jobCount = user.jobCount;
             } else {
               deduped[name].jobCount += user.jobCount;
+            }
+          }
+
+          // Sum GPU counts (same logic)
+          if (user.gpuCount !== -1) {
+            if (deduped[name].gpuCount === -1) {
+              deduped[name].gpuCount = user.gpuCount;
+            } else {
+              deduped[name].gpuCount += user.gpuCount;
             }
           }
 
@@ -1473,6 +1546,12 @@ function UsersTable({
               >
                 Jobs{getSortDirection('jobCount')}
               </TableHead>
+              <TableHead
+                onClick={() => requestSort('gpuCount')}
+                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+              >
+                GPUs{getSortDirection('gpuCount')}
+              </TableHead>
               {/* Show Actions column if basicAuthEnabled and not deduplicating */}
               {!deduplicateUsers &&
                 (basicAuthEnabled || currentUserRole === 'admin') && (
@@ -1590,6 +1669,25 @@ function UsersTable({
                     >
                       {user.jobCount}
                     </Link>
+                  )}
+                </TableCell>
+                <TableCell>
+                  {user.gpuCount === -1 ? (
+                    <span className="px-2 py-0.5 bg-gray-100 text-gray-400 rounded text-xs font-medium flex items-center">
+                      <CircularProgress size={10} className="mr-1" />
+                      Loading...
+                    </span>
+                  ) : (
+                    <span
+                      className={`px-2 py-0.5 rounded text-xs font-medium ${
+                        user.gpuCount > 0
+                          ? 'bg-purple-100 text-purple-600'
+                          : 'bg-gray-100 text-gray-500'
+                      }`}
+                      title={`Total GPUs: ${user.gpuCount}`}
+                    >
+                      {user.gpuCount}
+                    </span>
                   )}
                 </TableCell>
                 {/* Actions cell logic - hide when deduplicating */}
@@ -1733,7 +1831,7 @@ function ServiceAccountTokensView({
           {
             allUsers: true,
             skipFinished: true,
-            fields: ['user_hash', 'status'],
+            fields: ['user_hash', 'status', 'accelerators', 'job_id'],
           },
         ]),
       ]);
@@ -1744,23 +1842,38 @@ function ServiceAccountTokensView({
       // Step 3: Calculate counts for each service account
       const enhancedTokens = (tokensData || []).map((token) => {
         const serviceAccountId = token.service_account_user_id;
+        let clusterCount = 0;
+        let clusterGPUCount = 0;
+        let jobCount = 0;
+        let jobGPUCount = 0;
 
-        // Count clusters owned by this service account
-        const serviceAccountClusters = clustersData.filter(
-          (cluster) => cluster.user_hash === serviceAccountId
-        );
+        // Count clusters and sum GPUs in one pass
+        for (const cluster of clustersData) {
+          if (cluster.user_hash === serviceAccountId) {
+            clusterCount++;
+            clusterGPUCount += getGPUCount(
+              cluster.gpus,
+              `Cluster ${cluster.cluster}`
+            );
+          }
+        }
 
-        // Count jobs owned by this service account
-        const serviceAccountJobs = jobsData.filter(
-          (job) =>
-            job.user_hash === serviceAccountId &&
-            ACTIVE_JOB_STATUSES.has(job.status)
-        );
+        // Count active jobs and sum GPUs in one pass
+        for (const job of jobsData) {
+          if (job.user_hash === serviceAccountId && ACTIVE_JOB_STATUSES.has(job.status)) {
+            jobCount++;
+            jobGPUCount += getGPUCount(
+              job.accelerators,
+              `Job ${job.job_name || job.job_id}`
+            );
+          }
+        }
 
         return {
           ...token,
-          clusterCount: serviceAccountClusters.length,
-          jobCount: serviceAccountJobs.length,
+          clusterCount,
+          jobCount,
+          gpuCount: clusterGPUCount + jobGPUCount,
           // Extract primary role
           primaryRole:
             token.service_account_roles &&
@@ -1996,6 +2109,7 @@ function ServiceAccountTokensView({
                   <TableHead>Role</TableHead>
                   <TableHead>Clusters</TableHead>
                   <TableHead>Jobs</TableHead>
+                  <TableHead>GPUs</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead>Last used</TableHead>
                   <TableHead>Expires</TableHead>
@@ -2098,6 +2212,18 @@ function ServiceAccountTokensView({
                       >
                         {token.jobCount}
                       </Link>
+                    </TableCell>
+                    <TableCell>
+                      <span
+                        className={`px-2 py-0.5 rounded text-xs font-medium ${
+                          token.gpuCount > 0
+                            ? 'bg-purple-100 text-purple-600'
+                            : 'bg-gray-100 text-gray-500'
+                        }`}
+                        title={`Total GPUs: ${token.gpuCount}`}
+                      >
+                        {token.gpuCount}
+                      </span>
                     </TableCell>
                     <TableCell className="truncate">
                       {token.created_at ? (
