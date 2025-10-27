@@ -4688,22 +4688,33 @@ class CoreWeaveStore(S3CompatibleStore):
             self._validate_existing_bucket()
             return bucket, False
 
-        # Check if this is a source with URL prefix (existing bucket case)
-        if isinstance(self.source, str) and self.source.startswith(
-                self.config.url_prefix):
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.StorageBucketGetError(
-                    'Attempted to use a non-existent bucket as a source: '
-                    f'{self.source}.')
+        # TODO(hailong): Enable the bucket creation for CoreWeave
+        # Disable this to avoid waiting too long until the following
+        # issue is resolved:
+        # https://github.com/skypilot-org/skypilot/issues/7736
+        raise exceptions.StorageBucketGetError(
+            f'Bucket {self.name!r} does not exist. CoreWeave buckets can take'
+            ' a long time to become accessible after creation, so SkyPilot'
+            ' does not create them automatically. Please create the bucket'
+            ' manually in CoreWeave and wait for it to be accessible before'
+            ' using it.')
 
-        # If bucket cannot be found, create it if needed
-        if self.sync_on_reconstruction:
-            bucket = self._create_bucket(self.name)
-            return bucket, True
-        else:
-            raise exceptions.StorageExternalDeletionError(
-                'Attempted to fetch a non-existent bucket: '
-                f'{self.name}')
+        # # Check if this is a source with URL prefix (existing bucket case)
+        # if isinstance(self.source, str) and self.source.startswith(
+        #         self.config.url_prefix):
+        #     with ux_utils.print_exception_no_traceback():
+        #         raise exceptions.StorageBucketGetError(
+        #             'Attempted to use a non-existent bucket as a source: '
+        #             f'{self.source}.')
+
+        # # If bucket cannot be found, create it if needed
+        # if self.sync_on_reconstruction:
+        #     bucket = self._create_bucket(self.name)
+        #     return bucket, True
+        # else:
+        #     raise exceptions.StorageExternalDeletionError(
+        #         'Attempted to fetch a non-existent bucket: '
+        #         f'{self.name}')
 
     @classmethod
     def _get_coreweave_mount_cmd(cls, bucket_name: str, mount_path: str,

@@ -590,32 +590,34 @@ def test_nebius_storage_mounts(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.coreweave
-def test_coreweave_storage_mounts(generic_cloud: str):
-    name = smoke_tests_utils.get_cluster_name()
-    storage_name = f'sky-test-{int(time.time())}-coreweave'
-    template_str = pathlib.Path(
-        'tests/test_yamls/test_coreweave_storage_mounting.yaml.j2').read_text()
-    template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name)
-    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        f.write(content)
-        f.flush()
-        file_path = f.name
-        test_commands = [
-            *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
-            f'sky launch -y -c {name} --infra {generic_cloud} {file_path}',
-            f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} AWS_SHARED_CREDENTIALS_FILE={coreweave.COREWEAVE_CREDENTIALS_PATH} aws s3 ls s3://{storage_name}/hello.txt --profile={coreweave.COREWEAVE_PROFILE_NAME}'
-        ]
+# TODO(hailong): Enable this case when the following issue is resolved:
+# https://github.com/skypilot-org/skypilot/issues/7736
+# @pytest.mark.coreweave
+# def test_coreweave_storage_mounts(generic_cloud: str):
+#     name = smoke_tests_utils.get_cluster_name()
+#     storage_name = f'sky-test-{int(time.time())}-coreweave'
+#     template_str = pathlib.Path(
+#         'tests/test_yamls/test_coreweave_storage_mounting.yaml.j2').read_text()
+#     template = jinja2.Template(template_str)
+#     content = template.render(storage_name=storage_name)
+#     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+#         f.write(content)
+#         f.flush()
+#         file_path = f.name
+#         test_commands = [
+#             *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+#             f'sky launch -y -c {name} --infra {generic_cloud} {file_path}',
+#             f'sky logs {name} 1 --status',  # Ensure job succeeded.
+#             f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} AWS_SHARED_CREDENTIALS_FILE={coreweave.COREWEAVE_CREDENTIALS_PATH} aws s3 ls s3://{storage_name}/hello.txt --profile={coreweave.COREWEAVE_PROFILE_NAME}'
+#         ]
 
-        test = smoke_tests_utils.Test(
-            'coreweave_storage_mounts',
-            test_commands,
-            f'sky down -y {name}; sky storage delete -y {storage_name}',
-            timeout=30 * 60,  # 20 mins
-        )
-        smoke_tests_utils.run_one_test(test)
+#         test = smoke_tests_utils.Test(
+#             'coreweave_storage_mounts',
+#             test_commands,
+#             f'sky down -y {name}; sky storage delete -y {storage_name}',
+#             timeout=30 * 60,  # 20 mins
+#         )
+#         smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.ibm

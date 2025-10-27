@@ -949,14 +949,14 @@ def split_coreweave_path(coreweave_path: str) -> Tuple[str, str]:
     return bucket, key
 
 
-def verify_coreweave_bucket(name: str, retry: int = 12) -> bool:
+def verify_coreweave_bucket(name: str, retry: int = 0) -> bool:
     """Verify CoreWeave bucket exists and is accessible.
 
     Retries head_bucket operation up to retry times with 5 second intervals
     to handle DNS propagation delays or temporary connectivity issues.
     """
     coreweave_client = create_coreweave_client()
-    max_retries = retry  # 5s * retry = total seconds to retry
+    max_retries = retry + 1  # 5s * (retry+1) = total seconds to retry
     retry_count = 0
 
     while retry_count < max_retries:
