@@ -496,7 +496,7 @@ async def kill_request_async(request_id: str) -> bool:
     Returns:
         True if the request was killed, False otherwise.
     """
-    async with update_request_async(request_id) as request_record:
+    async with _update_request_async(request_id) as request_record:
         if not _should_kill_request(request_id, request_record):
             return False
         if request_record.pid is not None:
@@ -671,10 +671,12 @@ def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
 
 @contextlib.asynccontextmanager
 @init_db_async
-@asyncio_utils.shield
-async def update_request_async(
+async def _update_request_async(
         request_id: str) -> AsyncGenerator[Optional[Request], None]:
-    """Get and update a SkyPilot API request."""
+    """Get and update a SkyPilot API request.
+
+    This function is not shielded from cancellation.
+    The caller should use @asyncio_utils.shield to protect it."""
     # Acquire the lock to avoid race conditions between multiple request
     # operations, e.g. execute and cancel.
     async with filelock.AsyncFileLock(request_lock_path(request_id)):
