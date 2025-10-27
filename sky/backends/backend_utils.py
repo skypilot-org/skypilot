@@ -3157,6 +3157,7 @@ def get_clusters(
     all_users: bool = True,
     include_credentials: bool = False,
     summary_response: bool = False,
+    include_handle: bool = True,
     # Internal only:
     # pylint: disable=invalid-name
     _include_is_managed: bool = False,
@@ -3313,6 +3314,8 @@ def get_clusters(
             record['accelerators'] = (
                 f'{handle.launched_resources.accelerators}'
                 if handle.launched_resources.accelerators else None)
+            if not include_handle:
+                record.pop('handle', None)
 
     # Add handle info to the records
     _update_records_with_handle_info(records)
