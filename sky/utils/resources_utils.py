@@ -234,11 +234,11 @@ def format_resource(resource: 'resources_lib.Resources',
     spot = '[spot]' if resource.use_spot else ''
     resources_str_simple = (
         f'{spot}({"" if not elements_simple else ", ".join(elements_simple)})')
-    resources_str_full = (
-        f'{spot}({"" if not elements_full else ", ".join(elements_full)})')
     if simplified_only:
         return resources_str_simple, None
     else:
+        resources_str_full = (
+            f'{spot}({"" if not elements_full else ", ".join(elements_full)})')
         return resources_str_simple, resources_str_full
 
 

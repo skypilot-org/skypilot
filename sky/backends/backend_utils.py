@@ -3242,11 +3242,11 @@ def get_clusters(
             handle = record['handle']
             resource_str_simple, resource_str_full = (
                 resources_utils.get_readable_resources_repr(
-                    handle, simplified_only=False))
-            assert resource_str_full is not None
+                    handle, simplified_only=summary_response))
             record['resources_str'] = resource_str_simple
-            record['resources_str_full'] = resource_str_full
             if not summary_response:
+                assert resource_str_full is not None
+                record['resources_str_full'] = resource_str_full
                 record['cluster_name_on_cloud'] = handle.cluster_name_on_cloud
 
     def _update_records_with_credentials(
