@@ -299,3 +299,66 @@ When the client and server are running on different minor versions, SkyPilot CLI
     pip install -U skypilot==X.X.X
 
 For a nightly build, its API compatibility is equivalent to its previous minor version, e.g., all nightly builds after ``0.10.0`` and before ``0.11.0`` have the same API compatibility guarantee as ``0.10.0``.
+
+.. _sky-api-server-database-migrations:
+
+Manual database migrations
+--------------------------
+
+The SkyPilot API server runs Alembic database migrations during startup if necessary to ensure the database schema is up to date.
+
+For advanced use cases such as expensive migrations or troubleshooting, SkyPilot exposes an Alembic wrapper that enables manual database operations. **Use this with caution** as these commands will directly interact with the database.
+
+The Alembic wrapper is located at ``sky/schemas/db/scripts/run_alembic.py``. It supports operations on three database sections:
+
+* ``state_db`` - Main state database (default)
+* ``spot_jobs_db`` - Spot jobs database
+* ``serve_db`` - Serve database
+
+Common commands
+~~~~~~~~~~~~~~~
+
+Check current database version:
+
+.. code-block:: bash
+
+    python sky/schemas/db/scripts/run_alembic.py \
+      --url DB_URI \
+      --section state_db \
+      current
+
+View migration history:
+
+.. code-block:: bash
+
+    python sky/schemas/db/scripts/run_alembic.py \
+      --url DB_URI \
+      --section state_db \
+      history
+
+Manually upgrade to latest version:
+
+.. code-block:: bash
+
+    python sky/schemas/db/scripts/run_alembic.py \
+      --url DB_URI \
+      --section state_db \
+      upgrade head
+
+Upgrade to specific revision:
+
+.. code-block:: bash
+
+    python sky/schemas/db/scripts/run_alembic.py \
+      --url DB_URI \
+      --section state_db \
+      upgrade 009
+
+Show details of a specific revision:
+
+.. code-block:: bash
+
+    python sky/schemas/db/scripts/run_alembic.py \
+      --url DB_URI \
+      --section state_db \
+      show head
