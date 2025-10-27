@@ -440,7 +440,6 @@ class TestCloudVmRayBackendGetGrpcChannel:
         assert tunnel_creation_count.value == 2, f"Expected tunnel to be created exactly once, but was created {tunnel_creation_count.value} times"
 
 
-
 class TestIsMessageTooLong:
     """Tests for _is_message_too_long function."""
 
