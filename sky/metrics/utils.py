@@ -145,7 +145,10 @@ SKY_APISERVER_REQUEST_RSS_INCR_BYTES = prom.Histogram(
 
 SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS = prom.Histogram(
     'sky_apiserver_websocket_ssh_latency_seconds',
-    'Time taken for ssh message to go from client to API server and back.',
+    ('Time taken for ssh message to go from client to API server and back'
+     'to the client. This does not include: latency to reach the pod, '
+     'overhead from sending through the k8s port-forward tunnel, or '
+     'ssh server lag on the destination pod.'),
     ['pid'],
     buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.125, 0.15, 0.25,
              0.35, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 2.75, 3, 3.5, 4, 4.5,

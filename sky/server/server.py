@@ -1863,13 +1863,20 @@ async def kubernetes_pod_ssh_proxy(
                             message = message[1:]
                         elif message_type == KubernetesSSHMessageType.PINGPONG:
                             # PING message - respond with PONG (type 1)
-                            pong_message = struct.pack(
-                                '!B', KubernetesSSHMessageType.PINGPONG.value)
-                            await websocket.send_bytes(pong_message)
+                            if len(message) != 5:
+                                raise ValueError('Invalid PING message '
+                                                 f'length: {len(message)}')
+                            # Return the same PING message, so that the client
+                            # can measure the latency.
+                            await websocket.send_bytes(message)
                             continue
                         elif (message_type ==
                               KubernetesSSHMessageType.LATENCY_MEASUREMENT):
                             # Latency measurement from client
+                            if len(message) != 9:
+                                raise ValueError(
+                                    'Invalid latency measurement '
+                                    f'message length: {len(message)}')
                             avg_latency_ms = struct.unpack('!Q',
                                                            message[1:9])[0]
                             latency_seconds = avg_latency_ms / 1000

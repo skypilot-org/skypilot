@@ -24,9 +24,10 @@ from websockets.asyncio.client import connect
 
 from sky.server import constants
 from sky.server.server import KubernetesSSHMessageType
+from sky.skylet import constants as skylet_constants
 
 BUFFER_SIZE = 2**16  # 64KB
-HEARTBEAT_INTERVAL_SECONDS = 60
+HEARTBEAT_INTERVAL_SECONDS = 10
 
 # Environment variable for a file path to the API cookie file.
 # Keep in sync with server/constants.py
@@ -34,6 +35,8 @@ API_COOKIE_FILE_ENV_VAR = 'SKYPILOT_API_COOKIE_FILE'
 # Default file if unset.
 # Keep in sync with server/constants.py
 API_COOKIE_FILE_DEFAULT_LOCATION = '~/.sky/cookies.txt'
+
+MAX_UNANSWERED_PINGS = 100
 
 
 def _get_cookie_header(url: str) -> Dict[str, str]:
@@ -83,23 +86,27 @@ async def main(url: str, timestamps_supported: bool) -> None:
             stdout_writer = asyncio.StreamWriter(transport, protocol, None,
                                                  loop)
             # Dictionary to store last ping time for latency measurement
-            last_ping_time_dict: Optional[dict] = None
+            last_ping_time_dict: Optional[Dict[int, float]] = None
+            last_ping_time_dict_lock = asyncio.Lock()
             if timestamps_supported:
                 last_ping_time_dict = {}
 
             # Use an Event to signal when websocket is closed
             websocket_closed_event = asyncio.Event()
+            websocket_lock = asyncio.Lock()
 
-            await asyncio.gather(stdin_to_websocket(stdin_reader, websocket,
-                                                    timestamps_supported,
-                                                    websocket_closed_event),
-                                 websocket_to_stdout(websocket, stdout_writer,
-                                                     timestamps_supported,
-                                                     last_ping_time_dict,
-                                                     websocket_closed_event),
-                                 latency_monitor(websocket, last_ping_time_dict,
-                                                 websocket_closed_event),
-                                 return_exceptions=True)
+            await asyncio.gather(
+                stdin_to_websocket(stdin_reader, websocket,
+                                   timestamps_supported, websocket_closed_event,
+                                   websocket_lock),
+                websocket_to_stdout(websocket, stdout_writer,
+                                    timestamps_supported, last_ping_time_dict,
+                                    last_ping_time_dict_lock,
+                                    websocket_closed_event, websocket_lock),
+                latency_monitor(websocket, last_ping_time_dict,
+                                last_ping_time_dict_lock,
+                                websocket_closed_event, websocket_lock),
+                return_exceptions=True)
         finally:
             if old_settings:
                 termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN,
@@ -108,19 +115,30 @@ async def main(url: str, timestamps_supported: bool) -> None:
 
 async def latency_monitor(websocket: ClientConnection,
                           last_ping_time_dict: Optional[dict],
-                          websocket_closed_event: asyncio.Event):
+                          last_ping_time_dict_lock: asyncio.Lock,
+                          websocket_closed_event: asyncio.Event,
+                          websocket_lock: asyncio.Lock):
     """Periodically send PING messages (type 1) to measure latency."""
     if last_ping_time_dict is None:
         return
+    next_id = 0
     while not websocket_closed_event.is_set():
         try:
             await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
+            async with last_ping_time_dict_lock:
+                if len(last_ping_time_dict) >= MAX_UNANSWERED_PINGS:
+                    # We are not getting responses, clear the dictionary so
+                    # as not to grow unbounded.
+                    last_ping_time_dict.clear()
             ping_time = time.time()
-            last_ping_time_dict['time'] = ping_time
-            message_type_bytes = struct.pack(
-                '!B', KubernetesSSHMessageType.PINGPONG.value)
+            next_id += 1
+            async with last_ping_time_dict_lock:
+                last_ping_time_dict[next_id] = ping_time
+            message_header_bytes = struct.pack(
+                '!BI', KubernetesSSHMessageType.PINGPONG.value, next_id)
             try:
-                await websocket.send(message_type_bytes)
+                async with websocket_lock:
+                    await websocket.send(message_header_bytes)
             except websockets.exceptions.ConnectionClosed as e:
                 # Websocket is already closed.
                 print(f'Failed to send PING message: {e}', file=sys.stderr)
@@ -134,7 +152,8 @@ async def latency_monitor(websocket: ClientConnection,
 async def stdin_to_websocket(reader: asyncio.StreamReader,
                              websocket: ClientConnection,
                              timestamps_supported: bool,
-                             websocket_closed_event: asyncio.Event):
+                             websocket_closed_event: asyncio.Event,
+                             websocket_lock: asyncio.Lock):
     try:
         while not websocket_closed_event.is_set():
             # Read at most BUFFER_SIZE bytes, this not affect
@@ -151,64 +170,74 @@ async def stdin_to_websocket(reader: asyncio.StreamReader,
                 message_type_bytes = struct.pack(
                     '!B', KubernetesSSHMessageType.REGULAR_DATA.value)
                 data = message_type_bytes + data
-            await websocket.send(data)
+            async with websocket_lock:
+                await websocket.send(data)
 
     except Exception as e:  # pylint: disable=broad-except
         print(f'Error in stdin_to_websocket: {e}', file=sys.stderr)
     finally:
-        await websocket.close()
+        async with websocket_lock:
+            await websocket.close()
         websocket_closed_event.set()
 
 
-async def websocket_to_stdout(websocket: ClientConnection,
-                              writer: asyncio.StreamWriter,
-                              timestamps_supported: bool,
-                              last_ping_time_dict: Optional[dict],
-                              websocket_closed_event: asyncio.Event):
+async def websocket_to_stdout(
+        websocket: ClientConnection, writer: asyncio.StreamWriter,
+        timestamps_supported: bool, last_ping_time_dict: Optional[dict],
+        last_ping_time_dict_lock: asyncio.Lock,
+        websocket_closed_event: asyncio.Event, websocket_lock: asyncio.Lock):
     try:
         while not websocket_closed_event.is_set():
             message = await websocket.recv()
-            if timestamps_supported and len(message) > 0:
+            if (timestamps_supported and len(message) > 0 and
+                    last_ping_time_dict is not None):
                 message_type = struct.unpack('!B', message[:1])[0]
                 if message_type == KubernetesSSHMessageType.REGULAR_DATA.value:
                     # Regular data - strip type byte and write to stdout
-                    data = message[1:]
-                    writer.write(data)
-                    await writer.drain()
+                    message = message[1:]
                 elif message_type == KubernetesSSHMessageType.PINGPONG.value:
                     # PONG response - calculate latency and send measurement
+                    if not len(message) == 5:
+                        raise ValueError(
+                            f'Invalid PONG message length: {len(message)}')
+                    pong_id = struct.unpack('!I', message[1:5])[0]
                     pong_time = time.time()
-                    if last_ping_time_dict and 'time' in last_ping_time_dict:
-                        ping_time = last_ping_time_dict['time']
-                        latency_seconds = pong_time - ping_time
-                        latency_ms = int(latency_seconds * 1000)
 
-                        # Send latency measurement (type 2)
-                        message_type_bytes = struct.pack(
-                            '!B',
-                            KubernetesSSHMessageType.LATENCY_MEASUREMENT.value)
-                        latency_bytes = struct.pack('!Q', latency_ms)
-                        data = message_type_bytes + latency_bytes
+                    ping_time = None
+                    async with last_ping_time_dict_lock:
                         try:
-                            await websocket.send(data)
-                        except Exception as e:  # pylint: disable=broad-except
-                            print(f'Failed to send latency measurement: {e}',
-                                  file=sys.stderr)
-                else:
-                    # Unknown message type, write as-is
-                    writer.write(message)
-                    await writer.drain()
-            else:
-                # No timestamps support, write directly
-                writer.write(message)
-                await writer.drain()
+                            ping_time = last_ping_time_dict.pop(pong_id)
+                        except KeyError:
+                            # We don't have a matching ping, ignore the pong.
+                            pass
+
+                    if ping_time is None:
+                        continue
+
+                    latency_seconds = pong_time - ping_time
+                    latency_ms = int(latency_seconds * 1000)
+
+                    # Send latency measurement (type 2)
+                    message_type_bytes = struct.pack(
+                        '!B',
+                        KubernetesSSHMessageType.LATENCY_MEASUREMENT.value)
+                    latency_bytes = struct.pack('!Q', latency_ms)
+                    message = message_type_bytes + latency_bytes
+                    # Send to server.
+                    async with websocket_lock:
+                        await websocket.send(message)
+                    continue
+            # No timestamps support, write directly
+            writer.write(message)
+            await writer.drain()
     except websockets.exceptions.ConnectionClosed:
         print('WebSocket connection closed', file=sys.stderr)
     except Exception as e:  # pylint: disable=broad-except
         print(f'Error in websocket_to_stdout: {e}', file=sys.stderr)
         raise e
     finally:
-        await websocket.close()
+        async with websocket_lock:
+            await websocket.close()
         websocket_closed_event.set()
 
 
@@ -223,7 +252,10 @@ if __name__ == '__main__':
     health_response = requests.get(health_url)
     health_data = health_response.json()
     timestamps_are_supported = int(health_data['api_version']) > 21
-    print(f'Timestamps are supported: {timestamps_are_supported}')
+    disable_latency_measurement = os.environ.get(
+        skylet_constants.SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR, '0') == '1'
+    timestamps_are_supported = (timestamps_are_supported and
+                                not disable_latency_measurement)
 
     server_proto, server_fqdn = server_url.split('://')
     websocket_proto = 'ws'
