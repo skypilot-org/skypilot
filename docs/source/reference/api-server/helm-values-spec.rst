@@ -73,7 +73,7 @@ Below is the available helm value keys and the default value of each key:
     :ref:`extraEnvs <helm-values-apiService-extraEnvs>`: null
     :ref:`extraVolumes <helm-values-apiService-extraVolumes>`: null
     :ref:`extraVolumeMounts <helm-values-apiService-extraVolumeMounts>`: null
-  
+
   :ref:`auth <helm-values-auth>`:
     :ref:`oauth <helm-values-auth-oauth>`:
       :ref:`enabled <helm-values-auth-oauth-enabled>`: false
@@ -376,7 +376,7 @@ Default: ``null``
 ``apiService.authUserHeaderName``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Custom header name for user authentication with auth proxies. This overrides the default ``X-Auth-Request-Email`` header. 
+Custom header name for user authentication with auth proxies. This overrides the default ``X-Auth-Request-Email`` header.
 
 This setting is useful when integrating with auth proxies that use different header names for user identification, such as ``X-Remote-User``, ``X-Auth-User``, or custom headers specific to your organization's auth infrastructure.
 
@@ -430,7 +430,7 @@ Default: ``null``
 ``apiService.dbConnectionSecretName``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Name of the secret containing the database connection string for the API server. This is used to configure an external database for the API server. 
+Name of the secret containing the database connection string for the API server. This is used to configure an external database for the API server.
 
 If either this field or :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>` is set, :ref:`apiService.config <helm-values-apiService-config>` must be ``null``. Refer to the :ref:`API server deployment guide <sky-api-server-helm-deploy-command>` for more details on configuring an external database.
 Name of the secret containing the database connection string for the API server. If this field is set, ``config`` must be null.
@@ -1428,6 +1428,10 @@ Default: see the yaml below.
           service.beta.kubernetes.io/port_443_health-probe_protocol: "TCP"
           service.beta.kubernetes.io/port_80_health-probe_protocol: "TCP"
       config:
+        # Enable gzip compression for API responses
+        use-gzip: "true"
+        gzip-level: 5
+        gzip-min-length: 1000
         # Custom HTTP snippet to inject into the ingress-nginx configuration.
         http-snippet: |
           map $http_upgrade $connection_upgrade {

@@ -1,5 +1,7 @@
 """Unit tests for sky.server.requests.executor module."""
 import asyncio
+import functools
+import os
 import time
 from typing import List
 from unittest import mock
@@ -7,9 +9,14 @@ from unittest import mock
 import pytest
 
 from sky import exceptions
+from sky import skypilot_config
+from sky.server import constants as server_constants
 from sky.server.requests import executor
 from sky.server.requests import payloads
+from sky.server.requests import process
 from sky.server.requests import requests as requests_lib
+from sky.skylet import constants
+from sky.utils import context_utils
 
 
 @pytest.fixture()
@@ -26,6 +33,65 @@ def isolated_database(tmp_path):
             requests_lib._DB = None
             yield
             requests_lib._DB = None
+
+
+@pytest.fixture()
+def mock_skypilot_config(tmp_path):
+    config_content = """
+aws:
+  labels:
+    key: value
+  vpc_name: skypilot-vpc
+"""
+    config_file = tmp_path / 'config.yaml'
+    config_file.write_text(config_content)
+
+    with mock.patch('sky.skypilot_config._GLOBAL_CONFIG_PATH',
+                    str(config_file)):
+        skypilot_config.reload_config()
+        yield str(config_file)
+        # Reload config again to restore original state
+        skypilot_config.reload_config()
+
+
+@pytest.fixture()
+def mock_global_user_state():
+    mock_user = mock.Mock()
+    mock_user.id = 'test-user-id'
+    mock_user.name = 'test-user'
+
+    def mock_add_or_update_user(user,
+                                allow_duplicate_name=True,
+                                return_user=False):
+        if return_user:
+            return True, mock_user
+        return True
+
+    with mock.patch('sky.global_user_state.add_or_update_user',
+                    side_effect=mock_add_or_update_user), \
+         mock.patch('sky.global_user_state.get_user') as mock_get_user:
+        mock_get_user.return_value = mock_user
+        yield
+
+
+@pytest.fixture()
+def hijacked_sys_attrs():
+    """Hijack os.environ and sys.stdout/stderr to be context-aware."""
+    # Save original values
+    original_environ = os.environ
+    original_stdout = __import__('sys').stdout
+    original_stderr = __import__('sys').stderr
+
+    # Hijack
+    context_utils.hijack_sys_attrs()
+
+    yield
+
+    # Restore (for test isolation)
+    import sys
+    setattr(os, 'environ', original_environ)
+    setattr(sys, 'stdout', original_stdout)
+    setattr(sys, 'stderr', original_stderr)
 
 
 def dummy_entrypoint(*args, **kwargs):
@@ -49,7 +115,7 @@ async def test_execute_request_coroutine_ctx_cancelled_on_cancellation(
         entrypoint=dummy_entrypoint,
         request_body=payloads.RequestBody(),
     )
-    requests_lib.create_if_not_exists(request)
+    await requests_lib.create_if_not_exists_async(request)
 
     # Mock the context and its methods
     mock_ctx = mock.Mock()
@@ -75,7 +141,8 @@ def dummy_entrypoint(called_flag):
     return 'ok'
 
 
-def test_api_cancel_race_condition(isolated_database):
+@pytest.mark.asyncio
+async def test_api_cancel_race_condition(isolated_database):
     """Cancel before execution: wrapper must no-op and not run entrypoint."""
     CALLED_FLAG[0] = False
     req = requests_lib.Request(request_id='race-cancel-before',
@@ -86,7 +153,7 @@ def test_api_cancel_race_condition(isolated_database):
                                created_at=0.0,
                                user_id='test-user')
 
-    assert requests_lib.create_if_not_exists(req) is True
+    assert await requests_lib.create_if_not_exists_async(req) is True
 
     # Cancel the request before the executor starts.
     cancelled = requests_lib.kill_requests(['race-cancel-before'])
@@ -101,6 +168,172 @@ def test_api_cancel_race_condition(isolated_database):
     updated = requests_lib.get_request('race-cancel-before')
     assert updated is not None
     assert updated.status == requests_lib.RequestStatus.CANCELLED
+
+
+def _test_isolation_worker_fn(expected_env_a: str, expected_env_b: str,
+                              expected_labels: dict, **kwargs):
+    """Worker that verifies it sees the correct env vars and config overrides."""
+    # TEST_VAR_A: Should see the overridden value (not main process value)
+    assert os.environ.get('TEST_VAR_A') == expected_env_a, (
+        f"Expected TEST_VAR_A={expected_env_a}, got {os.environ.get('TEST_VAR_A')}"
+    )
+
+    # TEST_VAR_B: Should see the new value set by this request
+    assert os.environ.get('TEST_VAR_B') == expected_env_b, (
+        f"Expected TEST_VAR_B={expected_env_b}, got {os.environ.get('TEST_VAR_B')}"
+    )
+
+    # Assert config override works - should see the overridden value, not the base.
+    actual_labels = skypilot_config.get_nested(('aws', 'labels'),
+                                               default_value={})
+    assert actual_labels == expected_labels, (
+        f"Expected labels={expected_labels}, got {actual_labels}")
+
+    # Assert base config from mock_skypilot_config is still there.
+    assert skypilot_config.get_nested(('aws', 'vpc_name'),
+                                      default_value=None) == 'skypilot-vpc'
+
+    return
+
+
+def _subprocess_initializer(db_path: str, log_path: str, config_path: str):
+    """Initializer for subprocess workers to set up the same mocks as the main test process."""
+    from sky import skypilot_config
+    from sky.server import constants as server_constants
+    from sky.server.requests import requests as requests_lib
+
+    server_constants.API_SERVER_REQUEST_DB_PATH = db_path
+    requests_lib.REQUEST_LOG_PATH_PREFIX = log_path
+    requests_lib._DB = None
+    skypilot_config._GLOBAL_CONFIG_PATH = config_path
+
+
+class TestIsolationBody(payloads.RequestBody):
+    """Request body for isolation tests with expected values."""
+    expected_env_a: str
+    expected_env_b: str
+    expected_labels: dict
+
+
+@pytest.mark.parametrize('execution_mode', ['coroutine', 'process_executor'])
+@pytest.mark.asyncio
+async def test_execute_with_isolated_env_and_config(isolated_database,
+                                                    mock_global_user_state,
+                                                    mock_skypilot_config,
+                                                    hijacked_sys_attrs,
+                                                    execution_mode, tmp_path):
+    """Test that multiple concurrent requests see independent env vars and config.
+
+    Args:
+        execution_mode: Either 'coroutine' (for execute_request_in_coroutine)
+                       or 'process_executor' (for _request_execution_wrapper).
+    """
+    proc_executor = None
+    if execution_mode == 'process_executor':
+        # Get the paths that were set up by the fixtures, as we need to re-apply
+        # the same patches in the subprocess created by the BurstableExecutor.
+        db_path = server_constants.API_SERVER_REQUEST_DB_PATH
+        log_path_prefix = requests_lib.REQUEST_LOG_PATH_PREFIX
+
+        proc_executor = process.BurstableExecutor(
+            garanteed_workers=5,
+            burst_workers=0,
+            initializer=_subprocess_initializer,
+            initargs=(db_path, log_path_prefix, mock_skypilot_config))
+
+    # Set TEST_VAR_A in main process that workers will override
+    os.environ['TEST_VAR_A'] = 'init'
+
+    # Capture main process state before spawning any workers to verify no leakage.
+    env_before = dict(os.environ)
+    config_before = skypilot_config.to_dict()
+
+    async def spawn_request(request_id: str, env_a: str, env_b: str):
+        """Spawn a request with env and config overrides."""
+        expected_labels = {
+            'key': 'value',  # From mock_skypilot_config
+            'request_id': request_id,  # From override_skypilot_config
+        }
+        request_body = TestIsolationBody(
+            env_vars={
+                'TEST_VAR_A': env_a,  # Override env var from main process
+                'TEST_VAR_B': env_b,  # New env var
+                constants.USER_ID_ENV_VAR: f'user-{request_id}',
+                constants.USER_ENV_VAR: f'user-{request_id}',
+            },
+            override_skypilot_config={
+                'aws': {
+                    'labels': {
+                        'request_id': request_id,
+                    }
+                }
+            },
+            # Expected values to assert from inside the worker's context.
+            expected_env_a=env_a,
+            expected_env_b=env_b,
+            expected_labels=expected_labels)
+
+        request = await executor.prepare_request_async(
+            request_id=request_id,
+            request_name='test.isolation',
+            request_body=request_body,
+            func=_test_isolation_worker_fn,
+            schedule_type=requests_lib.ScheduleType.SHORT)
+
+        if execution_mode == 'coroutine':
+            task = executor.execute_request_in_coroutine(request)
+            await task.task
+        else:
+            # Submit to shared executor like production code
+            fut = proc_executor.submit_until_success(
+                executor._request_execution_wrapper, request_id, False)
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, fut.result)
+
+        completed_request = requests_lib.get_request(request_id)
+        assert completed_request is not None
+        if completed_request.status != requests_lib.RequestStatus.SUCCEEDED:
+            error_info = completed_request.get_error()
+            error_msg = f"Request {request_id} failed (mode={execution_mode}), status={completed_request.status}"
+            if error_info:
+                error_msg += f"\nError type: {error_info['type']}\nError message: {error_info['message']}\nError traceback:\n{error_info.get('traceback', 'N/A')}"
+            else:
+                error_msg += "\nNo error info available"
+            pytest.fail(error_msg)
+        return completed_request.get_return_value()
+
+    # Spawn 5 concurrent requests with different env vars
+    tasks = [
+        spawn_request('1', 'a', 'one'),
+        spawn_request('2', 'b', 'two'),
+        spawn_request('3', 'c', 'three'),
+        spawn_request('4', 'd', 'four'),
+        spawn_request('5', 'e', 'five'),
+    ]
+
+    try:
+        results = await asyncio.gather(*tasks)
+        assert len(results) == 5
+
+        # Verify main process state is unchanged.
+        env_after = dict(os.environ)
+        config_after = skypilot_config.to_dict()
+
+        assert env_after == env_before, (
+            "Environment leaked into main process! "
+            f"Added: {set(env_after.keys()) - set(env_before.keys())}, "
+            f"Removed: {set(env_before.keys()) - set(env_after.keys())}, "
+            f"Changed: {[k for k in env_before if env_before.get(k) != env_after.get(k)]}"
+        )
+
+        assert config_after == config_before, (
+            "Config leaked into main process! "
+            f"Before: {config_before}, After: {config_after}")
+    finally:
+        # Shutdown the executor if we created one
+        if proc_executor is not None:
+            proc_executor.shutdown()
+        os.environ.pop('TEST_VAR_A', None)
 
 
 FAKE_FD_START = 100
@@ -219,6 +452,7 @@ def _keyboard_interrupt_entrypoint():
     raise KeyboardInterrupt()
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize('test_case', [
     pytest.param(
         {
@@ -249,7 +483,7 @@ def _keyboard_interrupt_entrypoint():
         },
         id='keyboard_interrupt'),
 ])
-def test_stdout_stderr_restoration(mock_fd_operations, test_case):
+async def test_stdout_stderr_restoration(mock_fd_operations, test_case):
     """Test stdout and stderr fd handling across different execution paths."""
     req = requests_lib.Request(request_id=test_case['request_id'],
                                name='test',
@@ -258,7 +492,7 @@ def test_stdout_stderr_restoration(mock_fd_operations, test_case):
                                status=requests_lib.RequestStatus.PENDING,
                                created_at=0.0,
                                user_id='test-user')
-    requests_lib.create_if_not_exists(req)
+    await requests_lib.create_if_not_exists_async(req)
 
     if test_case['expected_exception'] is not None:
         with pytest.raises(test_case['expected_exception']):

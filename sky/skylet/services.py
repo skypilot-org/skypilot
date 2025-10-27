@@ -216,10 +216,12 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                 if pool is not None:
                     pool_hash = serve_state.get_service_hash(pool)
                 # Add the managed job to job queue database.
+                user_id = managed_job.user_id if managed_job.HasField(
+                    'user_id') else None
                 managed_job_state.set_job_info(job_id, managed_job.name,
                                                managed_job.workspace,
                                                managed_job.entrypoint, pool,
-                                               pool_hash)
+                                               pool_hash, user_id)
                 # Set the managed job to PENDING state to make sure that
                 # this managed job appears in the `sky jobs queue`, even
                 # if it needs to wait to be submitted.
@@ -406,17 +408,17 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
     ) -> managed_jobsv1_pb2.GetJobTableResponse:
         try:
             accessible_workspaces = list(request.accessible_workspaces)
-            job_ids = list(request.job_ids.ids) if request.job_ids else None
+            job_ids = (list(request.job_ids.ids)
+                       if request.HasField('job_ids') else None)
             user_hashes: Optional[List[Optional[str]]] = None
-            if request.user_hashes:
+            if request.HasField('user_hashes'):
                 user_hashes = list(request.user_hashes.hashes)
                 # For backwards compatibility, we show jobs that do not have a
                 # user_hash. TODO: Remove before 0.12.0.
                 if request.show_jobs_without_user_hash:
                     user_hashes.append(None)
-            statuses = list(
-                request.statuses.statuses) if request.statuses else None
-
+            statuses = (list(request.statuses.statuses)
+                        if request.HasField('statuses') else None)
             job_queue = managed_job_utils.get_managed_job_queue(
                 skip_finished=request.skip_finished,
                 accessible_workspaces=accessible_workspaces,

@@ -21,6 +21,8 @@ from sky.utils import subprocess_utils
 StreamHandler = Callable[[IO[Any], IO[Any]], str]
 PASSTHROUGH_FLUSH_INTERVAL_SECONDS = 1.0
 
+logger = sky_logging.init_logger(__name__)
+
 
 # TODO(aylei): call hijack_sys_attrs() proactivly in module init at server-side
 # once we have context widely adopted.

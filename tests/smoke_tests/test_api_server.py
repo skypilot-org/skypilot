@@ -1,10 +1,11 @@
 import os
+import pathlib
 import subprocess
 import sys
 import tempfile
 import threading
 import time
-from typing import Dict, List, Optional, Tuple, TypeVar
+from typing import Dict, Generator, List, Optional, Tuple, TypeVar
 
 import pytest
 from smoke_tests import metrics_utils
@@ -12,9 +13,11 @@ from smoke_tests import smoke_tests_utils
 
 import sky
 from sky import jobs
+from sky import skypilot_config
 from sky.client import common as client_common
 from sky.server import common as server_common
 from sky.skylet import constants
+from sky.utils import context
 
 T = TypeVar('T')
 
@@ -356,8 +359,12 @@ def test_managed_jobs_force_disable_cloud_bucket(generic_cloud: str):
 
 
 def test_big_file_upload_memory_usage(generic_cloud: str):
-    if not smoke_tests_utils.is_remote_server_test():
-        pytest.skip('This test is only for remote server')
+    # TODO(kevin): Re-enable this once we have a standardized way to expose /metrics
+    # on the non-docker remote API servers used for smoke tests.
+    if not smoke_tests_utils.is_docker_remote_api_server():
+        pytest.skip(
+            'This test is only for remote server setup with setup_docker_container fixture'
+        )
 
     def compare_rss_metrics(baseline: Dict[Tuple[str, ...], List[Tuple[float,
                                                                        float]]],
@@ -479,7 +486,7 @@ def test_api_server_start_stop(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
 
     test = smoke_tests_utils.Test(
-        'test_managed_jobs_force_disable_cloud_bucket',
+        'test_api_server_start_stop',
         [
             # To avoid interference with other tests, we launch a separate API server for this test.
             f'sky launch -n {name} --cloud {generic_cloud} tests/test_yamls/apiserver-start-stop.yaml -y {smoke_tests_utils.LOW_RESOURCE_ARG}'
@@ -512,6 +519,12 @@ def test_tail_jobs_logs_blocks_ssh(generic_cloud: str):
 
     threads = [None for _ in range(num_threads)]
     try:
+        # Stop and start the api server to start an server without deployment mode,
+        # so that there is only one server process that can be easier to block.
+        cmd_one = subprocess.Popen(['sky api stop'], shell=True)
+        cmd_one.wait(timeout=timeout)
+        cmd_two = subprocess.Popen(['sky api start'], shell=True)
+        cmd_two.wait(timeout=timeout)
         # Launch cluster, use the command line because the sdk doesn't
         # lead to websocket_proxy.
         print("Launching cluster...")
@@ -535,7 +548,7 @@ def test_tail_jobs_logs_blocks_ssh(generic_cloud: str):
         # Wait for the job to start.
         def is_job_started(job_id: int):
             req_id = jobs.queue(refresh=True, job_ids=[job_id])
-            job_records = sky.stream_and_get(req_id)
+            job_records = sky.stream_and_get(req_id)[0]
             assert len(job_records) == 1
             return job_records[0]['status'] == sky.ManagedJobStatus.RUNNING
 
@@ -599,4 +612,101 @@ def test_tail_jobs_logs_blocks_ssh(generic_cloud: str):
 
         # Join threads.
         for thread in threads:
-            thread.join()
+            if thread:
+                thread.join()
+
+
+# TODO(aylei): support running this test on remote server.
+# The test infra will use a dedicated API server for each case when remote server is not used.
+# TODO(aylei): this assumption does not hold when running this test locally, should figure
+# a better way to isolate this test.
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency  # We can't restart the api server in the dependency test.
+def test_high_logs_concurrency_not_blocking_operations(generic_cloud: str,
+                                                       tmp_path: pathlib.Path):
+    """Test that high logs concurrency does not block other operations."""
+    name = smoke_tests_utils.get_cluster_name()
+
+    tail_log_threads: List[threading.Thread] = []
+
+    def tail_log_thread(idx: int):
+        try:
+            context.initialize()
+            ctx = context.get()
+            log_file = tmp_path / f'log_{idx}.txt'
+            log_file.touch()
+            origin = ctx.redirect_log(log_file)
+            sky.tail_logs(cluster_name=name, job_id=None, follow=True)
+            ctx.redirect_log(origin)
+        except Exception as e:  # pylint: disable=broad-except
+            print(f'Error in tail log thread {idx}: {e}')
+
+    def start_tail_logs() -> Generator[str, None, None]:
+        yield f'Starting tail log threads, log path: {tmp_path}'
+        # Probe we can start log tail first to fail fast on exceptional case
+        sky.tail_logs(cluster_name=name, job_id=None, follow=False, tail=10)
+        # We expect a single server process will still be responsive even the logs requests
+        # rate exceeds its capability.
+        # Note that we have to use SDK here to avoid the overhead of too much CLI processes
+        # which makes the test flaky.
+        tmp_path.mkdir(exist_ok=True)
+        for i in range(196):
+            thread = threading.Thread(target=tail_log_thread,
+                                      args=(i,),
+                                      daemon=True)
+            tail_log_threads.append(thread)
+            thread.start()
+
+    def expect_enough_concurrent_logs() -> Generator[str, None, None]:
+        start = time.time()
+        # Expect the API server support enough concurrent logs requests
+        # within a reasonable time.
+        expected_count = 128
+        while time.time() - start < 120:
+            count = 0
+            for req in sky.api_status(limit=None):
+                if 'logs' in req.name and req.status == 'RUNNING':
+                    count += 1
+            if count >= expected_count:
+                return
+            yield f'Wait enough concurrent logs requests: {count}/{expected_count}'
+            time.sleep(5)
+        raise Exception('Enough concurrent logs requests are not supported')
+
+    test = smoke_tests_utils.Test(
+        'test_high_logs_concurrency_not_blocking_operations',
+        [
+            # Stop and start the api server in non-deployment mode, so that there is only
+            # one server process that can be easier to block.
+            'sky api stop; sky api start',
+            f'sky launch -c {name} --cloud {generic_cloud} \'for i in {{1..102400}}; do echo "Repeat $i"; sleep 1; done\' -y {smoke_tests_utils.LOW_RESOURCE_ARG} --async',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+            start_tail_logs,
+            expect_enough_concurrent_logs,
+            f'sky launch -c {name}-another --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --async',
+            f'sky jobs launch -n {name}-job "echo hello" --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --async',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name + '-another',
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}-job',
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+            # Cancel all requests.
+            'sky api cancel -yu',
+            # print all non-completed requests for debugging
+            'sky api status',
+            f'sky down -y {name}',
+            f'sky down -y {name}-another',
+        ],
+        (f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api stop && '
+         f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api start; '
+         f'sky down -y {name} || true; sky down -y {name}-another || true; '
+         f'sky jobs cancel -n {name}-job -y || true;'),
+    )
+    smoke_tests_utils.run_one_test(test)

@@ -17,7 +17,6 @@ import time
 import typing
 from typing import (Any, Callable, cast, Dict, Generic, Literal, Optional,
                     Tuple, TypeVar, Union)
-from urllib import parse
 import uuid
 
 import cachetools
@@ -342,18 +341,7 @@ def get_server_url(host: Optional[str] = None) -> str:
 @annotations.lru_cache(scope='global')
 def get_dashboard_url(server_url: str,
                       starting_page: Optional[str] = None) -> str:
-    # The server_url may include username or password with the
-    # format of https://username:password@example.com:8080/path
-    # We need to remove the username and password and only
-    # return `https://example.com:8080/path`
-    parsed = parse.urlparse(server_url)
-    # Reconstruct the URL without credentials but keeping the scheme
-    dashboard_url = f'{parsed.scheme}://{parsed.hostname}'
-    if parsed.port:
-        dashboard_url = f'{dashboard_url}:{parsed.port}'
-    if parsed.path:
-        dashboard_url = f'{dashboard_url}{parsed.path}'
-    dashboard_url = dashboard_url.rstrip('/')
+    dashboard_url = server_url.rstrip('/')
     dashboard_url = f'{dashboard_url}/dashboard'
     if starting_page:
         dashboard_url = f'{dashboard_url}/{starting_page}'
@@ -490,6 +478,7 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
 def handle_request_error(response: 'requests.Response') -> None:
     # Keep the original HTTPError if the response code >= 400
     response.raise_for_status()
+
     # Other status codes are not expected neither, e.g. we do not expect to
     # handle redirection here.
     if response.status_code != 200:
@@ -916,12 +905,18 @@ def reload_for_new_request(client_entrypoint: Optional[str],
                            client_command: Optional[str],
                            using_remote_api_server: bool, user: 'models.User',
                            request_id: str) -> None:
-    """Reload modules, global variables, and usage message for a new request."""
+    """Reload modules, global variables, and usage message for a new request.
+
+    Must be called within the request's context.
+    """
     # This should be called first to make sure the logger is up-to-date.
     sky_logging.reload_logger()
 
     # Reload the skypilot config to make sure the latest config is used.
-    skypilot_config.safe_reload_config()
+    # We don't need to grab the lock here because this function is only
+    # run once we are inside the request's context, so there shouldn't
+    # be any race conditions when reloading the config.
+    skypilot_config.reload_config()
 
     # Reset the client entrypoint and command for the usage message.
     common_utils.set_request_context(

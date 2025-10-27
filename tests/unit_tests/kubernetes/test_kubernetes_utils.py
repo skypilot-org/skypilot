@@ -429,7 +429,7 @@ def test_detect_gpu_label_formatter_ignores_empty_labels():
 
 
 # pylint: disable=line-too-long
-def test_heterogenous_gpu_detection_key_counts():
+def test_heterogenous_gpu_detection():
     """Tests that a heterogenous gpu cluster with empty
     labels are correctly processed."""
 
@@ -438,11 +438,11 @@ def test_heterogenous_gpu_detection_key_counts():
     mock_node1.metadata.labels = {
         'cloud.google.com/gke-accelerator': 'nvidia-h100-80gb',
         'gpu.nvidia.com/class': 'nvidia-h100-80gb',
-        'gpu.nvidia.com/count': '1',
+        'gpu.nvidia.com/count': '2',
         'gpu.nvidia.com/model': 'nvidia-h100-80gb',
         'gpu.nvidia.com/vram': '81'
     }
-    mock_node1.status.allocatable = {'nvidia.com/gpu': '1'}
+    mock_node1.status.allocatable = {'nvidia.com/gpu': '2'}
 
     mock_node2 = mock.MagicMock()
     mock_node2.metadata.name = 'node2'
@@ -478,6 +478,7 @@ def test_heterogenous_gpu_detection_key_counts():
         assert (set(counts.keys()) == set(capacity.keys()) == set(available.keys())), \
             (f'Keys of counts ({list(counts.keys())}), capacity ({list(capacity.keys())}), '
              f'and available ({list(available.keys())}) must be the same.')
+        assert available == {'H100': 1}
 
 
 def test_low_priority_pod_filtering():
@@ -1038,6 +1039,26 @@ spec:
 '''
 
         self._check_pod_config(comprehensive_pod_config, True)
+
+
+def test_parse_cpu_or_gpu_resource_to_float():
+    """Test parse_cpu_or_gpu_resource_to_float function."""
+    # Test with millicore values (ending with 'm')
+    assert utils.parse_cpu_or_gpu_resource_to_float('500m') == 0.5
+    assert utils.parse_cpu_or_gpu_resource_to_float('1000m') == 1.0
+    assert utils.parse_cpu_or_gpu_resource_to_float('250m') == 0.25
+    assert utils.parse_cpu_or_gpu_resource_to_float('1m') == 0.001
+    assert utils.parse_cpu_or_gpu_resource_to_float('0m') == 0.0
+
+    # Test with whole number values (no 'm' suffix)
+    assert utils.parse_cpu_or_gpu_resource_to_float('1') == 1.0
+    assert utils.parse_cpu_or_gpu_resource_to_float('2') == 2.0
+    assert utils.parse_cpu_or_gpu_resource_to_float('0') == 0.0
+    assert utils.parse_cpu_or_gpu_resource_to_float('4.5') == 4.5
+    assert utils.parse_cpu_or_gpu_resource_to_float('0.5') == 0.5
+
+    # Test edge cases
+    assert utils.parse_cpu_or_gpu_resource_to_float('') == 0.0  # Empty string
 
 
 def test_coreweave_autoscaler():
