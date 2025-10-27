@@ -325,8 +325,15 @@ spec:
       - name: logrotate
         image: {{ .Values.apiService.image }}
         command: ["/bin/sh", "-c"]
+        # Warn if logrotate is missing in the image and keep the sidecar running
         args:
         - |
+          if ! command -v logrotate >/dev/null 2>&1; then
+            echo "warning: logrotate not found; skipping log retention" >&2
+            while true; do
+              sleep 3600
+            done
+          fi
           set -x
           cat > /etc/logrotate.conf <<EOF
           /root/.sky/api_server/server.log {
