@@ -1488,6 +1488,10 @@ Default: see the yaml below.
           service.beta.kubernetes.io/port_443_health-probe_protocol: "TCP"
           service.beta.kubernetes.io/port_80_health-probe_protocol: "TCP"
       config:
+        # Enable gzip compression for API responses
+        use-gzip: "true"
+        gzip-level: 5
+        gzip-min-length: 1000
         # Custom HTTP snippet to inject into the ingress-nginx configuration.
         http-snippet: |
           map $http_upgrade $connection_upgrade {

@@ -10,6 +10,7 @@ import sky
 from sky import sky_logging
 from sky.schemas.generated import autostopv1_pb2_grpc
 from sky.schemas.generated import jobsv1_pb2_grpc
+from sky.schemas.generated import managed_jobsv1_pb2_grpc
 from sky.schemas.generated import servev1_pb2_grpc
 from sky.skylet import constants
 from sky.skylet import events
@@ -55,6 +56,8 @@ def start_grpc_server(port: int = constants.SKYLET_GRPC_PORT) -> grpc.Server:
         services.JobsServiceImpl(), server)
     servev1_pb2_grpc.add_ServeServiceServicer_to_server(
         services.ServeServiceImpl(), server)
+    managed_jobsv1_pb2_grpc.add_ManagedJobsServiceServicer_to_server(
+        services.ManagedJobsServiceImpl(), server)
 
     listen_addr = f'127.0.0.1:{port}'
     server.add_insecure_port(listen_addr)
@@ -67,6 +70,9 @@ def start_grpc_server(port: int = constants.SKYLET_GRPC_PORT) -> grpc.Server:
 
 def run_event_loop():
     """Run the existing event loop."""
+
+    for event in EVENTS:
+        event.start()
 
     while True:
         time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)

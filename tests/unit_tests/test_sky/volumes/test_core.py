@@ -453,6 +453,8 @@ class TestVolumeCore:
         mock_cloud.max_cluster_name_length.return_value = 63
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
+        mock_cloud.validate_region_zone.return_value = ('us-east-1',
+                                                        'us-east-1a')
         monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
                             mock_cloud_registry)
 
@@ -508,6 +510,8 @@ class TestVolumeCore:
         mock_cloud.max_cluster_name_length.return_value = 63
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
+        mock_cloud.validate_region_zone.return_value = ('us-east-1',
+                                                        'us-east-1a')
         monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
                             mock_cloud_registry)
 
@@ -547,6 +551,8 @@ class TestVolumeCore:
         mock_cloud.max_cluster_name_length.return_value = 63
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
+        mock_cloud.validate_region_zone.return_value = ('us-east-1',
+                                                        'us-east-1a')
         monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
                             mock_cloud_registry)
 

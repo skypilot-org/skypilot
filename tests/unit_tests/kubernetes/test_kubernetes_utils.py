@@ -2,6 +2,7 @@
 
 """
 
+import collections
 import os
 import tempfile
 from typing import Optional
@@ -32,23 +33,23 @@ def test_get_kubernetes_nodes():
 def test_get_kubernetes_node_info():
     """Tests get_kubernetes_node_info function."""
     # Mock node and pod objects
-    mock_node_1 = mock.MagicMock()
-    mock_node_1.metadata.name = 'node-1'
-    mock_node_1.metadata.labels = {
+    mock_gpu_node_1 = mock.MagicMock()
+    mock_gpu_node_1.metadata.name = 'node-1'
+    mock_gpu_node_1.metadata.labels = {
         'skypilot.co/accelerator': 'a100-80gb',
         'cloud.google.com/gke-accelerator-count': '4'
     }
-    mock_node_1.status.allocatable = {'nvidia.com/gpu': '4'}
+    mock_gpu_node_1.status.allocatable = {'nvidia.com/gpu': '4'}
 
-    mock_node_2 = mock.MagicMock()
-    mock_node_2.metadata.name = 'node-2'
-    mock_node_2.metadata.labels = {
+    mock_gpu_node_2 = mock.MagicMock()
+    mock_gpu_node_2.metadata.name = 'node-2'
+    mock_gpu_node_2.metadata.labels = {
         'skypilot.co/accelerator': 'tpu-v4-podslice',
         'cloud.google.com/gke-accelerator-count': '8',
         'cloud.google.com/gke-tpu-accelerator': 'tpu-v4-podslice',
         'cloud.google.com/gke-tpu-topology': '2x4'
     }
-    mock_node_2.status.allocatable = {'google.com/tpu': '8'}
+    mock_gpu_node_2.status.allocatable = {'google.com/tpu': '8'}
 
     mock_pod_1 = mock.MagicMock()
     mock_pod_1.spec.node_name = 'node-1'
@@ -68,10 +69,10 @@ def test_get_kubernetes_node_info():
 
     # Test case 1: Normal operation with GPU and TPU nodes
     with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
-                   return_value=[mock_node_1, mock_node_2]), \
+                   return_value=[mock_gpu_node_1, mock_gpu_node_2]), \
          mock.patch('sky.provision.kubernetes.utils.'
-                   'get_all_pods_in_kubernetes_cluster',
-                   return_value=[mock_pod_1, mock_pod_2]), \
+                   'get_allocated_gpu_qty_by_node',
+                   return_value={mock_gpu_node_1.metadata.name: 2, mock_gpu_node_2.metadata.name: 4}), \
          mock.patch('sky.provision.kubernetes.utils.get_gpu_resource_key',
                     return_value='nvidia.com/gpu'):
         node_info = utils.get_kubernetes_node_info()
@@ -92,9 +93,9 @@ def test_get_kubernetes_node_info():
 
     # Test case 2: No permission to list pods
     with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
-                   return_value=[mock_node_1, mock_node_2]), \
+                   return_value=[mock_gpu_node_1, mock_gpu_node_2]), \
          mock.patch('sky.provision.kubernetes.utils.'
-                   'get_all_pods_in_kubernetes_cluster',
+                   'get_allocated_gpu_qty_by_node',
                    side_effect=utils.kubernetes.kubernetes.client.ApiException(
                        status=403)):
         node_info = utils.get_kubernetes_node_info()
@@ -106,22 +107,22 @@ def test_get_kubernetes_node_info():
             'accelerators_available'] == -1
 
     # Test case 3: Multi-host TPU node
-    mock_node_3 = mock.MagicMock()
-    mock_node_3.metadata.name = 'node-3'
-    mock_node_3.metadata.labels = {
+    mock_tpu_node_1 = mock.MagicMock()
+    mock_tpu_node_1.metadata.name = 'node-3'
+    mock_tpu_node_1.metadata.labels = {
         'skypilot.co/accelerator': 'tpu-v4-podslice',
         'cloud.google.com/gke-accelerator-count': '4',
         'cloud.google.com/gke-tpu-accelerator': 'tpu-v4-podslice',
         'cloud.google.com/gke-tpu-topology': '4x4',
         'cloud.google.com/gke-tpu-node-pool-type': 'multi-host'
     }
-    mock_node_3.status.allocatable = {'google.com/tpu': '4'}
+    mock_tpu_node_1.status.allocatable = {'google.com/tpu': '4'}
 
     with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
-                   return_value=[mock_node_1, mock_node_3]), \
+                   return_value=[mock_gpu_node_1, mock_tpu_node_1]), \
          mock.patch('sky.provision.kubernetes.utils.'
-                   'get_all_pods_in_kubernetes_cluster',
-                   return_value=[mock_pod_1]):
+                   'get_allocated_gpu_qty_by_node',
+                   return_value=collections.defaultdict(int, {mock_gpu_node_1.metadata.name: 2})):
         node_info = utils.get_kubernetes_node_info()
         assert isinstance(node_info, models.KubernetesNodesInfo)
         # Multi-host TPU node should be excluded
@@ -133,12 +134,71 @@ def test_get_kubernetes_node_info():
     with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
                    return_value=[]), \
          mock.patch('sky.provision.kubernetes.utils.'
-                   'get_all_pods_in_kubernetes_cluster',
+                   'get_allocated_gpu_qty_by_node',
                    return_value=[]):
         node_info = utils.get_kubernetes_node_info()
         assert isinstance(node_info, models.KubernetesNodesInfo)
         assert len(node_info.node_info_dict) == 0
         assert node_info.hint == ''
+
+    # Test case 5: CPU-only nodes
+    mock_cpu_node_1 = mock.MagicMock()
+    mock_cpu_node_1.metadata.name = 'node-4'
+    mock_cpu_node_1.metadata.labels = {}
+    mock_cpu_node_1.status.allocatable = {'cpu': '4', 'memory': '16Gi'}
+    mock_cpu_node_1.status.addresses = [
+        mock.MagicMock(type='InternalIP', address='10.0.0.1')
+    ]
+
+    mock_cpu_node_2 = mock.MagicMock()
+    mock_cpu_node_2.metadata.name = 'node-5'
+    mock_cpu_node_2.metadata.labels = {}
+    mock_cpu_node_2.status.allocatable = {'cpu': '8', 'memory': '32Gi'}
+    mock_cpu_node_2.status.addresses = [
+        mock.MagicMock(type='InternalIP', address='10.0.0.2')
+    ]
+
+    with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                   return_value=[mock_cpu_node_1, mock_cpu_node_2]), \
+         mock.patch('sky.provision.kubernetes.utils.'
+                   'get_allocated_gpu_qty_by_node') as mock_get_allocated_gpu_qty_by_node:
+        node_info = utils.get_kubernetes_node_info()
+
+        mock_get_allocated_gpu_qty_by_node.assert_not_called()
+        assert isinstance(node_info, models.KubernetesNodesInfo)
+        assert len(node_info.node_info_dict) == 2
+        assert node_info.node_info_dict['node-4'].accelerator_type is None
+        assert node_info.node_info_dict['node-4'].total[
+            'accelerator_count'] == 0
+        assert node_info.node_info_dict['node-4'].free[
+            'accelerators_available'] == 0
+        assert node_info.node_info_dict['node-5'].total[
+            'accelerator_count'] == 0
+        assert node_info.node_info_dict['node-5'].free[
+            'accelerators_available'] == 0
+
+    # Test case 6: Mixed CPU and GPU nodes
+    with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                   return_value=[mock_cpu_node_1, mock_gpu_node_1]), \
+         mock.patch('sky.provision.kubernetes.utils.'
+                   'get_allocated_gpu_qty_by_node',
+                   return_value={mock_gpu_node_1.metadata.name: 2}) as mock_get_allocated_gpu_qty_by_node, \
+         mock.patch('sky.provision.kubernetes.utils.get_gpu_resource_key',
+                   return_value='nvidia.com/gpu'):
+        node_info = utils.get_kubernetes_node_info()
+
+        mock_get_allocated_gpu_qty_by_node.assert_called_once()
+        assert len(node_info.node_info_dict) == 2
+        # CPU node should have 0 accelerators
+        assert node_info.node_info_dict['node-4'].total[
+            'accelerator_count'] == 0
+        assert node_info.node_info_dict['node-4'].free[
+            'accelerators_available'] == 0
+        # GPU node should have correct allocation
+        assert node_info.node_info_dict['node-1'].total[
+            'accelerator_count'] == 4
+        assert node_info.node_info_dict['node-1'].free[
+            'accelerators_available'] == 2
 
 
 def test_get_all_kube_context_names():
@@ -369,7 +429,7 @@ def test_detect_gpu_label_formatter_ignores_empty_labels():
 
 
 # pylint: disable=line-too-long
-def test_heterogenous_gpu_detection_key_counts():
+def test_heterogenous_gpu_detection():
     """Tests that a heterogenous gpu cluster with empty
     labels are correctly processed."""
 
@@ -378,11 +438,11 @@ def test_heterogenous_gpu_detection_key_counts():
     mock_node1.metadata.labels = {
         'cloud.google.com/gke-accelerator': 'nvidia-h100-80gb',
         'gpu.nvidia.com/class': 'nvidia-h100-80gb',
-        'gpu.nvidia.com/count': '1',
+        'gpu.nvidia.com/count': '2',
         'gpu.nvidia.com/model': 'nvidia-h100-80gb',
         'gpu.nvidia.com/vram': '81'
     }
-    mock_node1.status.allocatable = {'nvidia.com/gpu': '1'}
+    mock_node1.status.allocatable = {'nvidia.com/gpu': '2'}
 
     mock_node2 = mock.MagicMock()
     mock_node2.metadata.name = 'node2'
@@ -410,7 +470,7 @@ def test_heterogenous_gpu_detection_key_counts():
          mock.patch('sky.provision.kubernetes.utils.detect_accelerator_resource', return_value=True), \
          mock.patch('sky.provision.kubernetes.utils.detect_gpu_label_formatter', return_value=[utils.GKELabelFormatter(), None]), \
          mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes', return_value=[mock_node1, mock_node2]), \
-         mock.patch('sky.provision.kubernetes.utils.get_all_pods_in_kubernetes_cluster', return_value=[mock_pod1, mock_pod2]), \
+         mock.patch('sky.provision.kubernetes.utils.get_allocated_gpu_qty_by_node', return_value={mock_node1.metadata.name: 1, mock_node2.metadata.name: 0}), \
          mock.patch('sky.provision.kubernetes.utils.get_gpu_resource_key', return_value='nvidia.com/gpu'):
 
         counts, capacity, available = kubernetes_catalog.list_accelerators_realtime(
@@ -418,6 +478,7 @@ def test_heterogenous_gpu_detection_key_counts():
         assert (set(counts.keys()) == set(capacity.keys()) == set(available.keys())), \
             (f'Keys of counts ({list(counts.keys())}), capacity ({list(capacity.keys())}), '
              f'and available ({list(available.keys())}) must be the same.')
+        assert available == {'H100': 1}
 
 
 def test_low_priority_pod_filtering():
@@ -460,8 +521,8 @@ def test_low_priority_pod_filtering():
     with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
                    return_value=[mock_node]), \
          mock.patch('sky.provision.kubernetes.utils.'
-                   'get_all_pods_in_kubernetes_cluster',
-                   return_value=[mock_regular_pod, mock_low_priority_pod]), \
+                   'get_allocated_gpu_qty_by_node',
+                   return_value={mock_node.metadata.name: 2}), \
          mock.patch('sky.provision.kubernetes.utils.get_gpu_resource_key',
                     return_value='nvidia.com/gpu'):
 
@@ -978,6 +1039,26 @@ spec:
 '''
 
         self._check_pod_config(comprehensive_pod_config, True)
+
+
+def test_parse_cpu_or_gpu_resource_to_float():
+    """Test parse_cpu_or_gpu_resource_to_float function."""
+    # Test with millicore values (ending with 'm')
+    assert utils.parse_cpu_or_gpu_resource_to_float('500m') == 0.5
+    assert utils.parse_cpu_or_gpu_resource_to_float('1000m') == 1.0
+    assert utils.parse_cpu_or_gpu_resource_to_float('250m') == 0.25
+    assert utils.parse_cpu_or_gpu_resource_to_float('1m') == 0.001
+    assert utils.parse_cpu_or_gpu_resource_to_float('0m') == 0.0
+
+    # Test with whole number values (no 'm' suffix)
+    assert utils.parse_cpu_or_gpu_resource_to_float('1') == 1.0
+    assert utils.parse_cpu_or_gpu_resource_to_float('2') == 2.0
+    assert utils.parse_cpu_or_gpu_resource_to_float('0') == 0.0
+    assert utils.parse_cpu_or_gpu_resource_to_float('4.5') == 4.5
+    assert utils.parse_cpu_or_gpu_resource_to_float('0.5') == 0.5
+
+    # Test edge cases
+    assert utils.parse_cpu_or_gpu_resource_to_float('') == 0.0  # Empty string
 
 
 def test_coreweave_autoscaler():

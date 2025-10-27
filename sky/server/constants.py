@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 19
+API_VERSION = 21
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -64,3 +64,7 @@ DAEMON_RESTART_INTERVAL_SECONDS = 20
 
 # Cookie header for stream request id.
 STREAM_REQUEST_HEADER = 'X-SkyPilot-Stream-Request-ID'
+
+# Valid empty values for pickled fields (base64-encoded pickled None)
+# base64.b64encode(pickle.dumps(None)).decode('utf-8')
+EMPTY_PICKLED_VALUE = 'gAROLg=='

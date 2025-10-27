@@ -363,9 +363,10 @@ class CancelBody(RequestBody):
         return kwargs
 
 
-class ClusterNameBody(RequestBody):
+class ProvisionLogsBody(RequestBody):
     """Cluster node."""
     cluster_name: str
+    worker: Optional[int] = None
 
 
 class ClusterJobBody(RequestBody):
@@ -478,6 +479,17 @@ class VolumeListBody(RequestBody):
     pass
 
 
+class VolumeValidateBody(RequestBody):
+    """The request body for the volume validate endpoint."""
+    name: Optional[str] = None
+    volume_type: Optional[str] = None
+    infra: Optional[str] = None
+    size: Optional[str] = None
+    labels: Optional[Dict[str, str]] = None
+    resource_name: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
+
+
 class EndpointsBody(RequestBody):
     """The request body for the endpoint."""
     cluster: str
@@ -530,6 +542,9 @@ class JobsQueueV2Body(RequestBody):
     page: Optional[int] = None
     limit: Optional[int] = None
     statuses: Optional[List[str]] = None
+    # The fields to return in the response.
+    # Refer to the fields in the `class ManagedJobRecord` in `response.py`
+    fields: Optional[List[str]] = None
 
 
 class JobsCancelBody(RequestBody):
@@ -562,6 +577,8 @@ class RequestStatusBody(pydantic.BaseModel):
     """The request body for the API request status endpoint."""
     request_ids: Optional[List[str]] = None
     all_status: bool = False
+    limit: Optional[int] = None
+    fields: Optional[List[str]] = None
 
 
 class ServeUpBody(RequestBody):
@@ -673,6 +690,13 @@ class LocalUpBody(RequestBody):
     cleanup: bool = False
     context_name: Optional[str] = None
     password: Optional[str] = None
+    name: Optional[str] = None
+    port_start: Optional[int] = None
+
+
+class LocalDownBody(RequestBody):
+    """The request body for the local down endpoint."""
+    name: Optional[str] = None
 
 
 class SSHUpBody(RequestBody):

@@ -309,22 +309,7 @@ export function InfrastructureSection({
                                 <CircularProgress size={16} />
                               </div>
                             ) : (
-                              <span
-                                className={
-                                  totalGpus === 0 && nodes.length === 0
-                                    ? 'text-gray-400'
-                                    : ''
-                                }
-                                title={
-                                  totalGpus === 0 && nodes.length === 0
-                                    ? 'Context may be unavailable or timed out'
-                                    : ''
-                                }
-                              >
-                                {totalGpus === 0 && nodes.length === 0
-                                  ? '0*'
-                                  : totalGpus}
-                              </span>
+                              totalGpus
                             )}
                           </td>
                         </tr>
@@ -1770,8 +1755,14 @@ export function GPUs() {
   const fetchManagedJobsData = async (forceRefresh) => {
     try {
       const jobsData = forceRefresh
-        ? await getManagedJobs({ allUsers: true })
-        : await dashboardCache.get(getManagedJobs, [{ allUsers: true }]);
+        ? await getManagedJobs({
+            allUsers: true,
+            skipFinished: true,
+            fields: ['cloud', 'region'],
+          })
+        : await dashboardCache.get(getManagedJobs, [
+            { allUsers: true, skipFinished: true, fields: ['cloud', 'region'] },
+          ]);
       const jobs = jobsData?.jobs || [];
       setSshAndKubeJobsData(await getContextJobs(jobs));
       setSshAndKubeJobsDataLoading(false);
@@ -1897,13 +1888,17 @@ export function GPUs() {
     };
 
     initializeData();
-  }, [fetchData]); // Include fetchData dependency
+  }, []);
 
   // Effect for interval refresh.
   useEffect(() => {
     let isCurrent = true;
     const interval = setInterval(() => {
-      if (isCurrent && refreshDataRef.current) {
+      if (
+        isCurrent &&
+        refreshDataRef.current &&
+        window.document.visibilityState === 'visible'
+      ) {
         // Calls the latest fetchData from the ref, with showLoadingIndicators: false
         refreshDataRef.current({ showLoadingIndicators: false });
       }
@@ -1932,7 +1927,9 @@ export function GPUs() {
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getClusters);
-    dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
+    dashboardCache.invalidate(getManagedJobs, [
+      { allUsers: true, skipFinished: true, fields: ['cloud', 'region'] },
+    ]);
     dashboardCache.invalidate(getWorkspaceInfrastructure);
     dashboardCache.invalidate(getCloudInfrastructure, [false]);
     dashboardCache.invalidate(getSSHNodePools);
@@ -2079,14 +2076,21 @@ export function GPUs() {
   const handleContextClick = (context) => {
     setSelectedContext(context);
     // Use push instead of replace for proper browser history
-    router.push(`/infra/${encodeURIComponent(context)}`);
+    const targetPath = `/infra/${encodeURIComponent(context)}`;
+    // Only navigate if we're not already on the target path
+    if (router.asPath !== targetPath) {
+      router.push(targetPath);
+    }
   };
 
   // Handler to go back to main view
   const handleBackClick = () => {
     setSelectedContext(null);
     // Use push instead of replace for proper browser history
-    router.push('/infra');
+    // Only navigate if we're not already on the infra page
+    if (router.asPath !== '/infra') {
+      router.push('/infra');
+    }
   };
 
   // Render context details

@@ -1079,6 +1079,17 @@ function JobDetailsContent({
         </div>
       </div>
       <div>
+        <div className="text-gray-600 font-medium text-base">Workspace</div>
+        <div className="text-base mt-1">
+          <Link
+            href="/workspaces"
+            className="text-gray-700 hover:text-blue-600 hover:underline"
+          >
+            {jobData.workspace || 'default'}
+          </Link>
+        </div>
+      </div>
+      <div>
         <div className="text-gray-600 font-medium text-base">Submitted</div>
         <div className="text-base mt-1">
           {jobData.submitted_at

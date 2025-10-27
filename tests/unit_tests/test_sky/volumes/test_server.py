@@ -20,8 +20,9 @@ class TestVolumeServer:
     def test_volume_list_success(self, monkeypatch):
         """Test volume_list endpoint with successful request."""
         # Mock executor.schedule_request
-        mock_schedule = mock.MagicMock()
-        monkeypatch.setattr(executor, 'schedule_request', mock_schedule)
+        mock_schedule_async = mock.AsyncMock()
+        monkeypatch.setattr(executor, 'schedule_request_async',
+                            mock_schedule_async)
 
         # Create test client
         app = fastapi.FastAPI()
@@ -40,10 +41,10 @@ class TestVolumeServer:
             assert response.status_code == 200
 
             # Verify executor was called correctly
-            mock_schedule.assert_called_once_with(
+            mock_schedule_async.assert_called_once_with(
                 request_id='test-request-id',
                 request_name='volume_list',
-                request_body=payloads.VolumeListBody(),
+                request_body=payloads.RequestBody(),
                 func=server.core.volume_list,
                 schedule_type=requests_lib.ScheduleType.SHORT,
             )
@@ -51,8 +52,9 @@ class TestVolumeServer:
     def test_volume_delete_success(self, monkeypatch):
         """Test volume_delete endpoint with successful request."""
         # Mock executor.schedule_request
-        mock_schedule = mock.MagicMock()
-        monkeypatch.setattr(executor, 'schedule_request', mock_schedule)
+        mock_schedule_async = mock.AsyncMock()
+        monkeypatch.setattr(executor, 'schedule_request_async',
+                            mock_schedule_async)
 
         # Create test client
         app = fastapi.FastAPI()
@@ -73,8 +75,8 @@ class TestVolumeServer:
             assert response.status_code == 200
 
             # Verify executor was called correctly
-            mock_schedule.assert_called_once()
-            call_args = mock_schedule.call_args
+            mock_schedule_async.assert_called_once()
+            call_args = mock_schedule_async.call_args
             assert call_args[1]['request_id'] == 'test-request-id'
             assert call_args[1]['request_name'] == 'volume_delete'
             assert call_args[1]['func'] == server.core.volume_delete
@@ -86,8 +88,9 @@ class TestVolumeServer:
     def test_volume_apply_success_pvc(self, monkeypatch):
         """Test volume_apply endpoint with successful PVC volume creation."""
         # Mock executor.schedule_request
-        mock_schedule = mock.MagicMock()
-        monkeypatch.setattr(executor, 'schedule_request', mock_schedule)
+        mock_schedule_async = mock.AsyncMock()
+        monkeypatch.setattr(executor, 'schedule_request_async',
+                            mock_schedule_async)
 
         # Mock cloud registry
         mock_cloud = mock.MagicMock()
@@ -127,8 +130,8 @@ class TestVolumeServer:
             assert response.status_code == 200
 
             # Verify executor was called correctly
-            mock_schedule.assert_called_once()
-            call_args = mock_schedule.call_args
+            mock_schedule_async.assert_called_once()
+            call_args = mock_schedule_async.call_args
             assert call_args[1]['request_id'] == 'test-request-id'
             assert call_args[1]['request_name'] == 'volume_apply'
             assert call_args[1]['func'] == server.core.volume_apply
@@ -140,8 +143,9 @@ class TestVolumeServer:
     def test_volume_apply_success_pvc_default_access_mode(self, monkeypatch):
         """Test volume_apply endpoint with PVC volume using default access mode."""
         # Mock executor.schedule_request
-        mock_schedule = mock.MagicMock()
-        monkeypatch.setattr(executor, 'schedule_request', mock_schedule)
+        mock_schedule_async = mock.AsyncMock()
+        monkeypatch.setattr(executor, 'schedule_request_async',
+                            mock_schedule_async)
 
         # Mock cloud registry
         mock_cloud = mock.MagicMock()
@@ -179,8 +183,8 @@ class TestVolumeServer:
             assert response.status_code == 200
 
             # Verify executor was called correctly
-            mock_schedule.assert_called_once()
-            call_args = mock_schedule.call_args
+            mock_schedule_async.assert_called_once()
+            call_args = mock_schedule_async.call_args
             assert call_args[1]['request_id'] == 'test-request-id'
             assert call_args[1]['request_name'] == 'volume_apply'
             assert call_args[1]['func'] == server.core.volume_apply
@@ -190,8 +194,9 @@ class TestVolumeServer:
     def test_volume_apply_success_pvc_none_config(self, monkeypatch):
         """Test volume_apply endpoint with PVC volume and None config."""
         # Mock executor.schedule_request
-        mock_schedule = mock.MagicMock()
-        monkeypatch.setattr(executor, 'schedule_request', mock_schedule)
+        mock_schedule_async = mock.AsyncMock()
+        monkeypatch.setattr(executor, 'schedule_request_async',
+                            mock_schedule_async)
 
         # Mock cloud registry
         mock_cloud = mock.MagicMock()
@@ -227,7 +232,7 @@ class TestVolumeServer:
             assert response.status_code == 200
 
             # Verify executor was called correctly
-            mock_schedule.assert_called_once()
+            mock_schedule_async.assert_called_once()
 
     def test_volume_apply_invalid_volume_type(self, monkeypatch):
         """Test volume_apply endpoint with invalid volume type."""
@@ -371,8 +376,9 @@ class TestVolumeServer:
     def test_volume_apply_non_pvc_volume_type(self, monkeypatch):
         """Test volume_apply endpoint with non-PVC volume type."""
         # Mock executor.schedule_request
-        mock_schedule = mock.MagicMock()
-        monkeypatch.setattr(executor, 'schedule_request', mock_schedule)
+        mock_schedule_async = mock.AsyncMock()
+        monkeypatch.setattr(executor, 'schedule_request_async',
+                            mock_schedule_async)
 
         # Mock cloud registry
         mock_cloud = mock.MagicMock()
@@ -412,8 +418,9 @@ class TestVolumeServer:
     def test_volume_delete_empty_volume_names(self, monkeypatch):
         """Test volume_delete endpoint with empty volume names list."""
         # Mock executor.schedule_request
-        mock_schedule = mock.MagicMock()
-        monkeypatch.setattr(executor, 'schedule_request', mock_schedule)
+        mock_schedule_async = mock.AsyncMock()
+        monkeypatch.setattr(executor, 'schedule_request_async',
+                            mock_schedule_async)
 
         # Create test client
         app = fastapi.FastAPI()
@@ -434,8 +441,8 @@ class TestVolumeServer:
             assert response.status_code == 200
 
             # Verify executor was called correctly
-            mock_schedule.assert_called_once()
-            call_args = mock_schedule.call_args
+            mock_schedule_async.assert_called_once()
+            call_args = mock_schedule_async.call_args
             assert call_args[1]['request_id'] == 'test-request-id'
             assert call_args[1]['request_name'] == 'volume_delete'
             assert call_args[1]['func'] == server.core.volume_delete

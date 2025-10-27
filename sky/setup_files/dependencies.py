@@ -48,6 +48,7 @@ install_requires = [
     # (https://github.com/yaml/pyyaml/issues/601)
     # <= 3.13 may encounter https://github.com/ultralytics/yolov5/issues/414
     'pyyaml > 3.13, != 5.4.*',
+    'ijson',
     'requests',
     # SkyPilot inherits from uvicorn.Server to customize the behavior of
     # uvicorn, so we need to pin uvicorn version to avoid potential break
@@ -79,13 +80,12 @@ install_requires = [
     # Required for API server metrics
     'prometheus_client>=0.8.0',
     'passlib',
-    'bcrypt',
+    'bcrypt==4.0.1',
     'pyjwt',
     'gitpython',
     'types-paramiko',
     'alembic',
     'aiohttp',
-    'aiosqlite',
     'anyio',
 ]
 
@@ -103,6 +103,10 @@ GRPC = 'grpcio>=1.63.0'
 PROTOBUF = 'protobuf>=5.26.1, < 7.0.0'
 
 server_dependencies = [
+    # TODO: Some of these dependencies are also specified in install_requires,
+    # so they are redundant here. We should figure out if they are only needed
+    # on the server (should remove from install_requires), or if they are needed
+    # on the client (should remove from here).
     'casbin',
     'sqlalchemy_adapter',
     'passlib',
@@ -147,7 +151,7 @@ aws_dependencies = [
 # a few places.
 AZURE_CLI = 'azure-cli>=2.65.0'
 
-extras_require: Dict[str, List[str]] = {
+cloud_dependencies: Dict[str, List[str]] = {
     'aws': aws_dependencies,
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
     # Tracked in: https://github.com/Azure/azure-cli/issues/7387
@@ -190,10 +194,11 @@ extras_require: Dict[str, List[str]] = {
         'kubernetes>=20.0.0,!=32.0.0', 'websockets', 'python-dateutil'
     ],
     'ssh': ['kubernetes>=20.0.0,!=32.0.0', 'websockets', 'python-dateutil'],
-    'remote': remote,
     # For the container registry auth api. Reference:
     # https://github.com/runpod/runpod-python/releases/tag/1.6.1
-    'runpod': ['runpod>=1.6.1'],
+    # RunPod needs a TOML parser to read ~/.runpod/config.toml. On Python 3.11+
+    # stdlib provides tomllib; on lower versions we depend on tomli explicitly.
+    'runpod': ['runpod>=1.6.1', 'tomli; python_version < "3.11"'],
     'fluidstack': [],  # No dependencies needed for fluidstack
     'cudo': ['cudo-compute>=0.1.10'],
     'paperspace': [],  # No dependencies needed for paperspace
@@ -218,12 +223,11 @@ extras_require: Dict[str, List[str]] = {
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'seeweb': ['ecsapi>=0.2.0'],
-    'server': server_dependencies,
+    'shadeform': [],  # No dependencies needed for shadeform
 }
 
 # Calculate which clouds should be included in the [all] installation.
-clouds_for_all = set(extras_require)
-clouds_for_all.remove('remote')
+clouds_for_all = set(cloud_dependencies)
 
 if sys.version_info < (3, 10):
     # Nebius needs python3.10. If python 3.9 [all] will not install nebius
@@ -238,5 +242,16 @@ if sys.version_info >= (3, 12):
     # TODO: Remove once https://github.com/vast-ai/vast-sdk/pull/6 is released
     clouds_for_all.remove('vast')
 
-extras_require['all'] = list(
-    set().union(*[extras_require[cloud] for cloud in clouds_for_all]))
+cloud_extras = {
+    cloud: dependencies + server_dependencies
+    for cloud, dependencies in cloud_dependencies.items()
+}
+
+extras_require: Dict[str, List[str]] = {
+    # Include server_dependencies with each cloud.
+    **cloud_extras,
+    'all': list(set().union(*[cloud_extras[cloud] for cloud in clouds_for_all])
+               ),
+    'remote': remote,
+    'server': server_dependencies,
+}

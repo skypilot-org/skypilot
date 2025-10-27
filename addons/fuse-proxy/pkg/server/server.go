@@ -89,6 +89,15 @@ func (s *Server) handleConnection(conn net.Conn) {
 		log.Errorf("Failed to receive namespace fd: %v", err)
 		return
 	}
+	// Close fd to avoid holding reference to the mnt namespace, which will
+	// block the ephmeral storage cleanup.
+	defer func() {
+		if err := syscall.Close(nsFd); err != nil {
+			log.Errorf("Failed to close ns fd %d: %v", nsFd, err)
+		} else {
+			log.Infof("Closed ns fd %d", nsFd)
+		}
+	}()
 	if err := json.Unmarshal(msg, req); err != nil {
 		log.Errorf("Failed to unmarshal request: %v", err)
 		return
@@ -152,7 +161,8 @@ func (s *Server) handleFusermount(req *common.Request, nsFd int) (int, error) {
 		return 0, fmt.Errorf("fusermount failed: %w, output: %s", err, string(output))
 	}
 	// For mount operations, we need to transfer the fd back to the caller
-	if !strings.Contains(strings.Join(req.Args, " "), "-u") {
+	isUmount := isUmount(req.Args)
+	if !isUmount {
 		fd, _, err := mfcputil.RecvMsg(socks[0])
 		if err != nil {
 			return 0, fmt.Errorf("failed to receive FD: %w", err)

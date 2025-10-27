@@ -201,6 +201,7 @@ def add_column_to_table_alembic(
     server_default: Optional[str] = None,
     copy_from: Optional[str] = None,
     value_to_replace_existing_entries: Optional[Any] = None,
+    index: Optional[bool] = None,
 ):
     """Add a column to a table using Alembic operations.
 
@@ -215,6 +216,8 @@ def add_column_to_table_alembic(
         copy_from: Column name to copy values from (for existing rows)
         value_to_replace_existing_entries: Default value for existing NULL
             entries
+        index: If True, create an index on this column. If None, no index
+            is created.
     """
     from alembic import op  # pylint: disable=import-outside-toplevel
 
@@ -222,7 +225,8 @@ def add_column_to_table_alembic(
         # Create the column with server_default if provided
         column = sqlalchemy.Column(column_name,
                                    column_type,
-                                   server_default=server_default)
+                                   server_default=server_default,
+                                   index=index)
         op.add_column(table_name, column)
 
         # Handle data migration
@@ -354,6 +358,27 @@ class SQLiteConn(threading.local):
         conn = await self._get_async_conn()
         return await conn.execute_fetchall(sql, parameters)
 
+    async def execute_get_returning_value_async(
+            self,
+            sql: str,
+            parameters: Optional[Iterable[Any]] = None
+    ) -> Optional[sqlite3.Row]:
+        conn = await self._get_async_conn()
+
+        if parameters is None:
+            parameters = []
+
+        def exec_and_get_returning_value(sql: str,
+                                         parameters: Optional[Iterable[Any]]):
+            # pylint: disable=protected-access
+            row = conn._conn.execute(sql, parameters).fetchone()
+            conn._conn.commit()
+            return row
+
+        # pylint: disable=protected-access
+        return await conn._execute(exec_and_get_returning_value, sql,
+                                   parameters)
+
     async def close(self):
         if self._async_conn is not None:
             await self._async_conn.close()
@@ -378,21 +403,28 @@ def get_max_connections():
 
 @typing.overload
 def get_engine(
-        db_name: str,
+        db_name: Optional[str],
         async_engine: Literal[False] = False) -> sqlalchemy.engine.Engine:
     ...
 
 
 @typing.overload
-def get_engine(db_name: str,
+def get_engine(db_name: Optional[str],
                async_engine: Literal[True]) -> sqlalchemy_async.AsyncEngine:
     ...
 
 
 def get_engine(
-    db_name: str,
+    db_name: Optional[str],
     async_engine: bool = False
 ) -> Union[sqlalchemy.engine.Engine, sqlalchemy_async.AsyncEngine]:
+    """Get the engine for the given database name.
+
+    Args:
+        db_name: The name of the database. ONLY used for SQLite. On Postgres,
+        we use a single database, which we get from the connection string.
+        async_engine: Whether to return an async engine.
+    """
     conn_string = None
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
@@ -406,6 +438,8 @@ def get_engine(
                 conn_string, poolclass=sqlalchemy.NullPool)
         with _db_creation_lock:
             if conn_string not in _postgres_engine_cache:
+                logger.debug('Creating a new postgres engine with '
+                             f'maximum {_max_connections} connections')
                 if _max_connections == 0:
                     _postgres_engine_cache[conn_string] = (
                         sqlalchemy.create_engine(
@@ -423,6 +457,7 @@ def get_engine(
                             max_overflow=0))
             engine = _postgres_engine_cache[conn_string]
     else:
+        assert db_name is not None, 'db_name must be provided for SQLite'
         db_path = os.path.expanduser(f'~/.sky/{db_name}.db')
         pathlib.Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
         if async_engine:

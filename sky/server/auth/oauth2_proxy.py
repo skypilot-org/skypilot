@@ -15,7 +15,9 @@ import starlette.middleware.base
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
+from sky.jobs import utils as managed_job_utils
 from sky.server.auth import authn
+from sky.server.auth import loopback
 from sky.users import permission
 from sky.utils import common_utils
 
@@ -108,6 +110,10 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # Already authenticated
             return await call_next(request)
 
+        if managed_job_utils.is_consolidation_mode(
+        ) and loopback.is_loopback_request(request):
+            return await call_next(request)
+
         async with aiohttp.ClientSession() as session:
             try:
                 return await self._authenticate(request, call_next, session)
@@ -120,13 +126,10 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
     async def _authenticate(self, request: fastapi.Request, call_next,
                             session: aiohttp.ClientSession):
-        forwarded_headers = dict(request.headers)
+        forwarded_headers = {}
         auth_url = f'{self.proxy_base}/oauth2/auth'
         forwarded_headers['X-Forwarded-Uri'] = str(request.url).rstrip('/')
-        # Remove content-length and content-type headers and drop request body
-        # to reduce the auth overhead.
-        forwarded_headers.pop('content-length', None)
-        forwarded_headers.pop('content-type', None)
+        forwarded_headers['Host'] = request.url.hostname
         logger.debug(f'authenticate request: {auth_url}, '
                      f'headers: {forwarded_headers}')
 

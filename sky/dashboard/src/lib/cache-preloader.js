@@ -7,7 +7,7 @@ import { getManagedJobsWithClientPagination } from '@/data/connectors/jobs';
 import { getWorkspaces, getEnabledClouds } from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
 import { getVolumes } from '@/data/connectors/volumes';
-import { getGPUs, getCloudInfrastructure } from '@/data/connectors/infra';
+import { getCloudInfrastructure } from '@/data/connectors/infra';
 import { getSSHNodePools } from '@/data/connectors/ssh-node-pools';
 
 /**
@@ -23,7 +23,6 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
     },
     getWorkspaces: { fn: getWorkspaces, args: [] },
     getUsers: { fn: getUsers, args: [] },
-    getGPUs: { fn: getGPUs, args: [] },
     getCloudInfrastructure: {
       fn: getCloudInfrastructure,
       args: [false],
@@ -44,7 +43,6 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
     infra: [
       'getClusters',
       'getManagedJobs',
-      'getGPUs',
       'getCloudInfrastructure',
       'getSSHNodePools',
     ],
