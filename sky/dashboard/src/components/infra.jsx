@@ -56,6 +56,13 @@ import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { NonCapitalizedTooltip } from '@/components/utils';
 import { Card } from '@/components/ui/card';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 // Set the refresh interval to align with other pages
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
@@ -2415,25 +2422,25 @@ export function GPUs() {
           {/* Workspace Selector */}
           {availableWorkspaces.length > 0 && (
             <div className="flex items-center mr-4">
-              <label
-                htmlFor="workspace-selector"
-                className="text-sm font-medium text-gray-700 mr-2"
-              >
+              <label className="text-sm font-medium text-gray-700 mr-2">
                 Workspace:
               </label>
-              <select
-                id="workspace-selector"
+              <Select
                 value={selectedWorkspace}
-                onChange={(e) => setSelectedWorkspace(e.target.value)}
-                className="px-3 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-sky-blue focus:border-transparent"
+                onValueChange={setSelectedWorkspace}
               >
-                <option value="all">All Workspaces</option>
-                {availableWorkspaces.map((workspace) => (
-                  <option key={workspace} value={workspace}>
-                    {workspace}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger className="w-40 h-8 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Workspaces</SelectItem>
+                  {availableWorkspaces.map((workspace) => (
+                    <SelectItem key={workspace} value={workspace}>
+                      {workspace}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           )}
 
