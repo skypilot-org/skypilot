@@ -1594,41 +1594,32 @@ def get_cluster_from_name(
         include_user_info: bool = True,
         summary_response: bool = False) -> Optional[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
+    query_fields = [
+        cluster_table.c.name,
+        cluster_table.c.launched_at,
+        cluster_table.c.handle,
+        cluster_table.c.last_use,
+        cluster_table.c.status,
+        cluster_table.c.autostop,
+        cluster_table.c.to_down,
+        cluster_table.c.owner,
+        cluster_table.c.metadata,
+        cluster_table.c.cluster_hash,
+        cluster_table.c.storage_mounts_metadata,
+        cluster_table.c.cluster_ever_up,
+        cluster_table.c.status_updated_at,
+        cluster_table.c.user_hash,
+        cluster_table.c.config_hash,
+        cluster_table.c.workspace,
+        cluster_table.c.is_managed,
+    ]
+    if not summary_response:
+        query_fields.extend([
+            cluster_table.c.last_creation_yaml,
+            cluster_table.c.last_creation_command,
+        ])
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        if summary_response:
-            query = session.query(
-                cluster_table.c.name, cluster_table.c.launched_at,
-                cluster_table.c.handle, cluster_table.c.last_use,
-                cluster_table.c.status, cluster_table.c.autostop,
-                cluster_table.c.to_down, cluster_table.c.owner,
-                cluster_table.c.metadata, cluster_table.c.cluster_hash,
-                cluster_table.c.storage_mounts_metadata,
-                cluster_table.c.cluster_ever_up,
-                cluster_table.c.status_updated_at, cluster_table.c.user_hash,
-                cluster_table.c.config_hash, cluster_table.c.workspace,
-                cluster_table.c.is_managed)
-        else:
-            query = session.query(
-                cluster_table.c.name,
-                cluster_table.c.launched_at,
-                cluster_table.c.handle,
-                cluster_table.c.last_use,
-                cluster_table.c.status,
-                cluster_table.c.autostop,
-                cluster_table.c.to_down,
-                cluster_table.c.owner,
-                cluster_table.c.metadata,
-                cluster_table.c.cluster_hash,
-                cluster_table.c.storage_mounts_metadata,
-                cluster_table.c.cluster_ever_up,
-                cluster_table.c.status_updated_at,
-                cluster_table.c.user_hash,
-                cluster_table.c.config_hash,
-                cluster_table.c.workspace,
-                cluster_table.c.is_managed,
-                # extra fields compared to above query
-                cluster_table.c.last_creation_yaml,
-                cluster_table.c.last_creation_command)
+        query = session.query(*query_fields)
         row = query.filter_by(name=cluster_name).first()
     if row is None:
         return None
@@ -1709,45 +1700,34 @@ def get_clusters(
     # we treat it as belonging to the current user.
     current_user_hash = common_utils.get_user_hash()
     assert _SQLALCHEMY_ENGINE is not None
+    query_fields = [
+        cluster_table.c.name,
+        cluster_table.c.launched_at,
+        cluster_table.c.handle,
+        cluster_table.c.last_use,
+        cluster_table.c.status,
+        cluster_table.c.autostop,
+        cluster_table.c.to_down,
+        cluster_table.c.owner,
+        cluster_table.c.metadata,
+        cluster_table.c.cluster_hash,
+        cluster_table.c.storage_mounts_metadata,
+        cluster_table.c.cluster_ever_up,
+        cluster_table.c.status_updated_at,
+        cluster_table.c.user_hash,
+        cluster_table.c.config_hash,
+        cluster_table.c.workspace,
+        cluster_table.c.is_managed,
+        user_table.c.name.label('user_name'),
+    ]
+    if not summary_response:
+        query_fields.extend([
+            cluster_table.c.last_creation_yaml,
+            cluster_table.c.last_creation_command,
+        ])
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        if summary_response:
-            query = session.query(
-                cluster_table.c.name, cluster_table.c.launched_at,
-                cluster_table.c.handle, cluster_table.c.last_use,
-                cluster_table.c.status, cluster_table.c.autostop,
-                cluster_table.c.to_down, cluster_table.c.owner,
-                cluster_table.c.metadata, cluster_table.c.cluster_hash,
-                cluster_table.c.storage_mounts_metadata,
-                cluster_table.c.cluster_ever_up,
-                cluster_table.c.status_updated_at, cluster_table.c.user_hash,
-                cluster_table.c.config_hash,
-                cluster_table.c.workspace, cluster_table.c.is_managed,
-                user_table.c.name.label('user_name')).outerjoin(
-                    user_table, cluster_table.c.user_hash == user_table.c.id)
-        else:
-            query = session.query(
-                cluster_table.c.name,
-                cluster_table.c.launched_at,
-                cluster_table.c.handle,
-                cluster_table.c.last_use,
-                cluster_table.c.status,
-                cluster_table.c.autostop,
-                cluster_table.c.to_down,
-                cluster_table.c.owner,
-                cluster_table.c.metadata,
-                cluster_table.c.cluster_hash,
-                cluster_table.c.storage_mounts_metadata,
-                cluster_table.c.cluster_ever_up,
-                cluster_table.c.status_updated_at,
-                cluster_table.c.user_hash,
-                cluster_table.c.config_hash,
-                cluster_table.c.workspace,
-                cluster_table.c.is_managed,
-                # extra fields compared to above query
-                cluster_table.c.last_creation_yaml,
-                cluster_table.c.last_creation_command,
-                user_table.c.name.label('user_name')).outerjoin(
-                    user_table, cluster_table.c.user_hash == user_table.c.id)
+        query = session.query(*query_fields).outerjoin(
+            user_table, cluster_table.c.user_hash == user_table.c.id)
         if exclude_managed_clusters:
             query = query.filter(cluster_table.c.is_managed == int(False))
         if workspaces_filter is not None:
