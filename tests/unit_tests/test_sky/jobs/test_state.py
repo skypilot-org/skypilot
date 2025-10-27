@@ -154,10 +154,12 @@ async def test_get_task_logs_to_clean_async_basic(_mock_managed_jobs_db_conn):
         logs_cleaned_at=None,
     )
 
+    state.scheduler_set_done(job_id)
+
     res = await state.get_task_logs_to_clean_async(retention, batch_size=10)
     # Only task 0 should be returned
     assert len(res) == 1
-    assert res[0]['spot_job_id'] == job_id
+    assert res[0]['job_id'] == job_id
     assert res[0]['task_id'] == 0
     assert res[0]['local_log_file'] == '/tmp/a.log'
 
@@ -208,11 +210,13 @@ async def test_set_task_logs_cleaned_async(_mock_managed_jobs_db_conn):
         logs_cleaned_at=None,
     )
 
+    state.scheduler_set_done(job_id)
+
     res = await state.get_task_logs_to_clean_async(retention, batch_size=10)
     assert len(res) == 1
 
     ts = now
-    await state.set_task_logs_cleaned_async(job_id, 0, ts)
+    await state.set_task_logs_cleaned_async([(job_id, 0)], ts)
 
     # Verify updated
     with orm.Session(state._SQLALCHEMY_ENGINE) as session:
@@ -256,6 +260,7 @@ async def test_get_controller_logs_to_clean_async_basic(
         local_log_file='/tmp/a1.log',
         logs_cleaned_at=None,
     )
+    state.scheduler_set_done(job_a)
 
     # Job B: not old enough
     job_b = _insert_job_info(state._SQLALCHEMY_ENGINE,
@@ -269,6 +274,7 @@ async def test_get_controller_logs_to_clean_async_basic(
         local_log_file='/tmp/b0.log',
         logs_cleaned_at=None,
     )
+    state.scheduler_set_done(job_b)
 
     # Job C: already cleaned controller logs
     job_c = _insert_job_info(state._SQLALCHEMY_ENGINE,
@@ -282,6 +288,7 @@ async def test_get_controller_logs_to_clean_async_basic(
         local_log_file='/tmp/c0.log',
         logs_cleaned_at=None,
     )
+    state.scheduler_set_done(job_c)
 
     # Job D: terminal but end_at is None -> does not qualify
     job_d = _insert_job_info(state._SQLALCHEMY_ENGINE,
@@ -295,6 +302,7 @@ async def test_get_controller_logs_to_clean_async_basic(
         local_log_file='/tmp/d0.log',
         logs_cleaned_at=None,
     )
+    state.scheduler_set_done(job_d)
 
     res = await state.get_controller_logs_to_clean_async(retention,
                                                          batch_size=10)
@@ -313,6 +321,7 @@ async def test_get_controller_logs_to_clean_async_basic(
         local_log_file='/tmp/e0.log',
         logs_cleaned_at=None,
     )
+    state.scheduler_set_done(job_e)
     job_f = _insert_job_info(state._SQLALCHEMY_ENGINE,
                              controller_logs_cleaned_at=None)
     _insert_task(
@@ -324,6 +333,7 @@ async def test_get_controller_logs_to_clean_async_basic(
         local_log_file='/tmp/f0.log',
         logs_cleaned_at=None,
     )
+    state.scheduler_set_done(job_f)
 
     res2 = await state.get_controller_logs_to_clean_async(retention,
                                                           batch_size=2)
@@ -337,7 +347,7 @@ async def test_set_controller_logs_cleaned_async(_mock_managed_jobs_db_conn):
     job_id = _insert_job_info(state._SQLALCHEMY_ENGINE,
                               controller_logs_cleaned_at=None)
 
-    await state.set_controller_logs_cleaned_async(job_id, now)
+    await state.set_controller_logs_cleaned_async([job_id], now)
 
     with orm.Session(state._SQLALCHEMY_ENGINE) as session:
         row = session.execute(
