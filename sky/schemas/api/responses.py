@@ -98,9 +98,6 @@ class StatusResponse(ResponseBaseModel):
     # metadata is a JSON, so we use Any here.
     metadata: Optional[Dict[str, Any]] = None
     cluster_hash: str
-    # pydantic cannot generate the pydantic-core schema for
-    # storage_mounts_metadata, so we use Any here.
-    storage_mounts_metadata: Optional[Dict[str, Any]] = None
     cluster_ever_up: bool
     status_updated_at: int
     user_hash: str
@@ -160,6 +157,8 @@ class StorageRecord(ResponseBaseModel):
 # and therefore can be non-optional.
 class ManagedJobRecord(ResponseBaseModel):
     """A single managed job record."""
+    # The job_id in the spot table
+    task_job_id: Optional[int] = pydantic.Field(None, alias='_job_id')
     job_id: Optional[int] = None
     task_id: Optional[int] = None
     job_name: Optional[str] = None

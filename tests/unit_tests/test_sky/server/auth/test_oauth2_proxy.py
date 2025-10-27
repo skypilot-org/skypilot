@@ -42,6 +42,7 @@ class TestOAuth2ProxyMiddleware:
         request.url = mock.Mock()
         request.url.path = '/api/v1/status'
         request.url.query = 'param=value'
+        request.url.hostname = 'localhost:8080'
         request.url.__str__ = mock.Mock(
             return_value='http://localhost:8080/api/v1/status?param=value')
         request.base_url = 'http://localhost:8080/'
@@ -52,6 +53,7 @@ class TestOAuth2ProxyMiddleware:
             'host': 'localhost:8080',
             'accept-encoding': 'gzip, deflate',
             'user-agent': 'python-requests/2.32.3',
+            'transfer-encoding': 'chunked',
         }
         request.cookies = {'session': 'test_session'}
         request.state = mock.Mock()
@@ -140,11 +142,9 @@ class TestOAuth2ProxyMiddleware:
             assert response.status_code == 302
 
     @pytest.mark.asyncio
-    async def test_authenticate_strips_content_headers(self, middleware_enabled,
-                                                       mock_request,
-                                                       mock_call_next):
-        """Test that content-length and content-type headers are stripped
-        during auth check."""
+    async def test_authenticate_strips_forwarded_headers(
+            self, middleware_enabled, mock_request, mock_call_next):
+        """Test that forwarded headers are stripped during auth check."""
         mock_request.state.auth_user = None
 
         # Mock aiohttp session and response
@@ -173,10 +173,11 @@ class TestOAuth2ProxyMiddleware:
             # Verify problematic headers were stripped
             assert 'content-length' not in headers
             assert 'content-type' not in headers
+            assert 'transfer-encoding' not in headers
 
             # Verify other headers are preserved
-            assert headers['user-agent'] == 'python-requests/2.32.3'
-            assert headers['host'] == 'localhost:8080'
+            assert 'user-agent' not in headers
+            assert headers['Host'] == 'localhost:8080'
 
             # Verify X-Forwarded-Uri was added
             assert 'X-Forwarded-Uri' in headers

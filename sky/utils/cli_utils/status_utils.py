@@ -282,8 +282,14 @@ def _get_resources(cluster_record: _ClusterRecord,
             if resources_str_full is not None:
                 resources_str = resources_str_full
         if resources_str is None:
-            resources_str = resources_utils.get_readable_resources_repr(
-                handle, simplify=truncate)
+            resources_str_simple, resources_str_full = (
+                resources_utils.get_readable_resources_repr(
+                    handle, simplified_only=truncate))
+            if truncate:
+                resources_str = resources_str_simple
+            else:
+                assert resources_str_full is not None
+                resources_str = resources_str_full
 
         return resources_str
     return '-'

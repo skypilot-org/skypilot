@@ -41,7 +41,7 @@ def test_handler_default_level(mock_get, handler, monkeypatch):
     assert handler.level == logging.DEBUG
 
 
-@mock.patch('sky.utils.context.get', return_value=context.Context())
+@mock.patch('sky.utils.context.get', return_value=context.SkyPilotContext())
 def test_handler_with_debug_env(mock_get, handler, monkeypatch):
     """Test handler respects SHOW_DEBUG_INFO env var."""
     # Mock the env var to enable debug
@@ -64,7 +64,7 @@ def test_handler_without_context(mock_get, handler, monkeypatch):
     assert handler.level == logging.INFO
 
 
-@mock.patch('sky.utils.context.get', return_value=context.Context())
+@mock.patch('sky.utils.context.get', return_value=context.SkyPilotContext())
 def test_sensitive_handler(mock_get, sensitive_handler, monkeypatch):
     """Test sensitive handler's log level behavior."""
     # Test when sensitive logs are suppressed
@@ -80,7 +80,7 @@ def test_sensitive_handler(mock_get, sensitive_handler, monkeypatch):
     assert sensitive_handler.level == logging.DEBUG
 
 
-@mock.patch('sky.utils.context.get', return_value=context.Context())
+@mock.patch('sky.utils.context.get', return_value=context.SkyPilotContext())
 def test_handler_invalid_level(mock_get, handler, monkeypatch):
     """Test setting invalid log levels."""
     monkeypatch.setattr(env_options.Options.SHOW_DEBUG_INFO, 'get',
@@ -98,7 +98,7 @@ def test_handler_invalid_level(mock_get, handler, monkeypatch):
 async def test_handler_with_context_override(mock_get, handler, monkeypatch):
     """Test setting invalid log levels."""
     assert handler.level == logging.INFO
-    ctx = context.Context()
+    ctx = context.SkyPilotContext()
     ctx.override_envs({'SKYPILOT_DEBUG': '1'})
     mock_get.return_value = ctx
     assert handler.level == logging.DEBUG

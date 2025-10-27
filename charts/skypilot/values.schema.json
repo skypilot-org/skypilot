@@ -80,6 +80,22 @@
                         "null"
                     ]
                 },
+                "logs": {
+                    "type": "object",
+                    "properties": {
+                        "retention": {
+                            "type": "object",
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "size": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                },
                 "metrics": {
                     "type": "object",
                     "properties": {
@@ -384,7 +400,16 @@
                         "config": {
                             "type": "object",
                             "properties": {
+                                "gzip-level": {
+                                    "type": "integer"
+                                },
+                                "gzip-min-length": {
+                                    "type": "integer"
+                                },
                                 "http-snippet": {
+                                    "type": "string"
+                                },
+                                "use-gzip": {
                                     "type": "string"
                                 }
                             }

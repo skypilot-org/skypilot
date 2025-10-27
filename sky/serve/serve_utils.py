@@ -1550,8 +1550,15 @@ def _format_replica_table(replica_records: List[Dict[str, Any]], show_all: bool,
             'handle']
         if replica_handle is not None:
             infra = replica_handle.launched_resources.infra.formatted_str()
-            resources_str = resources_utils.get_readable_resources_repr(
-                replica_handle, simplify=not show_all)
+            simplified = not show_all
+            resources_str_simple, resources_str_full = (
+                resources_utils.get_readable_resources_repr(
+                    replica_handle, simplified_only=simplified))
+            if simplified:
+                resources_str = resources_str_simple
+            else:
+                assert resources_str_full is not None
+                resources_str = resources_str_full
 
         replica_values = [
             service_name,

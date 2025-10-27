@@ -131,7 +131,7 @@ def _parse_args(args: Optional[str] = None):
     parser.add_argument('--jobs-consolidation', action="store_true")
     parser.add_argument('--grpc', action="store_true")
     parser.add_argument('--env-file')
-    parser.add_argument('--dependency')
+    parser.add_argument('--dependency', nargs='?', const='', default='all')
 
     parsed_args, _ = parser.parse_known_args(args_list)
 
@@ -175,8 +175,9 @@ def _parse_args(args: Optional[str] = None):
         extra_args.append('--grpc')
     if parsed_args.env_file:
         extra_args.append(f'--env-file {parsed_args.env_file}')
-    if parsed_args.dependency:
-        extra_args.append(f'--dependency {parsed_args.dependency}')
+    if parsed_args.dependency != 'all':
+        space = ' ' if parsed_args.dependency else ''
+        extra_args.append(f'--dependency{space}{parsed_args.dependency}')
 
     return default_clouds_to_run, parsed_args.k, extra_args
 
@@ -443,7 +444,7 @@ def _convert_quick_tests_core(test_files: List[str], args: str,
                         branch != 'master'):
                     continue
                 pipeline = _generate_pipeline(test_file,
-                                              args + f'--base-branch {branch}',
+                                              args + f' --base-branch {branch}',
                                               auto_retry=True)
                 output_file_pipelines.append(pipeline)
         else:

@@ -26,6 +26,7 @@ def collect_metrics(
         stop_event is not None
     ), "Exactly one of duration_seconds or stop_event must be provided"
 
+    metrics = {}
     start_time = time.time()
     while True:
         if duration_seconds is not None and time.time(

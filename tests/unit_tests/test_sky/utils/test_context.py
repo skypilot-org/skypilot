@@ -25,7 +25,7 @@ def test_context_initialization():
     """Test context initialization."""
     assert context.get() is None
     context.initialize()
-    assert isinstance(context.get(), context.Context)
+    assert isinstance(context.get(), context.SkyPilotContext)
 
 
 def test_context_cancellation(ctx):

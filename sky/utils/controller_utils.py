@@ -72,7 +72,8 @@ class _ControllerSpec:
     """Spec for skypilot controllers."""
     controller_type: str
     name: str
-    cluster_name: str
+    _cluster_name_func: Callable[[], str]
+    _cluster_name_from_server: Optional[str]  # For client-side only
     in_progress_hint: Callable[[bool], str]
     decline_cancel_hint: str
     _decline_down_when_failed_to_fetch_status_hint: str
@@ -93,6 +94,24 @@ class _ControllerSpec:
         return self._check_cluster_name_hint.format(
             cluster_name=self.cluster_name)
 
+    @property
+    def cluster_name(self) -> str:
+        """The cluster name of the controller.
+
+        On the server-side, the cluster name is the actual cluster name,
+        which is read from common.(JOB|SKY_SERVE)_CONTROLLER_NAME.
+
+        On the client-side, the cluster name may not be accurate,
+        as we may not know the exact name, because we are missing
+        the server-side common.SERVER_ID. We have to wait until
+        we get the actual cluster name from the server.
+        """
+        return (self._cluster_name_from_server if self._cluster_name_from_server
+                is not None else self._cluster_name_func())
+
+    def set_cluster_name_from_server(self, cluster_name: str) -> None:
+        self._cluster_name_from_server = cluster_name
+
 
 # TODO: refactor controller class to not be an enum.
 class Controllers(enum.Enum):
@@ -102,7 +121,8 @@ class Controllers(enum.Enum):
     JOBS_CONTROLLER = _ControllerSpec(
         controller_type='jobs',
         name='managed jobs controller',
-        cluster_name=common.JOB_CONTROLLER_NAME,
+        _cluster_name_func=lambda: common.JOB_CONTROLLER_NAME,
+        _cluster_name_from_server=None,
         in_progress_hint=lambda _:
         ('* {job_info}To see all managed jobs: '
          f'{colorama.Style.BRIGHT}sky jobs queue{colorama.Style.RESET_ALL}'),
@@ -133,7 +153,8 @@ class Controllers(enum.Enum):
     SKY_SERVE_CONTROLLER = _ControllerSpec(
         controller_type='serve',
         name='serve controller',
-        cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+        _cluster_name_func=lambda: common.SKY_SERVE_CONTROLLER_NAME,
+        _cluster_name_from_server=None,
         in_progress_hint=(
             lambda pool:
             (f'* To see detailed pool status: {colorama.Style.BRIGHT}'
@@ -166,7 +187,9 @@ class Controllers(enum.Enum):
         default_autostop_config=serve_constants.CONTROLLER_AUTOSTOP)
 
     @classmethod
-    def from_name(cls, name: Optional[str]) -> Optional['Controllers']:
+    def from_name(cls,
+                  name: Optional[str],
+                  expect_exact_match: bool = True) -> Optional['Controllers']:
         """Check if the cluster name is a controller name.
 
         Returns:
@@ -187,7 +210,11 @@ class Controllers(enum.Enum):
         elif name.startswith(common.JOB_CONTROLLER_PREFIX):
             controller = cls.JOBS_CONTROLLER
             prefix = common.JOB_CONTROLLER_PREFIX
-        if controller is not None and name != controller.value.cluster_name:
+
+        if controller is not None and expect_exact_match:
+            assert name == controller.value.cluster_name, (
+                name, controller.value.cluster_name)
+        elif controller is not None and name != controller.value.cluster_name:
             # The client-side cluster_name is not accurate. Assume that `name`
             # is the actual cluster name, so need to set the controller's
             # cluster name to the input name.
@@ -201,7 +228,7 @@ class Controllers(enum.Enum):
                                                                          prefix)
 
             # Update the cluster name.
-            controller.value.cluster_name = name
+            controller.value.set_cluster_name_from_server(name)
         return controller
 
     @classmethod
@@ -228,7 +255,7 @@ def get_controller_for_pool(pool: bool) -> Controllers:
 def high_availability_specified(cluster_name: Optional[str]) -> bool:
     """Check if the controller high availability is specified in user config.
     """
-    controller = Controllers.from_name(cluster_name)
+    controller = Controllers.from_name(cluster_name, expect_exact_match=False)
     if controller is None:
         return False
 
@@ -411,7 +438,7 @@ def check_cluster_name_not_controller(
     Returns:
       None, if the cluster name is not a controller name.
     """
-    controller = Controllers.from_name(cluster_name)
+    controller = Controllers.from_name(cluster_name, expect_exact_match=False)
     if controller is not None:
         msg = controller.value.check_cluster_name_hint
         if operation_str is not None:
@@ -506,6 +533,9 @@ def shared_controller_vars_to_fill(
         # before popping allowed_contexts. If it is not on Kubernetes,
         # we may be able to use allowed_contexts.
         local_user_config.pop('allowed_contexts', None)
+        # Remove api_server config so that the controller does not try to use
+        # a remote API server.
+        local_user_config.pop('api_server', None)
         with tempfile.NamedTemporaryFile(
                 delete=False,
                 suffix=_LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX) as temp_file:
@@ -724,6 +754,17 @@ def get_controller_resources(
     if not result:
         return {controller_resources_to_use}
     return result
+
+
+def get_controller_mem_size_gb() -> float:
+    try:
+        with open(os.path.expanduser(constants.CONTROLLER_K8S_MEMORY_FILE),
+                  'r',
+                  encoding='utf-8') as f:
+            return float(f.read())
+    except FileNotFoundError:
+        pass
+    return common_utils.get_mem_size_gb()
 
 
 def _setup_proxy_command_on_controller(

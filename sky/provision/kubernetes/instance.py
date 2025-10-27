@@ -5,7 +5,7 @@ import json
 import re
 import sys
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from sky import exceptions
 from sky import global_user_state
@@ -583,31 +583,6 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
         time.sleep(1)
 
 
-def _run_function_with_retries(func: Callable,
-                               operation_name: str,
-                               max_retries: int = _MAX_RETRIES,
-                               retry_delay: int = 5) -> Any:
-    """Runs a function with retries on Kubernetes errors.
-    Args:
-        func: Function to retry
-        operation_name: Name of the operation for logging
-        max_retries: Maximum number of retry attempts
-        retry_delay: Delay between retries in seconds
-    Raises:
-        The last exception encountered if all retries fail.
-    """
-    for attempt in range(max_retries + 1):
-        try:
-            return func()
-        except config_lib.KubernetesError:
-            if attempt < max_retries:
-                logger.warning(f'Failed to {operation_name} - '
-                               f'retrying in {retry_delay} seconds.')
-                time.sleep(retry_delay)
-            else:
-                raise
-
-
 @timeline.event
 def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
     """Pre-initialization step for SkyPilot pods.
@@ -934,8 +909,11 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     running_pods = kubernetes_utils.filter_pods(namespace, context, tags,
                                                 ['Pending', 'Running'])
     head_pod_name = _get_head_pod_name(running_pods)
+    running_pod_statuses = [{
+        pod.metadata.name: pod.status.phase
+    } for pod in running_pods.values()]
     logger.debug(f'Found {len(running_pods)} existing pods: '
-                 f'{list(running_pods.keys())}')
+                 f'{running_pod_statuses}')
 
     to_start_count = config.count - len(running_pods)
     if to_start_count < 0:
@@ -951,7 +929,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     nvidia_runtime_exists = False
     try:
         nvidia_runtime_exists = kubernetes_utils.check_nvidia_runtime_class(
-            context)
+            context=context)
     except kubernetes.kubernetes.client.ApiException as e:
         logger.warning('run_instances: Error occurred while checking for '
                        f'nvidia RuntimeClass - '
@@ -981,12 +959,19 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     def _create_resource_thread(i: int):
         pod_spec_copy = copy.deepcopy(pod_spec)
-        if head_pod_name is None and i == 0:
-            # First pod should be head if no head exists
-            pod_spec_copy['metadata']['labels'].update(constants.HEAD_NODE_TAGS)
-            head_selector = _head_service_selector(cluster_name_on_cloud)
-            pod_spec_copy['metadata']['labels'].update(head_selector)
-            pod_spec_copy['metadata']['name'] = f'{cluster_name_on_cloud}-head'
+        # 0 is for head pod, while 1+ is for worker pods.
+        if i == 0:
+            if head_pod_name is None:
+                # First pod should be head if no head exists
+                pod_spec_copy['metadata']['labels'].update(
+                    constants.HEAD_NODE_TAGS)
+                head_selector = _head_service_selector(cluster_name_on_cloud)
+                pod_spec_copy['metadata']['labels'].update(head_selector)
+                pod_spec_copy['metadata'][
+                    'name'] = f'{cluster_name_on_cloud}-head'
+            else:
+                # If head pod already exists, we skip creating it.
+                return
         else:
             # Worker pods
             pod_spec_copy['metadata']['labels'].update(
@@ -1127,9 +1112,16 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 'and then up the cluster again.')
             raise exceptions.InconsistentHighAvailabilityError(message)
 
-    # Create pods in parallel
-    created_resources = subprocess_utils.run_in_parallel(
-        _create_resource_thread, list(range(to_start_count)), _NUM_THREADS)
+    created_resources = []
+    if to_start_count > 0:
+        # Create pods in parallel.
+        # Use `config.count` instead of `to_start_count` to keep the index of
+        # the Pods consistent especially for the case where some Pods are down
+        # due to node failure or manual termination, etc. and then launch
+        # again to create the Pods back.
+        # The existing Pods will be skipped in _create_resource_thread.
+        created_resources = subprocess_utils.run_in_parallel(
+            _create_resource_thread, list(range(config.count)), _NUM_THREADS)
 
     if to_create_deployment:
         deployments = copy.deepcopy(created_resources)
@@ -1142,10 +1134,21 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         pods = created_resources
 
     created_pods = {}
+    valid_pods = []
     for pod in pods:
+        # In case Pod is not created
+        if pod is None:
+            continue
+        valid_pods.append(pod)
         created_pods[pod.metadata.name] = pod
         if head_pod_name is None and _is_head(pod):
             head_pod_name = pod.metadata.name
+    pods = valid_pods
+
+    # The running_pods may include Pending Pods, so we add them to the pods
+    # list to wait for scheduling and running
+    if running_pods:
+        pods = pods + list(running_pods.values())
 
     provision_timeout = provider_config['timeout']
 
@@ -1361,6 +1364,9 @@ def get_cluster_info(
                 external_ip=None,
                 ssh_port=port,
                 tags=pod.metadata.labels,
+                # TODO(hailong): `cluster.local` may need to be configurable
+                # Service name is same as the pod name for now.
+                internal_svc=f'{pod_name}.{namespace}.svc.cluster.local',
             )
         ]
         if _is_head(pod):
@@ -1369,8 +1375,9 @@ def get_cluster_info(
             assert head_spec is not None, pod
             cpu_request = head_spec.containers[0].resources.requests['cpu']
 
-    assert cpu_request is not None, ('cpu_request should not be None, check '
-                                     'the Pod status')
+    if cpu_request is None:
+        raise RuntimeError(f'Pod {cluster_name_on_cloud}-head not found'
+                           ' or not Running, check the Pod status')
 
     ssh_user = 'sky'
     # Use pattern matching to extract SSH user, handling MOTD contamination.
@@ -1398,6 +1405,13 @@ def get_cluster_info(
     logger.debug(
         f'Using ssh user {ssh_user} for cluster {cluster_name_on_cloud}')
 
+    # cpu_request may be a string like `100m`, need to parse and convert
+    num_cpus = kubernetes_utils.parse_cpu_or_gpu_resource_to_float(cpu_request)
+    # 'num-cpus' for ray must be an integer, but we should not set it to 0 if
+    # cpus is <1.
+    # Keep consistent with the logic in clouds/kubernetes.py
+    str_cpus = str(max(int(num_cpus), 1))
+
     return common.ClusterInfo(
         instances=pods,
         head_instance_id=head_pod_name,
@@ -1407,7 +1421,7 @@ def get_cluster_info(
         # problems for other pods.
         custom_ray_options={
             'object-store-memory': 500000000,
-            'num-cpus': cpu_request,
+            'num-cpus': str_cpus,
         },
         provider_name='kubernetes',
         provider_config=provider_config)

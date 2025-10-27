@@ -67,6 +67,7 @@ message ManagedJobInfo {
   string workspace = 3;
   string entrypoint = 4;
   repeated ManagedJobTask tasks = 5;
+  optional string user_id = 6;
 }
 
 message ManagedJobTask {

@@ -14,6 +14,7 @@ from sky import models
 from sky import sky_logging
 from sky.skylet import constants
 from sky.users import rbac
+from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils.db import db_utils
 
@@ -254,6 +255,9 @@ class PermissionService:
         with _policy_lock():
             self._load_policy_no_lock()
 
+    # Right now, not a lot of users are using multiple workspaces,
+    # so 5 should be more than enough.
+    @annotations.lru_cache(scope='request', maxsize=5)
     def check_workspace_permission(self, user_id: str,
                                    workspace_name: str) -> bool:
         """Check workspace permission.

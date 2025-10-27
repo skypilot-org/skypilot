@@ -99,6 +99,19 @@ class DashboardCache {
       try {
         const freshData = await fetchFunction(...args);
 
+        // If the fetch function indicates the result should not be cached
+        // (e.g., transient error fallback), then skip cache update and
+        // return stale data if available.
+        if (freshData && freshData.__skipCache) {
+          this._debug(
+            `Skip caching for ${functionName} due to __skipCache flag on result`
+          );
+          if (cachedItem) {
+            return cachedItem.data;
+          }
+          return freshData;
+        }
+
         // Update cache with fresh data
         this.cache.set(key, {
           data: freshData,
@@ -243,6 +256,10 @@ class DashboardCache {
     // Execute the refresh asynchronously
     fetchFunction(...args)
       .then((freshData) => {
+        // Respect __skipCache signal from fetch function
+        if (freshData && freshData.__skipCache) {
+          return; // do not update cache
+        }
         // Update cache with fresh data
         this.cache.set(key, {
           data: freshData,

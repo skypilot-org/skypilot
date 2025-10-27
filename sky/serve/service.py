@@ -13,7 +13,6 @@ from typing import Dict
 
 import filelock
 
-from sky import authentication
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
@@ -28,6 +27,7 @@ from sky.serve import replica_managers
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import constants as skylet_constants
+from sky.utils import auth_utils
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import subprocess_utils
@@ -227,7 +227,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
     """
     # Generate ssh key pair to avoid race condition when multiple sky.launch
     # are executed at the same time.
-    authentication.get_or_generate_keys()
+    auth_utils.get_or_generate_keys()
 
     # Initialize database record for the service.
     task = task_lib.Task.from_yaml(tmp_task_yaml)

@@ -283,17 +283,22 @@ By convention, we define API payloads in `sky/server/api/payloads.py` and there 
 - When receiving a payload from an older version without the new field, the default value is used for the missing new field.
 - When receiving a payload from a newer version with a new field, the value of the new field is ignored.
 
-However, when the value of the new field is taken from an user input (e.g. CLI flag), we should add a warning message to inform the user that the new field is ignored. An API version bump is required in this case. For example:
+However, when the value of the new field is taken from user input (e.g. CLI flag), we should warn (or throw an error) to inform the user that the new field is not supported on the current api server version. Calling `versions.get_remote_api_version()` in `sky/client/cli/command.py` will return `None` until we check the api server status which can be triggered by adding a `@server_common.check_server_healthy_or_start` decorator around the cli entry point. For example:
+
 
 ```python
 from sky.server import versions
 
 @click.option('--newflag', default=None)
+# Must have this or the version will be None!
+@server_common.check_server_healthy_or_start
 def cli_entry_point(newflag: Optional[str] = None):
     # The new flag is set but the server does not support the new field yet
     if newflag is not None and versions.get_remote_api_version() < 12:
         logger.warning('The new flag is ignored because the server does not support it yet.')
 ```
+
+We can also just check for the unsupported field in the sdk and surface the error in the cli.
 
 We should also be careful when adding new fields that are not directly visible in
 `sky/server/api/payloads.py`, but is also being sent from the client to the server. This

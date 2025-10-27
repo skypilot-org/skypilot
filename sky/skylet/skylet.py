@@ -71,6 +71,9 @@ def start_grpc_server(port: int = constants.SKYLET_GRPC_PORT) -> grpc.Server:
 def run_event_loop():
     """Run the existing event loop."""
 
+    for event in EVENTS:
+        event.start()
+
     while True:
         time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
         for event in EVENTS:

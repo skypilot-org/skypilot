@@ -244,3 +244,132 @@ def test_get_clusters_cache_size(_mock_db_conn):
     )
     print(f"Successful get_command_runners calls: {len(successful_calls)}")
     print(f"Request-level cache functions tracked: {final_functions}")
+
+
+@pytest.mark.parametrize('should_mock,return_user', [
+    (True, True),
+    (False, True),
+    (True, False),
+    (False, False),
+])
+def test_add_or_update_user_new_user(_mock_db_conn, should_mock, return_user):
+    """Test add new user."""
+    user_id = f'test-new-user-{str(should_mock).lower()}-{str(return_user).lower()}'
+    password = 'password123'
+
+    def test():
+        user = sky.models.User(id=user_id, name='Test User', password=password)
+        result = global_user_state.add_or_update_user(user,
+                                                      return_user=return_user)
+
+        if return_user:
+            was_inserted, returned_user = result
+            assert was_inserted is True
+            assert returned_user is not None
+            assert returned_user.id == user_id
+            assert returned_user.name == 'Test User'
+            assert returned_user.password == password
+            assert returned_user.created_at is not None
+        else:
+            assert result is True
+
+        fetched_user = global_user_state.get_user(user_id)
+        assert fetched_user is not None
+        assert fetched_user.name == 'Test User'
+        assert fetched_user.password == password
+
+    if should_mock:
+        # Mock _sqlite_supports_returning so we don't have to install an older version of SQLite or SQLAlchemy.
+        with mock.patch('sky.global_user_state._sqlite_supports_returning',
+                        return_value=False):
+            test()
+    else:
+        test()
+
+
+@pytest.mark.parametrize('should_mock', [True, False])
+def test_add_or_update_user_update_user(_mock_db_conn, should_mock):
+    """Test update user."""
+
+    def test():
+        user_id = 'test-update-user'
+
+        # Insert
+        user = sky.models.User(id=user_id, name='Original', password='old')
+        was_inserted, original_user = global_user_state.add_or_update_user(
+            user, return_user=True)
+        assert was_inserted is True
+        original_created_at = original_user.created_at
+
+        # Update
+        updated_user_data = sky.models.User(id=user_id,
+                                            name='Updated',
+                                            password='new')
+        was_inserted, updated_user = global_user_state.add_or_update_user(
+            updated_user_data, return_user=True)
+
+        assert was_inserted is False
+        assert updated_user.name == 'Updated'
+        assert updated_user.password == 'new'
+        assert updated_user.created_at == original_created_at
+
+        # Verify in database
+        fetched_user = global_user_state.get_user(user_id)
+        assert fetched_user.name == 'Updated'
+        assert fetched_user.password == 'new'
+
+    if should_mock:
+        with mock.patch('sky.global_user_state._sqlite_supports_returning',
+                        return_value=False):
+            test()
+    else:
+        test()
+
+
+@pytest.mark.parametrize('should_mock', [True, False])
+def test_add_or_update_user_update_partial(_mock_db_conn, should_mock):
+    """Test update user without changing password."""
+
+    def test():
+        user_id = 'test-update-partial-user'
+
+        # Insert with password
+        user = sky.models.User(id=user_id, name='Original', password='old')
+        global_user_state.add_or_update_user(user, return_user=False)
+
+        # Update only name
+        updated_user_data = sky.models.User(id=user_id, name='Updated')
+        was_inserted, updated_user = global_user_state.add_or_update_user(
+            updated_user_data, return_user=True)
+
+        assert was_inserted is False
+        assert updated_user.name == 'Updated'
+        assert updated_user.password == 'old'
+
+        fetched_user = global_user_state.get_user(user_id)
+        assert fetched_user.name == 'Updated'
+        assert fetched_user.password == 'old'
+
+    if should_mock:
+        with mock.patch('sky.global_user_state._sqlite_supports_returning',
+                        return_value=False):
+            test()
+    else:
+        test()
+
+
+@pytest.mark.parametrize('should_mock', [True, False])
+def test_add_or_update_user_name_none(_mock_db_conn, should_mock):
+    """Test that user with name=None returns False without inserting."""
+
+    def test():
+        user = sky.models.User(id='test-user-none', name=None)
+        result = global_user_state.add_or_update_user(user, return_user=False)
+        assert result is False
+
+    if should_mock:
+        with mock.patch('sky.global_user_state._sqlite_supports_returning',
+                        return_value=False):
+            test()
+    else:
+        test()

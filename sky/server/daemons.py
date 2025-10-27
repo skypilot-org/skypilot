@@ -38,9 +38,11 @@ class InternalRequestDaemon:
         try:
             # Refresh config within the while loop.
             # Since this is a long running daemon,
-            # reload_config_for_new_request()
+            # reload_for_new_request()
             # is not called in between the event runs.
-            skypilot_config.safe_reload_config()
+            # We don't need to grab the lock here because each of the daemons
+            # run in their own process and thus have their own request context.
+            skypilot_config.reload_config()
             # Get the configured log level for the daemon inside the event loop
             # in case the log level changes after the API server is started.
             level_str = skypilot_config.get_nested(

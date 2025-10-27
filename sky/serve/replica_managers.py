@@ -495,8 +495,8 @@ class ReplicaInfo:
                 info_dict['cloud'] = repr(handle.launched_resources.cloud)
                 info_dict['region'] = handle.launched_resources.region
                 info_dict['resources_str'] = (
-                    resources_utils.get_readable_resources_repr(handle,
-                                                                simplify=True))
+                    resources_utils.get_readable_resources_repr(
+                        handle, simplified_only=True)[0])
         return info_dict
 
     def __repr__(self) -> str:

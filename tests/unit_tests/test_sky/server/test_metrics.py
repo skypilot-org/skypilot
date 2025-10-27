@@ -58,7 +58,7 @@ async def test_metrics_endpoint_without_multiprocess():
         with patch('sky.server.metrics.generate_latest') as mock_gen:
             mock_gen.return_value = b"# HELP test_metric Test metric\n"
 
-            response = await metrics.metrics()
+            response = metrics.metrics()
 
             assert isinstance(response, fastapi.Response)
             assert response.media_type == CONTENT_TYPE_LATEST
@@ -81,7 +81,7 @@ async def test_metrics_endpoint_with_multiprocess():
             mock_registry.return_value = mock_registry_instance
             mock_gen.return_value = b"# HELP multiproc_metric Test\n"
 
-            response = await metrics.metrics()
+            response = metrics.metrics()
 
             assert isinstance(response, fastapi.Response)
             mock_registry.assert_called_once()

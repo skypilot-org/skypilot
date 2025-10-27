@@ -35,6 +35,21 @@ chart deploy everything for you with a single command:
       --set prometheus.enabled=true \
       --set grafana.enabled=true
 
+.. dropdown:: Turn off GPU metrics scraping
+
+   The above command also configures Prometheus to scrape the SkyPilot API server's ``/gpu-metrics`` endpoint. To disable scraping of ``/gpu-metrics``, append ``--set prometheus.extraScrapeConfigs=""`` to the Helm command:
+
+   .. code-block:: bash
+
+       helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+         --namespace skypilot \
+         --create-namespace \
+         --reuse-values \
+         --set apiService.metrics.enabled=true \
+         --set prometheus.enabled=true \
+         --set prometheus.extraScrapeConfigs="" \
+         --set grafana.enabled=true
+
 You can access Grafana at the ``/grafana`` endpoint:
 
 .. code-block:: bash

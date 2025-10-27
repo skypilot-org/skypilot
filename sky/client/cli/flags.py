@@ -284,8 +284,10 @@ def config_option(expose_value: bool):
     return return_option_decorator
 
 
-def yes_option():
+def yes_option(helptext: Optional[str] = None):
     """A decorator for the --yes/-y option."""
+    if helptext is None:
+        helptext = 'Skip confirmation prompt.'
 
     def return_option_decorator(func):
         return click.option('--yes',
@@ -293,7 +295,7 @@ def yes_option():
                             is_flag=True,
                             default=False,
                             required=False,
-                            help='Skip confirmation prompt.')(func)
+                            help=helptext)(func)
 
     return return_option_decorator
 

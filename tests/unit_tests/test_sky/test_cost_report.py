@@ -198,15 +198,15 @@ class TestCostReportServer(unittest.TestCase):
         # Import and test the server function
         from sky.server import server
 
-        with mock.patch(
-                'sky.server.server.executor.schedule_request') as mock_schedule:
+        with mock.patch('sky.server.server.executor.schedule_request_async'
+                       ) as mock_schedule_async:
             # Call the server endpoint
             import asyncio
             asyncio.run(server.cost_report(mock_request, cost_report_body))
 
             # Verify executor.schedule_request was called with correct parameters
-            mock_schedule.assert_called_once()
-            call_args = mock_schedule.call_args
+            mock_schedule_async.assert_called_once()
+            call_args = mock_schedule_async.call_args
 
             self.assertEqual(call_args[1]['request_id'], 'test_request_id')
             self.assertEqual(call_args[1]['request_name'], 'cost_report')

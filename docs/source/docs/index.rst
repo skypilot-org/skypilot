@@ -1,5 +1,5 @@
-Welcome to SkyPilot!
-====================
+SkyPilot: Run AI on Any Infrastructure
+======================================
 
 .. image:: /_static/SkyPilot_wide_dark.svg
   :width: 50%
@@ -13,10 +13,6 @@ Welcome to SkyPilot!
   :class: no-scaled-link, only-light
 
 .. raw:: html
-
-   <p style="text-align:center">
-   <strong>Simplify & scale any AI infrastructure</strong>
-   </p>
 
    <p></p>
 
@@ -210,8 +206,7 @@ SkyPilot **cuts your cloud costs & maximizes GPU availability**:
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
 Current supported infra: Kubernetes, AWS, GCP, Azure, OCI, Nebius, Lambda Cloud, RunPod, Fluidstack,
-Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai,
-VMware vSphere.
+Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai, VMware vSphere, Seeweb, Prime Intellect.
 
 .. raw:: html
 
