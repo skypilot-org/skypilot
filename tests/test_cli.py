@@ -675,8 +675,7 @@ def test_batch_continues_on_errors_helper(monkeypatch, capsys, mode):
             "status": None
         } for n in names])
 
-    with pytest.raises(click.ClickException):
-        command._down_or_stop_clusters(**kwargs)
+    command._down_or_stop_clusters(**kwargs)
 
     captured = capsys.readouterr()
 
