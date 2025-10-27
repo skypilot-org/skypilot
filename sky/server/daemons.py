@@ -13,6 +13,7 @@ from sky.utils import env_options
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils.kubernetes import config_map_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -27,7 +28,7 @@ class InternalRequestDaemon:
 
     id: str
     name: str
-    event_fn: Callable[[], None]
+    event_fn: Callable[[], bool]
     default_log_level: str = 'INFO'
     should_skip: Callable[[], bool] = _default_should_skip
 
@@ -71,7 +72,9 @@ class InternalRequestDaemon:
                     sky_logging.set_sky_logging_levels(level):
                     sky_logging.reload_logger()
                     level = self.refresh_log_level()
-                    self.event_fn()
+                    continue_running = self.event_fn()
+                    if not continue_running:
+                        break
                 # Clear request level cache after each run to avoid
                 # using too much memory.
                 annotations.clear_request_level_cache()
@@ -92,7 +95,7 @@ class InternalRequestDaemon:
                 time.sleep(server_constants.DAEMON_RESTART_INTERVAL_SECONDS)
 
 
-def refresh_cluster_status_event():
+def refresh_cluster_status_event() -> bool:
     """Periodically refresh the cluster status."""
     # pylint: disable=import-outside-toplevel
     from sky.backends import backend_utils
@@ -106,9 +109,10 @@ def refresh_cluster_status_event():
                 f'{server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS}'
                 ' seconds for the next refresh...\n')
     time.sleep(server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS)
+    return True
 
 
-def refresh_volume_status_event():
+def refresh_volume_status_event() -> bool:
     """Periodically refresh the volume status."""
     # pylint: disable=import-outside-toplevel
     from sky.volumes.server import core
@@ -123,9 +127,10 @@ def refresh_volume_status_event():
                 f'{server_constants.VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS}'
                 ' seconds for the next refresh...\n')
     time.sleep(server_constants.VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS)
+    return True
 
 
-def managed_job_status_refresh_event():
+def managed_job_status_refresh_event() -> bool:
     """Refresh the managed job status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
     from sky.jobs import utils as managed_job_utils
@@ -140,6 +145,7 @@ def managed_job_status_refresh_event():
     logger.info('=== Running managed job event ===')
     refresh_event.run()
     time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
+    return True
 
 
 def should_skip_managed_job_status_refresh():
@@ -174,20 +180,73 @@ def _should_skip_serve_status_refresh_event(pool: bool):
     return not serve_utils.is_consolidation_mode(pool=pool)
 
 
-def sky_serve_status_refresh_event():
+def sky_serve_status_refresh_event() -> bool:
     _serve_status_refresh_event(pool=False)
+    return True
 
 
 def should_skip_sky_serve_status_refresh():
     return _should_skip_serve_status_refresh_event(pool=False)
 
 
-def pool_status_refresh_event():
+def pool_status_refresh_event() -> bool:
     _serve_status_refresh_event(pool=True)
+    return True
 
 
 def should_skip_pool_status_refresh():
     return _should_skip_serve_status_refresh_event(pool=True)
+
+
+def deployment_update_event() -> bool:
+    """Trigger the deployment update event.
+    - Find out the memory utilization percentage of the current pod.
+    """
+    time.sleep(60)
+    memory_limit = common_utils.get_mem_size_gb()
+    memory_usage = common_utils.get_current_memory_usage_gb()
+    if memory_usage is None:
+        logger.warning('Failed to get the current memory usage.')
+        return True
+    memory_utilization = memory_usage / memory_limit
+    threshold = 0.4
+    if memory_utilization <= threshold:
+        logger.info(
+            f'Currently using {memory_usage:.3f}GB of {memory_limit:.3f}GB. '
+            f'Memory utilization {memory_utilization:.3f}'
+            f' is less than {threshold}.')
+        # Nothing to do, return and continue running the daemon.
+        return True
+    logger.info(
+        f'Currently using {memory_usage:.3f}GB of {memory_limit:.3f}GB. '
+        f'Memory utilization {memory_utilization:.3f} is above {threshold}. '
+        'Triggering deployment update...')
+    success = config_map_utils.trigger_deployment_update()
+    if not success:
+        logger.warning('Failed to trigger deployment update.')
+        # Continue running the daemon as deployment update failed.
+        return True
+    # Deployment update event is done, return and stop running the daemon.
+    return False
+
+
+def should_skip_deployment_update():
+    """Check if the deployment update event should be skipped.
+
+    Skip the deployment update daemon if:
+    - the API server is not running in kubernetes
+    - The system memory environment variable is not set correctly.
+    - the daemon is not configured in config (TODO)
+    - the API server cannot locate the daemon using kubernetes API (TODO)
+    - the API server does not have permission to change the deployment (TODO)"""
+    if not config_map_utils.is_running_in_kubernetes():
+        logger.debug('API server is not running in Kubernetes.')
+        return True
+    if not config_map_utils.can_patch_deployment():
+        logger.debug(
+            'API server cannot patch the deployment using Kubernetes API.')
+        return True
+    return False
 
 
 # Register the events to run in the background.
@@ -215,6 +274,10 @@ INTERNAL_REQUEST_DAEMONS = [
                           name='pool-status-refresh',
                           event_fn=pool_status_refresh_event,
                           should_skip=should_skip_pool_status_refresh),
+    InternalRequestDaemon(id='trigger-deployment-update-daemon',
+                          name='trigger-deployment-update',
+                          event_fn=deployment_update_event,
+                          should_skip=should_skip_deployment_update),
 ]
 
 

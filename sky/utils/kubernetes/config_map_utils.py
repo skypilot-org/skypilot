@@ -1,4 +1,5 @@
 """Utilities for Kubernetes ConfigMap operations in SkyPilot."""
+import datetime
 import os
 
 from sky import sky_logging
@@ -35,6 +36,18 @@ def _get_configmap_name() -> str:
     release_name = (os.getenv('HELM_RELEASE_NAME') or
                     os.getenv('SKYPILOT_RELEASE_NAME') or 'skypilot')
     return f'{release_name}-config'
+
+
+def _get_deployment_name() -> str:
+    release_name = (os.getenv('HELM_RELEASE_NAME') or
+                    os.getenv('SKYPILOT_RELEASE_NAME') or 'skypilot')
+    return f'{release_name}-api-server'
+
+
+def _get_app_name() -> str:
+    release_name = (os.getenv('HELM_RELEASE_NAME') or
+                    os.getenv('SKYPILOT_RELEASE_NAME') or 'skypilot')
+    return f'{release_name}-api'
 
 
 def initialize_configmap_sync_on_startup(config_file_path: str) -> None:
@@ -131,3 +144,80 @@ def patch_configmap_with_config(config, config_file_path: str) -> None:
 
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to sync config to ConfigMap: {e}')
+
+
+def can_patch_deployment() -> bool:
+    """Check if the Kubernetes deployment can be patched."""
+    if not is_running_in_kubernetes():
+        return False
+    try:
+        namespace = _get_kubernetes_namespace()
+        deployment_name = _get_deployment_name()
+        kubernetes.apps_api().read_namespaced_deployment(name=deployment_name,
+                                                         namespace=namespace)
+        return True
+    except kubernetes.kubernetes.client.rest.ApiException as e:
+        if e.status == 404:
+            return False
+        raise
+
+
+def trigger_deployment_update() -> bool:
+    """Patch the Kubernetes deployment with the updated config.
+
+    Args:
+        config: The updated config to sync to the deployment.
+
+    Returns:
+        True if the deployment update is successful, False otherwise.
+    """
+    if not is_running_in_kubernetes():
+        return False
+    try:
+        namespace = _get_kubernetes_namespace()
+        deployment_name = _get_deployment_name()
+        label_selector = f'app={_get_app_name()}'
+        pods = kubernetes.core_api().list_namespaced_pod(
+            namespace=namespace, label_selector=label_selector)
+        # If there are multiple API server pods, assume that a rolling update
+        # is already in progress. In this case, we don't need to trigger a new
+        # rolling update.
+        # TODO modify this logic once we have multi-replica support.
+        logger.info(
+            f'Found {len(pods.items)} API server pods in namespace {namespace}')
+        if len(pods.items) > 1:
+            logger.info(
+                f'Found multiple API server pods in namespace {namespace}. '
+                'Assuming a rolling update is already in progress, '
+                'skipping deployment update.')
+            return False
+        # Get the current deployment object
+        kubernetes.apps_api().read_namespaced_deployment(name=deployment_name,
+                                                         namespace=namespace)
+        # Add or update the restartedAt annotation with the current timestamp
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat('T') + 'Z'
+
+        # Create the patch body
+        patch_body = {
+            'spec': {
+                'template': {
+                    'metadata': {
+                        'annotations': {
+                            'kubectl.kubernetes.io/restartedAt': now
+                        }
+                    }
+                }
+            }
+        }
+
+        # Apply the patch
+        kubernetes.apps_api().patch_namespaced_deployment(name=deployment_name,
+                                                          namespace=namespace,
+                                                          body=patch_body)
+        logger.info(
+            f'Deployment "{deployment_name}" in namespace "{namespace}" '
+            'successfully restarted.')
+        return True
+    except kubernetes.kubernetes.client.rest.ApiException as e:
+        logger.warning(f'Failed to patch deployment: {e}')
+        return False
