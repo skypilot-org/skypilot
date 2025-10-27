@@ -3452,7 +3452,7 @@ def _down_or_stop_clusters(
                     click.echo(f'      {name} ({first})')
 
     if failures:
-        click.echo('Cluster(s) failed. See details above.')
+        click.echo('Cluster(s) failed. See details above. TestTest')
 
 
 @cli.command(cls=_DocumentedCodeCommand)
