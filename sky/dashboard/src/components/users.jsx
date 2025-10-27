@@ -73,9 +73,7 @@ const getGPUCount = (accelerators, source) => {
   // Handle string format (from clusters): "{'V100': 4}"
   if (typeof accelerators === 'string') {
     try {
-      const jsonStr = accelerators
-        .replace(/'/g, '"')
-        .replace(/None/g, 'null');
+      const jsonStr = accelerators.replace(/'/g, '"').replace(/None/g, 'null');
       parsed = JSON.parse(jsonStr);
     } catch (e) {
       console.error('Failed to parse accelerators string:', accelerators, e);
@@ -1243,7 +1241,13 @@ function UsersTable({
             {
               allUsers: true,
               skipFinished: true,
-              fields: ['user_hash', 'status', 'accelerators', 'job_name', 'job_id'],
+              fields: [
+                'user_hash',
+                'status',
+                'accelerators',
+                'job_name',
+                'job_id',
+              ],
             },
           ]),
         ]);
@@ -1258,7 +1262,7 @@ function UsersTable({
           let jobGPUCount = 0;
 
           // Count clusters and sum GPUs in one pass
-          for (const cluster of (clustersData || [])) {
+          for (const cluster of clustersData || []) {
             if (cluster.user_hash === user.userId) {
               clusterCount++;
               clusterGPUCount += getGPUCount(
@@ -1269,13 +1273,13 @@ function UsersTable({
           }
 
           // Count active jobs and sum GPUs in one pass
-          for (const job of (jobsData || [])) {
-            if (job.user_hash === user.userId && ACTIVE_JOB_STATUSES.has(job.status)) {
+          for (const job of jobsData || []) {
+            if (
+              job.user_hash === user.userId &&
+              ACTIVE_JOB_STATUSES.has(job.status)
+            ) {
               jobCount++;
-              jobGPUCount += getGPUCount(
-                job.accelerators,
-                `Job ${job.job_id}`
-              );
+              jobGPUCount += getGPUCount(job.accelerators, `Job ${job.job_id}`);
             }
           }
 
@@ -1860,7 +1864,10 @@ function ServiceAccountTokensView({
 
         // Count active jobs and sum GPUs in one pass
         for (const job of jobsData) {
-          if (job.user_hash === serviceAccountId && ACTIVE_JOB_STATUSES.has(job.status)) {
+          if (
+            job.user_hash === serviceAccountId &&
+            ACTIVE_JOB_STATUSES.has(job.status)
+          ) {
             jobCount++;
             jobGPUCount += getGPUCount(
               job.accelerators,
