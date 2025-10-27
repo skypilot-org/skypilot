@@ -167,6 +167,11 @@ its performance requirements and size of the data.
     AWS Graviton). SkyPilot automatically uses the optimal mounting tool for each architecture:
     goofys for x86_64 and rclone for ARM64.
 
+.. note::
+    CoreWeave buckets may take a long time to become accessible after creation.
+    Therefore, SkyPilot does not automatically create them.
+    Please manually create your CoreWeave bucket and verify its accessibility before using it.
+
 .. _mount_cached_mode_in_detail:
 
 MOUNT_CACHED mode in detail
