@@ -3358,6 +3358,7 @@ def _down_or_stop_clusters(
                 success_progress = True
                 message = (f'{colorama.Fore.GREEN}{operation} '
                            f'cluster {name!r}...done{colorama.Style.RESET_ALL}')
+                successes.append(name)
                 if idle_minutes_to_autostop >= 0:
                     option_str = 'down' if down else 'stop'
                     passive_str = 'downed' if down else 'stopped'
@@ -3428,17 +3429,30 @@ def _down_or_stop_clusters(
         click.secho(f'{operation} requests are sent. Check the requests\' '
                     'status with `sky request get <request_id>`.')
 
-    click.echo('\nSummary:')
-    if successes:
-        click.echo('  ✓ Succeeded: ' + ', '.join(successes))
+    show_summary = len(clusters) > 1
+
+    if show_summary:
+        click.echo('\nSummary:')
+        if successes:
+            # Preserve the original order of clusters as provided by user.
+            click.echo('  ✓ Succeeded: ' + ', '.join(successes))
+        if failures:
+            # Format failures: if one failure, keep on same line. If multiple,
+            # indent each failed cluster on its own line for readability.
+            if len(failures) == 1:
+                name, reason = failures[0]
+                first = reason.strip().splitlines()[0]
+                first = first if len(first) <= 120 else first[:120] + '…'
+                click.echo(f'  ✗ Failed: {name} ({first})')
+            else:
+                click.echo('  ✗ Failed:')
+                for name, reason in failures:
+                    first = reason.strip().splitlines()[0]
+                    first = first if len(first) <= 120 else first[:120] + '…'
+                    click.echo(f'      {name} ({first})')
+
     if failures:
-        failed_pretty = []
-        for name, reason in failures:
-            first = reason.strip().splitlines()[0]
-            first = first if len(first) <= 120 else first[:120] + '…'
-            failed_pretty.append(f'{name} ({first})')
-        click.echo('  ✗ Failed: ' + ', '.join(failed_pretty))
-        raise click.ClickException('Some clusters failed. See summary above.')
+        raise click.ClickException('Cluster(s) failed. See details above.')
 
 
 @cli.command(cls=_DocumentedCodeCommand)
