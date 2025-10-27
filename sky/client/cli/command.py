@@ -1,5 +1,5 @@
 """The 'sky' command line tool.
-
+!
 Example usage:
 
   # See available commands.
