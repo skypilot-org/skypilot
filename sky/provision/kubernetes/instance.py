@@ -542,22 +542,20 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
 
         # Get the set of found pod names and check if we have all expected pods
         found_pod_names = {pod.metadata.name for pod in all_pods}
-        missing_pods = expected_pod_names - found_pod_names
-        if missing_pods:
+        missing_pod_names = expected_pod_names - found_pod_names
+        if missing_pod_names:
             if missing_pods_retry >= _MAX_MISSING_PODS_RETRIES:
-                for pod in missing_pods:
+                for pod_name in missing_pod_names:
                     reason = _get_pod_missing_reason(context, namespace,
-                                                     cluster_name,
-                                                     pod.metadata.name)
-                    logger.info(f'Pod {pod.metadata.name} missing: {reason}')
+                                                     cluster_name, pod_name)
+                    logger.warning(f'Pod {pod_name} missing: {reason}')
                 raise config_lib.KubernetesError(
                     f'Failed to get all pods after {missing_pods_retry} '
                     f'retries. Some pods may have been terminated or failed '
-                    f'unexpectedly. Run `sky status {cluster_name} -v` or '
-                    f'`sky logs --provision {cluster_name}` for more '
-                    f'details.')
+                    f'unexpectedly. Run `sky logs --provision {cluster_name}` '
+                    'for more details.')
             logger.info('Retrying running pods check: '
-                        f'Missing pods: {missing_pods}')
+                        f'Missing pods: {missing_pod_names}')
             time.sleep(0.5)
             missing_pods_retry += 1
             continue
@@ -573,11 +571,11 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
                 # Get the reason and write to cluster events before
                 # the pod gets completely deleted from the API.
                 reason = _get_pod_termination_reason(pod, cluster_name)
-                logger.info(f'Pod {pod.metadata.name} terminated: {reason}')
+                logger.warning(f'Pod {pod.metadata.name} terminated: {reason}')
                 raise config_lib.KubernetesError(
                     f'Pod {pod.metadata.name} has terminated or failed '
-                    f'unexpectedly. Run `sky status {cluster_name} -v` or '
-                    f'`sky logs --provision {cluster_name}` for more details.')
+                    f'unexpectedly. Run `sky logs --provision {cluster_name}` '
+                    'for more details.')
 
             # Continue if pod and all the containers within the
             # pod are successfully created and running.
