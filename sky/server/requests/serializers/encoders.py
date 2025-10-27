@@ -206,10 +206,11 @@ def encode_enabled_clouds(clouds: List['clouds.Cloud']) -> List[str]:
 @register_encoder('storage_ls')
 def encode_storage_ls(
         return_value: List[responses.StorageRecord]) -> List[Dict[str, Any]]:
-    for storage_info in return_value:
+    response_list = [storage_info.model_dump() for storage_info in return_value]
+    for storage_info in response_list:
         storage_info['status'] = storage_info['status'].value
         storage_info['store'] = [store.value for store in storage_info['store']]
-    return [storage_info.model_dump() for storage_info in return_value]
+    return response_list
 
 
 @register_encoder('volume_list')
