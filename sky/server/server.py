@@ -1572,6 +1572,8 @@ async def stream(
             clients, console for CLI/API clients), 'plain' (force plain text),
             'html' (force HTML), or 'console' (force console)
     """
+    # We need to save the user-supplied request ID for the response header.
+    user_supplied_request_id = request_id
     if request_id is not None and log_path is not None:
         raise fastapi.HTTPException(
             status_code=400,
@@ -1679,7 +1681,9 @@ async def stream(
         'Transfer-Encoding': 'chunked'
     }
     if request_id is not None:
-        headers[server_constants.STREAM_REQUEST_HEADER] = request_id
+        headers[server_constants.STREAM_REQUEST_HEADER] = (
+            user_supplied_request_id
+            if user_supplied_request_id else request_id)
 
     return fastapi.responses.StreamingResponse(
         content=stream_utils.log_streamer(request_id,
