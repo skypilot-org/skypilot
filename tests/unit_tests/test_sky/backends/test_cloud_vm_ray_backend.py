@@ -439,6 +439,22 @@ class TestCloudVmRayBackendGetGrpcChannel:
 
         assert tunnel_creation_count.value == 2, f"Expected tunnel to be created exactly once, but was created {tunnel_creation_count.value} times"
 
+    def test_setup_num_gpus(self, monkeypatch):
+        """Test setup num GPUs."""
+        test_task = task.Task(resources=resources.Resources(accelerators={
+            'A100': 8,
+            'L4': 1
+        }))
+        monkeypatch.setattr(CloudVmRayResourceHandle, '__init__',
+                            lambda self, *args, **kwargs: None)
+        backend = CloudVmRayBackend()
+        monkeypatch.setattr(backend,
+                            'check_resources_fit_cluster',
+                            lambda handle, task, check_ports=True: resources.
+                            Resources(accelerators={'L4': 1}))
+        handle = CloudVmRayResourceHandle(**self.MOCK_HANDLE_KWARGS)
+        assert backend._get_num_gpus(handle, test_task) == 1
+
 
 class TestIsMessageTooLong:
     """Tests for _is_message_too_long function."""
