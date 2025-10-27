@@ -65,8 +65,11 @@ def encode_status(
         handle = serialize_utils.prepare_handle_for_backwards_compatibility(
             cluster['handle'])
         response_cluster['handle'] = pickle_and_encode(handle)
+        # TODO (syang) We still need to return this field for backwards
+        # compatibility.
+        # Remove this field at or after v0.10.7 or v0.11.0
         response_cluster['storage_mounts_metadata'] = pickle_and_encode(
-            response_cluster['storage_mounts_metadata'])
+            None)  # Always returns None.
         response.append(response_cluster)
     return response
 
