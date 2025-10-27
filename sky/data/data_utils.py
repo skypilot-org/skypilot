@@ -990,8 +990,11 @@ def verify_coreweave_bucket(name: str, retry: int = 0) -> bool:
                          f'Retrying in 5 seconds...')
             time.sleep(5)
         else:
+            attempt_str = 'attempt'
+            if max_retries > 1:
+                attempt_str += 's'
             logger.error(f'Failed to verify CoreWeave bucket {name} after '
-                         f'{max_retries} attempts')
+                         f'{max_retries} {attempt_str}.')
             return False
 
     # Should not reach here, but just in case
