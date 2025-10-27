@@ -51,6 +51,11 @@ REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
 DEFAULT_REQUESTS_RETENTION_HOURS = 24  # 1 day
 
+
+def _is_running_pytest() -> bool:
+    return 'PYTEST_CURRENT_TEST' in os.environ
+
+
 # TODO(zhwu): For scalability, there are several TODOs:
 # [x] Have a way to queue requests.
 # [ ] Move logs to persistent place.
@@ -666,6 +671,8 @@ def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
     """Get and update a SkyPilot API request."""
     # Acquire the lock to avoid race conditions between multiple request
     # operations, e.g. execute and cancel.
+    if not _is_running_pytest() and asyncio_utils.is_running_async():
+        logger.warning('synchronous filelock is being used in an async context')
     with filelock.FileLock(request_lock_path(request_id)):
         request = _get_request_no_lock(request_id)
         yield request
@@ -752,6 +759,8 @@ async def get_latest_request_id_async() -> Optional[str]:
 def get_request(request_id: str,
                 fields: Optional[List[str]] = None) -> Optional[Request]:
     """Get a SkyPilot API request."""
+    if not _is_running_pytest() and asyncio_utils.is_running_async():
+        logger.warning('synchronous filelock is being used in an async context')
     with filelock.FileLock(request_lock_path(request_id)):
         return _get_request_no_lock(request_id, fields)
 
