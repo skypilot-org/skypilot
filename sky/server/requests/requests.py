@@ -13,8 +13,8 @@ import sqlite3
 import threading
 import time
 import traceback
-from typing import (Any, Callable, Dict, Generator, List, NamedTuple, Optional,
-                    Tuple)
+from typing import (Any, AsyncGenerator, Callable, Dict, Generator, List,
+                    NamedTuple, Optional, Tuple)
 import uuid
 
 import anyio
@@ -410,7 +410,7 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
             cluster_names=[cluster_name],
             fields=['request_id']))
     ]
-    kill_requests(request_ids)
+    _kill_requests(request_ids)
 
 
 def kill_requests_with_prefix(request_ids: Optional[List[str]] = None,
@@ -428,11 +428,27 @@ def kill_requests_with_prefix(request_ids: Optional[List[str]] = None,
                 raise ValueError(f'Multiple requests found for '
                                  f'request ID prefix: {request_id}')
             expanded_request_ids.append(request_tasks[0].request_id)
-    return kill_requests(request_ids=expanded_request_ids, user_id=user_id)
+    return _kill_requests(request_ids=expanded_request_ids, user_id=user_id)
 
 
-def kill_requests(request_ids: Optional[List[str]] = None,
-                  user_id: Optional[str] = None) -> List[str]:
+def _should_kill_request(request_id: str,
+                         request_record: Optional[Request]) -> bool:
+    if request_record is None:
+        logger.debug(f'No request ID {request_id}')
+        return False
+    # Skip internal requests. The internal requests are scheduled with
+    # request_id in range(len(INTERNAL_REQUEST_EVENTS)).
+    if request_record.request_id in set(
+            event.id for event in daemons.INTERNAL_REQUEST_DAEMONS):
+        return False
+    if request_record.status > RequestStatus.RUNNING:
+        logger.debug(f'Request {request_id} already finished')
+        return False
+    return True
+
+
+def _kill_requests(request_ids: Optional[List[str]] = None,
+                   user_id: Optional[str] = None) -> List[str]:
     """Kill a SkyPilot API request and set its status to cancelled.
 
     Args:
@@ -457,16 +473,7 @@ def kill_requests(request_ids: Optional[List[str]] = None,
     cancelled_request_ids = []
     for request_id in request_ids:
         with update_request(request_id) as request_record:
-            if request_record is None:
-                logger.debug(f'No request ID {request_id}')
-                continue
-            # Skip internal requests. The internal requests are scheduled with
-            # request_id in range(len(INTERNAL_REQUEST_EVENTS)).
-            if request_record.request_id in set(
-                    event.id for event in daemons.INTERNAL_REQUEST_DAEMONS):
-                continue
-            if request_record.status > RequestStatus.RUNNING:
-                logger.debug(f'Request {request_id} already finished')
+            if not _should_kill_request(request_id, request_record):
                 continue
             if request_record.pid is not None:
                 logger.debug(f'Killing request process {request_record.pid}')
@@ -480,6 +487,29 @@ def kill_requests(request_ids: Optional[List[str]] = None,
             request_record.finished_at = time.time()
             cancelled_request_ids.append(request_id)
     return cancelled_request_ids
+
+
+@asyncio_utils.shield
+async def kill_request_async(request_id: str) -> bool:
+    """Kill a SkyPilot API request and set its status to cancelled.
+
+    Returns:
+        True if the request was killed, False otherwise.
+    """
+    async with update_request_async(request_id) as request_record:
+        if not _should_kill_request(request_id, request_record):
+            return False
+        if request_record.pid is not None:
+            logger.debug(f'Killing request process {request_record.pid}')
+            # Use SIGTERM instead of SIGKILL:
+            # - The executor can handle SIGTERM gracefully
+            # - After SIGTERM, the executor can reuse the request process
+            #   for other requests, avoiding the overhead of forking a new
+            #   process for each request.
+            os.kill(request_record.pid, signal.SIGTERM)
+        request_record.status = RequestStatus.CANCELLED
+        request_record.finished_at = time.time()
+    return True
 
 
 def create_table(cursor, conn):
@@ -637,6 +667,21 @@ def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
         yield request
         if request is not None:
             _add_or_update_request_no_lock(request)
+
+
+@contextlib.asynccontextmanager
+@init_db_async
+@asyncio_utils.shield
+async def update_request_async(
+        request_id: str) -> AsyncGenerator[Optional[Request], None]:
+    """Get and update a SkyPilot API request."""
+    # Acquire the lock to avoid race conditions between multiple request
+    # operations, e.g. execute and cancel.
+    async with filelock.AsyncFileLock(request_lock_path(request_id)):
+        request = await _get_request_no_lock_async(request_id)
+        yield request
+        if request is not None:
+            await _add_or_update_request_no_lock_async(request)
 
 
 @init_db

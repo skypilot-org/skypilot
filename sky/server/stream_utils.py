@@ -373,7 +373,7 @@ def stream_response(
         async def on_disconnect():
             logger.info(f'User terminated the connection for request '
                         f'{request_id}')
-            requests_lib.kill_requests([request_id])
+            await requests_lib.kill_request_async(request_id)
 
         # The background task will be run after returning a response.
         # https://fastapi.tiangolo.com/tutorial/background-tasks/
