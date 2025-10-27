@@ -413,6 +413,24 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
     kill_requests(request_ids)
 
 
+def kill_requests_with_prefix(request_ids: Optional[List[str]] = None,
+                              user_id: Optional[str] = None) -> List[str]:
+    """Kill requests with a given request ID prefix."""
+    expanded_request_ids: Optional[List[str]] = None
+    if request_ids is not None:
+        expanded_request_ids = []
+        for request_id in request_ids:
+            request_tasks = get_requests_with_prefix(request_id,
+                                                     fields=['request_id'])
+            if request_tasks is None or len(request_tasks) == 0:
+                continue
+            if len(request_tasks) > 1:
+                raise ValueError(f'Multiple requests found for '
+                                 f'request ID prefix: {request_id}')
+            expanded_request_ids.append(request_tasks[0].request_id)
+    return kill_requests(request_ids=expanded_request_ids, user_id=user_id)
+
+
 def kill_requests(request_ids: Optional[List[str]] = None,
                   user_id: Optional[str] = None) -> List[str]:
     """Kill a SkyPilot API request and set its status to cancelled.
@@ -714,6 +732,51 @@ async def get_request_async(
     # TODO(aylei): figure out how to remove FileLock here to avoid the overhead
     async with filelock.AsyncFileLock(request_lock_path(request_id)):
         return await _get_request_no_lock_async(request_id, fields)
+
+
+@init_db
+@metrics_lib.time_me
+def get_requests_with_prefix(
+        request_id_prefix: str,
+        fields: Optional[List[str]] = None) -> Optional[List[Request]]:
+    """Get requests with a given request ID prefix."""
+    assert _DB is not None
+    if fields:
+        columns_str = ', '.join(fields)
+    else:
+        columns_str = ', '.join(REQUEST_COLUMNS)
+    with _DB.conn:
+        cursor = _DB.conn.cursor()
+        cursor.execute((f'SELECT {columns_str} FROM {REQUEST_TABLE} '
+                        'WHERE request_id LIKE ?'), (request_id_prefix + '%',))
+        rows = cursor.fetchall()
+        if not rows:
+            return None
+        if fields:
+            rows = [_update_request_row_fields(row, fields) for row in rows]
+        return [Request.from_row(row) for row in rows]
+
+
+@init_db_async
+@metrics_lib.time_me_async
+@asyncio_utils.shield
+async def get_requests_async_with_prefix(
+        request_id_prefix: str,
+        fields: Optional[List[str]] = None) -> Optional[List[Request]]:
+    """Async version of get_request_with_prefix."""
+    assert _DB is not None
+    if fields:
+        columns_str = ', '.join(fields)
+    else:
+        columns_str = ', '.join(REQUEST_COLUMNS)
+    async with _DB.execute_fetchall_async(
+        (f'SELECT {columns_str} FROM {REQUEST_TABLE} '
+         'WHERE request_id LIKE ?'), (request_id_prefix + '%',)) as rows:
+        if not rows:
+            return None
+        if fields:
+            rows = [_update_request_row_fields(row, fields) for row in rows]
+        return [Request.from_row(row) for row in rows]
 
 
 class StatusWithMsg(NamedTuple):

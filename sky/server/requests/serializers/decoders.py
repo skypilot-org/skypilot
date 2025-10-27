@@ -56,10 +56,16 @@ def decode_status(
     clusters = return_value
     response = []
     for cluster in clusters:
-        cluster['handle'] = decode_and_unpickle(cluster['handle'])
+        # handle may not always be present in the response.
+        if 'handle' in cluster and cluster['handle'] is not None:
+            cluster['handle'] = decode_and_unpickle(cluster['handle'])
         cluster['status'] = status_lib.ClusterStatus(cluster['status'])
-        cluster['storage_mounts_metadata'] = decode_and_unpickle(
-            cluster['storage_mounts_metadata'])
+        # this field is to be deprecated in the future.
+        # do not decode this field if it is not present.
+        if ('storage_mounts_metadata' in cluster and
+                cluster['storage_mounts_metadata'] is not None):
+            cluster['storage_mounts_metadata'] = decode_and_unpickle(
+                cluster['storage_mounts_metadata'])
         if 'is_managed' not in cluster:
             cluster['is_managed'] = False
         response.append(responses.StatusResponse.model_validate(cluster))
