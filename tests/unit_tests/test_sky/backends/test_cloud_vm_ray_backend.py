@@ -456,6 +456,7 @@ class TestCloudVmRayBackendGetGrpcChannel:
         handle = CloudVmRayResourceHandle(**self.MOCK_HANDLE_KWARGS)
         assert backend._get_num_gpus(handle, test_task) == 1
 
+
 class TestIsMessageTooLong:
     """Tests for _is_message_too_long function."""
 
