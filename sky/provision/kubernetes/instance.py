@@ -1488,7 +1488,9 @@ def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
             if message:
                 termination_reason += f' ({message})'
 
-        latest_timestamp = max(latest_timestamp, condition.last_transition_time)
+        if condition.last_transition_time is not None:
+            latest_timestamp = max(latest_timestamp,
+                                   condition.last_transition_time)
 
     pod_reason = (f'{termination_reason}.\n'
                   f'Last known state: {ready_state}.')
