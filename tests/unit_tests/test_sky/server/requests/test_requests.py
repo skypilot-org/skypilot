@@ -39,7 +39,8 @@ def isolated_database(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_set_request_failed(isolated_database):
+@pytest.mark.parametrize('test_async', [True, False])
+async def test_set_request_failed(isolated_database, test_async):
     request = requests.Request(request_id='test-request-1',
                                name='test-request',
                                entrypoint=dummy,
@@ -53,10 +54,16 @@ async def test_set_request_failed(isolated_database):
     try:
         raise ValueError('Boom!')
     except ValueError as e:
-        requests.set_request_failed('test-request-1', e)
+        if test_async:
+            await requests.set_request_failed_async('test-request-1', e)
+        else:
+            requests.set_request_failed('test-request-1', e)
 
     # Get the updated request
-    updated_request = requests.get_request('test-request-1')
+    if test_async:
+        updated_request = await requests.get_request_async('test-request-1')
+    else:
+        updated_request = requests.get_request('test-request-1')
 
     # Verify the request was updated correctly
     assert updated_request is not None
@@ -75,6 +82,47 @@ def test_set_request_failed_nonexistent_request(isolated_database):
     with pytest.raises(AssertionError):
         requests.set_request_failed('nonexistent-request',
                                     ValueError('Test error'))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('test_async', [True, False])
+async def test_set_request_succeeded(isolated_database, test_async):
+    request = requests.Request(request_id='test-request-1',
+                               name='test-request',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.RUNNING,
+                               created_at=0.0,
+                               finished_at=0.0,
+                               user_id='test-user')
+
+    await requests.create_if_not_exists_async(request)
+    result = {'key': 'value', 'number': 42}
+    if test_async:
+        await requests.set_request_succeeded_async('test-request-1', result)
+    else:
+        requests.set_request_succeeded('test-request-1', result)
+
+    # Get the updated request
+    if test_async:
+        updated_request = await requests.get_request_async('test-request-1')
+    else:
+        updated_request = requests.get_request('test-request-1')
+
+    # Verify the request was updated correctly
+    assert updated_request is not None
+    assert updated_request.status == RequestStatus.SUCCEEDED
+    assert updated_request.finished_at > 0.0
+
+    # Verify the return value was set correctly
+    returned_value = updated_request.get_return_value()
+    assert returned_value == result
+
+
+def test_set_request_succeeded_nonexistent_request(isolated_database):
+    # Try to set a non-existent request as succeeded
+    with pytest.raises(AssertionError):
+        requests.set_request_succeeded('nonexistent-request', {'result': 'ok'})
 
 
 @pytest.mark.asyncio
