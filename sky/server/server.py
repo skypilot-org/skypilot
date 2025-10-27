@@ -1497,11 +1497,8 @@ async def local_down(request: fastapi.Request,
     )
 
 
-# === API server related APIs ===
-@app.get('/api/get')
-async def api_get(request_id: str) -> payloads.RequestPayload:
-    """Gets a request with a given request ID prefix."""
-    # Validate request_id prefix matches a single request.
+async def get_expanded_request_id(request_id: str) -> str:
+    """Gets the expanded request ID for a given request ID prefix."""
     request_tasks = await requests_lib.get_requests_async_with_prefix(
         request_id, fields=['request_id'])
     if request_tasks is None:
@@ -1511,7 +1508,15 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
         raise fastapi.HTTPException(status_code=400,
                                     detail=('Multiple requests found for '
                                             f'request ID prefix: {request_id}'))
-    request_id = request_tasks[0].request_id
+    return request_tasks[0].request_id
+
+
+# === API server related APIs ===
+@app.get('/api/get')
+async def api_get(request_id: str) -> payloads.RequestPayload:
+    """Gets a request with a given request ID prefix."""
+    # Validate request_id prefix matches a single request.
+    request_id = await get_expanded_request_id(request_id)
 
     while True:
         req_status = await requests_lib.get_request_status_async(request_id)
@@ -1580,17 +1585,7 @@ async def stream(
             detail='Only one of request_id and log_path can be provided')
 
     if request_id is not None:
-        request_tasks = await requests_lib.get_requests_async_with_prefix(
-            request_id, fields=['request_id'])
-        if request_tasks is None:
-            raise fastapi.HTTPException(
-                status_code=404, detail=f'Request {request_id!r} not found')
-        if len(request_tasks) > 1:
-            raise fastapi.HTTPException(
-                status_code=400,
-                detail=
-                f'Multiple requests found for request ID prefix: {request_id}')
-        request_id = request_tasks[0].request_id
+        request_id = await get_expanded_request_id(request_id)
 
     if request_id is None and log_path is None:
         request_id = await requests_lib.get_latest_request_id_async()
