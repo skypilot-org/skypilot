@@ -35,6 +35,7 @@ from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
 from sky.utils import asyncio_utils
 from sky.utils import common_utils
+from sky.utils import env_options
 from sky.utils import ux_utils
 from sky.utils.db import db_utils
 
@@ -669,10 +670,13 @@ async def kill_request_async(request_id: str) -> bool:
 @metrics_lib.time_me
 def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
     """Get and update a SkyPilot API request."""
+    # In developer mode, we assert if synchronous filelock is
+    # being used in an async context.
+    if (env_options.Options.IS_DEVELOPER.get() and not _is_running_pytest() and
+            asyncio_utils.is_running_async()):
+        assert False, 'synchronous filelock is being used in an async context'
     # Acquire the lock to avoid race conditions between multiple request
     # operations, e.g. execute and cancel.
-    if not _is_running_pytest() and asyncio_utils.is_running_async():
-        logger.warning('synchronous filelock is being used in an async context')
     with filelock.FileLock(request_lock_path(request_id)):
         request = _get_request_no_lock(request_id)
         yield request
@@ -759,8 +763,11 @@ async def get_latest_request_id_async() -> Optional[str]:
 def get_request(request_id: str,
                 fields: Optional[List[str]] = None) -> Optional[Request]:
     """Get a SkyPilot API request."""
-    if not _is_running_pytest() and asyncio_utils.is_running_async():
-        logger.warning('synchronous filelock is being used in an async context')
+    # In developer mode, we assert if synchronous filelock is
+    # being used in an async context.
+    if (env_options.Options.IS_DEVELOPER.get() and not _is_running_pytest() and
+            asyncio_utils.is_running_async()):
+        assert False, 'synchronous filelock is being used in an async context'
     with filelock.FileLock(request_lock_path(request_id)):
         return _get_request_no_lock(request_id, fields)
 
