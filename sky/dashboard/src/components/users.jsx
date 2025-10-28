@@ -61,8 +61,31 @@ import {
 } from '@/components/ui/dialog';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import { statusGroups } from '@/components/jobs';
+import {
+  FilterDropdown,
+  Filters,
+  updateURLParams as sharedUpdateURLParams,
+  updateFiltersByURLParams as sharedUpdateFiltersByURLParams,
+  filterData,
+} from '@/components/shared/FilterSystem';
 
 const ACTIVE_JOB_STATUSES = new Set(statusGroups.active);
+
+// Define filter options for the filter dropdown
+const PROPERTY_OPTIONS = [
+  {
+    label: 'Name',
+    value: 'name',
+  },
+  {
+    label: 'User ID',
+    value: 'userid',
+  },
+  {
+    label: 'Role',
+    value: 'role',
+  },
+];
 
 // Helper function to get GPU count with validation
 const getGPUCount = (accelerators, source) => {
@@ -232,6 +255,12 @@ export function Users() {
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [serviceAccountSearchQuery, setServiceAccountSearchQuery] =
     useState('');
+  const [filters, setFilters] = useState([]);
+  const [valueList, setValueList] = useState({
+    name: [],
+    userid: [],
+    role: [],
+  });
 
   // Initialize deduplicateUsers from URL parameter
   const getInitialDeduplicateUsers = () => {
@@ -284,6 +313,29 @@ export function Users() {
       { shallow: true }
     );
   };
+
+  // Helper function to update URL query parameters for filters
+  const updateURLParams = (filters) => {
+    sharedUpdateURLParams(router, filters);
+  };
+
+  // Create property map for filter URL parameters
+  const propertyMap = new Map([
+    ['name', 'Name'],
+    ['userid', 'User ID'],
+    ['role', 'Role'],
+  ]);
+
+  // Initialize filters from URL parameters
+  useEffect(() => {
+    if (router.isReady && activeMainTab === 'users') {
+      const urlFilters = sharedUpdateFiltersByURLParams(router, propertyMap);
+      if (urlFilters.length > 0) {
+        setFilters(urlFilters);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.isReady, activeMainTab]);
 
   // Handle URL parameters for tab selection
   useEffect(() => {
@@ -646,60 +698,54 @@ export function Users() {
         </div>
       </div>
 
-      {/* Search and Create Service Account Row */}
+      {/* Filter/Search and Create Service Account Row */}
       <div className="flex items-center justify-between mb-4">
-        <div className="relative flex-1 max-w-md">
-          <input
-            type="text"
-            placeholder={
-              activeMainTab === 'users'
-                ? 'Search users by name, email, or role'
-                : 'Search by service account name, or created by'
-            }
-            value={
-              activeMainTab === 'users'
-                ? userSearchQuery
-                : serviceAccountSearchQuery
-            }
-            onChange={(e) => {
-              if (activeMainTab === 'users') {
-                setUserSearchQuery(e.target.value);
-              } else {
+        {activeMainTab === 'users' ? (
+          <div className="w-full sm:w-auto max-w-md">
+            <FilterDropdown
+              propertyList={PROPERTY_OPTIONS}
+              valueList={valueList}
+              setFilters={setFilters}
+              updateURLParams={updateURLParams}
+              placeholder="Filter users"
+            />
+          </div>
+        ) : (
+          <div className="relative flex-1 max-w-md">
+            <input
+              type="text"
+              placeholder="Search by service account name, or created by"
+              value={serviceAccountSearchQuery}
+              onChange={(e) => {
                 setServiceAccountSearchQuery(e.target.value);
-              }
-            }}
-            className="h-8 w-full px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
-          />
-          {((activeMainTab === 'users' && userSearchQuery) ||
-            (activeMainTab === 'service-accounts' &&
-              serviceAccountSearchQuery)) && (
-            <button
-              onClick={() => {
-                if (activeMainTab === 'users') {
-                  setUserSearchQuery('');
-                } else {
-                  setServiceAccountSearchQuery('');
-                }
               }}
-              className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              title="Clear search"
-            >
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+              className="h-8 w-full px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
+            />
+            {serviceAccountSearchQuery && (
+              <button
+                onClick={() => {
+                  setServiceAccountSearchQuery('');
+                }}
+                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                title="Clear search"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
-          )}
-        </div>
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Deduplicate Users Toggle - only show on users tab when NOT using SSO/OAuth2 */}
         {activeMainTab === 'users' && !userEmail && (
@@ -751,6 +797,15 @@ export function Users() {
         )}
       </div>
 
+      {/* Display Active Filters - only for users tab */}
+      {activeMainTab === 'users' && (
+        <Filters
+          filters={filters}
+          setFilters={setFilters}
+          updateURLParams={updateURLParams}
+        />
+      )}
+
       {/* Error/Success messages positioned at top right, below navigation bar */}
       <div className="fixed top-20 right-4 z-[9999] max-w-md">
         <SuccessDisplay
@@ -776,8 +831,8 @@ export function Users() {
           basicAuthEnabled={basicAuthEnabled}
           currentUserRole={userRoleCache?.role}
           currentUserId={userRoleCache?.id}
-          searchQuery={userSearchQuery}
-          setSearchQuery={setUserSearchQuery}
+          filters={filters}
+          setValueList={setValueList}
           deduplicateUsers={deduplicateUsers}
         />
       ) : (
@@ -1197,8 +1252,8 @@ function UsersTable({
   basicAuthEnabled,
   currentUserRole,
   currentUserId,
-  searchQuery,
-  setSearchQuery,
+  filters,
+  setValueList,
   deduplicateUsers,
 }) {
   const [usersWithCounts, setUsersWithCounts] = useState([]);
@@ -1341,16 +1396,39 @@ function UsersTable({
     return () => clearInterval(interval);
   }, [fetchDataAndProcess, refreshInterval]);
 
+  // Populate valueList with unique values from users for autocomplete
+  useEffect(() => {
+    if (usersWithCounts.length > 0) {
+      const names = new Set();
+      const userIds = new Set();
+      const roles = new Set();
+
+      usersWithCounts.forEach((user) => {
+        if (user.usernameDisplay) names.add(user.usernameDisplay);
+        if (user.userId) userIds.add(user.userId);
+        if (user.role) roles.add(user.role);
+      });
+
+      setValueList({
+        name: Array.from(names).sort(),
+        userid: Array.from(userIds).sort(),
+        role: Array.from(roles).sort(),
+      });
+    }
+  }, [usersWithCounts, setValueList]);
+
   const filteredAndSortedUsers = useMemo(() => {
     let filtered = usersWithCounts;
 
-    if (searchQuery?.trim()) {
-      const query = searchQuery.toLowerCase();
-      filtered = usersWithCounts.filter(
-        (user) =>
-          user.usernameDisplay?.toLowerCase().includes(query) ||
-          user.fullEmailID?.toLowerCase().includes(query) ||
-          user.role?.toLowerCase().includes(query)
+    // Apply filters using the shared filter system
+    if (filters.length > 0) {
+      filtered = filterData(
+        usersWithCounts.map((user) => ({
+          ...user,
+          name: user.usernameDisplay,
+          'user id': user.userId, // Note: space to match "User ID" -> "user id" from toLowerCase()
+        })),
+        filters
       );
     }
 
@@ -1421,7 +1499,7 @@ function UsersTable({
     }
 
     return sortData(filtered, sortConfig.key, sortConfig.direction);
-  }, [usersWithCounts, sortConfig, searchQuery, deduplicateUsers]);
+  }, [usersWithCounts, sortConfig, filters, deduplicateUsers]);
 
   const requestSort = (key) => {
     let direction = 'ascending';
@@ -1499,13 +1577,13 @@ function UsersTable({
     return (
       <div className="text-center py-12">
         <p className="text-lg font-semibold text-gray-500">
-          {searchQuery?.trim()
-            ? 'No users match your search.'
+          {filters.length > 0
+            ? 'No users match your filters.'
             : 'No users found.'}
         </p>
         <p className="text-sm text-gray-400 mt-1">
-          {searchQuery?.trim()
-            ? 'Try adjusting your search terms.'
+          {filters.length > 0
+            ? 'Try adjusting your filter criteria.'
             : 'There are currently no users to display.'}
         </p>
       </div>
