@@ -215,9 +215,11 @@ export function Users() {
     if (router.isReady) {
       const deduplicateParam = router.query.deduplicate;
 
-      // If URL has no deduplicate parameter, set it to the default (true)
+      // If URL has no deduplicate parameter, set it to the default
+      // Default to false for SSO (userEmail exists), true for non-SSO
       if (deduplicateParam === undefined) {
-        updateDeduplicateURL(true);
+        const defaultValue = !userEmail; // false for SSO, true for non-SSO
+        updateDeduplicateURL(defaultValue);
       } else {
         const expectedState = deduplicateParam === 'true';
         if (deduplicateUsers !== expectedState) {
@@ -226,7 +228,7 @@ export function Users() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router.isReady, router.query.deduplicate]);
+  }, [router.isReady, router.query.deduplicate, userEmail]);
 
   // Helper function to update deduplicate in URL
   const updateDeduplicateURL = (deduplicateValue) => {
