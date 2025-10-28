@@ -1701,26 +1701,27 @@ def get_clusters(
         cluster_table.c.name,
         cluster_table.c.launched_at,
         cluster_table.c.handle,
-        cluster_table.c.last_use,
         cluster_table.c.status,
         cluster_table.c.autostop,
         cluster_table.c.to_down,
-        cluster_table.c.owner,
-        cluster_table.c.metadata,
         cluster_table.c.cluster_hash,
         cluster_table.c.cluster_ever_up,
-        cluster_table.c.status_updated_at,
         cluster_table.c.user_hash,
-        cluster_table.c.config_hash,
         cluster_table.c.workspace,
-        cluster_table.c.is_managed,
         user_table.c.name.label('user_name'),
     ]
     if not summary_response:
         query_fields.extend([
             cluster_table.c.last_creation_yaml,
             cluster_table.c.last_creation_command,
+            cluster_table.c.config_hash,
+            cluster_table.c.owner,
+            cluster_table.c.metadata,
+            cluster_table.c.last_use,
+            cluster_table.c.status_updated_at,
         ])
+    if not exclude_managed_clusters:
+        query_fields.append(cluster_table.c.is_managed)
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         query = session.query(*query_fields).outerjoin(
             user_table, cluster_table.c.user_hash == user_table.c.id)
@@ -1767,28 +1768,29 @@ def get_clusters(
             'name': row.name,
             'launched_at': row.launched_at,
             'handle': pickle.loads(row.handle),
-            'last_use': row.last_use,
             'status': status_lib.ClusterStatus[row.status],
             'autostop': row.autostop,
             'to_down': bool(row.to_down),
-            'owner': _load_owner(row.owner),
-            'metadata': json.loads(row.metadata),
             'cluster_hash': row.cluster_hash,
             'cluster_ever_up': bool(row.cluster_ever_up),
-            'status_updated_at': row.status_updated_at,
             'user_hash': (row.user_hash
                           if row.user_hash is not None else current_user_hash),
             'user_name': (row.user_name
                           if row.user_name is not None else current_user_name),
             'workspace': row.workspace,
-            'is_managed': bool(row.is_managed),
-            'config_hash': row.config_hash,
+            'is_managed': False
+                          if exclude_managed_clusters else bool(row.is_managed),
         }
         if not summary_response:
             record['last_creation_yaml'] = row.last_creation_yaml
             record['last_creation_command'] = row.last_creation_command
             record['last_event'] = last_cluster_event_dict.get(
                 row.cluster_hash, None)
+            record['config_hash'] = row.config_hash
+            record['owner'] = _load_owner(row.owner)
+            record['metadata'] = json.loads(row.metadata)
+            record['last_use'] = row.last_use
+            record['status_updated_at'] = row.status_updated_at
 
         records.append(record)
     return records
