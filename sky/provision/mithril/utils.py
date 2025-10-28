@@ -221,7 +221,8 @@ class MithrilClient:
     def _get_instance_type_fid(self, instance_type_name: str) -> str:
         """Get the FID for an instance type by name.
 
-        Converts SkyPilot-style names (e.g., 4xa100) to Mithril names (e.g., a100-80gb.sxm.4x).
+        Converts SkyPilot-style names (e.g., 4xa100) to Mithril names
+        (e.g., a100-80gb.sxm.4x).
         """
         # Convert SkyPilot format to Mithril forma
         # e.g., 4xa100 -> a100-80gb.sxm.4x
@@ -249,9 +250,8 @@ class MithrilClient:
                         logger.info(
                             f'Found instance type: {mithril_name} -> {fid}')
                         return str(fid)
-            raise MithrilError(
-                f'Instance type {mithril_name} (from {instance_type_name}) not found'
-            )
+            raise MithrilError(f'Instance type {mithril_name} (from '
+                               f'{instance_type_name}) not found')
         except Exception as e:
             raise MithrilError(
                 f'Failed to get instance type FID: {str(e)}') from e
@@ -277,7 +277,8 @@ class MithrilClient:
 
             # If a specific public key is requested, check if it exists
             if public_key:
-                # Extract key content (remove 'ssh-rsa ' prefix and user@host suffix if present)
+                # Extract key content (remove 'ssh-rsa ' prefix and
+                # user@host suffix if present)
                 key_parts = public_key.strip().split()
                 if len(key_parts) >= 2:
                     key_content = f'{key_parts[0]} {key_parts[1]}'
@@ -289,7 +290,8 @@ class MithrilClient:
                     if not isinstance(key, dict):
                         continue
                     existing_key = str(key.get('public_key', '')).strip()
-                    if key_content in existing_key or existing_key in key_content:
+                    if (key_content in existing_key or
+                            existing_key in key_content):
                         ssh_key_fid = key.get('fid')
                         if ssh_key_fid:
                             logger.info(
@@ -323,9 +325,8 @@ class MithrilClient:
                         return [str(ssh_key_fid)]
 
             # No keys exist at all
-            raise MithrilError(
-                'No SSH keys found in Mithril account. Please create one using: flow ssh-key create'
-            )
+            raise MithrilError('No SSH keys found in Mithril account. '
+                               'Please create one using: flow ssh-key create')
         except MithrilError:
             raise
         except Exception as e:
@@ -369,12 +370,14 @@ class MithrilClient:
         # Add timestamp to name to ensure uniqueness
         unique_name = f'{name}-{int(time.time())}'
 
-        # Use provided region or select a default from availability API for this instance type
+        # Use provided region or select a default from availability API for
+        # this instance type
         if region is None or region == 'default':
             try:
                 availability = self._make_request('GET',
                                                   '/v2/spot/availability')
-                # Normalize into a mapping and pick the first available region for the instance_type
+                # Normalize into a mapping and pick the first available region
+                # for the instance_type
                 records = availability.get('data', availability)
                 candidate_region: Optional[str] = None
                 if isinstance(records, list):
@@ -393,13 +396,14 @@ class MithrilClient:
                 else:
                     # Fallback: keep previous default if nothing found
                     region = 'us-central1-b'
-            except Exception as e:  # pylint: disable=broad-excep
+            except Exception as e:  # pylint: disable=broad-except
                 logger.warning(
-                    'Falling back to default region due to availability lookup failure: %s',
-                    e)
+                    'Falling back to default region due to availability '
+                    'lookup failure: %s', e)
                 region = 'us-central1-b'
 
         # Create spot bid payload according to Mithril API
+        startup_script = '#!/bin/bash\necho "SkyPilot instance started"'
         bid_payload = {
             'project': self.project,
             'region': region,
@@ -410,14 +414,14 @@ class MithrilClient:
             'launch_specification': {
                 'ssh_keys': ssh_keys,
                 'volumes': [],  # No volumes for now
-                'startup_script': '#!/bin/bash\necho "SkyPilot instance started"'
+                'startup_script': startup_script
             }
         }
 
         endpoint = '/v2/spot/bids'
         try:
-            logger.info(
-                f'Creating spot bid for {instance_type} ({instance_type_fid})')
+            logger.info(f'Creating spot bid for {instance_type} '
+                        f'({instance_type_fid})')
             response = self._make_request('POST', endpoint, payload=bid_payload)
             logger.debug(f'Spot bid response: {json.dumps(response, indent=2)}')
 
@@ -426,9 +430,8 @@ class MithrilClient:
                 logger.error(f'No bid ID in response: {response}')
                 raise MithrilError('No bid ID returned from API')
 
-            logger.info(
-                f'Successfully created spot bid {bid_id}, waiting for instance...'
-            )
+            logger.info(f'Successfully created spot bid {bid_id}, '
+                        f'waiting for instance...')
 
             # Wait for the bid to create an instance
             instance_id = self._wait_for_bid_instance(bid_id, timeout=300)
@@ -449,7 +452,8 @@ class MithrilClient:
                 raise MithrilError(
                     f'Instance {instance_id} not found after launch')
 
-            # Get SSH connection info (ip_address is set from ssh_destination in list_instances)
+            # Get SSH connection info (ip_address is set from
+            # ssh_destination in list_instances)
             ip_address = instance.get('ip_address')
             ssh_port = instance.get('ssh_port', 22)
 
@@ -474,7 +478,8 @@ class MithrilClient:
     ) -> Dict[str, Dict[str, Any]]:
         """List all instances, optionally filtered by status.
 
-        Note: Mithril doesn't support user metadata, so metadata filtering is ignored.
+        Note: Mithril doesn't support user metadata, so metadata filtering
+        is ignored.
         Filtering by cluster name should be done by instance name instead.
         """
         endpoint = '/v2/instances'
@@ -485,7 +490,8 @@ class MithrilClient:
             logger.debug(f'Raw API response: {json.dumps(response, indent=2)}')
             instances = {}
 
-            # Metadata filtering is ignored for Mithril - it's handled in instance.py
+            # Metadata filtering is ignored for Mithril - it's handled in
+            # instance.py
             # by filtering on instance name instead
             if metadata:
                 logger.debug(
@@ -538,8 +544,8 @@ class MithrilClient:
             instance = instances.get(instance_id)
             if not instance:
                 logger.warning(
-                    f'Instance {instance_id} not found, may already be terminated'
-                )
+                    f'Instance {instance_id} not found, may already be '
+                    f'terminated')
                 return
 
             bid_id = instance.get('bid')
@@ -605,31 +611,32 @@ class MithrilClient:
                 # Track status changes to show progress
                 if current_status != last_status:
                     logger.info(
-                        f'Instance {instance_id} status: {last_status} -> {current_status} '
-                        f'(elapsed: {int(elapsed)}s)')
+                        f'Instance {instance_id} status: {last_status} -> '
+                        f'{current_status} (elapsed: {int(elapsed)}s)')
                     last_status = current_status
                 else:
                     # Log periodically even if status hasn't changed
                     if int(elapsed) % 30 == 0:
-                        logger.info(
-                            f'Still waiting... Current status: {current_status} '
-                            f'(elapsed: {int(elapsed)}s/{timeout}s)')
+                        logger.info(f'Still waiting... Current status: '
+                                    f'{current_status} '
+                                    f'(elapsed: {int(elapsed)}s/{timeout}s)')
 
-                # For Mithril, once we have an IP address, the instance is ready for SSH
-                # We don't need to wait for STATUS_RUNNING - having the ssh_destination
+                # For Mithril, once we have an IP address, the instance is
+                # ready for SSH. We don't need to wait for STATUS_RUNNING -
+                # having the ssh_destination
                 # means the instance is allocated and networking is configured
                 if ip_address:
                     logger.info(
                         f'✓ Instance {instance_id} has IP {ip_address} '
-                        f'(status: {current_status}) after {int(elapsed)}s - ready for SSH'
-                    )
+                        f'(status: {current_status}) after {int(elapsed)}s - '
+                        f'ready for SSH')
                     return True
 
                 # If no IP yet, check if we've reached the target status anyway
                 if current_status == target_status_enum.value:
                     logger.debug(
-                        f'Instance reached {target_status_enum.value} but no IP yet, continuing to wait...'
-                    )
+                        f'Instance reached {target_status_enum.value} but no '
+                        f'IP yet, continuing to wait...')
                     # Continue waiting for IP address
 
                 # Check for terminal failure states
@@ -644,14 +651,16 @@ class MithrilClient:
                     'pending', 'creating', 'starting', 'confirmed',
                     'initializing'
                 ]
-                if current_status not in valid_pending and current_status != target_status_enum.value:
+                if (current_status not in valid_pending and
+                        current_status != target_status_enum.value):
                     logger.warning(
                         f'Instance in unexpected status: {current_status}')
 
                 time.sleep(5)
-            except Exception as e:  # pylint: disable=broad-excep
+            except Exception as e:  # pylint: disable=broad-except
                 logger.warning(
-                    f'Error while waiting for instance {instance_id}: {str(e)}')
+                    f'Error while waiting for instance {instance_id}: '
+                    f'{str(e)}')
                 time.sleep(5)
 
 

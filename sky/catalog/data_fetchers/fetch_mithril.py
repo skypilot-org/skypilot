@@ -113,7 +113,8 @@ def fetch_spot_availability(api_key: str) -> Dict[str, List[Dict[str, Any]]]:
     availability: Dict[str, List[Dict[str, Any]]] = {}
 
     # Common shapes we may handle:
-    # 1) { data: [ { name|instance_type, region, spot_price|price, available }, ... ] }
+    # 1) { data: [ { name|instance_type, region, spot_price|price,
+    #      available }, ... ] }
     # 2) [ { name|instance_type, region, spot_price|price, available }, ... ]
     # 3) { instance_type: { region: { price, ... }, ... }, ... }
     records = data.get('data', data)
@@ -200,26 +201,27 @@ def create_catalog(output_path: str) -> None:
             memory_gb = instance.get('ram_gb', 0)
 
             # Handle duplicate instance type names by making them unique
-            # Append CPU count if there's a conflic
+            # Append CPU count if there's a conflict
             if base_instance_type in seen_names:
                 instance_type = f'{base_instance_type}_{vcpus}cpu'
-                print(
-                    f'Duplicate instance type name found: {base_instance_type}, '
-                    f'renaming to {instance_type}')
+                print(f'Duplicate instance type name found: '
+                      f'{base_instance_type}, renaming to {instance_type}')
             else:
                 instance_type = base_instance_type
                 seen_names[base_instance_type] = True
 
             # Populate per-region pricing from spot availability.
             # If not found, skip writing rows for this instance type.
-            regions_with_prices = availability.get(
-                instance_type) or availability.get(base_instance_type) or []
+            regions_with_prices = (availability.get(instance_type) or
+                                   availability.get(base_instance_type) or [])
             if not regions_with_prices:
-                # Try matching by case-insensitive key if API returns different casing
+                # Try matching by case-insensitive key if API returns
+                # different casing
                 lowered = {k.lower(): v for k, v in availability.items()}
                 regions_with_prices = lowered.get(instance_type.lower(), [])
             if not regions_with_prices:
-                # No availability info; skip to avoid misleading hardcoded data
+                # No availability info; skip to avoid misleading hardcoded
+                # data
                 continue
 
             # Create GPU info if GPUs are present
@@ -263,7 +265,7 @@ def main():
     try:
         create_catalog(output_path)
         return 0
-    except Exception as e:  # pylint: disable=broad-excep
+    except Exception as e:  # pylint: disable=broad-except
         print(f'Error: {e}')
         return 1
 

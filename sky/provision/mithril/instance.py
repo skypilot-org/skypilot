@@ -37,10 +37,9 @@ def _filter_instances(cluster_name_on_cloud: str,
             instance_name = instance.get('name', '')
             # Instance names start with cluster_name_on_cloud
             if not instance_name.startswith(cluster_name_on_cloud):
-                logger.debug(
-                    f'Skipping instance {instance_id} '
-                    f'- name {instance_name} does not start with {cluster_name_on_cloud}'
-                )
+                logger.debug(f'Skipping instance {instance_id} - name '
+                             f'{instance_name} does not start with '
+                             f'{cluster_name_on_cloud}')
                 continue
 
             # Check status filter
@@ -56,7 +55,7 @@ def _filter_instances(cluster_name_on_cloud: str,
             logger.debug(f'Including instance {instance_id} '
                          f'with status {instance_status}')
 
-        except Exception as e:  # pylint: disable=broad-excep
+        except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Error processing instance {instance_id}: {str(e)}')
             continue
 
@@ -154,7 +153,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 with open(public_key_path, 'r', encoding='utf-8') as f:
                     public_key = f.read().strip()
                 logger.debug(f'Using SSH public key from: {public_key_path}')
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-except
                 logger.warning(
                     f'Failed to read public key from {public_key_path}: {e}')
 
@@ -206,7 +205,7 @@ def terminate_instances(
         try:
             utils.terminate_instance(instance_id)
             logger.info(f'Terminated instance {instance_id}')
-        except Exception as e:  # pylint: disable=broad-excep
+        except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to terminate instance {instance_id}: {e}')
             continue
 
@@ -248,7 +247,7 @@ def get_cluster_info(
     ssh_user = 'ubuntu'  # Default SSH user for Mithril
 
     for instance_id, instance_info in running_instances.items():
-        # Extract IP address and por
+        # Extract IP address and port
         ip_address = instance_info.get('ip_address')
         ssh_port = instance_info.get('ssh_port', 22)
 
@@ -333,9 +332,11 @@ def wait_instances(region: str, cluster_name_on_cloud: str,
             raise RuntimeError(f'No running instances found for cluster '
                                f'{cluster_name_on_cloud}')
         # Note: We don't check for terminated instances here because:
-        # 1. Old terminated instances from previous launches may still be in the API
+        # 1. Old terminated instances from previous launches may still be in
+        #    the API
         # 2. The important check is that we have at least one running instance
-        # 3. If the current instance gets terminated, it won't be in the RUNNING filter above
+        # 3. If the current instance gets terminated, it won't be in the
+        #    RUNNING filter above
     elif state == status_lib.ClusterStatus.STOPPED:
         # Check if any instances are in TERMINATED state
         instances = _filter_instances(
@@ -358,8 +359,8 @@ def wait_instances(region: str, cluster_name_on_cloud: str,
             cluster_name_on_cloud, [utils.MithrilInstanceStatus.RUNNING.value])
         if running_instances:
             error_msg = (
-                f'Cluster {cluster_name_on_cloud} is in STOPPED state, but '
-                f'{len(running_instances)} instances are running.')
+                f'Cluster {cluster_name_on_cloud} is in STOPPED state, '
+                f'but {len(running_instances)} instances are running.')
             raise RuntimeError(error_msg)
     else:
         raise RuntimeError(f'Unsupported state: {state}')
