@@ -1261,14 +1261,20 @@ function UsersTable({
           let jobCount = 0;
           let jobGPUCount = 0;
 
-          // Count clusters and sum GPUs in one pass
+          // Count clusters and sum GPUs in one pass (exclude STOPPED and TERMINATED clusters from GPU count)
           for (const cluster of clustersData || []) {
             if (cluster.user_hash === user.userId) {
               clusterCount++;
-              clusterGPUCount += getGPUCount(
-                cluster.gpus,
-                `Cluster ${cluster.cluster}`
-              );
+              // Only count GPUs from active clusters (exclude STOPPED and TERMINATED)
+              if (
+                cluster.status !== 'STOPPED' &&
+                cluster.status !== 'TERMINATED'
+              ) {
+                clusterGPUCount += getGPUCount(
+                  cluster.gpus,
+                  `Cluster ${cluster.cluster}`
+                );
+              }
             }
           }
 
@@ -1851,14 +1857,20 @@ function ServiceAccountTokensView({
         let jobCount = 0;
         let jobGPUCount = 0;
 
-        // Count clusters and sum GPUs in one pass
+        // Count clusters and sum GPUs in one pass (exclude STOPPED and TERMINATED clusters from GPU count)
         for (const cluster of clustersData) {
           if (cluster.user_hash === serviceAccountId) {
             clusterCount++;
-            clusterGPUCount += getGPUCount(
-              cluster.gpus,
-              `Cluster ${cluster.cluster}`
-            );
+            // Only count GPUs from active clusters (exclude STOPPED and TERMINATED)
+            if (
+              cluster.status !== 'STOPPED' &&
+              cluster.status !== 'TERMINATED'
+            ) {
+              clusterGPUCount += getGPUCount(
+                cluster.gpus,
+                `Cluster ${cluster.cluster}`
+              );
+            }
           }
         }
 
