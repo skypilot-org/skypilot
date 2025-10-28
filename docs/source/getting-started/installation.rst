@@ -358,6 +358,39 @@ Azure
 Hint: run ``az account subscription list`` to get a list of subscription IDs under your account.
 
 
+.. _coreweave-installation:
+
+CoreWeave
+~~~~~~~~~
+
+CoreWeave integrates with SkyPilot through the Kubernetes interface, allowing you to run workloads on CoreWeave's managed Kubernetes clusters.
+
+To use CoreWeave with SkyPilot:
+
+1. **Install SkyPilot with Kubernetes support**:
+
+   .. code-block:: shell
+
+     pip install "skypilot[kubernetes]"
+
+2. **Set up your CoreWeave kubeconfig**:
+
+   Obtain your kubeconfig from the CoreWeave console and place it at ``~/.kube/config``:
+
+   .. code-block:: shell
+
+     # Place your CoreWeave kubeconfig at ~/.kube/config
+     mkdir -p ~/.kube
+     cp /path/to/coreweave-kubeconfig ~/.kube/config
+
+3. **Verify access**:
+
+   .. code-block:: shell
+
+     sky check
+
+CoreWeave also offers InfiniBand networking for high-performance distributed training. You can enable InfiniBand support by adding ``network_tier: best`` to your SkyPilot task configuration.
+
 
 Nebius
 ~~~~~~
