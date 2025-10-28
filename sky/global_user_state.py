@@ -1708,7 +1708,6 @@ def get_clusters(
         cluster_table.c.cluster_ever_up,
         cluster_table.c.user_hash,
         cluster_table.c.workspace,
-        cluster_table.c.is_managed,
         user_table.c.name.label('user_name'),
     ]
     if not summary_response:
@@ -1721,6 +1720,8 @@ def get_clusters(
             cluster_table.c.last_use,
             cluster_table.c.status_updated_at,
         ])
+    if not exclude_managed_clusters:
+        query_fields.append(cluster_table.c.is_managed)
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         query = session.query(*query_fields).outerjoin(
             user_table, cluster_table.c.user_hash == user_table.c.id)
@@ -1777,7 +1778,8 @@ def get_clusters(
             'user_name': (row.user_name
                           if row.user_name is not None else current_user_name),
             'workspace': row.workspace,
-            'is_managed': bool(row.is_managed),
+            'is_managed': False
+                          if exclude_managed_clusters else bool(row.is_managed),
         }
         if not summary_response:
             record['last_creation_yaml'] = row.last_creation_yaml
