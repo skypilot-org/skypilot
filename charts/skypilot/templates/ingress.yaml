@@ -7,7 +7,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ .Release.Name }}-ingress
+  name: {{ include "skypilot.fullname" . }}-ingress
   namespace: {{ .Release.Namespace }}
   annotations:
     {{- if not $useNewIngressClass }}
@@ -43,7 +43,7 @@ metadata:
     # Basic authentication
     nginx.ingress.kubernetes.io/auth-type: basic
     nginx.ingress.kubernetes.io/auth-realm: "SkyPilot API Server"
-    nginx.ingress.kubernetes.io/auth-secret: {{ .Values.ingress.authSecret | default (printf "%s-basic-auth" .Release.Name) }}
+    nginx.ingress.kubernetes.io/auth-secret: {{ .Values.ingress.authSecret | default (printf "%s-basic-auth" (include "skypilot.fullname" .)) }}
     {{- end }}
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
@@ -69,7 +69,7 @@ spec:
         path: {{ .Values.ingress.path }}{{ if ne .Values.ingress.path "/" }}(/|$)(.*){{ end }}
         backend:
           service:
-            name: {{ .Release.Name }}-api-service
+            name: {{ include "skypilot.fullname" . }}-api-service
             port:
               number: 80
 {{- end }}

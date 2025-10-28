@@ -7,20 +7,20 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}-oauth2-proxy-redis
+  name: {{ include "skypilot.fullname" . }}-oauth2-proxy-redis
   namespace: {{ .Release.Namespace }}
   labels:
-    app: {{ .Release.Name }}-oauth2-proxy-redis
+    app: {{ include "skypilot.fullname" . }}-oauth2-proxy-redis
     skypilot.co/component: oauth2-proxy-redis
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: {{ .Release.Name }}-oauth2-proxy-redis
+      app: {{ include "skypilot.fullname" . }}-oauth2-proxy-redis
   template:
     metadata:
       labels:
-        app: {{ .Release.Name }}-oauth2-proxy-redis
+        app: {{ include "skypilot.fullname" . }}-oauth2-proxy-redis
         skypilot.co/component: oauth2-proxy-redis
     spec:
       containers:
@@ -39,10 +39,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Release.Name }}-oauth2-proxy-redis
+  name: {{ include "skypilot.fullname" . }}-oauth2-proxy-redis
   namespace: {{ .Release.Namespace }}
   labels:
-    app: {{ .Release.Name }}-oauth2-proxy-redis
+    app: {{ include "skypilot.fullname" . }}-oauth2-proxy-redis
     skypilot.co/component: oauth2-proxy-redis
 spec:
   type: ClusterIP
@@ -52,6 +52,6 @@ spec:
     protocol: TCP
     name: redis
   selector:
-    app: {{ .Release.Name }}-oauth2-proxy-redis
+    app: {{ include "skypilot.fullname" . }}-oauth2-proxy-redis
 {{- end -}}
 {{- end -}}

@@ -6,7 +6,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: {{ .Release.Name }}-system-role
+  name: {{ include "skypilot.fullname" . }}-system-role
   namespace: {{ $namespace }}
 rules:
   - apiGroups: [ "apps" ]
@@ -24,7 +24,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: {{ .Release.Name }}-system-role-binding
+  name: {{ include "skypilot.fullname" . }}-system-role-binding
   namespace: {{ $namespace }}
 subjects:
 - kind: ServiceAccount
@@ -32,7 +32,7 @@ subjects:
   namespace: {{ .Release.Namespace }}
 roleRef:
   kind: Role
-  name: {{ .Release.Name }}-system-role
+  name: {{ include "skypilot.fullname" . }}-system-role
   apiGroup: rbac.authorization.k8s.io
 ---
 {{/* If API server is going to configure RBAC policies for controllers, the permission to manage skypilot-system namespace is also needed */}}
@@ -40,7 +40,7 @@ roleRef:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ .Release.Name }}-system-cluster-role
+  name: {{ include "skypilot.fullname" . }}-system-cluster-role
 rules:
   - apiGroups: [ "" ]
     resources: [ "namespaces" ]
@@ -50,14 +50,14 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ .Release.Name }}-system-cluster-role-binding
+  name: {{ include "skypilot.fullname" . }}-system-cluster-role-binding
 subjects:
 - kind: ServiceAccount
   name: {{ include "skypilot.serviceAccountName" . }}
   namespace: {{ .Release.Namespace }}
 roleRef:
   kind: ClusterRole
-  name: {{ .Release.Name }}-system-cluster-role
+  name: {{ include "skypilot.fullname" . }}-system-cluster-role
   apiGroup: rbac.authorization.k8s.io
 {{- end }}
 {{- end }}

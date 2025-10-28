@@ -43,19 +43,19 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    app: {{ .Release.Name }}-oauth2-proxy
+    app: {{ include "skypilot.fullname" . }}-oauth2-proxy
     skypilot.co/component: oauth2-proxy
-  name: {{ .Release.Name }}-oauth2-proxy
+  name: {{ include "skypilot.fullname" . }}-oauth2-proxy
   namespace: {{ .Release.Namespace }}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: {{ .Release.Name }}-oauth2-proxy
+      app: {{ include "skypilot.fullname" . }}-oauth2-proxy
   template:
     metadata:
       labels:
-        app: {{ .Release.Name }}-oauth2-proxy
+        app: {{ include "skypilot.fullname" . }}-oauth2-proxy
         skypilot.co/component: oauth2-proxy
     spec:
       containers:
@@ -110,7 +110,7 @@ spec:
           value: {{ index $oauth2 "client-secret" | quote }}
           {{- end }}
         - name: SERVICE_NAME
-          value: {{ .Release.Name }}
+          value: {{ include "skypilot.fullname" . }}
         {{- if (index $oauth2 "redis-secret") }}
         - name: REDIS_URL
           valueFrom:
@@ -120,7 +120,7 @@ spec:
         {{- end }}
         - name: OAUTH2_PROXY_COOKIE_SECRET
           {{- /* Look up existing deployment to get the current cookie secret if available */}}
-          {{- $deploymentName := printf "%s-oauth2-proxy" .Release.Name }}
+          {{- $deploymentName := printf "%s-oauth2-proxy" (include "skypilot.fullname" .) }}
           {{- $existingDeployment := lookup "apps/v1" "Deployment" .Release.Namespace $deploymentName }}
           {{- if and $existingDeployment $existingDeployment.spec.template.spec.containers }}
             {{- range $container := $existingDeployment.spec.template.spec.containers }}
