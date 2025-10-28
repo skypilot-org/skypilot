@@ -1,0 +1,163 @@
+name: Build and Push Custom Ojin SkyPilot to ECR
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: 'Version tag for the image (e.g., v0.9.1-runpod-catalog, latest)'
+        required: true
+        type: string
+        default: 'latest'
+      build_from_branch:
+        description: 'Branch to build from'
+        required: true
+        type: string
+        default: 'ojin-releases'
+      push_latest:
+        description: 'Also tag and push as :latest'
+        required: false
+        type: boolean
+        default: false
+
+  push:
+    branches:
+      - 'feature/runpod-catalog-fetcher'
+
+env:
+  AWS_REGION: eu-central-1
+  # ECR_REGISTRY will be set dynamically from AWS account
+
+jobs:
+  build-and-push:
+    name: Build and Push to ECR
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # Required for OIDC authentication
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.build_from_branch || github.ref }}
+          fetch-depth: 0  # Full history for version info
+
+      - name: Get commit info
+        id: commit_info
+        run: |
+          COMMIT_SHA=$(git rev-parse --short HEAD)
+          COMMIT_DATE=$(git show -s --format=%ci HEAD | cut -d' ' -f1)
+          echo "sha=${COMMIT_SHA}" >> $GITHUB_OUTPUT
+          echo "date=${COMMIT_DATE}" >> $GITHUB_OUTPUT
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Commit: ${COMMIT_SHA}"
+          echo "Date: ${COMMIT_DATE}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ECR_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set ECR repository
+        id: ecr-repo
+        run: |
+          ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          ECR_REPOSITORY="ojin/skypilot"
+          echo "registry=${ECR_REGISTRY}" >> $GITHUB_OUTPUT
+          echo "repository=${ECR_REPOSITORY}" >> $GITHUB_OUTPUT
+          echo "ECR Registry: ${ECR_REGISTRY}"
+          echo "ECR Repository: ${ECR_REPOSITORY}"
+
+      - name: Generate image tags
+        id: tags
+        run: |
+          ECR_REGISTRY="${{ steps.ecr-repo.outputs.registry }}"
+          ECR_REPOSITORY="${{ steps.ecr-repo.outputs.repository }}"
+          VERSION_TAG="${{ inputs.version_tag || 'latest' }}"
+          COMMIT_SHA="${{ steps.commit_info.outputs.sha }}"
+          COMMIT_DATE="${{ steps.commit_info.outputs.date }}"
+
+          # Primary tag
+          PRIMARY_TAG="${ECR_REGISTRY}/${ECR_REPOSITORY}:${VERSION_TAG}"
+
+          # Additional tags
+          COMMIT_TAG="${ECR_REGISTRY}/${ECR_REPOSITORY}:${VERSION_TAG}-${COMMIT_SHA}"
+          DATE_TAG="${ECR_REGISTRY}/${ECR_REPOSITORY}:${VERSION_TAG}-${COMMIT_DATE}"
+
+          # Construct tags list
+          TAGS="${PRIMARY_TAG},${COMMIT_TAG},${DATE_TAG}"
+
+          # Add :latest if requested
+          if [ "${{ inputs.push_latest }}" == "true" ]; then
+            LATEST_TAG="${ECR_REGISTRY}/${ECR_REPOSITORY}:latest"
+            TAGS="${TAGS},${LATEST_TAG}"
+          fi
+
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "primary_tag=${PRIMARY_TAG}" >> $GITHUB_OUTPUT
+
+          echo "Image tags:"
+          echo "${TAGS}" | tr ',' '\n'
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            INSTALL_FROM_SOURCE=true
+            NEXT_BASE_PATH=/dashboard
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: |
+            org.opencontainers.image.title=Ojin SkyPilot
+            org.opencontainers.image.description=Custom SkyPilot with various improvements
+            org.opencontainers.image.version=${{ inputs.version_tag }}
+            org.opencontainers.image.source=${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.commit_info.outputs.sha }}
+            org.opencontainers.image.created=${{ steps.commit_info.outputs.date }}
+
+      - name: Image digest
+        run: echo "Built and pushed image with tags ${{ steps.tags.outputs.tags }}"
+
+      - name: Create deployment summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+          ## 🚀 Docker Image Build Summary
+
+          **Status**: ✅ Success
+
+          ### Image Details
+          - **Primary Tag**: \`${{ steps.tags.outputs.primary_tag }}\`
+          - **Commit**: \`${{ steps.commit_info.outputs.sha }}\`
+          - **Date**: \`${{ steps.commit_info.outputs.date }}\`
+          - **Branch**: \`${{ inputs.build_from_branch || github.ref_name }}\`
+
+          ### All Tags
+          \`\`\`
+          ${{ steps.tags.outputs.tags }}
+          \`\`\`
+          EOF
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::Docker build or push failed. Check the logs above for details."
+          echo "Common issues:"
+          echo "  - ECR authentication failure (check AWS credentials/role)"
+          echo "  - ECR repository doesn't exist (create it first)"
+          echo "  - Insufficient ECR permissions"
+          echo "  - Docker build errors (check Dockerfile)"

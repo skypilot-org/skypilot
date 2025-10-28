@@ -21,4 +21,3 @@ jobs:
           exempt-pr-labels: 'P0,P1'
           ascending: true
           operations-per-run: 100
-

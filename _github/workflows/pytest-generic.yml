@@ -2,9 +2,17 @@
 # according to https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/defining-the-mergeability-of-pull-requests/troubleshooting-required-status-checks
 name: Python Tests
 on:
+  # Trigger the workflow on push or pull request,
+  # but only for the main branch
+  push:
+    branches:
+      - master
+      - 'releases/**'
   pull_request:
     branches:
-      - ojin-releases
+      - master
+      - 'releases/**'
+  merge_group:
 
 jobs:
   python-test:

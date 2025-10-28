@@ -12,7 +12,12 @@ from sky.catalog import common
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
-_df = common.read_catalog('runpod/vms.csv')
+# Runpod has no set updated schedule for their catalog. We pull the catalog
+# every hour to ensure we have the latest GPU availability and pricing.
+# This is especially important for high-demand GPUs like L40S in EU regions.
+_PULL_FREQUENCY_HOURS = 1
+_df = common.read_catalog('runpod/vms.csv',
+                          pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
 
 def instance_type_exists(instance_type: str) -> bool:

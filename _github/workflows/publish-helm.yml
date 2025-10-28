@@ -94,7 +94,7 @@ jobs:
           # Convert PEP440 version to SemVer if needed for Helm versioning
           # Handle cases like 1.0.0.dev20250218 -> 1.0.0-dev.20250218
           semversion=$(echo "$version" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)\.dev([0-9]+)/\1-dev.\2/')
-          
+
           # Update the version and name in the main skypilot chart
           sed -i "s/^version:.*$/version: ${semversion}/" src/charts/skypilot/Chart.yaml
           sed -i "s/^appVersion:.*$/appVersion: ${version}/" src/charts/skypilot/Chart.yaml
