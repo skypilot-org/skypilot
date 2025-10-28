@@ -7,7 +7,7 @@ import argparse
 import csv
 import json
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import requests
 import yaml
@@ -30,8 +30,13 @@ GPU_MEMORY_MAP = {
 }
 
 
-def get_api_key() -> str:
-    """Get Mithril API key from ~/.flow/config.yaml."""
+def get_api_key(api_key: Optional[str] = None) -> str:
+    """Get API key from arg, env var, or config file."""
+    if api_key:
+        return api_key
+    env_api_key = os.environ.get('MITHRIL_API_KEY')
+    if env_api_key:
+        return env_api_key
     if not os.path.exists(DEFAULT_CREDENTIALS_PATH):
         raise RuntimeError(
             f'Mithril config not found at {DEFAULT_CREDENTIALS_PATH}. '
@@ -168,10 +173,10 @@ def fetch_spot_availability(api_key: str) -> Dict[str, List[Dict[str, Any]]]:
     return availability
 
 
-def create_catalog(output_path: str) -> None:
+def create_catalog(output_path: str, api_key: Optional[str] = None) -> None:
     """Create Mithril catalog CSV file."""
     print('Fetching Mithril instance types...')
-    api_key = get_api_key()
+    api_key = get_api_key(api_key)
     instance_types = fetch_instance_types(api_key)
     availability = fetch_spot_availability(api_key)
 
@@ -258,12 +263,13 @@ def main():
                         type=str,
                         default='~/.sky/catalogs/v8/mithril/vms.csv',
                         help='Output path for the catalog CSV file')
+    parser.add_argument('--api-key', type=str, help='Mithril API key')
 
     args = parser.parse_args()
     output_path = os.path.expanduser(args.output)
 
     try:
-        create_catalog(output_path)
+        create_catalog(output_path, args.api_key)
         return 0
     except Exception as e:  # pylint: disable=broad-except
         print(f'Error: {e}')
