@@ -18,6 +18,17 @@ INSTANCE_TYPES_ENDPOINT = f'{BASE_URL}/v2/instance-types'
 SPOT_AVAILABILITY_ENDPOINT = f'{BASE_URL}/v2/spot/availability'
 DEFAULT_CREDENTIALS_PATH = os.path.expanduser('~/.flow/config.yaml')
 
+
+def get_output_path() -> str:
+    """Get output path for catalog file."""
+    current_dir = os.getcwd()
+    if os.path.basename(current_dir) == 'mithril':
+        return 'vms.csv'
+    mithril_dir = os.path.join(current_dir, 'mithril')
+    os.makedirs(mithril_dir, exist_ok=True)
+    return os.path.join(mithril_dir, 'vms.csv')
+
+
 # GPU memory mapping (in MiB)
 GPU_MEMORY_MAP = {
     'A100': 40960,  # 40 GB
@@ -173,7 +184,7 @@ def fetch_spot_availability(api_key: str) -> Dict[str, List[Dict[str, Any]]]:
     return availability
 
 
-def create_catalog(output_path: str, api_key: Optional[str] = None) -> None:
+def create_catalog(api_key: Optional[str] = None) -> None:
     """Create Mithril catalog CSV file."""
     print('Fetching Mithril instance types...')
     api_key = get_api_key(api_key)
@@ -181,9 +192,9 @@ def create_catalog(output_path: str, api_key: Optional[str] = None) -> None:
     availability = fetch_spot_availability(api_key)
 
     print(f'Found {len(instance_types)} instance types')
-    print(f'Writing catalog to {output_path}')
 
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    output_path = get_output_path()
+    print(f'Writing catalog to {output_path}')
 
     # Track unique instance type names to handle duplicates
     # Mithril API can return multiple configs with the same name
@@ -259,17 +270,13 @@ def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
         description='Fetch Mithril Cloud catalog data')
-    parser.add_argument('--output',
-                        type=str,
-                        default='~/.sky/catalogs/v8/mithril/vms.csv',
-                        help='Output path for the catalog CSV file')
     parser.add_argument('--api-key', type=str, help='Mithril API key')
 
     args = parser.parse_args()
-    output_path = os.path.expanduser(args.output)
 
     try:
-        create_catalog(output_path, args.api_key)
+        create_catalog(args.api_key)
+        print(f'Mithril Service Catalog saved to {get_output_path()}')
         return 0
     except Exception as e:  # pylint: disable=broad-except
         print(f'Error: {e}')
