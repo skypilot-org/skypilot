@@ -60,15 +60,14 @@ def encode_status(
         clusters: List[responses.StatusResponse]) -> List[Dict[str, Any]]:
     response = []
     for cluster in clusters:
+        response_cluster = cluster.model_dump(exclude_none=True)
         # These default setting is needed because last_use and status_updated_at
         # used to be not optional.
         # TODO(syang): remove this after v0.10.7 or v0.11.0
-        if 'last_use' not in cluster:
-            cluster['last_use'] = ''
-        if 'status_updated_at' not in cluster:
-            cluster['status_updated_at'] = 0
-
-        response_cluster = cluster.model_dump(exclude_none=True)
+        if 'last_use' not in response_cluster:
+            response_cluster['last_use'] = ''
+        if 'status_updated_at' not in response_cluster:
+            response_cluster['status_updated_at'] = 0
         response_cluster['status'] = cluster['status'].value
         handle = serialize_utils.prepare_handle_for_backwards_compatibility(
             cluster['handle'])
