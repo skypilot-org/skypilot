@@ -544,6 +544,14 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
         found_pod_names = {pod.metadata.name for pod in all_pods}
         missing_pod_names = expected_pod_names - found_pod_names
         if missing_pod_names:
+            # In _wait_for_pods_to_schedule, we already wait for all pods to go
+            # from pending to scheduled. So if a pod is missing here, it means
+            # something unusual must have happened, and so should be treated as
+            # an exception.
+            # It is also only in _wait_for_pods_to_schedule that
+            # provision_timeout is used.
+            # TODO(kevin): Should we take provision_timeout into account here,
+            # instead of hardcoding the number of retries?
             if missing_pods_retry >= _MAX_MISSING_PODS_RETRIES:
                 for pod_name in missing_pod_names:
                     reason = _get_pod_missing_reason(context, namespace,
