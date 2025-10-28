@@ -1,7 +1,7 @@
 # SkyPilot Development Makefile
 #
 # Quick commands for local development, testing, and code quality checks
-# Uses uv for fast dependency management
+# Supports using tools like uv for virtual environment management
 
 .PHONY: help install test-local test-unit test-integration lint format type-check check clean dev
 
@@ -33,7 +33,7 @@ help: ## Display this help message
 install: ## Install dependencies using uv (creates venv if needed)
 	@echo "📦 Installing SkyPilot with dependencies..."
 	@if [ ! -d "$(VENV_DIR)" ]; then \
-		echo "Creating virtual environment with uv..."; \
+		echo "Creating virtual environment ..."; \
 		$(UV) venv --python $(PYTHON_VERSION) $(VENV_DIR); \
 	fi
 	@echo "Installing Azure CLI (with pre-release workaround)..."
@@ -155,11 +155,6 @@ pre-commit: check test-unit ## Run pre-commit checks (format, lint, type-check, 
 watch-tests: ## Watch for changes and re-run tests (requires pytest-watch)
 	@$(UV) pip install --python $(PYTHON) pytest-watch
 	@$(VENV_DIR)/bin/ptw tests/unit_tests/ -- -n 4 --dist worksteal
-
-shell: ## Activate virtual environment shell
-	@echo "Activating virtual environment..."
-	@echo "Run: source $(VENV_DIR)/bin/activate"
-	@$(VENV_DIR)/bin/python --version
 
 debug-test: ## Run single test with debugger (set TEST variable)
 	@echo "🐛 Running test in debug mode..."
