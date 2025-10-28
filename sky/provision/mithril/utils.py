@@ -335,9 +335,31 @@ class MithrilClient:
         # Add timestamp to name to ensure uniqueness
         unique_name = f'{name}-{int(time.time())}'
         
-        # Use provided region or default to us-central3-a (where instances were successfully created)
+        # Use provided region or select a default from availability API for this instance type
         if region is None or region == 'default':
-            region = 'us-central3-a'
+            try:
+                availability = self._make_request('GET', '/v2/spot/availability')
+                # Normalize into a mapping and pick the first available region for the instance_type
+                records = availability.get('data', availability)
+                candidate_region: Optional[str] = None
+                if isinstance(records, list):
+                    for rec in records:
+                        inst = rec.get('instance_type') or rec.get('name') or rec.get('type')
+                        if inst == instance_type and rec.get('region'):
+                            candidate_region = rec['region']
+                            break
+                elif isinstance(records, dict):
+                    per_region = records.get(instance_type)
+                    if isinstance(per_region, dict) and per_region:
+                        candidate_region = next(iter(per_region.keys()))
+                if candidate_region:
+                    region = candidate_region
+                else:
+                    # Fallback: keep previous default if nothing found
+                    region = 'us-central1-b'
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning('Falling back to default region due to availability lookup failure: %s', e)
+                region = 'us-central1-b'
         
         # Create spot bid payload according to Mithril API
         bid_payload = {
