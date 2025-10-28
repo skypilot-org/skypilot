@@ -90,7 +90,7 @@ class StatusResponse(ResponseBaseModel):
     # This is an internally facing field anyway, so it's less
     # of a problem that it's not typed.
     handle: Optional[Any] = None
-    last_use: str
+    last_use: Optional[str] = None
     status: status_lib.ClusterStatus
     autostop: int
     to_down: bool

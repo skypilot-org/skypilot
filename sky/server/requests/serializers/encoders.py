@@ -60,6 +60,8 @@ def encode_status(
         clusters: List[responses.StatusResponse]) -> List[Dict[str, Any]]:
     response = []
     for cluster in clusters:
+        if 'last_use' not in cluster:
+            cluster['last_use'] = ''
         response_cluster = cluster.model_dump()
         response_cluster['status'] = cluster['status'].value
         handle = serialize_utils.prepare_handle_for_backwards_compatibility(

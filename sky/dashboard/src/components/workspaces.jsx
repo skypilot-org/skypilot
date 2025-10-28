@@ -83,7 +83,6 @@ export async function getWorkspaceClusters(workspaceName) {
       last_use: cluster.last_use,
       autostop: cluster.autostop,
       to_down: cluster.to_down,
-      metadata: cluster.metadata,
       resources_str: cluster.resources_str,
       workspace: cluster.workspace || 'default', // Preserve workspace info
     }));

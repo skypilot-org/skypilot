@@ -1767,7 +1767,6 @@ def get_clusters(
             'name': row.name,
             'launched_at': row.launched_at,
             'handle': pickle.loads(row.handle),
-            'last_use': row.last_use,
             'status': status_lib.ClusterStatus[row.status],
             'autostop': row.autostop,
             'to_down': bool(row.to_down),
@@ -1789,6 +1788,7 @@ def get_clusters(
             record['config_hash'] = row.config_hash
             record['owner'] = _load_owner(row.owner)
             record['metadata'] = json.loads(row.metadata)
+            record['last_use'] = row.last_use
 
         records.append(record)
     return records
