@@ -1701,13 +1701,11 @@ def get_clusters(
         cluster_table.c.name,
         cluster_table.c.launched_at,
         cluster_table.c.handle,
-        cluster_table.c.last_use,
         cluster_table.c.status,
         cluster_table.c.autostop,
         cluster_table.c.to_down,
         cluster_table.c.cluster_hash,
         cluster_table.c.cluster_ever_up,
-        cluster_table.c.status_updated_at,
         cluster_table.c.user_hash,
         cluster_table.c.workspace,
         cluster_table.c.is_managed,
@@ -1720,6 +1718,8 @@ def get_clusters(
             cluster_table.c.config_hash,
             cluster_table.c.owner,
             cluster_table.c.metadata,
+            cluster_table.c.last_use,
+            cluster_table.c.status_updated_at,
         ])
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         query = session.query(*query_fields).outerjoin(
