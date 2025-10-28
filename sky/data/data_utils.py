@@ -19,6 +19,7 @@ from sky import sky_logging
 from sky.adaptors import aws
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
+from sky.adaptors import coreweave
 from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import nebius
@@ -625,6 +626,7 @@ class Rclone:
         R2 = 'R2'
         AZURE = 'AZURE'
         NEBIUS = 'NEBIUS'
+        COREWEAVE = 'COREWEAVE'
 
         def get_profile_name(self, bucket_name: str) -> str:
             """Gets the Rclone profile name for a given bucket.
@@ -642,7 +644,8 @@ class Rclone:
                 Rclone.RcloneStores.IBM: 'sky-ibm',
                 Rclone.RcloneStores.R2: 'sky-r2',
                 Rclone.RcloneStores.AZURE: 'sky-azure',
-                Rclone.RcloneStores.NEBIUS: 'sky-nebius'
+                Rclone.RcloneStores.NEBIUS: 'sky-nebius',
+                Rclone.RcloneStores.COREWEAVE: 'sky-coreweave'
             }
             return f'{profile_prefix[self]}-{bucket_name}'
 
@@ -747,6 +750,25 @@ class Rclone:
                     secret_access_key = {secret_access_key}
                     endpoint = {endpoint_url}
                     acl = private
+                    """)
+            elif self is Rclone.RcloneStores.COREWEAVE:
+                coreweave_session = coreweave.session()
+                coreweave_credentials = coreweave.get_coreweave_credentials(
+                    coreweave_session)
+                # Get endpoint URL from the client
+                endpoint_url = coreweave.get_endpoint()
+                access_key_id = coreweave_credentials.access_key
+                secret_access_key = coreweave_credentials.secret_key
+                config = textwrap.dedent(f"""\
+                    [{rclone_profile_name}]
+                    type = s3
+                    provider = Other
+                    access_key_id = {access_key_id}
+                    secret_access_key = {secret_access_key}
+                    endpoint = {endpoint_url}
+                    region = auto
+                    acl = private
+                    force_path_style = false
                     """)
             else:
                 with ux_utils.print_exception_no_traceback():
@@ -908,3 +930,72 @@ def split_oci_path(oci_path: str) -> Tuple[str, str]:
     bucket = path_parts.pop(0)
     key = '/'.join(path_parts)
     return bucket, key
+
+
+def create_coreweave_client() -> Client:
+    """Create CoreWeave S3 client."""
+    return coreweave.client('s3')
+
+
+def split_coreweave_path(coreweave_path: str) -> Tuple[str, str]:
+    """Splits CoreWeave Path into Bucket name and Relative Path to Bucket
+
+    Args:
+      coreweave_path: str; CoreWeave Path, e.g. cw://imagenet/train/
+    """
+    path_parts = coreweave_path.replace('cw://', '').split('/')
+    bucket = path_parts.pop(0)
+    key = '/'.join(path_parts)
+    return bucket, key
+
+
+def verify_coreweave_bucket(name: str, retry: int = 0) -> bool:
+    """Verify CoreWeave bucket exists and is accessible.
+
+    Retries head_bucket operation up to retry times with 5 second intervals
+    to handle DNS propagation delays or temporary connectivity issues.
+    """
+    coreweave_client = create_coreweave_client()
+    max_retries = retry + 1  # 5s * (retry+1) = total seconds to retry
+    retry_count = 0
+
+    while retry_count < max_retries:
+        try:
+            coreweave_client.head_bucket(Bucket=name)
+            if retry_count > 0:
+                logger.debug(
+                    f'Successfully verified bucket {name} after '
+                    f'{retry_count} retries ({retry_count * 5} seconds)')
+            return True
+
+        except coreweave.botocore.exceptions.ClientError as e:  # type: ignore[union-attr] # pylint: disable=line-too-long:
+            error_code = e.response['Error']['Code']
+            if error_code == '403':
+                logger.error(f'Access denied to bucket {name}')
+                return False
+            elif error_code == '404':
+                logger.debug(f'Bucket {name} does not exist')
+            else:
+                logger.debug(
+                    f'Unexpected error checking CoreWeave bucket {name}: {e}')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(
+                f'Unexpected error checking CoreWeave bucket {name}: {e}')
+
+        # Common retry logic for all transient errors
+        retry_count += 1
+        if retry_count < max_retries:
+            logger.debug(f'Error checking CoreWeave bucket {name} '
+                         f'(attempt {retry_count}/{max_retries}). '
+                         f'Retrying in 5 seconds...')
+            time.sleep(5)
+        else:
+            attempt_str = 'attempt'
+            if max_retries > 1:
+                attempt_str += 's'
+            logger.error(f'Failed to verify CoreWeave bucket {name} after '
+                         f'{max_retries} {attempt_str}.')
+            return False
+
+    # Should not reach here, but just in case
+    return False
