@@ -59,5 +59,3 @@ def test_mithril_check_credentials_present(monkeypatch, tmp_path):
     valid, msg = cloud._check_credentials()
     assert valid
     assert msg is None
-
-
