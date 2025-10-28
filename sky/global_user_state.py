@@ -1705,13 +1705,10 @@ def get_clusters(
         cluster_table.c.status,
         cluster_table.c.autostop,
         cluster_table.c.to_down,
-        cluster_table.c.owner,
-        cluster_table.c.metadata,
         cluster_table.c.cluster_hash,
         cluster_table.c.cluster_ever_up,
         cluster_table.c.status_updated_at,
         cluster_table.c.user_hash,
-        cluster_table.c.config_hash,
         cluster_table.c.workspace,
         cluster_table.c.is_managed,
         user_table.c.name.label('user_name'),
@@ -1720,6 +1717,9 @@ def get_clusters(
         query_fields.extend([
             cluster_table.c.last_creation_yaml,
             cluster_table.c.last_creation_command,
+            cluster_table.c.config_hash,
+            cluster_table.c.owner,
+            cluster_table.c.metadata,
         ])
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         query = session.query(*query_fields).outerjoin(
@@ -1771,8 +1771,6 @@ def get_clusters(
             'status': status_lib.ClusterStatus[row.status],
             'autostop': row.autostop,
             'to_down': bool(row.to_down),
-            'owner': _load_owner(row.owner),
-            'metadata': json.loads(row.metadata),
             'cluster_hash': row.cluster_hash,
             'cluster_ever_up': bool(row.cluster_ever_up),
             'status_updated_at': row.status_updated_at,
@@ -1782,13 +1780,15 @@ def get_clusters(
                           if row.user_name is not None else current_user_name),
             'workspace': row.workspace,
             'is_managed': bool(row.is_managed),
-            'config_hash': row.config_hash,
         }
         if not summary_response:
             record['last_creation_yaml'] = row.last_creation_yaml
             record['last_creation_command'] = row.last_creation_command
             record['last_event'] = last_cluster_event_dict.get(
                 row.cluster_hash, None)
+            record['config_hash'] = row.config_hash
+            record['owner'] = _load_owner(row.owner)
+            record['metadata'] = json.loads(row.metadata)
 
         records.append(record)
     return records
