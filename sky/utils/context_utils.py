@@ -19,7 +19,7 @@ from sky.utils import context
 from sky.utils import subprocess_utils
 
 StreamHandler = Callable[[IO[Any], IO[Any]], str]
-PASSTHROUGH_FLUSH_INTERVAL_SECONDS = 1.0
+PASSTHROUGH_FLUSH_INTERVAL_SECONDS = 0.5
 
 logger = sky_logging.init_logger(__name__)
 
@@ -58,7 +58,6 @@ def passthrough_stream_handler(in_stream: IO[Any], out_stream: IO[Any]) -> str:
         line = wrapped.readline()
         if line:
             out_stream.write(line)
-            out_stream.flush()
 
             # Flush based on timeout instead of on every line
             current_time = time.time()
