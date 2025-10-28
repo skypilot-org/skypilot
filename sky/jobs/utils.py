@@ -2265,6 +2265,18 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
+    def get_version(cls) -> str:
+        """Generate code to get controller version."""
+        code = textwrap.dedent("""\
+        from sky.skylet import constants as controller_constants
+
+        # Get controller version
+        controller_version = controller_constants.SKYLET_VERSION
+        print(f"controller_version:{controller_version}", flush=True)
+        """)
+        return cls._build(code)
+
+    @classmethod
     def get_all_job_ids_by_name(cls, job_name: Optional[str]) -> str:
         code = textwrap.dedent(f"""\
         from sky.utils import message_utils
