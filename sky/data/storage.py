@@ -4671,7 +4671,7 @@ class CoreWeaveStore(S3CompatibleStore):
             split_path=data_utils.split_coreweave_path,
             verify_bucket=data_utils.verify_coreweave_bucket,
             aws_profile=coreweave.COREWEAVE_PROFILE_NAME,
-            get_endpoint_url=lambda: coreweave.get_endpoint(),  # pylint: disable=unnecessary-lambda
+            get_endpoint_url=coreweave.get_endpoint,
             credentials_file=coreweave.COREWEAVE_CREDENTIALS_PATH,
             config_file=coreweave.COREWEAVE_CONFIG_PATH,
             cloud_name=coreweave.NAME,
@@ -4746,6 +4746,9 @@ class CoreWeaveStore(S3CompatibleStore):
         # The newly created bucket ever takes about 18min to be accessible,
         # here we just retry for 36 times (5s * 36 = 180s) to avoid waiting
         # too long
+        # TODO(hailong): Update the logic here when the following
+        # issue is resolved:
+        # https://github.com/skypilot-org/skypilot/issues/7736
         data_utils.verify_coreweave_bucket(bucket_name, retry=36)
 
         return result
