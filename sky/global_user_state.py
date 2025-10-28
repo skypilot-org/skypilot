@@ -1772,7 +1772,6 @@ def get_clusters(
             'to_down': bool(row.to_down),
             'cluster_hash': row.cluster_hash,
             'cluster_ever_up': bool(row.cluster_ever_up),
-            'status_updated_at': row.status_updated_at,
             'user_hash': (row.user_hash
                           if row.user_hash is not None else current_user_hash),
             'user_name': (row.user_name
@@ -1789,6 +1788,7 @@ def get_clusters(
             record['owner'] = _load_owner(row.owner)
             record['metadata'] = json.loads(row.metadata)
             record['last_use'] = row.last_use
+            record['status_updated_at'] = row.status_updated_at
 
         records.append(record)
     return records

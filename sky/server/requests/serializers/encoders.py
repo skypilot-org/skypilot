@@ -62,6 +62,8 @@ def encode_status(
     for cluster in clusters:
         if 'last_use' not in cluster:
             cluster['last_use'] = ''
+        if 'status_updated_at' not in cluster:
+            cluster['status_updated_at'] = 0
         response_cluster = cluster.model_dump()
         response_cluster['status'] = cluster['status'].value
         handle = serialize_utils.prepare_handle_for_backwards_compatibility(

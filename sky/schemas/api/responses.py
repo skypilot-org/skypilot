@@ -99,7 +99,7 @@ class StatusResponse(ResponseBaseModel):
     metadata: Optional[Dict[str, Any]] = None
     cluster_hash: str
     cluster_ever_up: bool
-    status_updated_at: int
+    status_updated_at: Optional[int] = None
     user_hash: str
     user_name: str
     config_hash: Optional[str] = None
