@@ -9,7 +9,7 @@ from urllib.parse import quote
 import requests
 import yaml
 
-from sky import authentication
+# Unused: from sky import authentication
 from sky import sky_logging
 from sky.utils import status_lib
 
@@ -76,16 +76,17 @@ class MithrilInstanceStatus(enum.Enum):
             'status_failed': cls.FAILED,
             'status_error': cls.ERROR,
         }
-        
+
         status_lower = status.lower()
         if status_lower in status_map:
             return status_map[status_lower]
-        
+
         # Try direct enum match for legacy formats
         try:
             return cls(status_lower)
         except ValueError:
-            logger.warning(f'Unknown instance status: {status}, treating as UNKNOWN')
+            logger.warning(
+                f'Unknown instance status: {status}, treating as UNKNOWN')
             return cls.UNKNOWN
 
     def to_cluster_status(self) -> Optional[status_lib.ClusterStatus]:
@@ -100,22 +101,18 @@ class MithrilClient:
         """Initialize the Mithril client with API credentials from ~/.flow/."""
         config_path = os.path.expanduser(FLOW_CONFIG_PATH)
         if not os.path.exists(config_path):
-            raise RuntimeError(
-                f'Mithril config not found at {config_path}. '
-                f'Please run: flow setup'
-            )
-        
+            raise RuntimeError(f'Mithril config not found at {config_path}. '
+                               f'Please run: flow setup')
+
         with open(config_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
-        
+
         # Get API key
         self.api_key = config.get('api_key')
         if not self.api_key:
-            raise RuntimeError(
-                f'API key not found in {config_path}. '
-                f'Please run: flow setup'
-            )
-        
+            raise RuntimeError(f'API key not found in {config_path}. '
+                               f'Please run: flow setup')
+
         # Get project ID from metadata.json (more reliable than project name)
         metadata_path = os.path.expanduser(FLOW_METADATA_PATH)
         if os.path.exists(metadata_path):
@@ -135,16 +132,15 @@ class MithrilClient:
             # Fallback to project name from config
             mithril_config = config.get('mithril', {})
             self.project = mithril_config.get('project')
-        
+
         if not self.project:
             raise RuntimeError(
                 f'Project not found in {config_path} or {metadata_path}. '
-                f'Please run: flow setup'
-            )
-        
+                f'Please run: flow setup')
+
         self.headers = {'Authorization': f'Bearer {self.api_key}'}
         self.api_url = BASE_URL
-        
+
         logger.info(f'Initialized Mithril client for project: {self.project}')
 
     def _make_request(
@@ -160,7 +156,7 @@ class MithrilClient:
             'Content-Type': 'application/json'
         }
 
-        # Debug logging for request
+        # Debug logging for reques
         logger.debug(f'Making {method} request to {url}')
         if payload:
             logger.debug(f'Request payload: {json.dumps(payload, indent=2)}')
@@ -169,7 +165,10 @@ class MithrilClient:
 
         try:
             if method == 'GET':
-                response = requests.get(url, headers=headers, params=params, timeout=120)
+                response = requests.get(url,
+                                        headers=headers,
+                                        params=params,
+                                        timeout=120)
             elif method == 'POST':
                 response = requests.post(url,
                                          headers=headers,
@@ -178,10 +177,10 @@ class MithrilClient:
                                          timeout=120)
             elif method == 'DELETE':
                 response = requests.delete(url,
-                                          headers=headers,
-                                          json=payload,
-                                          params=params,
-                                          timeout=120)
+                                           headers=headers,
+                                           json=payload,
+                                           params=params,
+                                           timeout=120)
             else:
                 raise MithrilError(f'Unsupported HTTP method: {method}')
 
@@ -200,9 +199,9 @@ class MithrilClient:
                 logger.debug(f'Response body (raw): {response_text}')
                 if not response.ok:
                     raise MithrilError(f'API request failed with status '
-                                          f'{response.status_code}: '
-                                          f'{response_text}') from exc
-                # If response is OK but not JSON, return empty dict
+                                       f'{response.status_code}: '
+                                       f'{response_text}') from exc
+                # If response is OK but not JSON, return empty dic
                 return {}
 
             if not response.ok:
@@ -221,10 +220,10 @@ class MithrilClient:
 
     def _get_instance_type_fid(self, instance_type_name: str) -> str:
         """Get the FID for an instance type by name.
-        
+
         Converts SkyPilot-style names (e.g., 4xa100) to Mithril names (e.g., a100-80gb.sxm.4x).
         """
-        # Convert SkyPilot format to Mithril format
+        # Convert SkyPilot format to Mithril forma
         # e.g., 4xa100 -> a100-80gb.sxm.4x
         mithril_name = instance_type_name
         if 'xa100' in instance_type_name.lower():
@@ -233,21 +232,34 @@ class MithrilClient:
         elif 'xh100' in instance_type_name.lower():
             count = instance_type_name.lower().replace('xh100', '')
             mithril_name = f'h100-80gb.sxm.{count}x'
-        
+
         endpoint = '/v2/instance-types'
         try:
             response = self._make_request('GET', endpoint)
-            for it in response:
-                if it.get('name') == mithril_name:
-                    logger.info(f'Found instance type: {mithril_name} -> {it["fid"]}')
-                    return it['fid']
-            raise MithrilError(f'Instance type {mithril_name} (from {instance_type_name}) not found')
-        except Exception as e:
-            raise MithrilError(f'Failed to get instance type FID: {str(e)}') from e
+            # Response can be a list or dict with 'data' key
+            if isinstance(response, dict):
+                instance_types = response.get('data', [])
+            else:
+                instance_types = response
 
-    def _get_or_create_ssh_key(self, public_key: Optional[str] = None) -> List[str]:
+            for it in instance_types:
+                if isinstance(it, dict) and it.get('name') == mithril_name:
+                    fid = it.get('fid')
+                    if fid:
+                        logger.info(
+                            f'Found instance type: {mithril_name} -> {fid}')
+                        return str(fid)
+            raise MithrilError(
+                f'Instance type {mithril_name} (from {instance_type_name}) not found'
+            )
+        except Exception as e:
+            raise MithrilError(
+                f'Failed to get instance type FID: {str(e)}') from e
+
+    def _get_or_create_ssh_key(self,
+                               public_key: Optional[str] = None) -> List[str]:
         """Get or create SSH key for instances.
-        
+
         Args:
             public_key: The public SSH key content to upload. If not provided,
                        will use the first existing key.
@@ -257,7 +269,12 @@ class MithrilClient:
         try:
             # Get existing SSH keys
             response = self._make_request('GET', endpoint, params=params)
-            
+            # Normalize response to lis
+            if isinstance(response, dict):
+                key_list = response.get('data', [])
+            else:
+                key_list = response
+
             # If a specific public key is requested, check if it exists
             if public_key:
                 # Extract key content (remove 'ssh-rsa ' prefix and user@host suffix if present)
@@ -266,60 +283,77 @@ class MithrilClient:
                     key_content = f'{key_parts[0]} {key_parts[1]}'
                 else:
                     key_content = public_key.strip()
-                
+
                 # Check if this key already exists
-                for key in response:
-                    existing_key = key.get('public_key', '').strip()
+                for key in key_list:
+                    if not isinstance(key, dict):
+                        continue
+                    existing_key = str(key.get('public_key', '')).strip()
                     if key_content in existing_key or existing_key in key_content:
                         ssh_key_fid = key.get('fid')
-                        logger.info(f'Found matching SSH key: {ssh_key_fid}')
-                        return [ssh_key_fid]
-                
-                # Key doesn't exist, create it
+                        if ssh_key_fid:
+                            logger.info(
+                                f'Found matching SSH key: {ssh_key_fid}')
+                            return [str(ssh_key_fid)]
+
+                # Key doesn't exist, create i
                 logger.info('Uploading new SSH key to Mithril')
                 create_payload = {
                     'project': self.project,
                     'name': f'skypilot-{int(time.time())}',
                     'public_key': public_key.strip()
                 }
-                create_response = self._make_request('POST', endpoint, payload=create_payload)
+                create_response = self._make_request('POST',
+                                                     endpoint,
+                                                     payload=create_payload)
                 ssh_key_fid = create_response.get('fid')
                 if not ssh_key_fid:
-                    raise MithrilError('Failed to create SSH key - no FID returned')
+                    raise MithrilError(
+                        'Failed to create SSH key - no FID returned')
                 logger.info(f'Created new SSH key: {ssh_key_fid}')
-                return [ssh_key_fid]
-            
+                return [str(ssh_key_fid)]
+
             # No specific key requested, use first existing key
-            if response and len(response) > 0:
-                ssh_key_fid = response[0].get('fid')
-                logger.info(f'Using existing SSH key: {ssh_key_fid}')
-                return [ssh_key_fid]
-            
+            if key_list and len(key_list) > 0:
+                first_key = key_list[0]
+                if isinstance(first_key, dict):
+                    ssh_key_fid = first_key.get('fid')
+                    if ssh_key_fid:
+                        logger.info(f'Using existing SSH key: {ssh_key_fid}')
+                        return [str(ssh_key_fid)]
+
             # No keys exist at all
-            raise MithrilError('No SSH keys found in Mithril account. Please create one using: flow ssh-key create')
+            raise MithrilError(
+                'No SSH keys found in Mithril account. Please create one using: flow ssh-key create'
+            )
         except MithrilError:
             raise
         except Exception as e:
-            raise MithrilError(f'Failed to get/create SSH keys: {str(e)}') from e
+            raise MithrilError(
+                f'Failed to get/create SSH keys: {str(e)}') from e
 
-    def _wait_for_bid_instance(self, bid_id: str, timeout: int = 300) -> Optional[str]:
+    def _wait_for_bid_instance(self,
+                               bid_id: str,
+                               timeout: int = 300) -> Optional[str]:
         """Wait for a spot bid to create an instance."""
         start_time = time.time()
         while time.time() - start_time < timeout:
             instances = self.list_instances()
             for instance_id, instance in instances.items():
                 if instance.get('bid') == bid_id:
-                    logger.info(f'Found instance {instance_id} for bid {bid_id}')
+                    logger.info(
+                        f'Found instance {instance_id} for bid {bid_id}')
                     return instance_id
             time.sleep(5)
         return None
 
-    def launch_instance(self, instance_type: str,
+    def launch_instance(self,
+                        instance_type: str,
                         name: str,
                         region: Optional[str] = None,
                         public_key: Optional[str] = None) -> Tuple[str, str]:
         """Launch a new instance by creating a spot bid.
-        
+
         Args:
             instance_type: The instance type to launch
             name: The name for the instance
@@ -328,23 +362,25 @@ class MithrilClient:
         """
         # Get instance type FID from name
         instance_type_fid = self._get_instance_type_fid(instance_type)
-        
+
         # Get or create SSH key for the instance
         ssh_keys = self._get_or_create_ssh_key(public_key)
-        
+
         # Add timestamp to name to ensure uniqueness
         unique_name = f'{name}-{int(time.time())}'
-        
+
         # Use provided region or select a default from availability API for this instance type
         if region is None or region == 'default':
             try:
-                availability = self._make_request('GET', '/v2/spot/availability')
+                availability = self._make_request('GET',
+                                                  '/v2/spot/availability')
                 # Normalize into a mapping and pick the first available region for the instance_type
                 records = availability.get('data', availability)
                 candidate_region: Optional[str] = None
                 if isinstance(records, list):
                     for rec in records:
-                        inst = rec.get('instance_type') or rec.get('name') or rec.get('type')
+                        inst = rec.get('instance_type') or rec.get(
+                            'name') or rec.get('type')
                         if inst == instance_type and rec.get('region'):
                             candidate_region = rec['region']
                             break
@@ -357,16 +393,18 @@ class MithrilClient:
                 else:
                     # Fallback: keep previous default if nothing found
                     region = 'us-central1-b'
-            except Exception as e:  # pylint: disable=broad-except
-                logger.warning('Falling back to default region due to availability lookup failure: %s', e)
+            except Exception as e:  # pylint: disable=broad-excep
+                logger.warning(
+                    'Falling back to default region due to availability lookup failure: %s',
+                    e)
                 region = 'us-central1-b'
-        
+
         # Create spot bid payload according to Mithril API
         bid_payload = {
             'project': self.project,
             'region': region,
             'instance_type': instance_type_fid,
-            'limit_price': '$8.00',  # Default bid price limit
+            'limit_price': '$8.00',  # Default bid price limi
             'instance_quantity': 1,
             'name': unique_name,
             'launch_specification': {
@@ -378,7 +416,8 @@ class MithrilClient:
 
         endpoint = '/v2/spot/bids'
         try:
-            logger.info(f'Creating spot bid for {instance_type} ({instance_type_fid})')
+            logger.info(
+                f'Creating spot bid for {instance_type} ({instance_type_fid})')
             response = self._make_request('POST', endpoint, payload=bid_payload)
             logger.debug(f'Spot bid response: {json.dumps(response, indent=2)}')
 
@@ -387,17 +426,19 @@ class MithrilClient:
                 logger.error(f'No bid ID in response: {response}')
                 raise MithrilError('No bid ID returned from API')
 
-            logger.info(f'Successfully created spot bid {bid_id}, waiting for instance...')
+            logger.info(
+                f'Successfully created spot bid {bid_id}, waiting for instance...'
+            )
 
             # Wait for the bid to create an instance
             instance_id = self._wait_for_bid_instance(bid_id, timeout=300)
-            
+
             if not instance_id:
                 raise MithrilError(f'Bid {bid_id} did not create an instance')
 
             # Wait for instance to be ready
-            if not self.wait_for_instance(
-                    instance_id, MithrilInstanceStatus.RUNNING.value):
+            if not self.wait_for_instance(instance_id,
+                                          MithrilInstanceStatus.RUNNING.value):
                 raise MithrilError(
                     f'Instance {instance_id} failed to reach RUNNING state')
 
@@ -411,14 +452,15 @@ class MithrilClient:
             # Get SSH connection info (ip_address is set from ssh_destination in list_instances)
             ip_address = instance.get('ip_address')
             ssh_port = instance.get('ssh_port', 22)
-            
+
             if not ip_address:
                 logger.error(
                     f'No IP address available for instance {instance_id}')
                 raise MithrilError('No IP address available for instance')
 
             ssh_command = f'ssh ubuntu@{ip_address} -p {ssh_port}'
-            logger.info(f'Instance {instance_id} is ready with SSH: {ssh_command}')
+            logger.info(
+                f'Instance {instance_id} is ready with SSH: {ssh_command}')
             return instance_id, ssh_command
 
         except Exception as e:
@@ -431,7 +473,7 @@ class MithrilClient:
         metadata: Optional[Dict[str, Dict[str, str]]] = None
     ) -> Dict[str, Dict[str, Any]]:
         """List all instances, optionally filtered by status.
-        
+
         Note: Mithril doesn't support user metadata, so metadata filtering is ignored.
         Filtering by cluster name should be done by instance name instead.
         """
@@ -442,20 +484,20 @@ class MithrilClient:
             response = self._make_request('GET', endpoint, params=params)
             logger.debug(f'Raw API response: {json.dumps(response, indent=2)}')
             instances = {}
-            
+
             # Metadata filtering is ignored for Mithril - it's handled in instance.py
             # by filtering on instance name instead
             if metadata:
-                logger.debug('Note: Mithril does not support metadata filtering. '
-                           'Filtering by instance name should be done by caller.')
-            
+                logger.debug(
+                    'Note: Mithril does not support metadata filtering. '
+                    'Filtering by instance name should be done by caller.')
+
             # Mithril API returns instances in a 'data' key
             instance_list = response.get('data', [])
             for instance in instance_list:
                 instance_id = instance.get('fid')
                 current_status = instance.get('status')
-                logger.debug(
-                    f'Instance {instance_id} status: {current_status}')
+                logger.debug(f'Instance {instance_id} status: {current_status}')
 
                 # Convert raw status to enum
                 try:
@@ -471,7 +513,7 @@ class MithrilClient:
 
                 # Get IP address from Mithril's ssh_destination field
                 ssh_dest = instance.get('ssh_destination')
-                
+
                 instances[instance_id] = {
                     'id': instance_id,
                     'name': instance.get('name'),  # Include name for filtering
@@ -480,7 +522,8 @@ class MithrilClient:
                     'ssh_port': 22,
                     'instance_type': instance.get('instance_type'),
                     'created_at': instance.get('created_at'),
-                    'bid': instance.get('bid'),  # Include bid ID for termination
+                    'bid':
+                        instance.get('bid'),  # Include bid ID for termination
                     'private_ip': instance.get('private_ip')
                 }
             return instances
@@ -494,13 +537,16 @@ class MithrilClient:
             instances = self.list_instances()
             instance = instances.get(instance_id)
             if not instance:
-                logger.warning(f'Instance {instance_id} not found, may already be terminated')
+                logger.warning(
+                    f'Instance {instance_id} not found, may already be terminated'
+                )
                 return
-            
+
             bid_id = instance.get('bid')
             if not bid_id:
-                raise MithrilError(f'No bid ID found for instance {instance_id}')
-            
+                raise MithrilError(
+                    f'No bid ID found for instance {instance_id}')
+
             # Cancel the spot bid to terminate the instance
             endpoint = f'/v2/spot/bids/{bid_id}'
             params = {'project': self.project}
@@ -518,7 +564,7 @@ class MithrilClient:
                           target_status: str,
                           timeout: int = TIMEOUT) -> bool:
         """Wait for an instance to reach a specific status.
-        
+
         Mithril instances go through several states:
         - STATUS_CONFIRMED: Bid accepted, instance allocation confirmed
         - STATUS_INITIALIZING: Instance is being set up
@@ -528,11 +574,10 @@ class MithrilClient:
         start_time = time.time()
         target_status_enum = MithrilInstanceStatus.from_raw_status(
             target_status)
-        logger.info(
-            f'Waiting for instance {instance_id} '
-            f'to reach status {target_status_enum.value} '
-            f'(timeout: {timeout}s)')
-        
+        logger.info(f'Waiting for instance {instance_id} '
+                    f'to reach status {target_status_enum.value} '
+                    f'(timeout: {timeout}s)')
+
         # Track if we've seen any progress
         last_status = None
 
@@ -556,29 +601,35 @@ class MithrilClient:
 
                 current_status = instance.get('status', '').lower()
                 ip_address = instance.get('ip_address')
-                
+
                 # Track status changes to show progress
                 if current_status != last_status:
-                    logger.info(f'Instance {instance_id} status: {last_status} -> {current_status} '
-                                f'(elapsed: {int(elapsed)}s)')
+                    logger.info(
+                        f'Instance {instance_id} status: {last_status} -> {current_status} '
+                        f'(elapsed: {int(elapsed)}s)')
                     last_status = current_status
                 else:
                     # Log periodically even if status hasn't changed
                     if int(elapsed) % 30 == 0:
-                        logger.info(f'Still waiting... Current status: {current_status} '
-                                    f'(elapsed: {int(elapsed)}s/{timeout}s)')
-                
+                        logger.info(
+                            f'Still waiting... Current status: {current_status} '
+                            f'(elapsed: {int(elapsed)}s/{timeout}s)')
+
                 # For Mithril, once we have an IP address, the instance is ready for SSH
                 # We don't need to wait for STATUS_RUNNING - having the ssh_destination
                 # means the instance is allocated and networking is configured
                 if ip_address:
-                    logger.info(f'✓ Instance {instance_id} has IP {ip_address} '
-                                f'(status: {current_status}) after {int(elapsed)}s - ready for SSH')
+                    logger.info(
+                        f'✓ Instance {instance_id} has IP {ip_address} '
+                        f'(status: {current_status}) after {int(elapsed)}s - ready for SSH'
+                    )
                     return True
-                
+
                 # If no IP yet, check if we've reached the target status anyway
                 if current_status == target_status_enum.value:
-                    logger.debug(f'Instance reached {target_status_enum.value} but no IP yet, continuing to wait...')
+                    logger.debug(
+                        f'Instance reached {target_status_enum.value} but no IP yet, continuing to wait...'
+                    )
                     # Continue waiting for IP address
 
                 # Check for terminal failure states
@@ -587,14 +638,18 @@ class MithrilClient:
                                  f'terminal status: {current_status} '
                                  f'after {int(elapsed)}s')
                     return False
-                
+
                 # Valid intermediate states (keep waiting)
-                valid_pending = ['pending', 'creating', 'starting', 'confirmed', 'initializing']
+                valid_pending = [
+                    'pending', 'creating', 'starting', 'confirmed',
+                    'initializing'
+                ]
                 if current_status not in valid_pending and current_status != target_status_enum.value:
-                    logger.warning(f'Instance in unexpected status: {current_status}')
+                    logger.warning(
+                        f'Instance in unexpected status: {current_status}')
 
                 time.sleep(5)
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:  # pylint: disable=broad-excep
                 logger.warning(
                     f'Error while waiting for instance {instance_id}: {str(e)}')
                 time.sleep(5)
@@ -613,7 +668,10 @@ def get_client() -> MithrilClient:
 
 
 # Backward-compatible wrapper functions
-def launch_instance(instance_type: str, name: str, region: Optional[str] = None, public_key: Optional[str] = None) -> Tuple[str, str]:
+def launch_instance(instance_type: str,
+                    name: str,
+                    region: Optional[str] = None,
+                    public_key: Optional[str] = None) -> Tuple[str, str]:
     """Launch a new instance with the specified configuration."""
     return get_client().launch_instance(instance_type, name, region, public_key)
 
@@ -636,4 +694,3 @@ def wait_for_instance(instance_id: str,
                       timeout: int = TIMEOUT) -> bool:
     """Wait for an instance to reach a specific status."""
     return get_client().wait_for_instance(instance_id, target_status, timeout)
-

@@ -130,8 +130,9 @@ class Mithril(clouds.Cloud):
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
         if os.path.exists(cls.CREDENTIALS_PATH):
             return True, None
-        return False, (f'Mithril credentials not found at {cls.CREDENTIALS_PATH}. '
-                      f'Please run: flow setup')
+        return False, (
+            f'Mithril credentials not found at {cls.CREDENTIALS_PATH}. '
+            f'Please run: flow setup')
 
     @classmethod
     def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
@@ -151,8 +152,7 @@ class Mithril(clouds.Cloud):
     ) -> 'resources_utils.FeasibleResources':
         # Check if the instance type exists in the catalog
         if resources.instance_type is not None:
-            if catalog.instance_type_exists(resources.instance_type,
-                                            'mithril'):
+            if catalog.instance_type_exists(resources.instance_type, 'mithril'):
                 # Remove accelerators for launchable resources
                 resources_launch = resources.copy(accelerators=None)
                 return resources_utils.FeasibleResources([resources_launch], [],
@@ -283,4 +283,3 @@ class Mithril(clouds.Cloud):
         if cluster_name_on_cloud is None:
             return False
         return cluster_name_on_cloud.startswith(cluster_name)
-

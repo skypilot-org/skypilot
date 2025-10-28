@@ -39,9 +39,10 @@ def _filter_instances(cluster_name_on_cloud: str,
             if not instance_name.startswith(cluster_name_on_cloud):
                 logger.debug(
                     f'Skipping instance {instance_id} '
-                    f'- name {instance_name} does not start with {cluster_name_on_cloud}')
+                    f'- name {instance_name} does not start with {cluster_name_on_cloud}'
+                )
                 continue
-            
+
             # Check status filter
             instance_status = instance.get('status', '').lower()
             if (status_filters is not None and
@@ -55,7 +56,7 @@ def _filter_instances(cluster_name_on_cloud: str,
             logger.debug(f'Including instance {instance_id} '
                          f'with status {instance_status}')
 
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:  # pylint: disable=broad-excep
             logger.warning(f'Error processing instance {instance_id}: {str(e)}')
             continue
 
@@ -142,9 +143,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         logger.debug(f'Instance type from config: {instance_type}')
         if not instance_type:
             logger.error('InstanceType is not set in node_config')
-            raise RuntimeError(
-                'InstanceType is not set in node_config. '
-                'Please specify an instance type for Mithril.')
+            raise RuntimeError('InstanceType is not set in node_config. '
+                               'Please specify an instance type for Mithril.')
 
         # Launch instance with SkyPilot's public SSH key
         public_key_path = config.authentication_config.get('ssh_public_key')
@@ -155,8 +155,9 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                     public_key = f.read().strip()
                 logger.debug(f'Using SSH public key from: {public_key_path}')
             except Exception as e:
-                logger.warning(f'Failed to read public key from {public_key_path}: {e}')
-        
+                logger.warning(
+                    f'Failed to read public key from {public_key_path}: {e}')
+
         instance_id, ssh_command = utils.launch_instance(
             instance_type, cluster_name_on_cloud, region, public_key)
         logger.info(f'Launched instance {instance_id} with SSH command: '
@@ -166,9 +167,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         # Wait for instance to have an IP address (means it's ready for SSH)
         if not utils.wait_for_instance(
                 instance_id, utils.MithrilInstanceStatus.RUNNING.value):
-            raise RuntimeError(
-                f'Instance {instance_id} failed to become ready')
-        
+            raise RuntimeError(f'Instance {instance_id} failed to become ready')
+
         logger.info(f'Instance {instance_id} is ready with IP address')
 
     except Exception as e:
@@ -195,7 +195,7 @@ def terminate_instances(
     logger.info(
         f'Terminating all instances for cluster {cluster_name_on_cloud}')
 
-    # First check if instances exist
+    # First check if instances exis
     instances = _filter_instances(cluster_name_on_cloud, None)
     if not instances:
         logger.info(f'No instances found for cluster {cluster_name_on_cloud}')
@@ -206,7 +206,7 @@ def terminate_instances(
         try:
             utils.terminate_instance(instance_id)
             logger.info(f'Terminated instance {instance_id}')
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:  # pylint: disable=broad-excep
             logger.warning(f'Failed to terminate instance {instance_id}: {e}')
             continue
 
@@ -221,16 +221,17 @@ def terminate_instances(
             break
 
         # Check for instances that are still active (not terminated)
-        active_instances = _filter_instances(
-            cluster_name_on_cloud,
-            [utils.MithrilInstanceStatus.RUNNING.value,
-             utils.MithrilInstanceStatus.STARTING.value,
-             utils.MithrilInstanceStatus.PENDING.value])
+        active_instances = _filter_instances(cluster_name_on_cloud, [
+            utils.MithrilInstanceStatus.RUNNING.value,
+            utils.MithrilInstanceStatus.STARTING.value,
+            utils.MithrilInstanceStatus.PENDING.value
+        ])
         if not active_instances:
             logger.info('All instances terminated successfully')
             break
 
-        logger.info(f'Waiting for {len(active_instances)} instances to terminate...')
+        logger.info(
+            f'Waiting for {len(active_instances)} instances to terminate...')
         time.sleep(POLL_INTERVAL)
 
 
@@ -247,10 +248,10 @@ def get_cluster_info(
     ssh_user = 'ubuntu'  # Default SSH user for Mithril
 
     for instance_id, instance_info in running_instances.items():
-        # Extract IP address and port
+        # Extract IP address and por
         ip_address = instance_info.get('ip_address')
         ssh_port = instance_info.get('ssh_port', 22)
-        
+
         if not ip_address:
             logger.warning(f'No IP address for instance {instance_id}')
             continue
@@ -318,8 +319,7 @@ def wait_instances(region: str, cluster_name_on_cloud: str,
     if state == status_lib.ClusterStatus.UP:
         # Check if any instances are in RUNNING state
         instances = _filter_instances(
-            cluster_name_on_cloud,
-            [utils.MithrilInstanceStatus.RUNNING.value])
+            cluster_name_on_cloud, [utils.MithrilInstanceStatus.RUNNING.value])
         if not instances:
             # Check if any instances are in a failed state
             failed_instances = _filter_instances(cluster_name_on_cloud, [
@@ -355,8 +355,7 @@ def wait_instances(region: str, cluster_name_on_cloud: str,
                                f'{cluster_name_on_cloud}')
         # Check if any instances are in RUNNING state
         running_instances = _filter_instances(
-            cluster_name_on_cloud,
-            [utils.MithrilInstanceStatus.RUNNING.value])
+            cluster_name_on_cloud, [utils.MithrilInstanceStatus.RUNNING.value])
         if running_instances:
             error_msg = (
                 f'Cluster {cluster_name_on_cloud} is in STOPPED state, but '
@@ -401,4 +400,3 @@ def open_ports(
 ) -> None:
     """Open ports. Not supported for Mithril."""
     raise NotImplementedError('open_ports is not supported for Mithril')
-

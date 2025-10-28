@@ -10,4 +10,3 @@ from sky.provision.mithril.instance import run_instances
 from sky.provision.mithril.instance import stop_instances
 from sky.provision.mithril.instance import terminate_instances
 from sky.provision.mithril.instance import wait_instances
-

@@ -8,4 +8,3 @@ def bootstrap_instances(
         config: common.ProvisionConfig) -> common.ProvisionConfig:
     del region, cluster_name  # unused
     return config
-

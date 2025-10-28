@@ -58,7 +58,7 @@ def _route_to_cloud_impl(func):
         if module_name == 'lambda':
             module_name = 'lambda_cloud'
         module = globals().get(module_name)
-        
+
         assert module is not None, f'Unknown provider: {module_name}'
 
         impl = getattr(module, func.__name__, None)

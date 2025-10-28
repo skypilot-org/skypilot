@@ -121,10 +121,9 @@ def list_accelerators(
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in Mithril Cloud offering accelerators."""
     del require_price  # Unused
-    return common.list_accelerators_impl('Mithril', _df, gpus_only,
-                                         name_filter, region_filter,
-                                         quantity_filter, case_sensitive,
-                                         all_regions)
+    return common.list_accelerators_impl('Mithril', _df, gpus_only, name_filter,
+                                         region_filter, quantity_filter,
+                                         case_sensitive, all_regions)
 
 
 def get_instance_type_from_catalog() -> dict:
@@ -136,4 +135,3 @@ def regions() -> List[cloud.Region]:
     # Return regions from the catalog
     unique_regions = _df['Region'].unique()
     return [cloud.Region(region) for region in unique_regions if region]
-
