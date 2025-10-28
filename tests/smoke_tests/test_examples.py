@@ -43,6 +43,16 @@ def test_min_gpt(generic_cloud: str, train_file: str, accelerator: Dict[str,
             'git clone --depth 1 -b fix-mingpt https://github.com/michaelvll/examples || true',
             modified_content)
 
+        if generic_cloud == 'nebius' and train_file == 'examples/distributed-pytorch/train-rdzv.yaml':
+            nebius_fix = '''    # Nebius-specific fix: Add master's IP to /etc/hosts for proper hostname resolution
+    if [ ${SKYPILOT_NODE_RANK} == 0 ]; then
+        echo "$MASTER_ADDR $(hostname)" | sudo tee -a /etc/hosts
+    fi
+
+'''
+            modified_content = modified_content.replace(
+                '    torchrun \\', nebius_fix + '    torchrun \\')
+
         # Create a temporary YAML file with the modified content
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
                                          delete=False) as f:
