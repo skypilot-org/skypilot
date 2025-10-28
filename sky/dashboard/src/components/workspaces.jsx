@@ -58,6 +58,7 @@ export async function getWorkspaceClusters(workspaceName) {
       cluster_names: null,
       all_users: true,
       include_credentials: false,
+      include_handle: false,
       override_skypilot_config: { active_workspace: workspaceName },
     });
 

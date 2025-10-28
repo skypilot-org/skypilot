@@ -99,6 +99,7 @@ def status(
     all_users: bool = False,
     include_credentials: bool = False,
     summary_response: bool = False,
+    include_handle: bool = True,
 ) -> List[responses.StatusResponse]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets cluster statuses.
@@ -179,7 +180,8 @@ def status(
         cluster_names=cluster_names,
         all_users=all_users,
         include_credentials=include_credentials,
-        summary_response=summary_response)
+        summary_response=summary_response,
+        include_handle=include_handle)
 
     status_responses = []
     for cluster in clusters:
