@@ -17,10 +17,10 @@ logger = sky_logging.init_logger(__name__)
 
 def get_job_dag_content(job_id: int) -> Optional[str]:
     """Get DAG YAML content for a job from database or disk.
-    
+
     Args:
         job_id: The job ID
-        
+
     Returns:
         DAG YAML content as string, or None if not found
     """
@@ -36,11 +36,12 @@ def get_job_dag_content(job_id: int) -> Optional[str]:
         try:
             with open(dag_yaml_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-                logger.debug('Loaded DAG YAML from disk for job %s: %s',
-                             job_id, dag_yaml_path)
+                logger.debug('Loaded DAG YAML from disk for job %s: %s', job_id,
+                             dag_yaml_path)
                 return content
         except (FileNotFoundError, IOError, OSError) as e:
-            logger.warning(f'Failed to read DAG YAML from disk {dag_yaml_path}: {e}')
+            logger.warning(
+                f'Failed to read DAG YAML from disk {dag_yaml_path}: {e}')
 
     logger.warning(f'DAG YAML content not found for job {job_id}')
     return None
@@ -48,10 +49,10 @@ def get_job_dag_content(job_id: int) -> Optional[str]:
 
 def get_job_env_content(job_id: int) -> Optional[str]:
     """Get environment file content for a job from database or disk.
-    
+
     Args:
         job_id: The job ID
-        
+
     Returns:
         Environment file content as string, or None if not found
     """
@@ -71,7 +72,9 @@ def get_job_env_content(job_id: int) -> Optional[str]:
                              job_id, env_file_path)
                 return content
         except (FileNotFoundError, IOError, OSError) as e:
-            logger.warning(f'Failed to read environment file from disk {env_file_path}: {e}')
-    
+            logger.warning(
+                f'Failed to read environment file from disk {env_file_path}: '
+                f'{e}')
+
     # Environment file is optional, so don't warn if not found
     return None
