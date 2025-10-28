@@ -247,6 +247,18 @@ class Nebius(clouds.Cloud):
 
         use_static_ip_address = skypilot_config.get_nested(
             ('nebius', 'use_static_ip_address'), default_value=False)
+
+        # Add Nebius-specific setup commands that run during provisioning
+        initial_setup_commands = []
+
+        # This adds an /etc/hosts entry mapping the node's IP to its
+        # hostname, which is useful for distributed training frameworks that
+        # use MASTER_ADDR=$(hostname) patterns.
+        hostname_setup_cmd = (
+            'IP=$(hostname -I | awk \'{print $1}\'); '
+            'echo "$IP $(hostname)" | sudo tee -a /etc/hosts; ')
+        initial_setup_commands.append(hostname_setup_cmd)
+
         resources_vars: Dict[str, Any] = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -257,7 +269,8 @@ class Nebius(clouds.Cloud):
             'zones': None,
             'use_spot': resources.use_spot,
             'filesystems': resources_vars_fs,
-            'network_tier': resources.network_tier
+            'network_tier': resources.network_tier,
+            'initial_setup_commands': initial_setup_commands
         }
 
         docker_run_options = []

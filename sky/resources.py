@@ -1570,6 +1570,11 @@ class Resources:
         cloud_specific_variables = self.cloud.make_deploy_resources_variables(
             self, cluster_name, region, zones, num_nodes, dryrun, volume_mounts)
 
+        # Extend the setup commands so we don't override cloud specific ones.
+        if cloud_specific_variables.get('initial_setup_commands'):
+            initial_setup_commands.extend(
+                cloud_specific_variables['initial_setup_commands'])
+
         # TODO(andyl): Should we print some warnings if users' envs share
         # same names with the cloud specific variables, but not enabled
         # since it's not on the particular cloud?
