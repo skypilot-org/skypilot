@@ -490,17 +490,17 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
 
 
 @timeline.event
-def _wait_for_pods_to_run(namespace, context, new_nodes):
+def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
     """Wait for pods and their containers to be ready.
 
     Pods may be pulling images or may be in the process of container
     creation.
     """
-    if not new_nodes:
+    if not new_pods:
         return
 
     # Create a set of pod names we're waiting for
-    expected_pod_names = {node.metadata.name for node in new_nodes}
+    expected_pod_names = {pod.metadata.name for pod in new_pods}
 
     def _check_init_containers(pod):
         # Check if any of the init containers failed
@@ -530,15 +530,13 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
     missing_pods_retry = 0
     while True:
         # Get all pods in a single API call
-        cluster_name_on_cloud = new_nodes[0].metadata.labels[
+        cluster_name_on_cloud = new_pods[0].metadata.labels[
             k8s_constants.TAG_SKYPILOT_CLUSTER_NAME]
         all_pods = kubernetes.core_api(context).list_namespaced_pod(
             namespace,
             label_selector=
             f'{k8s_constants.TAG_SKYPILOT_CLUSTER_NAME}={cluster_name_on_cloud}'
         ).items
-        cluster_name = (kubernetes_utils.get_cluster_name_from_cloud_name(
-            cluster_name_on_cloud))
 
         # Get the set of found pod names and check if we have all expected pods
         found_pod_names = {pod.metadata.name for pod in all_pods}
@@ -1206,7 +1204,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     # fail early if there is an error
     logger.debug(f'run_instances: waiting for pods to be running (pulling '
                  f'images): {[pod.metadata.name for pod in pods]}')
-    _wait_for_pods_to_run(namespace, context, pods)
+    _wait_for_pods_to_run(namespace, context, cluster_name, pods)
     logger.debug(f'run_instances: all pods are scheduled and running: '
                  f'{[pod.metadata.name for pod in pods]}')
 
