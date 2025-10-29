@@ -28,9 +28,7 @@ This is informed by the following boto3 docs:
 
 # pylint: disable=import-outside-toplevel
 
-import configparser
 import logging
-import os
 import threading
 import time
 import typing
@@ -127,34 +125,6 @@ def get_workspace_profile() -> Optional[str]:
     return skypilot_config.get_workspace_cloud('aws').get('profile', None)
 
 
-def _validate_workspace_profile(profile_name: str) -> bool:
-    """Validate that the specified AWS profile exists in credentials file.
-
-    This only checks ~/.aws/credentials because workspace profiles are designed
-    to work with SHARED_CREDENTIALS_FILE identity type, which requires actual
-    credentials (access key ID and secret key) to be present in the credentials
-    file. Profiles that only exist in ~/.aws/config (e.g., SSO or assume role
-    profiles) cannot be used.
-
-    Args:
-        profile_name: Name of the AWS profile to validate.
-
-    Returns:
-        True if profile exists in credentials file, False otherwise.
-    """
-    # Only check credentials file - we need actual credentials for static auth
-    credentials_path = os.path.expanduser('~/.aws/credentials')
-    if os.path.exists(credentials_path):
-        parser = configparser.ConfigParser()
-        try:
-            parser.read(credentials_path)
-            return profile_name in parser.sections()
-        except configparser.Error:
-            pass
-
-    return False
-
-
 # The LRU cache needs to be thread-local to avoid multiple threads sharing the
 # same session object, which is not guaranteed to be thread-safe.
 @_thread_local_lru_cache()
@@ -166,10 +136,6 @@ def session(check_credentials: bool = True, profile: Optional[str] = None):
         profile: AWS profile name to use. If None, uses default credentials.
     """
     if profile is not None:
-        if not _validate_workspace_profile(profile):
-            logger.error(f'AWS profile \'{profile}\' not found in '
-                         '~/.aws/credentials.')
-            raise botocore_exceptions().NoCredentialsError()
         logger.debug(f'Using AWS profile \'{profile}\'.')
         s = _create_aws_object(
             lambda: boto3.session.Session(profile_name=profile), 'session')
