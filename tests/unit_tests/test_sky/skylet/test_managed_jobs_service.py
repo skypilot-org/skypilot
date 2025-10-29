@@ -488,19 +488,19 @@ class TestGetJobTable:
             assert job.cloud == ''
             assert job.region == ''
             assert job.infra == ''
-            assert len(job.accelerators) == 0
             assert job.recovery_count == 0
+            assert len(job.accelerators) == 0
+            assert len(job.metadata) == 0
             assert not job.HasField('details')
             assert not job.HasField('failure_reason')
             assert not job.HasField('user_name')
-            assert job.user_hash == ''  # Not requested
-            assert job.submitted_at == 0.0
-            assert job.start_at == 0.0
-            assert job.end_at == 0.0
+            assert not job.HasField('user_hash')
+            assert not job.HasField('submitted_at')
+            assert not job.HasField('start_at')
+            assert not job.HasField('end_at')
             assert not job.HasField('user_yaml')
-            assert job.entrypoint == ''
-            assert len(job.metadata) == 0
-            assert job.pool_hash == ''
+            assert not job.HasField('entrypoint')
+            assert not job.HasField('pool_hash')
 
     def test_get_job_table_with_empty_fields_filter(self):
         """Test GetJobTable with empty fields list - should return minimal fields (job_id, status)."""
