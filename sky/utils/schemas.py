@@ -1648,6 +1648,9 @@ def get_config_schema():
                         'profile': {
                             'type': 'string'
                         },
+                        'disabled': {
+                            'type': 'boolean'
+                        },
                     },
                     'additionalProperties': False,
                 },

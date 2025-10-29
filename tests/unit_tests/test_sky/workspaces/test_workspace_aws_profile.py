@@ -2,7 +2,10 @@
 
 import configparser
 import os
+from typing import List
 from unittest import mock
+
+import pytest
 
 from sky.adaptors import aws
 
@@ -46,7 +49,7 @@ def _create_config_file(tmp_path, profiles):
         parser.write(f)
 
 
-def _get_credential_file_paths() -> list[str]:
+def _get_credential_file_paths() -> List[str]:
     """Helper to get credential file paths for testing.
 
     Returns:
