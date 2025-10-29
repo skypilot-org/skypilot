@@ -42,7 +42,7 @@ class _ProcessingArgs:
         ...
 
 
-def _get_context() -> Optional[context.Context]:
+def _get_context() -> Optional[context.SkyPilotContext]:
     ...
 
 

@@ -149,7 +149,7 @@ Work with managed jobs
 
 For a list of all commands and options, run :code:`sky jobs --help` or read the :ref:`CLI reference <cli>`.
 
-See a list of all managed jobs:
+See a list of managed jobs:
 
 .. code-block:: console
 
@@ -162,6 +162,8 @@ See a list of all managed jobs:
   ID NAME     RESOURCES           SUBMITTED   TOT. DURATION   JOB DURATION   #RECOVERIES  STATUS
   2  roberta  1x [A100:8][Spot]   2 hrs ago   2h 47m 18s      2h 36m 18s     0            RUNNING
   1  bert-qa  1x [V100:1][Spot]   4 hrs ago   4h 24m 26s      4h 17m 54s     0            RUNNING
+
+This command shows 50 managed jobs by default, use ``--limit <num>`` to show more jobs or use ``--all`` to show all jobs.
 
 Stream the logs of a running managed job:
 
@@ -615,6 +617,7 @@ Submit multiple jobs at once
 
 Pools support a :code:`--num-jobs` flag to conveniently submit multiple jobs at once.
 Each job will be assigned a unique environment variable :code:`$SKYPILOT_JOB_RANK`, which can be used to determine the job partition.
+Additionally, the :code:`$SKYPILOT_NUM_JOBS` environment variable will be set to the total number of jobs submitted.
 
 For example, if you have 1000 prompts to evaluate, each job can process prompts with sequence numbers
 :code:`$SKYPILOT_JOB_RANK * 100` to :code:`($SKYPILOT_JOB_RANK + 1) * 100`.
@@ -630,7 +633,7 @@ Here is a simple example:
     accelerators: {H100:1, H200:1}
 
   run: |
-    echo "Job rank: $SKYPILOT_JOB_RANK"
+    echo "Job rank: $SKYPILOT_JOB_RANK out of $SKYPILOT_NUM_JOBS"
     echo "Processing prompts from $(($SKYPILOT_JOB_RANK * 100)) to $((($SKYPILOT_JOB_RANK + 1) * 100))"
     # Actual business logic here...
     echo "Job $SKYPILOT_JOB_RANK finished"
@@ -766,7 +769,7 @@ For managed jobs, SkyPilot uses an intermediate bucket to store files used in th
 
 If you do not configure a bucket, SkyPilot will automatically create a temporary bucket named :code:`skypilot-filemounts-{username}-{run_id}` for each job launch. SkyPilot automatically deletes the bucket after the job completes.
 
-**Object store access is not necessary to use managed jobs.** If cloud object storage is not available (e.g., Kubernetes deployments), SkyPilot automatically falls back to a two-hop upload that copies files to the jobs controller and then downloads them to the jobs. 
+**Object store access is not necessary to use managed jobs.** If cloud object storage is not available (e.g., Kubernetes deployments), SkyPilot automatically falls back to a two-hop upload that copies files to the jobs controller and then downloads them to the jobs.
 
 .. tip::
 
@@ -958,12 +961,12 @@ Best practices for scaling up the jobs controller
 
 The number of active jobs that the controller supports is based on the controller size. There are two limits that apply:
 
-- **Actively launching job count**: maxes out at ``8 * floor((memory - 2GiB) / 3.59GiB)``.
+- **Actively launching job count**: limit is ``8 * floor((memory - 2GiB) / 3.59GiB)``, with a maximum of 512 jobs.
   A job counts towards this limit when it is first starting, launching instances, or recovering.
 
   - The default controller size has 16 GiB memory, meaning **24 jobs** can be actively launching at once.
 
-- **Running job count**: maxes out at ``200 * floor((memory - 2GiB) / 3.59GiB)``.
+- **Running job count**: limit is ``200 * floor((memory - 2GiB) / 3.59GiB)``, with a maximum of 2000 jobs.
 
   - The default controller size supports up to **600 jobs** running in parallel.
 
@@ -1015,25 +1018,4 @@ For absolute maximum parallelism, the following per-cloud configurations are rec
 .. note::
   Remember to tear down your controller to apply these changes, as described above.
 
-With this configuration, you'll get the following performance:
-
-.. list-table::
-   :widths: 1 2 2 2
-   :header-rows: 1
-
-   * - Cloud
-     - Instance type
-     - Launches at once
-     - Running jobs
-   * - AWS
-     - m7i.48xlarge (~768GiB RAM)
-     - **~1,704**
-     - **~42,600**
-   * - GCP
-     - n2-standard-128 (~512GiB RAM)
-     - **~1,136**
-     - **~28,400**
-   * - Azure
-     - Standard_D96s_v5 (~384GiB RAM)
-     - **~848**
-     - **~21,200**
+With this configuration, you can launch up to 512 jobs at once. Once the jobs are launched, up to 2000 jobs can be running in parallel.

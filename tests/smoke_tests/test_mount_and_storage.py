@@ -41,6 +41,7 @@ from sky import global_user_state
 from sky import skypilot_config
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
+from sky.adaptors import coreweave
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.data import data_utils
@@ -51,6 +52,7 @@ from sky.utils import controller_utils
 
 # ---------- file_mounts ----------
 @pytest.mark.no_vast  # VAST does not support num_nodes > 1 yet
+@pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_file_mounts instead.
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 and storage mounting yet.
 @pytest.mark.no_seeweb  # Seeweb does not support num_nodes > 1 yet and storage mounting yet.
@@ -113,6 +115,7 @@ def test_oci_mounts():
 @pytest.mark.no_vast  # Requires GCP
 @pytest.mark.no_fluidstack  # Requires GCP to be enabled
 @pytest.mark.no_hyperbolic  # Requires GCP to be enabled
+@pytest.mark.no_shadeform  # Requires GCP to be enabled
 @pytest.mark.no_seeweb  # Requires GCP to be enabled
 def test_using_file_mounts_with_env_vars(generic_cloud: str):
     if smoke_tests_utils.is_remote_server_test():
@@ -185,6 +188,11 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
     f.flush()
     file_path = f.name
 
+    # stop is not supported on kubernetes
+    stop_command = ''
+    if cloud != 'kubernetes':
+        stop_command = f'sky stop -y {cluster_name}'
+
     test_commands = [
         smoke_tests_utils.launch_cluster_for_cloud_cmd(cloud, cluster_name),
         *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
@@ -192,7 +200,7 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
         f'sky logs {cluster_name} 1 --status',  # Ensure job succeeded.
         smoke_tests_utils.run_cloud_cmd_on_cluster(cluster_name,
                                                    cmd=ls_hello_command),
-        f'sky stop -y {cluster_name}',
+        stop_command,
         f'sky start -y {cluster_name}',
         # Check if hello.txt from mounting bucket exists after restart in
         # the mounted directory
@@ -392,6 +400,7 @@ def test_azure_storage_mounts_with_stop():
 
 
 @pytest.mark.kubernetes
+@pytest.mark.no_dependency  # Storage tests required full dependency installed
 @pytest.mark.parametrize(
     'storage_name_prefix',
     [
@@ -415,6 +424,8 @@ def test_kubernetes_storage_mounts(storage_name_prefix: str):
         storage_lib.StoreType.GCS, storage_name, 'hello.txt')
     azure_ls_cmd = TestStorageWithCredentials.cli_ls_cmd(
         storage_lib.StoreType.AZURE, storage_name, 'hello.txt')
+    nebius_ls_cmd = TestStorageWithCredentials.cli_ls_cmd(
+        storage_lib.StoreType.NEBIUS, storage_name, 'hello.txt')
 
     # For Azure, we need to check if the output is empty list, as it returns []
     # instead of a non-zero exit code when the file doesn't exist
@@ -425,7 +436,8 @@ def test_kubernetes_storage_mounts(storage_name_prefix: str):
 
     ls_hello_command = (f'{s3_ls_cmd} || {{ '
                         f'{gcs_ls_cmd}; }} || {{ '
-                        f'{azure_check_cmd}; }}')
+                        f'{azure_check_cmd}; }} || {{ '
+                        f'{nebius_ls_cmd}; }}')
     cloud_cmd_cluster_setup_cmd_list = controller_utils._get_cloud_dependencies_installation_commands(
         controller_utils.Controllers.JOBS_CONTROLLER)
     cloud_cmd_cluster_setup_cmd = ' && '.join(cloud_cmd_cluster_setup_cmd_list)
@@ -578,6 +590,36 @@ def test_nebius_storage_mounts(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+# TODO(hailong): Enable this case when the following issue is resolved:
+# https://github.com/skypilot-org/skypilot/issues/7736
+# @pytest.mark.coreweave
+# def test_coreweave_storage_mounts(generic_cloud: str):
+#     name = smoke_tests_utils.get_cluster_name()
+#     storage_name = f'sky-test-{int(time.time())}-coreweave'
+#     template_str = pathlib.Path(
+#         'tests/test_yamls/test_coreweave_storage_mounting.yaml.j2').read_text()
+#     template = jinja2.Template(template_str)
+#     content = template.render(storage_name=storage_name)
+#     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+#         f.write(content)
+#         f.flush()
+#         file_path = f.name
+#         test_commands = [
+#             *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+#             f'sky launch -y -c {name} --infra {generic_cloud} {file_path}',
+#             f'sky logs {name} 1 --status',  # Ensure job succeeded.
+#             f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} AWS_SHARED_CREDENTIALS_FILE={coreweave.COREWEAVE_CREDENTIALS_PATH} aws s3 ls s3://{storage_name}/hello.txt --profile={coreweave.COREWEAVE_PROFILE_NAME}'
+#         ]
+
+#         test = smoke_tests_utils.Test(
+#             'coreweave_storage_mounts',
+#             test_commands,
+#             f'sky down -y {name}; sky storage delete -y {storage_name}',
+#             timeout=30 * 60,  # 20 mins
+#         )
+#         smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.ibm
 def test_ibm_storage_mounts():
     name = smoke_tests_utils.get_cluster_name()
@@ -608,6 +650,7 @@ def test_ibm_storage_mounts():
 
 
 @pytest.mark.no_vast  # VAST does not support multi-cloud features
+@pytest.mark.no_shadeform  # Shadeform does not support multi-cloud features
 @pytest.mark.no_fluidstack  # FluidStack doesn't have stable package installation
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support multi-cloud features
 @pytest.mark.no_seeweb  # Seeweb does not support multi-cloud features
@@ -685,7 +728,7 @@ exclude.py
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{jobs_name}',
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
-                timeout=60),
+                timeout=600),
         ]
 
         teardown_commands = [
@@ -904,6 +947,10 @@ class TestStorageWithCredentials:
             url = f's3://{bucket_name}'
             return f'aws s3 rb {url} --force --profile={nebius.NEBIUS_PROFILE_NAME}'
 
+        if store_type == storage_lib.StoreType.COREWEAVE:
+            url = f's3://{bucket_name}'
+            return f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} AWS_SHARED_CREDENTIALS_FILE={coreweave.COREWEAVE_CREDENTIALS_PATH} aws s3 rb {url} --force --profile={coreweave.COREWEAVE_PROFILE_NAME}'
+
         if store_type == storage_lib.StoreType.IBM:
             rclone_profile_name = (data_utils.Rclone.RcloneStores.IBM.
                                    get_profile_name(bucket_name))
@@ -999,6 +1046,14 @@ class TestStorageWithCredentials:
             recursive_flag = '--recursive' if recursive else ''
             return f'aws s3 ls {url} --profile={nebius.NEBIUS_PROFILE_NAME} {recursive_flag}'
 
+        if store_type == storage_lib.StoreType.COREWEAVE:
+            if suffix:
+                url = f's3://{bucket_name}/{suffix}'
+            else:
+                url = f's3://{bucket_name}'
+            recursive_flag = '--recursive' if recursive else ''
+            return f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} AWS_SHARED_CREDENTIALS_FILE={coreweave.COREWEAVE_CREDENTIALS_PATH} aws s3 ls {url} --profile={coreweave.COREWEAVE_PROFILE_NAME} {recursive_flag}'
+
         if store_type == storage_lib.StoreType.IBM:
             # rclone ls is recursive by default
             bucket_rclone_profile = data_utils.Rclone.generate_rclone_bucket_profile_name(
@@ -1067,6 +1122,11 @@ class TestStorageWithCredentials:
                 return f'aws s3api list-objects --bucket "{bucket_name}" --prefix {suffix} --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --profile={nebius.NEBIUS_PROFILE_NAME}'
             else:
                 return f'aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --profile={nebius.NEBIUS_PROFILE_NAME}'
+        elif store_type == storage_lib.StoreType.COREWEAVE:
+            if suffix:
+                return f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} AWS_SHARED_CREDENTIALS_FILE={coreweave.COREWEAVE_CREDENTIALS_PATH} aws s3api list-objects --bucket "{bucket_name}" --prefix {suffix} --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --profile={coreweave.COREWEAVE_PROFILE_NAME}'
+            else:
+                return f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} AWS_SHARED_CREDENTIALS_FILE={coreweave.COREWEAVE_CREDENTIALS_PATH} aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --profile={coreweave.COREWEAVE_PROFILE_NAME}'
 
     @staticmethod
     def cli_count_file_in_bucket(store_type, bucket_name):
@@ -1090,6 +1150,8 @@ class TestStorageWithCredentials:
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls s3://{bucket_name} --recursive --endpoint {endpoint_url} --profile=r2 | wc -l'
         elif store_type == storage_lib.StoreType.NEBIUS:
             return f'aws s3 ls s3://{bucket_name} --recursive --profile={nebius.NEBIUS_PROFILE_NAME} | wc -l'
+        elif store_type == storage_lib.StoreType.COREWEAVE:
+            return f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} AWS_SHARED_CREDENTIALS_FILE={coreweave.COREWEAVE_CREDENTIALS_PATH} aws s3 ls s3://{bucket_name} --recursive --profile={coreweave.COREWEAVE_PROFILE_NAME} | wc -l'
 
     @pytest.fixture
     def tmp_source(self, tmp_path):
@@ -1353,6 +1415,38 @@ class TestStorageWithCredentials:
             shell=True)
 
     @pytest.fixture
+    def tmp_awscli_bucket_coreweave(self, tmp_bucket_name):
+        # Creates a temporary bucket using awscli with CoreWeave profile
+        bucket_uri = f's3://{tmp_bucket_name}'
+        subprocess.check_call(
+            f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} AWS_SHARED_CREDENTIALS_FILE={coreweave.COREWEAVE_CREDENTIALS_PATH} aws s3 mb {bucket_uri} --profile={coreweave.COREWEAVE_PROFILE_NAME}',
+            shell=True)
+        # Coreweave yields the bucket after being created immediately, but any action will fail...
+        # Wait for bucket to be available using ls
+        import time
+        max_retries = 36
+        retry_delay = 5
+        for attempt in range(max_retries):
+            try:
+                subprocess.check_call(
+                    f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} AWS_SHARED_CREDENTIALS_FILE={coreweave.COREWEAVE_CREDENTIALS_PATH} aws s3 ls {bucket_uri} --profile={coreweave.COREWEAVE_PROFILE_NAME}',
+                    shell=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL)
+                break
+            except subprocess.CalledProcessError:
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                else:
+                    # If we can't list after max retries, still try to continue
+                    break
+
+        yield tmp_bucket_name, f'cw://{tmp_bucket_name}'
+        subprocess.check_call(
+            f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} AWS_SHARED_CREDENTIALS_FILE={coreweave.COREWEAVE_CREDENTIALS_PATH} aws s3 rb {bucket_uri} --force --profile={coreweave.COREWEAVE_PROFILE_NAME}',
+            shell=True)
+
+    @pytest.fixture
     def tmp_ibm_cos_bucket(self, tmp_bucket_name):
         # Creates a temporary bucket using IBM COS API
         storage_obj = storage_lib.IBMCosStore(source="", name=tmp_bucket_name)
@@ -1372,6 +1466,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_shadeform  # Requires other clouds to be enabled
     @pytest.mark.no_kubernetes
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.parametrize('store_type', [
@@ -1379,7 +1474,9 @@ class TestStorageWithCredentials:
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
-        pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius)
+        pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius),
+        pytest.param(storage_lib.StoreType.COREWEAVE,
+                     marks=pytest.mark.coreweave)
     ])
     def test_new_bucket_creation_and_deletion(self, tmp_local_storage_obj,
                                               store_type):
@@ -1402,6 +1499,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.parametrize('store_type', [
         pytest.param(storage_lib.StoreType.S3, marks=pytest.mark.aws),
@@ -1409,7 +1507,9 @@ class TestStorageWithCredentials:
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
-        pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius)
+        pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius),
+        pytest.param(storage_lib.StoreType.COREWEAVE,
+                     marks=pytest.mark.coreweave)
     ])
     def test_bucket_sub_path(self, tmp_local_storage_obj_with_sub_path,
                              store_type):
@@ -1467,6 +1567,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_kubernetes
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.xdist_group('multiple_bucket_deletion')
@@ -1475,6 +1576,8 @@ class TestStorageWithCredentials:
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
         pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius),
+        pytest.param(storage_lib.StoreType.COREWEAVE,
+                     marks=pytest.mark.coreweave),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm)
     ])
     def test_multiple_buckets_creation_and_deletion(
@@ -1515,6 +1618,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_kubernetes
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.parametrize('store_type', [
@@ -1522,6 +1626,8 @@ class TestStorageWithCredentials:
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.COREWEAVE,
+                     marks=pytest.mark.coreweave),
         pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius)
     ])
     def test_upload_source_with_spaces(self, store_type,
@@ -1547,6 +1653,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_kubernetes
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.parametrize('store_type', [
@@ -1554,6 +1661,8 @@ class TestStorageWithCredentials:
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.COREWEAVE,
+                     marks=pytest.mark.coreweave),
         pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius)
     ])
     def test_bucket_external_deletion(self, tmp_scratch_storage_obj,
@@ -1583,12 +1692,16 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
+    @pytest.mark.no_dependency  # Storage tests required full dependency installed
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.COREWEAVE,
+                     marks=pytest.mark.coreweave),
         pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius)
     ])
     def test_bucket_bulk_deletion(self, store_type, tmp_bulk_del_storage_obj):
@@ -1606,7 +1719,9 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
+    @pytest.mark.no_dependency  # Storage tests required full dependency installed
     @pytest.mark.parametrize(
         'tmp_public_storage_obj, store_type',
         [('s3://tcga-2-open', storage_lib.StoreType.S3),
@@ -1629,6 +1744,8 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_shadeform  # Requires AWS or S3
+    @pytest.mark.no_dependency  # Storage tests required full dependency installed
     @pytest.mark.parametrize(
         'nonexist_bucket_url',
         [
@@ -1639,6 +1756,7 @@ class TestStorageWithCredentials:
                 marks=pytest.mark.azure),
             pytest.param('cos://us-east/{random_name}', marks=pytest.mark.ibm),
             pytest.param('r2://{random_name}', marks=pytest.mark.cloudflare),
+            pytest.param('cw://{random_name}', marks=pytest.mark.coreweave),
             pytest.param('nebius://{random_name}', marks=pytest.mark.nebius)
         ])
     def test_nonexistent_bucket(self, nonexist_bucket_url):
@@ -1663,6 +1781,9 @@ class TestStorageWithCredentials:
             elif nonexist_bucket_url.startswith('r2'):
                 endpoint_url = cloudflare.create_endpoint()
                 command = f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api head-bucket --bucket {nonexist_bucket_name} --endpoint {endpoint_url} --profile=r2'
+                expected_output = '404'
+            elif nonexist_bucket_url.startswith('cw'):
+                command = f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} AWS_SHARED_CREDENTIALS_FILE={coreweave.COREWEAVE_CREDENTIALS_PATH} aws s3api head-bucket --bucket {nonexist_bucket_name} --profile={coreweave.COREWEAVE_PROFILE_NAME}'
                 expected_output = '404'
             elif nonexist_bucket_url.startswith('nebius'):
                 command = f'aws s3api head-bucket --bucket {nonexist_bucket_name} --profile={nebius.NEBIUS_PROFILE_NAME}'
@@ -1717,7 +1838,9 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
+    @pytest.mark.no_dependency  # Storage tests required full dependency installed
     @pytest.mark.parametrize(
         'private_bucket',
         [
@@ -1747,7 +1870,9 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
+    @pytest.mark.no_dependency  # Storage tests required full dependency installed
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
                               ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
@@ -1760,6 +1885,9 @@ class TestStorageWithCredentials:
                               pytest.param('tmp_awscli_bucket_r2',
                                            storage_lib.StoreType.R2,
                                            marks=pytest.mark.cloudflare),
+                              pytest.param('tmp_awscli_bucket_coreweave',
+                                           storage_lib.StoreType.COREWEAVE,
+                                           marks=pytest.mark.coreweave),
                               pytest.param('tmp_awscli_bucket_nebius',
                                            storage_lib.StoreType.NEBIUS,
                                            marks=pytest.mark.nebius)])
@@ -1801,6 +1929,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_postgres
     @pytest.mark.no_kubernetes
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
@@ -1818,12 +1947,16 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
+    @pytest.mark.no_dependency  # Storage tests required full dependency installed
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.COREWEAVE,
+                     marks=pytest.mark.coreweave),
         pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius)
     ])
     def test_list_source(self, tmp_local_list_storage_obj, store_type):
@@ -1856,6 +1989,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.parametrize('invalid_name_list, store_type',
                              [(AWS_INVALID_NAMES, storage_lib.StoreType.S3),
@@ -1869,6 +2003,9 @@ class TestStorageWithCredentials:
                               pytest.param(AWS_INVALID_NAMES,
                                            storage_lib.StoreType.R2,
                                            marks=pytest.mark.cloudflare),
+                              pytest.param(AWS_INVALID_NAMES,
+                                           storage_lib.StoreType.COREWEAVE,
+                                           marks=pytest.mark.coreweave),
                               pytest.param(AWS_INVALID_NAMES,
                                            storage_lib.StoreType.NEBIUS,
                                            marks=pytest.mark.nebius)])
@@ -1884,7 +2021,9 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
+    @pytest.mark.no_dependency  # Storage tests required full dependency installed
     @pytest.mark.parametrize(
         'gitignore_structure, store_type',
         [(GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.S3),
@@ -1895,7 +2034,10 @@ class TestStorageWithCredentials:
                       marks=pytest.mark.cloudflare),
          pytest.param(GITIGNORE_SYNC_TEST_DIR_STRUCTURE,
                       storage_lib.StoreType.NEBIUS,
-                      marks=pytest.mark.nebius)])
+                      marks=pytest.mark.nebius),
+         pytest.param(GITIGNORE_SYNC_TEST_DIR_STRUCTURE,
+                      storage_lib.StoreType.COREWEAVE,
+                      marks=pytest.mark.coreweave)])
     def test_excluded_file_cloud_storage_upload_copy(self, gitignore_structure,
                                                      store_type,
                                                      tmp_gitignore_storage_obj):
@@ -1932,7 +2074,9 @@ class TestStorageWithCredentials:
 
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
+    @pytest.mark.no_dependency  # Storage tests required full dependency installed
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
                               ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
@@ -1941,7 +2085,10 @@ class TestStorageWithCredentials:
                                            marks=pytest.mark.cloudflare),
                               pytest.param('tmp_awscli_bucket_nebius',
                                            storage_lib.StoreType.NEBIUS,
-                                           marks=pytest.mark.nebius)])
+                                           marks=pytest.mark.nebius),
+                              pytest.param('tmp_awscli_bucket_coreweave',
+                                           storage_lib.StoreType.COREWEAVE,
+                                           marks=pytest.mark.coreweave)])
     def test_externally_created_bucket_mount_without_source(
             self, ext_bucket_fixture, request, store_type):
         # Non-sky managed buckets(buckets created outside of Skypilot CLI)

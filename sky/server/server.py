@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import contextlib
 import datetime
 import hashlib
@@ -16,6 +17,7 @@ import resource
 import shutil
 import sys
 import threading
+import traceback
 from typing import Dict, List, Literal, Optional, Set, Tuple
 import uuid
 import zipfile
@@ -23,6 +25,7 @@ import zipfile
 import aiofiles
 import anyio
 import fastapi
+from fastapi import responses as fastapi_responses
 from fastapi.middleware import cors
 import starlette.middleware.base
 import uvloop
@@ -41,6 +44,7 @@ from sky.data import storage_utils
 from sky.jobs import utils as managed_job_utils
 from sky.jobs.server import server as jobs_rest
 from sky.metrics import utils as metrics_utils
+from sky.provision import metadata_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
 from sky.serve.server import server as serve_rest
@@ -73,6 +77,7 @@ from sky.utils import dag_utils
 from sky.utils import perf_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
+from sky.utils import ux_utils
 from sky.utils.db import db_utils
 from sky.volumes.server import server as volumes_rest
 from sky.workspaces import server as workspaces_rest
@@ -159,7 +164,7 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to add a request ID to each request."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
-        request_id = str(uuid.uuid4())
+        request_id = requests_lib.get_new_request_id()
         request.state.request_id = request_id
         response = await call_next(request)
         # TODO(syang): remove X-Request-ID when v0.10.0 is released.
@@ -451,9 +456,9 @@ async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
     loop.call_at(target, tick)
 
 
-def schedule_on_boot_check():
+async def schedule_on_boot_check_async():
     try:
-        executor.schedule_request(
+        await executor.schedule_request_async(
             request_id='skypilot-server-on-boot-check',
             request_name='check',
             request_body=payloads.CheckBody(),
@@ -476,7 +481,7 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
         if event.should_skip():
             continue
         try:
-            executor.schedule_request(
+            await executor.schedule_request_async(
                 request_id=event.id,
                 request_name=event.name,
                 request_body=payloads.RequestBody(),
@@ -491,7 +496,7 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
             # Lifespan will be executed in each uvicorn worker process, we
             # can safely ignore the error if the task is already scheduled.
             logger.debug(f'Request {event.id} already exists.')
-    schedule_on_boot_check()
+    await schedule_on_boot_check_async()
     asyncio.create_task(cleanup_upload_ids())
     if metrics_utils.METRICS_ENABLED:
         # Start monitoring the event loop lag in each server worker
@@ -663,6 +668,25 @@ except Exception:  # pylint: disable=broad-except
     pass  # no issue, we will warn the user later if its too low
 
 
+@app.exception_handler(exceptions.ConcurrentWorkerExhaustedError)
+def handle_concurrent_worker_exhausted_error(
+        request: fastapi.Request, e: exceptions.ConcurrentWorkerExhaustedError):
+    del request  # request is not used
+    # Print detailed error message to server log
+    logger.error('Concurrent worker exhausted: '
+                 f'{common_utils.format_exception(e)}')
+    with ux_utils.enable_traceback():
+        logger.error(f'  Traceback: {traceback.format_exc()}')
+    # Return human readable error message to client
+    return fastapi.responses.JSONResponse(
+        status_code=503,
+        content={
+            'detail':
+                ('The server has exhausted its concurrent worker limit. '
+                 'Please try again or scale the server if the load persists.')
+        })
+
+
 @app.get('/token')
 async def token(request: fastapi.Request,
                 local_port: Optional[int] = None) -> fastapi.responses.Response:
@@ -706,7 +730,7 @@ async def token(request: fastapi.Request,
 async def check(request: fastapi.Request,
                 check_body: payloads.CheckBody) -> None:
     """Checks enabled clouds."""
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='check',
         request_body=check_body,
@@ -720,7 +744,7 @@ async def enabled_clouds(request: fastapi.Request,
                          workspace: Optional[str] = None,
                          expand: bool = False) -> None:
     """Gets enabled clouds on the server."""
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='enabled_clouds',
         request_body=payloads.EnabledCloudsBody(workspace=workspace,
@@ -736,7 +760,7 @@ async def realtime_kubernetes_gpu_availability(
     realtime_gpu_availability_body: payloads.RealtimeGpuAvailabilityRequestBody
 ) -> None:
     """Gets real-time Kubernetes GPU availability."""
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='realtime_kubernetes_gpu_availability',
         request_body=realtime_gpu_availability_body,
@@ -751,7 +775,7 @@ async def kubernetes_node_info(
         kubernetes_node_info_body: payloads.KubernetesNodeInfoRequestBody
 ) -> None:
     """Gets Kubernetes nodes information and hints."""
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='kubernetes_node_info',
         request_body=kubernetes_node_info_body,
@@ -763,7 +787,7 @@ async def kubernetes_node_info(
 @app.get('/status_kubernetes')
 async def status_kubernetes(request: fastapi.Request) -> None:
     """Gets Kubernetes status."""
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='status_kubernetes',
         request_body=payloads.RequestBody(),
@@ -777,7 +801,7 @@ async def list_accelerators(
         request: fastapi.Request,
         list_accelerator_counts_body: payloads.ListAcceleratorsBody) -> None:
     """Gets list of accelerators from cloud catalog."""
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='list_accelerators',
         request_body=list_accelerator_counts_body,
@@ -792,7 +816,7 @@ async def list_accelerator_counts(
         list_accelerator_counts_body: payloads.ListAcceleratorCountsBody
 ) -> None:
     """Gets list of accelerator counts from cloud catalog."""
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='list_accelerator_counts',
         request_body=list_accelerator_counts_body,
@@ -849,7 +873,7 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
 async def optimize(optimize_body: payloads.OptimizeBody,
                    request: fastapi.Request) -> None:
     """Optimizes the user's DAG."""
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='optimize',
         request_body=optimize_body,
@@ -1059,7 +1083,7 @@ async def launch(launch_body: payloads.LaunchBody,
     """Launches a cluster or task."""
     request_id = request.state.request_id
     logger.info(f'Launching request: {request_id}')
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id,
         request_name='launch',
         request_body=launch_body,
@@ -1075,7 +1099,7 @@ async def launch(launch_body: payloads.LaunchBody,
 async def exec(request: fastapi.Request, exec_body: payloads.ExecBody) -> None:
     """Executes a task on an existing cluster."""
     cluster_name = exec_body.cluster_name
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='exec',
         request_body=exec_body,
@@ -1093,7 +1117,7 @@ async def exec(request: fastapi.Request, exec_body: payloads.ExecBody) -> None:
 async def stop(request: fastapi.Request,
                stop_body: payloads.StopOrDownBody) -> None:
     """Stops a cluster."""
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='stop',
         request_body=stop_body,
@@ -1113,7 +1137,7 @@ async def status(
         raise fastapi.HTTPException(
             status_code=503,
             detail='Server is shutting down, please try again later.')
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='status',
         request_body=status_body,
@@ -1128,7 +1152,7 @@ async def status(
 async def endpoints(request: fastapi.Request,
                     endpoint_body: payloads.EndpointsBody) -> None:
     """Gets the endpoint for a given cluster and port number (endpoint)."""
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='endpoints',
         request_body=endpoint_body,
@@ -1142,7 +1166,7 @@ async def endpoints(request: fastapi.Request,
 async def down(request: fastapi.Request,
                down_body: payloads.StopOrDownBody) -> None:
     """Tears down a cluster."""
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='down',
         request_body=down_body,
@@ -1156,7 +1180,7 @@ async def down(request: fastapi.Request,
 async def start(request: fastapi.Request,
                 start_body: payloads.StartBody) -> None:
     """Restarts a cluster."""
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='start',
         request_body=start_body,
@@ -1170,7 +1194,7 @@ async def start(request: fastapi.Request,
 async def autostop(request: fastapi.Request,
                    autostop_body: payloads.AutostopBody) -> None:
     """Schedules an autostop/autodown for a cluster."""
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='autostop',
         request_body=autostop_body,
@@ -1184,7 +1208,7 @@ async def autostop(request: fastapi.Request,
 async def queue(request: fastapi.Request,
                 queue_body: payloads.QueueBody) -> None:
     """Gets the job queue of a cluster."""
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='queue',
         request_body=queue_body,
@@ -1198,7 +1222,7 @@ async def queue(request: fastapi.Request,
 async def job_status(request: fastapi.Request,
                      job_status_body: payloads.JobStatusBody) -> None:
     """Gets the status of a job."""
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='job_status',
         request_body=job_status_body,
@@ -1212,7 +1236,7 @@ async def job_status(request: fastapi.Request,
 async def cancel(request: fastapi.Request,
                  cancel_body: payloads.CancelBody) -> None:
     """Cancels jobs on a cluster."""
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='cancel',
         request_body=cancel_body,
@@ -1231,7 +1255,8 @@ async def logs(
     # TODO(zhwu): This should wait for the request on the cluster, e.g., async
     # launch, to finish, so that a user does not need to manually pull the
     # request status.
-    request_task = executor.prepare_request(
+    executor.check_request_thread_executor_available()
+    request_task = await executor.prepare_request_async(
         request_id=request.state.request_id,
         request_name='logs',
         request_body=cluster_job_body,
@@ -1243,10 +1268,11 @@ async def logs(
     background_tasks.add_task(task.cancel)
     # TODO(zhwu): This makes viewing logs in browser impossible. We should adopt
     # the same approach as /stream.
-    return stream_utils.stream_response(
+    return stream_utils.stream_response_for_long_request(
         request_id=request.state.request_id,
         logs_path=request_task.log_path,
         background_tasks=background_tasks,
+        kill_request_on_disconnect=False,
     )
 
 
@@ -1261,7 +1287,7 @@ async def download_logs(
     # We should reuse the original request body, so that the env vars, such as
     # user hash, are kept the same.
     cluster_jobs_body.local_dir = str(logs_dir_on_api_server)
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='download_logs',
         request_body=cluster_jobs_body,
@@ -1340,38 +1366,65 @@ async def download(download_body: payloads.DownloadBody,
 
 # TODO(aylei): run it asynchronously after global_user_state support async op
 @app.post('/provision_logs')
-def provision_logs(cluster_body: payloads.ClusterNameBody,
+def provision_logs(provision_logs_body: payloads.ProvisionLogsBody,
                    follow: bool = True,
                    tail: int = 0) -> fastapi.responses.StreamingResponse:
     """Streams the provision.log for the latest launch request of a cluster."""
-    # Prefer clusters table first, then cluster_history as fallback.
-    log_path_str = global_user_state.get_cluster_provision_log_path(
-        cluster_body.cluster_name)
-    if not log_path_str:
-        log_path_str = global_user_state.get_cluster_history_provision_log_path(
-            cluster_body.cluster_name)
-    if not log_path_str:
-        raise fastapi.HTTPException(
-            status_code=404,
-            detail=('Provision log path is not recorded for this cluster. '
-                    'Please relaunch to generate provisioning logs.'))
+    log_path = None
+    cluster_name = provision_logs_body.cluster_name
+    worker = provision_logs_body.worker
+    # stream head node logs
+    if worker is None:
+        # Prefer clusters table first, then cluster_history as fallback.
+        log_path_str = global_user_state.get_cluster_provision_log_path(
+            cluster_name)
+        if not log_path_str:
+            log_path_str = (
+                global_user_state.get_cluster_history_provision_log_path(
+                    cluster_name))
+        if not log_path_str:
+            raise fastapi.HTTPException(
+                status_code=404,
+                detail=('Provision log path is not recorded for this cluster. '
+                        'Please relaunch to generate provisioning logs.'))
+        log_path = pathlib.Path(log_path_str).expanduser().resolve()
+        if not log_path.exists():
+            raise fastapi.HTTPException(
+                status_code=404,
+                detail=f'Provision log path does not exist: {str(log_path)}')
 
-    log_path = pathlib.Path(log_path_str).expanduser().resolve()
-    if not log_path.exists():
-        raise fastapi.HTTPException(
-            status_code=404,
-            detail=f'Provision log path does not exist: {str(log_path)}')
+    # stream worker node logs
+    else:
+        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+        if handle is None:
+            raise fastapi.HTTPException(
+                status_code=404,
+                detail=('Cluster handle is not recorded for this cluster. '
+                        'Please relaunch to generate provisioning logs.'))
+        # instance_ids includes head node
+        instance_ids = handle.instance_ids
+        if instance_ids is None:
+            raise fastapi.HTTPException(
+                status_code=400,
+                detail='Instance IDs are not recorded for this cluster. '
+                'Please relaunch to generate provisioning logs.')
+        if worker > len(instance_ids) - 1:
+            raise fastapi.HTTPException(
+                status_code=400,
+                detail=f'Worker {worker} is out of range. '
+                f'The cluster has {len(instance_ids)} nodes.')
+        log_path = metadata_utils.get_instance_log_dir(
+            handle.get_cluster_name_on_cloud(), instance_ids[worker])
 
     # Tail semantics: 0 means print all lines. Convert 0 -> None for streamer.
     effective_tail = None if tail is None or tail <= 0 else tail
 
     return fastapi.responses.StreamingResponse(
-        content=stream_utils.log_streamer(
-            None,
-            log_path,
-            tail=effective_tail,
-            follow=follow,
-            cluster_name=cluster_body.cluster_name),
+        content=stream_utils.log_streamer(None,
+                                          log_path,
+                                          tail=effective_tail,
+                                          follow=follow,
+                                          cluster_name=cluster_name),
         media_type='text/plain',
         headers={
             'Cache-Control': 'no-cache, no-transform',
@@ -1385,7 +1438,7 @@ def provision_logs(cluster_body: payloads.ClusterNameBody,
 async def cost_report(request: fastapi.Request,
                       cost_report_body: payloads.CostReportBody) -> None:
     """Gets the cost report of a cluster."""
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='cost_report',
         request_body=cost_report_body,
@@ -1397,7 +1450,7 @@ async def cost_report(request: fastapi.Request,
 @app.get('/storage/ls')
 async def storage_ls(request: fastapi.Request) -> None:
     """Gets the storages."""
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='storage_ls',
         request_body=payloads.RequestBody(),
@@ -1410,7 +1463,7 @@ async def storage_ls(request: fastapi.Request) -> None:
 async def storage_delete(request: fastapi.Request,
                          storage_body: payloads.StorageBody) -> None:
     """Deletes a storage."""
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='storage_delete',
         request_body=storage_body,
@@ -1423,7 +1476,7 @@ async def storage_delete(request: fastapi.Request,
 async def local_up(request: fastapi.Request,
                    local_up_body: payloads.LocalUpBody) -> None:
     """Launches a Kubernetes cluster on API server."""
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='local_up',
         request_body=local_up_body,
@@ -1436,7 +1489,7 @@ async def local_up(request: fastapi.Request,
 async def local_down(request: fastapi.Request,
                      local_down_body: payloads.LocalDownBody) -> None:
     """Tears down the Kubernetes cluster started by local_up."""
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='local_down',
         request_body=local_down_body,
@@ -1445,10 +1498,27 @@ async def local_down(request: fastapi.Request,
     )
 
 
+async def get_expanded_request_id(request_id: str) -> str:
+    """Gets the expanded request ID for a given request ID prefix."""
+    request_tasks = await requests_lib.get_requests_async_with_prefix(
+        request_id, fields=['request_id'])
+    if request_tasks is None:
+        raise fastapi.HTTPException(status_code=404,
+                                    detail=f'Request {request_id!r} not found')
+    if len(request_tasks) > 1:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail=('Multiple requests found for '
+                                            f'request ID prefix: {request_id}'))
+    return request_tasks[0].request_id
+
+
 # === API server related APIs ===
-@app.get('/api/get')
+@app.get('/api/get', response_class=fastapi_responses.ORJSONResponse)
 async def api_get(request_id: str) -> payloads.RequestPayload:
     """Gets a request with a given request ID prefix."""
+    # Validate request_id prefix matches a single request.
+    request_id = await get_expanded_request_id(request_id)
+
     while True:
         req_status = await requests_lib.get_request_status_async(request_id)
         if req_status is None:
@@ -1465,6 +1535,8 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
         # to avoid storming the DB and CPU in the meantime
         await asyncio.sleep(0.1)
     request_task = await requests_lib.get_request_async(request_id)
+    # TODO(aylei): refine this, /api/get will not be retried and this is
+    # meaningless to retry. It is the original request that should be retried.
     if request_task.should_retry:
         raise fastapi.HTTPException(
             status_code=503, detail=f'Request {request_id!r} should be retried')
@@ -1506,13 +1578,18 @@ async def stream(
             clients, console for CLI/API clients), 'plain' (force plain text),
             'html' (force HTML), or 'console' (force console)
     """
+    # We need to save the user-supplied request ID for the response header.
+    user_supplied_request_id = request_id
     if request_id is not None and log_path is not None:
         raise fastapi.HTTPException(
             status_code=400,
             detail='Only one of request_id and log_path can be provided')
 
+    if request_id is not None:
+        request_id = await get_expanded_request_id(request_id)
+
     if request_id is None and log_path is None:
-        request_id = requests_lib.get_latest_request_id()
+        request_id = await requests_lib.get_latest_request_id_async()
         if request_id is None:
             raise fastapi.HTTPException(status_code=404,
                                         detail='No request found')
@@ -1539,13 +1616,17 @@ async def stream(
                 'X-Accel-Buffering': 'no'
             })
 
+    polling_interval = stream_utils.DEFAULT_POLL_INTERVAL
     # Original plain text streaming logic
     if request_id is not None:
-        request_task = await requests_lib.get_request_async(request_id)
+        request_task = await requests_lib.get_request_async(
+            request_id, fields=['request_id', 'schedule_type'])
         if request_task is None:
             print(f'No task with request ID {request_id}')
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Request {request_id!r} not found')
+        # req.log_path is derived from request_id,
+        # so it's ok to just grab the request_id in the above query.
         log_path_to_stream = request_task.log_path
         if not log_path_to_stream.exists():
             # The log file might be deleted by the request GC daemon but the
@@ -1553,6 +1634,9 @@ async def stream(
             raise fastapi.HTTPException(
                 status_code=404,
                 detail=f'Log of request {request_id!r} has been deleted')
+        if request_task.schedule_type == requests_lib.ScheduleType.LONG:
+            polling_interval = stream_utils.LONG_REQUEST_POLL_INTERVAL
+        del request_task
     else:
         assert log_path is not None, (request_id, log_path)
         if log_path == constants.API_SERVER_LOGS:
@@ -1593,14 +1677,17 @@ async def stream(
         'Transfer-Encoding': 'chunked'
     }
     if request_id is not None:
-        headers[server_constants.STREAM_REQUEST_HEADER] = request_id
+        headers[server_constants.STREAM_REQUEST_HEADER] = (
+            user_supplied_request_id
+            if user_supplied_request_id else request_id)
 
     return fastapi.responses.StreamingResponse(
         content=stream_utils.log_streamer(request_id,
                                           log_path_to_stream,
                                           plain_logs=format == 'plain',
                                           tail=tail,
-                                          follow=follow),
+                                          follow=follow,
+                                          polling_interval=polling_interval),
         media_type='text/plain',
         headers=headers,
     )
@@ -1610,11 +1697,11 @@ async def stream(
 async def api_cancel(request: fastapi.Request,
                      request_cancel_body: payloads.RequestCancelBody) -> None:
     """Cancels requests."""
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='api_cancel',
         request_body=request_cancel_body,
-        func=requests_lib.kill_requests,
+        func=requests_lib.kill_requests_with_prefix,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
@@ -1622,9 +1709,13 @@ async def api_cancel(request: fastapi.Request,
 @app.get('/api/status')
 async def api_status(
     request_ids: Optional[List[str]] = fastapi.Query(
-        None, description='Request IDs to get status for.'),
+        None, description='Request ID prefixes to get status for.'),
     all_status: bool = fastapi.Query(
         False, description='Get finished requests as well.'),
+    limit: Optional[int] = fastapi.Query(
+        None, description='Number of requests to show.'),
+    fields: Optional[List[str]] = fastapi.Query(
+        None, description='Fields to get. If None, get all fields.'),
 ) -> List[payloads.RequestPayload]:
     """Gets the list of requests."""
     if request_ids is None:
@@ -1635,15 +1726,22 @@ async def api_status(
                 requests_lib.RequestStatus.RUNNING,
             ]
         request_tasks = await requests_lib.get_request_tasks_async(
-            req_filter=requests_lib.RequestTaskFilter(status=statuses))
-        return [r.readable_encode() for r in request_tasks]
+            req_filter=requests_lib.RequestTaskFilter(
+                status=statuses,
+                limit=limit,
+                fields=fields,
+                sort=True,
+            ))
+        return requests_lib.encode_requests(request_tasks)
     else:
         encoded_request_tasks = []
         for request_id in request_ids:
-            request_task = await requests_lib.get_request_async(request_id)
-            if request_task is None:
+            request_tasks = await requests_lib.get_requests_async_with_prefix(
+                request_id)
+            if request_tasks is None:
                 continue
-            encoded_request_tasks.append(request_task.readable_encode())
+            for request_task in request_tasks:
+                encoded_request_tasks.append(request_task.readable_encode())
         return encoded_request_tasks
 
 
@@ -1717,9 +1815,9 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
 
     # Run core.status in another thread to avoid blocking the event loop.
-    cluster_records = await context_utils.to_thread(core.status,
-                                                    cluster_name,
-                                                    all_users=True)
+    with ThreadPoolExecutor(max_workers=1) as thread_pool_executor:
+        cluster_records = await context_utils.to_thread_with_executor(
+            thread_pool_executor, core.status, cluster_name, all_users=True)
     cluster_record = cluster_records[0]
     if cluster_record['status'] != status_lib.ClusterStatus.UP:
         raise fastapi.HTTPException(
@@ -1837,7 +1935,7 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
 async def all_contexts(request: fastapi.Request) -> None:
     """Gets all Kubernetes and SSH node pool contexts."""
 
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name='all_contexts',
         request_body=payloads.RequestBody(),
@@ -1943,6 +2041,7 @@ if __name__ == '__main__':
 
     from sky.server import uvicorn as skyuvicorn
 
+    logger.info('Initializing SkyPilot API server')
     skyuvicorn.add_timestamp_prefix_for_server_logs()
 
     parser = argparse.ArgumentParser()
@@ -1952,9 +2051,24 @@ if __name__ == '__main__':
     # Serve metrics on a separate port to isolate it from the application APIs:
     # metrics port will not be exposed to the public network typically.
     parser.add_argument('--metrics-port', default=9090, type=int)
+    parser.add_argument('--start-with-python', action='store_true')
     cmd_args = parser.parse_args()
     if cmd_args.port == cmd_args.metrics_port:
+        logger.error('port and metrics-port cannot be the same, exiting.')
         raise ValueError('port and metrics-port cannot be the same')
+
+    # Fail fast if the port is not available to avoid corrupt the state
+    # of potential running server instance.
+    # We might reach here because the running server is currently not
+    # responding, thus the healthz check fails and `sky api start` think
+    # we should start a new server instance.
+    if not common_utils.is_port_available(cmd_args.port):
+        logger.error(f'Port {cmd_args.port} is not available, exiting.')
+        raise RuntimeError(f'Port {cmd_args.port} is not available')
+
+    if not cmd_args.start_with_python:
+        # Maybe touch the signal file on API server startup.
+        managed_job_utils.is_consolidation_mode(on_api_restart=True)
 
     # Show the privacy policy if it is not already shown. We place it here so
     # that it is shown only when the API server is started.
@@ -1962,12 +2076,17 @@ if __name__ == '__main__':
 
     # Initialize global user state db
     db_utils.set_max_connections(1)
+    logger.info('Initializing database engine')
     global_user_state.initialize_and_get_db()
+    logger.info('Database engine initialized')
     # Initialize request db
     requests_lib.reset_db_and_logs()
     # Restore the server user hash
+    logger.info('Initializing server user hash')
     _init_or_restore_server_user_hash()
+
     max_db_connections = global_user_state.get_max_db_connections()
+    logger.info(f'Max db connections: {max_db_connections}')
     config = server_config.compute_server_config(cmd_args.deploy,
                                                  max_db_connections)
 
@@ -1998,7 +2117,8 @@ if __name__ == '__main__':
         uvicorn_config = uvicorn.Config('sky.server.server:app',
                                         host=cmd_args.host,
                                         port=cmd_args.port,
-                                        workers=num_workers)
+                                        workers=num_workers,
+                                        ws_per_message_deflate=False)
         skyuvicorn.run(uvicorn_config,
                        max_db_connections=config.num_db_connections_per_worker)
     except Exception as exc:  # pylint: disable=broad-except

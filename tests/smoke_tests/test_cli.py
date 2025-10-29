@@ -42,6 +42,19 @@ def test_endpoint_output_basic(generic_cloud: str):
 
 
 @pytest.mark.no_remote_server
+def test_endpoint_output_basic_no_pg_conn_closed_errors(generic_cloud: str):
+    """Test that sky api info endpoint output is correct and no pg conn closed errors are raised."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'endpoint_output_basic_no_pg_conn_closed_errors', [
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT_NO_PG_CONN_CLOSED_ERROR}',
+        ],
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+        teardown=f'sky down -y {name}')
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server
 def test_endpoint_output_config(generic_cloud: str):
     """Test that sky api info endpoint output is correct when config is set."""
 

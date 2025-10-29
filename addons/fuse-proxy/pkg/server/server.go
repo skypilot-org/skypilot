@@ -91,7 +91,13 @@ func (s *Server) handleConnection(conn net.Conn) {
 	}
 	// Close fd to avoid holding reference to the mnt namespace, which will
 	// block the ephmeral storage cleanup.
-	defer syscall.Close(nsFd)
+	defer func() {
+		if err := syscall.Close(nsFd); err != nil {
+			log.Errorf("Failed to close ns fd %d: %v", nsFd, err)
+		} else {
+			log.Infof("Closed ns fd %d", nsFd)
+		}
+	}()
 	if err := json.Unmarshal(msg, req); err != nil {
 		log.Errorf("Failed to unmarshal request: %v", err)
 		return

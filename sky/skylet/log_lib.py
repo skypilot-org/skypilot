@@ -220,7 +220,14 @@ def run_with_log(
                           stdin=stdin,
                           **kwargs) as proc:
         try:
-            subprocess_utils.kill_process_daemon(proc.pid)
+            if ctx is not None:
+                # When runs in coroutine, use kill_pg if available to avoid
+                # the overhead of refreshing the process tree in the daemon.
+                subprocess_utils.kill_process_daemon(proc.pid, use_kill_pg=True)
+            else:
+                # For backward compatibility, do not specify use_kill_pg by
+                # default.
+                subprocess_utils.kill_process_daemon(proc.pid)
             stdout = ''
             stderr = ''
             stdout_stream_handler = None
@@ -271,7 +278,6 @@ def run_with_log(
                 stdout, stderr = context_utils.pipe_and_wait_process(
                     ctx,
                     proc,
-                    cancel_callback=subprocess_utils.kill_children_processes,
                     stdout_stream_handler=stdout_stream_handler,
                     stderr_stream_handler=stderr_stream_handler)
             elif process_stream:

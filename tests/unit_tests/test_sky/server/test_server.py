@@ -182,7 +182,7 @@ async def test_logs():
         task = asyncio.create_task(asyncio.sleep(0.1))
         return executor.CoroutineTask(task)
 
-    with mock.patch('sky.server.requests.executor.prepare_request') as mock_prepare, \
+    with mock.patch('sky.server.requests.executor.prepare_request_async') as mock_prepare_async, \
          mock.patch('sky.server.requests.executor.execute_request_in_coroutine',
                    side_effect=slow_execute) as mock_execute, \
          mock.patch('sky.server.stream_utils.stream_response',
@@ -191,7 +191,7 @@ async def test_logs():
         # Mock prepare_request to return a request task
         mock_request_task = mock.MagicMock()
         mock_request_task.log_path = '/tmp/test.log'
-        mock_prepare.return_value = mock_request_task
+        mock_prepare_async.return_value = mock_request_task
 
         # Start logs endpoint in background
         logs_task = asyncio.create_task(
@@ -208,12 +208,13 @@ async def test_logs():
         await background_tasks()
 
         # Verify the executor calls
-        mock_prepare.assert_called_once()
+        mock_prepare_async.assert_called_once()
         mock_execute.assert_called_once_with(mock_request_task)
-        mock_stream.assert_called_once_with(
-            request_id=mock.ANY,
-            logs_path=mock_request_task.log_path,
-            background_tasks=mock.ANY)
+        mock_stream.assert_called_once_with(mock.ANY,
+                                            mock_request_task.log_path,
+                                            mock.ANY,
+                                            polling_interval=1,
+                                            kill_request_on_disconnect=False)
 
 
 @mock.patch('sky.utils.context_utils.hijack_sys_attrs')
@@ -234,18 +235,26 @@ def test_server_run_uses_uvloop(mock_asyncio_run, mock_hijack_sys_attrs):
     uvloop_available = True
 
     def setup_and_check():
-        # Call original setup to configure event loop
-        original_setup()
-        # Check if uvloop policy is now set
-        nonlocal uvloop_policy_set, uvloop_available
-        import asyncio
+        # Save previous event loop policy
+        previous_policy = asyncio.get_event_loop_policy()
         try:
-            import uvloop
-            policy = asyncio.get_event_loop_policy()
-            uvloop_policy_set = isinstance(policy, uvloop.EventLoopPolicy)
-        except ImportError:
-            # uvloop not available
-            uvloop_available = False
+            # Call original setup to configure event loop
+            original_setup()
+            # Check if uvloop policy is now set
+            nonlocal uvloop_policy_set, uvloop_available
+            try:
+                import uvloop
+                policy = asyncio.get_event_loop_policy()
+                uvloop_policy_set = isinstance(policy, uvloop.EventLoopPolicy)
+            except ImportError:
+                # uvloop not available
+                uvloop_available = False
+        finally:
+            # Restore previous event loop policy
+            # This is needed because other tests/fixtures running on the same
+            # pytest worker may not work with the uvicorn event loop policy,
+            # such as _seed_test_jobs in test_managed_jobs_service.py
+            asyncio.set_event_loop_policy(previous_policy)
 
     with mock.patch.object(config,
                            'setup_event_loop',

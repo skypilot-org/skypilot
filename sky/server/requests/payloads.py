@@ -319,6 +319,8 @@ class StatusBody(RequestBody):
     # Only return fields that are needed for the
     # dashboard / CLI summary response
     summary_response: bool = False
+    # Include the cluster handle in the response
+    include_handle: bool = True
 
 
 class StartBody(RequestBody):
@@ -363,9 +365,10 @@ class CancelBody(RequestBody):
         return kwargs
 
 
-class ClusterNameBody(RequestBody):
+class ProvisionLogsBody(RequestBody):
     """Cluster node."""
     cluster_name: str
+    worker: Optional[int] = None
 
 
 class ClusterJobBody(RequestBody):
@@ -541,6 +544,9 @@ class JobsQueueV2Body(RequestBody):
     page: Optional[int] = None
     limit: Optional[int] = None
     statuses: Optional[List[str]] = None
+    # The fields to return in the response.
+    # Refer to the fields in the `class ManagedJobRecord` in `response.py`
+    fields: Optional[List[str]] = None
 
 
 class JobsCancelBody(RequestBody):
@@ -573,6 +579,8 @@ class RequestStatusBody(pydantic.BaseModel):
     """The request body for the API request status endpoint."""
     request_ids: Optional[List[str]] = None
     all_status: bool = False
+    limit: Optional[int] = None
+    fields: Optional[List[str]] = None
 
 
 class ServeUpBody(RequestBody):

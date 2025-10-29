@@ -3,6 +3,7 @@
 Simple script to inject test clusters without cleanup for manual verification.
 """
 
+import argparse
 import os
 import sys
 
@@ -14,22 +15,36 @@ from scale_test_utils import TestScale
 
 def main():
     """Inject test clusters without cleanup."""
-    count = 5
+    parser = argparse.ArgumentParser(
+        description='Inject test clusters for manual verification')
+    parser.add_argument(
+        '--active-cluster',
+        type=str,
+        default='scale-test-active',
+        help=
+        'Name of the active cluster to use as template (default: scale-test-active)'
+    )
+    parser.add_argument('--count',
+                        type=int,
+                        default=5,
+                        help='Number of test clusters to inject (default: 5)')
 
-    print(f"Injecting {count} test clusters (no cleanup)...")
+    args = parser.parse_args()
+
+    print(f"Injecting {args.count} test clusters (no cleanup)...")
     print("=" * 60)
 
     # Create test instance
     test = TestScale()
     test.initialize(
-        active_cluster_name='scale-test-active',
+        active_cluster_name=args.active_cluster,
         terminated_cluster_name='scale-test-terminated',
         managed_job_id=1  # Not used
     )
 
     try:
         # Inject clusters
-        injected = test.inject_clusters(count)
+        injected = test.inject_clusters(args.count)
         print(f"\nSuccessfully injected {injected} test clusters!")
         print("\nCluster names:")
         for name in test.test_cluster_names:

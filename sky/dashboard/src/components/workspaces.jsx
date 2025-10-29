@@ -2,8 +2,6 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
-import { getClusters } from '@/data/connectors/clusters';
-import { getManagedJobs } from '@/data/connectors/jobs';
 import {
   getWorkspaces,
   getEnabledClouds,
@@ -60,6 +58,7 @@ export async function getWorkspaceClusters(workspaceName) {
       cluster_names: null,
       all_users: true,
       include_credentials: false,
+      include_handle: false,
       override_skypilot_config: { active_workspace: workspaceName },
     });
 
@@ -84,7 +83,6 @@ export async function getWorkspaceClusters(workspaceName) {
       last_use: cluster.last_use,
       autostop: cluster.autostop,
       to_down: cluster.to_down,
-      metadata: cluster.metadata,
       resources_str: cluster.resources_str,
       workspace: cluster.workspace || 'default', // Preserve workspace info
     }));
@@ -108,6 +106,9 @@ export async function getWorkspaceManagedJobs(workspaceName) {
     const response = await apiClient.post('/jobs/queue/v2', {
       all_users: true,
       verbose: true,
+      skip_finished: true,
+      workspace_match: workspaceName,
+      fields: ['workspace', 'status'],
       override_skypilot_config: { active_workspace: workspaceName },
     });
 
@@ -549,7 +550,9 @@ export function Workspaces() {
 
     // Set up refresh interval
     const interval = setInterval(() => {
-      fetchData(false); // Don't show loading on background refresh
+      if (window.document.visibilityState === 'visible') {
+        fetchData(false); // Don't show loading on background refresh
+      }
     }, REFRESH_INTERVALS.REFRESH_INTERVAL);
 
     return () => clearInterval(interval);
