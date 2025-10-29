@@ -178,6 +178,12 @@ export function ManagedJobs() {
   const poolsRefreshRef = React.useRef(null);
   const [poolsData, setPoolsData] = useState([]);
   const [filters, setFilters] = useState([]);
+  const [valueList, setValueList] = useState({
+    name: [],
+    user: [],
+    workspace: [],
+    pool: [],
+  });
 
   const fetchData = React.useCallback(
     async (isRefreshButton = false) => {
@@ -264,7 +270,7 @@ export function ManagedJobs() {
         <div className="w-full sm:w-auto">
           <FilterDropdown
             propertyList={PROPERTY_OPTIONS}
-            valueList={{}}
+            valueList={valueList}
             setFilters={setFilters}
             updateURLParams={updateURLParams}
             placeholder="Filter jobs"
@@ -286,6 +292,7 @@ export function ManagedJobs() {
         onRefresh={handleRefresh}
         poolsData={poolsData}
         poolsLoading={poolsLoading}
+        setValueList={setValueList}
       />
 
       {/* Pools table - always visible */}
@@ -308,6 +315,7 @@ export function ManagedJobsTable({
   onRefresh,
   poolsData,
   poolsLoading,
+  setValueList,
 }) {
   const [data, setData] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -571,7 +579,10 @@ export function ManagedJobsTable({
 
   useEffect(() => {
     const interval = setInterval(() => {
-      if (fetchDataRef.current) {
+      if (
+        fetchDataRef.current &&
+        window.document.visibilityState === 'visible'
+      ) {
         fetchDataRef.current({ includeStatus: true });
       }
     }, refreshInterval);
@@ -598,6 +609,32 @@ export function ManagedJobsTable({
     setSelectedStatuses([]);
     setShowAllMode(true); // Default to show all mode when changing tabs
   }, [activeTab]);
+
+  // Populate valueList for filter dropdown
+  useEffect(() => {
+    if (!data || data.length === 0 || !setValueList) {
+      return;
+    }
+
+    const names = new Set();
+    const users = new Set();
+    const workspaces = new Set();
+    const pools = new Set();
+
+    data.forEach((job) => {
+      if (job.name) names.add(job.name);
+      if (job.user) users.add(job.user);
+      if (job.workspace) workspaces.add(job.workspace);
+      if (job.pool) pools.add(job.pool);
+    });
+
+    setValueList({
+      name: Array.from(names).sort(),
+      user: Array.from(users).sort(),
+      workspace: Array.from(workspaces).sort(),
+      pool: Array.from(pools).sort(),
+    });
+  }, [data, setValueList]);
 
   const requestSort = (key) => {
     let direction = 'ascending';
@@ -1834,7 +1871,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
     fetchData();
 
     const interval = setInterval(() => {
-      if (isCurrent) {
+      if (isCurrent && window.document.visibilityState === 'visible') {
         fetchData();
       }
     }, refreshInterval);

@@ -58,6 +58,7 @@ export async function getWorkspaceClusters(workspaceName) {
       cluster_names: null,
       all_users: true,
       include_credentials: false,
+      include_handle: false,
       override_skypilot_config: { active_workspace: workspaceName },
     });
 
@@ -82,7 +83,6 @@ export async function getWorkspaceClusters(workspaceName) {
       last_use: cluster.last_use,
       autostop: cluster.autostop,
       to_down: cluster.to_down,
-      metadata: cluster.metadata,
       resources_str: cluster.resources_str,
       workspace: cluster.workspace || 'default', // Preserve workspace info
     }));
@@ -550,7 +550,9 @@ export function Workspaces() {
 
     // Set up refresh interval
     const interval = setInterval(() => {
-      fetchData(false); // Don't show loading on background refresh
+      if (window.document.visibilityState === 'visible') {
+        fetchData(false); // Don't show loading on background refresh
+      }
     }, REFRESH_INTERVALS.REFRESH_INTERVAL);
 
     return () => clearInterval(interval);

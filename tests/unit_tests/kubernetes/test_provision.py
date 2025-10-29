@@ -207,7 +207,7 @@ def test_out_of_both_cpus_and_gpus(monkeypatch):
 
 def test_out_of_gpus_and_node_selector_failed(monkeypatch):
     """Test to check if the error message is correct when there is GPU resource
-    
+
     shortage and node selector failed to match.
     """
 
@@ -401,3 +401,94 @@ def test_insufficient_resources_msg(monkeypatch):
             to_provision, requested_resources, insufficient_resources) ==
         f'Failed to acquire resources (CPUs, Memory) in context {region} for {requested_resources_str}. '
     )
+
+
+def test_pod_termination_reason_start_error(monkeypatch):
+    """Test _get_pod_termination_reason with StartError (like busybox).
+
+    Pod is in Failed state with container terminated due to StartError.
+    """
+    import datetime
+
+    now = datetime.datetime(2025, 1, 1, 0, 0, 0)
+
+    pod = mock.MagicMock()
+    pod.metadata.name = 'test-pod'
+    pod.status.start_time = now
+
+    # Ready condition showing PodFailed
+    ready_condition = mock.MagicMock()
+    ready_condition.type = 'Ready'
+    ready_condition.reason = 'PodFailed'
+    ready_condition.message = ''
+    ready_condition.last_transition_time = now
+
+    pod.status.conditions = [ready_condition]
+
+    # Container with StartError
+    container_status = mock.MagicMock()
+    container_status.name = 'ray-node'
+    container_status.state.terminated = mock.MagicMock()
+    container_status.state.terminated.exit_code = 128
+    container_status.state.terminated.reason = 'StartError'
+    container_status.state.terminated.finished_at = now
+
+    pod.status.container_statuses = [container_status]
+
+    monkeypatch.setattr('sky.provision.kubernetes.instance.global_user_state',
+                        mock.MagicMock())
+
+    reason = instance._get_pod_termination_reason(pod, 'test-cluster')
+
+    expected = ('Terminated unexpectedly.\n'
+                'Last known state: PodFailed.\n'
+                'Container errors: StartError')
+    assert reason == expected
+
+
+def test_pod_termination_reason_kueue_preemption(monkeypatch):
+    """Test _get_pod_termination_reason with Kueue preemption.
+
+    Pod is being terminated by Kueue due to PodsReady timeout.
+    Includes both the TerminationTarget condition (preemption) and
+    Ready condition (container status), as seen in real API responses.
+    """
+    import datetime
+
+    now = datetime.datetime(2025, 1, 1, 0, 0, 0)
+
+    pod = mock.MagicMock()
+    pod.metadata.name = 'test-pod'
+    pod.status.start_time = now
+
+    ready_condition = mock.MagicMock()
+    ready_condition.type = 'Ready'
+    ready_condition.reason = 'ContainersNotReady'
+    ready_condition.message = 'containers with unready status: [ray-node]'
+    ready_condition.last_transition_time = now
+
+    # Taken from an actual Pod that got preempted by Kueue.
+    termination_condition = mock.MagicMock()
+    termination_condition.type = 'TerminationTarget'
+    termination_condition.reason = 'WorkloadEvictedDueToPodsReadyTimeout'
+    termination_condition.message = 'Exceeded the PodsReady timeout default/test-pod'
+    termination_condition.last_transition_time = now
+
+    pod.status.conditions = [ready_condition, termination_condition]
+
+    # Container still creating (not terminated)
+    container_status = mock.MagicMock()
+    container_status.state.terminated = None
+    pod.status.container_statuses = [container_status]
+
+    monkeypatch.setattr('sky.provision.kubernetes.instance.global_user_state',
+                        mock.MagicMock())
+
+    reason = instance._get_pod_termination_reason(pod, 'test-cluster')
+
+    expected = (
+        'Preempted by Kueue: WorkloadEvictedDueToPodsReadyTimeout '
+        '(Exceeded the PodsReady timeout default/test-pod).\n'
+        'Last known state: ContainersNotReady (containers with unready status: [ray-node]).'
+    )
+    assert reason == expected

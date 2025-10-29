@@ -631,13 +631,28 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
             test.echo(msg)
             write(msg)
 
+        if proc.returncode and not is_remote_server_test():
+            test.echo('=== Sky API Server Log (last 100 lines) ===')
+            # Read the log file directly and echo it
+            log_path = os.path.expanduser('~/.sky/api_server/server.log')
+            if os.path.exists(log_path):
+                with open(log_path, 'r') as f:
+                    lines = f.readlines()
+                    # Get last 100 lines
+                    last_lines = lines[-100:] if len(lines) > 100 else lines
+                    for line in last_lines:
+                        test.echo(line.rstrip())
+            else:
+                test.echo(f'Server log file not found: {log_path}')
+            test.echo('=== End of Sky API Server Log ===')
+
         if (proc.returncode == 0 or
                 pytest.terminate_on_failure) and test.teardown is not None:
             subprocess_utils.run(
                 test.teardown,
                 stdout=subprocess_out,
                 stderr=subprocess.STDOUT,
-                timeout=10 * 60,  # 10 mins
+                timeout=20 * 60,  # 20 mins
                 shell=True,
                 env=env_dict,
             )
@@ -932,6 +947,12 @@ def get_metrics_server_url() -> str:
 def is_non_docker_remote_api_server() -> bool:
     if is_remote_server_test():
         return 'host.docker.internal' not in get_api_server_url()
+    return False
+
+
+def is_docker_remote_api_server() -> bool:
+    if is_remote_server_test():
+        return 'host.docker.internal' in get_api_server_url()
     return False
 
 

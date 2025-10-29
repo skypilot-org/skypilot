@@ -25,6 +25,7 @@ import zipfile
 import aiofiles
 import anyio
 import fastapi
+from fastapi import responses as fastapi_responses
 from fastapi.middleware import cors
 import starlette.middleware.base
 import uvloop
@@ -1497,10 +1498,27 @@ async def local_down(request: fastapi.Request,
     )
 
 
+async def get_expanded_request_id(request_id: str) -> str:
+    """Gets the expanded request ID for a given request ID prefix."""
+    request_tasks = await requests_lib.get_requests_async_with_prefix(
+        request_id, fields=['request_id'])
+    if request_tasks is None:
+        raise fastapi.HTTPException(status_code=404,
+                                    detail=f'Request {request_id!r} not found')
+    if len(request_tasks) > 1:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail=('Multiple requests found for '
+                                            f'request ID prefix: {request_id}'))
+    return request_tasks[0].request_id
+
+
 # === API server related APIs ===
-@app.get('/api/get')
+@app.get('/api/get', response_class=fastapi_responses.ORJSONResponse)
 async def api_get(request_id: str) -> payloads.RequestPayload:
     """Gets a request with a given request ID prefix."""
+    # Validate request_id prefix matches a single request.
+    request_id = await get_expanded_request_id(request_id)
+
     while True:
         req_status = await requests_lib.get_request_status_async(request_id)
         if req_status is None:
@@ -1560,10 +1578,15 @@ async def stream(
             clients, console for CLI/API clients), 'plain' (force plain text),
             'html' (force HTML), or 'console' (force console)
     """
+    # We need to save the user-supplied request ID for the response header.
+    user_supplied_request_id = request_id
     if request_id is not None and log_path is not None:
         raise fastapi.HTTPException(
             status_code=400,
             detail='Only one of request_id and log_path can be provided')
+
+    if request_id is not None:
+        request_id = await get_expanded_request_id(request_id)
 
     if request_id is None and log_path is None:
         request_id = await requests_lib.get_latest_request_id_async()
@@ -1654,7 +1677,9 @@ async def stream(
         'Transfer-Encoding': 'chunked'
     }
     if request_id is not None:
-        headers[server_constants.STREAM_REQUEST_HEADER] = request_id
+        headers[server_constants.STREAM_REQUEST_HEADER] = (
+            user_supplied_request_id
+            if user_supplied_request_id else request_id)
 
     return fastapi.responses.StreamingResponse(
         content=stream_utils.log_streamer(request_id,
@@ -1676,7 +1701,7 @@ async def api_cancel(request: fastapi.Request,
         request_id=request.state.request_id,
         request_name='api_cancel',
         request_body=request_cancel_body,
-        func=requests_lib.kill_requests,
+        func=requests_lib.kill_requests_with_prefix,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
@@ -1684,7 +1709,7 @@ async def api_cancel(request: fastapi.Request,
 @app.get('/api/status')
 async def api_status(
     request_ids: Optional[List[str]] = fastapi.Query(
-        None, description='Request IDs to get status for.'),
+        None, description='Request ID prefixes to get status for.'),
     all_status: bool = fastapi.Query(
         False, description='Get finished requests as well.'),
     limit: Optional[int] = fastapi.Query(
@@ -1711,10 +1736,12 @@ async def api_status(
     else:
         encoded_request_tasks = []
         for request_id in request_ids:
-            request_task = await requests_lib.get_request_async(request_id)
-            if request_task is None:
+            request_tasks = await requests_lib.get_requests_async_with_prefix(
+                request_id)
+            if request_tasks is None:
                 continue
-            encoded_request_tasks.append(request_task.readable_encode())
+            for request_task in request_tasks:
+                encoded_request_tasks.append(request_task.readable_encode())
         return encoded_request_tasks
 
 

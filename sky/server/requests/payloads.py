@@ -319,6 +319,8 @@ class StatusBody(RequestBody):
     # Only return fields that are needed for the
     # dashboard / CLI summary response
     summary_response: bool = False
+    # Include the cluster handle in the response
+    include_handle: bool = True
 
 
 class StartBody(RequestBody):
