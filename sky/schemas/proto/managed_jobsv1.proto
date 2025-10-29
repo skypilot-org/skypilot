@@ -56,6 +56,10 @@ message Statuses {
   repeated string statuses = 1;
 }
 
+message Fields {
+  repeated string fields = 1;
+}
+
 message GetVersionRequest {}
 
 message GetVersionResponse {
@@ -74,6 +78,7 @@ message GetJobTableRequest {
   optional UserHashes user_hashes = 9;
   optional Statuses statuses = 10;
   bool show_jobs_without_user_hash = 11;
+  optional Fields fields = 12;
 }
 
 message ManagedJobInfo {
@@ -105,6 +110,7 @@ message ManagedJobInfo {
   map<string, string> metadata = 26;
   optional string pool = 27;
   optional string pool_hash = 28;
+  optional int64 _job_id = 29;
 }
 
 message GetJobTableResponse {

@@ -809,6 +809,8 @@ def queue_v2(
                 ]) if user_hashes is not None else None,
                 statuses=managed_jobsv1_pb2.Statuses(
                     statuses=statuses) if statuses is not None else None,
+                fields=managed_jobsv1_pb2.Fields(
+                    fields=fields) if fields is not None else None,
                 show_jobs_without_user_hash=show_jobs_without_user_hash,
             )
             response = backend_utils.invoke_skylet_with_retries(
