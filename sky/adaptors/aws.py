@@ -122,9 +122,32 @@ def _create_aws_object(creation_fn_or_cls: Callable[[], T],
                         f'{common_utils.format_exception(e)}.')
 
 
-def get_workspace_profile() -> Optional[str]:
-    """Get AWS profile name from workspace config."""
-    return skypilot_config.get_workspace_cloud('aws').get('profile', None)
+def get_current_profile() -> Optional[str]:
+    """Get AWS profile name that is currently used.
+
+    This function checks two sources in order:
+    1. Workspace config (~/.sky/config.yaml) - for API server
+    2. ~/.sky/.aws_profile - for remote clusters (autostop/down)
+
+    Returns:
+        AWS profile name if configured, None otherwise.
+    """
+    # First, check the workspace config
+    profile = skypilot_config.get_workspace_cloud('aws').get('profile', None)
+    if profile is not None:
+        return profile
+
+    # Fallback: read from disk (for remote clusters doing autostop/down)
+    profile_file = os.path.expanduser('~/.sky/.aws_profile')
+    if os.path.exists(profile_file):
+        try:
+            with open(profile_file, 'r', encoding='utf-8') as f:
+                profile = f.read().strip()
+                return profile if profile else None
+        except Exception:  # pylint: disable=broad-except
+            pass
+
+    return None
 
 
 def _validate_workspace_profile(profile_name: str) -> bool:
@@ -232,7 +255,7 @@ def resource(service_name: str, **kwargs):
         kwargs['config'] = config
 
     check_credentials = kwargs.pop('check_credentials', True)
-    profile = get_workspace_profile()
+    profile = get_current_profile()
 
     # Need to use the client retrieved from the per-thread session to avoid
     # thread-safety issues (Directly creating the client with boto3.resource()
@@ -274,7 +297,7 @@ def client(service_name: str, **kwargs):
     _assert_kwargs_builtin_type(kwargs)
 
     check_credentials = kwargs.pop('check_credentials', True)
-    profile = get_workspace_profile()
+    profile = get_current_profile()
 
     # Need to use the client retrieved from the per-thread session to avoid
     # thread-safety issues (Directly creating the client with boto3.client() is

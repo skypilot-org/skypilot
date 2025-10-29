@@ -72,8 +72,8 @@ def test_session_error_handling():
 
 
 def test_resource_and_client_use_workspace_profile():
-    """Test that resource() and client() retrieve workspace profile."""
-    with patch('sky.adaptors.aws.get_workspace_profile') as mock_get_profile, \
+    """Test that resource() and client() retrieve current profile."""
+    with patch('sky.adaptors.aws.get_current_profile') as mock_get_profile, \
          patch('sky.adaptors.aws.session') as mock_session, \
          patch('sky.adaptors.aws._create_aws_object') as mock_create:
 

@@ -182,8 +182,12 @@ setup_commands:
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
   # Line 'mkdir -p ~/.ssh ...': adding the key in the ssh config to allow interconnection for nodes in the cluster
+  # Line 'mkdir -p ~/.sky && ...': set the AWS profile based on the workspace config, so that autostop/down uses the correct profile
   # Line 'rm ~/.aws/credentials': explicitly remove the credentials file to be safe. This is to guard against the case where the credential files was uploaded once as `remote_identity` was not set in a previous launch.
   - mkdir -p ~/.ssh; touch ~/.ssh/config;
+    {%- if workspace_profile is not none %}
+    mkdir -p ~/.sky && echo '{{workspace_profile}}' > ~/.sky/.aws_profile;
+    {%- endif %}
     {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
     {%- endfor %}

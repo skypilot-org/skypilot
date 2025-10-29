@@ -111,12 +111,35 @@ def test_validate_workspace_profile(tmp_path, monkeypatch):
 
 
 @mock.patch('sky.skypilot_config.get_workspace_cloud')
-def test_get_workspace_profile(mock_get_workspace_cloud):
-    """Test getting workspace profile when configured and not configured."""
-    # Test when configured
-    mock_get_workspace_cloud.return_value.get.return_value = 'dev-profile'
-    assert aws.get_workspace_profile() == 'dev-profile'
+def test_get_current_profile(mock_get_workspace_cloud, tmp_path, monkeypatch):
+    """Test getting current profile from workspace config and disk fallback."""
+    # Point ~ to tmp_path for testing disk fallback
+    monkeypatch.setattr('os.path.expanduser',
+                        lambda p: p.replace('~', str(tmp_path)))
 
-    # Test when not configured
+    # Profile from workspace config (primary source)
+    mock_get_workspace_cloud.return_value.get.return_value = 'dev-profile'
+    assert aws.get_current_profile() == 'dev-profile'
+
+    # No profile in workspace config, fallback to disk
     mock_get_workspace_cloud.return_value.get.return_value = None
-    assert aws.get_workspace_profile() is None
+
+    # Create ~/.sky/.aws_profile with a profile name
+    sky_dir = tmp_path / '.sky'
+    sky_dir.mkdir(exist_ok=True)
+    profile_file = sky_dir / '.aws_profile'
+    profile_file.write_text('remote-profile')
+
+    assert aws.get_current_profile() == 'remote-profile'
+
+    # No profile in workspace config and no disk file
+    profile_file.unlink()
+    assert aws.get_current_profile() is None
+
+    # Empty profile file should return None
+    profile_file.write_text('')
+    assert aws.get_current_profile() is None
+
+    # Profile file with whitespace should be stripped
+    profile_file.write_text('  trimmed-profile  \n')
+    assert aws.get_current_profile() == 'trimmed-profile'
