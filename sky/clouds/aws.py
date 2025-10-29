@@ -686,9 +686,6 @@ class AWS(clouds.Cloud):
                     'has requested ports setup; or, leave out `aws.security_group_name` '
                     'in `~/.sky/config.yaml`.')
 
-        workspace_profile = skypilot_config.get_workspace_cloud('aws').get(
-            'profile', None)
-
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -704,7 +701,6 @@ class AWS(clouds.Cloud):
                 str(security_group != user_security_group).lower(),
             'max_efa_interfaces': max_efa_interfaces,
             'docker_run_options': docker_run_options,
-            'workspace_profile': workspace_profile,
             **AWS._get_disk_specs(resources.disk_tier)
         }
 
@@ -898,7 +894,7 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def _current_identity_type(cls) -> Optional[AWSIdentityType]:
-        profile = aws.get_current_profile()
+        profile = aws.get_workspace_profile()
         stdout = cls._aws_configure_list(profile)
         if stdout is None:
             return None
@@ -1065,7 +1061,7 @@ class AWS(clouds.Cloud):
             exceptions.CloudUserIdentityError: if the user identity cannot be
                 retrieved.
         """
-        profile = aws.get_current_profile()
+        profile = aws.get_workspace_profile()
         stdout = cls._aws_configure_list(profile)
         if stdout is None:
             # `aws configure list` is not available, possible reasons:
@@ -1126,6 +1122,7 @@ class AWS(clouds.Cloud):
         # the cluster will not be used for launching clusters in other clouds,
         # e.g. jobs controller.
 
+        # TODO(DO NOT MERGE): Only include the profile set in the workspace config (if any)?
         if self._current_identity_type(
         ) != AWSIdentityType.SHARED_CREDENTIALS_FILE:
             return {}
