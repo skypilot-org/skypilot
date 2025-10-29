@@ -412,8 +412,9 @@ class TestEfaHelpers:
 
 class TestAwsConfigureList:
 
+    @mock.patch('sky.adaptors.aws.get_workspace_profile')
     @mock.patch('subprocess.run')
-    def test_command_generation_with_profiles(self, mock_run):
+    def test_command_generation_with_profiles(self, mock_run, mock_get_profile):
         """Test command generation with no profile, with profile, and different profiles."""
         mock_result = mock.Mock()
         mock_result.returncode = 0
@@ -423,20 +424,24 @@ class TestAwsConfigureList:
         aws_mod.AWS._aws_configure_list.cache_clear()
 
         # Test with no profile
-        aws_mod.AWS._aws_configure_list(profile=None)
+        mock_get_profile.return_value = None
+        aws_mod.AWS._aws_configure_list()
         assert mock_run.call_args[0][0] == 'aws configure list'
 
         # Test with profile
-        aws_mod.AWS._aws_configure_list(profile='dev')
+        mock_get_profile.return_value = 'dev'
+        aws_mod.AWS._aws_configure_list()
         assert mock_run.call_args[0][0] == 'aws configure list --profile dev'
 
         # Test with different profiles
-        aws_mod.AWS._aws_configure_list(profile='profile1')
+        mock_get_profile.return_value = 'profile1'
+        aws_mod.AWS._aws_configure_list()
         assert mock_run.call_args[0][
             0] == 'aws configure list --profile profile1'
 
+    @mock.patch('sky.adaptors.aws.get_workspace_profile')
     @mock.patch('subprocess.run')
-    def test_caching_behavior(self, mock_run):
+    def test_caching_behavior(self, mock_run, mock_get_profile):
         """Test caching: same profile cached, different profiles not cached."""
         mock_result = mock.Mock()
         mock_result.returncode = 0
@@ -446,12 +451,14 @@ class TestAwsConfigureList:
         aws_mod.AWS._aws_configure_list.cache_clear()
 
         # Same profile should be cached
-        aws_mod.AWS._aws_configure_list(profile='test')
-        aws_mod.AWS._aws_configure_list(profile='test')
+        mock_get_profile.return_value = 'test'
+        aws_mod.AWS._aws_configure_list()
+        aws_mod.AWS._aws_configure_list()
         assert mock_run.call_count == 1
 
         # Different profiles should NOT be cached together
-        aws_mod.AWS._aws_configure_list(profile='other')
+        mock_get_profile.return_value = 'other'
+        aws_mod.AWS._aws_configure_list()
         assert mock_run.call_count == 2
 
 
