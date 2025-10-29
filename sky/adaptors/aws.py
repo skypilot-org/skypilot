@@ -142,15 +142,13 @@ def _validate_workspace_profile(profile_name: str) -> bool:
     Returns:
         True if profile exists in credentials file, False otherwise.
     """
-    credentials_path = os.path.expanduser('~/.aws/credentials')
-
     # Only check credentials file - we need actual credentials for static auth
+    credentials_path = os.path.expanduser('~/.aws/credentials')
     if os.path.exists(credentials_path):
         parser = configparser.ConfigParser()
         try:
             parser.read(credentials_path)
-            if profile_name in parser.sections() or profile_name == 'default':
-                return True
+            return profile_name in parser.sections()
         except configparser.Error:
             pass
 
