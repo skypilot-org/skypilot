@@ -1,66 +1,17 @@
 """Unit tests for AWS workspace profile functionality."""
 
-import configparser
-import os
-from typing import List
 from unittest import mock
-
-import pytest
 
 from sky.adaptors import aws
 
 
-def _create_credentials_file(tmp_path, profiles):
-    """Helper to create a credentials file with given profiles.
-
-    Args:
-        tmp_path: Temporary directory path from pytest fixture
-        profiles: Dict of profile_name -> {aws_access_key_id, aws_secret_access_key}
-    """
+def _create_aws_file(tmp_path, filename, contents):
     aws_dir = tmp_path / '.aws'
     aws_dir.mkdir(exist_ok=True)
-    credentials_path = aws_dir / 'credentials'
+    file_path = aws_dir / filename
 
-    parser = configparser.ConfigParser()
-    for profile_name, creds in profiles.items():
-        parser[profile_name] = creds
-    with open(credentials_path, 'w', encoding='utf-8') as f:
-        parser.write(f)
-
-
-def _create_config_file(tmp_path, profiles):
-    """Helper to create a config file with given profiles.
-
-    Args:
-        tmp_path: Temporary directory path from pytest fixture
-        profiles: Dict of profile_name -> {region, output, etc.}
-    """
-    aws_dir = tmp_path / '.aws'
-    aws_dir.mkdir(exist_ok=True)
-    config_path = aws_dir / 'config'
-
-    parser = configparser.ConfigParser()
-    for profile_name, config in profiles.items():
-        if profile_name == 'default':
-            parser['default'] = config
-        else:
-            parser[f'profile {profile_name}'] = config
-    with open(config_path, 'w', encoding='utf-8') as f:
-        parser.write(f)
-
-
-def _get_credential_file_paths() -> List[str]:
-    """Helper to get credential file paths for testing.
-
-    Returns:
-        List of paths to AWS credential files that should be mounted.
-    """
-    paths = []
-    for filename in ['credentials', 'config']:
-        path = os.path.expanduser(f'~/.aws/{filename}')
-        if os.path.exists(path):
-            paths.append(f'~/.aws/{filename}')
-    return paths
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.write(contents)
 
 
 def test_validate_workspace_profile(tmp_path, monkeypatch):
@@ -70,17 +21,15 @@ def test_validate_workspace_profile(tmp_path, monkeypatch):
                         lambda p: p.replace('~', str(tmp_path)))
 
     # Test profiles in credentials file are validated
-    _create_credentials_file(
-        tmp_path, {
-            'default': {
-                'aws_access_key_id': 'default_key',
-                'aws_secret_access_key': 'default_secret'
-            },
-            'dev': {
-                'aws_access_key_id': 'dev_key',
-                'aws_secret_access_key': 'dev_secret'
-            }
-        })
+    _create_aws_file(
+        tmp_path, 'credentials', """[default]
+aws_access_key_id = default_key
+aws_secret_access_key = default_secret
+
+[dev]
+aws_access_key_id = dev_key
+aws_secret_access_key = dev_secret
+""")
 
     # Profiles in credentials file should be found
     assert aws._validate_workspace_profile('dev')
@@ -100,7 +49,9 @@ def test_validate_workspace_profile(tmp_path, monkeypatch):
                         lambda p: p.replace('~', str(other_path)))
 
     # Create ONLY a config file with 'staging' profile (no credentials file)
-    _create_config_file(other_path, {'staging': {'region': 'us-west-2'}})
+    _create_aws_file(other_path, 'config', """[profile staging]
+region = us-west-2
+""")
     # Validation should fail because staging is only in config, not credentials
     assert not aws._validate_workspace_profile('staging')
 
