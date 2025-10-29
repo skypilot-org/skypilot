@@ -79,11 +79,19 @@ const PROPERTY_OPTIONS = [
   },
   {
     label: 'User ID',
-    value: 'userid',
+    value: 'user id', // Match valueList key
   },
   {
     label: 'Role',
     value: 'role',
+  },
+  {
+    label: 'GPU Type',
+    value: 'gpu type', // Match valueList key
+  },
+  {
+    label: 'Infra',
+    value: 'infra',
   },
 ];
 
@@ -258,8 +266,10 @@ export function Users() {
   const [filters, setFilters] = useState([]);
   const [valueList, setValueList] = useState({
     name: [],
-    userid: [],
+    'user id': [],
     role: [],
+    'gpu type': [],
+    infra: [],
   });
 
   // Initialize deduplicateUsers from URL parameter
@@ -322,8 +332,10 @@ export function Users() {
   // Create property map for filter URL parameters
   const propertyMap = new Map([
     ['name', 'Name'],
-    ['userid', 'User ID'],
+    ['user id', 'User ID'], // Note: lowercase with space to match URL encoding
     ['role', 'Role'],
+    ['gpu type', 'GPU Type'], // Note: lowercase with space to match URL encoding
+    ['infra', 'Infra'],
   ]);
 
   // Initialize filters from URL parameters
@@ -1266,10 +1278,16 @@ function UsersTable({
   const [editingUserId, setEditingUserId] = useState(null);
   const [currentEditingRole, setCurrentEditingRole] = useState('');
 
+  // Lookup dictionary for GPU type and infra filtering
+  // Structure: infra -> gpuType -> userId -> { clusterCount, jobCount, gpuCount }
+  const [combinedLookup, setCombinedLookup] = useState({});
+  const [lookupsReady, setLookupsReady] = useState(false);
+
   const fetchDataAndProcess = useCallback(
     async (showLoading = false) => {
       if (setLoading && showLoading) setLoading(true);
       if (showLoading) setIsLoading(true);
+      setLookupsReady(false); // Reset lookups state when starting to fetch
       try {
         // Step 1: Load users first and show them immediately
         const usersData = await dashboardCache.get(getUsers);
@@ -1304,6 +1322,7 @@ function UsersTable({
                 'accelerators',
                 'job_name',
                 'job_id',
+                'infra',
               ],
             },
           ]),
@@ -1311,7 +1330,126 @@ function UsersTable({
 
         const jobsData = managedJobsResponse.jobs || [];
 
-        // Update users with actual counts
+        // Build combined lookup dictionary for GPU type and infra filtering
+        // Structure: infra -> gpuType -> userId -> { clusterCount, jobCount, gpuCount }
+        const newCombinedLookup = {};
+
+        // Helper to extract GPU type from accelerators
+        const extractGPUType = (accelerators) => {
+          if (!accelerators) return null;
+
+          let parsed = accelerators;
+          if (typeof accelerators === 'string') {
+            try {
+              const jsonStr = accelerators
+                .replace(/'/g, '"')
+                .replace(/None/g, 'null');
+              parsed = JSON.parse(jsonStr);
+            } catch (e) {
+              return null;
+            }
+          }
+
+          if (typeof parsed === 'object' && parsed !== null) {
+            const entries = Object.entries(parsed);
+            if (entries.length > 0) {
+              return entries[0][0]; // Return GPU type (the key)
+            }
+          }
+          return null;
+        };
+
+        // Helper to update combined lookup
+        const updateCombinedLookup = (
+          infra,
+          gpuType,
+          userId,
+          clusterDelta,
+          jobDelta,
+          gpuDelta
+        ) => {
+          if (!infra || !gpuType || !userId) return;
+
+          if (!newCombinedLookup[infra]) {
+            newCombinedLookup[infra] = {};
+          }
+          if (!newCombinedLookup[infra][gpuType]) {
+            newCombinedLookup[infra][gpuType] = {};
+          }
+          if (!newCombinedLookup[infra][gpuType][userId]) {
+            newCombinedLookup[infra][gpuType][userId] = {
+              clusterCount: 0,
+              jobCount: 0,
+              gpuCount: 0,
+            };
+          }
+          newCombinedLookup[infra][gpuType][userId].clusterCount +=
+            clusterDelta;
+          newCombinedLookup[infra][gpuType][userId].jobCount += jobDelta;
+          newCombinedLookup[infra][gpuType][userId].gpuCount += gpuDelta;
+        };
+
+        // Process clusters to build lookup
+        for (const cluster of clustersData || []) {
+          const userId = cluster.user_hash;
+          if (!userId) continue;
+
+          const gpuType = extractGPUType(cluster.gpus);
+          const infra = cluster.infra;
+
+          // Count GPUs (only from active clusters)
+          let gpuCount = 0;
+          if (cluster.status !== 'STOPPED' && cluster.status !== 'TERMINATED') {
+            const gpuCountPerNode = getGPUCount(
+              cluster.gpus,
+              `Cluster ${cluster.cluster}`
+            );
+            // Multiply by number of nodes to get total GPU count
+            const numNodes = cluster.num_nodes || 1;
+            gpuCount = gpuCountPerNode * numNodes;
+          }
+
+          updateCombinedLookup(infra, gpuType, userId, 1, 0, gpuCount);
+        }
+
+        // Helper to extract num_nodes from cluster_resources_full (e.g., "3x(...)")
+        const extractNumNodes = (clusterResourcesFull) => {
+          if (
+            !clusterResourcesFull ||
+            typeof clusterResourcesFull !== 'string'
+          ) {
+            return 1;
+          }
+          const match = clusterResourcesFull.match(/^(\d+)x/);
+          return match ? parseInt(match[1], 10) : 1;
+        };
+
+        // Process jobs to build lookup
+        for (const job of jobsData || []) {
+          if (!ACTIVE_JOB_STATUSES.has(job.status)) continue;
+
+          const userId = job.user_hash;
+          if (!userId) continue;
+
+          const gpuType = extractGPUType(job.accelerators);
+          const infra = job.infra;
+          const gpuCountPerNode = getGPUCount(
+            job.accelerators,
+            `Job ${job.job_id}`
+          );
+
+          // Multiply by number of nodes to get total GPU count
+          const numNodes = extractNumNodes(job.resources_str_full);
+          const gpuCount = gpuCountPerNode * numNodes;
+
+          updateCombinedLookup(infra, gpuType, userId, 0, 1, gpuCount);
+        }
+
+        // Store the lookup dictionary
+        setCombinedLookup(newCombinedLookup);
+        setLookupsReady(true); // Mark lookups as ready
+
+        // Update users with actual counts (without filter applied)
         const finalProcessedUsers = (usersData || []).map((user) => {
           let clusterCount = 0;
           let clusterGPUCount = 0;
@@ -1327,10 +1465,13 @@ function UsersTable({
                 cluster.status !== 'STOPPED' &&
                 cluster.status !== 'TERMINATED'
               ) {
-                clusterGPUCount += getGPUCount(
+                const gpuCountPerNode = getGPUCount(
                   cluster.gpus,
                   `Cluster ${cluster.cluster}`
                 );
+                // Multiply by number of nodes to get total GPU count
+                const numNodes = cluster.num_nodes || 1;
+                clusterGPUCount += gpuCountPerNode * numNodes;
               }
             }
           }
@@ -1342,7 +1483,13 @@ function UsersTable({
               ACTIVE_JOB_STATUSES.has(job.status)
             ) {
               jobCount++;
-              jobGPUCount += getGPUCount(job.accelerators, `Job ${job.job_id}`);
+              const gpuCountPerNode = getGPUCount(
+                job.accelerators,
+                `Job ${job.job_id}`
+              );
+              // Multiply by number of nodes to get total GPU count
+              const numNodes = extractNumNodes(job.resources_str_full);
+              jobGPUCount += gpuCountPerNode * numNodes;
             }
           }
 
@@ -1354,6 +1501,36 @@ function UsersTable({
             jobCount,
             gpuCount: clusterGPUCount + jobGPUCount,
           };
+        });
+
+        // Collect unique GPU types and infra values for filter dropdowns
+        const infras = new Set();
+        const gpuTypes = new Set();
+
+        for (const [infra, gpuTypeMap] of Object.entries(newCombinedLookup)) {
+          infras.add(infra);
+          for (const gpuType of Object.keys(gpuTypeMap)) {
+            gpuTypes.add(gpuType);
+          }
+        }
+
+        // Update valueList for filter autocomplete
+        const names = new Set();
+        const userIds = new Set();
+        const roles = new Set();
+
+        finalProcessedUsers.forEach((user) => {
+          if (user.usernameDisplay) names.add(user.usernameDisplay);
+          if (user.userId) userIds.add(user.userId);
+          if (user.role) roles.add(user.role);
+        });
+
+        setValueList({
+          name: Array.from(names).sort(),
+          'user id': Array.from(userIds).sort(),
+          role: Array.from(roles).sort(),
+          'gpu type': Array.from(gpuTypes).sort(),
+          infra: Array.from(infras).sort(),
         });
 
         setUsersWithCounts(finalProcessedUsers);
@@ -1396,40 +1573,141 @@ function UsersTable({
     return () => clearInterval(interval);
   }, [fetchDataAndProcess, refreshInterval]);
 
-  // Populate valueList with unique values from users for autocomplete
-  useEffect(() => {
-    if (usersWithCounts.length > 0) {
-      const names = new Set();
-      const userIds = new Set();
-      const roles = new Set();
-
-      usersWithCounts.forEach((user) => {
-        if (user.usernameDisplay) names.add(user.usernameDisplay);
-        if (user.userId) userIds.add(user.userId);
-        if (user.role) roles.add(user.role);
-      });
-
-      setValueList({
-        name: Array.from(names).sort(),
-        userid: Array.from(userIds).sort(),
-        role: Array.from(roles).sort(),
-      });
-    }
-  }, [usersWithCounts, setValueList]);
-
   const filteredAndSortedUsers = useMemo(() => {
     let filtered = usersWithCounts;
 
-    // Apply filters using the shared filter system
-    if (filters.length > 0) {
+    // Separate GPU type and infra filters from standard filters
+    // Note: filter.property contains the label (e.g., "GPU Type", "Infra"), not the value
+    const standardFilters = filters.filter(
+      (f) => f.property !== 'GPU Type' && f.property !== 'Infra'
+    );
+    const gpuTypeFilters = filters.filter((f) => f.property === 'GPU Type');
+    const infraFilters = filters.filter((f) => f.property === 'Infra');
+
+    // Apply standard filters using the shared filter system
+    if (standardFilters.length > 0) {
       filtered = filterData(
         usersWithCounts.map((user) => ({
           ...user,
           name: user.usernameDisplay,
           'user id': user.userId, // Note: space to match "User ID" -> "user id" from toLowerCase()
         })),
-        filters
+        standardFilters
       );
+    }
+
+    // Helper to get counts from lookup for a user given filter criteria
+    // gpuTypeFilters and infraFilters are arrays - we OR within same type, AND across types
+    const getFilteredCounts = (
+      userId,
+      gpuTypeFilterValues,
+      infraFilterValues
+    ) => {
+      let clusterCount = 0;
+      let jobCount = 0;
+      let gpuCount = 0;
+
+      // Normalize filter values to lowercase
+      const normalizedGpuTypes = gpuTypeFilterValues.map((v) =>
+        v.toLowerCase()
+      );
+      const normalizedInfras = infraFilterValues.map((v) => v.toLowerCase());
+
+      const hasGpuTypeFilters = normalizedGpuTypes.length > 0;
+      const hasInfraFilters = normalizedInfras.length > 0;
+
+      // Iterate through the combined lookup
+      for (const [infra, gpuTypeMap] of Object.entries(combinedLookup)) {
+        const infraLower = infra.toLowerCase();
+
+        // Check if this infra matches any of the infra filters (OR logic within infra)
+        const infraMatches =
+          !hasInfraFilters || normalizedInfras.includes(infraLower);
+
+        if (infraMatches) {
+          for (const [gpuType, userMap] of Object.entries(gpuTypeMap)) {
+            const gpuTypeLower = gpuType.toLowerCase();
+
+            // Check if this GPU type matches any of the GPU type filters (OR logic within GPU type)
+            const gpuTypeMatches =
+              !hasGpuTypeFilters || normalizedGpuTypes.includes(gpuTypeLower);
+
+            if (gpuTypeMatches && userMap[userId]) {
+              const counts = userMap[userId];
+              clusterCount += counts.clusterCount;
+              jobCount += counts.jobCount;
+              gpuCount += counts.gpuCount;
+            }
+          }
+        }
+      }
+
+      return { clusterCount, jobCount, gpuCount };
+    };
+
+    // Apply GPU type and infra filters
+    const hasGpuTypeFilter = gpuTypeFilters.length > 0;
+    const hasInfraFilter = infraFilters.length > 0;
+
+    if (hasGpuTypeFilter || hasInfraFilter) {
+      // Extract filter values - support multiple filters of same type (OR logic)
+      const gpuTypeFilterValues = gpuTypeFilters
+        .map((f) => f.value)
+        .filter(Boolean);
+      const infraFilterValues = infraFilters
+        .map((f) => f.value)
+        .filter(Boolean);
+
+      // Normalize to lowercase for matching
+      const normalizedGpuTypes = gpuTypeFilterValues.map((v) =>
+        v.toLowerCase()
+      );
+      const normalizedInfras = infraFilterValues.map((v) => v.toLowerCase());
+
+      // Filter users: check if they have ANY resources matching the filters
+      filtered = filtered.filter((user) => {
+        // Iterate through lookup to see if user has any matching resources
+        for (const [infra, gpuTypeMap] of Object.entries(combinedLookup)) {
+          const infraLower = infra.toLowerCase();
+
+          // Check if this infra matches any of the infra filters (OR logic)
+          const infraMatches =
+            !hasInfraFilter || normalizedInfras.includes(infraLower);
+
+          if (infraMatches) {
+            for (const [gpuType, userMap] of Object.entries(gpuTypeMap)) {
+              const gpuTypeLower = gpuType.toLowerCase();
+
+              // Check if this GPU type matches any of the GPU type filters (OR logic)
+              const gpuTypeMatches =
+                !hasGpuTypeFilter || normalizedGpuTypes.includes(gpuTypeLower);
+
+              // If both match (AND between types, OR within type) and user has resources, include them
+              if (gpuTypeMatches && userMap[user.userId]) {
+                return true;
+              }
+            }
+          }
+        }
+
+        return false;
+      });
+
+      // Update counts for filtered users
+      filtered = filtered.map((user) => {
+        const filteredCounts = getFilteredCounts(
+          user.userId,
+          gpuTypeFilterValues,
+          infraFilterValues
+        );
+
+        return {
+          ...user,
+          clusterCount: filteredCounts.clusterCount,
+          jobCount: filteredCounts.jobCount,
+          gpuCount: filteredCounts.gpuCount,
+        };
+      });
     }
 
     // Deduplicate by username if toggle is enabled
@@ -1499,7 +1777,7 @@ function UsersTable({
     }
 
     return sortData(filtered, sortConfig.key, sortConfig.direction);
-  }, [usersWithCounts, sortConfig, filters, deduplicateUsers]);
+  }, [usersWithCounts, sortConfig, filters, deduplicateUsers, combinedLookup]);
 
   const requestSort = (key) => {
     let direction = 'ascending';
@@ -1569,6 +1847,19 @@ function UsersTable({
       <div className="flex justify-center items-center h-64">
         <CircularProgress />
         <span className="ml-2 text-gray-500">Loading users...</span>
+      </div>
+    );
+  }
+
+  // Check if we're still loading lookups for GPU/Infra filters
+  const hasGpuOrInfraFilters = filters.some(
+    (f) => f.property === 'GPU Type' || f.property === 'Infra'
+  );
+  if (hasGpuOrInfraFilters && !lookupsReady) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <CircularProgress />
+        <span className="ml-2 text-gray-500">Loading filtered data...</span>
       </div>
     );
   }
@@ -1921,7 +2212,7 @@ function ServiceAccountTokensView({
           {
             allUsers: true,
             skipFinished: true,
-            fields: ['user_hash', 'status', 'accelerators', 'job_id'],
+            fields: ['user_hash', 'status', 'accelerators', 'job_id', 'infra'],
           },
         ]),
       ]);
