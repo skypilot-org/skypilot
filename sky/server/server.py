@@ -2040,11 +2040,15 @@ if __name__ == '__main__':
 
     # Maybe touch the signal file on API server startup. Do it again here even
     # if we already touched it in the sky/server/common.py::_start_api_server.
-    # This is because the above function call is in client side and when pg is
-    # used, client side will not load the config file from db, which will ignore
-    # the consolidation mode config. Here, inside this function, we already
-    # reload the config as a server (with env var IS_SKYPILOT_SERVER=1), so we
-    # will respect the consolidation mode config.
+    # This is because the sky/server/common.py::_start_api_server function call
+    # is running outside the skypilot API server process tree. The process tree
+    # starts within that function (see the `subprocess.Popen` call in
+    # sky/server/common.py::_start_api_server). When pg is used, the
+    # _start_api_server function will not load the config file from db, which
+    # will ignore the consolidation mode config. Here, inside the process tree,
+    # we already reload the config as a server (with env var _start_api_server),
+    # so we will respect the consolidation mode config.
+    # Refers to #7717 for more details.
     managed_job_utils.is_consolidation_mode(on_api_restart=True)
 
     # Show the privacy policy if it is not already shown. We place it here so
