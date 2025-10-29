@@ -178,7 +178,7 @@ async def run_log_gc():
     log_dir = os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(log_dir, 'garbage_collector.log')
-    # Remove legacy log file
+    # Remove previous log file
     await anyio.Path(log_path).unlink(missing_ok=True)
     ctx = context.get()
     assert ctx is not None, 'Context is not initialized'
