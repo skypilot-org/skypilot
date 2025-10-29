@@ -277,13 +277,30 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     # should set the cluster to be launched in the same region.
     region_str = f'/centralus' if generic_cloud == 'azure' else ''
 
-    # Determine store type based on generic_cloud
-    if generic_cloud == 'aws':
-        store_type = 's3'
-    elif generic_cloud == 'gcp':
-        store_type = 'gcs'
+    cloud_to_store_type = {
+        clouds.AWS().canonical_name(): 's3',
+        clouds.GCP().canonical_name(): 'gcs',
+        clouds.Azure().canonical_name(): 'azure',
+    }
+
+    enabled_cloud_storages = smoke_tests_utils.get_enabled_cloud_storages()
+    if len(enabled_cloud_storages) == 0:
+        raise ValueError(f'No cloud storage is enabled.')
+
+    allowed_cloud_storages = [clouds.AWS(), clouds.GCP(), clouds.Azure()]
+
+    store_type = None
+    if generic_cloud in allowed_cloud_storages:
+        # We just use the matching store type.
+        store_type = cloud_to_store_type[generic_cloud]
     else:
-        store_type = 'azure'
+        # We use the first enabled cloud storage we can find.
+        for cloud_storage in allowed_cloud_storages:
+            if clouds.cloud_in_iterable(cloud_storage, enabled_cloud_storages):
+                store_type = cloud_to_store_type[cloud_storage.canonical_name()]
+                break
+    if store_type is None:
+        raise ValueError(f'No eligible enabled storage type found.')
 
     if smoke_tests_utils.is_non_docker_remote_api_server():
         enabled_cloud_storages = smoke_tests_utils.get_enabled_cloud_storages()
