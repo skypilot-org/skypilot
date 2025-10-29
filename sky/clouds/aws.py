@@ -1122,7 +1122,6 @@ class AWS(clouds.Cloud):
         # the cluster will not be used for launching clusters in other clouds,
         # e.g. jobs controller.
 
-        # TODO(DO NOT MERGE): Only include the profile set in the workspace config (if any)?
         if self._current_identity_type(
         ) != AWSIdentityType.SHARED_CREDENTIALS_FILE:
             return {}
