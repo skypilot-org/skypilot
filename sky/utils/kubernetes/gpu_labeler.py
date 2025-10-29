@@ -254,23 +254,12 @@ def wait_for_jobs_completion(jobs_to_node_names: Dict[str, str],
     batch_v1 = kubernetes.batch_api(context=context)
     completed_jobs = []
 
-    def _watch_jobs(resource_version=None):
-        """Helper function to watch jobs with error handling.
-
-        Args:
-            resource_version: Specific resource version to watch from.
-                If None, starts from the current state.
-        """
+    def _watch_jobs():
+        """Helper function to watch jobs with error handling."""
         w = kubernetes.watch()
-        kwargs = {
-            'namespace': namespace,
-            'timeout_seconds': timeout,
-        }
-        # Only specify resource_version if explicitly provided
-        if resource_version is not None:
-            kwargs['resource_version'] = resource_version
-
-        for event in w.stream(func=batch_v1.list_namespaced_job, **kwargs):
+        for event in w.stream(func=batch_v1.list_namespaced_job,
+                              namespace=namespace,
+                              timeout_seconds=timeout):
             job = event['object']
             job_name = job.metadata.name
             if job_name in jobs_to_node_names:
