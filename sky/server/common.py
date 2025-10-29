@@ -550,8 +550,9 @@ def _start_api_server(deploy: bool = False,
             # pylint: disable=import-outside-toplevel
             import sky.jobs.utils as job_utils
             max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
-                        if job_utils.is_consolidation_mode(on_api_restart=True)
-                        else server_constants.MIN_AVAIL_MEM_GB)
+                          if job_utils.is_consolidation_mode(
+                              on_api_restart=True) else
+                          server_constants.MIN_AVAIL_MEM_GB)
             if avail_mem_size_gb <= max_memory:
                 logger.warning(
                     f'{colorama.Fore.YELLOW}Your SkyPilot API server machine '
