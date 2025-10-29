@@ -181,38 +181,62 @@ def wait_for_jobs_completion(jobs_to_node_names: Dict[str, str],
         True if the Job completed successfully, False if it failed or timed out.
     """
     batch_v1 = kubernetes.batch_api(context=context)
-    w = kubernetes.watch()
     completed_jobs = []
-    for event in w.stream(func=batch_v1.list_namespaced_job,
-                          namespace=namespace,
-                          timeout_seconds=timeout):
-        job = event['object']
-        job_name = job.metadata.name
-        if job_name in jobs_to_node_names:
-            node_name = jobs_to_node_names[job_name]
-            if job.status and job.status.completion_time:
-                print(
-                    _format_string(
-                        f'GPU labeler job for node {node_name} '
-                        'completed successfully', colorama.Style.DIM))
-                completed_jobs.append(job_name)
-                num_remaining_jobs = len(jobs_to_node_names) - len(
-                    completed_jobs)
-                if num_remaining_jobs == 0:
+
+    def _watch_jobs():
+        """Helper function to watch jobs with error handling."""
+        w = kubernetes.watch()
+        for event in w.stream(func=batch_v1.list_namespaced_job,
+                              namespace=namespace,
+                              timeout_seconds=timeout):
+            job = event['object']
+            job_name = job.metadata.name
+            if job_name in jobs_to_node_names:
+                node_name = jobs_to_node_names[job_name]
+                if job.status and job.status.completion_time:
+                    print(
+                        _format_string(
+                            f'GPU labeler job for node {node_name} '
+                            'completed successfully', colorama.Style.DIM))
+                    completed_jobs.append(job_name)
+                    num_remaining_jobs = len(jobs_to_node_names) - len(
+                        completed_jobs)
+                    if num_remaining_jobs == 0:
+                        w.stop()
+                        return True
+                elif job.status and job.status.failed:
+                    print(
+                        _format_string(
+                            f'GPU labeler job for node {node_name} failed',
+                            colorama.Style.DIM))
                     w.stop()
-                    return True
-            elif job.status and job.status.failed:
-                print(
-                    _format_string(
-                        f'GPU labeler job for node {node_name} failed',
-                        colorama.Style.DIM))
-                w.stop()
-                return False
+                    return False
+        return None  # Timeout
+
+    try:
+        result = _watch_jobs()
+        if result is not None:
+            return result
+    except kubernetes.api_exception() as e:
+        if e.status == 504 and 'Too large resource version' in str(e):
+            print(
+                _format_string(
+                    'Watch failed due to resource version mismatch. '
+                    'Restarting watch...', colorama.Fore.YELLOW))
+            # Restart watch without resource version - let Kubernetes choose
+            # starting point
+            result = _watch_jobs()
+            if result is not None:
+                return result
+        else:
+            # Re-raise other API exceptions
+            raise
+
     print(
         _format_string(
             f'Timed out after waiting {timeout} seconds '
             'for job to complete', colorama.Style.DIM))
-    return False  #Timed out
+    return False  # Timed out
 
 
 def main():
