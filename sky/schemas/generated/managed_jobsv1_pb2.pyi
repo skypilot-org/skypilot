@@ -82,6 +82,12 @@ class Fields(_message.Message):
     fields: _containers.RepeatedScalarFieldContainer[str]
     def __init__(self, fields: _Optional[_Iterable[str]] = ...) -> None: ...
 
+class Workspaces(_message.Message):
+    __slots__ = ("workspaces",)
+    WORKSPACES_FIELD_NUMBER: _ClassVar[int]
+    workspaces: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, workspaces: _Optional[_Iterable[str]] = ...) -> None: ...
+
 class GetVersionRequest(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
@@ -107,7 +113,7 @@ class GetJobTableRequest(_message.Message):
     SHOW_JOBS_WITHOUT_USER_HASH_FIELD_NUMBER: _ClassVar[int]
     FIELDS_FIELD_NUMBER: _ClassVar[int]
     skip_finished: bool
-    accessible_workspaces: _containers.RepeatedScalarFieldContainer[str]
+    accessible_workspaces: Workspaces
     job_ids: JobIds
     workspace_match: str
     name_match: str
@@ -118,7 +124,7 @@ class GetJobTableRequest(_message.Message):
     statuses: Statuses
     show_jobs_without_user_hash: bool
     fields: Fields
-    def __init__(self, skip_finished: bool = ..., accessible_workspaces: _Optional[_Iterable[str]] = ..., job_ids: _Optional[_Union[JobIds, _Mapping]] = ..., workspace_match: _Optional[str] = ..., name_match: _Optional[str] = ..., pool_match: _Optional[str] = ..., page: _Optional[int] = ..., limit: _Optional[int] = ..., user_hashes: _Optional[_Union[UserHashes, _Mapping]] = ..., statuses: _Optional[_Union[Statuses, _Mapping]] = ..., show_jobs_without_user_hash: bool = ..., fields: _Optional[_Union[Fields, _Mapping]] = ...) -> None: ...
+    def __init__(self, skip_finished: bool = ..., accessible_workspaces: _Optional[_Union[Workspaces, _Mapping]] = ..., job_ids: _Optional[_Union[JobIds, _Mapping]] = ..., workspace_match: _Optional[str] = ..., name_match: _Optional[str] = ..., pool_match: _Optional[str] = ..., page: _Optional[int] = ..., limit: _Optional[int] = ..., user_hashes: _Optional[_Union[UserHashes, _Mapping]] = ..., statuses: _Optional[_Union[Statuses, _Mapping]] = ..., show_jobs_without_user_hash: bool = ..., fields: _Optional[_Union[Fields, _Mapping]] = ...) -> None: ...
 
 class ManagedJobInfo(_message.Message):
     __slots__ = ("job_id", "task_id", "job_name", "task_name", "job_duration", "workspace", "status", "schedule_state", "resources", "cluster_resources", "cluster_resources_full", "cloud", "region", "infra", "accelerators", "recovery_count", "details", "failure_reason", "user_name", "user_hash", "submitted_at", "start_at", "end_at", "user_yaml", "entrypoint", "metadata", "pool", "pool_hash", "_job_id")

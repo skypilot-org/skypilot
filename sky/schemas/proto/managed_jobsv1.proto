@@ -60,6 +60,10 @@ message Fields {
   repeated string fields = 1;
 }
 
+message Workspaces {
+  repeated string workspaces = 1;
+}
+
 message GetVersionRequest {}
 
 message GetVersionResponse {
@@ -68,7 +72,7 @@ message GetVersionResponse {
 
 message GetJobTableRequest {
   bool skip_finished = 1;
-  repeated string accessible_workspaces = 2;
+  optional Workspaces accessible_workspaces = 2;
   optional JobIds job_ids = 3;
   optional string workspace_match = 4;
   optional string name_match = 5;

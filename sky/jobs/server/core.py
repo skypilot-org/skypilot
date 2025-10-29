@@ -793,7 +793,8 @@ def queue_v2(
         try:
             request = managed_jobsv1_pb2.GetJobTableRequest(
                 skip_finished=skip_finished,
-                accessible_workspaces=accessible_workspaces,
+                accessible_workspaces=(managed_jobsv1_pb2.Workspaces(
+                    workspaces=accessible_workspaces)),
                 job_ids=managed_jobsv1_pb2.JobIds(
                     ids=job_ids) if job_ids is not None else None,
                 workspace_match=workspace_match,

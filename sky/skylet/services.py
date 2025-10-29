@@ -407,8 +407,9 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
         context: grpc.ServicerContext
     ) -> managed_jobsv1_pb2.GetJobTableResponse:
         try:
-            accessible_workspaces = (list(request.accessible_workspaces)
-                                     if request.accessible_workspaces else None)
+            accessible_workspaces = (
+                list(request.accessible_workspaces.workspaces)
+                if request.HasField('accessible_workspaces') else None)
             job_ids = (list(request.job_ids.ids)
                        if request.HasField('job_ids') else None)
             user_hashes: Optional[List[Optional[str]]] = None
