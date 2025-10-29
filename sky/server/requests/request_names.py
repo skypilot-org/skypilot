@@ -7,7 +7,8 @@ class RequestName(str, enum.Enum):
     # General requests
     CHECK = 'check'
     ENABLED_CLOUDS = 'enabled_clouds'
-    REALTIME_KUBERNETES_GPU_AVAILABILITY = 'realtime_kubernetes_gpu_availability'
+    REALTIME_KUBERNETES_GPU_AVAILABILITY = (
+        'realtime_kubernetes_gpu_availability')
     KUBERNETES_NODE_INFO = 'kubernetes_node_info'
     STATUS_KUBERNETES = 'status_kubernetes'
     LIST_ACCELERATORS = 'list_accelerators'
