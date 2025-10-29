@@ -36,7 +36,8 @@ def _next_gc_interval(retention_seconds: int) -> int:
     # Run the GC at least per hour to ensure hourly accuracy and
     # at most per 30 seconds (when retention_seconds is small) to
     # avoid too frequent cleanup.
-    return max(min(retention_seconds, 3600), 30)
+    return max(min(retention_seconds, _LEAST_FREQUENT_GC_INTERVAL_SECONDS),
+               _MOST_FREQUENT_GC_INTERVAL_SECONDS)
 
 
 async def gc_controller_logs_for_job():
@@ -126,10 +127,9 @@ async def _clean_controller_logs_with_retention(retention_seconds: int,
             async with await anyio.open_file(log_file, 'w',
                                              encoding='utf-8') as f:
                 await f.write(msg + '\n')
-    if job_ids_to_update:
-        # Batch the update, the timestamp will be not accurate but it's okay.
-        await managed_job_state.set_controller_logs_cleaned_async(
-            job_ids=job_ids_to_update, logs_cleaned_at=time.time())
+    # Batch the update, the timestamp will be not accurate but it's okay.
+    await managed_job_state.set_controller_logs_cleaned_async(
+        job_ids=job_ids_to_update, logs_cleaned_at=time.time())
     complete = len(jobs) < batch_size
     logger.info(f'Cleaned {len(jobs)} controller logs with retention '
                 f'{retention_seconds} seconds, complete: {complete}')
@@ -163,9 +163,8 @@ async def _clean_task_logs_with_retention(retention_seconds: int,
                                       ignore_errors=True)
         # We have at least once semantic guarantee for the cleanup here.
         tasks_to_update.append((task['job_id'], task['task_id']))
-    if tasks_to_update:
-        await managed_job_state.set_task_logs_cleaned_async(
-            tasks=list(tasks_to_update), logs_cleaned_at=time.time())
+    await managed_job_state.set_task_logs_cleaned_async(
+        tasks=list(tasks_to_update), logs_cleaned_at=time.time())
     complete = len(tasks) < batch_size
     logger.info(f'Cleaned {len(tasks)} task logs with retention '
                 f'{retention_seconds} seconds, complete: {complete}')
