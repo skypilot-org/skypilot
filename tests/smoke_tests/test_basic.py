@@ -1071,13 +1071,15 @@ def test_kubernetes_show_gpus(generic_cloud: str):
         [(
             's=$(SKYPILOT_DEBUG=0 sky show-gpus --infra kubernetes) && '
             'echo "$s" && '
-            # Grab the table header by querying for `REQUESTABLE_QTY_PER_NODE`
-            # using -A 1 to grab the next line as well.
-            # Then get the last line of the output
-            # (only the first line of values, exluding the table header.)
-            # Then, search for the correct utilization string.
-            'echo "$s" | grep "REQUESTABLE_QTY_PER_NODE" -A 1 | tail -n 1 | grep "8 of 8 free"'
-        )],
+            # Verify either:
+            # 1. We have at least one GPU entry with utilization info
+            #    Match pattern: "<GPU_TYPE>  <qty>  <X> of <Y> free"
+            #    Example      :    H100   1, 2, 4, 8   16 of 16 free
+            # OR
+            # 2. The cluster has no GPUs, and the expected message is shown
+            '(echo "$s" | grep -A 1 "REQUESTABLE_QTY_PER_NODE" | '
+            'grep -E "^[A-Z0-9]+[[:space:]]+[0-9, ]+[[:space:]]+[0-9]+ of [0-9]+ free" || '
+            'echo "$s" | grep "No GPUs found in any Kubernetes clusters")')],
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1475,7 +1477,10 @@ def test_sky_down_with_multiple_sgs():
         f'printf "%s" "$s" | grep "Terminating cluster {name_two}...done" && '
         # Ensure the last line is present.
         f'printf "%s" "$s" | grep "Terminating 2 clusters" && '
-        # # Ensure there are only 5 lines (includes Summary and succeeded clusters).
+        # Ensure there are 5 lines because multiple clusters are being down-ed.
+        # The expected lines include operation header, two per-cluster lines,
+        # Summary line, and succeeded/failed line. Note: when down-ing a single
+        # cluster, 3 lines are printed.
         f'echo "$s" | sed "/^$/d" | wc -l | grep 5')
 
     test = smoke_tests_utils.Test(

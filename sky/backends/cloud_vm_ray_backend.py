@@ -2369,9 +2369,8 @@ class RetryingVmProvisioner(object):
                 for (resource, exception) in resource_exceptions.items():
                     table.add_row([
                         resource.infra.formatted_str(),
-                        resources_utils.format_resource(resource,
-                                                        simplify=True),
-                        exception
+                        resources_utils.format_resource(
+                            resource, simplified_only=True)[0], exception
                     ])
                 # Set the max width of REASON column to 80 to avoid the table
                 # being wrapped in a unreadable way.

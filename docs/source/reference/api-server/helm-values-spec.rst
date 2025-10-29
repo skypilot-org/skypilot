@@ -73,6 +73,10 @@ Below is the available helm value keys and the default value of each key:
     :ref:`extraEnvs <helm-values-apiService-extraEnvs>`: null
     :ref:`extraVolumes <helm-values-apiService-extraVolumes>`: null
     :ref:`extraVolumeMounts <helm-values-apiService-extraVolumeMounts>`: null
+    :ref:`logs <helm-values-apiService-logs>`:
+      :ref:`retention <helm-values-apiService-logs-retention>`:
+        :ref:`enabled <helm-values-apiService-logs-retention-enabled>`: false
+        :ref:`size <helm-values-apiService-logs-retention-size>`: 10M
 
   :ref:`auth <helm-values-auth>`:
     :ref:`oauth <helm-values-auth-oauth>`:
@@ -690,6 +694,62 @@ Default: ``null``
       - name: my-volume
         mountPath: /my-path
         subPath: my-file
+
+.. _helm-values-apiService-logs:
+
+``apiService.logs``
+^^^^^^^^^^^^^^^^^^^
+
+Configuration for managing API server logs.
+
+Default: see the yaml below.
+
+.. code-block:: yaml
+
+  apiService:
+    logs:
+      retention:
+        enabled: false
+        size: 10M
+
+.. _helm-values-apiService-logs-retention:
+
+``apiService.logs.retention``
+'''''''''''''''''''''''''''''
+
+Configuration for log retention settings.
+
+.. _helm-values-apiService-logs-retention-enabled:
+
+``apiService.logs.retention.enabled``
+''''''''''''''''''''''''''''''''''''''
+
+Whether to enable log retention for the API server. When enabled, logs will be automatically rotated and managed according to the specified size limit.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  apiService:
+    logs:
+      retention:
+        enabled: true
+
+.. _helm-values-apiService-logs-retention-size:
+
+``apiService.logs.retention.size``
+'''''''''''''''''''''''''''''''''''
+
+The maximum size of the log file before rotation. When the log file reaches this size, it will be rotated to preserve disk space. Only used when ``enabled`` is ``true``.
+
+Default: ``10M``
+
+.. code-block:: yaml
+
+  apiService:
+    logs:
+      retention:
+        size: 50M
 
 
 .. _helm-values-auth:
