@@ -894,7 +894,8 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def _current_identity_type(cls) -> Optional[AWSIdentityType]:
-        stdout = cls._aws_configure_list()
+        profile = aws.get_workspace_profile()
+        stdout = cls._aws_configure_list(profile)
         if stdout is None:
             return None
         output = stdout.decode()
@@ -924,9 +925,14 @@ class AWS(clouds.Cloud):
         return AWSIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
-    @annotations.lru_cache(scope='request', maxsize=1)
-    def _aws_configure_list(cls) -> Optional[bytes]:
-        proc = subprocess.run('aws configure list',
+    @annotations.lru_cache(scope='request', maxsize=5)
+    def _aws_configure_list(cls, profile: Optional[str]) -> Optional[bytes]:
+        cmd = 'aws configure list'
+        # Profile takes precedence over default configs.
+        if profile is not None:
+            # If profile does not exist, we will get returncode 255.
+            cmd += f' --profile {profile}'
+        proc = subprocess.run(cmd,
                               shell=True,
                               check=False,
                               stdout=subprocess.PIPE,
@@ -1055,7 +1061,8 @@ class AWS(clouds.Cloud):
             exceptions.CloudUserIdentityError: if the user identity cannot be
                 retrieved.
         """
-        stdout = cls._aws_configure_list()
+        profile = aws.get_workspace_profile()
+        stdout = cls._aws_configure_list(profile)
         if stdout is None:
             # `aws configure list` is not available, possible reasons:
             # - awscli is not installed but credentials are valid, e.g. run from
@@ -1114,6 +1121,8 @@ class AWS(clouds.Cloud):
         # provider of the cluster to be launched in this function and make sure
         # the cluster will not be used for launching clusters in other clouds,
         # e.g. jobs controller.
+
+        # TODO(DO NOT MERGE): Only include the profile set in the workspace config (if any)?
         if self._current_identity_type(
         ) != AWSIdentityType.SHARED_CREDENTIALS_FILE:
             return {}

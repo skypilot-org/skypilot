@@ -408,3 +408,48 @@ class TestEfaHelpers:
         )
         with pytest.raises(ValueError):
             aws_mod._get_max_efa_interfaces('g6.12xlarge', 'ap-northeast-1')
+
+
+class TestAwsConfigureList:
+
+    @mock.patch('subprocess.run')
+    def test_command_generation_with_profiles(self, mock_run):
+        """Test command generation with no profile, with profile, and different profiles."""
+        mock_result = mock.Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = b'output'
+        mock_run.return_value = mock_result
+
+        aws_mod.AWS._aws_configure_list.cache_clear()
+
+        # Test with no profile
+        aws_mod.AWS._aws_configure_list(profile=None)
+        assert mock_run.call_args[0][0] == 'aws configure list'
+
+        # Test with profile
+        aws_mod.AWS._aws_configure_list(profile='dev')
+        assert mock_run.call_args[0][0] == 'aws configure list --profile dev'
+
+        # Test with different profiles
+        aws_mod.AWS._aws_configure_list(profile='profile1')
+        assert mock_run.call_args[0][
+            0] == 'aws configure list --profile profile1'
+
+    @mock.patch('subprocess.run')
+    def test_caching_behavior(self, mock_run):
+        """Test caching: same profile cached, different profiles not cached."""
+        mock_result = mock.Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = b'output'
+        mock_run.return_value = mock_result
+
+        aws_mod.AWS._aws_configure_list.cache_clear()
+
+        # Same profile should be cached
+        aws_mod.AWS._aws_configure_list(profile='test')
+        aws_mod.AWS._aws_configure_list(profile='test')
+        assert mock_run.call_count == 1
+
+        # Different profiles should NOT be cached together
+        aws_mod.AWS._aws_configure_list(profile='other')
+        assert mock_run.call_count == 2
