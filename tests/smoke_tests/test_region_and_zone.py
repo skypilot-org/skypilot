@@ -284,23 +284,21 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     }
 
     enabled_cloud_storages = smoke_tests_utils.get_enabled_cloud_storages()
-    if len(enabled_cloud_storages) == 0:
-        raise ValueError(f'No cloud storage is enabled.')
 
-    allowed_cloud_storages = [clouds.AWS(), clouds.GCP(), clouds.Azure()]
-
-    store_type = None
-    if generic_cloud in allowed_cloud_storages:
-        # We just use the matching store type.
-        store_type = cloud_to_store_type[generic_cloud]
-    else:
-        # We use the first enabled cloud storage we can find.
-        for cloud_storage in allowed_cloud_storages:
-            if clouds.cloud_in_iterable(cloud_storage, enabled_cloud_storages):
-                store_type = cloud_to_store_type[cloud_storage.canonical_name()]
-                break
-    if store_type is None:
+    allowed_cloud_storages = [clouds.Azure(), clouds.AWS(), clouds.GCP()]
+    allowed_and_enabled = [
+        cloud_storage for cloud_storage in allowed_cloud_storages
+        if clouds.cloud_in_iterable(cloud_storage, enabled_cloud_storages)
+    ]
+    if len(allowed_and_enabled) == 0:
         raise ValueError(f'No eligible enabled storage type found.')
+
+    store_type = cloud_to_store_type[allowed_and_enabled[0].canonical_name()]
+    # Try to match the generic_cloud with an enabled storage
+    for cloud_storage in allowed_and_enabled:
+        if cloud_storage.canonical_name() == generic_cloud:
+            store_type = cloud_to_store_type[cloud_storage.canonical_name()]
+            break
 
     if smoke_tests_utils.is_non_docker_remote_api_server():
         enabled_cloud_storages = smoke_tests_utils.get_enabled_cloud_storages()
