@@ -61,8 +61,78 @@ import {
 } from '@/components/ui/dialog';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import { statusGroups } from '@/components/jobs';
+import {
+  FilterDropdown,
+  Filters,
+  updateURLParams as sharedUpdateURLParams,
+  updateFiltersByURLParams as sharedUpdateFiltersByURLParams,
+  filterData,
+} from '@/components/shared/FilterSystem';
 
 const ACTIVE_JOB_STATUSES = new Set(statusGroups.active);
+
+// Define filter options for the filter dropdown
+const PROPERTY_OPTIONS = [
+  {
+    label: 'Name',
+    value: 'name',
+  },
+  {
+    label: 'User ID',
+    value: 'user id', // Match valueList key
+  },
+  {
+    label: 'Role',
+    value: 'role',
+  },
+  {
+    label: 'GPU Type',
+    value: 'gpu type', // Match valueList key
+  },
+  {
+    label: 'Infra',
+    value: 'infra',
+  },
+];
+
+// Helper function to get GPU count with validation
+const getGPUCount = (accelerators, source) => {
+  if (!accelerators) return 0;
+
+  let parsed = accelerators;
+
+  // Handle string format (from clusters): "{'V100': 4}"
+  if (typeof accelerators === 'string') {
+    try {
+      const jsonStr = accelerators.replace(/'/g, '"').replace(/None/g, 'null');
+      parsed = JSON.parse(jsonStr);
+    } catch (e) {
+      console.error('Failed to parse accelerators string:', accelerators, e);
+      return 0;
+    }
+  }
+
+  // Validate and extract GPU count
+  if (typeof parsed === 'object' && parsed !== null) {
+    const entries = Object.entries(parsed);
+
+    if (entries.length === 0) {
+      return 0;
+    }
+
+    if (entries.length > 1) {
+      console.warn(
+        `${source} has ${entries.length} accelerator entries:`,
+        parsed
+      );
+    }
+
+    // Return the first (and ideally only) GPU count
+    return Number(entries[0][1]) || 0;
+  }
+
+  return 0;
+};
 
 // Helper functions for username parsing
 const parseUsername = (username, userId) => {
@@ -193,6 +263,14 @@ export function Users() {
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [serviceAccountSearchQuery, setServiceAccountSearchQuery] =
     useState('');
+  const [filters, setFilters] = useState([]);
+  const [valueList, setValueList] = useState({
+    name: [],
+    'user id': [],
+    role: [],
+    'gpu type': [],
+    infra: [],
+  });
 
   // Initialize deduplicateUsers from URL parameter
   const getInitialDeduplicateUsers = () => {
@@ -215,9 +293,11 @@ export function Users() {
     if (router.isReady) {
       const deduplicateParam = router.query.deduplicate;
 
-      // If URL has no deduplicate parameter, set it to the default (true)
+      // If URL has no deduplicate parameter, set it to the default
+      // Default to false for SSO (userEmail exists), true for non-SSO
       if (deduplicateParam === undefined) {
-        updateDeduplicateURL(true);
+        const defaultValue = !userEmail; // false for SSO, true for non-SSO
+        updateDeduplicateURL(defaultValue);
       } else {
         const expectedState = deduplicateParam === 'true';
         if (deduplicateUsers !== expectedState) {
@@ -226,7 +306,7 @@ export function Users() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router.isReady, router.query.deduplicate]);
+  }, [router.isReady, router.query.deduplicate, userEmail]);
 
   // Helper function to update deduplicate in URL
   const updateDeduplicateURL = (deduplicateValue) => {
@@ -243,6 +323,31 @@ export function Users() {
       { shallow: true }
     );
   };
+
+  // Helper function to update URL query parameters for filters
+  const updateURLParams = (filters) => {
+    sharedUpdateURLParams(router, filters);
+  };
+
+  // Create property map for filter URL parameters
+  const propertyMap = new Map([
+    ['name', 'Name'],
+    ['user id', 'User ID'], // Note: lowercase with space to match URL encoding
+    ['role', 'Role'],
+    ['gpu type', 'GPU Type'], // Note: lowercase with space to match URL encoding
+    ['infra', 'Infra'],
+  ]);
+
+  // Initialize filters from URL parameters
+  useEffect(() => {
+    if (router.isReady && activeMainTab === 'users') {
+      const urlFilters = sharedUpdateFiltersByURLParams(router, propertyMap);
+      if (urlFilters.length > 0) {
+        setFilters(urlFilters);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.isReady, activeMainTab]);
 
   // Handle URL parameters for tab selection
   useEffect(() => {
@@ -605,60 +710,54 @@ export function Users() {
         </div>
       </div>
 
-      {/* Search and Create Service Account Row */}
+      {/* Filter/Search and Create Service Account Row */}
       <div className="flex items-center justify-between mb-4">
-        <div className="relative flex-1 max-w-md">
-          <input
-            type="text"
-            placeholder={
-              activeMainTab === 'users'
-                ? 'Search users by name, email, or role'
-                : 'Search by service account name, or created by'
-            }
-            value={
-              activeMainTab === 'users'
-                ? userSearchQuery
-                : serviceAccountSearchQuery
-            }
-            onChange={(e) => {
-              if (activeMainTab === 'users') {
-                setUserSearchQuery(e.target.value);
-              } else {
+        {activeMainTab === 'users' ? (
+          <div className="w-full sm:w-auto max-w-md">
+            <FilterDropdown
+              propertyList={PROPERTY_OPTIONS}
+              valueList={valueList}
+              setFilters={setFilters}
+              updateURLParams={updateURLParams}
+              placeholder="Filter users"
+            />
+          </div>
+        ) : (
+          <div className="relative flex-1 max-w-md">
+            <input
+              type="text"
+              placeholder="Search by service account name, or created by"
+              value={serviceAccountSearchQuery}
+              onChange={(e) => {
                 setServiceAccountSearchQuery(e.target.value);
-              }
-            }}
-            className="h-8 w-full px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
-          />
-          {((activeMainTab === 'users' && userSearchQuery) ||
-            (activeMainTab === 'service-accounts' &&
-              serviceAccountSearchQuery)) && (
-            <button
-              onClick={() => {
-                if (activeMainTab === 'users') {
-                  setUserSearchQuery('');
-                } else {
-                  setServiceAccountSearchQuery('');
-                }
               }}
-              className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              title="Clear search"
-            >
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+              className="h-8 w-full px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
+            />
+            {serviceAccountSearchQuery && (
+              <button
+                onClick={() => {
+                  setServiceAccountSearchQuery('');
+                }}
+                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                title="Clear search"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
-          )}
-        </div>
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Deduplicate Users Toggle - only show on users tab when NOT using SSO/OAuth2 */}
         {activeMainTab === 'users' && !userEmail && (
@@ -710,6 +809,15 @@ export function Users() {
         )}
       </div>
 
+      {/* Display Active Filters - only for users tab */}
+      {activeMainTab === 'users' && (
+        <Filters
+          filters={filters}
+          setFilters={setFilters}
+          updateURLParams={updateURLParams}
+        />
+      )}
+
       {/* Error/Success messages positioned at top right, below navigation bar */}
       <div className="fixed top-20 right-4 z-[9999] max-w-md">
         <SuccessDisplay
@@ -735,8 +843,8 @@ export function Users() {
           basicAuthEnabled={basicAuthEnabled}
           currentUserRole={userRoleCache?.role}
           currentUserId={userRoleCache?.id}
-          searchQuery={userSearchQuery}
-          setSearchQuery={setUserSearchQuery}
+          filters={filters}
+          setValueList={setValueList}
           deduplicateUsers={deduplicateUsers}
         />
       ) : (
@@ -1156,8 +1264,8 @@ function UsersTable({
   basicAuthEnabled,
   currentUserRole,
   currentUserId,
-  searchQuery,
-  setSearchQuery,
+  filters,
+  setValueList,
   deduplicateUsers,
 }) {
   const [usersWithCounts, setUsersWithCounts] = useState([]);
@@ -1170,10 +1278,16 @@ function UsersTable({
   const [editingUserId, setEditingUserId] = useState(null);
   const [currentEditingRole, setCurrentEditingRole] = useState('');
 
+  // Lookup dictionary for GPU type and infra filtering
+  // Structure: infra -> gpuType -> userId -> { clusterCount, jobCount, gpuCount }
+  const [combinedLookup, setCombinedLookup] = useState({});
+  const [lookupsReady, setLookupsReady] = useState(false);
+
   const fetchDataAndProcess = useCallback(
     async (showLoading = false) => {
       if (setLoading && showLoading) setLoading(true);
       if (showLoading) setIsLoading(true);
+      setLookupsReady(false); // Reset lookups state when starting to fetch
       try {
         // Step 1: Load users first and show them immediately
         const usersData = await dashboardCache.get(getUsers);
@@ -1185,6 +1299,7 @@ function UsersTable({
           fullEmailID: getFullEmailID(user.username, user.userId),
           clusterCount: -1, // Use -1 as loading indicator
           jobCount: -1, // Use -1 as loading indicator
+          gpuCount: -1, // Use -1 as loading indicator
         }));
 
         setUsersWithCounts(initialProcessedUsers);
@@ -1201,29 +1316,221 @@ function UsersTable({
             {
               allUsers: true,
               skipFinished: true,
-              fields: ['user_hash', 'status'],
+              fields: [
+                'user_hash',
+                'status',
+                'accelerators',
+                'job_name',
+                'job_id',
+                'infra',
+              ],
             },
           ]),
         ]);
 
         const jobsData = managedJobsResponse.jobs || [];
 
-        // Update users with actual counts
-        const finalProcessedUsers = (usersData || []).map((user) => {
-          const userClusters = (clustersData || []).filter(
-            (c) => c.user_hash === user.userId
+        // Build combined lookup dictionary for GPU type and infra filtering
+        // Structure: infra -> gpuType -> userId -> { clusterCount, jobCount, gpuCount }
+        const newCombinedLookup = {};
+
+        // Helper to extract GPU type from accelerators
+        const extractGPUType = (accelerators) => {
+          if (!accelerators) return null;
+
+          let parsed = accelerators;
+          if (typeof accelerators === 'string') {
+            try {
+              const jsonStr = accelerators
+                .replace(/'/g, '"')
+                .replace(/None/g, 'null');
+              parsed = JSON.parse(jsonStr);
+            } catch (e) {
+              return null;
+            }
+          }
+
+          if (typeof parsed === 'object' && parsed !== null) {
+            const entries = Object.entries(parsed);
+            if (entries.length > 0) {
+              return entries[0][0]; // Return GPU type (the key)
+            }
+          }
+          return null;
+        };
+
+        // Helper to update combined lookup
+        const updateCombinedLookup = (
+          infra,
+          gpuType,
+          userId,
+          clusterDelta,
+          jobDelta,
+          gpuDelta
+        ) => {
+          if (!infra || !gpuType || !userId) return;
+
+          if (!newCombinedLookup[infra]) {
+            newCombinedLookup[infra] = {};
+          }
+          if (!newCombinedLookup[infra][gpuType]) {
+            newCombinedLookup[infra][gpuType] = {};
+          }
+          if (!newCombinedLookup[infra][gpuType][userId]) {
+            newCombinedLookup[infra][gpuType][userId] = {
+              clusterCount: 0,
+              jobCount: 0,
+              gpuCount: 0,
+            };
+          }
+          newCombinedLookup[infra][gpuType][userId].clusterCount +=
+            clusterDelta;
+          newCombinedLookup[infra][gpuType][userId].jobCount += jobDelta;
+          newCombinedLookup[infra][gpuType][userId].gpuCount += gpuDelta;
+        };
+
+        // Process clusters to build lookup
+        for (const cluster of clustersData || []) {
+          const userId = cluster.user_hash;
+          if (!userId) continue;
+
+          const gpuType = extractGPUType(cluster.gpus);
+          const infra = cluster.infra;
+
+          // Count GPUs (only from active clusters)
+          let gpuCount = 0;
+          if (cluster.status !== 'STOPPED' && cluster.status !== 'TERMINATED') {
+            const gpuCountPerNode = getGPUCount(
+              cluster.gpus,
+              `Cluster ${cluster.cluster}`
+            );
+            // Multiply by number of nodes to get total GPU count
+            const numNodes = cluster.num_nodes || 1;
+            gpuCount = gpuCountPerNode * numNodes;
+          }
+
+          updateCombinedLookup(infra, gpuType, userId, 1, 0, gpuCount);
+        }
+
+        // Helper to extract num_nodes from cluster_resources_full (e.g., "3x(...)")
+        const extractNumNodes = (clusterResourcesFull) => {
+          if (
+            !clusterResourcesFull ||
+            typeof clusterResourcesFull !== 'string'
+          ) {
+            return 1;
+          }
+          const match = clusterResourcesFull.match(/^(\d+)x/);
+          return match ? parseInt(match[1], 10) : 1;
+        };
+
+        // Process jobs to build lookup
+        for (const job of jobsData || []) {
+          if (!ACTIVE_JOB_STATUSES.has(job.status)) continue;
+
+          const userId = job.user_hash;
+          if (!userId) continue;
+
+          const gpuType = extractGPUType(job.accelerators);
+          const infra = job.infra;
+          const gpuCountPerNode = getGPUCount(
+            job.accelerators,
+            `Job ${job.job_id}`
           );
-          const activeJobCount = (jobsData || []).filter(
-            (j) =>
-              j.user_hash === user.userId && ACTIVE_JOB_STATUSES.has(j.status)
-          ).length;
+
+          // Multiply by number of nodes to get total GPU count
+          const numNodes = extractNumNodes(job.resources_str_full);
+          const gpuCount = gpuCountPerNode * numNodes;
+
+          updateCombinedLookup(infra, gpuType, userId, 0, 1, gpuCount);
+        }
+
+        // Store the lookup dictionary
+        setCombinedLookup(newCombinedLookup);
+        setLookupsReady(true); // Mark lookups as ready
+
+        // Update users with actual counts (without filter applied)
+        const finalProcessedUsers = (usersData || []).map((user) => {
+          let clusterCount = 0;
+          let clusterGPUCount = 0;
+          let jobCount = 0;
+          let jobGPUCount = 0;
+
+          // Count clusters and sum GPUs in one pass (exclude STOPPED and TERMINATED clusters from GPU count)
+          for (const cluster of clustersData || []) {
+            if (cluster.user_hash === user.userId) {
+              clusterCount++;
+              // Only count GPUs from active clusters (exclude STOPPED and TERMINATED)
+              if (
+                cluster.status !== 'STOPPED' &&
+                cluster.status !== 'TERMINATED'
+              ) {
+                const gpuCountPerNode = getGPUCount(
+                  cluster.gpus,
+                  `Cluster ${cluster.cluster}`
+                );
+                // Multiply by number of nodes to get total GPU count
+                const numNodes = cluster.num_nodes || 1;
+                clusterGPUCount += gpuCountPerNode * numNodes;
+              }
+            }
+          }
+
+          // Count active jobs and sum GPUs in one pass
+          for (const job of jobsData || []) {
+            if (
+              job.user_hash === user.userId &&
+              ACTIVE_JOB_STATUSES.has(job.status)
+            ) {
+              jobCount++;
+              const gpuCountPerNode = getGPUCount(
+                job.accelerators,
+                `Job ${job.job_id}`
+              );
+              // Multiply by number of nodes to get total GPU count
+              const numNodes = extractNumNodes(job.resources_str_full);
+              jobGPUCount += gpuCountPerNode * numNodes;
+            }
+          }
+
           return {
             ...user,
             usernameDisplay: parseUsername(user.username, user.userId),
             fullEmailID: getFullEmailID(user.username, user.userId),
-            clusterCount: userClusters.length,
-            jobCount: activeJobCount,
+            clusterCount,
+            jobCount,
+            gpuCount: clusterGPUCount + jobGPUCount,
           };
+        });
+
+        // Collect unique GPU types and infra values for filter dropdowns
+        const infras = new Set();
+        const gpuTypes = new Set();
+
+        for (const [infra, gpuTypeMap] of Object.entries(newCombinedLookup)) {
+          infras.add(infra);
+          for (const gpuType of Object.keys(gpuTypeMap)) {
+            gpuTypes.add(gpuType);
+          }
+        }
+
+        // Update valueList for filter autocomplete
+        const names = new Set();
+        const userIds = new Set();
+        const roles = new Set();
+
+        finalProcessedUsers.forEach((user) => {
+          if (user.usernameDisplay) names.add(user.usernameDisplay);
+          if (user.userId) userIds.add(user.userId);
+          if (user.role) roles.add(user.role);
+        });
+
+        setValueList({
+          name: Array.from(names).sort(),
+          'user id': Array.from(userIds).sort(),
+          role: Array.from(roles).sort(),
+          'gpu type': Array.from(gpuTypes).sort(),
+          infra: Array.from(infras).sort(),
         });
 
         setUsersWithCounts(finalProcessedUsers);
@@ -1269,14 +1576,138 @@ function UsersTable({
   const filteredAndSortedUsers = useMemo(() => {
     let filtered = usersWithCounts;
 
-    if (searchQuery?.trim()) {
-      const query = searchQuery.toLowerCase();
-      filtered = usersWithCounts.filter(
-        (user) =>
-          user.usernameDisplay?.toLowerCase().includes(query) ||
-          user.fullEmailID?.toLowerCase().includes(query) ||
-          user.role?.toLowerCase().includes(query)
+    // Separate GPU type and infra filters from standard filters
+    // Note: filter.property contains the label (e.g., "GPU Type", "Infra"), not the value
+    const standardFilters = filters.filter(
+      (f) => f.property !== 'GPU Type' && f.property !== 'Infra'
+    );
+    const gpuTypeFilters = filters.filter((f) => f.property === 'GPU Type');
+    const infraFilters = filters.filter((f) => f.property === 'Infra');
+
+    // Apply standard filters using the shared filter system
+    if (standardFilters.length > 0) {
+      filtered = filterData(
+        usersWithCounts.map((user) => ({
+          ...user,
+          name: user.usernameDisplay,
+          'user id': user.userId, // Note: space to match "User ID" -> "user id" from toLowerCase()
+        })),
+        standardFilters
       );
+    }
+
+    // Helper to get counts from lookup for a user given filter criteria
+    // gpuTypeFilters and infraFilters are arrays - we OR within same type, AND across types
+    const getFilteredCounts = (
+      userId,
+      gpuTypeFilterValues,
+      infraFilterValues
+    ) => {
+      let clusterCount = 0;
+      let jobCount = 0;
+      let gpuCount = 0;
+
+      // Normalize filter values to lowercase
+      const normalizedGpuTypes = gpuTypeFilterValues.map((v) =>
+        v.toLowerCase()
+      );
+      const normalizedInfras = infraFilterValues.map((v) => v.toLowerCase());
+
+      const hasGpuTypeFilters = normalizedGpuTypes.length > 0;
+      const hasInfraFilters = normalizedInfras.length > 0;
+
+      // Iterate through the combined lookup
+      for (const [infra, gpuTypeMap] of Object.entries(combinedLookup)) {
+        const infraLower = infra.toLowerCase();
+
+        // Check if this infra matches any of the infra filters (OR logic within infra)
+        const infraMatches =
+          !hasInfraFilters || normalizedInfras.includes(infraLower);
+
+        if (infraMatches) {
+          for (const [gpuType, userMap] of Object.entries(gpuTypeMap)) {
+            const gpuTypeLower = gpuType.toLowerCase();
+
+            // Check if this GPU type matches any of the GPU type filters (OR logic within GPU type)
+            const gpuTypeMatches =
+              !hasGpuTypeFilters || normalizedGpuTypes.includes(gpuTypeLower);
+
+            if (gpuTypeMatches && userMap[userId]) {
+              const counts = userMap[userId];
+              clusterCount += counts.clusterCount;
+              jobCount += counts.jobCount;
+              gpuCount += counts.gpuCount;
+            }
+          }
+        }
+      }
+
+      return { clusterCount, jobCount, gpuCount };
+    };
+
+    // Apply GPU type and infra filters
+    const hasGpuTypeFilter = gpuTypeFilters.length > 0;
+    const hasInfraFilter = infraFilters.length > 0;
+
+    if (hasGpuTypeFilter || hasInfraFilter) {
+      // Extract filter values - support multiple filters of same type (OR logic)
+      const gpuTypeFilterValues = gpuTypeFilters
+        .map((f) => f.value)
+        .filter(Boolean);
+      const infraFilterValues = infraFilters
+        .map((f) => f.value)
+        .filter(Boolean);
+
+      // Normalize to lowercase for matching
+      const normalizedGpuTypes = gpuTypeFilterValues.map((v) =>
+        v.toLowerCase()
+      );
+      const normalizedInfras = infraFilterValues.map((v) => v.toLowerCase());
+
+      // Filter users: check if they have ANY resources matching the filters
+      filtered = filtered.filter((user) => {
+        // Iterate through lookup to see if user has any matching resources
+        for (const [infra, gpuTypeMap] of Object.entries(combinedLookup)) {
+          const infraLower = infra.toLowerCase();
+
+          // Check if this infra matches any of the infra filters (OR logic)
+          const infraMatches =
+            !hasInfraFilter || normalizedInfras.includes(infraLower);
+
+          if (infraMatches) {
+            for (const [gpuType, userMap] of Object.entries(gpuTypeMap)) {
+              const gpuTypeLower = gpuType.toLowerCase();
+
+              // Check if this GPU type matches any of the GPU type filters (OR logic)
+              const gpuTypeMatches =
+                !hasGpuTypeFilter || normalizedGpuTypes.includes(gpuTypeLower);
+
+              // If both match (AND between types, OR within type) and user has resources, include them
+              if (gpuTypeMatches && userMap[user.userId]) {
+                return true;
+              }
+            }
+          }
+        }
+
+        return false;
+      });
+
+      // Update counts for filtered users
+      filtered = filtered.map((user) => {
+        const filteredCounts = getFilteredCounts(
+          user.userId,
+          gpuTypeFilterValues,
+          infraFilterValues
+        );
+
+        return {
+          ...user,
+          clusterCount: filteredCounts.clusterCount,
+          jobCount: filteredCounts.jobCount,
+          gpuCount: filteredCounts.gpuCount,
+        };
+      });
     }
 
     // Deduplicate by username if toggle is enabled
@@ -1293,6 +1724,7 @@ function UsersTable({
             // Track counts that will be summed
             clusterCount: user.clusterCount,
             jobCount: user.jobCount,
+            gpuCount: user.gpuCount,
             // Track the oldest created_at
             created_at: user.created_at,
           };
@@ -1322,6 +1754,15 @@ function UsersTable({
             }
           }
 
+          // Sum GPU counts (same logic)
+          if (user.gpuCount !== -1) {
+            if (deduped[name].gpuCount === -1) {
+              deduped[name].gpuCount = user.gpuCount;
+            } else {
+              deduped[name].gpuCount += user.gpuCount;
+            }
+          }
+
           // Keep the oldest created_at
           if (
             user.created_at &&
@@ -1336,7 +1777,7 @@ function UsersTable({
     }
 
     return sortData(filtered, sortConfig.key, sortConfig.direction);
-  }, [usersWithCounts, sortConfig, searchQuery, deduplicateUsers]);
+  }, [usersWithCounts, sortConfig, filters, deduplicateUsers, combinedLookup]);
 
   const requestSort = (key) => {
     let direction = 'ascending';
@@ -1410,17 +1851,30 @@ function UsersTable({
     );
   }
 
+  // Check if we're still loading lookups for GPU/Infra filters
+  const hasGpuOrInfraFilters = filters.some(
+    (f) => f.property === 'GPU Type' || f.property === 'Infra'
+  );
+  if (hasGpuOrInfraFilters && !lookupsReady) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <CircularProgress />
+        <span className="ml-2 text-gray-500">Loading filtered data...</span>
+      </div>
+    );
+  }
+
   if (!filteredAndSortedUsers || filteredAndSortedUsers.length === 0) {
     return (
       <div className="text-center py-12">
         <p className="text-lg font-semibold text-gray-500">
-          {searchQuery?.trim()
-            ? 'No users match your search.'
+          {filters.length > 0
+            ? 'No users match your filters.'
             : 'No users found.'}
         </p>
         <p className="text-sm text-gray-400 mt-1">
-          {searchQuery?.trim()
-            ? 'Try adjusting your search terms.'
+          {filters.length > 0
+            ? 'Try adjusting your filter criteria.'
             : 'There are currently no users to display.'}
         </p>
       </div>
@@ -1472,6 +1926,12 @@ function UsersTable({
                 className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
               >
                 Jobs{getSortDirection('jobCount')}
+              </TableHead>
+              <TableHead
+                onClick={() => requestSort('gpuCount')}
+                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+              >
+                GPUs{getSortDirection('gpuCount')}
               </TableHead>
               {/* Show Actions column if basicAuthEnabled and not deduplicating */}
               {!deduplicateUsers &&
@@ -1590,6 +2050,25 @@ function UsersTable({
                     >
                       {user.jobCount}
                     </Link>
+                  )}
+                </TableCell>
+                <TableCell>
+                  {user.gpuCount === -1 ? (
+                    <span className="px-2 py-0.5 bg-gray-100 text-gray-400 rounded text-xs font-medium flex items-center">
+                      <CircularProgress size={10} className="mr-1" />
+                      Loading...
+                    </span>
+                  ) : (
+                    <span
+                      className={`px-2 py-0.5 rounded text-xs font-medium ${
+                        user.gpuCount > 0
+                          ? 'bg-purple-100 text-purple-600'
+                          : 'bg-gray-100 text-gray-500'
+                      }`}
+                      title={`Total GPUs: ${user.gpuCount}`}
+                    >
+                      {user.gpuCount}
+                    </span>
                   )}
                 </TableCell>
                 {/* Actions cell logic - hide when deduplicating */}
@@ -1733,7 +2212,7 @@ function ServiceAccountTokensView({
           {
             allUsers: true,
             skipFinished: true,
-            fields: ['user_hash', 'status'],
+            fields: ['user_hash', 'status', 'accelerators', 'job_id', 'infra'],
           },
         ]),
       ]);
@@ -1744,23 +2223,47 @@ function ServiceAccountTokensView({
       // Step 3: Calculate counts for each service account
       const enhancedTokens = (tokensData || []).map((token) => {
         const serviceAccountId = token.service_account_user_id;
+        let clusterCount = 0;
+        let clusterGPUCount = 0;
+        let jobCount = 0;
+        let jobGPUCount = 0;
 
-        // Count clusters owned by this service account
-        const serviceAccountClusters = clustersData.filter(
-          (cluster) => cluster.user_hash === serviceAccountId
-        );
+        // Count clusters and sum GPUs in one pass (exclude STOPPED and TERMINATED clusters from GPU count)
+        for (const cluster of clustersData) {
+          if (cluster.user_hash === serviceAccountId) {
+            clusterCount++;
+            // Only count GPUs from active clusters (exclude STOPPED and TERMINATED)
+            if (
+              cluster.status !== 'STOPPED' &&
+              cluster.status !== 'TERMINATED'
+            ) {
+              clusterGPUCount += getGPUCount(
+                cluster.gpus,
+                `Cluster ${cluster.cluster}`
+              );
+            }
+          }
+        }
 
-        // Count jobs owned by this service account
-        const serviceAccountJobs = jobsData.filter(
-          (job) =>
+        // Count active jobs and sum GPUs in one pass
+        for (const job of jobsData) {
+          if (
             job.user_hash === serviceAccountId &&
             ACTIVE_JOB_STATUSES.has(job.status)
-        );
+          ) {
+            jobCount++;
+            jobGPUCount += getGPUCount(
+              job.accelerators,
+              `Job ${job.job_name || job.job_id}`
+            );
+          }
+        }
 
         return {
           ...token,
-          clusterCount: serviceAccountClusters.length,
-          jobCount: serviceAccountJobs.length,
+          clusterCount,
+          jobCount,
+          gpuCount: clusterGPUCount + jobGPUCount,
           // Extract primary role
           primaryRole:
             token.service_account_roles &&
@@ -1996,6 +2499,7 @@ function ServiceAccountTokensView({
                   <TableHead>Role</TableHead>
                   <TableHead>Clusters</TableHead>
                   <TableHead>Jobs</TableHead>
+                  <TableHead>GPUs</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead>Last used</TableHead>
                   <TableHead>Expires</TableHead>
@@ -2098,6 +2602,18 @@ function ServiceAccountTokensView({
                       >
                         {token.jobCount}
                       </Link>
+                    </TableCell>
+                    <TableCell>
+                      <span
+                        className={`px-2 py-0.5 rounded text-xs font-medium ${
+                          token.gpuCount > 0
+                            ? 'bg-purple-100 text-purple-600'
+                            : 'bg-gray-100 text-gray-500'
+                        }`}
+                        title={`Total GPUs: ${token.gpuCount}`}
+                      >
+                        {token.gpuCount}
+                      </span>
                     </TableCell>
                     <TableCell className="truncate">
                       {token.created_at ? (

@@ -1522,12 +1522,11 @@ def get_managed_job_queue(
             handle = cluster_name_to_handle.get(
                 cluster_name, None) if cluster_name is not None else None
             if isinstance(handle, backends.CloudVmRayResourceHandle):
-                resources_str = resources_utils.get_readable_resources_repr(
-                    handle, simplify=True)
-                resources_str_full = (
-                    resources_utils.get_readable_resources_repr(handle,
-                                                                simplify=False))
-                job['cluster_resources'] = resources_str
+                resources_str_simple, resources_str_full = (
+                    resources_utils.get_readable_resources_repr(
+                        handle, simplified_only=False))
+                assert resources_str_full is not None
+                job['cluster_resources'] = resources_str_simple
                 job['cluster_resources_full'] = resources_str_full
                 job['cloud'] = str(handle.launched_resources.cloud)
                 job['region'] = handle.launched_resources.region

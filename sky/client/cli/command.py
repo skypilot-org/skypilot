@@ -3452,7 +3452,7 @@ def _down_or_stop_clusters(
                     click.echo(f'      {name} ({first})')
 
     if failures:
-        raise click.ClickException('Cluster(s) failed. See details above.')
+        click.echo('Cluster(s) failed. See details above.')
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -4251,6 +4251,10 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
 def volumes():
     """SkyPilot Volumes CLI."""
     pass
+
+
+# Add 'volume' as an alias for 'volumes'
+cli.add_command(volumes, name='volume')
 
 
 @volumes.command('apply', cls=_DocumentedCodeCommand)

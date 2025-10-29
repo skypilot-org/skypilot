@@ -237,12 +237,12 @@ export const FilterDropdown = ({
   };
 
   return (
-    <div className="flex flex-row border border-gray-300 rounded-md overflow-visible">
+    <div className="flex flex-row border border-gray-300 rounded-md overflow-visible bg-white">
       <div className="border-r border-gray-300 flex-shrink-0">
         <Select onValueChange={setPropertyValue} value={propertyValue}>
           <SelectTrigger
             aria-label="Filter Property"
-            className="focus:ring-0 focus:ring-offset-0 border-none rounded-l-md rounded-r-none w-20 sm:w-24 md:w-32 h-8 text-xs sm:text-sm"
+            className="focus:ring-0 focus:ring-offset-0 border-none rounded-l-md rounded-r-none w-20 sm:w-24 md:w-32 h-8 text-xs sm:text-sm bg-white"
           >
             <SelectValue placeholder={propertyList[0]?.label || 'Status'} />
           </SelectTrigger>
@@ -264,7 +264,7 @@ export const FilterDropdown = ({
           onChange={handleValueChange}
           onFocus={handleInputFocus}
           onKeyDown={handleKeyDown}
-          className="h-8 w-full sm:w-96 px-3 pr-8 text-sm border-none rounded-l-none rounded-r-md focus:ring-0 focus:outline-none"
+          className="h-8 w-full px-3 pr-8 text-sm border-none rounded-l-none rounded-r-md focus:ring-0 focus:outline-none"
           autoComplete="off"
         />
         {value && (
