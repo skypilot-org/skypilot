@@ -195,8 +195,8 @@ def _validate_consolidation_mode_config(
                     'terminate the controller cluster first.'
                     f'{colorama.Style.RESET_ALL}')
     else:
-        all_jobs = managed_job_state.get_managed_jobs()
-        if all_jobs:
+        job_count = managed_job_state.get_managed_jobs_total()
+        if job_count:
             nonterminal_jobs = (
                 managed_job_state.get_nonterminal_job_ids_by_name(
                     None, None, all_users=True))
@@ -211,7 +211,7 @@ def _validate_consolidation_mode_config(
             else:
                 logger.warning(
                     f'{colorama.Fore.YELLOW}Consolidation mode is disabled, '
-                    f'but there are {len(all_jobs)} jobs from previous '
+                    f'but there are {job_count} jobs from previous '
                     'consolidation mode. Reset the `jobs.controller.'
                     'consolidation_mode` to `true` and run `sky jobs queue` '
                     'to see those jobs. Switching to normal mode will '
@@ -276,7 +276,12 @@ def ha_recovery_for_consolidation_mode():
               encoding='utf-8') as f:
         start = time.time()
         f.write(f'Starting HA recovery at {datetime.datetime.now()}\n')
-        for job in managed_job_state.get_managed_jobs():
+        jobs, _ = managed_job_state.get_managed_jobs_with_filters(fields=[
+            'job_id',
+            'controller_pid',
+            'schedule_state',
+        ])
+        for job in jobs:
             job_id = job['job_id']
             controller_pid = job['controller_pid']
 
@@ -456,7 +461,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         """
         managed_job_state.remove_ha_recovery_script(job_id)
         error_msg = None
-        tasks = managed_job_state.get_managed_jobs(job_id)
+        tasks = managed_job_state.get_managed_job_tasks(job_id)
         for task in tasks:
             pool = task.get('pool', None)
             if pool is None:
@@ -525,7 +530,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
 
     for job_id in job_ids:
         assert job_id is not None
-        tasks = managed_job_state.get_managed_jobs(job_id)
+        tasks = managed_job_state.get_managed_job_tasks(job_id)
         # Note: controller_pid and schedule_state are in the job_info table
         # which is joined to the spot table, so all tasks with the same job_id
         # will have the same value for these columns. This is what lets us just
@@ -545,9 +550,9 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         if schedule_state == managed_job_state.ManagedJobScheduleState.DONE:
             # There are two cases where we could get a job that is DONE.
             # 1. At query time (get_jobs_to_check_status), the job was not yet
-            #    DONE, but since then (before get_managed_jobs is called) it has
-            #    hit a terminal status, marked itself done, and exited. This is
-            #    fine.
+            #    DONE, but since then (before get_managed_job_tasks is called)
+            #    it has hit a terminal status, marked itself done, and exited.
+            #    This is fine.
             # 2. The job is DONE, but in a non-terminal status. This is
             #    unexpected. For instance, the task status is RUNNING, but the
             #    job schedule_state is DONE.
@@ -1202,7 +1207,8 @@ def stream_logs(job_id: Optional[int],
     if controller:
         if job_id is None:
             assert job_name is not None
-            managed_jobs = managed_job_state.get_managed_jobs()
+            managed_jobs, _ = managed_job_state.get_managed_jobs_with_filters(
+                fields=['job_id', 'job_name'])
             # We manually filter the jobs by name, instead of using
             # get_nonterminal_job_ids_by_name, as with `controller=True`, we
             # should be able to show the logs for jobs in terminal states.
@@ -1378,9 +1384,11 @@ def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
             new_fields.append('priority')
         if 'failure_reason' not in new_fields:
             new_fields.append('failure_reason')
-    if ('user_yaml' in new_fields and
-            'original_user_yaml_path' not in new_fields):
-        new_fields.append('original_user_yaml_path')
+    if 'user_yaml' in new_fields:
+        if 'original_user_yaml_path' not in new_fields:
+            new_fields.append('original_user_yaml_path')
+        if 'original_user_yaml_content' not in new_fields:
+            new_fields.append('original_user_yaml_content')
     if cluster_handle_required:
         if 'task_name' not in new_fields:
             new_fields.append('task_name')

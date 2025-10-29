@@ -1162,8 +1162,8 @@ def get_failure_reason(job_id: int) -> Optional[str]:
 
 
 @_init_db
-def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
-    """Get managed jobs from the database."""
+def get_managed_job_tasks(job_id: int) -> List[Dict[str, Any]]:
+    """Get managed job tasks for a specific managed job id from the database."""
     assert _SQLALCHEMY_ENGINE is not None
 
     # Join spot and job_info tables to get the job name for each task.
@@ -1178,10 +1178,8 @@ def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
         spot_table.outerjoin(
             job_info_table,
             spot_table.c.spot_job_id == job_info_table.c.spot_job_id))
-    if job_id is not None:
-        query = query.where(spot_table.c.spot_job_id == job_id)
-    query = query.order_by(spot_table.c.spot_job_id.desc(),
-                           spot_table.c.task_id.asc())
+    query = query.where(spot_table.c.spot_job_id == job_id)
+    query = query.order_by(spot_table.c.task_id.asc())
     rows = None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.execute(query).fetchall()
@@ -1420,7 +1418,13 @@ def get_managed_jobs_with_filters(
     page: Optional[int] = None,
     limit: Optional[int] = None,
 ) -> Tuple[List[Dict[str, Any]], int]:
-    """Get managed jobs from the database with filters."""
+    """Get managed jobs from the database with filters.
+
+    Returns:
+        A tuple containing
+         - the list of managed jobs
+         - the total number of managed jobs
+    """
     assert _SQLALCHEMY_ENGINE is not None
 
     count_query = build_managed_jobs_with_filters_query(
@@ -1469,6 +1473,10 @@ def get_managed_jobs_with_filters(
             job_dict['metadata'] = json.loads(job_dict['metadata'])
 
         # Add user YAML content for managed jobs.
+        # TODO(cooperc): This doesn't make sense, because _update_fields
+        # will strip 'user_yaml' from the fields. So we will only hit this if
+        # fields in None. We need to rework/simplify the field handling logic,
+        # which is a mess right now.
         if not fields or 'user_yaml' in fields:
             job_dict['user_yaml'] = job_dict.get('original_user_yaml_content')
             if job_dict['user_yaml'] is None:
