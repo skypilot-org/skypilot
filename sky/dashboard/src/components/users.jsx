@@ -78,20 +78,20 @@ const PROPERTY_OPTIONS = [
     value: 'name',
   },
   {
+    label: 'GPU',
+    value: 'gpu type', // Match valueList key
+  },
+  {
+    label: 'Infra',
+    value: 'infra',
+  },
+  {
     label: 'User ID',
     value: 'user id', // Match valueList key
   },
   {
     label: 'Role',
     value: 'role',
-  },
-  {
-    label: 'GPU Type',
-    value: 'gpu type', // Match valueList key
-  },
-  {
-    label: 'Infra',
-    value: 'infra',
   },
 ];
 
@@ -334,7 +334,7 @@ export function Users() {
     ['name', 'Name'],
     ['user id', 'User ID'], // Note: lowercase with space to match URL encoding
     ['role', 'Role'],
-    ['gpu type', 'GPU Type'], // Note: lowercase with space to match URL encoding
+    ['gpu type', 'GPU'], // Note: lowercase with space to match URL encoding
     ['infra', 'Infra'],
   ]);
 
@@ -1577,11 +1577,11 @@ function UsersTable({
     let filtered = usersWithCounts;
 
     // Separate GPU type and infra filters from standard filters
-    // Note: filter.property contains the label (e.g., "GPU Type", "Infra"), not the value
+    // Note: filter.property contains the label (e.g., "GPU", "Infra"), not the value
     const standardFilters = filters.filter(
-      (f) => f.property !== 'GPU Type' && f.property !== 'Infra'
+      (f) => f.property !== 'GPU' && f.property !== 'Infra'
     );
-    const gpuTypeFilters = filters.filter((f) => f.property === 'GPU Type');
+    const gpuTypeFilters = filters.filter((f) => f.property === 'GPU');
     const infraFilters = filters.filter((f) => f.property === 'Infra');
 
     // Apply standard filters using the shared filter system
@@ -1853,7 +1853,7 @@ function UsersTable({
 
   // Check if we're still loading lookups for GPU/Infra filters
   const hasGpuOrInfraFilters = filters.some(
-    (f) => f.property === 'GPU Type' || f.property === 'Infra'
+    (f) => f.property === 'GPU' || f.property === 'Infra'
   );
   if (hasGpuOrInfraFilters && !lookupsReady) {
     return (
@@ -1916,6 +1916,12 @@ function UsersTable({
                 Joined{getSortDirection('created_at')}
               </TableHead>
               <TableHead
+                onClick={() => requestSort('gpuCount')}
+                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+              >
+                GPUs{getSortDirection('gpuCount')}
+              </TableHead>
+              <TableHead
                 onClick={() => requestSort('clusterCount')}
                 className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
               >
@@ -1926,12 +1932,6 @@ function UsersTable({
                 className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
               >
                 Jobs{getSortDirection('jobCount')}
-              </TableHead>
-              <TableHead
-                onClick={() => requestSort('gpuCount')}
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-              >
-                GPUs{getSortDirection('gpuCount')}
               </TableHead>
               {/* Show Actions column if basicAuthEnabled and not deduplicating */}
               {!deduplicateUsers &&
@@ -2013,6 +2013,25 @@ function UsersTable({
                   )}
                 </TableCell>
                 <TableCell>
+                  {user.gpuCount === -1 ? (
+                    <span className="px-2 py-0.5 bg-gray-100 text-gray-400 rounded text-xs font-medium flex items-center">
+                      <CircularProgress size={10} className="mr-1" />
+                      Loading...
+                    </span>
+                  ) : (
+                    <span
+                      className={`px-2 py-0.5 rounded text-xs font-medium ${
+                        user.gpuCount > 0
+                          ? 'bg-purple-100 text-purple-600'
+                          : 'bg-gray-100 text-gray-500'
+                      }`}
+                      title={`Total GPUs: ${user.gpuCount}`}
+                    >
+                      {user.gpuCount}
+                    </span>
+                  )}
+                </TableCell>
+                <TableCell>
                   {user.clusterCount === -1 ? (
                     <span className="px-2 py-0.5 bg-gray-100 text-gray-400 rounded text-xs font-medium flex items-center">
                       <CircularProgress size={10} className="mr-1" />
@@ -2050,25 +2069,6 @@ function UsersTable({
                     >
                       {user.jobCount}
                     </Link>
-                  )}
-                </TableCell>
-                <TableCell>
-                  {user.gpuCount === -1 ? (
-                    <span className="px-2 py-0.5 bg-gray-100 text-gray-400 rounded text-xs font-medium flex items-center">
-                      <CircularProgress size={10} className="mr-1" />
-                      Loading...
-                    </span>
-                  ) : (
-                    <span
-                      className={`px-2 py-0.5 rounded text-xs font-medium ${
-                        user.gpuCount > 0
-                          ? 'bg-purple-100 text-purple-600'
-                          : 'bg-gray-100 text-gray-500'
-                      }`}
-                      title={`Total GPUs: ${user.gpuCount}`}
-                    >
-                      {user.gpuCount}
-                    </span>
                   )}
                 </TableCell>
                 {/* Actions cell logic - hide when deduplicating */}
