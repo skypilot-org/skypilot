@@ -117,15 +117,15 @@ _EFA_DOCKER_RUN_OPTIONS = [
 _EFA_IMAGE_NAME = 'Deep Learning Base OSS Nvidia Driver GPU AMI' \
 ' (Ubuntu 22.04) 20250808'
 
-# For functions that needs caching per-workspace.
+# For functions that needs caching per AWS profile.
 _AWS_PROFILE_SCOPED_FUNC_CACHE_SIZE = 5
 
 T = TypeVar('T')
 P = ParamSpec('P')
 
 
-def aws_profile_aware_lru_cache(scope: Literal['global', 'request'] = 'request',
-                                *lru_cache_args,
+def aws_profile_aware_lru_cache(*lru_cache_args,
+                                scope: Literal['global', 'request'] = 'request',
                                 **lru_cache_kwargs) -> Callable:
     """Similar to annotations.lru_cache, but automatically includes the
     AWS profile (if set in the workspace config) in the cache key.
@@ -996,7 +996,6 @@ class AWS(clouds.Cloud):
             # Refer to https://docs.aws.amazon.com/cli/latest/reference/sts/get-caller-identity.html # pylint: disable=line-too-long
             # and https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_variables.html#principaltable # pylint: disable=line-too-long
             user_info = sts.get_caller_identity()
-            logger.info(f'AWS user info: {user_info}')
             # Allow fallback to AccountId if UserId does not match, because:
             # 1. In the case where multiple IAM users belong a single root account,
             # those users normally share the visibility of the VMs, so we do not
@@ -1129,7 +1128,6 @@ class AWS(clouds.Cloud):
         result = cls._sts_get_caller_identity()
         with open(cache_path, 'w', encoding='utf-8') as f:
             f.write(json.dumps(result))
-        logger.info(f'AWS user info cached: {result}')
         return result
 
     @classmethod
