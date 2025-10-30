@@ -4665,7 +4665,8 @@ def jobs_launch(
         else:
             # TODO(tian): This can be very long. Considering have a "group id"
             # and query all job ids with the same group id.
-            job_ids_str = ','.join(map(str, job_ids))
+            # Sort job ids to ensure consistent ordering.
+            job_ids_str = ','.join(map(str, sorted(job_ids)))
             click.secho(
                 f'Jobs submitted with IDs: {colorama.Fore.CYAN}'
                 f'{job_ids_str}{colorama.Style.RESET_ALL}.'

@@ -1,7 +1,7 @@
 """Adding columns for the GC time of task logs and controller logs.
 
-Revision ID: 004
-Revises: 003
+Revision ID: 005
+Revises: 004
 Create Date: 2025-10-20
 
 """
@@ -14,8 +14,8 @@ import sqlalchemy as sa
 from sky.utils.db import db_utils
 
 # revision identifiers, used by Alembic.
-revision: str = '004'
-down_revision: Union[str, Sequence[str], None] = '003'
+revision: str = '005'
+down_revision: Union[str, Sequence[str], None] = '004'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

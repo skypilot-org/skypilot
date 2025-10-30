@@ -631,9 +631,6 @@ class TestDumpManagedJobQueue:
                             jobs: List[Dict[str, Any]]):
         """Patch dependencies for dump_managed_job_queue."""
 
-        def fake_get_managed_jobs():
-            return jobs
-
         def fake_get_managed_jobs_total():
             return len(jobs)
 
@@ -713,8 +710,6 @@ class TestDumpManagedJobQueue:
             return None
 
         # Patch the dependencies
-        monkeypatch.setattr(jobs_utils.managed_job_state, 'get_managed_jobs',
-                            fake_get_managed_jobs)
         monkeypatch.setattr(jobs_utils.managed_job_state,
                             'get_managed_jobs_total',
                             fake_get_managed_jobs_total)

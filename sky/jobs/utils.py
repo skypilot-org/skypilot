@@ -458,7 +458,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         """
         managed_job_state.remove_ha_recovery_script(job_id)
         error_msg = None
-        tasks = managed_job_state.get_managed_jobs(job_id)
+        tasks = managed_job_state.get_managed_job_tasks(job_id)
         for task in tasks:
             pool = task.get('pool', None)
             if pool is None:
@@ -527,7 +527,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
 
     for job_id in job_ids:
         assert job_id is not None
-        tasks = managed_job_state.get_managed_jobs(job_id)
+        tasks = managed_job_state.get_managed_job_tasks(job_id)
         # Note: controller_pid and schedule_state are in the job_info table
         # which is joined to the spot table, so all tasks with the same job_id
         # will have the same value for these columns. This is what lets us just
@@ -547,9 +547,9 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         if schedule_state == managed_job_state.ManagedJobScheduleState.DONE:
             # There are two cases where we could get a job that is DONE.
             # 1. At query time (get_jobs_to_check_status), the job was not yet
-            #    DONE, but since then (before get_managed_jobs is called) it has
-            #    hit a terminal status, marked itself done, and exited. This is
-            #    fine.
+            #    DONE, but since then (before get_managed_job_tasks is called)
+            #    it has hit a terminal status, marked itself done, and exited.
+            #    This is fine.
             # 2. The job is DONE, but in a non-terminal status. This is
             #    unexpected. For instance, the task status is RUNNING, but the
             #    job schedule_state is DONE.
@@ -1394,9 +1394,11 @@ def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
             new_fields.append('priority')
         if 'failure_reason' not in new_fields:
             new_fields.append('failure_reason')
-    if ('user_yaml' in new_fields and
-            'original_user_yaml_path' not in new_fields):
-        new_fields.append('original_user_yaml_path')
+    if 'user_yaml' in new_fields:
+        if 'original_user_yaml_path' not in new_fields:
+            new_fields.append('original_user_yaml_path')
+        if 'original_user_yaml_content' not in new_fields:
+            new_fields.append('original_user_yaml_content')
     if cluster_handle_required:
         if 'task_name' not in new_fields:
             new_fields.append('task_name')
