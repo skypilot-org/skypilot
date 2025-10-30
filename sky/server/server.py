@@ -1804,6 +1804,9 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         basic_auth_enabled=os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH,
                                           'false').lower() == 'true',
         user=user if user is not None else None,
+        service_account_token_enabled=(os.environ.get(
+            constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS,
+            'false').lower() == 'true'),
     )
 
 
