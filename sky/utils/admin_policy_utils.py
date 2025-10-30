@@ -2,6 +2,7 @@
 import contextlib
 import copy
 import importlib
+import typing
 from typing import Iterator, Optional, Tuple, Union
 import urllib.parse
 
@@ -18,6 +19,9 @@ from sky.utils import config_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
+
+if typing.TYPE_CHECKING:
+    from sky import models
 
 
 def _is_url(policy_string: str) -> bool:
@@ -126,9 +130,11 @@ def apply(
     if policy is None:
         return dag, skypilot_config.to_dict()
 
+    user = None
     if at_client_side:
         logger.info(f'Applying client admin policy: {policy}')
     else:
+        user = common_utils.get_current_user()
         logger.info(f'Applying server admin policy: {policy}')
     config = copy.deepcopy(skypilot_config.to_dict())
     mutated_dag = dag_lib.Dag()
@@ -137,7 +143,7 @@ def apply(
     mutated_config = None
     for task in dag.tasks:
         user_request = admin_policy.UserRequest(task, config, request_options,
-                                                at_client_side)
+                                                at_client_side, user)
         try:
             mutated_user_request = policy.apply(user_request)
         # Avoid duplicate exception wrapping.
