@@ -259,7 +259,7 @@ def pytest_configure(config):
                 '--remote-server and --postgres are not compatible. '
                 'Postgres backend is not supported with remote server testing.')
 
-    pytest.terminate_on_failure = config.getoption('--terminate-on-failure')
+    pytest.terminate_on_failure = config.getoption('--terminate-on_failure')
 
 
 def _get_cloud_to_run(config) -> List[str]:
@@ -508,13 +508,12 @@ def monitor_memory_usage():
         return
 
     reset_succeeded = False
-    baseline_peak = None
     try:
         with open(peak_file, 'w', encoding='utf-8') as f:
             f.write('0')
         reset_succeeded = True
     except OSError:
-        baseline_peak = _read_int(peak_file)
+        pass
 
     stop_event = threading.Event()
     availability_warned = False
@@ -531,8 +530,6 @@ def monitor_memory_usage():
                         '(failed to read %s).', peak_file)
             else:
                 availability_warned = False
-                if not reset_succeeded and baseline_peak not in (None, 0):
-                    peak_bytes = max(0, peak_bytes - baseline_peak)
                 limit_bytes = _memory_limit()
                 if limit_bytes:
                     print(
@@ -565,20 +562,7 @@ def monitor_memory_usage():
                     '(failed to read %s).', peak_file)
         return
 
-    if not reset_succeeded and baseline_peak not in (None, 0):
-        peak_bytes = max(0, peak_bytes - baseline_peak)
-
-    limit_bytes = _memory_limit()
-    if limit_bytes:
-        print(f'Docker container peak memory usage: {_format_gib(peak_bytes)} (limit {_format_gib(limit_bytes)}).',
-            file=sys.stderr,
-            flush=True,
-            )
-    else:
-        print(f'Docker container peak memory usage: {_format_gib(peak_bytes)}.',
-            file=sys.stderr,
-            flush=True,
-            )
+    logger.info('Docker container peak memory usage: %s.', _format_gib(peak_bytes))
 
 
 @pytest.fixture(scope='session', autouse=True)
