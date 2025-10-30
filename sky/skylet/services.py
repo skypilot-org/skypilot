@@ -453,6 +453,8 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                         k: v for k, v in metadata.items() if v is not None
                     }
                 job_info = managed_jobsv1_pb2.ManagedJobInfo(
+                    # The `spot.job_id`, which can be used to identify
+                    # different tasks for the same job
                     _job_id=job.get('_job_id'),
                     job_id=job.get('job_id'),
                     task_id=job.get('task_id'),
