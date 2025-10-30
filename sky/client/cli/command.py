@@ -6368,7 +6368,9 @@ INT_OR_NONE = IntOrNone()
               is_flag=True,
               default=False,
               required=False,
-              help='Show requests of all statuses.')
+              help=('Show requests of all statuses, including finished ones ',
+                    '(SUCCEEDED, FAILED, CANCELLED). By default, only active ',
+                    'requests (PENDING, RUNNING) are shown.'))
 @click.option(
     '--limit',
     '-l',
