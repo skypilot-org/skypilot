@@ -318,6 +318,8 @@ async def _describe_task_transition_failure(session: sql_async.AsyncSession,
 # column names in the DB and it corresponds to the combined view
 # by joining the spot and job_info tables.
 def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
+    # WARNING: If you update these you may also need to update GetJobTable in
+    # the skylet ManagedJobsServiceImpl.
     return {
         '_job_id': r.get('job_id'),  # from spot table
         '_task_name': r.get('job_name'),  # deprecated, from spot table
