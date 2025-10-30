@@ -62,6 +62,7 @@ from sky.server.auth import oauth2_proxy
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
+from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.ssh_node_pools import server as ssh_node_pools_rest
@@ -460,7 +461,7 @@ async def schedule_on_boot_check_async():
     try:
         await executor.schedule_request_async(
             request_id='skypilot-server-on-boot-check',
-            request_name='check',
+            request_name=request_names.RequestName.CHECK,
             request_body=payloads.CheckBody(),
             func=sky_check.check,
             schedule_type=requests_lib.ScheduleType.SHORT,
@@ -732,7 +733,7 @@ async def check(request: fastapi.Request,
     """Checks enabled clouds."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='check',
+        request_name=request_names.RequestName.CHECK,
         request_body=check_body,
         func=sky_check.check,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -746,7 +747,7 @@ async def enabled_clouds(request: fastapi.Request,
     """Gets enabled clouds on the server."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='enabled_clouds',
+        request_name=request_names.RequestName.ENABLED_CLOUDS,
         request_body=payloads.EnabledCloudsBody(workspace=workspace,
                                                 expand=expand),
         func=core.enabled_clouds,
@@ -762,7 +763,8 @@ async def realtime_kubernetes_gpu_availability(
     """Gets real-time Kubernetes GPU availability."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='realtime_kubernetes_gpu_availability',
+        request_name=request_names.RequestName.
+        REALTIME_KUBERNETES_GPU_AVAILABILITY,
         request_body=realtime_gpu_availability_body,
         func=core.realtime_kubernetes_gpu_availability,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -777,7 +779,7 @@ async def kubernetes_node_info(
     """Gets Kubernetes nodes information and hints."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='kubernetes_node_info',
+        request_name=request_names.RequestName.KUBERNETES_NODE_INFO,
         request_body=kubernetes_node_info_body,
         func=kubernetes_utils.get_kubernetes_node_info,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -789,7 +791,7 @@ async def status_kubernetes(request: fastapi.Request) -> None:
     """Gets Kubernetes status."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='status_kubernetes',
+        request_name=request_names.RequestName.STATUS_KUBERNETES,
         request_body=payloads.RequestBody(),
         func=core.status_kubernetes,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -803,7 +805,7 @@ async def list_accelerators(
     """Gets list of accelerators from cloud catalog."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='list_accelerators',
+        request_name=request_names.RequestName.LIST_ACCELERATORS,
         request_body=list_accelerator_counts_body,
         func=catalog.list_accelerators,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -818,7 +820,7 @@ async def list_accelerator_counts(
     """Gets list of accelerator counts from cloud catalog."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='list_accelerator_counts',
+        request_name=request_names.RequestName.LIST_ACCELERATOR_COUNTS,
         request_body=list_accelerator_counts_body,
         func=catalog.list_accelerator_counts,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -875,7 +877,7 @@ async def optimize(optimize_body: payloads.OptimizeBody,
     """Optimizes the user's DAG."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='optimize',
+        request_name=request_names.RequestName.OPTIMIZE,
         request_body=optimize_body,
         ignore_return_value=True,
         func=core.optimize,
@@ -1085,7 +1087,7 @@ async def launch(launch_body: payloads.LaunchBody,
     logger.info(f'Launching request: {request_id}')
     await executor.schedule_request_async(
         request_id,
-        request_name='launch',
+        request_name=request_names.RequestName.CLUSTER_LAUNCH,
         request_body=launch_body,
         func=execution.launch,
         schedule_type=requests_lib.ScheduleType.LONG,
@@ -1101,7 +1103,7 @@ async def exec(request: fastapi.Request, exec_body: payloads.ExecBody) -> None:
     cluster_name = exec_body.cluster_name
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='exec',
+        request_name=request_names.RequestName.CLUSTER_EXEC,
         request_body=exec_body,
         func=execution.exec,
         precondition=preconditions.ClusterStartCompletePrecondition(
@@ -1119,7 +1121,7 @@ async def stop(request: fastapi.Request,
     """Stops a cluster."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='stop',
+        request_name=request_names.RequestName.CLUSTER_STOP,
         request_body=stop_body,
         func=core.stop,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -1139,7 +1141,7 @@ async def status(
             detail='Server is shutting down, please try again later.')
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='status',
+        request_name=request_names.RequestName.CLUSTER_STATUS,
         request_body=status_body,
         func=core.status,
         schedule_type=(requests_lib.ScheduleType.LONG if
@@ -1154,7 +1156,7 @@ async def endpoints(request: fastapi.Request,
     """Gets the endpoint for a given cluster and port number (endpoint)."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='endpoints',
+        request_name=request_names.RequestName.CLUSTER_ENDPOINTS,
         request_body=endpoint_body,
         func=core.endpoints,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -1168,7 +1170,7 @@ async def down(request: fastapi.Request,
     """Tears down a cluster."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='down',
+        request_name=request_names.RequestName.CLUSTER_DOWN,
         request_body=down_body,
         func=core.down,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -1182,7 +1184,7 @@ async def start(request: fastapi.Request,
     """Restarts a cluster."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='start',
+        request_name=request_names.RequestName.CLUSTER_START,
         request_body=start_body,
         func=core.start,
         schedule_type=requests_lib.ScheduleType.LONG,
@@ -1196,7 +1198,7 @@ async def autostop(request: fastapi.Request,
     """Schedules an autostop/autodown for a cluster."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='autostop',
+        request_name=request_names.RequestName.CLUSTER_AUTOSTOP,
         request_body=autostop_body,
         func=core.autostop,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -1210,7 +1212,7 @@ async def queue(request: fastapi.Request,
     """Gets the job queue of a cluster."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='queue',
+        request_name=request_names.RequestName.CLUSTER_QUEUE,
         request_body=queue_body,
         func=core.queue,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -1224,7 +1226,7 @@ async def job_status(request: fastapi.Request,
     """Gets the status of a job."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='job_status',
+        request_name=request_names.RequestName.CLUSTER_JOB_STATUS,
         request_body=job_status_body,
         func=core.job_status,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -1238,7 +1240,7 @@ async def cancel(request: fastapi.Request,
     """Cancels jobs on a cluster."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='cancel',
+        request_name=request_names.RequestName.CLUSTER_JOB_CANCEL,
         request_body=cancel_body,
         func=core.cancel,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -1258,7 +1260,7 @@ async def logs(
     executor.check_request_thread_executor_available()
     request_task = await executor.prepare_request_async(
         request_id=request.state.request_id,
-        request_name='logs',
+        request_name=request_names.RequestName.CLUSTER_JOB_LOGS,
         request_body=cluster_job_body,
         func=core.tail_logs,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -1289,7 +1291,7 @@ async def download_logs(
     cluster_jobs_body.local_dir = str(logs_dir_on_api_server)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='download_logs',
+        request_name=request_names.RequestName.CLUSTER_JOB_DOWNLOAD_LOGS,
         request_body=cluster_jobs_body,
         func=core.download_logs,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -1440,7 +1442,7 @@ async def cost_report(request: fastapi.Request,
     """Gets the cost report of a cluster."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='cost_report',
+        request_name=request_names.RequestName.CLUSTER_COST_REPORT,
         request_body=cost_report_body,
         func=core.cost_report,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -1452,7 +1454,7 @@ async def storage_ls(request: fastapi.Request) -> None:
     """Gets the storages."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='storage_ls',
+        request_name=request_names.RequestName.STORAGE_LS,
         request_body=payloads.RequestBody(),
         func=core.storage_ls,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -1465,7 +1467,7 @@ async def storage_delete(request: fastapi.Request,
     """Deletes a storage."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='storage_delete',
+        request_name=request_names.RequestName.STORAGE_DELETE,
         request_body=storage_body,
         func=core.storage_delete,
         schedule_type=requests_lib.ScheduleType.LONG,
@@ -1478,7 +1480,7 @@ async def local_up(request: fastapi.Request,
     """Launches a Kubernetes cluster on API server."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='local_up',
+        request_name=request_names.RequestName.LOCAL_UP,
         request_body=local_up_body,
         func=core.local_up,
         schedule_type=requests_lib.ScheduleType.LONG,
@@ -1491,7 +1493,7 @@ async def local_down(request: fastapi.Request,
     """Tears down the Kubernetes cluster started by local_up."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='local_down',
+        request_name=request_names.RequestName.LOCAL_DOWN,
         request_body=local_down_body,
         func=core.local_down,
         schedule_type=requests_lib.ScheduleType.LONG,
@@ -1699,7 +1701,7 @@ async def api_cancel(request: fastapi.Request,
     """Cancels requests."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='api_cancel',
+        request_name=request_names.RequestName.API_CANCEL,
         request_body=request_cancel_body,
         func=requests_lib.kill_requests_with_prefix,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -1937,7 +1939,7 @@ async def all_contexts(request: fastapi.Request) -> None:
 
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='all_contexts',
+        request_name=request_names.RequestName.ALL_CONTEXTS,
         request_body=payloads.RequestBody(),
         func=core.get_all_contexts,
         schedule_type=requests_lib.ScheduleType.SHORT,
