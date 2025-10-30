@@ -2189,3 +2189,37 @@ class TestStorageWithCredentials:
         output = out.decode('utf-8')
         assert 'tmp-file' in output, (
             f'tmp-file not found in bucket - output of {ls_cmd} was: {output}')
+
+
+@pytest.mark.aws
+def test_aws_yum_storage_mounts_cached():
+    name = smoke_tests_utils.get_cluster_name()
+    cloud = 'aws'
+    storage_name = f'sky-test-{int(time.time())}'
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f1:
+        with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f2:
+            test_commands, clean_command = _storage_mount_cached_test_command_generator(
+                f1, f2, name, storage_name, cloud)
+
+            for i, cmd in enumerate(test_commands):
+                if cmd.startswith('sky launch') and '--infra aws' in cmd:
+                    test_commands[i] = cmd.replace(
+                        '--infra aws',
+                        # The image ID is retrieved with:
+
+                        # aws ec2 describe-images \
+                        # --owners amazon \
+                        # --filters "Name=name,Values=al2023-ami-2023.*-x86_64" \
+                        # --query 'Images | sort_by(@, &CreationDate) | [-1].[ImageId,Name]' \
+                        # --output text --region us-east-2
+                        '--infra aws/us-east-2 --image-id ami-0a5a5b7e2278263e5'
+                    )
+                    break
+
+            test = smoke_tests_utils.Test(
+                'aws_yum_storage_mount_cached',
+                test_commands,
+                clean_command,
+                timeout=20 * 60,  # 20 mins
+            )
+            smoke_tests_utils.run_one_test(test)
