@@ -10,10 +10,7 @@ from sky.adaptors import aws
 
 def test_session_caching_behavior():
     """Test session caching: different profiles not cached, same profile cached."""
-    with patch('sky.adaptors.aws._validate_workspace_profile') as mock_validate, \
-         patch('sky.adaptors.aws._create_aws_object') as mock_create:
-
-        mock_validate.return_value = True
+    with patch('sky.adaptors.aws._create_aws_object') as mock_create:
 
         # Create mock sessions
         mock_session1 = MagicMock()
@@ -46,9 +43,11 @@ def test_session_caching_behavior():
 
 def test_session_error_handling():
     """Test session creation error handling."""
-    # Test invalid profile raises error
-    with patch('sky.adaptors.aws._validate_workspace_profile') as mock_validate:
-        mock_validate.return_value = False
+    # Test invalid profile raises error when credentials are missing
+    with patch('sky.adaptors.aws._create_aws_object') as mock_create:
+        mock_session = MagicMock()
+        mock_session.get_credentials.return_value = None
+        mock_create.return_value = mock_session
         aws.session.cache_clear()
 
         with pytest.raises(Exception) as exc_info:
@@ -56,10 +55,8 @@ def test_session_error_handling():
         assert 'NoCredentialsError' in str(type(exc_info.value))
 
     # Test no credentials check allows missing credentials
-    with patch('sky.adaptors.aws._validate_workspace_profile') as mock_validate, \
-         patch('sky.adaptors.aws._create_aws_object') as mock_create:
+    with patch('sky.adaptors.aws._create_aws_object') as mock_create:
 
-        mock_validate.return_value = True
         mock_session = MagicMock()
         mock_session.get_credentials.return_value = None
         mock_create.return_value = mock_session
