@@ -31,6 +31,7 @@ from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
+from sky.utils import annotations
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import context
@@ -63,7 +64,8 @@ async def create_background_task(coro: typing.Coroutine) -> None:
         task.add_done_callback(_background_tasks.discard)
 
 
-# TODO(cooperc): cache??
+# Make sure to limit the size as we don't want to cache too many DAGs in memory.
+@annotations.lru_cache(scope='global', maxsize=50)
 def _get_dag(job_id: int) -> 'sky.Dag':
     dag_content = file_content_utils.get_job_dag_content(job_id)
     if dag_content is None:
