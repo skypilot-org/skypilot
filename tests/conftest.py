@@ -4,7 +4,9 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
+import threading
 import time
 from typing import List, Optional, Tuple
 
@@ -793,3 +795,90 @@ def prepare_env_file(request):
     if has_api_server:
         os.environ['PYTEST_SKYPILOT_REMOTE_SERVER_TEST'] = '1'
     yield local_file_path
+
+
+@pytest.fixture(scope='session', autouse=True)
+def monitor_mem_usage(request):
+    """Monitor container memory usage when running smoke tests."""
+    del request  # Unused.
+
+    def _resolve_cgroup_files() -> Tuple[Optional[str], Optional[str]]:
+        # cgroup v2: memory metrics exposed directly under /sys/fs/cgroup.
+        v2_current = '/sys/fs/cgroup/memory.current'
+        if os.path.exists(v2_current):
+            v2_peak = '/sys/fs/cgroup/memory.peak'
+            return v2_current, v2_peak if os.path.exists(v2_peak) else None
+
+        # cgroup v1: find memory controller path from /proc/self/cgroup.
+        try:
+            with open('/proc/self/cgroup', 'r', encoding='utf-8') as f:
+                for line in f:
+                    parts = line.strip().split(':')
+                    if len(parts) != 3:
+                        continue
+                    controllers = parts[1].split(',')
+                    if 'memory' not in controllers:
+                        continue
+                    rel_path = parts[2].lstrip('/')
+                    base = os.path.join('/sys/fs/cgroup/memory', rel_path)
+                    current = os.path.join(base, 'memory.usage_in_bytes')
+                    peak = os.path.join(base, 'memory.max_usage_in_bytes')
+                    if os.path.exists(current):
+                        return current, peak if os.path.exists(peak) else None
+        except OSError:
+            return None, None
+
+        return None, None
+
+    mem_current, mem_peak = _resolve_cgroup_files()
+    if mem_current is None:
+        yield
+        return
+
+    stop_event = threading.Event()
+    peak_seen = 0
+
+    def _read_bytes(path: str) -> Optional[int]:
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                return int(f.read().strip())
+        except (OSError, ValueError):
+            return None
+
+    def _monitor():
+        nonlocal peak_seen
+        interval = 10.0
+        while not stop_event.is_set():
+            current_bytes = _read_bytes(mem_current)
+            if current_bytes is None:
+                if stop_event.wait(interval):
+                    break
+                continue
+
+            peak_seen = max(peak_seen, current_bytes)
+            if mem_peak:
+                peak_bytes = _read_bytes(mem_peak)
+                if peak_bytes is not None:
+                    peak_seen = max(peak_seen, peak_bytes)
+
+            current_mib = current_bytes / (1024 * 1024)
+            peak_mib = peak_seen / (1024 * 1024)
+            print(
+                f'[mem-monitor] current: {current_mib:.2f} MiB; peak: {peak_mib:.2f} MiB',
+                file=sys.stderr,
+                flush=True,
+            )
+            if stop_event.wait(interval):
+                break
+
+    monitor_thread = threading.Thread(
+        target=_monitor,
+        name='mem-monitor',
+        daemon=True,
+    )
+    monitor_thread.start()
+    try:
+        yield
+    finally:
+        stop_event.set()
+        monitor_thread.join(timeout=1.0)
