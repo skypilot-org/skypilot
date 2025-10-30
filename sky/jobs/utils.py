@@ -2125,7 +2125,8 @@ def _job_proto_to_dict(
         # and Protobuf encodes int64 as decimal strings in JSON,
         # so we need to convert them back to ints.
         # https://protobuf.dev/programming-guides/json/#field-representation
-        if field.type == descriptor.FieldDescriptor.TYPE_INT64:
+        if (field.type == descriptor.FieldDescriptor.TYPE_INT64 and
+                job_dict.get(field.name) is not None):
             job_dict[field.name] = int(job_dict[field.name])
     job_dict['status'] = managed_job_state.ManagedJobStatus.from_protobuf(
         job_dict['status'])

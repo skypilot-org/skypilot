@@ -260,6 +260,15 @@ def pytest_configure(config):
 
     pytest.terminate_on_failure = config.getoption('--terminate-on-failure')
 
+    # Disable parallelism for smoke tests only to save memory in Buildkite.
+    # Check if any of the test paths are under smoke_tests/
+    if hasattr(config, 'args') and config.args:
+        is_smoke_test = any('smoke_tests' in str(arg) for arg in config.args)
+        if is_smoke_test and smoke_tests_utils.is_in_buildkite_env():
+            # Override xdist settings to disable parallelism
+            config.option.numprocesses = 0
+            config.option.dist = 'no'
+
 
 def _get_cloud_to_run(config) -> List[str]:
     cloud_to_run = []

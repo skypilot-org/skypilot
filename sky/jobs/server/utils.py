@@ -55,7 +55,11 @@ def check_version_mismatch_and_non_terminal_jobs() -> None:
                     )).get_managed_job_controller_version(version_request))
             controller_version = version_response.controller_version
 
-            job_table_request = managed_jobsv1_pb2.GetJobTableRequest()
+            job_table_request = managed_jobsv1_pb2.GetJobTableRequest(
+                skip_finished=True,
+                fields=managed_jobsv1_pb2.Fields(
+                    fields=_MANAGED_JOB_FIELDS_TO_GET),
+            )
             job_table_response = backend_utils.invoke_skylet_with_retries(
                 lambda: cloud_vm_ray_backend.SkyletClient(
                     handle.get_grpc_channel()).get_managed_job_table(

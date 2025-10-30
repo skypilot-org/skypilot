@@ -1464,7 +1464,7 @@ def get_managed_jobs_with_filters(
 
         # Add user YAML content for managed jobs.
         yaml_path = job_dict.get('original_user_yaml_path')
-        if (not fields or 'user_yaml' in fields) and yaml_path:
+        if yaml_path:
             try:
                 with open(yaml_path, 'r', encoding='utf-8') as f:
                     job_dict['user_yaml'] = f.read()
