@@ -515,7 +515,7 @@ def setup_policy_server(request, tmp_path_factory):
     # get the temp directory shared by all workers
     root_tmp_dir = tmp_path_factory.getbasetemp().parent / 'policy_server'
 
-    os.mkdir(root_tmp_dir, exist_ok=True)
+    pathlib.Path(root_tmp_dir).mkdir(parents=True, exist_ok=True)
     fn = root_tmp_dir / 'policy_server.txt'
     policy_server_url = ''
     # Reference count and pid for cleanup
