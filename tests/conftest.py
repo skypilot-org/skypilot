@@ -260,7 +260,7 @@ def pytest_configure(config):
 
     pytest.terminate_on_failure = config.getoption('--terminate-on-failure')
 
-    # Disable parallelism for smoke tests only
+    # Disable parallelism for smoke tests only to save memory.
     # Check if any of the test paths are under smoke_tests/
     if hasattr(config, 'args') and config.args:
         is_smoke_test = any('smoke_tests' in str(arg) for arg in config.args)
