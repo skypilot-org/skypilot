@@ -570,12 +570,12 @@ spec:
       {{- end }}
       {{- if .Values.awsCredentials.enabled }}
       {{- if .Values.awsCredentials.useCredentialsFile }}
-      # Mount credentials file directly from secret
+      # Mount the credentials file directly from secret
       - name: aws-credentials-file
         secret:
           secretName: {{ .Values.awsCredentials.awsSecretName }}
       {{- else }}
-      # emptyDir, which will be populated by init container
+      # Mount emptyDir that will be populated by initContainer
       - name: aws-config
         emptyDir: {}
       {{- end }}
