@@ -1,11 +1,11 @@
 import fcntl
 import os
-import shutil
 import signal
 import socket
 import subprocess
 import tempfile
 import time
+import threading
 from typing import List, Optional, Tuple
 
 import filelock
@@ -474,6 +474,99 @@ def hijack_sys_attrs(request):
     # Make skypilot context work in smoke test client side.
     context_utils.hijack_sys_attrs()
     yield
+
+@pytest.fixture(scope='session', autouse=True)
+def monitor_memory_usage():
+    def _read_int(path: str) -> Optional[int]:
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                raw = f.read().strip()
+            if not raw or raw == 'max':
+                return None
+            return int(raw)
+        except (OSError, ValueError):
+            return None
+
+    def _format_gib(num_bytes: int) -> str:
+        return f'{num_bytes / (1024**3):.2f} GiB'
+
+    def _memory_limit() -> Optional[int]:
+        path = ('/sys/fs/cgroup/memory.max'
+                if common_utils._is_cgroup_v2() else
+                '/sys/fs/cgroup/memory/memory.limit_in_bytes')
+        return _read_int(path)
+
+    peak_file = ('/sys/fs/cgroup/memory.peak'
+                 if common_utils._is_cgroup_v2() else
+                 '/sys/fs/cgroup/memory/memory.max_usage_in_bytes')
+
+    if not os.path.exists(peak_file):
+        yield
+        logger.info('Docker container peak memory usage: unavailable '
+                    '(missing %s).', peak_file)
+        return
+
+    reset_succeeded = False
+    baseline_peak = None
+    try:
+        with open(peak_file, 'w', encoding='utf-8') as f:
+            f.write('0')
+        reset_succeeded = True
+    except OSError:
+        baseline_peak = _read_int(peak_file)
+
+    stop_event = threading.Event()
+    availability_warned = False
+
+    def _log_peak():
+        nonlocal availability_warned
+        while not stop_event.is_set():
+            peak_bytes = _read_int(peak_file)
+            if peak_bytes is None:
+                if not availability_warned:
+                    availability_warned = True
+                    logger.info(
+                        'Docker container peak memory usage: unavailable '
+                        '(failed to read %s).', peak_file)
+            else:
+                availability_warned = False
+                if not reset_succeeded and baseline_peak not in (None, 0):
+                    peak_bytes = max(0, peak_bytes - baseline_peak)
+                limit_bytes = _memory_limit()
+                if limit_bytes:
+                    logger.info(
+                        'Docker container peak memory usage: %s (limit %s).',
+                        _format_gib(peak_bytes), _format_gib(limit_bytes))
+                else:
+                    logger.info('Docker container peak memory usage: %s.',
+                                _format_gib(peak_bytes))
+            stop_event.wait(timeout=30)
+
+    thread = threading.Thread(target=_log_peak, name='skypilot-peak-mem-monitor')
+    thread.daemon = True
+    thread.start()
+
+    yield
+
+    stop_event.set()
+    thread.join(timeout=5)
+
+    peak_bytes = _read_int(peak_file)
+    if peak_bytes is None:
+        logger.info('Docker container peak memory usage: unavailable '
+                    '(failed to read %s).', peak_file)
+        return
+
+    if not reset_succeeded and baseline_peak not in (None, 0):
+        peak_bytes = max(0, peak_bytes - baseline_peak)
+
+    limit_bytes = _memory_limit()
+    if limit_bytes:
+        logger.info('Docker container peak memory usage: %s (limit %s).',
+                    _format_gib(peak_bytes), _format_gib(limit_bytes))
+    else:
+        logger.info('Docker container peak memory usage: %s.',
+                    _format_gib(peak_bytes))
 
 
 @pytest.fixture(scope='session', autouse=True)
