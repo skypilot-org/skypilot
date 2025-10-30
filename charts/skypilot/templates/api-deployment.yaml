@@ -269,9 +269,18 @@ spec:
           mountPath: /var/skypilot/ssh_keys
         {{- end }}
         {{- if .Values.awsCredentials.enabled }}
+        {{- if .Values.awsCredentials.useCredentialsFile }}
+        # Mount the credentials file directly from secret
+        - name: aws-credentials-file
+          mountPath: /root/.aws/credentials
+          subPath: credentials
+          readOnly: true
+        {{- else }}
+        # Mount emptyDir that will be populated by initContainer
         - name: aws-config
           mountPath: /root/.aws
           readOnly: true
+        {{- end }}
         {{- end }}
         {{- if .Values.r2Credentials.enabled }}
         - name: r2-config
@@ -354,7 +363,7 @@ spec:
           subPath: .sky
       {{- end }}
       initContainers:
-      {{- if .Values.awsCredentials.enabled }}
+      {{- if and .Values.awsCredentials.enabled (not .Values.awsCredentials.useCredentialsFile) }}
       - name: create-aws-credentials
         {{- with .Values.securityContext }}
         securityContext:
@@ -560,8 +569,16 @@ spec:
         emptyDir: {}
       {{- end }}
       {{- if .Values.awsCredentials.enabled }}
+      {{- if .Values.awsCredentials.useCredentialsFile }}
+      # Mount credentials file directly from secret
+      - name: aws-credentials-file
+        secret:
+          secretName: {{ .Values.awsCredentials.awsSecretName }}
+      {{- else }}
+      # emptyDir, which will be populated by init container
       - name: aws-config
         emptyDir: {}
+      {{- end }}
       {{- end }}
       {{- if .Values.gcpCredentials.enabled }}
       - name: gcp-credentials
