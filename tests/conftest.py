@@ -1,4 +1,5 @@
 import fcntl
+import sys
 import os
 import signal
 import socket
@@ -534,12 +535,16 @@ def monitor_memory_usage():
                     peak_bytes = max(0, peak_bytes - baseline_peak)
                 limit_bytes = _memory_limit()
                 if limit_bytes:
-                    logger.info(
-                        'Docker container peak memory usage: %s (limit %s).',
-                        _format_gib(peak_bytes), _format_gib(limit_bytes))
+                    print(
+                        f'Docker container peak memory usage: {_format_gib(peak_bytes)} (limit {_format_gib(limit_bytes)}).',
+                        file=sys.stderr,
+                        flush=True,
+                        )
                 else:
-                    logger.info('Docker container peak memory usage: %s.',
-                                _format_gib(peak_bytes))
+                    print(f'Docker container peak memory usage: {_format_gib(peak_bytes)}.',
+                        file=sys.stderr,
+                        flush=True,
+                        )
             stop_event.wait(timeout=30)
 
     thread = threading.Thread(target=_log_peak, name='skypilot-peak-mem-monitor')
@@ -562,11 +567,15 @@ def monitor_memory_usage():
 
     limit_bytes = _memory_limit()
     if limit_bytes:
-        logger.info('Docker container peak memory usage: %s (limit %s).',
-                    _format_gib(peak_bytes), _format_gib(limit_bytes))
+        print(f'Docker container peak memory usage: {_format_gib(peak_bytes)} (limit {_format_gib(limit_bytes)}).',
+            file=sys.stderr,
+            flush=True,
+            )
     else:
-        logger.info('Docker container peak memory usage: %s.',
-                    _format_gib(peak_bytes))
+        print(f'Docker container peak memory usage: {_format_gib(peak_bytes)}.',
+            file=sys.stderr,
+            flush=True,
+            )
 
 
 @pytest.fixture(scope='session', autouse=True)
