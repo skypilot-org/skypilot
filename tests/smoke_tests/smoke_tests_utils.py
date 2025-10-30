@@ -1,3 +1,4 @@
+import configparser
 import contextlib
 import enum
 import functools
@@ -833,6 +834,39 @@ def down_cluster_for_cloud_cmd(test_cluster_name: str,
         return 'true'
     else:
         return f'sky down -y {cluster_name}'
+
+
+def extract_default_aws_credentials():
+    """Extract default AWS credentials from credentials file or environment variables.
+
+    Returns:
+        Tuple of (access_key_id, secret_access_key) or (None, None) if not found.
+    """
+    # Try environment variables first
+    access_key = os.environ.get('AWS_ACCESS_KEY_ID')
+    secret_key = os.environ.get('AWS_SECRET_ACCESS_KEY')
+    if access_key and secret_key:
+        return access_key, secret_key
+
+    # Try credentials file
+    credentials_path = os.path.expanduser('~/.aws/credentials')
+    if os.path.exists(credentials_path):
+        parser = configparser.ConfigParser()
+        try:
+            parser.read(credentials_path)
+            if 'default' in parser.sections():
+                access_key = parser.get('default',
+                                        'aws_access_key_id',
+                                        fallback=None)
+                secret_key = parser.get('default',
+                                        'aws_secret_access_key',
+                                        fallback=None)
+                if access_key and secret_key:
+                    return access_key.strip(), secret_key.strip()
+        except configparser.Error:
+            pass
+
+    return None, None
 
 
 def _increase_initial_delay_seconds(original_cmd: str,
