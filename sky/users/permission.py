@@ -43,7 +43,6 @@ class PermissionService:
         with _policy_lock():
             global _enforcer_instance
             if _enforcer_instance is None:
-                _enforcer_instance = self
                 engine = global_user_state.initialize_and_get_db()
                 db_utils.add_all_tables_to_db_sqlalchemy(
                     sqlalchemy_adapter.Base.metadata, engine)
@@ -53,6 +52,10 @@ class PermissionService:
                                           'model.conf')
                 enforcer = casbin.Enforcer(model_path, adapter)
                 self.enforcer = enforcer
+                # Only set the enforcer instance once the enforcer
+                # is successfully initialized, if we change it and then fail
+                # we will set it to None and all subsequent calls will fail.
+                _enforcer_instance = self
                 self._maybe_initialize_policies()
                 self._maybe_initialize_basic_auth_user()
             else:
