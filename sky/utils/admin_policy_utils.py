@@ -134,6 +134,8 @@ def apply(
     if at_client_side:
         logger.info(f'Applying client admin policy: {policy}')
     else:
+        # When being called by the server, the middleware has set the
+        # current user and this information is available at this point.
         user = common_utils.get_current_user()
         logger.info(f'Applying server admin policy: {policy}')
     config = copy.deepcopy(skypilot_config.to_dict())
