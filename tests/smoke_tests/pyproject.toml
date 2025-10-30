@@ -1,3 +1,0 @@
-[tool.pytest.ini_options]
-# Override parent configuration to disable parallelism for smoke tests
-addopts = "-s -n 0 -q --tb=short --dist no --disable-warnings"
