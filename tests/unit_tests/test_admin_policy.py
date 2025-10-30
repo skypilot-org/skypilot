@@ -19,6 +19,7 @@ from sky import skypilot_config
 from sky.utils import admin_policy_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky import models
 
 logger = sky_logging.init_logger(__name__)
 
@@ -378,6 +379,19 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
                            'requires v1 to be applied'):
             policy.apply(user_request)
 
+
+def test_user_request_encode_decode(task):
+    with mock.patch('sky.utils.common_utils.get_current_user', return_value=models.User(id='123', name='test')):
+        user_request = sky.UserRequest(task=task,
+                                    skypilot_config=sky.Config(),
+                                    at_client_side=False,
+                                    user=models.User(id='123', name='test'))
+        encoded_request = user_request.encode()
+        decoded_request = sky.UserRequest.decode(encoded_request)
+        assert repr(decoded_request.task) == repr(task)
+        assert decoded_request.skypilot_config == sky.Config()
+        assert decoded_request.at_client_side == False
+        assert decoded_request.user == models.User(id='123', name='test')
 
 def test_restful_policy(add_example_policy_paths, task):
     """Test RestfulAdminPolicy for various scenarios."""
