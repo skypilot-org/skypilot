@@ -1,10 +1,11 @@
 import fcntl
 import os
-import sys
+import pathlib
 import shutil
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 from typing import List, Optional, Tuple
@@ -512,8 +513,9 @@ def setup_policy_server(request, tmp_path_factory):
         return
 
     # get the temp directory shared by all workers
-    root_tmp_dir = tmp_path_factory.getbasetemp().parent
+    root_tmp_dir = tmp_path_factory.getbasetemp().parent / 'policy_server'
 
+    os.mkdir(root_tmp_dir, exist_ok=True)
     fn = root_tmp_dir / 'policy_server.txt'
     policy_server_url = ''
     # Reference count and pid for cleanup
@@ -551,12 +553,18 @@ def setup_policy_server(request, tmp_path_factory):
             if fn.is_file():
                 ref_count(1)
                 policy_server_url = fn.read_text().strip()
-                print(f'Using existing policy server {policy_server_url}, file: {fn}', file=sys.stderr, flush=True)
+                print(
+                    f'Using existing policy server {policy_server_url}, file: {fn}',
+                    file=sys.stderr,
+                    flush=True)
             else:
                 # Launch the policy server
                 port = common_utils.find_free_port(start_port=10000)
                 policy_server_url = f'http://127.0.0.1:{port}'
-                print(f'Launching policy server {policy_server_url}, file: {fn}', file=sys.stderr, flush=True)
+                print(
+                    f'Launching policy server {policy_server_url}, file: {fn}',
+                    file=sys.stderr,
+                    flush=True)
                 server_process = subprocess.Popen([
                     'python', 'tests/admin_policy/no_op_server.py', '--host',
                     '0.0.0.0', '--port',
@@ -580,6 +588,7 @@ def setup_policy_server(request, tmp_path_factory):
                 pid = pid_file.read_text().strip()
                 if pid:
                     os.kill(int(pid), signal.SIGKILL)
+                pathlib.Path(fn).unlink(missing_ok=True)
 
 
 @pytest.fixture(scope='session', autouse=True)
