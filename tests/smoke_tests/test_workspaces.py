@@ -169,7 +169,7 @@ def _verify_cluster_created_by_user(cluster_name: str,
                     'AttributeValue': instance_id
                 }],
                                                     StartTime=start_time,
-                                                    MaxResults=20)
+                                                    MaxResults=500)
                 for event in response.get('Events', []):
                     if event['EventName'] == 'RunInstances':
                         event_data = json.loads(event['CloudTrailEvent'])
