@@ -1070,20 +1070,7 @@ _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
     },
 }
 
-_CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
-    # TODO(kevin): Remove 'networking' in v0.13.0.
-    'networking': {
-        'type': 'string',
-        'case_insensitive_enum': [
-            type.value for type in kubernetes_enums.KubernetesNetworkingMode
-        ],
-    },
-    'ports': {
-        'type': 'string',
-        'case_insensitive_enum': [
-            type.value for type in kubernetes_enums.KubernetesPortMode
-        ],
-    },
+_CONTEXT_CONFIG_SCHEMA_MINIMAL = {
     'pod_config': {
         'type': 'object',
         'required': [],
@@ -1107,6 +1094,33 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
     'provision_timeout': {
         'type': 'integer',
     },
+    'kueue': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'local_queue_name': {
+                'type': 'string',
+            },
+        },
+    },
+}
+
+_CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
+    # TODO(kevin): Remove 'networking' in v0.13.0.
+    'networking': {
+        'type': 'string',
+        'case_insensitive_enum': [
+            type.value for type in kubernetes_enums.KubernetesNetworkingMode
+        ],
+    },
+    'ports': {
+        'type': 'string',
+        'case_insensitive_enum': [
+            type.value for type in kubernetes_enums.KubernetesPortMode
+        ],
+    },
+    **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
     'autoscaler': {
         'type': 'string',
         'case_insensitive_enum': [
@@ -1121,16 +1135,6 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             'storage_class_name': {
                 'type': 'string',
             }
-        },
-    },
-    'kueue': {
-        'type': 'object',
-        'required': [],
-        'additionalProperties': False,
-        'properties': {
-            'local_queue_name': {
-                'type': 'string',
-            },
         },
     },
     'dws': {
@@ -1370,12 +1374,21 @@ def get_config_schema():
                         'type': 'string',
                     },
                 },
-                'pod_config': {
+                'context_configs': {
                     'type': 'object',
                     'required': [],
-                    # Allow arbitrary keys since validating pod spec is hard
-                    'additionalProperties': True,
+                    'properties': {},
+                    # Properties are kubernetes context names.
+                    'additionalProperties': {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
+                        },
+                    },
                 },
+                **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
             }
         },
         'oci': {
