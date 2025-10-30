@@ -545,7 +545,10 @@ def monitor_memory_usage():
                         file=sys.stderr,
                         flush=True,
                         )
-            stop_event.wait(timeout=30)
+            try:
+                stop_event.wait(timeout=10)
+            except TimeoutError:
+                pass
 
     thread = threading.Thread(target=_log_peak, name='skypilot-peak-mem-monitor')
     thread.daemon = True
