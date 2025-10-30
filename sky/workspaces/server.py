@@ -4,6 +4,7 @@ import fastapi
 
 from sky.server.requests import executor
 from sky.server.requests import payloads
+from sky.server.requests import request_names
 from sky.server.requests import requests as api_requests
 from sky.workspaces import core
 
@@ -24,7 +25,7 @@ async def get(request: fastapi.Request) -> None:
 
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='workspaces.get',
+        request_name=request_names.RequestName.WORKSPACES_GET,
         request_body=request_body,
         func=core.get_workspaces,
         schedule_type=api_requests.ScheduleType.SHORT,
@@ -37,7 +38,7 @@ async def update(request: fastapi.Request,
     """Updates a specific workspace configuration."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='workspaces.update',
+        request_name=request_names.RequestName.WORKSPACES_UPDATE,
         request_body=update_workspace_body,
         func=core.update_workspace,
         schedule_type=api_requests.ScheduleType.SHORT,
@@ -50,7 +51,7 @@ async def create(request: fastapi.Request,
     """Creates a new workspace configuration."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='workspaces.create',
+        request_name=request_names.RequestName.WORKSPACES_CREATE,
         request_body=create_workspace_body,
         func=core.create_workspace,
         schedule_type=api_requests.ScheduleType.SHORT,
@@ -63,7 +64,7 @@ async def delete(request: fastapi.Request,
     """Deletes a workspace configuration."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='workspaces.delete',
+        request_name=request_names.RequestName.WORKSPACES_DELETE,
         request_body=delete_workspace_body,
         func=core.delete_workspace,
         schedule_type=api_requests.ScheduleType.SHORT,
@@ -80,7 +81,7 @@ async def get_config(request: fastapi.Request) -> None:
     get_config_body = payloads.GetConfigBody(**auth_user_env_vars_kwargs)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='workspaces.get_config',
+        request_name=request_names.RequestName.WORKSPACES_GET_CONFIG,
         request_body=get_config_body,
         func=core.get_config,
         schedule_type=api_requests.ScheduleType.SHORT,
@@ -93,7 +94,7 @@ async def update_config(request: fastapi.Request,
     """Updates the entire SkyPilot configuration."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='workspaces.update_config',
+        request_name=request_names.RequestName.WORKSPACES_UPDATE_CONFIG,
         request_body=update_config_body,
         func=core.update_config,
         schedule_type=api_requests.ScheduleType.SHORT,
