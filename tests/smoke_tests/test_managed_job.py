@@ -1644,7 +1644,9 @@ def test_managed_jobs_logs_gc(generic_cloud: str):
             # sync down should still work
             'sky jobs logs --sync-down'
         ],
-        teardown=f'sky jobs cancel -y -n {name}',
+        # Stop the API server so that it doesn't refer to the deleted config
+        # file after the test exits
+        teardown=f'sky jobs cancel -y -n {name}; sky api stop',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=20 * 60,
     )
