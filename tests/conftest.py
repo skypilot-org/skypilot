@@ -532,12 +532,16 @@ def setup_policy_server(request, tmp_path_factory):
 
     def wait_server(port: int, timeout: int = 60):
         start_time = time.time()
+        success_count = 0
         while time.time() - start_time < timeout:
             try:
                 socket.create_connection(('127.0.0.1', port), timeout=1).close()
-                return True
+                success_count += 1
+                if success_count > 5:
+                    return True
             except (socket.error, OSError):
-                time.sleep(0.5)
+                pass
+            time.sleep(0.5)
         raise RuntimeError(f"Policy server not available after {timeout}s")
 
     try:
