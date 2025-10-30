@@ -1475,23 +1475,17 @@ def get_managed_jobs_with_filters(
             job_dict['metadata'] = json.loads(job_dict['metadata'])
 
         # Add user YAML content for managed jobs.
-        # TODO(cooperc): This doesn't make sense, because _update_fields
-        # will strip 'user_yaml' from the fields. So we will only hit this if
-        # fields in None. We need to rework/simplify the field handling logic,
-        # which is a mess right now.
-        if not fields or 'user_yaml' in fields:
-            job_dict['user_yaml'] = job_dict.get('original_user_yaml_content')
-            if job_dict['user_yaml'] is None:
-                # Backwards compatibility - try to read from file path
-                yaml_path = job_dict.get('original_user_yaml_path')
-                if yaml_path:
-                    try:
-                        with open(yaml_path, 'r', encoding='utf-8') as f:
-                            job_dict['user_yaml'] = f.read()
-                    except (FileNotFoundError, IOError, OSError) as e:
-                        logger.debug(
-                            'Failed to read original user YAML for job '
-                            f'{job_dict["job_id"]} from {yaml_path}: {e}')
+        job_dict['user_yaml'] = job_dict.get('original_user_yaml_content')
+        if job_dict['user_yaml'] is None:
+            # Backwards compatibility - try to read from file path
+            yaml_path = job_dict.get('original_user_yaml_path')
+            if yaml_path:
+                try:
+                    with open(yaml_path, 'r', encoding='utf-8') as f:
+                        job_dict['user_yaml'] = f.read()
+                except (FileNotFoundError, IOError, OSError) as e:
+                    logger.debug('Failed to read original user YAML for job '
+                                 f'{job_id} from {yaml_path}: {e}')
 
         jobs.append(job_dict)
     return jobs, total

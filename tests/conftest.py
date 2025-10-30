@@ -66,7 +66,7 @@ all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci', 'do',
     'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace',
     'primeintellect', 'runpod', 'vast', 'nebius', 'hyperbolic', 'seeweb',
-    'shadeform'
+    'shadeform', 'coreweave'
 ]
 default_clouds_to_run = ['aws', 'azure']
 
@@ -95,7 +95,8 @@ cloud_to_pytest_keyword = {
     'nebius': 'nebius',
     'hyperbolic': 'hyperbolic',
     'shadeform': 'shadeform',
-    'seeweb': 'seeweb'
+    'seeweb': 'seeweb',
+    'coreweave': 'coreweave',
 }
 
 
@@ -259,13 +260,22 @@ def pytest_configure(config):
 
     pytest.terminate_on_failure = config.getoption('--terminate-on-failure')
 
+    # Disable parallelism for smoke tests only to save memory in Buildkite.
+    # Check if any of the test paths are under smoke_tests/
+    if hasattr(config, 'args') and config.args:
+        is_smoke_test = any('smoke_tests' in str(arg) for arg in config.args)
+        if is_smoke_test and smoke_tests_utils.is_in_buildkite_env():
+            # Override xdist settings to disable parallelism
+            config.option.numprocesses = 0
+            config.option.dist = 'no'
+
 
 def _get_cloud_to_run(config) -> List[str]:
     cloud_to_run = []
 
     for cloud in all_clouds_in_smoke_tests:
         if config.getoption(f'--{cloud}'):
-            if cloud == 'cloudflare':
+            if cloud in ['cloudflare', 'coreweave']:
                 cloud_to_run.append(default_clouds_to_run[0])
             else:
                 cloud_to_run.append(cloud)
@@ -329,6 +339,8 @@ def pytest_collection_modifyitems(config, items):
                 # Need to check both conditions as the first default cloud is
                 # added to cloud_to_run when tested for cloudflare
                 if config.getoption('--cloudflare') and cloud == 'cloudflare':
+                    continue
+                if config.getoption('--coreweave') and cloud == 'coreweave':
                     continue
                 item.add_marker(skip_marks[cloud])
 
@@ -520,12 +532,16 @@ def setup_policy_server(request, tmp_path_factory):
 
     def wait_server(port: int, timeout: int = 60):
         start_time = time.time()
+        success_count = 0
         while time.time() - start_time < timeout:
             try:
                 socket.create_connection(('127.0.0.1', port), timeout=1).close()
-                return True
+                success_count += 1
+                if success_count > 5:
+                    return True
             except (socket.error, OSError):
-                time.sleep(0.5)
+                pass
+            time.sleep(0.5)
         raise RuntimeError(f"Policy server not available after {timeout}s")
 
     try:

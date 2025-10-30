@@ -1732,6 +1732,27 @@ def test_kubernetes_custom_image(image_id):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.kubernetes
+def test_kubernetes_pod_failure_detection():
+    """Test that we detect pod failures and log useful details.
+
+    We use busybox image because it doesn't have bash,
+    so we know the pod must fail.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'test-kubernetes-pod-failure-detection',
+        [
+            f'sky launch -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} -y --image-id docker:busybox:latest --infra kubernetes echo hi || true',
+            # Check that the provision logs contain the expected error message.
+            f's=$(sky logs --provision {name}) && echo "==Validating error message==" && echo "$s" && echo "$s" | grep -A 2 "Pod.*terminated:.*" | grep -A 2 "PodFailed" | grep "StartError"',
+        ],
+        f'sky down -y {name}',
+        timeout=10 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.azure
 def test_azure_start_stop_two_nodes():
     name = smoke_tests_utils.get_cluster_name()
@@ -1955,14 +1976,16 @@ def test_gcp_zero_quota_failover():
     smoke_tests_utils.run_one_test(test)
 
 
-# Skip this for kubernetes due to https://github.com/skypilot-org/skypilot/issues/7504#event-20180419521
-# TODO(aylei,zpoint): fix the infra issue and remove the mark
-@pytest.mark.no_kubernetes
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controller and auto-stop
 def test_long_setup_run_script(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
                                      suffix='.yaml') as f:
+        debug_command = (
+            f'sky exec {name} "source ~/skypilot-runtime/bin/activate; '
+            f'ray status --verbose; ray list tasks --detail; '
+            f'find /home/sky/sky_logs -name "*.log" -type f -exec tail -f '
+            f'{{}} +"')
         f.write(
             textwrap.dedent(""" \
             setup: |
@@ -1994,7 +2017,8 @@ def test_long_setup_run_script(generic_cloud: str):
                 f'sky jobs launch -y -n {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {f.name}',
                 f'sky jobs queue | grep {name} | grep SUCCEEDED',
             ],
-            f'sky down -y {name}; sky jobs cancel -n {name} -y',
+            debug_command +
+            f'; sky down -y {name}; sky jobs cancel -n {name} -y',
         )
         smoke_tests_utils.run_one_test(test)
 

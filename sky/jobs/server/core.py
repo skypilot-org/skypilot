@@ -60,6 +60,35 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
+_MANAGED_JOB_FIELDS_FOR_QUEUE_KUBERNETES = [
+    'job_id',
+    'task_id',
+    'workspace',
+    'job_name',
+    'task_name',
+    'resources',
+    'submitted_at',
+    'end_at',
+    'job_duration',
+    'recovery_count',
+    'status',
+    'pool',
+    'current_cluster_name',
+    'job_id_on_pool_cluster',
+    'start_at',
+    'infra',
+    'cloud',
+    'region',
+    'zone',
+    'cluster_resources',
+    'schedule_state',
+    'details',
+    'failure_reason',
+    'metadata',
+    'user_name',
+    'user_hash',
+]
+
 
 def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
     """Upload files to the controller.
@@ -533,7 +562,8 @@ def queue_from_kubernetes_pod(
         'kubernetes', cluster_info)[0]
 
     code = managed_job_utils.ManagedJobCodeGen.get_job_table(
-        skip_finished=skip_finished)
+        skip_finished=skip_finished,
+        fields=_MANAGED_JOB_FIELDS_FOR_QUEUE_KUBERNETES)
     returncode, job_table_payload, stderr = managed_jobs_runner.run(
         code,
         require_outputs=True,
@@ -646,8 +676,7 @@ def queue(refresh: bool,
             does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
-    jobs, _, _, _ = queue_v2(refresh, skip_finished, all_users, job_ids, None,
-                             None, None, None, None, None, None)
+    jobs, _, _, _ = queue_v2(refresh, skip_finished, all_users, job_ids)
 
     return jobs
 
@@ -764,7 +793,8 @@ def queue_v2(
         try:
             request = managed_jobsv1_pb2.GetJobTableRequest(
                 skip_finished=skip_finished,
-                accessible_workspaces=accessible_workspaces,
+                accessible_workspaces=(managed_jobsv1_pb2.Workspaces(
+                    workspaces=accessible_workspaces)),
                 job_ids=managed_jobsv1_pb2.JobIds(
                     ids=job_ids) if job_ids is not None else None,
                 workspace_match=workspace_match,
@@ -780,6 +810,8 @@ def queue_v2(
                 ]) if user_hashes is not None else None,
                 statuses=managed_jobsv1_pb2.Statuses(
                     statuses=statuses) if statuses is not None else None,
+                fields=managed_jobsv1_pb2.Fields(
+                    fields=fields) if fields is not None else None,
                 show_jobs_without_user_hash=show_jobs_without_user_hash,
             )
             response = backend_utils.invoke_skylet_with_retries(
