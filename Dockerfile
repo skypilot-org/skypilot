@@ -93,7 +93,8 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
     rm kubectl
 
 # Install Nebius CLI
-RUN curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh | NEBIUS_INSTALL_FOLDER=/usr/local/bin bash
+# TODO(aylei): use the latest version of Nebius CLI after #7789 get resolved.
+RUN NEBIUS_CLI_VERSION=0.12.127 curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh | NEBIUS_INSTALL_FOLDER=/usr/local/bin bash
 # Install uv
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     ~/.local/bin/uv pip install --prerelease allow azure-cli --system && \
