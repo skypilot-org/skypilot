@@ -1856,14 +1856,17 @@ async def kubernetes_pod_ssh_proxy(
             try:
                 async for message in websocket.iter_bytes():
                     if timestamps_supported:
-                        message_type = struct.unpack('!B', message[:1])[0]
+                        type_size = struct.calcsize('!B')
+                        message_type = struct.unpack('!B',
+                                                     message[:type_size])[0]
                         if (message_type ==
                                 KubernetesSSHMessageType.REGULAR_DATA):
                             # Regular data - strip type byte and forward to SSH
-                            message = message[1:]
+                            message = message[type_size:]
                         elif message_type == KubernetesSSHMessageType.PINGPONG:
                             # PING message - respond with PONG (type 1)
-                            if len(message) != 5:
+                            ping_id_size = struct.calcsize('!I')
+                            if len(message) != type_size + ping_id_size:
                                 raise ValueError('Invalid PING message '
                                                  f'length: {len(message)}')
                             # Return the same PING message, so that the client
@@ -1873,12 +1876,14 @@ async def kubernetes_pod_ssh_proxy(
                         elif (message_type ==
                               KubernetesSSHMessageType.LATENCY_MEASUREMENT):
                             # Latency measurement from client
-                            if len(message) != 9:
+                            latency_size = struct.calcsize('!Q')
+                            if len(message) != type_size + latency_size:
                                 raise ValueError(
                                     'Invalid latency measurement '
                                     f'message length: {len(message)}')
-                            avg_latency_ms = struct.unpack('!Q',
-                                                           message[1:9])[0]
+                            avg_latency_ms = struct.unpack(
+                                '!Q',
+                                message[type_size:type_size + latency_size])[0]
                             latency_seconds = avg_latency_ms / 1000
                             metrics_utils.SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS.labels(pid=os.getpid()).observe(latency_seconds)  # pylint: disable=line-too-long
                             continue

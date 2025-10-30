@@ -87,7 +87,6 @@ async def main(url: str, timestamps_supported: bool) -> None:
                                                  loop)
             # Dictionary to store last ping time for latency measurement
             last_ping_time_dict: Optional[Dict[int, float]] = None
-            last_ping_time_dict_lock = asyncio.Lock()
             if timestamps_supported:
                 last_ping_time_dict = {}
 
@@ -101,10 +100,8 @@ async def main(url: str, timestamps_supported: bool) -> None:
                                    websocket_lock),
                 websocket_to_stdout(websocket, stdout_writer,
                                     timestamps_supported, last_ping_time_dict,
-                                    last_ping_time_dict_lock,
                                     websocket_closed_event, websocket_lock),
                 latency_monitor(websocket, last_ping_time_dict,
-                                last_ping_time_dict_lock,
                                 websocket_closed_event, websocket_lock),
                 return_exceptions=True)
         finally:
@@ -115,7 +112,6 @@ async def main(url: str, timestamps_supported: bool) -> None:
 
 async def latency_monitor(websocket: ClientConnection,
                           last_ping_time_dict: Optional[dict],
-                          last_ping_time_dict_lock: asyncio.Lock,
                           websocket_closed_event: asyncio.Event,
                           websocket_lock: asyncio.Lock):
     """Periodically send PING messages (type 1) to measure latency."""
@@ -125,15 +121,13 @@ async def latency_monitor(websocket: ClientConnection,
     while not websocket_closed_event.is_set():
         try:
             await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
-            async with last_ping_time_dict_lock:
-                if len(last_ping_time_dict) >= MAX_UNANSWERED_PINGS:
-                    # We are not getting responses, clear the dictionary so
-                    # as not to grow unbounded.
-                    last_ping_time_dict.clear()
+            if len(last_ping_time_dict) >= MAX_UNANSWERED_PINGS:
+                # We are not getting responses, clear the dictionary so
+                # as not to grow unbounded.
+                last_ping_time_dict.clear()
             ping_time = time.time()
             next_id += 1
-            async with last_ping_time_dict_lock:
-                last_ping_time_dict[next_id] = ping_time
+            last_ping_time_dict[next_id] = ping_time
             message_header_bytes = struct.pack(
                 '!BI', KubernetesSSHMessageType.PINGPONG.value, next_id)
             try:
@@ -181,11 +175,12 @@ async def stdin_to_websocket(reader: asyncio.StreamReader,
         websocket_closed_event.set()
 
 
-async def websocket_to_stdout(
-        websocket: ClientConnection, writer: asyncio.StreamWriter,
-        timestamps_supported: bool, last_ping_time_dict: Optional[dict],
-        last_ping_time_dict_lock: asyncio.Lock,
-        websocket_closed_event: asyncio.Event, websocket_lock: asyncio.Lock):
+async def websocket_to_stdout(websocket: ClientConnection,
+                              writer: asyncio.StreamWriter,
+                              timestamps_supported: bool,
+                              last_ping_time_dict: Optional[dict],
+                              websocket_closed_event: asyncio.Event,
+                              websocket_lock: asyncio.Lock):
     try:
         while not websocket_closed_event.is_set():
             message = await websocket.recv()
@@ -197,19 +192,13 @@ async def websocket_to_stdout(
                     message = message[1:]
                 elif message_type == KubernetesSSHMessageType.PINGPONG.value:
                     # PONG response - calculate latency and send measurement
-                    if not len(message) == 5:
+                    if not len(message) == struct.calcsize('!BI'):
                         raise ValueError(
                             f'Invalid PONG message length: {len(message)}')
                     pong_id = struct.unpack('!I', message[1:5])[0]
                     pong_time = time.time()
 
-                    ping_time = None
-                    async with last_ping_time_dict_lock:
-                        try:
-                            ping_time = last_ping_time_dict.pop(pong_id)
-                        except KeyError:
-                            # We don't have a matching ping, ignore the pong.
-                            pass
+                    ping_time = last_ping_time_dict.pop(pong_id, None)
 
                     if ping_time is None:
                         continue
