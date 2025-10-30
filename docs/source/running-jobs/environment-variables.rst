@@ -186,6 +186,12 @@ Environment variables for ``setup``
 
          1.2.3.4
          3.4.5.6
+   * - ``SKYPILOT_SETUP_NUM_GPUS_PER_NODE``
+     - Number of GPUs per node in the cluster.
+     
+       Note that GPUs may not be available at this stage. Do not assume 
+       GPUs are available during setup.
+     - 1
 
    * - ``SKYPILOT_NUM_NODES``
      - Number of nodes in the cluster. Same value as ``$(echo "$SKYPILOT_NODE_IPS" | wc -l)``.
