@@ -257,6 +257,7 @@ export function Users() {
   const [basicAuthEnabled, setBasicAuthEnabled] = useState(undefined);
   const [serviceAccountTokenEnabled, setServiceAccountTokenEnabled] =
     useState(undefined);
+  const [healthCheckLoading, setHealthCheckLoading] = useState(true);
   const [activeMainTab, setActiveMainTab] = useState('users');
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showRotateDialog, setShowRotateDialog] = useState(false);
@@ -365,6 +366,7 @@ export function Users() {
 
   useEffect(() => {
     async function fetchHealth() {
+      setHealthCheckLoading(true);
       try {
         const resp = await apiClient.get('/api/health');
         if (resp.ok) {
@@ -378,6 +380,8 @@ export function Users() {
       } catch {
         setBasicAuthEnabled(false);
         setServiceAccountTokenEnabled(false);
+      } finally {
+        setHealthCheckLoading(false);
       }
     }
     fetchHealth();
@@ -629,6 +633,16 @@ export function Users() {
     setResetPasswordUser(null);
     setResetPassword('');
   };
+
+  // Show loading while fetching health check
+  if (healthCheckLoading) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <CircularProgress />
+        <span className="ml-2 text-gray-500">Loading...</span>
+      </div>
+    );
+  }
 
   return (
     <>
