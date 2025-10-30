@@ -1484,8 +1484,13 @@ def get_managed_jobs_with_filters(
                     with open(yaml_path, 'r', encoding='utf-8') as f:
                         job_dict['user_yaml'] = f.read()
                 except (FileNotFoundError, IOError, OSError) as e:
-                    logger.debug('Failed to read original user YAML for job '
-                                 f'{job_id} from {yaml_path}: {e}')
+                    job_id = job_dict.get('job_id')
+                    if job_id is not None:
+                        logger.debug('Failed to read original user YAML for '
+                                     f'job {job_id} from {yaml_path}: {e}')
+                    else:
+                        logger.debug('Failed to read original user YAML from '
+                                     f'{yaml_path}: {e}')
 
         jobs.append(job_dict)
     return jobs, total
