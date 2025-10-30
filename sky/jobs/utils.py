@@ -195,8 +195,8 @@ def _validate_consolidation_mode_config(
                     'terminate the controller cluster first.'
                     f'{colorama.Style.RESET_ALL}')
     else:
-        all_jobs = managed_job_state.get_managed_jobs()
-        if all_jobs:
+        total_jobs = managed_job_state.get_managed_jobs_total()
+        if total_jobs > 0:
             nonterminal_jobs = (
                 managed_job_state.get_nonterminal_job_ids_by_name(
                     None, None, all_users=True))
@@ -211,7 +211,7 @@ def _validate_consolidation_mode_config(
             else:
                 logger.warning(
                     f'{colorama.Fore.YELLOW}Consolidation mode is disabled, '
-                    f'but there are {len(all_jobs)} jobs from previous '
+                    f'but there are {total_jobs} jobs from previous '
                     'consolidation mode. Reset the `jobs.controller.'
                     'consolidation_mode` to `true` and run `sky jobs queue` '
                     'to see those jobs. Switching to normal mode will '
@@ -276,7 +276,9 @@ def ha_recovery_for_consolidation_mode():
               encoding='utf-8') as f:
         start = time.time()
         f.write(f'Starting HA recovery at {datetime.datetime.now()}\n')
-        for job in managed_job_state.get_managed_jobs():
+        jobs, _ = managed_job_state.get_managed_jobs_with_filters(
+            fields=['job_id', 'controller_pid', 'schedule_state', 'status'])
+        for job in jobs:
             job_id = job['job_id']
             controller_pid = job['controller_pid']
 
@@ -1217,7 +1219,8 @@ def stream_logs(job_id: Optional[int],
     if controller:
         if job_id is None:
             assert job_name is not None
-            managed_jobs = managed_job_state.get_managed_jobs()
+            managed_jobs, _ = managed_job_state.get_managed_jobs_with_filters(
+                name_match=job_name, fields=['job_id', 'job_name', 'status'])
             # We manually filter the jobs by name, instead of using
             # get_nonterminal_job_ids_by_name, as with `controller=True`, we
             # should be able to show the logs for jobs in terminal states.
@@ -1535,12 +1538,11 @@ def get_managed_job_queue(
             handle = cluster_name_to_handle.get(
                 cluster_name, None) if cluster_name is not None else None
             if isinstance(handle, backends.CloudVmRayResourceHandle):
-                resources_str = resources_utils.get_readable_resources_repr(
-                    handle, simplify=True)
-                resources_str_full = (
-                    resources_utils.get_readable_resources_repr(handle,
-                                                                simplify=False))
-                job['cluster_resources'] = resources_str
+                resources_str_simple, resources_str_full = (
+                    resources_utils.get_readable_resources_repr(
+                        handle, simplified_only=False))
+                assert resources_str_full is not None
+                job['cluster_resources'] = resources_str_simple
                 job['cluster_resources_full'] = resources_str_full
                 job['cloud'] = str(handle.launched_resources.cloud)
                 job['region'] = handle.launched_resources.region
@@ -1728,6 +1730,7 @@ def format_job_table(
     show_all: bool,
     show_user: bool,
     return_rows: Literal[False] = False,
+    pool_status: Optional[List[Dict[str, Any]]] = None,
     max_jobs: Optional[int] = None,
     job_status_counts: Optional[Dict[str, int]] = None,
 ) -> str:
@@ -1740,6 +1743,7 @@ def format_job_table(
     show_all: bool,
     show_user: bool,
     return_rows: Literal[True],
+    pool_status: Optional[List[Dict[str, Any]]] = None,
     max_jobs: Optional[int] = None,
     job_status_counts: Optional[Dict[str, int]] = None,
 ) -> List[List[str]]:
@@ -1751,6 +1755,7 @@ def format_job_table(
     show_all: bool,
     show_user: bool,
     return_rows: bool = False,
+    pool_status: Optional[List[Dict[str, Any]]] = None,
     max_jobs: Optional[int] = None,
     job_status_counts: Optional[Dict[str, int]] = None,
 ) -> Union[str, List[List[str]]]:
@@ -1762,6 +1767,7 @@ def format_job_table(
         max_jobs: The maximum number of jobs to show in the table.
         return_rows: If True, return the rows as a list of strings instead of
           all rows concatenated into a single string.
+        pool_status: List of pool status dictionaries with replica_info.
         job_status_counts: The counts of each job status.
 
     Returns: A formatted string of managed jobs, if not `return_rows`; otherwise
@@ -1778,6 +1784,30 @@ def format_job_table(
         if tasks_have_k8s_user:
             return (task['user'], task['job_id'])
         return task['job_id']
+
+    def _get_job_id_to_worker_map(
+            pool_status: Optional[List[Dict[str, Any]]]) -> Dict[int, int]:
+        """Create a mapping from job_id to worker replica_id.
+
+        Args:
+            pool_status: List of pool status dictionaries with replica_info.
+
+        Returns:
+            Dictionary mapping job_id to replica_id (worker ID).
+        """
+        job_to_worker: Dict[int, int] = {}
+        if pool_status is None:
+            return job_to_worker
+        for pool in pool_status:
+            replica_info = pool.get('replica_info', [])
+            for replica in replica_info:
+                used_by = replica.get('used_by')
+                if used_by is not None:
+                    job_to_worker[used_by] = replica.get('replica_id')
+        return job_to_worker
+
+    # Create mapping from job_id to worker replica_id
+    job_to_worker = _get_job_id_to_worker_map(pool_status)
 
     for task in tasks:
         # The tasks within the same job_id are already sorted
@@ -1922,7 +1952,12 @@ def format_job_table(
             if pool is None:
                 pool = '-'
 
+            # Add worker information if job is assigned to a worker
             job_id = job_hash[1] if tasks_have_k8s_user else job_hash
+            # job_id is now always an integer, use it to look up worker
+            if job_id in job_to_worker and pool != '-':
+                pool = f'{pool} (worker={job_to_worker[job_id]})'
+
             job_values = [
                 job_id,
                 '',
@@ -1965,6 +2000,12 @@ def format_job_table(
             pool = task.get('pool')
             if pool is None:
                 pool = '-'
+
+            # Add worker information if task is assigned to a worker
+            task_job_id = task['job_id']
+            if task_job_id in job_to_worker and pool != '-':
+                pool = f'{pool} (worker={job_to_worker[task_job_id]})'
+
             values = [
                 task['job_id'] if len(job_tasks) == 1 else ' \u21B3',
                 task['task_id'] if len(job_tasks) > 1 else '-',
@@ -2236,6 +2277,18 @@ class ManagedJobCodeGen:
         # Get and print raw job table (load_managed_job_queue can parse this directly)
         job_table = utils.dump_managed_job_queue()
         print(job_table, flush=True)
+        """)
+        return cls._build(code)
+
+    @classmethod
+    def get_version(cls) -> str:
+        """Generate code to get controller version."""
+        code = textwrap.dedent("""\
+        from sky.skylet import constants as controller_constants
+
+        # Get controller version
+        controller_version = controller_constants.SKYLET_VERSION
+        print(f"controller_version:{controller_version}", flush=True)
         """)
         return cls._build(code)
 

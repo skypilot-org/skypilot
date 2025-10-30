@@ -5,7 +5,6 @@ import contextlib
 import dataclasses
 import enum
 import functools
-import json
 import os
 import pathlib
 import shutil
@@ -21,6 +20,7 @@ import uuid
 import anyio
 import colorama
 import filelock
+import orjson
 
 from sky import exceptions
 from sky import global_user_state
@@ -213,8 +213,8 @@ class Request:
             entrypoint=self.entrypoint.__name__,
             request_body=self.request_body.model_dump_json(),
             status=self.status.value,
-            return_value=json.dumps(None),
-            error=json.dumps(None),
+            return_value=orjson.dumps(None).decode('utf-8'),
+            error=orjson.dumps(None).decode('utf-8'),
             pid=None,
             created_at=self.created_at,
             schedule_type=self.schedule_type.value,
@@ -237,8 +237,8 @@ class Request:
                 entrypoint=encoders.pickle_and_encode(self.entrypoint),
                 request_body=encoders.pickle_and_encode(self.request_body),
                 status=self.status.value,
-                return_value=json.dumps(self.return_value),
-                error=json.dumps(self.error),
+                return_value=orjson.dumps(self.return_value).decode('utf-8'),
+                error=orjson.dumps(self.error).decode('utf-8'),
                 pid=self.pid,
                 created_at=self.created_at,
                 schedule_type=self.schedule_type.value,
@@ -270,8 +270,8 @@ class Request:
                 entrypoint=decoders.decode_and_unpickle(payload.entrypoint),
                 request_body=decoders.decode_and_unpickle(payload.request_body),
                 status=RequestStatus(payload.status),
-                return_value=json.loads(payload.return_value),
-                error=json.loads(payload.error),
+                return_value=orjson.loads(payload.return_value),
+                error=orjson.loads(payload.error),
                 pid=payload.pid,
                 created_at=payload.created_at,
                 schedule_type=ScheduleType(payload.schedule_type),
@@ -328,10 +328,11 @@ def encode_requests(requests: List[Request]) -> List[payloads.RequestPayload]:
             entrypoint=request.entrypoint.__name__
             if request.entrypoint is not None else '',
             request_body=request.request_body.model_dump_json()
-            if request.request_body is not None else json.dumps(None),
+            if request.request_body is not None else
+            orjson.dumps(None).decode('utf-8'),
             status=request.status.value,
-            return_value=json.dumps(None),
-            error=json.dumps(None),
+            return_value=orjson.dumps(None).decode('utf-8'),
+            error=orjson.dumps(None).decode('utf-8'),
             pid=None,
             created_at=request.created_at,
             schedule_type=request.schedule_type.value,
@@ -372,9 +373,9 @@ def _update_request_row_fields(
     if 'user_id' not in fields:
         content['user_id'] = ''
     if 'return_value' not in fields:
-        content['return_value'] = json.dumps(None)
+        content['return_value'] = orjson.dumps(None).decode('utf-8')
     if 'error' not in fields:
-        content['error'] = json.dumps(None)
+        content['error'] = orjson.dumps(None).decode('utf-8')
     if 'schedule_type' not in fields:
         content['schedule_type'] = ScheduleType.SHORT.value
     # Optional fields in RequestPayload
@@ -391,76 +392,6 @@ def _update_request_row_fields(
 
     # Convert back to tuple in the same order as REQUEST_COLUMNS
     return tuple(content[col] for col in REQUEST_COLUMNS)
-
-
-def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
-    """Kill all pending and running requests for a cluster.
-
-    Args:
-        cluster_name: the name of the cluster.
-        exclude_request_names: exclude requests with these names. This is to
-            prevent killing the caller request.
-    """
-    request_ids = [
-        request_task.request_id
-        for request_task in get_request_tasks(req_filter=RequestTaskFilter(
-            status=[RequestStatus.PENDING, RequestStatus.RUNNING],
-            exclude_request_names=[exclude_request_name],
-            cluster_names=[cluster_name],
-            fields=['request_id']))
-    ]
-    kill_requests(request_ids)
-
-
-def kill_requests(request_ids: Optional[List[str]] = None,
-                  user_id: Optional[str] = None) -> List[str]:
-    """Kill a SkyPilot API request and set its status to cancelled.
-
-    Args:
-        request_ids: The request IDs to kill. If None, all requests for the
-            user are killed.
-        user_id: The user ID to kill requests for. If None, all users are
-            killed.
-
-    Returns:
-        A list of request IDs that were cancelled.
-    """
-    if request_ids is None:
-        request_ids = [
-            request_task.request_id
-            for request_task in get_request_tasks(req_filter=RequestTaskFilter(
-                status=[RequestStatus.PENDING, RequestStatus.RUNNING],
-                # Avoid cancelling the cancel request itself.
-                exclude_request_names=['sky.api_cancel'],
-                user_id=user_id,
-                fields=['request_id']))
-        ]
-    cancelled_request_ids = []
-    for request_id in request_ids:
-        with update_request(request_id) as request_record:
-            if request_record is None:
-                logger.debug(f'No request ID {request_id}')
-                continue
-            # Skip internal requests. The internal requests are scheduled with
-            # request_id in range(len(INTERNAL_REQUEST_EVENTS)).
-            if request_record.request_id in set(
-                    event.id for event in daemons.INTERNAL_REQUEST_DAEMONS):
-                continue
-            if request_record.status > RequestStatus.RUNNING:
-                logger.debug(f'Request {request_id} already finished')
-                continue
-            if request_record.pid is not None:
-                logger.debug(f'Killing request process {request_record.pid}')
-                # Use SIGTERM instead of SIGKILL:
-                # - The executor can handle SIGTERM gracefully
-                # - After SIGTERM, the executor can reuse the request process
-                #   for other requests, avoiding the overhead of forking a new
-                #   process for each request.
-                os.kill(request_record.pid, signal.SIGTERM)
-            request_record.status = RequestStatus.CANCELLED
-            request_record.finished_at = time.time()
-            cancelled_request_ids.append(request_id)
-    return cancelled_request_ids
 
 
 def create_table(cursor, conn):
@@ -606,6 +537,128 @@ def request_lock_path(request_id: str) -> str:
     return os.path.join(lock_path, f'.{request_id}.lock')
 
 
+def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
+    """Kill all pending and running requests for a cluster.
+
+    Args:
+        cluster_name: the name of the cluster.
+        exclude_request_names: exclude requests with these names. This is to
+            prevent killing the caller request.
+    """
+    request_ids = [
+        request_task.request_id
+        for request_task in get_request_tasks(req_filter=RequestTaskFilter(
+            status=[RequestStatus.PENDING, RequestStatus.RUNNING],
+            exclude_request_names=[exclude_request_name],
+            cluster_names=[cluster_name],
+            fields=['request_id']))
+    ]
+    _kill_requests(request_ids)
+
+
+def kill_requests_with_prefix(request_ids: Optional[List[str]] = None,
+                              user_id: Optional[str] = None) -> List[str]:
+    """Kill requests with a given request ID prefix."""
+    expanded_request_ids: Optional[List[str]] = None
+    if request_ids is not None:
+        expanded_request_ids = []
+        for request_id in request_ids:
+            request_tasks = get_requests_with_prefix(request_id,
+                                                     fields=['request_id'])
+            if request_tasks is None or len(request_tasks) == 0:
+                continue
+            if len(request_tasks) > 1:
+                raise ValueError(f'Multiple requests found for '
+                                 f'request ID prefix: {request_id}')
+            expanded_request_ids.append(request_tasks[0].request_id)
+    return _kill_requests(request_ids=expanded_request_ids, user_id=user_id)
+
+
+def _should_kill_request(request_id: str,
+                         request_record: Optional[Request]) -> bool:
+    if request_record is None:
+        logger.debug(f'No request ID {request_id}')
+        return False
+    # Skip internal requests. The internal requests are scheduled with
+    # request_id in range(len(INTERNAL_REQUEST_EVENTS)).
+    if request_record.request_id in set(
+            event.id for event in daemons.INTERNAL_REQUEST_DAEMONS):
+        return False
+    if request_record.status > RequestStatus.RUNNING:
+        logger.debug(f'Request {request_id} already finished')
+        return False
+    return True
+
+
+def _kill_requests(request_ids: Optional[List[str]] = None,
+                   user_id: Optional[str] = None) -> List[str]:
+    """Kill a SkyPilot API request and set its status to cancelled.
+
+    Args:
+        request_ids: The request IDs to kill. If None, all requests for the
+            user are killed.
+        user_id: The user ID to kill requests for. If None, all users are
+            killed.
+
+    Returns:
+        A list of request IDs that were cancelled.
+    """
+    if request_ids is None:
+        request_ids = [
+            request_task.request_id
+            for request_task in get_request_tasks(req_filter=RequestTaskFilter(
+                status=[RequestStatus.PENDING, RequestStatus.RUNNING],
+                # Avoid cancelling the cancel request itself.
+                exclude_request_names=['sky.api_cancel'],
+                user_id=user_id,
+                fields=['request_id']))
+        ]
+    cancelled_request_ids = []
+    for request_id in request_ids:
+        with update_request(request_id) as request_record:
+            if not _should_kill_request(request_id, request_record):
+                continue
+            if request_record.pid is not None:
+                logger.debug(f'Killing request process {request_record.pid}')
+                # Use SIGTERM instead of SIGKILL:
+                # - The executor can handle SIGTERM gracefully
+                # - After SIGTERM, the executor can reuse the request process
+                #   for other requests, avoiding the overhead of forking a new
+                #   process for each request.
+                os.kill(request_record.pid, signal.SIGTERM)
+            request_record.status = RequestStatus.CANCELLED
+            request_record.finished_at = time.time()
+            cancelled_request_ids.append(request_id)
+    return cancelled_request_ids
+
+
+@init_db_async
+@asyncio_utils.shield
+async def kill_request_async(request_id: str) -> bool:
+    """Kill a SkyPilot API request and set its status to cancelled.
+
+    Returns:
+        True if the request was killed, False otherwise.
+    """
+    async with filelock.AsyncFileLock(request_lock_path(request_id)):
+        request = await _get_request_no_lock_async(request_id)
+        if not _should_kill_request(request_id, request):
+            return False
+        assert request is not None
+        if request.pid is not None:
+            logger.debug(f'Killing request process {request.pid}')
+            # Use SIGTERM instead of SIGKILL:
+            # - The executor can handle SIGTERM gracefully
+            # - After SIGTERM, the executor can reuse the request process
+            #   for other requests, avoiding the overhead of forking a new
+            #   process for each request.
+            os.kill(request.pid, signal.SIGTERM)
+        request.status = RequestStatus.CANCELLED
+        request.finished_at = time.time()
+        await _add_or_update_request_no_lock_async(request)
+    return True
+
+
 @contextlib.contextmanager
 @init_db
 @metrics_lib.time_me
@@ -620,7 +673,7 @@ def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
             _add_or_update_request_no_lock(request)
 
 
-@init_db
+@init_db_async
 @metrics_lib.time_me
 @asyncio_utils.shield
 async def update_status_async(request_id: str, status: RequestStatus) -> None:
@@ -632,7 +685,7 @@ async def update_status_async(request_id: str, status: RequestStatus) -> None:
             await _add_or_update_request_no_lock_async(request)
 
 
-@init_db
+@init_db_async
 @metrics_lib.time_me
 @asyncio_utils.shield
 async def update_status_msg_async(request_id: str, status_msg: str) -> None:
@@ -713,6 +766,51 @@ async def get_request_async(
     # TODO(aylei): figure out how to remove FileLock here to avoid the overhead
     async with filelock.AsyncFileLock(request_lock_path(request_id)):
         return await _get_request_no_lock_async(request_id, fields)
+
+
+@init_db
+@metrics_lib.time_me
+def get_requests_with_prefix(
+        request_id_prefix: str,
+        fields: Optional[List[str]] = None) -> Optional[List[Request]]:
+    """Get requests with a given request ID prefix."""
+    assert _DB is not None
+    if fields:
+        columns_str = ', '.join(fields)
+    else:
+        columns_str = ', '.join(REQUEST_COLUMNS)
+    with _DB.conn:
+        cursor = _DB.conn.cursor()
+        cursor.execute((f'SELECT {columns_str} FROM {REQUEST_TABLE} '
+                        'WHERE request_id LIKE ?'), (request_id_prefix + '%',))
+        rows = cursor.fetchall()
+        if not rows:
+            return None
+        if fields:
+            rows = [_update_request_row_fields(row, fields) for row in rows]
+        return [Request.from_row(row) for row in rows]
+
+
+@init_db_async
+@metrics_lib.time_me_async
+@asyncio_utils.shield
+async def get_requests_async_with_prefix(
+        request_id_prefix: str,
+        fields: Optional[List[str]] = None) -> Optional[List[Request]]:
+    """Async version of get_request_with_prefix."""
+    assert _DB is not None
+    if fields:
+        columns_str = ', '.join(fields)
+    else:
+        columns_str = ', '.join(REQUEST_COLUMNS)
+    async with _DB.execute_fetchall_async(
+        (f'SELECT {columns_str} FROM {REQUEST_TABLE} '
+         'WHERE request_id LIKE ?'), (request_id_prefix + '%',)) as rows:
+        if not rows:
+            return None
+        if fields:
+            rows = [_update_request_row_fields(row, fields) for row in rows]
+        return [Request.from_row(row) for row in rows]
 
 
 class StatusWithMsg(NamedTuple):

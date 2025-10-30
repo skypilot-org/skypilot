@@ -25,7 +25,10 @@ metadata:
 spec:
   ingressClassName: {{ .Values.grafana.ingress.ingressClassName }}
   rules:
-  - http:
+  - {{- if .Values.ingress.host }}
+    host: {{ .Values.ingress.host | quote }}
+    {{- end }}
+    http:
       paths:
       - backend:
           service:

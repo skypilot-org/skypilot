@@ -60,6 +60,35 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
+_MANAGED_JOB_FIELDS_FOR_QUEUE_KUBERNETES = [
+    'job_id',
+    'task_id',
+    'workspace',
+    'job_name',
+    'task_name',
+    'resources',
+    'submitted_at',
+    'end_at',
+    'job_duration',
+    'recovery_count',
+    'status',
+    'pool',
+    'current_cluster_name',
+    'job_id_on_pool_cluster',
+    'start_at',
+    'infra',
+    'cloud',
+    'region',
+    'zone',
+    'cluster_resources',
+    'schedule_state',
+    'details',
+    'failure_reason',
+    'metadata',
+    'user_name',
+    'user_hash',
+]
+
 
 def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
     """Upload files to the controller.
@@ -533,7 +562,8 @@ def queue_from_kubernetes_pod(
         'kubernetes', cluster_info)[0]
 
     code = managed_job_utils.ManagedJobCodeGen.get_job_table(
-        skip_finished=skip_finished)
+        skip_finished=skip_finished,
+        fields=_MANAGED_JOB_FIELDS_FOR_QUEUE_KUBERNETES)
     returncode, job_table_payload, stderr = managed_jobs_runner.run(
         code,
         require_outputs=True,
@@ -646,8 +676,7 @@ def queue(refresh: bool,
             does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
-    jobs, _, _, _ = queue_v2(refresh, skip_finished, all_users, job_ids, None,
-                             None, None, None, None, None, None)
+    jobs, _, _, _ = queue_v2(refresh, skip_finished, all_users, job_ids)
 
     return jobs
 

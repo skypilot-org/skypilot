@@ -49,6 +49,7 @@ install_requires = [
     # <= 3.13 may encounter https://github.com/ultralytics/yolov5/issues/414
     'pyyaml > 3.13, != 5.4.*',
     'ijson',
+    'orjson',
     'requests',
     # SkyPilot inherits from uvicorn.Server to customize the behavior of
     # uvicorn, so we need to pin uvicorn version to avoid potential break
@@ -187,6 +188,7 @@ cloud_dependencies: Dict[str, List[str]] = {
     'docker': ['docker'] + local_ray,
     'lambda': [],  # No dependencies needed for lambda
     'cloudflare': aws_dependencies,
+    'coreweave': aws_dependencies,
     'scp': local_ray,
     'oci': ['oci'],
     # Kubernetes 32.0.0 has an authentication bug: https://github.com/kubernetes-client/python/issues/2333 # pylint: disable=line-too-long
