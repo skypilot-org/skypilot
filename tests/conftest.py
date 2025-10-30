@@ -554,6 +554,7 @@ def setup_policy_server(request, tmp_path_factory):
                 # Launch the policy server
                 port = common_utils.find_free_port(start_port=10000)
                 policy_server_url = f'http://127.0.0.1:{port}'
+                print(f'Launching policy server on port {port}, file: {fn}')
                 server_process = subprocess.Popen([
                     'python', 'tests/admin_policy/no_op_server.py', '--host',
                     '0.0.0.0', '--port',
