@@ -1,5 +1,6 @@
 """SDK functions for managed jobs."""
 import concurrent.futures
+import copy
 import ipaddress
 import os
 import pathlib
@@ -387,12 +388,15 @@ def launch(
         ) as original_user_yaml_path:
             original_user_yaml_path.write(user_dag_str_user_specified)
             original_user_yaml_path.flush()
-            for task_ in dag.tasks:
+            # Copy tasks to avoid race conditions when multiple threads modify
+            # the same dag object concurrently. Each thread needs its own copy.
+            dag_copy = copy.deepcopy(dag)
+            for task_ in dag_copy.tasks:
                 if job_rank is not None:
                     task_.update_envs({'SKYPILOT_JOB_RANK': str(job_rank)})
                     task_.update_envs({'SKYPILOT_NUM_JOBS': str(num_jobs)})
 
-            dag_utils.dump_chain_dag_to_yaml(dag, f.name)
+            dag_utils.dump_chain_dag_to_yaml(dag_copy, f.name)
 
             vars_to_fill = {
                 'remote_original_user_yaml_path':
@@ -425,7 +429,8 @@ def launch(
 
             yaml_path = os.path.join(
                 managed_job_constants.JOBS_CONTROLLER_YAML_PREFIX,
-                f'{name}-{dag_uuid}-{consolidation_mode_job_id}.yaml')
+                f'{name}-{dag_uuid}-{consolidation_mode_job_id}-{job_rank}.yaml'
+            )
             common_utils.fill_template(
                 managed_job_constants.JOBS_CONTROLLER_TEMPLATE,
                 vars_to_fill,
@@ -433,7 +438,7 @@ def launch(
             controller_task = task_lib.Task.from_yaml(yaml_path)
             controller_task.set_resources(controller_resources)
 
-            controller_task.managed_job_dag = dag
+            controller_task.managed_job_dag = dag_copy
             # pylint: disable=protected-access
             controller_task._metadata = metadata
 
