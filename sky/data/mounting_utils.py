@@ -233,9 +233,18 @@ def get_az_mount_install_cmd() -> str:
         # Try to install fuse3 from default repos
         'sudo apt-get update && '
         'FUSE3_INSTALLED=0 && '
+        # On Kubernetes, if FUSERMOUNT_SHARED_DIR is set, it means
+        # fusermount and fusermount3 is symlinked to fusermount-shim.
+        # If we install fuse3, it will overwrite the fusermount-shim,
+        # so just install libfuse3, which is needed by blobfuse2.
+        'if [ -n "${FUSERMOUNT_SHARED_DIR:-}" ]; then '
+        '  PACKAGES="libfuse3-3 libfuse3-dev"; '
+        'else '
+        '  PACKAGES="fuse3 libfuse3-3 libfuse3-dev"; '
+        'fi && '
         'if sudo apt-get install -y '
         '-o Dpkg::Options::="--force-confdef" '
-        'fuse3 libfuse3-dev; then '
+        '$PACKAGES; then '
         '  FUSE3_INSTALLED=1; '
         '  echo "fuse3 installed from default repos"; '
         'else '
@@ -256,7 +265,7 @@ def get_az_mount_install_cmd() -> str:
         '    if sudo apt-get install -y '
         '-o Dpkg::Options::="--force-confdef" '
         '-o Dpkg::Options::="--force-confold" '
-        'fuse3 libfuse3-3 libfuse3-dev; then '
+        '$PACKAGES; then '
         '      FUSE3_INSTALLED=1; '
         '      echo "fuse3 installed from focal"; '
         '      sudo rm /etc/apt/sources.list.d/focal-fuse3.list; '
@@ -266,20 +275,6 @@ def get_az_mount_install_cmd() -> str:
         '      sudo apt-get update; '
         '    fi; '
         '  fi; '
-        'fi && '
-        # Restore fusermount shim on Kubernetes after fuse3 installation
-        # The fuse3 package installation overwrites fusermount/fusermount3 with
-        # the real binaries, so we need to restore the shim symlinks.
-        'if [ -n "${FUSERMOUNT_SHARED_DIR:-}" ]; then '
-        '  echo "Restoring fusermount shim after fuse3 installation"; '
-        '  FUSERMOUNT_PATH=$(which fusermount) && '
-        '  sudo rm -f "$FUSERMOUNT_PATH" && '
-        '  sudo cp -p ${FUSERMOUNT_SHARED_DIR}/fusermount-shim "$FUSERMOUNT_PATH" && '
-        '  FUSERMOUNT3_PATH=$(which fusermount3 2>/dev/null || echo "${FUSERMOUNT_PATH}3") && '
-        '  sudo ln -sf "$FUSERMOUNT_PATH" "$FUSERMOUNT3_PATH" && '
-        '  sudo rm -f /bin/fusermount-wrapper && '
-        '  sudo cp -p ${FUSERMOUNT_SHARED_DIR}/fusermount-wrapper /bin/fusermount-wrapper && '
-        '  echo "fusermount shim restored successfully"; '
         'fi && '
         # Install blobfuse2 only if fuse3 is available
         'if [ "$FUSE3_INSTALLED" = "1" ]; then '
@@ -636,6 +631,7 @@ def get_mounting_script(
                     echo "No goofys log file found in /tmp"
                 fi
             fi
+            # TODO(kevin): Print logs from rclone, etc too for observability.
             exit $MOUNT_EXIT_CODE
         fi
         echo "Mounting done."
