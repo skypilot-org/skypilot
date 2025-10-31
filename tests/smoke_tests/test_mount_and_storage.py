@@ -311,7 +311,13 @@ def test_aws_storage_mounts_arm64():
 
 
 @pytest.mark.aws
-def test_aws_dpkg_storage_mounts_cached():
+@pytest.mark.parametrize(
+    'ami',
+    [
+        'ami-0f5fcdfbd140e4ab7',  # dpkg
+        'ami-0a5a5b7e2278263e5'  # yum
+    ])
+def test_aws_storage_mounts_cached(ami: str):
     name = smoke_tests_utils.get_cluster_name()
     cloud = 'aws'
     storage_name = f'sky-test-{int(time.time())}'
@@ -324,53 +330,11 @@ def test_aws_dpkg_storage_mounts_cached():
                 if cmd.startswith('sky launch') and '--infra aws' in cmd:
                     test_commands[i] = cmd.replace(
                         '--infra aws',
-                        # The image ID is retrieved with:
-
-                        # aws ec2 describe-images \
-                        # --owners 099720109477 \
-                        # --filters "Name=name,Values=ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*" \
-                        # --query 'Images | sort_by(@, &CreationDate) | [-1].[ImageId,Name,CreationDate]' \
-                        # --output text --region us-east-2
-                        '--infra aws/us-east-2 --image-id ami-0f5fcdfbd140e4ab7'
-                    )
+                        f'--infra aws/us-east-2 --image-id {ami}')
                     break
 
             test = smoke_tests_utils.Test(
-                'aws_dpkg_storage_mount_cached',
-                test_commands,
-                clean_command,
-                timeout=20 * 60,  # 20 mins
-            )
-            smoke_tests_utils.run_one_test(test)
-
-
-@pytest.mark.aws
-def test_aws_yum_storage_mounts_cached():
-    name = smoke_tests_utils.get_cluster_name()
-    cloud = 'aws'
-    storage_name = f'sky-test-{int(time.time())}'
-    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f1:
-        with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f2:
-            test_commands, clean_command = _storage_mount_cached_test_command_generator(
-                f1, f2, name, storage_name, cloud)
-
-            for i, cmd in enumerate(test_commands):
-                if cmd.startswith('sky launch') and '--infra aws' in cmd:
-                    test_commands[i] = cmd.replace(
-                        '--infra aws',
-                        # The image ID is retrieved with:
-
-                        # aws ec2 describe-images \
-                        # --owners amazon \
-                        # --filters "Name=name,Values=al2023-ami-2023.*-x86_64" \
-                        # --query 'Images | sort_by(@, &CreationDate) | [-1].[ImageId,Name]' \
-                        # --output text --region us-east-2
-                        '--infra aws/us-east-2 --image-id ami-0a5a5b7e2278263e5'
-                    )
-                    break
-
-            test = smoke_tests_utils.Test(
-                'aws_yum_storage_mount_cached',
+                'aws_storage_mount_cached',
                 test_commands,
                 clean_command,
                 timeout=20 * 60,  # 20 mins

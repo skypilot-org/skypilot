@@ -17,6 +17,16 @@ _TYPE_CACHE_TTL = '5s'
 _RENAME_DIR_LIMIT = 10000
 # https://github.com/GoogleCloudPlatform/gcsfuse/releases
 GCSFUSE_VERSION = '2.2.0'
+
+# Some machines do not have fuse/fuse3 installed by default
+# hence rclone will fail on these machines
+FUSE3_INSTALL_CMD = ('(command -v fusermount3 > /dev/null 2>&1 || '
+                     '((which apt-get > /dev/null 2>&1 && '
+                     'sudo apt-get update && sudo apt-get install -y fuse3) || '
+                     '(which yum > /dev/null 2>&1 && '
+                     'sudo yum install -y fuse3) || '
+                     'true)) || true')
+
 # Creates a fusermount3 soft link on older (<22) Ubuntu systems to utilize
 # Rclone's mounting utility.
 FUSERMOUNT3_SOFT_LINK_CMD = ('[ ! -f /bin/fusermount3 ] && '
@@ -94,6 +104,7 @@ def get_s3_mount_cmd(bucket_name: str,
     # Use rclone for ARM64 architectures since goofys doesn't support them
     arch_check = 'ARCH=$(uname -m) && '
     rclone_mount = (
+        f'{FUSE3_INSTALL_CMD} && '
         f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
         f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
         # Have to add --s3-env-auth=true to allow rclone to access private
@@ -128,6 +139,7 @@ def get_nebius_mount_cmd(nebius_profile_name: str,
     # Use rclone for ARM64 architectures since goofys doesn't support them
     arch_check = 'ARCH=$(uname -m) && '
     rclone_mount = (
+        f'{FUSE3_INSTALL_CMD} && '
         f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
         f'AWS_PROFILE={nebius_profile_name} '
         f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
@@ -163,6 +175,7 @@ def get_coreweave_mount_cmd(cw_credentials_path: str,
     # Use rclone for ARM64 architectures since goofys doesn't support them
     arch_check = 'ARCH=$(uname -m) && '
     rclone_mount = (
+        f'{FUSE3_INSTALL_CMD} && '
         f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
         f'AWS_SHARED_CREDENTIALS_FILE={cw_credentials_path} '
         f'AWS_PROFILE={coreweave_profile_name} '
@@ -382,6 +395,7 @@ def get_r2_mount_cmd(r2_credentials_path: str,
     # Use rclone for ARM64 architectures since goofys doesn't support them
     arch_check = 'ARCH=$(uname -m) && '
     rclone_mount = (
+        f'{FUSE3_INSTALL_CMD} && '
         f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
         f'AWS_SHARED_CREDENTIALS_FILE={r2_credentials_path} '
         f'AWS_PROFILE={r2_profile_name} '
@@ -411,7 +425,8 @@ def get_cos_mount_cmd(rclone_config: str,
                       _bucket_sub_path: Optional[str] = None) -> str:
     """Returns a command to mount an IBM COS bucket using rclone."""
     # stores bucket profile in rclone config file at the cluster's nodes.
-    configure_rclone_profile = (f'{FUSERMOUNT3_SOFT_LINK_CMD}; '
+    configure_rclone_profile = (f'{FUSE3_INSTALL_CMD} && '
+                                f'{FUSERMOUNT3_SOFT_LINK_CMD}; '
                                 f'mkdir -p {constants.RCLONE_CONFIG_DIR} && '
                                 f'echo "{rclone_config}" >> '
                                 f'{constants.RCLONE_CONFIG_PATH}')
@@ -431,7 +446,8 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
                          bucket_name: str, mount_path: str) -> str:
     """Returns a command to mount a bucket using rclone with vfs cache."""
     # stores bucket profile in rclone config file at the remote nodes.
-    configure_rclone_profile = (f'{FUSERMOUNT3_SOFT_LINK_CMD}; '
+    configure_rclone_profile = (f'{FUSE3_INSTALL_CMD} && '
+                                f'{FUSERMOUNT3_SOFT_LINK_CMD}; '
                                 f'mkdir -p {constants.RCLONE_CONFIG_DIR} && '
                                 f'echo {shlex.quote(rclone_config)} >> '
                                 f'{constants.RCLONE_CONFIG_PATH}')
