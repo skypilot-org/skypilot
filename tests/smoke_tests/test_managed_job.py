@@ -1424,6 +1424,7 @@ def _get_ha_kill_test(name: str, generic_cloud: str,
     return smoke_tests_utils.Test(
         f'test-managed-jobs-ha-kill-{status.value.lower()}',
         [
+            'sky api stop && sky api start --deploy',
             smoke_tests_utils.launch_cluster_for_cloud_cmd(generic_cloud, name),
             f'sky jobs launch -n {name} --infra {generic_cloud} '
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y examples/managed_job.yaml -d',
