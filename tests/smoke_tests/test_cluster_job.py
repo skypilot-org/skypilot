@@ -484,7 +484,9 @@ def test_multi_echo(generic_cloud: str):
             # unfulfilled' error.  If process not found, grep->ssh returns 1.
             f'ssh {name} \'ps aux | grep "[/]"monitor.py\''
         ],
-        f'sky down -y {name}',
+        (f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api stop && '
+         f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api start; '
+         f'sky down -y {name}'),
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
