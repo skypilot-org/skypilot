@@ -1073,7 +1073,13 @@ def test_volume_env_mount_kubernetes():
                 f'sky volumes apply -y -n {full_pvc_name} --type k8s-pvc --size 2GB',
                 f's=$(sky jobs launch -y --infra kubernetes {f.name} --env USERNAME=user); echo "$s"; echo "$s" | grep "Job finished (status: SUCCEEDED)"',
             ],
-            f'sky jobs cancel -a || true && sleep 5 && sky volumes delete {full_pvc_name} -y && (vol=$(sky volumes ls | grep "{full_pvc_name}"); if [ -n "$vol" ]; then echo "{full_pvc_name} not deleted" && exit 1; else echo "{full_pvc_name} deleted"; fi)',
+            ' && '.join([
+                'sky jobs cancel -a -y || true', 'sleep 5',
+                f'sky volumes delete {full_pvc_name} -y',
+                f'(vol=$(sky volumes ls | grep "{full_pvc_name}"); '
+                f'if [ -n "$vol" ]; then echo "{full_pvc_name} not deleted" '
+                '&& exit 1; else echo "{full_pvc_name} deleted"; fi)'
+            ]),
         )
         smoke_tests_utils.run_one_test(test)
 
