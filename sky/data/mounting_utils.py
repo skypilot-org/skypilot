@@ -602,6 +602,32 @@ def get_mounting_script(
                 fi
             fi
         fi
+
+        # Wait for fusermount shim if we're in Kubernetes (indicated by presence of shim directory)
+        # This ensures the fusermount proxy is ready before attempting mounts, especially on Ubuntu 18.04
+        # where the setup might take longer
+        if [ -d "/var/run/fusermount" ] && [ "$MOUNT_BINARY" != "rclone" ]; then
+            FUSERMOUNT_SHIM="/var/run/fusermount/fusermount-shim"
+            FUSERMOUNT_PATH=$(which fusermount 2>/dev/null || echo "")
+            if [ -n "$FUSERMOUNT_PATH" ]; then
+                echo "Waiting for fusermount shim to be ready..."
+                timeout=30
+                start_time=$(date +%s)
+                while [ ! -f "$FUSERMOUNT_SHIM" ] || [ ! -L "$FUSERMOUNT_PATH" ] || [ "$(readlink -f "$FUSERMOUNT_PATH" 2>/dev/null)" != "$FUSERMOUNT_SHIM" ]; do
+                    current_time=$(date +%s)
+                    elapsed=$((current_time - start_time))
+                    if [ $elapsed -ge $timeout ]; then
+                        echo "Warning: fusermount shim not ready after $timeout seconds, proceeding anyway..."
+                        break
+                    fi
+                    sleep 1
+                done
+                if [ -f "$FUSERMOUNT_SHIM" ] && [ -L "$FUSERMOUNT_PATH" ]; then
+                    echo "fusermount shim is ready"
+                fi
+            fi
+        fi
+
         echo "Mounting $SOURCE_BUCKET to $MOUNT_PATH with $MOUNT_BINARY..."
         set +e
         {mount_cmd}
@@ -625,25 +651,48 @@ def get_mounting_script(
                 echo "Checking syslog for goofys entries..."
                 # Try journalctl first (systemd systems)
                 if command -v journalctl >/dev/null 2>&1; then
-                    echo "=== Recent syslog entries (journalctl) ==="
-                    journalctl -n 50 --no-pager 2>/dev/null | grep -i goofys || echo "No goofys entries found in journalctl"
-                    echo "=== End of syslog entries ==="
+                    GOOFYS_ENTRIES=$(journalctl -n 500 --no-pager 2>/dev/null | grep -i goofys || true)
+                    if [ -n "$GOOFYS_ENTRIES" ]; then
+                        echo "=== Recent syslog entries (journalctl) - goofys filtered ==="
+                        echo "$GOOFYS_ENTRIES"
+                        echo "=== End of syslog entries ==="
+                    else
+                        echo "No goofys entries found in journalctl. Showing recent unfiltered entries:"
+                        echo "=== Recent syslog entries (journalctl) - unfiltered ==="
+                        journalctl -n 200 --no-pager 2>/dev/null || echo "Could not read journalctl"
+                        echo "=== End of syslog entries ==="
+                    fi
                 # Try traditional syslog files
                 elif [ -f /var/log/syslog ]; then
-                    echo "=== Recent syslog entries from /var/log/syslog ==="
-                    tail -n 50 /var/log/syslog 2>/dev/null | grep -i goofys || echo "No goofys entries found in /var/log/syslog"
-                    echo "=== End of syslog entries ==="
+                    GOOFYS_ENTRIES=$(tail -n 500 /var/log/syslog 2>/dev/null | grep -i goofys || true)
+                    if [ -n "$GOOFYS_ENTRIES" ]; then
+                        echo "=== Recent syslog entries from /var/log/syslog - goofys filtered ==="
+                        echo "$GOOFYS_ENTRIES"
+                        echo "=== End of syslog entries ==="
+                    else
+                        echo "No goofys entries found in /var/log/syslog. Showing recent unfiltered entries:"
+                        echo "=== Recent syslog entries from /var/log/syslog - unfiltered ==="
+                        tail -n 200 /var/log/syslog 2>/dev/null || echo "Could not read /var/log/syslog"
+                        echo "=== End of syslog entries ==="
+                    fi
                 elif [ -f /var/log/messages ]; then
-                    echo "=== Recent syslog entries from /var/log/messages ==="
-                    tail -n 50 /var/log/messages 2>/dev/null | grep -i goofys || echo "No goofys entries found in /var/log/messages"
-                    echo "=== End of syslog entries ==="
-                # Fallback to dmesg for kernel messages
-                elif command -v dmesg >/dev/null 2>&1; then
+                    GOOFYS_ENTRIES=$(tail -n 500 /var/log/messages 2>/dev/null | grep -i goofys || true)
+                    if [ -n "$GOOFYS_ENTRIES" ]; then
+                        echo "=== Recent syslog entries from /var/log/messages - goofys filtered ==="
+                        echo "$GOOFYS_ENTRIES"
+                        echo "=== End of syslog entries ==="
+                    else
+                        echo "No goofys entries found in /var/log/messages. Showing recent unfiltered entries:"
+                        echo "=== Recent syslog entries from /var/log/messages - unfiltered ==="
+                        tail -n 200 /var/log/messages 2>/dev/null || echo "Could not read /var/log/messages"
+                        echo "=== End of syslog entries ==="
+                    fi
+                fi
+                # Always check dmesg for kernel messages related to fuse/fusermount
+                if command -v dmesg >/dev/null 2>&1; then
                     echo "=== Recent kernel messages (dmesg) ==="
-                    dmesg | tail -n 50 | grep -i -E "(goofys|fuse|fusermount)" || echo "No relevant entries found in dmesg"
+                    dmesg | tail -n 200 | grep -i -E "(goofys|fuse|fusermount)" || echo "No relevant entries found in dmesg"
                     echo "=== End of kernel messages ==="
-                else
-                    echo "Could not access syslog (journalctl, /var/log/syslog, /var/log/messages, or dmesg not available)"
                 fi
             fi
             exit $MOUNT_EXIT_CODE
