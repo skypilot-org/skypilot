@@ -1697,13 +1697,11 @@ def query_instances(
         logger.debug(
             f'Querying k8s api for pods in context: {context} and '
             f'namespace: {namespace} with '
-            f'`skypilot-cluster-name={cluster_name_on_cloud}` label selector.')
+            f'`skypilot-cluster={cluster_name_on_cloud}` label selector.')
 
-        label_selector = (f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
-                          f'{cluster_name_on_cloud}')
         response = kubernetes.core_api(context).list_namespaced_pod(
             namespace,
-            label_selector=label_selector,
+            label_selector=f'skypilot-cluster={cluster_name_on_cloud}',
             _request_timeout=kubernetes.API_TIMEOUT)
         pods = response.items
 
