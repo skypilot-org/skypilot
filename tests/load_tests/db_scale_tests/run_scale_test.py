@@ -120,9 +120,10 @@ def test_managed_jobs(test, count=10000):
     print(f"   Total injected: {jobs_count} managed jobs")
 
     # Test get_managed_jobs (raw DB query)
+    # Note: in most cases, we call this with `fields` set, which may be faster
     print("\n   Testing get_managed_jobs (raw DB query):")
     start_time = time.time()
-    managed_jobs = job_state.get_managed_jobs()
+    managed_jobs, _ = job_state.get_managed_jobs_with_filters()
     duration_get_jobs = time.time() - start_time
     print(
         f"   get_managed_jobs: {len(managed_jobs)} jobs in {duration_get_jobs:.3f}s"

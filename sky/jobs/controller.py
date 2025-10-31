@@ -1,15 +1,17 @@
 """Controller: handles scheduling and the life cycle of a managed job.
 """
 import asyncio
+import io
 import os
 import pathlib
 import resource
 import shutil
 import sys
+import threading
 import time
 import traceback
 import typing
-from typing import Dict, Optional, Set, Tuple
+from typing import Dict, Optional, Set
 
 import dotenv
 
@@ -22,6 +24,8 @@ from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.data import data_utils
 from sky.jobs import constants as jobs_constants
+from sky.jobs import file_content_utils
+from sky.jobs import log_gc
 from sky.jobs import recovery_strategy
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
@@ -29,6 +33,7 @@ from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
+from sky.utils import annotations
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import context
@@ -61,17 +66,26 @@ async def create_background_task(coro: typing.Coroutine) -> None:
         task.add_done_callback(_background_tasks.discard)
 
 
-def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
-    dag = dag_utils.load_chain_dag_from_yaml(dag_yaml)
-    dag_name = dag.name
-    assert dag_name is not None, dag
-    return dag, dag_name
+# Make sure to limit the size as we don't want to cache too many DAGs in memory.
+@annotations.lru_cache(scope='global', maxsize=50)
+def _get_dag(job_id: int) -> 'sky.Dag':
+    dag_content = file_content_utils.get_job_dag_content(job_id)
+    if dag_content is None:
+        raise RuntimeError('Managed job DAG YAML content is unavailable for '
+                           f'job {job_id}. This can happen if the job was '
+                           'submitted before file migration completed or if '
+                           'the submission failed to persist the DAG. Please '
+                           're-submit the job.')
+
+    dag = dag_utils.load_chain_dag_from_yaml_str(dag_content)
+    assert dag.name is not None, dag
+    return dag
 
 
-class JobsController:
+class JobController:
     """Controls the lifecycle of a single managed job.
 
-    This controller executes a chain DAG defined in ``dag_yaml`` by:
+    This controller executes the chain DAG recorded for the job by:
     - Loading the DAG and preparing per-task environment variables so each task
       has a stable global job identifier across recoveries.
     - Launching the task on the configured backend (``CloudVmRayBackend``),
@@ -91,7 +105,8 @@ class JobsController:
 
     Key attributes:
     - ``_job_id``: Integer identifier of this managed job.
-    - ``_dag_yaml`` / ``_dag`` / ``_dag_name``: The job definition and metadata.
+    - ``_dag`` / ``_dag_name``: The job definition and metadata loaded from the
+      database-backed job YAML.
     - ``_backend``: Backend used to launch and manage clusters.
     - ``_pool``: Optional pool name if using a cluster pool.
     - ``starting`` / ``starting_lock`` / ``starting_signal``: Shared scheduler
@@ -104,7 +119,6 @@ class JobsController:
     def __init__(
         self,
         job_id: int,
-        dag_yaml: str,
         starting: Set[int],
         starting_lock: asyncio.Lock,
         starting_signal: asyncio.Condition,
@@ -114,7 +128,6 @@ class JobsController:
 
         Args:
             job_id: Integer ID of the managed job.
-            dag_yaml: Path to the YAML file containing the chain DAG to run.
             starting: Shared set of job IDs currently in the STARTING phase,
                 used to limit concurrent launches.
             starting_lock: ``asyncio.Lock`` guarding access to the shared
@@ -130,12 +143,11 @@ class JobsController:
         self.starting_lock = starting_lock
         self.starting_signal = starting_signal
 
-        logger.info(f'Initializing JobsController for job_id={job_id}, '
-                    f'dag_yaml={dag_yaml}')
+        logger.info('Initializing JobsController for job_id=%s', job_id)
 
         self._job_id = job_id
-        self._dag_yaml = dag_yaml
-        self._dag, self._dag_name = _get_dag_and_name(dag_yaml)
+        self._dag = _get_dag(job_id)
+        self._dag_name = self._dag.name
         logger.info(f'Loaded DAG: {self._dag}')
 
         self._backend = cloud_vm_ray_backend.CloudVmRayBackend()
@@ -779,8 +791,11 @@ class JobsController:
                 task=self._dag.tasks[task_id]))
 
 
-class Controller:
-    """Controller for managing jobs."""
+class ControllerManager:
+    """Main loop for a job controller process.
+
+    Many jobs will be handled by this, each by a single JobController.
+    """
 
     def __init__(self, controller_uuid: str) -> None:
         self._controller_uuid = controller_uuid
@@ -799,10 +814,7 @@ class Controller:
 
         self._pid = os.getpid()
 
-    async def _cleanup(self,
-                       job_id: int,
-                       dag_yaml: str,
-                       pool: Optional[str] = None):
+    async def _cleanup(self, job_id: int, pool: Optional[str] = None):
         """Clean up the cluster(s) and storages.
 
         (1) Clean up the succeeded task(s)' ephemeral storage. The storage has
@@ -892,7 +904,7 @@ class Controller:
             if error is not None:
                 raise error
 
-        dag, _ = _get_dag_and_name(dag_yaml)
+        dag = _get_dag(job_id)
         error = None
         for task in dag.tasks:
             # most things in this function are blocking
@@ -911,57 +923,45 @@ class Controller:
     @context.contextual_async
     async def run_job_loop(self,
                            job_id: int,
-                           dag_yaml: str,
                            log_file: str,
-                           env_file_path: Optional[str] = None,
                            pool: Optional[str] = None):
         """Background task that runs the job loop."""
         ctx = context.get()
         assert ctx is not None, 'Context is not initialized'
         ctx.redirect_log(pathlib.Path(log_file))
 
-        logger.info(f'Starting job loop for {job_id}')
-        logger.info(f'  dag_yaml={dag_yaml}')
-        logger.info(f'  log_file={log_file}')
-        logger.info(f'  env_file_path={env_file_path}')
-        logger.info(f'  pool={pool}')
+        logger.info('Starting job loop for %s', job_id)
+        logger.info('  log_file=%s', log_file)
+        logger.info('  pool=%s', pool)
         logger.info(f'From controller {self._controller_uuid}')
         logger.info(f'  pid={self._pid}')
 
-        # Load and apply environment variables from the job's environment file
-        if env_file_path and os.path.exists(env_file_path):
+        env_content = file_content_utils.get_job_env_content(job_id)
+        if env_content:
             try:
-                # Load environment variables from the file
-                env_vars = dotenv.dotenv_values(env_file_path)
-                logger.info(f'Loading environment from {env_file_path}: '
-                            f'{list(env_vars.keys())}')
-
-                # Apply environment variables to the job's context
+                env_vars = dotenv.dotenv_values(stream=io.StringIO(env_content))
+                logger.info('Loading %d environment variables for job %s',
+                            len(env_vars), job_id)
                 if ctx is not None:
                     for key, value in env_vars.items():
                         if value is not None:
                             ctx.override_envs({key: value})
-                            logger.debug(
-                                f'Set environment variable: {key}={value}')
-                    # Reload the skypilot config for this context to make sure
-                    # the latest config is used.
+                            logger.debug('Set environment variable: %s=%s', key,
+                                         value)
                     skypilot_config.reload_config()
-                else:
-                    logger.error(
-                        'Context is None, cannot set environment variables')
+                else:  # pragma: no cover - defensive
+                    logger.error('Context is None, cannot set environment '
+                                 'variables')
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(
-                    f'Failed to load environment file {env_file_path}: {e}')
-        elif env_file_path:
-            logger.error(f'Environment file not found: {env_file_path}')
+                    'Failed to load environment variables for job %s: '
+                    '%s', job_id, e)
 
         cancelling = False
         try:
-            logger.info(f'Starting job loop for {job_id}')
-
-            controller = JobsController(job_id, dag_yaml, self.starting,
-                                        self._job_tasks_lock,
-                                        self._starting_signal, pool)
+            controller = JobController(job_id, self.starting,
+                                       self._job_tasks_lock,
+                                       self._starting_signal, pool)
 
             async with self._job_tasks_lock:
                 if job_id in self.job_tasks:
@@ -976,7 +976,7 @@ class Controller:
             await task
         except asyncio.CancelledError:
             logger.info(f'Job {job_id} was cancelled')
-            dag, _ = _get_dag_and_name(dag_yaml)
+            dag = _get_dag(job_id)
             task_id, _ = await (
                 managed_job_state.get_latest_task_id_status_async(job_id))
             assert task_id is not None, job_id
@@ -994,7 +994,7 @@ class Controller:
             raise
         finally:
             try:
-                await self._cleanup(job_id, dag_yaml=dag_yaml, pool=pool)
+                await self._cleanup(job_id, pool=pool)
                 logger.info(
                     f'Cluster of managed job {job_id} has been cleaned up.')
             except Exception as e:  # pylint: disable=broad-except
@@ -1056,29 +1056,23 @@ class Controller:
     async def start_job(
         self,
         job_id: int,
-        dag_yaml: str,
-        env_file_path: Optional[str] = None,
         pool: Optional[str] = None,
     ):
         """Start a new job.
 
         Args:
             job_id: The ID of the job to start.
-            dag_yaml: Path to the YAML file containing the DAG definition.
-            env_file_path: Optional path to environment file for the job.
         """
         # Create log file path for job output redirection
         log_dir = os.path.expanduser(jobs_constants.JOBS_CONTROLLER_LOGS_DIR)
         os.makedirs(log_dir, exist_ok=True)
         log_file = os.path.join(log_dir, f'{job_id}.log')
 
-        logger.info(f'Starting job {job_id} with dag_yaml={dag_yaml}, '
-                    f'env_file_path={env_file_path}, and log_file={log_file}')
+        logger.info(f'Starting job {job_id} with log_file={log_file}')
 
         async with self._job_tasks_lock:
             self.starting.add(job_id)
-        await create_background_task(
-            self.run_job_loop(job_id, dag_yaml, log_file, env_file_path, pool))
+        await create_background_task(self.run_job_loop(job_id, log_file, pool))
 
         logger.info(f'Job {job_id} started successfully')
 
@@ -1151,8 +1145,6 @@ class Controller:
 
             logger.info(f'Claiming job {waiting_job["job_id"]}')
             job_id = waiting_job['job_id']
-            dag_yaml_path = waiting_job['dag_yaml_path']
-            env_file_path = waiting_job.get('env_file_path')
             pool = waiting_job.get('pool', None)
 
             cancels = os.listdir(jobs_constants.CONSOLIDATED_SIGNAL_PATH)
@@ -1172,7 +1164,7 @@ class Controller:
                             job_id=job_id, task_id=None, task=None))
                     continue
 
-            await self.start_job(job_id, dag_yaml_path, env_file_path, pool)
+            await self.start_job(job_id, pool)
 
 
 async def main(controller_uuid: str):
@@ -1180,7 +1172,7 @@ async def main(controller_uuid: str):
 
     context_utils.hijack_sys_attrs()
 
-    controller = Controller(controller_uuid)
+    controller = ControllerManager(controller_uuid)
 
     # Will happen multiple times, who cares though
     os.makedirs(jobs_constants.CONSOLIDATED_SIGNAL_PATH, exist_ok=True)
@@ -1199,7 +1191,10 @@ async def main(controller_uuid: str):
     # Will loop forever, do it in the background
     cancel_job_task = asyncio.create_task(controller.cancel_job())
     monitor_loop_task = asyncio.create_task(controller.monitor_loop())
-
+    # Run the garbage collector in a dedicated daemon thread to avoid affecting
+    # the main event loop.
+    gc_thread = threading.Thread(target=log_gc.elect_for_log_gc, daemon=True)
+    gc_thread.start()
     try:
         await asyncio.gather(cancel_job_task, monitor_loop_task)
     except Exception as e:  # pylint: disable=broad-except

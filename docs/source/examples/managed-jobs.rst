@@ -149,7 +149,7 @@ Work with managed jobs
 
 For a list of all commands and options, run :code:`sky jobs --help` or read the :ref:`CLI reference <cli>`.
 
-See a list of all managed jobs:
+See a list of managed jobs:
 
 .. code-block:: console
 
@@ -162,6 +162,8 @@ See a list of all managed jobs:
   ID NAME     RESOURCES           SUBMITTED   TOT. DURATION   JOB DURATION   #RECOVERIES  STATUS
   2  roberta  1x [A100:8][Spot]   2 hrs ago   2h 47m 18s      2h 36m 18s     0            RUNNING
   1  bert-qa  1x [V100:1][Spot]   4 hrs ago   4h 24m 26s      4h 17m 54s     0            RUNNING
+
+This command shows 50 managed jobs by default, use ``--limit <num>`` to show more jobs or use ``--all`` to show all jobs.
 
 Stream the logs of a running managed job:
 
@@ -615,6 +617,7 @@ Submit multiple jobs at once
 
 Pools support a :code:`--num-jobs` flag to conveniently submit multiple jobs at once.
 Each job will be assigned a unique environment variable :code:`$SKYPILOT_JOB_RANK`, which can be used to determine the job partition.
+Additionally, the :code:`$SKYPILOT_NUM_JOBS` environment variable will be set to the total number of jobs submitted.
 
 For example, if you have 1000 prompts to evaluate, each job can process prompts with sequence numbers
 :code:`$SKYPILOT_JOB_RANK * 100` to :code:`($SKYPILOT_JOB_RANK + 1) * 100`.
@@ -630,7 +633,7 @@ Here is a simple example:
     accelerators: {H100:1, H200:1}
 
   run: |
-    echo "Job rank: $SKYPILOT_JOB_RANK"
+    echo "Job rank: $SKYPILOT_JOB_RANK out of $SKYPILOT_NUM_JOBS"
     echo "Processing prompts from $(($SKYPILOT_JOB_RANK * 100)) to $((($SKYPILOT_JOB_RANK + 1) * 100))"
     # Actual business logic here...
     echo "Job $SKYPILOT_JOB_RANK finished"
@@ -766,7 +769,7 @@ For managed jobs, SkyPilot uses an intermediate bucket to store files used in th
 
 If you do not configure a bucket, SkyPilot will automatically create a temporary bucket named :code:`skypilot-filemounts-{username}-{run_id}` for each job launch. SkyPilot automatically deletes the bucket after the job completes.
 
-**Object store access is not necessary to use managed jobs.** If cloud object storage is not available (e.g., Kubernetes deployments), SkyPilot automatically falls back to a two-hop upload that copies files to the jobs controller and then downloads them to the jobs. 
+**Object store access is not necessary to use managed jobs.** If cloud object storage is not available (e.g., Kubernetes deployments), SkyPilot automatically falls back to a two-hop upload that copies files to the jobs controller and then downloads them to the jobs.
 
 .. tip::
 

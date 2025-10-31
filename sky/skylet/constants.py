@@ -100,7 +100,7 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '22'
+SKYLET_VERSION = '25'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -422,6 +422,8 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     #   but the configs won't be applied)
     ('jobs', 'controller', 'consolidation_mode'),
     ('serve', 'controller', 'consolidation_mode'),
+    ('jobs', 'controller', 'controller_logs_gc_retention_hours'),
+    ('jobs', 'controller', 'task_logs_gc_retention_hours'),
 ]
 
 # Constants for Azure blob storage
@@ -548,3 +550,6 @@ ENV_VAR_LOOP_LAG_THRESHOLD_MS = (SKYPILOT_ENV_VAR_PREFIX +
 
 ARM64_ARCH = 'arm64'
 X86_64_ARCH = 'x86_64'
+
+SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}SSH_DISABLE_LATENCY_MEASUREMENT')

@@ -326,8 +326,15 @@ class AutostopEvent(SkyletEvent):
         cluster_name_on_cloud = cluster_config['cluster_name']
         is_cluster_multinode = cluster_config['max_workers'] > 0
 
+        # Clear AWS credentials from environment to force boto3 to use IAM
+        # role attached to the instance (lowest priority in credential chain).
+        # This allows the cluster to stop/terminate itself using its IAM role.
         os.environ.pop('AWS_ACCESS_KEY_ID', None)
         os.environ.pop('AWS_SECRET_ACCESS_KEY', None)
+        os.environ.pop('AWS_SESSION_TOKEN', None)
+        # Point boto3 to /dev/null to skip reading credentials from files.
+        os.environ['AWS_SHARED_CREDENTIALS_FILE'] = '/dev/null'
+        os.environ['AWS_CONFIG_FILE'] = '/dev/null'
 
         # Stop the ray autoscaler to avoid scaling up, during
         # stopping/terminating of the cluster.
