@@ -621,6 +621,30 @@ def get_mounting_script(
                 else
                     echo "No goofys log file found in /tmp"
                 fi
+                # Also check syslog since goofys may log there
+                echo "Checking syslog for goofys entries..."
+                # Try journalctl first (systemd systems)
+                if command -v journalctl >/dev/null 2>&1; then
+                    echo "=== Recent syslog entries (journalctl) ==="
+                    journalctl -n 50 --no-pager 2>/dev/null | grep -i goofys || echo "No goofys entries found in journalctl"
+                    echo "=== End of syslog entries ==="
+                # Try traditional syslog files
+                elif [ -f /var/log/syslog ]; then
+                    echo "=== Recent syslog entries from /var/log/syslog ==="
+                    tail -n 50 /var/log/syslog 2>/dev/null | grep -i goofys || echo "No goofys entries found in /var/log/syslog"
+                    echo "=== End of syslog entries ==="
+                elif [ -f /var/log/messages ]; then
+                    echo "=== Recent syslog entries from /var/log/messages ==="
+                    tail -n 50 /var/log/messages 2>/dev/null | grep -i goofys || echo "No goofys entries found in /var/log/messages"
+                    echo "=== End of syslog entries ==="
+                # Fallback to dmesg for kernel messages
+                elif command -v dmesg >/dev/null 2>&1; then
+                    echo "=== Recent kernel messages (dmesg) ==="
+                    dmesg | tail -n 50 | grep -i -E "(goofys|fuse|fusermount)" || echo "No relevant entries found in dmesg"
+                    echo "=== End of kernel messages ==="
+                else
+                    echo "Could not access syslog (journalctl, /var/log/syslog, /var/log/messages, or dmesg not available)"
+                fi
             fi
             exit $MOUNT_EXIT_CODE
         fi
