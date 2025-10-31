@@ -1,17 +1,8 @@
 [package]
 name = "skypilot-utils"
 version.workspace = true
-edition.workspace = true
 authors.workspace = true
+edition.workspace = true
 license.workspace = true
 
 [dependencies]
-anyhow.workspace = true
-thiserror.workspace = true
-tracing.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-serde_yaml.workspace = true
-tokio.workspace = true
-config.workspace = true
-chrono.workspace = true

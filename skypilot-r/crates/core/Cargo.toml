@@ -1,26 +1,22 @@
 [package]
 name = "skypilot-core"
 version.workspace = true
-edition.workspace = true
 authors.workspace = true
+edition.workspace = true
 license.workspace = true
 
 [dependencies]
-skypilot-utils = { path = "../utils" }
-
 tokio.workspace = true
-tokio-util.workspace = true
-serde.workspace = true
-serde_json.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 tracing.workspace = true
 petgraph.workspace = true
-daggy.workspace = true
 chrono.workspace = true
-uuid.workspace = true
-futures.workspace = true
+
+uuid = { version = "1.10", features = ["v4", "serde"] }
+async-trait = "0.1"
 
 [dev-dependencies]
-mockall.workspace = true
-proptest.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
