@@ -245,6 +245,9 @@
                 },
                 "secretAccessKeyKeyName": {
                     "type": "string"
+                },
+                "useCredentialsFile": {
+                    "type": "boolean"
                 }
             }
         },

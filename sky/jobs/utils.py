@@ -195,8 +195,8 @@ def _validate_consolidation_mode_config(
                     'terminate the controller cluster first.'
                     f'{colorama.Style.RESET_ALL}')
     else:
-        all_jobs = managed_job_state.get_managed_jobs()
-        if all_jobs:
+        total_jobs = managed_job_state.get_managed_jobs_total()
+        if total_jobs > 0:
             nonterminal_jobs = (
                 managed_job_state.get_nonterminal_job_ids_by_name(
                     None, None, all_users=True))
@@ -211,7 +211,7 @@ def _validate_consolidation_mode_config(
             else:
                 logger.warning(
                     f'{colorama.Fore.YELLOW}Consolidation mode is disabled, '
-                    f'but there are {len(all_jobs)} jobs from previous '
+                    f'but there are {total_jobs} jobs from previous '
                     'consolidation mode. Reset the `jobs.controller.'
                     'consolidation_mode` to `true` and run `sky jobs queue` '
                     'to see those jobs. Switching to normal mode will '
@@ -266,6 +266,12 @@ def is_consolidation_mode(on_api_restart: bool = False) -> bool:
 
 def ha_recovery_for_consolidation_mode():
     """Recovery logic for HA mode."""
+    # Touch the signal file here to avoid conflict with
+    # update_managed_jobs_statuses. Although we run this first and then start
+    # the deamon, this function is also called in cancel_jobs_by_id.
+    signal_file = pathlib.Path(
+        constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE).expanduser()
+    signal_file.touch()
     # No setup recovery is needed in consolidation mode, as the API server
     # already has all runtime installed. Directly start jobs recovery here.
     # Refers to sky/templates/kubernetes-ray.yml.j2 for more details.
@@ -276,7 +282,9 @@ def ha_recovery_for_consolidation_mode():
               encoding='utf-8') as f:
         start = time.time()
         f.write(f'Starting HA recovery at {datetime.datetime.now()}\n')
-        for job in managed_job_state.get_managed_jobs():
+        jobs, _ = managed_job_state.get_managed_jobs_with_filters(
+            fields=['job_id', 'controller_pid', 'schedule_state', 'status'])
+        for job in jobs:
             job_id = job['job_id']
             controller_pid = job['controller_pid']
 
@@ -312,6 +320,7 @@ def ha_recovery_for_consolidation_mode():
                         f'{datetime.datetime.now()}\n')
         f.write(f'HA recovery completed at {datetime.datetime.now()}\n')
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
+    signal_file.unlink()
 
 
 async def get_job_status(
@@ -456,7 +465,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         """
         managed_job_state.remove_ha_recovery_script(job_id)
         error_msg = None
-        tasks = managed_job_state.get_managed_jobs(job_id)
+        tasks = managed_job_state.get_managed_job_tasks(job_id)
         for task in tasks:
             pool = task.get('pool', None)
             if pool is None:
@@ -525,7 +534,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
 
     for job_id in job_ids:
         assert job_id is not None
-        tasks = managed_job_state.get_managed_jobs(job_id)
+        tasks = managed_job_state.get_managed_job_tasks(job_id)
         # Note: controller_pid and schedule_state are in the job_info table
         # which is joined to the spot table, so all tasks with the same job_id
         # will have the same value for these columns. This is what lets us just
@@ -545,9 +554,9 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         if schedule_state == managed_job_state.ManagedJobScheduleState.DONE:
             # There are two cases where we could get a job that is DONE.
             # 1. At query time (get_jobs_to_check_status), the job was not yet
-            #    DONE, but since then (before get_managed_jobs is called) it has
-            #    hit a terminal status, marked itself done, and exited. This is
-            #    fine.
+            #    DONE, but since then (before get_managed_job_tasks is called)
+            #    it has hit a terminal status, marked itself done, and exited.
+            #    This is fine.
             # 2. The job is DONE, but in a non-terminal status. This is
             #    unexpected. For instance, the task status is RUNNING, but the
             #    job schedule_state is DONE.
@@ -1202,7 +1211,8 @@ def stream_logs(job_id: Optional[int],
     if controller:
         if job_id is None:
             assert job_name is not None
-            managed_jobs = managed_job_state.get_managed_jobs()
+            managed_jobs, _ = managed_job_state.get_managed_jobs_with_filters(
+                name_match=job_name, fields=['job_id', 'job_name', 'status'])
             # We manually filter the jobs by name, instead of using
             # get_nonterminal_job_ids_by_name, as with `controller=True`, we
             # should be able to show the logs for jobs in terminal states.
@@ -1378,9 +1388,11 @@ def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
             new_fields.append('priority')
         if 'failure_reason' not in new_fields:
             new_fields.append('failure_reason')
-    if ('user_yaml' in new_fields and
-            'original_user_yaml_path' not in new_fields):
-        new_fields.append('original_user_yaml_path')
+    if 'user_yaml' in new_fields:
+        if 'original_user_yaml_path' not in new_fields:
+            new_fields.append('original_user_yaml_path')
+        if 'original_user_yaml_content' not in new_fields:
+            new_fields.append('original_user_yaml_content')
     if cluster_handle_required:
         if 'task_name' not in new_fields:
             new_fields.append('task_name')
@@ -1522,12 +1534,11 @@ def get_managed_job_queue(
             handle = cluster_name_to_handle.get(
                 cluster_name, None) if cluster_name is not None else None
             if isinstance(handle, backends.CloudVmRayResourceHandle):
-                resources_str = resources_utils.get_readable_resources_repr(
-                    handle, simplify=True)
-                resources_str_full = (
-                    resources_utils.get_readable_resources_repr(handle,
-                                                                simplify=False))
-                job['cluster_resources'] = resources_str
+                resources_str_simple, resources_str_full = (
+                    resources_utils.get_readable_resources_repr(
+                        handle, simplified_only=False))
+                assert resources_str_full is not None
+                job['cluster_resources'] = resources_str_simple
                 job['cluster_resources_full'] = resources_str_full
                 job['cloud'] = str(handle.launched_resources.cloud)
                 job['region'] = handle.launched_resources.region
@@ -2110,7 +2121,8 @@ def _job_proto_to_dict(
         # and Protobuf encodes int64 as decimal strings in JSON,
         # so we need to convert them back to ints.
         # https://protobuf.dev/programming-guides/json/#field-representation
-        if field.type == descriptor.FieldDescriptor.TYPE_INT64:
+        if (field.type == descriptor.FieldDescriptor.TYPE_INT64 and
+                job_dict.get(field.name) is not None):
             job_dict[field.name] = int(job_dict[field.name])
     job_dict['status'] = managed_job_state.ManagedJobStatus.from_protobuf(
         job_dict['status'])
@@ -2262,6 +2274,18 @@ class ManagedJobCodeGen:
         # Get and print raw job table (load_managed_job_queue can parse this directly)
         job_table = utils.dump_managed_job_queue()
         print(job_table, flush=True)
+        """)
+        return cls._build(code)
+
+    @classmethod
+    def get_version(cls) -> str:
+        """Generate code to get controller version."""
+        code = textwrap.dedent("""\
+        from sky.skylet import constants as controller_constants
+
+        # Get controller version
+        controller_version = controller_constants.SKYLET_VERSION
+        print(f"controller_version:{controller_version}", flush=True)
         """)
         return cls._build(code)
 

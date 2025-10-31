@@ -90,7 +90,7 @@ class StatusResponse(ResponseBaseModel):
     # This is an internally facing field anyway, so it's less
     # of a problem that it's not typed.
     handle: Optional[Any] = None
-    last_use: str
+    last_use: Optional[str] = None
     status: status_lib.ClusterStatus
     autostop: int
     to_down: bool
@@ -98,11 +98,8 @@ class StatusResponse(ResponseBaseModel):
     # metadata is a JSON, so we use Any here.
     metadata: Optional[Dict[str, Any]] = None
     cluster_hash: str
-    # pydantic cannot generate the pydantic-core schema for
-    # storage_mounts_metadata, so we use Any here.
-    storage_mounts_metadata: Optional[Dict[str, Any]] = None
     cluster_ever_up: bool
-    status_updated_at: int
+    status_updated_at: Optional[int] = None
     user_hash: str
     user_name: str
     config_hash: Optional[str] = None

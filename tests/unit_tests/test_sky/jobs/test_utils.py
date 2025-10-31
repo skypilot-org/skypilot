@@ -534,10 +534,10 @@ class TestGetManagedJobQueue:
         def fake_get_cluster_name_to_handle_map(is_managed: bool = True):
             return {'test-cluster': mock_handle}
 
-        def fake_get_readable_resources_repr(handle, simplify=False):
-            if simplify:
-                return '1x V100'
-            return '1x V100 (AWS)'
+        def fake_get_readable_resources_repr(handle, simplified_only=False):
+            if simplified_only:
+                return ('1x V100', None)
+            return ('1x V100', '1x V100 (AWS)')
 
         # Patch functions
         monkeypatch.setattr(jobs_utils.global_user_state,

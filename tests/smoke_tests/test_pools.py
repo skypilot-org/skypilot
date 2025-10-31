@@ -1045,3 +1045,39 @@ def test_pool_worker_assignment_in_queue(generic_cloud: str):
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
             )
             smoke_tests_utils.run_one_test(test)
+
+
+def test_pools_num_jobs_option(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+    pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
+    job_config = basic_job_conf(job_name=f'{name}-job',)
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
+            write_yaml(pool_yaml, pool_config)
+            write_yaml(job_yaml, job_config)
+            test = smoke_tests_utils.Test(
+                'test_pools_num_jobs',
+                [
+                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, pool_yaml=pool_yaml.name),
+                    # Test parallel job launching with --num-jobs 3
+                    ('s=$(sky jobs launch --pool {pool_name} {job_yaml} --num-jobs 10 -d -y); '
+                     'echo "$s"; '
+                     'echo; echo; echo "$s" | grep "Job submitted, ID: 1"; '
+                     'echo "$s" | grep "Job submitted, ID: 2"; '
+                     'echo "$s" | grep "Job submitted, ID: 3"; '
+                     'echo "$s" | grep "Job submitted, ID: 4"; '
+                     'echo "$s" | grep "Job submitted, ID: 5"; '
+                     'echo "$s" | grep "Job submitted, ID: 6"; '
+                     'echo "$s" | grep "Job submitted, ID: 7"; '
+                     'echo "$s" | grep "Job submitted, ID: 8"; '
+                     'echo "$s" | grep "Job submitted, ID: 9"; '
+                     'echo "$s" | grep "Job submitted, ID: 10"; '
+                     'sleep 5').format(pool_name=pool_name,
+                                       job_yaml=job_yaml.name)
+                ],
+                timeout=smoke_tests_utils.get_timeout(generic_cloud),
+                teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
+            )
+            smoke_tests_utils.run_one_test(test)

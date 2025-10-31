@@ -60,13 +60,23 @@ def encode_status(
         clusters: List[responses.StatusResponse]) -> List[Dict[str, Any]]:
     response = []
     for cluster in clusters:
-        response_cluster = cluster.model_dump()
+        response_cluster = cluster.model_dump(exclude_none=True)
+        # These default setting is needed because last_use and status_updated_at
+        # used to be not optional.
+        # TODO(syang): remove this after v0.10.7 or v0.11.0
+        if 'last_use' not in response_cluster:
+            response_cluster['last_use'] = ''
+        if 'status_updated_at' not in response_cluster:
+            response_cluster['status_updated_at'] = 0
         response_cluster['status'] = cluster['status'].value
         handle = serialize_utils.prepare_handle_for_backwards_compatibility(
             cluster['handle'])
         response_cluster['handle'] = pickle_and_encode(handle)
+        # TODO (syang) We still need to return this field for backwards
+        # compatibility.
+        # Remove this field at or after v0.10.7 or v0.11.0
         response_cluster['storage_mounts_metadata'] = pickle_and_encode(
-            response_cluster['storage_mounts_metadata'])
+            None)  # Always returns None.
         response.append(response_cluster)
     return response
 
@@ -220,11 +230,11 @@ def encode_volume_list(
 
 
 @register_encoder('job_status')
-def encode_job_status(return_value: Dict[int, Any]) -> Dict[int, str]:
+def encode_job_status(return_value: Dict[int, Any]) -> Dict[str, str]:
     for job_id in return_value.keys():
         if return_value[job_id] is not None:
             return_value[job_id] = return_value[job_id].value
-    return return_value
+    return {str(k): v for k, v in return_value.items()}
 
 
 @register_encoder('kubernetes_node_info')
@@ -236,3 +246,19 @@ def encode_kubernetes_node_info(
 @register_encoder('endpoints')
 def encode_endpoints(return_value: Dict[int, str]) -> Dict[str, str]:
     return {str(k): v for k, v in return_value.items()}
+
+
+@register_encoder('realtime_kubernetes_gpu_availability')
+def encode_realtime_gpu_availability(
+    return_value: List[Tuple[str,
+                             List[Any]]]) -> List[Tuple[str, List[List[Any]]]]:
+    # Convert RealtimeGpuAvailability namedtuples to lists
+    # for JSON serialization.
+    result = []
+    for context, gpu_list in return_value:
+        gpu_availability_list = []
+        for gpu in gpu_list:
+            gpu_list_item = [gpu.gpu, gpu.counts, gpu.capacity, gpu.available]
+            gpu_availability_list.append(gpu_list_item)
+        result.append((context, gpu_availability_list))
+    return result

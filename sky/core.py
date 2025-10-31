@@ -99,6 +99,7 @@ def status(
     all_users: bool = False,
     include_credentials: bool = False,
     summary_response: bool = False,
+    include_handle: bool = True,
 ) -> List[responses.StatusResponse]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets cluster statuses.
@@ -179,7 +180,8 @@ def status(
         cluster_names=cluster_names,
         all_users=all_users,
         include_credentials=include_credentials,
-        summary_response=summary_response)
+        summary_response=summary_response,
+        include_handle=include_handle)
 
     status_responses = []
     for cluster in clusters:
@@ -414,12 +416,12 @@ def cost_report(
         # compatibility
         num_nodes = record.get('num_nodes', 1)
         try:
-            resource_str_simple = resources_utils.format_resource(resources,
-                                                                  simplify=True)
+            resource_str_simple, resource_str_full = (
+                resources_utils.format_resource(
+                    resources, simplified_only=abbreviate_response))
             record['resources_str'] = f'{num_nodes}x{resource_str_simple}'
             if not abbreviate_response:
-                resource_str_full = resources_utils.format_resource(
-                    resources, simplify=False)
+                assert resource_str_full is not None
                 record[
                     'resources_str_full'] = f'{num_nodes}x{resource_str_full}'
         except Exception as e:  # pylint: disable=broad-except

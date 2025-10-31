@@ -201,6 +201,7 @@ export async function getManagedJobs(options = {}) {
         pool_hash: job.pool_hash,
         current_cluster_name: job.current_cluster_name,
         job_id_on_pool_cluster: job.job_id_on_pool_cluster,
+        accelerators: job.accelerators, // Include accelerators field
       };
     });
 
