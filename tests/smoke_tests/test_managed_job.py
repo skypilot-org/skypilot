@@ -1277,6 +1277,7 @@ def test_managed_jobs_env_isolation(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server
 @pytest.mark.managed_jobs
 def test_managed_jobs_config_labels_isolation(generic_cloud: str, request):
     supported_clouds = {'aws', 'gcp', 'kubernetes'}

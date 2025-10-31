@@ -742,3 +742,56 @@ class TestPermissionServiceMultiProcess:
 
         # The save_policy might not be called if no changes were made
         # We mainly want to ensure no duplicate additions occurred
+
+    @mock.patch('sky.users.permission._policy_lock')
+    @mock.patch(
+        'sky.users.permission.PermissionService._maybe_initialize_policies')
+    @mock.patch(
+        'sky.users.permission.PermissionService._maybe_initialize_basic_auth_user'
+    )
+    @mock.patch('sky.users.permission.casbin.Enforcer')
+    @mock.patch('sky.users.permission.sqlalchemy_adapter.Adapter')
+    @mock.patch('sky.users.permission.db_utils.add_all_tables_to_db_sqlalchemy')
+    @mock.patch('sky.global_user_state.initialize_and_get_db')
+    def test_lazy_initialize_db_failure_recovery(
+            self, mock_init_db, mock_add_tables, mock_adapter_class,
+            mock_enforcer_class, mock_init_basic_auth, mock_init_policies,
+            mock_policy_lock):
+        """Test that _lazy_initialize doesn't permanently set 
+        enforcer to None after DB failure on retry."""
+        # Configure context manager to allow exceptions to propagate
+        mock_context = mock.Mock()
+        mock_context.__enter__ = mock.Mock(return_value=None)
+        mock_context.__exit__ = mock.Mock(
+            return_value=False)  # Don't suppress exceptions
+        mock_policy_lock.return_value = mock_context
+
+        mock_engine = mock.Mock()
+        mock_init_db.return_value = mock_engine
+
+        mock_adapter = mock.Mock()
+        mock_adapter_class.return_value = mock_adapter
+
+        mock_enforcer = mock.Mock()
+        mock_enforcer_class.return_value = mock_enforcer
+
+        # First call: add_all_tables_to_db_sqlalchemy raises an error
+        # Second call: it succeeds
+        mock_add_tables.side_effect = [
+            Exception("Database connection failed"),
+            None  # Success on second call
+        ]
+
+        service = permission.PermissionService()
+
+        # First call - should raise an exception
+        with pytest.raises(Exception) as exc_info:
+            service._lazy_initialize()
+        assert "Database connection failed" in str(exc_info.value)
+
+        # Second call - should succeed
+        service._lazy_initialize()
+
+        # Verify that self.enforcer is not None after successful initialization
+        assert service.enforcer is not None
+        assert service.enforcer == mock_enforcer

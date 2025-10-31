@@ -11,6 +11,7 @@ from sky.server import common as server_common
 from sky.server import stream_utils
 from sky.server.requests import executor
 from sky.server.requests import payloads
+from sky.server.requests import request_names
 from sky.server.requests import requests as api_requests
 from sky.skylet import constants
 from sky.utils import common
@@ -37,7 +38,7 @@ async def launch(request: fastapi.Request,
                      if consolidation_mode else api_requests.ScheduleType.LONG)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='jobs.launch',
+        request_name=request_names.RequestName.JOBS_LAUNCH,
         request_body=jobs_launch_body,
         func=core.launch,
         schedule_type=schedule_type,
@@ -52,7 +53,7 @@ async def queue(request: fastapi.Request,
                 jobs_queue_body: payloads.JobsQueueBody) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='jobs.queue',
+        request_name=request_names.RequestName.JOBS_QUEUE,
         request_body=jobs_queue_body,
         func=core.queue,
         schedule_type=(api_requests.ScheduleType.LONG if jobs_queue_body.refresh
@@ -66,7 +67,7 @@ async def queue_v2(request: fastapi.Request,
                    jobs_queue_body_v2: payloads.JobsQueueV2Body) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='jobs.queue_v2',
+        request_name=request_names.RequestName.JOBS_QUEUE_V2,
         request_body=jobs_queue_body_v2,
         func=core.queue_v2_api,
         schedule_type=(api_requests.ScheduleType.LONG
@@ -81,7 +82,7 @@ async def cancel(request: fastapi.Request,
                  jobs_cancel_body: payloads.JobsCancelBody) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='jobs.cancel',
+        request_name=request_names.RequestName.JOBS_CANCEL,
         request_body=jobs_cancel_body,
         func=core.cancel,
         schedule_type=api_requests.ScheduleType.SHORT,
@@ -103,7 +104,7 @@ async def logs(
         executor.check_request_thread_executor_available()
     request_task = await executor.prepare_request_async(
         request_id=request.state.request_id,
-        request_name='jobs.logs',
+        request_name=request_names.RequestName.JOBS_LOGS,
         request_body=jobs_logs_body,
         func=core.tail_logs,
         schedule_type=schedule_type,
@@ -143,7 +144,7 @@ async def download_logs(
     jobs_download_logs_body.local_dir = str(logs_dir_on_api_server)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='jobs.download_logs',
+        request_name=request_names.RequestName.JOBS_DOWNLOAD_LOGS,
         request_body=jobs_download_logs_body,
         func=core.download_logs,
         schedule_type=api_requests.ScheduleType.LONG
@@ -157,7 +158,7 @@ async def pool_apply(request: fastapi.Request,
                      jobs_pool_apply_body: payloads.JobsPoolApplyBody) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='jobs.pool_apply',
+        request_name=request_names.RequestName.JOBS_POOL_APPLY,
         request_body=jobs_pool_apply_body,
         func=core.pool_apply,
         schedule_type=api_requests.ScheduleType.LONG,
@@ -170,7 +171,7 @@ async def pool_down(request: fastapi.Request,
                     jobs_pool_down_body: payloads.JobsPoolDownBody) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='jobs.pool_down',
+        request_name=request_names.RequestName.JOBS_POOL_DOWN,
         request_body=jobs_pool_down_body,
         func=core.pool_down,
         schedule_type=api_requests.ScheduleType.SHORT,
@@ -184,7 +185,7 @@ async def pool_status(
         jobs_pool_status_body: payloads.JobsPoolStatusBody) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='jobs.pool_status',
+        request_name=request_names.RequestName.JOBS_POOL_STATUS,
         request_body=jobs_pool_status_body,
         func=core.pool_status,
         schedule_type=api_requests.ScheduleType.SHORT,
@@ -199,7 +200,7 @@ async def pool_tail_logs(
 ) -> fastapi.responses.StreamingResponse:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='jobs.pool_logs',
+        request_name=request_names.RequestName.JOBS_POOL_LOGS,
         request_body=log_body,
         func=core.pool_tail_logs,
         schedule_type=api_requests.ScheduleType.SHORT,
@@ -235,7 +236,7 @@ async def pool_download_logs(
     download_logs_body.local_dir = str(logs_dir_on_api_server)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='jobs.pool_sync_down_logs',
+        request_name=request_names.RequestName.JOBS_POOL_SYNC_DOWN_LOGS,
         request_body=download_logs_body,
         func=core.pool_sync_down_logs,
         schedule_type=api_requests.ScheduleType.SHORT,

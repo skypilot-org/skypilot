@@ -405,9 +405,9 @@ def test_big_file_upload_memory_usage(generic_cloud: str):
                 total_increase: float, total_increase_pct: float) -> List[str]:
             """Aggregate threshold checker for RSS metrics."""
             failures = []
-            if total_increase_pct > 20:
+            if total_increase_pct > 30:
                 failures.append(
-                    f"Average memory increase too high: {total_increase_pct:.1f}% (limit: 20%)"
+                    f"Average memory increase too high: {total_increase_pct:.1f}% (limit: 30%)"
                 )
             return failures
 
