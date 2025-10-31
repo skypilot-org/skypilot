@@ -255,6 +255,9 @@ export function Users() {
   const [createSuccess, setCreateSuccess] = useState(null);
   const [createError, setCreateError] = useState(null);
   const [basicAuthEnabled, setBasicAuthEnabled] = useState(undefined);
+  const [serviceAccountTokenEnabled, setServiceAccountTokenEnabled] =
+    useState(undefined);
+  const [healthCheckLoading, setHealthCheckLoading] = useState(true);
   const [activeMainTab, setActiveMainTab] = useState('users');
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showRotateDialog, setShowRotateDialog] = useState(false);
@@ -353,26 +356,32 @@ export function Users() {
   useEffect(() => {
     if (router.isReady) {
       const tab = router.query.tab;
-      if (tab === 'service-accounts') {
+      if (tab === 'service-accounts' && serviceAccountTokenEnabled) {
         setActiveMainTab('service-accounts');
       } else {
         setActiveMainTab('users');
       }
     }
-  }, [router.isReady, router.query.tab]);
+  }, [router.isReady, router.query.tab, serviceAccountTokenEnabled]);
 
   useEffect(() => {
     async function fetchHealth() {
+      setHealthCheckLoading(true);
       try {
         const resp = await apiClient.get('/api/health');
         if (resp.ok) {
           const data = await resp.json();
           setBasicAuthEnabled(!!data.basic_auth_enabled);
+          setServiceAccountTokenEnabled(!!data.service_account_token_enabled);
         } else {
           setBasicAuthEnabled(false);
+          setServiceAccountTokenEnabled(false);
         }
       } catch {
         setBasicAuthEnabled(false);
+        setServiceAccountTokenEnabled(false);
+      } finally {
+        setHealthCheckLoading(false);
       }
     }
     fetchHealth();
@@ -625,17 +634,31 @@ export function Users() {
     setResetPassword('');
   };
 
+  // Show loading while fetching health check
+  if (healthCheckLoading) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <CircularProgress />
+        <span className="ml-2 text-gray-500">Loading...</span>
+      </div>
+    );
+  }
+
   return (
     <>
       {/* Main Tabs with Controls */}
       <div className="flex items-center justify-between mb-2">
         <div className="text-base flex items-center">
           <button
-            className={`leading-none mr-6 pb-2 px-2 border-b-2 ${
-              activeMainTab === 'users'
-                ? 'text-sky-blue border-sky-500'
-                : 'text-gray-500 hover:text-gray-700 border-transparent'
-            }`}
+            className={
+              serviceAccountTokenEnabled
+                ? `leading-none mr-6 pb-2 px-2 border-b-2 ${
+                    activeMainTab === 'users'
+                      ? 'text-sky-blue border-sky-500'
+                      : 'text-gray-500 hover:text-gray-700 border-transparent'
+                  }`
+                : 'leading-none mr-6 pb-2 px-2'
+            }
             onClick={() => {
               setActiveMainTab('users');
               router.push('/users', undefined, { shallow: true });
@@ -643,21 +666,23 @@ export function Users() {
           >
             Users
           </button>
-          <button
-            className={`leading-none pb-2 px-2 border-b-2 ${
-              activeMainTab === 'service-accounts'
-                ? 'text-sky-blue border-sky-500'
-                : 'text-gray-500 hover:text-gray-700 border-transparent'
-            }`}
-            onClick={() => {
-              setActiveMainTab('service-accounts');
-              router.push('/users?tab=service-accounts', undefined, {
-                shallow: true,
-              });
-            }}
-          >
-            Service Accounts
-          </button>
+          {serviceAccountTokenEnabled && (
+            <button
+              className={`leading-none pb-2 px-2 border-b-2 ${
+                activeMainTab === 'service-accounts'
+                  ? 'text-sky-blue border-sky-500'
+                  : 'text-gray-500 hover:text-gray-700 border-transparent'
+              }`}
+              onClick={() => {
+                setActiveMainTab('service-accounts');
+                router.push('/users?tab=service-accounts', undefined, {
+                  shallow: true,
+                });
+              }}
+            >
+              Service Accounts
+            </button>
+          )}
         </div>
 
         <div className="flex items-center">
@@ -790,7 +815,7 @@ export function Users() {
         )}
 
         {/* Create Service Account Button for Service Accounts Tab */}
-        {activeMainTab === 'service-accounts' && (
+        {activeMainTab === 'service-accounts' && serviceAccountTokenEnabled && (
           <button
             onClick={() => {
               checkPermissionAndAct(
@@ -848,22 +873,24 @@ export function Users() {
           deduplicateUsers={deduplicateUsers}
         />
       ) : (
-        <ServiceAccountTokensView
-          checkPermissionAndAct={checkPermissionAndAct}
-          userRoleCache={userRoleCache}
-          setCreateSuccess={setCreateSuccess}
-          setCreateError={setCreateError}
-          showCreateDialog={showCreateDialog}
-          setShowCreateDialog={setShowCreateDialog}
-          showRotateDialog={showRotateDialog}
-          setShowRotateDialog={setShowRotateDialog}
-          tokenToRotate={tokenToRotate}
-          setTokenToRotate={setTokenToRotate}
-          rotating={rotating}
-          setRotating={setRotating}
-          searchQuery={serviceAccountSearchQuery}
-          setSearchQuery={setServiceAccountSearchQuery}
-        />
+        serviceAccountTokenEnabled && (
+          <ServiceAccountTokensView
+            checkPermissionAndAct={checkPermissionAndAct}
+            userRoleCache={userRoleCache}
+            setCreateSuccess={setCreateSuccess}
+            setCreateError={setCreateError}
+            showCreateDialog={showCreateDialog}
+            setShowCreateDialog={setShowCreateDialog}
+            showRotateDialog={showRotateDialog}
+            setShowRotateDialog={setShowRotateDialog}
+            tokenToRotate={tokenToRotate}
+            setTokenToRotate={setTokenToRotate}
+            rotating={rotating}
+            setRotating={setRotating}
+            searchQuery={serviceAccountSearchQuery}
+            setSearchQuery={setServiceAccountSearchQuery}
+          />
+        )
       )}
 
       {/* Create User Dialog */}
