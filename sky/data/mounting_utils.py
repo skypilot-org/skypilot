@@ -611,7 +611,7 @@ def get_mounting_script(
             FUSERMOUNT_PATH=$(which fusermount 2>/dev/null || echo "")
             if [ -n "$FUSERMOUNT_PATH" ]; then
                 echo "Waiting for fusermount shim to be ready..."
-                timeout=30
+                timeout=300
                 start_time=$(date +%s)
                 while [ ! -f "$FUSERMOUNT_SHIM" ] || [ ! -L "$FUSERMOUNT_PATH" ] || [ "$(readlink -f "$FUSERMOUNT_PATH" 2>/dev/null)" != "$FUSERMOUNT_SHIM" ]; do
                     current_time=$(date +%s)
