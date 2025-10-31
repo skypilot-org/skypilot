@@ -830,20 +830,63 @@ available_node_types:
                 $(prefix_cmd) ln -sf "$FUSERMOUNT_PATH" "$FUSERMOUNT3_PATH"
                 # Add fusermount-wrapper to handle adapters that use libfuse directly, e.g. blobfuse2
                 $(prefix_cmd) ln -sf {{k8s_fusermount_shared_dir}}/fusermount-wrapper /bin/fusermount-wrapper
-                # Wait for the server to setup the fusermount shim binary in case:
+                # Wait for the server to setup the fusermount shim binary and socket in case:
                 # 1. The server daemonset was just deployed and is still starting up.
                 # 2. The node was just started and the server Pod is still starting up.
                 wait_for_fusermount() {
                     local timeout=60
                     local start_time=$(date +%s)
-                    while ! command -v fusermount >/dev/null 2>&1; do
-                        current_time=$(date +%s)
-                        elapsed=$((current_time - start_time))
-                        if [ $elapsed -ge $timeout ]; then
-                            echo "Error: fusermount not ready after $timeout seconds"
-                            exit 1
+                    local socket_path="{{k8s_fusermount_shared_dir}}/server.sock"
+                    local shim_path="{{k8s_fusermount_shared_dir}}/fusermount-shim"
+                    local wrapper_path="{{k8s_fusermount_shared_dir}}/fusermount-wrapper"
+                    while true; do
+                        # Check if fusermount command exists (symlink was created)
+                        if ! command -v fusermount >/dev/null 2>&1; then
+                            current_time=$(date +%s)
+                            elapsed=$((current_time - start_time))
+                            if [ $elapsed -ge $timeout ]; then
+                                echo "Error: fusermount command not ready after $timeout seconds"
+                                exit 1
+                            fi
+                            sleep 1
+                            continue
                         fi
-                        sleep 1
+                        # Check if socket file exists and is accessible
+                        if [ ! -S "$socket_path" ]; then
+                            current_time=$(date +%s)
+                            elapsed=$((current_time - start_time))
+                            if [ $elapsed -ge $timeout ]; then
+                                echo "Error: fusermount socket $socket_path not found after $timeout seconds"
+                                echo "This may indicate the fusermount-server daemonset is not ready on this node"
+                                exit 1
+                            fi
+                            sleep 1
+                            continue
+                        fi
+                        # Check if shim binary exists
+                        if [ ! -f "$shim_path" ]; then
+                            current_time=$(date +%s)
+                            elapsed=$((current_time - start_time))
+                            if [ $elapsed -ge $timeout ]; then
+                                echo "Error: fusermount-shim binary not found at $shim_path after $timeout seconds"
+                                exit 1
+                            fi
+                            sleep 1
+                            continue
+                        fi
+                        # Check if wrapper binary exists
+                        if [ ! -f "$wrapper_path" ]; then
+                            current_time=$(date +%s)
+                            elapsed=$((current_time - start_time))
+                            if [ $elapsed -ge $timeout ]; then
+                                echo "Error: fusermount-wrapper binary not found at $wrapper_path after $timeout seconds"
+                                exit 1
+                            fi
+                            sleep 1
+                            continue
+                        fi
+                        # All checks passed
+                        break
                     done
                 }
                 wait_for_fusermount
