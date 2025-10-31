@@ -621,6 +621,7 @@ def get_mounting_script(
                 else
                     echo "No goofys log file found in /tmp"
                 fi
+            fi
             exit $MOUNT_EXIT_CODE
         fi
         echo "Mounting done."
