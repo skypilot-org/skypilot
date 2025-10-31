@@ -48,8 +48,9 @@ setup: |
   sudo apt-get install cuda-toolkit-12-6 -y
 
   # Install LLaMA Factory and dependencies
-  git clone --depth 1 https://github.com/hiyouga/LLaMA-Factory.git
+  git clone https://github.com/hiyouga/LLaMA-Factory.git
   cd LLaMA-Factory
+  git checkout 767b344
   pip install -e ".[torch,metrics,deepspeed]" --no-build-isolation
   pip install "transformers>=4.51.1" "huggingface_hub>=0.34.0,<1.0"
   hf download meta-llama/Llama-4-Maverick-17B-128E-Instruct
