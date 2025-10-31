@@ -2,8 +2,7 @@
 #
 # Usage:
 #
-# export HF_TOKEN=xxx
-# sky launch llama-4-scout-sft.yaml -c scout --env HF_TOKEN
+# HF_TOKEN=xxx sky launch llama-4-scout-sft.yaml -c scout --env HF_TOKEN
 #
 # This config requires at least 2 nodes with 8x H200 GPUs each.
 

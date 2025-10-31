@@ -2,8 +2,7 @@
 #
 # Usage:
 #
-# export HF_TOKEN=xxx
-# sky launch llama-4-maverick-sft.yaml -c maverick --env HF_TOKEN
+# HF_TOKEN=xxx sky launch llama-4-maverick-sft.yaml -c maverick --env HF_TOKEN
 #
 # This config requires at least 4 nodes with 8x H200 GPUs each.
 
