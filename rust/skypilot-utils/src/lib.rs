@@ -7,6 +7,7 @@ use pyo3::prelude::*;
 
 pub mod errors;
 pub mod io_utils;
+pub mod process_utils;
 pub mod string_utils;
 pub mod system_utils;
 
@@ -29,6 +30,12 @@ fn sky_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // System utilities
     m.add_function(wrap_pyfunction!(system_utils::get_cpu_count, m)?)?;
     m.add_function(wrap_pyfunction!(system_utils::get_mem_size_gb, m)?)?;
+
+    // Process utilities
+    m.add_function(wrap_pyfunction!(process_utils::get_parallel_threads, m)?)?;
+    m.add_function(wrap_pyfunction!(process_utils::is_process_alive, m)?)?;
+    m.add_function(wrap_pyfunction!(process_utils::get_max_workers_for_file_mounts, m)?)?;
+    m.add_function(wrap_pyfunction!(process_utils::estimate_fd_for_directory, m)?)?;
 
     // Module metadata
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;

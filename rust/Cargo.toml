@@ -34,7 +34,7 @@ env_logger = "0.11"
 
 # System-Info
 sysinfo = "0.31"
-nix = { version = "0.29", features = ["user", "socket"] }
+nix = { version = "0.29", features = ["user", "socket", "signal", "resource"] }
 
 # Testing
 criterion = { version = "0.5", features = ["html_reports"] }

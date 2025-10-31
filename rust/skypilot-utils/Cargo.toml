@@ -23,7 +23,7 @@ memmap2.workspace = true
 log.workspace = true
 env_logger.workspace = true
 sysinfo.workspace = true
-nix.workspace = true
+nix = { workspace = true, features = ["signal", "resource"] }
 num_cpus = "1.16"
 
 [dev-dependencies]
@@ -37,6 +37,10 @@ harness = false
 
 [[bench]]
 name = "string_benchmarks"
+harness = false
+
+[[bench]]
+name = "process_benchmarks"
 harness = false
 
 [features]

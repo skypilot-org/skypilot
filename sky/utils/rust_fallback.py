@@ -357,6 +357,170 @@ def _python_get_mem_size_gb() -> float:
 
 
 # ============================================================================
+# Process Utilities
+# ============================================================================
+
+
+def get_parallel_threads(cloud_str: Union[str, None] = None) -> int:
+    """Get the number of threads to use for parallel execution.
+
+    Uses Rust implementation for better performance if available.
+
+    Args:
+        cloud_str: Optional cloud provider name (e.g., "kubernetes")
+
+    Returns:
+        Number of threads to use (minimum 4)
+    """
+    if _RUST_AVAILABLE:
+        try:
+            return sky_rs.get_parallel_threads(cloud_str)
+        except Exception as e:
+            logger.warning(f'Rust get_parallel_threads failed: {e}, using Python fallback')
+
+    # Python fallback
+    return _python_get_parallel_threads(cloud_str)
+
+
+def _python_get_parallel_threads(cloud_str: Union[str, None] = None) -> int:
+    """Python implementation of get_parallel_threads."""
+    cpu_count = get_cpu_count()
+    multiplier = 4 if cloud_str and cloud_str.lower() == 'kubernetes' else 1
+    return max(4, cpu_count - 1) * multiplier
+
+
+def is_process_alive(pid: int) -> bool:
+    """Check if a process is alive.
+
+    Uses Rust implementation with direct syscalls for better performance.
+
+    Args:
+        pid: Process ID to check
+
+    Returns:
+        True if process exists, False otherwise
+    """
+    if _RUST_AVAILABLE:
+        try:
+            return sky_rs.is_process_alive(pid)
+        except Exception as e:
+            logger.warning(f'Rust is_process_alive failed: {e}, using Python fallback')
+
+    # Python fallback
+    return _python_is_process_alive(pid)
+
+
+def _python_is_process_alive(pid: int) -> bool:
+    """Python implementation of is_process_alive."""
+    try:
+        import psutil
+        process = psutil.Process(pid)
+        return process.is_running()
+    except (psutil.NoSuchProcess, ImportError):
+        # Fallback: check if we can send signal 0
+        import os
+        import errno
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError as e:
+            if e.errno == errno.ESRCH:
+                return False  # No such process
+            elif e.errno == errno.EPERM:
+                return True  # Process exists but no permission
+            raise
+
+
+def get_max_workers_for_file_mounts(
+    num_sources: int,
+    estimated_files_per_source: int = 100,
+    cloud_str: Union[str, None] = None
+) -> int:
+    """Estimate maximum workers for file mount operations.
+
+    Uses Rust implementation for better performance if available.
+
+    Args:
+        num_sources: Number of source directories/files
+        estimated_files_per_source: Estimated files per source
+        cloud_str: Optional cloud provider name
+
+    Returns:
+        Optimal number of workers
+    """
+    if _RUST_AVAILABLE:
+        try:
+            return sky_rs.get_max_workers_for_file_mounts(
+                num_sources, estimated_files_per_source, cloud_str
+            )
+        except Exception as e:
+            logger.warning(
+                f'Rust get_max_workers_for_file_mounts failed: {e}, using Python fallback'
+            )
+
+    # Python fallback
+    return _python_get_max_workers_for_file_mounts(
+        num_sources, estimated_files_per_source, cloud_str
+    )
+
+
+def _python_get_max_workers_for_file_mounts(
+    num_sources: int,
+    estimated_files_per_source: int = 100,
+    cloud_str: Union[str, None] = None
+) -> int:
+    """Python implementation of get_max_workers_for_file_mounts."""
+    import resource
+
+    # Get file descriptor limits
+    fd_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+
+    # Estimate FDs per operation
+    fd_per_rsync = 5 + max(5, estimated_files_per_source // 20)
+
+    # Reserve FDs
+    fd_reserve = 100
+
+    # Calculate max workers
+    max_workers_fd = (fd_limit - fd_reserve) // fd_per_rsync
+    parallel_threads = get_parallel_threads(cloud_str)
+
+    return max(1, min(max_workers_fd, parallel_threads))
+
+
+def estimate_fd_for_directory(path: str) -> int:
+    """Estimate file descriptors needed for a directory.
+
+    Uses Rust implementation for better performance if available.
+
+    Args:
+        path: Directory path to analyze
+
+    Returns:
+        Estimated number of file descriptors
+    """
+    if _RUST_AVAILABLE:
+        try:
+            return sky_rs.estimate_fd_for_directory(path)
+        except Exception as e:
+            logger.warning(
+                f'Rust estimate_fd_for_directory failed: {e}, using Python fallback'
+            )
+
+    # Python fallback
+    return _python_estimate_fd_for_directory(path)
+
+
+def _python_estimate_fd_for_directory(path: str) -> int:
+    """Python implementation of estimate_fd_for_directory."""
+    try:
+        entries = len(os.listdir(path))
+        return entries * 5  # Rough estimate
+    except OSError:
+        return 0
+
+
+# ============================================================================
 # Utilities
 # ============================================================================
 
