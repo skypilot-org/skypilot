@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=58.0"]
+requires = ["setuptools>=58.0", "maturin>=1.0,<2.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.yapf]
