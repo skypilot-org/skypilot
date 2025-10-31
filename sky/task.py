@@ -1,6 +1,5 @@
 """Task: a coarse-grained stage in an application."""
 import collections
-import inspect
 import json
 import os
 import re
@@ -28,10 +27,6 @@ from sky.utils import volume as volume_lib
 from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
-
-# A lambda generating commands (node rank_i, node addrs -> cmd_i).
-CommandGen = Callable[[int, List[str]], Optional[str]]
-CommandOrCommandGen = Union[str, CommandGen]
 
 _VALID_NAME_REGEX = '[a-zA-Z0-9]+(?:[._-]{1,2}[a-zA-Z0-9]+)*'
 _VALID_NAME_DESCR = ('ASCII characters and may contain lowercase and'
@@ -236,7 +231,7 @@ class Task:
         name: Optional[str] = None,
         *,
         setup: Optional[Union[str, List[str]]] = None,
-        run: Optional[Union[CommandOrCommandGen, List[str]]] = None,
+        run: Optional[Union[str, List[str]]] = None,
         envs: Optional[Dict[str, str]] = None,
         secrets: Optional[Dict[str, str]] = None,
         workdir: Optional[Union[str, Dict[str, Any]]] = None,
@@ -349,7 +344,7 @@ class Task:
         self._volumes = volumes or {}
 
         # concatenate commands if given as list
-        def _concat(commands):
+        def _concat(commands: Optional[Union[str, List[str]]]) -> Optional[str]:
             if isinstance(commands, list):
                 return '\n'.join(commands)
             return commands
@@ -447,42 +442,9 @@ class Task:
 
     def validate_run(self):
         """Validates if the run command is valid."""
-        if callable(self.run):
-            run_sig = inspect.signature(self.run)
-            # Check that run is a function with 2 arguments.
-            if len(run_sig.parameters) != 2:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(_RUN_FN_CHECK_FAIL_MSG.format(run_sig))
-
-            type_list = [int, List[str]]
-            # Check annotations, if exists
-            for i, param in enumerate(run_sig.parameters.values()):
-                if param.annotation != inspect.Parameter.empty:
-                    if param.annotation != type_list[i]:
-                        with ux_utils.print_exception_no_traceback():
-                            raise ValueError(
-                                _RUN_FN_CHECK_FAIL_MSG.format(run_sig))
-
-            # Check self containedness.
-            run_closure = inspect.getclosurevars(self.run)
-            if run_closure.nonlocals:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'run command generator must be self contained. '
-                        f'Found nonlocals: {run_closure.nonlocals}')
-            if run_closure.globals:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'run command generator must be self contained. '
-                        f'Found globals: {run_closure.globals}')
-            if run_closure.unbound:
-                # Do not raise an error here. Import statements, which are
-                # allowed, will be considered as unbounded.
-                pass
-        elif self.run is not None and not isinstance(self.run, str):
+        if self.run is not None and not isinstance(self.run, str):
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('run must be either a shell script (str) or '
-                                 f'a command generator ({CommandGen}). '
+                raise ValueError('run must be a shell script (str). '
                                  f'Got {type(self.run)}')
 
     def expand_and_validate_file_mounts(self):
