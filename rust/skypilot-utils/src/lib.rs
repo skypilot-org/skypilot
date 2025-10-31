@@ -34,8 +34,14 @@ fn sky_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Process utilities
     m.add_function(wrap_pyfunction!(process_utils::get_parallel_threads, m)?)?;
     m.add_function(wrap_pyfunction!(process_utils::is_process_alive, m)?)?;
-    m.add_function(wrap_pyfunction!(process_utils::get_max_workers_for_file_mounts, m)?)?;
-    m.add_function(wrap_pyfunction!(process_utils::estimate_fd_for_directory, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        process_utils::get_max_workers_for_file_mounts,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        process_utils::estimate_fd_for_directory,
+        m
+    )?)?;
 
     // Module metadata
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
