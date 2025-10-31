@@ -1,0 +1,26 @@
+[package]
+name = "skypilot-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+skypilot-utils = { path = "../utils" }
+
+tokio.workspace = true
+tokio-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+petgraph.workspace = true
+daggy.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+futures.workspace = true
+
+[dev-dependencies]
+mockall.workspace = true
+proptest.workspace = true
