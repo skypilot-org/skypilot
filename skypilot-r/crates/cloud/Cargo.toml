@@ -6,3 +6,31 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+skypilot-core = { path = "../core" }
+
+tokio.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+
+# AWS SDK
+aws-config = "1.5"
+aws-sdk-ec2 = "1.62"
+aws-sdk-lambda = "1.50"
+
+# GCP (using reqwest for REST API)
+reqwest = { version = "0.12", features = ["json"] }
+
+# Kubernetes
+kube = { version = "0.95", features = ["runtime", "derive"] }
+k8s-openapi = { version = "0.23", features = ["latest"] }
+
+# Azure (placeholder)
+# azure_identity = "0.20"
+# azure_mgmt_compute = "0.20"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }

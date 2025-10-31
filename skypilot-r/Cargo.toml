@@ -69,6 +69,12 @@ jsonwebtoken = "9.3"
 # Time
 chrono = { version = "0.4", features = ["serde"] }
 
+# Async
+async-trait = "0.1"
+
+# UUID
+uuid = { version = "1.10", features = ["v4", "serde"] }
+
 # Testing
 criterion = "0.5"
 
