@@ -419,7 +419,7 @@ async def get_job_status(
     return None
 
 
-def controller_process_alive(pid: int, job_id: int) -> bool:
+def controller_process_alive(pid: int, job_id: Optional[int] = None) -> bool:
     """Check if the controller process is alive."""
     try:
         if pid < 0:
@@ -427,8 +427,11 @@ def controller_process_alive(pid: int, job_id: int) -> bool:
             pid = -pid
         process = psutil.Process(pid)
         cmd_str = ' '.join(process.cmdline())
-        return process.is_running() and ((f'--job-id {job_id}' in cmd_str) or
-                                         ('controller' in cmd_str))
+        if not process.is_running():
+            return False
+        if 'controller' in cmd_str:
+            return True
+        return job_id is not None and f'--job-id {job_id}' in cmd_str
     except psutil.NoSuchProcess:
         return False
 
