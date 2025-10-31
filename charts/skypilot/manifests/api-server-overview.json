@@ -1475,8 +1475,8 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "histogram_quantile(\n  0.95,\n  sum by (pid, le) (\n    rate(sky_apiserver_websocket_ssh_latency_seconds_bucket{app=\"$app\"}[2m])\n  )\n)",
-          "legendFormat": "__auto",
+          "expr": "histogram_quantile(\n  0.95,\n  sum by (le) (\n    rate(sky_apiserver_websocket_ssh_latency_seconds_bucket{app=\"$app\"}[2m])\n  )\n)",
+          "legendFormat": "Latency",
           "range": true,
           "refId": "A"
         }
