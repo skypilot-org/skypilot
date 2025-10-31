@@ -81,6 +81,11 @@ def main():
         action="store_true",
         default=False,
         help="Enable resuming from the latest checkpoint (default: False)")
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="/checkpoints",
+        help="Directory to save checkpoints (default: /checkpoints)")
     args = parser.parse_args()
 
     # Setup profiling if enabled
@@ -151,9 +156,13 @@ def main():
 
     report_to = "wandb" if os.environ.get("WANDB_API_KEY") else "none"
 
+    # Setup output directory for checkpoints
+    output_dir = os.path.join(args.output_dir, model_id.replace('/', '-'))
+    os.makedirs(output_dir, exist_ok=True)
+
     # Train model
     training_args = SFTConfig(
-        output_dir=f"/checkpoints/{model_id.replace('/', '-')}",
+        output_dir=output_dir,
         learning_rate=2e-4,
         num_train_epochs=1,
         logging_steps=1,

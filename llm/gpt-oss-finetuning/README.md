@@ -29,17 +29,17 @@ For more details on how to setup your cloud credentials see [SkyPilot docs](http
 sky check
 ```
 
-### Configure checkpoint storage
+### Configure checkpoint storage (Optional)
 
-Before running training, update the YAML files to specify your S3 bucket for checkpoint persistence:
+Checkpoint storage is optional and only needed if you want to resume training from interruptions. By default, checkpoints are saved locally on the cluster.
+
+To enable checkpoint persistence across cluster restarts, uncomment and configure the S3 bucket in the YAML files:
 
 ```yaml
 file_mounts:
   /checkpoints:
     source: s3://my-skypilot-bucket  # change this to your bucket
 ```
-
-This enables automatic checkpoint saving and resuming from interruptions.
 
 ## Step 1: Run gpt-oss models
 

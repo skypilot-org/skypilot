@@ -8,6 +8,7 @@ fsdp_config:
   fsdp_activation_checkpointing: true
   fsdp_sharding_strategy: FULL_SHARD
   fsdp_transformer_layer_cls_to_wrap: GptOssDecoderLayer
+  fsdp_backward_prefetch: BACKWARD_PRE
   fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP
   fsdp_cpu_ram_efficient_loading: false
   fsdp_offload_params: false

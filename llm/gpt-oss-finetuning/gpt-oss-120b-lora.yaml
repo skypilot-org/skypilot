@@ -1,11 +1,13 @@
 resources:
   accelerators: H100:8
+  disk_size: 1024
   network_tier: best
 
 file_mounts:
   /sft: ./sft
-  /checkpoints:
-    source: s3://my-skypilot-bucket # change this to your bucket
+  # Uncomment to enable checkpoint persistence across cluster restarts by saving them to S3
+  # /checkpoints:
+  #   source: s3://my-skypilot-bucket # change this to your bucket
 
 envs:
   WANDB_PROJECT: gpt-oss-120b-lora
