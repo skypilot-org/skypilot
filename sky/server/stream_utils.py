@@ -25,6 +25,8 @@ logger = sky_logging.init_logger(__name__)
 _BUFFER_SIZE = 8 * 1024  # 8KB
 _BUFFER_TIMEOUT = 0.02  # 20ms
 _HEARTBEAT_INTERVAL = 30
+_READ_CHUNK_SIZE = 256 * 1024  # 256KB chunks for file reading
+
 # If a SHORT request has been stuck in pending for
 # _SHORT_REQUEST_SPINNER_TIMEOUT seconds, we show the waiting spinner
 _SHORT_REQUEST_SPINNER_TIMEOUT = 2
@@ -235,6 +237,9 @@ async def _tail_log_file(
     buffer_bytes = 0
     last_flush_time = asyncio.get_event_loop().time()
 
+    # Read file in chunks instead of line-by-line for better performance
+    incomplete_line = b''  # Buffer for incomplete lines across chunks
+
     async def flush_buffer() -> AsyncGenerator[str, None]:
         nonlocal buffer, buffer_bytes, last_flush_time
         if buffer:
@@ -255,8 +260,23 @@ async def _tail_log_file(
             async for chunk in flush_buffer():
                 yield chunk
 
-        line: Optional[bytes] = await f.readline()
-        if not line:
+        # Read file in chunks for better I/O performance
+        file_chunk: bytes = await f.read(_READ_CHUNK_SIZE)
+        if not file_chunk:
+            # Process any remaining incomplete line
+            if incomplete_line:
+                line_str = incomplete_line.decode('utf-8')
+                if plain_logs:
+                    is_payload, line_str = message_utils.decode_payload(
+                        line_str, raise_for_mismatch=False)
+                    if not is_payload:
+                        buffer.append(line_str)
+                        buffer_bytes += len(line_str.encode('utf-8'))
+                else:
+                    buffer.append(line_str)
+                    buffer_bytes += len(line_str.encode('utf-8'))
+                incomplete_line = b''
+
             # Avoid checking the status too frequently to avoid overloading the
             # DB.
             should_check_status = (current_time -
@@ -328,16 +348,39 @@ async def _tail_log_file(
         # performance but it helps avoid unnecessary heartbeat strings
         # being printed when the client runs in an old version.
         last_heartbeat_time = asyncio.get_event_loop().time()
-        line_str = line.decode('utf-8')
-        if plain_logs:
-            is_payload, line_str = message_utils.decode_payload(
-                line_str, raise_for_mismatch=False)
-            # TODO(aylei): implement heartbeat mechanism for plain logs,
-            # sending invisible characters might be okay.
-            if is_payload:
-                continue
-        buffer.append(line_str)
-        buffer_bytes += len(line_str.encode('utf-8'))
+
+        # Combine with any incomplete line from previous chunk
+        file_chunk = incomplete_line + file_chunk
+        incomplete_line = b''
+
+        # Split chunk into lines, preserving line structure
+        lines_bytes = file_chunk.split(b'\n')
+
+        # If chunk doesn't end with newline, the last element is incomplete
+        if file_chunk and not file_chunk.endswith(b'\n'):
+            incomplete_line = lines_bytes[-1]
+            lines_bytes = lines_bytes[:-1]
+        else:
+            # If ends with \n, split creates an empty last element we should
+            # ignore
+            if lines_bytes and lines_bytes[-1] == b'':
+                lines_bytes = lines_bytes[:-1]
+
+        # Process all complete lines in this chunk
+        for line_bytes in lines_bytes:
+            # Reconstruct line with newline (since split removed it)
+            line_str = line_bytes.decode('utf-8') + '\n'
+
+            if plain_logs:
+                is_payload, line_str = message_utils.decode_payload(
+                    line_str, raise_for_mismatch=False)
+                # TODO(aylei): implement heartbeat mechanism for plain logs,
+                # sending invisible characters might be okay.
+                if is_payload:
+                    continue
+
+            buffer.append(line_str)
+            buffer_bytes += len(line_str.encode('utf-8'))
 
     # Flush remaining lines in the buffer.
     async for chunk in flush_buffer():

@@ -408,3 +408,130 @@ class TestEfaHelpers:
         )
         with pytest.raises(ValueError):
             aws_mod._get_max_efa_interfaces('g6.12xlarge', 'ap-northeast-1')
+
+
+class TestAwsConfigureList:
+
+    @mock.patch('sky.adaptors.aws.get_workspace_profile')
+    @mock.patch('subprocess.run')
+    def test_command_generation_with_profiles(self, mock_run, mock_get_profile):
+        """Test command generation with no profile, with profile, and different profiles."""
+        mock_result = mock.Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = b'output'
+        mock_run.return_value = mock_result
+
+        aws_mod.AWS._aws_configure_list.cache_clear()
+
+        # Test with no profile
+        mock_get_profile.return_value = None
+        aws_mod.AWS._aws_configure_list()
+        assert mock_run.call_args[0][0] == 'aws configure list'
+
+        # Test with profile
+        mock_get_profile.return_value = 'dev'
+        aws_mod.AWS._aws_configure_list()
+        assert mock_run.call_args[0][0] == 'aws configure list --profile dev'
+
+        # Test with different profiles
+        mock_get_profile.return_value = 'profile1'
+        aws_mod.AWS._aws_configure_list()
+        assert mock_run.call_args[0][
+            0] == 'aws configure list --profile profile1'
+
+    @mock.patch('sky.adaptors.aws.get_workspace_profile')
+    @mock.patch('subprocess.run')
+    def test_caching_behavior(self, mock_run, mock_get_profile):
+        """Test caching: same profile cached, different profiles not cached."""
+        mock_result = mock.Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = b'output'
+        mock_run.return_value = mock_result
+
+        aws_mod.AWS._aws_configure_list.cache_clear()
+
+        # Same profile should be cached
+        mock_get_profile.return_value = 'test'
+        aws_mod.AWS._aws_configure_list()
+        aws_mod.AWS._aws_configure_list()
+        assert mock_run.call_count == 1
+
+        # Different profiles should NOT be cached together
+        mock_get_profile.return_value = 'other'
+        aws_mod.AWS._aws_configure_list()
+        assert mock_run.call_count == 2
+
+
+class TestAwsProfileAwareLruCache:
+    """Tests for aws_profile_aware_lru_cache decorator."""
+
+    def test_cache_distinguishes_by_aws_profile(self):
+        """Test that cache differentiates between different AWS profiles."""
+        import os
+
+        from sky import skypilot_config
+        from sky.clouds.aws import aws_profile_aware_lru_cache
+
+        call_count = 0
+
+        @aws_profile_aware_lru_cache(scope='request', maxsize=5)
+        def expensive_func(cls):
+            nonlocal call_count
+            call_count += 1
+            return f"result_{call_count}"
+
+        expensive_func.cache_clear()
+
+        # Set config file with multiple workspaces and profiles
+        old_config_path = os.environ.get(
+            skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+        try:
+            os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = \
+                './tests/test_yamls/test_aws_profile_workspace_config.yaml'
+            skypilot_config.reload_config()
+
+            # Call with workspace-a
+            with skypilot_config.local_active_workspace_ctx('workspace-a'):
+                result = expensive_func(None)
+                assert result == 'result_1'
+                assert call_count == 1
+
+                # Same workspace should use cache
+                result = expensive_func(None)
+                assert result == 'result_1'
+                assert call_count == 1
+
+            # Call with workspace-b
+            with skypilot_config.local_active_workspace_ctx('workspace-b'):
+                result = expensive_func(None)
+                assert result == 'result_2'
+                assert call_count == 2  # Called again for different workspace
+
+                # Same workspace (workspace-b) should use cache
+                result = expensive_func(None)
+                assert result == 'result_2'
+                assert call_count == 2
+
+            with skypilot_config.local_active_workspace_ctx('workspace-a'):
+                # Back to workspace-a should use its cached result
+                result = expensive_func(None)
+                assert result == 'result_1'
+                assert call_count == 2
+
+                # Clear cache
+                expensive_func.cache_clear()
+                result = expensive_func(None)
+                assert result == 'result_3'
+                assert call_count == 3
+
+                result = expensive_func(None)
+                assert result == 'result_3'
+                assert call_count == 3
+        finally:
+            # Restore original config
+            if old_config_path:
+                os.environ[
+                    skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = old_config_path
+            else:
+                os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+            skypilot_config.reload_config()

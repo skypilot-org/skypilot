@@ -451,6 +451,9 @@ def test_multi_echo(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'multi_echo',
         [
+            # TODO(aylei): also test local API server after we have rate limit in local mode
+            # Use deploy mode to avoid ulimited concurrency requests exhausts the CPU
+            'sky api stop && sky api start --deploy',
             f'python examples/multi_echo.py {name} {generic_cloud} {int(use_spot)} {accelerator}',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
             'sleep 10',
@@ -481,7 +484,9 @@ def test_multi_echo(generic_cloud: str):
             # unfulfilled' error.  If process not found, grep->ssh returns 1.
             f'ssh {name} \'ps aux | grep "[/]"monitor.py\''
         ],
-        f'sky down -y {name}',
+        (f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api stop && '
+         f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api start; '
+         f'sky down -y {name}'),
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -1976,14 +1981,16 @@ def test_gcp_zero_quota_failover():
     smoke_tests_utils.run_one_test(test)
 
 
-# Skip this for kubernetes due to https://github.com/skypilot-org/skypilot/issues/7504#event-20180419521
-# TODO(aylei,zpoint): fix the infra issue and remove the mark
-@pytest.mark.no_kubernetes
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controller and auto-stop
 def test_long_setup_run_script(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
                                      suffix='.yaml') as f:
+        debug_command = (
+            f'sky exec {name} "source ~/skypilot-runtime/bin/activate; '
+            f'ray status --verbose; ray list tasks --detail; '
+            f'find /home/sky/sky_logs -name "*.log" -type f -exec tail -f '
+            f'{{}} +"')
         f.write(
             textwrap.dedent(""" \
             setup: |
@@ -2015,7 +2022,8 @@ def test_long_setup_run_script(generic_cloud: str):
                 f'sky jobs launch -y -n {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {f.name}',
                 f'sky jobs queue | grep {name} | grep SUCCEEDED',
             ],
-            f'sky down -y {name}; sky jobs cancel -n {name} -y',
+            debug_command +
+            f'; sky down -y {name}; sky jobs cancel -n {name} -y',
         )
         smoke_tests_utils.run_one_test(test)
 

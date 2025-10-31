@@ -79,6 +79,7 @@ class APIHealthResponse(ResponseBaseModel):
     commit: str = ''
     basic_auth_enabled: bool = False
     user: Optional[models.User] = None
+    service_account_token_enabled: bool = False
 
 
 class StatusResponse(ResponseBaseModel):
