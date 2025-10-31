@@ -267,6 +267,18 @@ def get_az_mount_install_cmd() -> str:
         '    fi; '
         '  fi; '
         'fi && '
+        # Restore fusermount shim on Kubernetes after fuse3 installation
+        # The fuse3 package installation overwrites fusermount/fusermount3 with
+        # the real binaries, so we need to restore the shim symlinks.
+        'if [ -n "${FUSERMOUNT_SHARED_DIR:-}" ]; then '
+        '  echo "Restoring fusermount shim after fuse3 installation"; '
+        '  FUSERMOUNT_PATH=$(which fusermount) && '
+        '  sudo ln -sf ${FUSERMOUNT_SHARED_DIR}/fusermount-shim "$FUSERMOUNT_PATH" && '
+        '  FUSERMOUNT3_PATH=$(which fusermount3 2>/dev/null || echo "${FUSERMOUNT_PATH}3") && '
+        '  sudo ln -sf "$FUSERMOUNT_PATH" "$FUSERMOUNT3_PATH" && '
+        '  sudo ln -sf ${FUSERMOUNT_SHARED_DIR}/fusermount-wrapper /bin/fusermount-wrapper && '
+        '  echo "fusermount shim restored successfully"; '
+        'fi && '
         # Install blobfuse2 only if fuse3 is available
         'if [ "$FUSE3_INSTALLED" = "1" ]; then '
         '  echo "Installing blobfuse2 with libfuse3 support"; '
