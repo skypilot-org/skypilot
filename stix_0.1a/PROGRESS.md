@@ -9,10 +9,10 @@
 ## 📊 Overall Progress
 
 ```
-████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 23.8%
+██████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 26.3%
 
 Planning:            ████████████████████ 100% ✅ DONE
-Phase 1: Core        ██████████░░░░░░░░░░  50% 🔄 IN PROGRESS
+Phase 1: Core        ████████████░░░░░░░░  62% 🔄 IN PROGRESS
 Phase 2: Optimizer   ░░░░░░░░░░░░░░░░░░░░   0% ⏳ PENDING
 Phase 3: Clouds      ░░░░░░░░░░░░░░░░░░░░   0% ⏳ PENDING
 Phase 4: Backend     ░░░░░░░░░░░░░░░░░░░░   0% ⏳ PENDING
@@ -66,7 +66,7 @@ Phase 7: CLI         ░░░░░░░░░░░░░░░░░░░�
 ## 🔥 Phase 1: Core Infrastructure (IN PROGRESS 🔄)
 
 **Duration**: Weeks 1-4 (Nov 4 - Nov 29, 2025)  
-**Status**: 🔄 50% Complete
+**Status**: 🔄 62% Complete
 
 ### Week 1: Restructure & Core Setup (Nov 4-8, 2025)
 
@@ -181,27 +181,36 @@ Phase 7: CLI         ░░░░░░░░░░░░░░░░░░░�
 
 ### Week 4: Database & State (Nov 25-29, 2025)
 
-**Progress**: ░░░░░░░░░░░░░░░░░░░░ 0%
+**Progress**: ████████████░░░░░░░░ 60%
 
 #### Tasks
-- [ ] **stix-db**: SQLite setup
-  - [ ] Schema design
-  - [ ] Migrations
-  - [ ] Query builders
-  - [ ] Models (Cluster, Job, Storage)
+- [x] **stix-db**: SQLite setup
+  - [x] Schema design (tasks + edges + kv tables)
+  - [x] SQL Migrations (0001_init.sql, 0002_state.sql)
+  - [x] DbPool with sqlx connection management
+  - [x] Models (TaskRow, EdgeRow, KvRow)
+  - [x] Repository layer (TaskRepo with CRUD)
+  - [x] Ready-query (tasks without pending dependencies)
+  - [x] Graph loading and edge upsert
+  - [x] Transaction support
+  - [ ] Full test suite (in progress)
 
-- [ ] **stix-core**: Global state
-  - [ ] Cluster registry
-  - [ ] Job registry
-  - [ ] Storage registry
-  - [ ] State persistence
-  - [ ] State transitions
+- [x] **stix-core**: State Registry
+  - [x] Storage traits (TaskStore, GraphStore, KvStore)
+  - [x] State transitions with validation
+  - [x] DbTaskStore adapter (placeholder for stix-db integration)
+  - [x] Transition enforcement (compile-time enum checks)
+  - [ ] Full DB integration (pending stix-db completion)
+  - [ ] Resume inflight logic
+  - [ ] DAG-bridge integration
 
 #### Deliverables
-- [ ] Working database layer
-- [ ] State persistence
-- [ ] Registry APIs
-- [ ] Integration tests
+- [x] Database schema and migrations
+- [x] Repository layer with ready-query
+- [x] State traits and interfaces
+- [x] Transition validation system
+- [ ] Integration tests (pending)
+- [ ] End-to-end orchestration (pending)
 
 ---
 
@@ -546,7 +555,31 @@ Phase 7: CLI         ░░░░░░░░░░░░░░░░░░░�
 
 ## 🔄 Recent Updates
 
-### November 1, 2025 (Latest - PM Session Part 4 - Week 3 Complete!)
+### November 1, 2025 (Latest - PM Session Part 5 - Week 4 Progress!)
+- ✅ **stix-db**: SQLite persistence layer (60% complete)
+  - SQL migrations with schema design (tasks, edges, kv tables)
+  - DbPool with sqlx connection management and auto-migration
+  - Database models (TaskRow, EdgeRow, KvRow) with serde support
+  - TaskRepo with full CRUD operations
+  - **Ready-query**: Efficient SQL for tasks without pending dependencies
+  - Graph loading and edge upsert (INSERT OR REPLACE for idempotency)
+  - Transaction support via SqlitePool
+  - 4 comprehensive repository tests
+- ✅ **stix-core State Registry**: Domain layer (60% complete)
+  - Storage traits: TaskStore, GraphStore, KvStore (storage-agnostic)
+  - State transition system with compile-time validation
+  - TaskTransition with strict state machine enforcement
+  - DbTaskStore adapter (placeholder for full integration)
+  - Allowed state transitions defined and tested
+  - Ready for DAG-bridge integration
+- 📊 **Files created**: 8 new files
+  - stix-db: migrations (2), pool, models, repo, error
+  - stix-core/state: traits, transitions, db_store
+- 📊 Phase 1: 50% → 62%
+- 📊 Overall: 23.8% → 26.3%
+- 📝 **Week 4 status**: 60% complete (DB + State foundations done)
+
+### November 1, 2025 (PM Session Part 4 - Week 3 Complete!)
 - ✅ **Week 3: Utilities & Authentication COMPLETE** (80%)
 - ✅ **stix-utils**: Command runner implementation
   - Tokio-based async command execution with timeout support
