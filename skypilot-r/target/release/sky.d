@@ -1,1 +1,0 @@
-/workspace/skypilot-r/target/release/sky: /workspace/skypilot-r/crates/cli/src/main.rs /workspace/skypilot-r/crates/core/src/error.rs /workspace/skypilot-r/crates/core/src/lib.rs /workspace/skypilot-r/crates/core/src/resource.rs /workspace/skypilot-r/crates/core/src/scheduler.rs /workspace/skypilot-r/crates/core/src/task.rs

@@ -1,0 +1,22 @@
+[package]
+name = "styx-core"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tokio.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+petgraph.workspace = true
+chrono.workspace = true
+
+uuid = { version = "1.10", features = ["v4", "serde"] }
+async-trait = "0.1"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
