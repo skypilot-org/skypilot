@@ -1,0 +1,11 @@
+/home/wind/ide/skypilot/crates/stix-mcp/target/debug/deps/serde_path_to_error-72bfa214fa572ea2.d: /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/serde_path_to_error-0.1.20/src/lib.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/serde_path_to_error-0.1.20/src/de.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/serde_path_to_error-0.1.20/src/path.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/serde_path_to_error-0.1.20/src/ser.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/serde_path_to_error-0.1.20/src/wrap.rs
+
+/home/wind/ide/skypilot/crates/stix-mcp/target/debug/deps/libserde_path_to_error-72bfa214fa572ea2.rlib: /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/serde_path_to_error-0.1.20/src/lib.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/serde_path_to_error-0.1.20/src/de.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/serde_path_to_error-0.1.20/src/path.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/serde_path_to_error-0.1.20/src/ser.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/serde_path_to_error-0.1.20/src/wrap.rs
+
+/home/wind/ide/skypilot/crates/stix-mcp/target/debug/deps/libserde_path_to_error-72bfa214fa572ea2.rmeta: /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/serde_path_to_error-0.1.20/src/lib.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/serde_path_to_error-0.1.20/src/de.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/serde_path_to_error-0.1.20/src/path.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/serde_path_to_error-0.1.20/src/ser.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/serde_path_to_error-0.1.20/src/wrap.rs
+
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/serde_path_to_error-0.1.20/src/lib.rs:
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/serde_path_to_error-0.1.20/src/de.rs:
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/serde_path_to_error-0.1.20/src/path.rs:
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/serde_path_to_error-0.1.20/src/ser.rs:
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/serde_path_to_error-0.1.20/src/wrap.rs:

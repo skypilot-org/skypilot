@@ -1,0 +1,12 @@
+/home/wind/ide/skypilot/crates/stix-mcp/target/debug/deps/writeable-603e388c6898e8bd.d: /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/writeable-0.6.2/src/lib.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/writeable-0.6.2/src/cmp.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/writeable-0.6.2/src/impls.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/writeable-0.6.2/src/ops.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/writeable-0.6.2/src/parts_write_adapter.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/writeable-0.6.2/src/try_writeable.rs
+
+/home/wind/ide/skypilot/crates/stix-mcp/target/debug/deps/libwriteable-603e388c6898e8bd.rlib: /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/writeable-0.6.2/src/lib.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/writeable-0.6.2/src/cmp.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/writeable-0.6.2/src/impls.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/writeable-0.6.2/src/ops.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/writeable-0.6.2/src/parts_write_adapter.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/writeable-0.6.2/src/try_writeable.rs
+
+/home/wind/ide/skypilot/crates/stix-mcp/target/debug/deps/libwriteable-603e388c6898e8bd.rmeta: /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/writeable-0.6.2/src/lib.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/writeable-0.6.2/src/cmp.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/writeable-0.6.2/src/impls.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/writeable-0.6.2/src/ops.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/writeable-0.6.2/src/parts_write_adapter.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/writeable-0.6.2/src/try_writeable.rs
+
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/writeable-0.6.2/src/lib.rs:
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/writeable-0.6.2/src/cmp.rs:
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/writeable-0.6.2/src/impls.rs:
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/writeable-0.6.2/src/ops.rs:
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/writeable-0.6.2/src/parts_write_adapter.rs:
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/writeable-0.6.2/src/try_writeable.rs:

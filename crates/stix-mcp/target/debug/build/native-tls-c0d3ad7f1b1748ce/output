@@ -1,0 +1,2 @@
+cargo:rustc-cfg=have_min_max_version
+cargo::rustc-check-cfg=cfg(have_min_max_version)

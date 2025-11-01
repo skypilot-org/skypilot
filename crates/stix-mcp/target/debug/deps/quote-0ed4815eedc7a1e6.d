@@ -1,0 +1,13 @@
+/home/wind/ide/skypilot/crates/stix-mcp/target/debug/deps/quote-0ed4815eedc7a1e6.d: /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/lib.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/ext.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/format.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/ident_fragment.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/to_tokens.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/runtime.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/spanned.rs
+
+/home/wind/ide/skypilot/crates/stix-mcp/target/debug/deps/libquote-0ed4815eedc7a1e6.rlib: /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/lib.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/ext.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/format.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/ident_fragment.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/to_tokens.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/runtime.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/spanned.rs
+
+/home/wind/ide/skypilot/crates/stix-mcp/target/debug/deps/libquote-0ed4815eedc7a1e6.rmeta: /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/lib.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/ext.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/format.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/ident_fragment.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/to_tokens.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/runtime.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/spanned.rs
+
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/lib.rs:
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/ext.rs:
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/format.rs:
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/ident_fragment.rs:
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/to_tokens.rs:
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/runtime.rs:
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/quote-1.0.41/src/spanned.rs:
