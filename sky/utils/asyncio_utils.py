@@ -76,3 +76,12 @@ def shield(func):
             raise
 
     return async_wrapper
+
+
+def is_running_async() -> bool:
+    """Check if the code is currently running inside an asyncio event loop."""
+    try:
+        asyncio.get_running_loop()
+        return True
+    except RuntimeError:
+        return False
