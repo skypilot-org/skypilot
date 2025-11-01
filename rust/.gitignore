@@ -1,0 +1,26 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Build artifacts
+*.so
+*.dylib
+*.dll
+*.pyd
+
+# Profiling
+*.profraw
+*.profdata
+perf.data*
+
+# Benchmarks
+criterion/

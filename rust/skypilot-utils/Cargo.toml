@@ -11,3 +11,52 @@ bytecount = "0.6"
 
 [dev-dependencies]
 tempfile = "3"
+[package]
+name = "skypilot-utils"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "High-performance utilities for SkyPilot implemented in Rust"
+
+[lib]
+name = "skypilot_utils"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+sha2.workspace = true
+md5 = { version = "0.10", package = "md-5" }
+base-x.workspace = true
+memmap2.workspace = true
+log.workspace = true
+env_logger.workspace = true
+sysinfo.workspace = true
+nix = { workspace = true, features = ["signal", "resource"] }
+num_cpus = "1.16"
+
+[dev-dependencies]
+criterion.workspace = true
+tempfile = "3.13"
+proptest = "1.5"
+
+[[bench]]
+name = "io_benchmarks"
+harness = false
+
+[[bench]]
+name = "string_benchmarks"
+harness = false
+
+[[bench]]
+name = "process_benchmarks"
+harness = false
+
+[features]
+default = ["pyo3/extension-module"]
+# Feature-Flag f?r optionale Rust-Nutzung
+enable-telemetry = []
