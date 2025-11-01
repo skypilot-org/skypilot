@@ -94,12 +94,51 @@ impl CloudProvider for AwsProvider {
         let instance_type = Self::choose_instance_type(&request);
         debug!("Selected instance type: {}", instance_type);
 
-        // For now, return a mock instance
-        // TODO: Actually call EC2 RunInstances
+        // REAL IMPLEMENTATION: Actually call EC2 RunInstances
+        use aws_sdk_ec2::types::{Tag, TagSpecification, ResourceType, InstanceType as Ec2InstanceType};
         
-        let instance_id = InstanceId::new(format!("i-{}", uuid::Uuid::new_v4().simple()));
+        let mut tags_vec = vec![];
+        tags_vec.push(Tag::builder()
+            .key("Name")
+            .value(&request.name)
+            .build());
+        
+        for (key, value) in &request.tags {
+            tags_vec.push(Tag::builder()
+                .key(key)
+                .value(value)
+                .build());
+        }
+        
+        let tag_spec = TagSpecification::builder()
+            .resource_type(ResourceType::Instance)
+            .set_tags(Some(tags_vec))
+            .build();
+        
+        // Launch instance
+        let run_result = self.ec2_client
+            .run_instances()
+            .image_id("ami-0c55b159cbfafe1f0") // Ubuntu 22.04 LTS (update per region)
+            .instance_type(Ec2InstanceType::from(instance_type.as_str()))
+            .min_count(1)
+            .max_count(1)
+            .tag_specifications(tag_spec)
+            .send()
+            .await
+            .map_err(|e| anyhow!("Failed to launch instance: {}", e))?;
+        
+        let aws_instance = run_result.instances()
+            .first()
+            .ok_or_else(|| anyhow!("No instance returned"))?;
+        
+        let instance_id = InstanceId::new(
+            aws_instance.instance_id()
+                .ok_or_else(|| anyhow!("No instance ID"))?
+                .to_string()
+        );
+        
         let mut instance = Instance::new(
-            instance_id,
+            instance_id.clone(),
             &request.name,
             &instance_type,
         );
@@ -107,7 +146,11 @@ impl CloudProvider for AwsProvider {
         instance.region = request.region.unwrap_or_else(|| self.region.clone());
         instance.state = InstanceState::Pending;
         instance.tags = request.tags;
-
+        
+        if let Some(ip) = aws_instance.public_ip_address() {
+            instance.public_ip = Some(ip.to_string());
+        }
+        
         info!("Instance provisioned: {}", instance.id);
 
         Ok(instance)
@@ -116,16 +159,103 @@ impl CloudProvider for AwsProvider {
     async fn list_instances(&self) -> Result<Vec<Instance>> {
         debug!("Listing AWS instances in region: {}", self.region);
 
-        // TODO: Actually call EC2 DescribeInstances
-        // For now, return empty list
+        // REAL IMPLEMENTATION: Actually call EC2 DescribeInstances
+        let describe_result = self.ec2_client
+            .describe_instances()
+            .send()
+            .await
+            .map_err(|e| anyhow!("Failed to describe instances: {}", e))?;
+        
+        let mut instances = Vec::new();
+        
+        for reservation in describe_result.reservations() {
+            for aws_inst in reservation.instances() {
+                let instance_id = aws_inst.instance_id()
+                    .ok_or_else(|| anyhow!("No instance ID"))?;
+                
+                let name = aws_inst.tags()
+                    .iter()
+                    .find(|t| t.key() == Some("Name"))
+                    .and_then(|t| t.value())
+                    .unwrap_or("unnamed");
+                
+                let instance_type = aws_inst.instance_type()
+                    .map(|t| t.as_str().to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                
+                let mut instance = Instance::new(
+                    InstanceId::new(instance_id.to_string()),
+                    name,
+                    &instance_type,
+                );
+                
+                instance.region = self.region.clone();
+                instance.state = match aws_inst.state().and_then(|s| s.name()) {
+                    Some(aws_sdk_ec2::types::InstanceStateName::Running) => InstanceState::Running,
+                    Some(aws_sdk_ec2::types::InstanceStateName::Pending) => InstanceState::Pending,
+                    Some(aws_sdk_ec2::types::InstanceStateName::Stopped) => InstanceState::Stopped,
+                    Some(aws_sdk_ec2::types::InstanceStateName::Stopping) => InstanceState::Stopping,
+                    Some(aws_sdk_ec2::types::InstanceStateName::Terminated) => InstanceState::Terminated,
+                    _ => InstanceState::Unknown,
+                };
+                
+                if let Some(ip) = aws_inst.public_ip_address() {
+                    instance.public_ip = Some(ip.to_string());
+                }
+                
+                instances.push(instance);
+            }
+        }
 
-        Ok(vec![])
+        Ok(instances)
     }
 
     async fn get_instance(&self, id: &InstanceId) -> Result<Option<Instance>> {
         debug!("Getting AWS instance: {}", id);
 
-        // TODO: Call EC2 DescribeInstances with specific ID
+        // REAL IMPLEMENTATION: Call EC2 DescribeInstances with specific ID
+        let describe_result = self.ec2_client
+            .describe_instances()
+            .instance_ids(id.as_str())
+            .send()
+            .await
+            .map_err(|e| anyhow!("Failed to describe instance: {}", e))?;
+        
+        for reservation in describe_result.reservations() {
+            if let Some(aws_inst) = reservation.instances().first() {
+                let instance_id = aws_inst.instance_id()
+                    .ok_or_else(|| anyhow!("No instance ID"))?;
+                
+                let name = aws_inst.tags()
+                    .iter()
+                    .find(|t| t.key() == Some("Name"))
+                    .and_then(|t| t.value())
+                    .unwrap_or("unnamed");
+                
+                let instance_type = aws_inst.instance_type()
+                    .map(|t| t.as_str().to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                
+                let mut instance = Instance::new(
+                    InstanceId::new(instance_id.to_string()),
+                    name,
+                    &instance_type,
+                );
+                
+                instance.region = self.region.clone();
+                instance.state = match aws_inst.state().and_then(|s| s.name()) {
+                    Some(aws_sdk_ec2::types::InstanceStateName::Running) => InstanceState::Running,
+                    Some(aws_sdk_ec2::types::InstanceStateName::Stopped) => InstanceState::Stopped,
+                    _ => InstanceState::Unknown,
+                };
+                
+                if let Some(ip) = aws_inst.public_ip_address() {
+                    instance.public_ip = Some(ip.to_string());
+                }
+                
+                return Ok(Some(instance));
+            }
+        }
         
         Ok(None)
     }
@@ -133,24 +263,45 @@ impl CloudProvider for AwsProvider {
     async fn terminate(&self, id: &InstanceId) -> Result<()> {
         info!("Terminating AWS instance: {}", id);
 
-        // TODO: Call EC2 TerminateInstances
-
+        // REAL IMPLEMENTATION: Call EC2 TerminateInstances
+        self.ec2_client
+            .terminate_instances()
+            .instance_ids(id.as_str())
+            .send()
+            .await
+            .map_err(|e| anyhow!("Failed to terminate instance: {}", e))?;
+        
+        info!("Instance {} termination initiated", id);
         Ok(())
     }
 
     async fn start(&self, id: &InstanceId) -> Result<()> {
         info!("Starting AWS instance: {}", id);
 
-        // TODO: Call EC2 StartInstances
-
+        // REAL IMPLEMENTATION: Call EC2 StartInstances
+        self.ec2_client
+            .start_instances()
+            .instance_ids(id.as_str())
+            .send()
+            .await
+            .map_err(|e| anyhow!("Failed to start instance: {}", e))?;
+        
+        info!("Instance {} start initiated", id);
         Ok(())
     }
 
     async fn stop(&self, id: &InstanceId) -> Result<()> {
         info!("Stopping AWS instance: {}", id);
 
-        // TODO: Call EC2 StopInstances
-
+        // REAL IMPLEMENTATION: Call EC2 StopInstances
+        self.ec2_client
+            .stop_instances()
+            .instance_ids(id.as_str())
+            .send()
+            .await
+            .map_err(|e| anyhow!("Failed to stop instance: {}", e))?;
+        
+        info!("Instance {} stop initiated", id);
         Ok(())
     }
 
