@@ -29,6 +29,18 @@ For more details on how to setup your cloud credentials see [SkyPilot docs](http
 sky check
 ```
 
+### Configure checkpoint storage (Optional)
+
+Checkpoint storage is optional and only needed if you want to resume training from interruptions. By default, checkpoints are saved locally on the cluster.
+
+To enable checkpoint persistence across cluster restarts, uncomment and configure the S3 bucket in the YAML files:
+
+```yaml
+file_mounts:
+  /checkpoints:
+    source: s3://my-skypilot-bucket  # change this to your bucket
+```
+
 ## Step 1: Run gpt-oss models
 
 ### Full finetuning
@@ -53,6 +65,13 @@ resources:
 
 file_mounts:
   /sft: ./sft
+  /checkpoints:
+    source: s3://my-skypilot-bucket  # change this to your bucket
+
+envs:
+  WANDB_PROJECT: gpt-oss-120b-sft
+  WANDB_RESUME: allow
+  WANDB_API_KEY: ""  # optionally, enable WandB tracking by providing the API key
 
 num_nodes: 4
 
@@ -64,10 +83,13 @@ setup: |
   uv pip install "trl>=0.20.0" "peft>=0.17.0" "transformers>=4.55.0"
   uv pip install deepspeed
   uv pip install git+https://github.com/huggingface/accelerate.git@c0a3aefea8aa5008a0fbf55b049bd3f0efa9cbf2
+  uv pip install wandb
 
   uv pip install nvitop
 
 run: |
+  export WANDB_RUN_ID=$SKYPILOT_TASK_ID
+  export WANDB_NAME=run-$SKYPILOT_TASK_ID
   source ~/training/bin/activate
 
   MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
@@ -80,7 +102,7 @@ run: |
     --machine_rank $SKYPILOT_NODE_RANK \
     --main_process_ip $MASTER_ADDR \
     --main_process_port 29500 \
-    /sft/train.py --model_id openai/gpt-oss-120b
+    /sft/train.py --model_id openai/gpt-oss-120b --resume_from_checkpoint
 ```
 
 ### LoRA finetuning
@@ -111,6 +133,17 @@ sky logs <cluster-name>
 # Download results when complete
 sky down <cluster-name>
 ```
+
+### Optional: WandB tracking
+
+To enable experiment tracking with Weights & Biases, set your API key in the YAML configuration:
+
+```yaml
+envs:
+  WANDB_API_KEY: "your-wandb-api-key"
+```
+
+Each training run will automatically use a unique run ID based on the SkyPilot task ID for easy tracking and resuming.
 
 ### Example full finetuning progress
 
