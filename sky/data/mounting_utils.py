@@ -233,9 +233,18 @@ def get_az_mount_install_cmd() -> str:
         # Try to install fuse3 from default repos
         'sudo apt-get update && '
         'FUSE3_INSTALLED=0 && '
+        # On Kubernetes, if FUSERMOUNT_SHARED_DIR is set, it means
+        # fusermount and fusermount3 is symlinked to fusermount-shim.
+        # If we reinstall fuse3, it may overwrite the symlink, so
+        # just install libfuse3, which is needed by blobfuse2.
+        'if [ -n "${FUSERMOUNT_SHARED_DIR:-}" ]; then '
+        '  PACKAGES="libfuse3-3 libfuse3-dev"; '
+        'else '
+        '  PACKAGES="fuse3 libfuse3-3 libfuse3-dev"; '
+        'fi && '
         'if sudo apt-get install -y '
         '-o Dpkg::Options::="--force-confdef" '
-        'fuse3 libfuse3-dev; then '
+        '$PACKAGES; then '
         '  FUSE3_INSTALLED=1; '
         '  echo "fuse3 installed from default repos"; '
         'else '
@@ -256,7 +265,7 @@ def get_az_mount_install_cmd() -> str:
         '    if sudo apt-get install -y '
         '-o Dpkg::Options::="--force-confdef" '
         '-o Dpkg::Options::="--force-confold" '
-        'fuse3 libfuse3-3 libfuse3-dev; then '
+        '$PACKAGES; then '
         '      FUSE3_INSTALLED=1; '
         '      echo "fuse3 installed from focal"; '
         '      sudo rm /etc/apt/sources.list.d/focal-fuse3.list; '
@@ -603,7 +612,28 @@ def get_mounting_script(
             fi
         fi
         echo "Mounting $SOURCE_BUCKET to $MOUNT_PATH with $MOUNT_BINARY..."
+        set +e
         {mount_cmd}
+        MOUNT_EXIT_CODE=$?
+        set -e
+        if [ $MOUNT_EXIT_CODE -ne 0 ]; then
+            echo "Mount failed with exit code $MOUNT_EXIT_CODE."
+            if [ "$MOUNT_BINARY" = "goofys" ]; then
+                echo "Looking for goofys log files..."
+                # Find goofys log files in /tmp (created by mktemp -t goofys.XXXX.log)
+                # Note: if /dev/log exists, goofys logs to syslog instead of a file
+                GOOFYS_LOGS=$(ls -t /tmp/goofys.*.log 2>/dev/null | head -1)
+                if [ -n "$GOOFYS_LOGS" ]; then
+                    echo "=== Goofys log file contents ==="
+                    cat "$GOOFYS_LOGS"
+                    echo "=== End of goofys log file ==="
+                else
+                    echo "No goofys log file found in /tmp"
+                fi
+            fi
+            # TODO(kevin): Print logs from rclone, etc too for observability.
+            exit $MOUNT_EXIT_CODE
+        fi
         echo "Mounting done."
     """)
 
