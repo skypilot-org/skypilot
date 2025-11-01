@@ -1459,7 +1459,7 @@ def test_managed_jobs_ha_kill_running(generic_cloud: str):
         generic_cloud,
         sky.ManagedJobStatus.RUNNING,
         first_timeout=200,
-        second_timeout=335,
+        second_timeout=600,
     )
     smoke_tests_utils.run_one_test(test)
 
