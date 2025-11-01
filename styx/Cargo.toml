@@ -12,6 +12,8 @@ members = [
     "crates/utils",
     "crates/sky",
     "crates/ghost",  # ?? Ghost - Isolated execution caves!
+    "crates/llm",    # 🤖 LLM - Complete LLM management!
+    "crates/git",    # 📦 Git - Self-hosted Git service!
 ]
 
 [workspace.package]
