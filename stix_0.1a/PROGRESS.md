@@ -134,14 +134,18 @@ Phase 7: CLI         ░░░░░░░░░░░░░░░░░░░�
 
 ### Week 3: Utilities & Authentication (Nov 18-22, 2025)
 
-**Progress**: ░░░░░░░░░░░░░░░░░░░░ 0%
+**Progress**: ████░░░░░░░░░░░░░░░░ 20%
 
 #### Tasks
-- [ ] **stix-utils**: Command runner
-  - [ ] SSH command execution
-  - [ ] Parallel execution
-  - [ ] Output streaming
-  - [ ] Error handling
+- [x] **stix-utils**: Command runner
+  - [x] Tokio-based async command execution
+  - [x] stdout/stderr capture with streaming
+  - [x] Structured CommandOutput with duration tracking
+  - [x] Error handling with timeout support
+  - [x] Environment variables and working directory
+  - [x] 10 unit tests (all passing)
+  - [ ] SSH command execution (deferred)
+  - [ ] Parallel execution (deferred)
 
 - [ ] **stix-utils**: Logging
   - [ ] Structured logging
