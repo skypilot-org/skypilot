@@ -59,3 +59,5 @@ once_cell = "1.19"
 [dev-dependencies]
 tokio-test = "0.4"
 mockall = "0.13"
+dirs = "5.0"
+serde_yaml = "0.9"
