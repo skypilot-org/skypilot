@@ -153,13 +153,15 @@ Phase 7: CLI         ░░░░░░░░░░░░░░░░░░░�
   - [ ] Color output
   - [ ] Log aggregation
 
-- [ ] **stix-auth**: Credential management
-  - [ ] AWS credentials
-  - [ ] GCP credentials
-  - [ ] Azure credentials
-  - [ ] Kubernetes config
-  - [ ] Credential validation
-  - [ ] Refresh logic
+- [x] **stix-auth**: Credential management
+  - [x] AWS credentials (environment + file-based ~/.aws/credentials)
+  - [x] GCP credentials (environment + ADC file)
+  - [x] Azure credentials (environment-based)
+  - [ ] Kubernetes config (deferred)
+  - [x] Credential validation for all providers
+  - [x] Caching with CredentialManager
+  - [x] Refresh logic
+  - [x] 13 unit tests (all passing)
 
 - [ ] **stix-config**: Configuration system
   - [ ] Config loading
