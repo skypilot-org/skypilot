@@ -1,7 +1,6 @@
 //! Resource requirements and specifications
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Resource requirements for task execution
 #[derive(Debug, Clone, Serialize, Deserialize)]

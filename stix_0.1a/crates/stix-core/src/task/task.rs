@@ -3,10 +3,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
-use uuid::Uuid;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::time::Duration;
 
 /// Unique task identifier
 pub type TaskId = String;
@@ -131,7 +127,8 @@ impl Task {
     /// Check if task should be retried
     pub fn should_retry(&self) -> bool {
         if let Some(policy) = &self.retry_policy {
-            self.status == TaskStatus::Failed && self.attempts < policy.max_attempts
+            matches!(self.status, TaskStatus::Failed | TaskStatus::Retrying)
+                && self.attempts < policy.max_attempts
         } else {
             false
         }
@@ -166,7 +163,14 @@ impl Task {
 
     /// Mark task as failed
     pub fn mark_failed(&mut self) {
-        if self.should_retry() {
+        // Check if we can retry before changing status
+        let can_retry = if let Some(policy) = &self.retry_policy {
+            self.attempts < policy.max_attempts
+        } else {
+            false
+        };
+
+        if can_retry {
             self.status = TaskStatus::Retrying;
         } else {
             self.status = TaskStatus::Failed;

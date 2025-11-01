@@ -2,7 +2,7 @@
 //!
 //! TODO: Implement full DAG functionality in Week 2
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::task::{Task, TaskId};
 use std::collections::HashMap;
 

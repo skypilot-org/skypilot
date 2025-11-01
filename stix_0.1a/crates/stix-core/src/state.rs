@@ -2,8 +2,6 @@
 //!
 //! TODO: Implement state management in Week 4
 
-use crate::error::Result;
-
 /// Cluster registry
 pub struct ClusterRegistry;
 
