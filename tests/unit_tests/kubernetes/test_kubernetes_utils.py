@@ -371,6 +371,7 @@ def test_detect_gpu_label_formatter_invalid_label_skip():
         lf, _ = utils.detect_gpu_label_formatter('whatever')
         assert lf is not None
         assert isinstance(lf, utils.CoreWeaveLabelFormatter)
+        utils.detect_gpu_label_formatter.cache_clear()
 
 
 def test_detect_gpu_label_formatter_suppresses_warning_for_coreweave_format():
@@ -404,6 +405,7 @@ def test_detect_gpu_label_formatter_suppresses_warning_for_coreweave_format():
         assert len(warning_calls) == 0, (
             f'Expected no warnings about GKE label with CoreWeave format, '
             f'but got: {warning_calls}')
+        utils.detect_gpu_label_formatter.cache_clear()
 
 
 def test_detect_gpu_label_formatter_logs_warning_with_no_valid_labels():
@@ -423,6 +425,7 @@ def test_detect_gpu_label_formatter_logs_warning_with_no_valid_labels():
     with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
                     return_value=[mock_node]), \
          mock.patch('sky.provision.kubernetes.utils.logger.warning', side_effect=mock_warning):
+        utils.detect_gpu_label_formatter.cache_clear()
         lf, _ = utils.detect_gpu_label_formatter('whatever')
 
         # Should not detect any formatter
@@ -477,6 +480,7 @@ def test_detect_gpu_label_formatter_ignores_empty_labels():
         lf, _ = utils.detect_gpu_label_formatter('test-context')
         assert lf is not None
         assert isinstance(lf, utils.CoreWeaveLabelFormatter)
+        utils.detect_gpu_label_formatter.cache_clear()
 
     # Test empty string variations
     mock_cpu_node_whitespace = mock.MagicMock()
@@ -493,6 +497,7 @@ def test_detect_gpu_label_formatter_ignores_empty_labels():
         lf, _ = utils.detect_gpu_label_formatter('test-context')
         assert lf is not None
         assert isinstance(lf, utils.CoreWeaveLabelFormatter)
+        utils.detect_gpu_label_formatter.cache_clear()
 
 
 # pylint: disable=line-too-long
