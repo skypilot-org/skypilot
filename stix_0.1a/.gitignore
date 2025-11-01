@@ -1,14 +1,15 @@
 # Rust
-target/
+/target
 Cargo.lock
 **/*.rs.bk
 *.pdb
 
-# IDE
+# IDEs
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store
@@ -16,12 +17,16 @@ Thumbs.db
 
 # Logs
 *.log
+logs/
+
+# Environment
+.env
+.env.local
 
 # Database
 *.db
-*.db-shm
-*.db-wal
+*.sqlite
 
-# Env
-.env
-.env.local
+# Temporary
+tmp/
+temp/

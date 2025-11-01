@@ -1,0 +1,8 @@
+[package]
+name = "styx-utils"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
