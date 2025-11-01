@@ -49,7 +49,7 @@ config = "0.14"
 toml = "0.8"
 
 # Storage
-sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "postgres", "chrono", "uuid"] }
+sqlx = { workspace = true }
 
 # Utilities
 regex = "1.10"

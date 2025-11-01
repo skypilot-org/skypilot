@@ -34,7 +34,7 @@ prost = "0.13"
 jsonwebtoken.workspace = true
 
 # Database
-sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite", "chrono"] }
+sqlx.workspace = true
 chrono.workspace = true
 
 [build-dependencies]
