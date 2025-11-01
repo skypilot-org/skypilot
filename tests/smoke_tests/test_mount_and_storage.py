@@ -311,6 +311,38 @@ def test_aws_storage_mounts_arm64():
 
 
 @pytest.mark.aws
+@pytest.mark.parametrize(
+    'ami',
+    [
+        'ami-0f5fcdfbd140e4ab7',  # dpkg
+        'ami-0a5a5b7e2278263e5'  # yum
+    ])
+def test_aws_storage_mounts_cached(ami: str):
+    name = smoke_tests_utils.get_cluster_name()
+    cloud = 'aws'
+    storage_name = f'sky-test-{int(time.time())}'
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f1:
+        with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f2:
+            test_commands, clean_command = _storage_mount_cached_test_command_generator(
+                f1, f2, name, storage_name, cloud)
+
+            for i, cmd in enumerate(test_commands):
+                if cmd.startswith('sky launch') and '--infra aws' in cmd:
+                    test_commands[i] = cmd.replace(
+                        '--infra aws',
+                        f'--infra aws/us-east-2 --image-id {ami}')
+                    break
+
+            test = smoke_tests_utils.Test(
+                'aws_storage_mount_cached',
+                test_commands,
+                clean_command,
+                timeout=20 * 60,  # 20 mins
+            )
+            smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.aws
 def test_aws_storage_mounts_with_stop():
     name = smoke_tests_utils.get_cluster_name()
     cloud = 'aws'
