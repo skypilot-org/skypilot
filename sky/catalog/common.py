@@ -171,9 +171,8 @@ class LazyDataFrame:
                 except Exception as e2:  # pylint: disable=broad-except
                     # As users can manually modify the catalog, read_csv can
                     # fail. Provide a helpful message and re-raise.
-                    logger.error(
-                        f'Failed to read {self._filename}. '
-                        'To fix: delete the csv file and try again.')
+                    logger.error(f'Failed to read {self._filename}. '
+                                 'To fix: delete the csv file and try again.')
                     with ux_utils.print_exception_no_traceback():
                         raise e2
         return self._df
