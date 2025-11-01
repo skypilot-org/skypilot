@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  stix-mcp-server:
+    build:
+      context: ../..
+      dockerfile: crates/stix-mcp/Dockerfile
+    container_name: stix-mcp-server
+    ports:
+      - "8080:8080"
+    environment:
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8080
+      - MCP_WORKSPACE_ROOT=/workspace
+      - MCP_LOG_FILE=/app/logs/mcp-audit.log
+      - MCP_RATE_LIMIT=100
+      - RUST_LOG=stix_mcp=debug,tower_http=debug
+    volumes:
+      - ./workspace:/workspace
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - stix-network
+
+networks:
+  stix-network:
+    driver: bridge

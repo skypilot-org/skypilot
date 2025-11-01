@@ -1,0 +1,83 @@
+---
+trigger: always_on
+---
+
+Perfekt.
+Hier ist der Inhalt, den du unter
+`/.rules/01_progress_integrity.md`
+ablegen solltest — das ist ab jetzt **Gesetz für alle KIs im STIX-Projekt**:
+
+---
+
+## ⚙️ STIX Project Rule #1 — Progress Integrity Rule
+
+**Date:** 2025-11-01
+**Status:** ✅ Active
+**Scope:** Applies to all contributors (human + AI)
+
+---
+
+### 📜 **Regelbeschreibung**
+
+**Jede Änderung an einer Datei erfordert ein sofortiges Update von `PROGRESS.md`.**
+
+Diese Regel ist **verbindlich** für alle Entwicklungs-, Dokumentations- und Infrastrukturänderungen.
+Sie stellt sicher, dass mehrere KIs oder Menschen synchron arbeiten können, ohne Fortschritt zu verlieren oder Arbeit zu duplizieren.
+
+---
+
+### 📋 **Pflichten**
+
+1. **Vor jedem Arbeitsschritt:**
+
+   * Lies `PROGRESS.md` vollständig.
+   * Vergewissere dich, dass keine offenen Aufgaben in Konflikt mit deiner Arbeit stehen.
+
+2. **Nach jeder Dateiänderung:**
+
+   * Aktualisiere `PROGRESS.md` mit:
+
+     * 🔹 Datei(en) geändert
+     * 🔹 Kurzbeschreibung der Änderung
+     * 🔹 Fortschritts-Prozent (falls relevant)
+     * 🔹 Zeitstempel
+
+3. **Beim Commit:**
+
+   * `PROGRESS.md` muss Teil des Commits sein.
+   * Commit-Nachricht muss auf das Update hinweisen:
+
+     ```
+     feat(core): implement new scheduler
+     → Updated PROGRESS.md (Phase 1 Week 1 +3%)
+     ```
+
+---
+
+### 🚫 **Verboten**
+
+* Commits **ohne** `PROGRESS.md`-Update
+* Manuelle Änderungen an `PROGRESS.md` durch Tools ohne Kontext
+* Überspringen der Pre-Commit-Validierung (`git commit --no-verify`)
+  (nur mit expliziter Begründung erlaubt und wird im CI geprüft)
+
+---
+
+### ⚙️ **Technische Umsetzung**
+
+* **Pre-Commit-Hook:** Blockiert Commits ohne `PROGRESS.md`-Änderung
+* **Post-Merge-Hook (optional):** Zeigt Fortschritt nach jedem `git pull`
+* **CI-Check:** Validiert, dass `PROGRESS.md` und Commits synchron sind
+
+---
+
+### 🧠 **Philosophie**
+
+> Fortschritt ist Wissen.
+> Wissen ist Kontext.
+> Kontext ist Macht.
+> Ohne `PROGRESS.md` verliert das Projekt seine Erinnerung.
+
+---
+
+Willst du, dass ich direkt auch die passende **post-merge Hook** erstelle, damit jede KI nach `git pull` automatisch den letzten Stand aus `PROGRESS.md` im Terminal sieht?

@@ -1,1 +1,0 @@
-../../generated-examples/nanochat.md

@@ -1,0 +1,13 @@
+[project]
+name = "my-example"
+version = "0.1.0"
+description = "Your example description"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "agent-sandbox",
+    "python-dotenv>=1.0.0",
+]
+
+[tool.uv.sources]
+agent-sandbox = { path = "../../sdk/python", editable = true }

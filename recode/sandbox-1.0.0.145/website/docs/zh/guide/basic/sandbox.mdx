@@ -1,0 +1,217 @@
+# 沙盒信息
+
+import { Tab, Tabs } from '@rspress/core/theme';
+
+![](/images/sandbox.png)
+
+## 概述
+
+沙盒 API 提供了一个综合的环境，用于在隔离的容器环境中执行代码、管理文件以及与各种开发工具进行交互。该 API 旨在支持多种编程语言、文件操作、浏览器自动化和终端交互。
+
+## 控制面板
+
+沙盒控制面板提供了一个统一的 Web 界面，可通过 `/index.html` 访问，通过多个集成视图与所有沙盒功能进行交互。
+
+![](/images/sandbox-dashboard.png)
+
+### 控制面板视图
+
+控制面板界面包含四个主要选项卡，用于不同的开发工作流程：
+
+#### 代码选项卡
+代码选项卡提供了集成的代码编辑器环境：
+- **文件浏览器**：导航和管理沙盒中的项目文件
+- **代码编辑器**：具有语法高亮和自动完成功能的文件编辑
+- **多文件支持**：同时打开和编辑多个文件
+- **文件操作**：创建、重命名、删除文件和目录
+- **集成终端**：直接从代码视图执行命令
+
+#### 浏览器选项卡
+浏览器选项卡支持 Web 开发和测试：
+- **无头浏览器**：用于 Web 自动化的 Chrome/Chromium 实例
+- **实时预览**：Web 应用程序的实时预览
+- **开发者工具**：检查元素、控制台、网络活动
+- **浏览器自动化**：支持自动化测试和爬虫
+- **视口控制**：调整屏幕大小和设备模拟
+- **截图捕获**：对渲染页面进行截图
+
+#### 终端选项卡
+终端选项卡提供完整的 shell 访问：
+- **交互式 Shell**：具有完整命令行访问权限的 Bash 终端
+- **多会话支持**：创建和管理多个终端会话
+- **命令历史**：浏览之前执行的命令
+- **文件系统访问**：完全访问沙盒文件系统
+- **包管理**：安装和管理 Python/Node.js 包
+- **进程管理**：运行和监控后台进程
+
+#### Jupyter 选项卡
+Jupyter 选项卡提供基于笔记本的开发：
+- **Jupyter 笔记本**：创建和编辑 `.ipynb` 笔记本文件
+- **Python 内核**：交互式执行 Python 代码单元
+- **丰富输出**：显示图表、图像和格式化数据
+- **Markdown 支持**：将代码与文档混合
+- **变量浏览器**：检查变量和数据结构
+- **会话持久性**：跨执行维护内核状态
+
+### 访问控制面板
+
+<Tabs>
+  <Tab label="本地访问">
+
+```bash
+# 控制面板可通过以下地址访问
+http://localhost:8080/index.html
+```
+
+  </Tab>
+  <Tab label="远程访问">
+
+```bash
+# 对于远程沙盒实例
+http://<sandbox-host>:8080/index.html
+```
+
+  </Tab>
+</Tabs>
+
+### 控制面板功能
+
+**集成开发环境**
+- 在代码、浏览器、终端和 Jupyter 视图之间无缝切换
+- 所有选项卡共享文件系统
+- 持久会话状态
+- 实时更新和同步
+
+**项目管理**
+- 通过拖放上传文件和项目
+- 下载文件和项目归档
+- Git 集成用于版本控制
+- 项目模板和快速启动
+
+**资源监控**
+- CPU 和内存使用指示器
+- 磁盘空间利用率
+- 网络活动监控
+- 进程和服务状态
+
+## 沙盒上下文
+
+### /llms.txt
+
+`llms.txt` 是智能体的使用手册。通过这个手册，智能体可以更好地使用沙盒。
+
+![](/images/sandbox_llms.png)
+
+### 获取沙盒上下文
+
+<Tabs>
+  <Tab label="Python">
+
+```python
+ctx = client.sandbox.get_context()
+print(ctx)
+```
+
+  </Tab>
+  <Tab label="Curl">
+
+```bash
+curl -X 'GET' \
+  'http://127.0.0.1:8080/v1/sandbox' \
+  -H 'accept: application/json'
+```
+
+  </Tab>
+</Tabs>
+
+检索沙盒环境信息，包括系统配置和可用资源。
+
+**响应**: `SandboxResponse`
+- `success`: 指示操作成功的布尔值
+- `message`: 操作结果消息
+- `data`: 沙盒环境数据
+- `home_dir`: 沙盒中的主目录路径
+
+示例 `data`：
+
+```json
+System Environment (v1.0.0.93):
+- Linux 6.10.14-linuxkit (x86_64), with internet access
+- User: e3f8da5a6253, with sudo privileges
+- Home directory: /home/gem
+- Timezone: Asia/Shanghai
+- Occupied Ports: 8080,8079,8088,8091,8100,8101,8102,8200,8888,9222
+
+Development Environment:
+- Python 3.12.11 (commands: python3, pip3)
+- Node.js v22.19.0 (commands: node, npm)
+- Git git version 2.34.1 (command: git)
+- GitHub CLI (command: gh)
+- UV uv 0.8.9 (command: uv)
+
+Available Tools:
+- Text editors: vim, nano
+- File operations: wget, curl, tar, zip, unzip, tree
+- Network tools: ping, telnet, netcat, nmap
+- Text processing: grep, sed, awk, jq
+- System monitoring: htop, procps
+- Image processing: imagemagick
+- Audio/Video Downloader: yt-dlp
+```
+
+## 包管理
+
+### Python 包
+
+列出沙盒环境中所有已安装的 Python 包。
+
+<Tabs>
+  <Tab label="Python">
+
+```python
+python_packages = client.sandbox.python_packages()
+print(python_packages.data) # [{ "name": "requests", "version": "2.32.5" }]
+```
+
+  </Tab>
+  <Tab label="Curl">
+
+```bash
+curl -X 'GET' \
+  'http://127.0.0.1:8080/v1/sandbox/packages/python' \
+  -H 'accept: application/json'
+```
+
+  </Tab>
+</Tabs>
+
+**响应**: `Response`
+- 返回已安装 Python 包及其版本的列表
+
+### Node.js 包
+
+列出沙盒环境中所有已安装的 Node.js 包。
+
+<Tabs>
+  <Tab label="Python">
+
+```python
+nodejs_packages = client.sandbox.nodejs_packages()
+print(nodejs_packages.data)
+```
+
+  </Tab>
+  <Tab label="Curl">
+
+```bash
+curl -X 'GET' \
+  'http://127.0.0.1:8080/v1/sandbox/packages/nodejs' \
+  -H 'accept: application/json'
+```
+
+  </Tab>
+</Tabs>
+
+
+**响应**: `Response`
+- 返回已安装 npm 包及其版本的列表

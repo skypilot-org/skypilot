@@ -1,0 +1,13 @@
+/home/wind/ide/skypilot/crates/stix-mcp/target/debug/deps/url-1f9aec130c33b98f.d: /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/lib.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/host.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/origin.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/parser.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/path_segments.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/slicing.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/quirks.rs
+
+/home/wind/ide/skypilot/crates/stix-mcp/target/debug/deps/liburl-1f9aec130c33b98f.rlib: /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/lib.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/host.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/origin.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/parser.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/path_segments.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/slicing.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/quirks.rs
+
+/home/wind/ide/skypilot/crates/stix-mcp/target/debug/deps/liburl-1f9aec130c33b98f.rmeta: /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/lib.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/host.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/origin.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/parser.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/path_segments.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/slicing.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/quirks.rs
+
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/lib.rs:
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/host.rs:
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/origin.rs:
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/parser.rs:
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/path_segments.rs:
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/slicing.rs:
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/url-2.5.7/src/quirks.rs:

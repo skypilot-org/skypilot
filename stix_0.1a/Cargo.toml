@@ -1,0 +1,83 @@
+[workspace]
+members = [
+    "crates/stix-core",
+    "crates/stix-optimizer",
+    "crates/stix-clouds",
+    "crates/stix-backends",
+    "crates/stix-provision",
+    "crates/stix-catalog",
+    "crates/stix-jobs",
+    "crates/stix-serve",
+    "crates/stix-storage",
+    "crates/stix-skylet",
+    "crates/stix-cli",
+    "crates/stix-server",
+    "crates/stix-config",
+    "crates/stix-auth",
+    "crates/stix-utils",
+    "crates/stix-metrics",
+    "crates/stix-db",
+    "crates/stix-sdk",
+]
+
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["STIX Team"]
+license = "Apache-2.0"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+async-trait = "0.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+toml = "0.8"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Cloud SDKs
+aws-config = "1.0"
+aws-sdk-ec2 = "1.0"
+aws-sdk-s3 = "1.0"
+azure_core = "0.20"
+azure_identity = "0.20"
+google-cloud-auth = "0.16"
+kube = { version = "0.90", features = ["runtime", "derive"] }
+
+# HTTP
+reqwest = { version = "0.12", features = ["json"] }
+hyper = "1.0"
+axum = "0.7"
+tower = "0.4"
+
+# CLI
+clap = { version = "4.0", features = ["derive", "cargo"] }
+comfy-table = "7.0"
+indicatif = "0.17"
+
+# Utilities
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dirs = "5.0"
+
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "sqlite"] }
+
+# Testing
+mockall = "0.12"
+tempfile = "3.0"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

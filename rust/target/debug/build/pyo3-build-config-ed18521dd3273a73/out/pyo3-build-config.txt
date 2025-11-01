@@ -1,0 +1,10 @@
+implementation=CPython
+version=3.8
+shared=true
+abi3=true
+lib_name=python3.12
+lib_dir=/usr/lib/x86_64-linux-gnu
+executable=/usr/bin/python3
+pointer_width=64
+build_flags=
+suppress_build_script_link_lines=false

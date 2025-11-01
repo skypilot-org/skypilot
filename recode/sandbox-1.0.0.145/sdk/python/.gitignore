@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.pytest_cache/
+.coverage
+sandbox.egg-info
+agent_sandbox.egg-info/
+.venv/
+build/

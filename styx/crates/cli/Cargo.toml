@@ -1,0 +1,24 @@
+[package]
+name = "styx-cli"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "styx"
+path = "src/main.rs"
+
+[dependencies]
+styx-core = { path = "../core" }
+
+tokio.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+colored.workspace = true
+indicatif.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

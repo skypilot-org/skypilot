@@ -1,1 +1,0 @@
-../../generated-examples/nebius_infiniband.md

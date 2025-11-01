@@ -1,0 +1,4 @@
+cargo:rustc-cfg=relaxed_coherence
+cargo:rustc-check-cfg=cfg(ga_is_deprecated)
+cargo:rustc-cfg=ga_is_deprecated
+cargo:warning=generic-array 0.14 is deprecated; please upgrade to generic-array 1.x

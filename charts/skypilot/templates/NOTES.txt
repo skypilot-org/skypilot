@@ -1,5 +1,0 @@
-{{- if not .Values.apiService.skipResourceCheck }}
-{{- include "skypilot.checkResources" . }}
-{{- end }}
-{{- include "skypilot.checkUpgradeConfig" . }}
-{{- include "skypilot.validateOAuthConfig" . }}

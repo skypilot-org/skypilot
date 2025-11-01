@@ -1,0 +1,34 @@
+{
+  "oneLineCommand": {
+    "zh": "docker run --rm -it -p 8080:8080 enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest",
+    "en": "docker run --rm -it -p 8080:8080 ghcr.io/agent-infra/sandbox:latest"
+  },
+  "gettingStarted": {
+    "zh": "开始",
+    "en": "Getting Started"
+  },
+  "features": {
+    "zh": "特性",
+    "en": "Features"
+  },
+  "defaultTheme": {
+    "zh": "默认主题",
+    "en": "Default Theme"
+  },
+  "advanced": {
+    "zh": "高级能力",
+    "en": "Advanced"
+  },
+  "apiOverview": {
+    "zh": "API 概览",
+    "en": "API Overview"
+  },
+  "config": {
+    "zh": "配置",
+    "en": "Config"
+  },
+  "loadingApiReference": {
+    "zh": "正在加载 API 文档...",
+    "en": "Loading API Reference..."
+  }
+}

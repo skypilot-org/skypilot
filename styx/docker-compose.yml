@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - RUST_LOG=info
+      - DATABASE_URL=sqlite:///data/styx.db
+    volumes:
+      - styx-data:/data
+    command: styx-server
+
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - RUST_LOG=info
+      - STYX_SERVER_URL=http://server:8080
+    depends_on:
+      - server
+    command: styx-agent
+
+volumes:
+  styx-data:

@@ -1,0 +1,330 @@
+# Quick Start
+
+import { Tab, Tabs } from '@rspress/core/theme';
+
+Get up and running with AIO Sandbox in just a few minutes.
+
+## Prerequisites
+
+- [Docker](https://www.docker.com/get-started/) installed on your system
+- At least 2GB of available RAM
+
+## Installation
+
+### Option 1: Run with Docker (Recommended)
+
+```bash
+# Pull and run the latest version
+docker run --security-opt seccomp=unconfined --rm -it -p 8080:8080 ghcr.io/agent-infra/sandbox:latest
+```
+
+### Option 2: For Users in Mainland China
+
+Use our China mirror for faster downloads:
+
+```bash
+docker run --security-opt seccomp=unconfined --rm -it -p 8080:8080 enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+```
+
+### Option 3: Use a specific version
+
+Format `agent-infra/sandbox:${version}`, for example, to use version 1.0.0.125:
+
+```bash
+docker run --security-opt seccomp=unconfined --rm -it -p 8080:8080 ghcr.io/agent-infra/sandbox:1.0.0.125
+
+# or users in mainland China
+docker run --security-opt seccomp=unconfined --rm -it -p 8080:8080 enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:1.0.0.125
+```
+
+> If port 8080 is occupied, map to a different port:
+
+```bash
+docker run --security-opt seccomp=unconfined --rm -it -p 3000:8080 ghcr.io/agent-infra/sandbox:latest
+# Then access via http://localhost:3000
+```
+
+## Welcome
+
+After running the Docker command, you'll see the AIO Sandbox ASCII logo:
+
+```bash
+ █████╗ ██╗ ██████╗     ███████╗ █████╗ ███╗   ██╗██████╗ ██████╗  ██████╗ ██╗  ██╗
+██╔══██╗██║██╔═══██╗    ██╔════╝██╔══██╗████╗  ██║██╔══██╗██╔══██╗██╔═══██╗╚██╗██╔╝
+███████║██║██║   ██║    ███████╗███████║██╔██╗ ██║██║  ██║██████╔╝██║   ██║ ╚███╔╝
+██╔══██║██║██║   ██║    ╚════██║██╔══██║██║╚██╗██║██║  ██║██╔══██╗██║   ██║ ██╔██╗
+██║  ██║██║╚██████╔╝    ███████║██║  ██║██║ ╚████║██████╔╝██████╔╝╚██████╔╝██╔╝ ██╗
+╚═╝  ╚═╝╚═╝ ╚═════╝     ╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═════╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝
+
+🚀 AIO(All-in-One) Agent Sandbox Environment
+📦 Image Version: 1.0.0.93
+🌈 Dashboard: http://localhost:8080/index.html
+🔌 MCP: http://localhost:8080/mcp
+📚 Documentation: http://localhost:8080/v1/docs
+```
+
+## 1. Install SDK
+
+<Tabs>
+  <Tab label="Python">
+
+```python
+pip install agent-sandbox
+```
+
+  </Tab>
+  <Tab label="TypeScript">
+
+```ts
+npm install @agent-infra/sandbox
+```
+
+  </Tab>
+</Tabs>
+
+## 2. Configure client
+
+<Tabs>
+  <Tab label="Python">
+
+```python
+from agent_sandbox import Sandbox
+
+client = Sandbox(base_url="http://localhost:8080")
+```
+
+  </Tab>
+</Tabs>
+
+
+## 3. Interact with the sandbox
+
+Interact with the sandbox with `file`, `shell`, `browser`, `code execute`.
+
+### Execute Shell
+
+<Tabs>
+  <Tab label="Python">
+
+```python
+shell_res = client.shell.exec_command(command="ls -la")
+print(shell_res.data.output) # /home/gem
+```
+
+  </Tab>
+  <Tab label="Curl">
+
+```bash
+curl -X 'POST' \
+  'http://127.0.0.1:8080/v1/shell/exec' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "command": "ls -la"
+}'
+```
+
+  </Tab>
+</Tabs>
+
+### File
+
+<Tabs>
+  <Tab label="Python">
+
+```python
+file_res = client.file.read_file(file="/home/gem/.bashrc")
+print(file_res.data.content) # export TERM=xterm-256color
+```
+
+  </Tab>
+  <Tab label="Curl">
+
+```bash
+curl -X 'POST' \
+  'http://127.0.0.1:8080/v1/file/read' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "file": "/home/gem/.bashrc"
+}'
+```
+
+  </Tab>
+</Tabs>
+
+### Browser
+
+#### Screenshot
+
+<Tabs>
+  <Tab label="Python">
+
+```python
+screenshot = client.browser.screenshot()
+print(screenshot)
+```
+
+  </Tab>
+  <Tab label="Curl">
+
+```bash
+curl -X 'GET' \
+  'http://127.0.0.1:8080/v1/browser/screenshot' \
+  -H 'accept: image/png'
+```
+
+  </Tab>
+</Tabs>
+
+#### GUI Actions
+
+<Tabs>
+  <Tab label="Python">
+
+```python
+action_res = client.browser.execute_action_actions_post(
+    request=Action_MoveTo(x=100, y=100)
+)
+print(action_res)
+```
+
+  </Tab>
+  <Tab label="Curl">
+
+```bash
+curl -X 'POST' \
+  'http://127.0.0.1:8080/v1/browser/actions' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "action_type": "MOVE_TO",
+  "x": 100,
+  "y": 100
+}'
+```
+
+  </Tab>
+</Tabs>
+
+> More `action_type` details can be found in this [Browser](/guide/basic/browser).
+
+#### Connect to the browser with CDP
+
+<Tabs>
+  <Tab label="Python">
+
+```python
+from playwright.sync_api import sync_playwright
+
+browser_info = client.browser.get_info()
+cdp_url = browser_info.data.cdp_url
+playwright = sync_playwright().start()
+browser = playwright.chromium.connect_over_cdp(cdp_url)
+```
+
+  </Tab>
+  <Tab label="Curl">
+
+```bash
+curl -X 'GET' \
+  'http://127.0.0.1:8080/v1/browser/info' \
+  -H 'accept: application/json'
+```
+
+  </Tab>
+</Tabs>
+
+## Example
+
+Convert a webpage to Markdown with embedded base64 screenshot:
+
+![](/images/example.png)
+
+<Tabs>
+  <Tab label="Python">
+
+```python
+import asyncio
+import base64
+from playwright.async_api import async_playwright
+from agent_sandbox import Sandbox
+
+
+async def site_to_markdown():
+    # initialize sandbox client
+    c = Sandbox(base_url="http://localhost:8080")
+    home_dir = c.sandbox.get_context().home_dir
+
+    # Browser: automation to download html
+    async with async_playwright() as p:
+        browser_info = c.browser.get_info().data
+        page = await (await p.chromium.connect_over_cdp(browser_info.cdp_url)).new_page(
+            viewport={
+                "width": browser_info.viewport.width,
+                "height": browser_info.viewport.height,
+            }
+        )
+        await page.goto("https://sandbox.agent-infra.com/", wait_until="networkidle")
+        html = await page.content()
+        screenshot_b64 = base64.b64encode(
+            await page.screenshot(full_page=False, type='png')
+        ).decode('utf-8')
+
+    # Jupyter: Run code in sandbox to convert html to markdown
+    c.jupyter.execute_code(
+        code=f"""
+from markdownify import markdownify
+html = '''{html}'''
+screenshot_b64 = "{screenshot_b64}"
+
+md = f"{{markdownify(html)}}\\n\\n![Screenshot](data:image/png;base64,{{screenshot_b64}})"
+
+with open('{home_dir}/site.md', 'w') as f:
+    f.write(md)
+
+print("Done!")
+"""
+    )
+
+    # BasH: execute command to list files in sandbox
+    list_result = c.shell.exec_command(command=f"ls -lh {home_dir}")
+    print(f"\nFiles in sandbox home directory:\n{list_result.data.output}")
+
+    open("./output.md", "w").write(
+        c.file.read_file(file=f"{home_dir}/site.md").data.content
+    )
+
+    return "./output.md"
+
+
+if __name__ == "__main__":
+    # Run the async function
+    result = asyncio.run(site_to_markdown())
+    print(f"\nMarkdown file saved at: {result}")
+```
+
+  </Tab>
+</Tabs>
+
+## Access Points
+
+Once running, you can access different interfaces:
+
+| Service | URL | Description |
+|---------|-----|-------------|
+| **API Documentation** | `http://localhost:8080/v1/docs` | OpenAPI documentation |
+| **Dashboard** | `http://localhost:8080/index.html` | Dashboard |
+| **VNC Browser** | `http://localhost:8080/vnc/index.html?autoconnect=true` | Remote desktop with browser |
+| **Terminal** | `http://localhost:8080/terminal` | Terminal interaction |
+| **Code Server** | `http://localhost:8080/code-server/` | VSCode Server |
+| **MCP Servers** | `http://localhost:8080/mcp` | Model Context Protocol Servers |
+| **Jupyter** | `http://localhost:8080/jupyter` | VSCode Server |
+
+
+## Getting Help
+
+- Browse [examples](/examples/) for working code samples
+- Review the [API documentation](/api/) for integration details
+
+Ready to build something awesome? Let's dive deeper into the specific components!

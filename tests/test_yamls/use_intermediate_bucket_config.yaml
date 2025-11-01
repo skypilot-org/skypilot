@@ -1,7 +1,0 @@
-jobs:
-  bucket: "s3://bucket-jobs-s3"
-
-  controller:
-    resources:
-        cpus: 2+
-        memory: 4+

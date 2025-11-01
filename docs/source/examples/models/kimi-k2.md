@@ -1,1 +1,0 @@
-../../generated-examples/kimi-k2.md

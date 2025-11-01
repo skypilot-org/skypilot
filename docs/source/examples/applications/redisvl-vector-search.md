@@ -1,1 +1,0 @@
-../../generated-examples/redisvl-vector-search.md

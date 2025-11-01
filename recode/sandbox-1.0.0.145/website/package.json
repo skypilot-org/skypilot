@@ -1,0 +1,32 @@
+{
+  "name": "website",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "rspress build",
+    "check": "biome check --write",
+    "dev": "rspress dev",
+    "format": "prettier --write .",
+    "preview": "rspress preview",
+    "deploy": "npm run build && npm run preview"
+  },
+  "dependencies": {
+    "@rspress/core": "2.0.0-beta.34",
+    "@rspress/plugin-llms": "2.0.0-beta.34",
+    "@rspress/theme-default": "2.0.0-beta.34",
+    "@scalar/api-reference-react": "^0.7.50",
+    "core-js": "^3.45.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@shikijs/transformers": "^3.13.0",
+    "rsbuild-plugin-google-analytics": "1.0.4",
+    "@rspress/plugin-sitemap": "2.0.0-beta.34",
+    "@rspress/plugin-twoslash": "2.0.0-beta.34",
+    "@rsbuild/plugin-sass": "1.4.0",
+    "rsbuild-plugin-open-graph": "1.1.0",
+    "rspress-plugin-font-open-sans": "1.0.3",
+    "@types/node": "^18.11.17",
+    "prettier": "^3.4.2"
+  }
+}

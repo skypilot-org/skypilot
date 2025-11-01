@@ -1,1 +1,0 @@
-../../generated-examples/stable_diffusion.md

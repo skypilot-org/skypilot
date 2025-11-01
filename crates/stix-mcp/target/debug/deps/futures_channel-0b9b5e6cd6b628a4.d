@@ -1,0 +1,11 @@
+/home/wind/ide/skypilot/crates/stix-mcp/target/debug/deps/futures_channel-0b9b5e6cd6b628a4.d: /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/futures-channel-0.3.31/src/lib.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/futures-channel-0.3.31/src/lock.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/futures-channel-0.3.31/src/mpsc/mod.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/futures-channel-0.3.31/src/mpsc/queue.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/futures-channel-0.3.31/src/oneshot.rs
+
+/home/wind/ide/skypilot/crates/stix-mcp/target/debug/deps/libfutures_channel-0b9b5e6cd6b628a4.rlib: /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/futures-channel-0.3.31/src/lib.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/futures-channel-0.3.31/src/lock.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/futures-channel-0.3.31/src/mpsc/mod.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/futures-channel-0.3.31/src/mpsc/queue.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/futures-channel-0.3.31/src/oneshot.rs
+
+/home/wind/ide/skypilot/crates/stix-mcp/target/debug/deps/libfutures_channel-0b9b5e6cd6b628a4.rmeta: /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/futures-channel-0.3.31/src/lib.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/futures-channel-0.3.31/src/lock.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/futures-channel-0.3.31/src/mpsc/mod.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/futures-channel-0.3.31/src/mpsc/queue.rs /home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/futures-channel-0.3.31/src/oneshot.rs
+
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/futures-channel-0.3.31/src/lib.rs:
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/futures-channel-0.3.31/src/lock.rs:
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/futures-channel-0.3.31/src/mpsc/mod.rs:
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/futures-channel-0.3.31/src/mpsc/queue.rs:
+/home/wind/.cargo/registry/src/github.com-25cdd57fae9f0462/futures-channel-0.3.31/src/oneshot.rs:

@@ -1,0 +1,26 @@
+[
+  {
+    "text": "指南",
+    "link": "/guide/start/introduction",
+    "activeMatch": "/guide/"
+  },
+  {
+    "text": "API",
+    "link": "/api",
+    "activeMatch": "/api/"
+  },
+  {
+    "text": "博客",
+    "link": "/blog/index",
+    "activeMatch": "/blog/"
+  },
+  {
+    "text": "Version",
+    "items": [
+      {
+        "text": "更新日志",
+        "link": "https://github.com/agent-infra/sandbox/releases"
+      }
+    ]
+  }
+]

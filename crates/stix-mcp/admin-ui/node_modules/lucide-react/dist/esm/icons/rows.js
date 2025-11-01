@@ -1,0 +1,16 @@
+/**
+ * @license lucide-react v0.294.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+
+import createLucideIcon from '../createLucideIcon.js';
+
+const Rows = createLucideIcon("Rows", [
+  ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", ry: "2", key: "1m3agn" }],
+  ["line", { x1: "3", x2: "21", y1: "12", y2: "12", key: "10d38w" }]
+]);
+
+export { Rows as default };
+//# sourceMappingURL=rows.js.map

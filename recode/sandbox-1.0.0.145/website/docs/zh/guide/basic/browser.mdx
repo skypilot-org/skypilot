@@ -1,0 +1,392 @@
+# 浏览器与 VNC
+
+import { Tab, Tabs } from '@rspress/core/theme';
+
+AIO Sandbox 提供了完整的浏览器环境和 VNC（虚拟网络计算）访问，支持与 Web 应用程序和基于 GUI 的工作流进行可视化交互。
+
+![](/images/browser.png)
+
+## 概述
+
+AIO Sandbox 提供多种与浏览器交互的方式：
+- **CDP（Chrome DevTools 协议）**：低级程序化控制
+- **VNC 访问**：具有可视化访问的完整桌面环境
+- **GUI 操作**：可视化截图和交互
+- **浏览器自动化**：与 Playwright 和 Puppeteer 集成
+
+## 连接
+
+### CDP（Chrome DevTools 协议）
+
+Chrome DevTools 协议（CDP）是一个低级、语言无关的协议，允许外部程序对基于 Chrome 或 Chromium 的浏览器进行监测、检查和控制。
+
+<Tabs>
+  <Tab label="1. /v1/browser/info">
+
+```bash
+curl -X 'GET' \
+  'http://127.0.0.1:8080/v1/browser/info' \
+  -H 'accept: application/json' \
+  | jq '.data.cdp_url'
+```
+
+  </Tab>
+  <Tab label="2. /json/version">
+
+```bash
+curl http://localhost:8080/json/version | jq '.webSocketDebuggerUrl'
+```
+
+  </Tab>
+</Tabs>
+
+## 浏览器自动化
+
+### Chrome DevTools 协议（CDP）
+
+AIO Sandbox 暴露 CDP 用于程序化浏览器控制：
+
+```bash
+# 获取 CDP 端点
+curl http://localhost:8080/cdp/json/version
+# 或获取浏览器信息（响应 data.cdp_url）
+curl http://localhost:8080/v1/browser/info
+```
+
+响应包含 `webSocketDebuggerUrl` 用于连接自动化工具。
+
+### Python SDK 集成
+
+Python SDK 提供同步和异步客户端用于浏览器控制：
+
+<Tabs>
+  <Tab label="同步客户端">
+
+```python
+from agent_sandbox import Sandbox
+from agent_sandbox.browser import Action_Click, Action_MoveTo, Action_Typing
+
+# 初始化客户端
+client = Sandbox(base_url="http://localhost:8080")
+
+# 获取浏览器信息
+browser_info = client.browser.get_info()
+print(f"CDP URL: {browser_info.cdp_url}")
+print(f"Viewport: {browser_info.viewport}")
+
+# 截图
+screenshot_data = client.browser.take_screenshot()
+with open("screenshot.png", "wb") as f:
+    for chunk in screenshot_data:
+        f.write(chunk)
+
+# 执行 GUI 操作
+# 移动鼠标到指定位置
+client.browser.execute_action(
+    request=Action_MoveTo(x=500, y=300)
+)
+
+# 在当前位置点击
+client.browser.execute_action(
+    request=Action_Click()
+)
+
+# 输入文本
+client.browser.execute_action(
+    request=Action_Typing(text="Hello World")
+)
+```
+
+  </Tab>
+  <Tab label="异步客户端">
+
+```python
+import asyncio
+from agent_sandbox import AsyncSandbox
+from agent_sandbox.browser import Action_Click, Action_MoveTo, Action_Typing
+
+async def main():
+    # 初始化异步客户端
+    client = AsyncSandbox(base_url="http://localhost:8080")
+
+    # 获取浏览器信息
+    browser_info = await client.browser.get_info()
+    print(f"CDP URL: {browser_info.cdp_url}")
+
+    # 截图
+    screenshot_data = client.browser.take_screenshot()
+    with open("screenshot.png", "wb") as f:
+        async for chunk in screenshot_data:
+            f.write(chunk)
+
+    # 执行 GUI 操作
+    await client.browser.execute_action(
+        request=Action_MoveTo(x=500, y=300)
+    )
+
+    await client.browser.execute_action(
+        request=Action_Click()
+    )
+
+asyncio.run(main())
+```
+
+  </Tab>
+</Tabs>
+
+### Browser Use 集成
+
+使用 `browser_use` Python 库的示例：
+
+```python
+import requests
+from agent_sandbox import Sandbox
+from browser_use.browser.browser import BrowserSession, BrowserProfile
+
+# 获取 CDP URL
+client = Sandbox(base_url="http://localhost:8080")
+cdp_url = client.browser.get_info().cdp_url
+
+# 配置浏览器配置文件
+profile = {
+    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "ignore_https_errors": True,
+    "viewport": {"width": 1920, "height": 1080},
+}
+
+# 创建会话
+browser_session = BrowserSession(
+    browser_profile=BrowserProfile(**profile),
+    cdp_url=cdp_url
+)
+
+await browser_session.start()
+page = await browser_session.browser_context.new_page()
+await page.goto("https://example.com")
+```
+
+### Playwright 集成
+
+与 Playwright 配合进行跨浏览器测试：
+
+```python
+from playwright.async_api import async_playwright
+from agent_sandbox import Sandbox
+
+client = Sandbox(base_url="http://localhost:8080")
+
+async with async_playwright() as p:
+    browser_info = client.browser.get_info()
+    cdp_url = browser_info.cdp_url
+
+    browser = await p.chromium.connect_over_cdp(cdp_url)
+    page = await browser.new_page()
+    await page.goto("https://example.com")
+    await page.screenshot(path="screenshot.png")
+
+    # 执行浏览器自动化
+    await page.fill('input[name="search"]', 'test query')
+    await page.click('button[type="submit"]')
+    await page.wait_for_load_state('networkidle')
+```
+
+### MCP
+
+连接到 `/mcp` 端点后，所有以 `browser_` 为前缀的工具都是浏览器相关工具，提供全面的浏览器控制功能。这些工具包括导航、交互、截图捕获等。
+
+![](/images/browser-mcp.png)
+
+有关详细的实现和使用，请参阅 [@agent-infra/mcp-server-browser](https://www.npmjs.com/package/@agent-infra/mcp-server-browser)。
+
+
+## GUI 操作
+
+GUI 操作提供基于可视化截图的浏览器交互。与浏览器自动化不同，GUI 操作使用纯视觉截图和交互，这在限制 DOM 操作的严格风控场景中具有优势。
+
+### 截图
+
+<Tabs>
+  <Tab label="Python">
+
+```python
+screenshot = client.browser.screenshot()
+print(screenshot)
+```
+
+  </Tab>
+  <Tab label="Curl">
+
+```bash
+curl -X 'GET' \
+  'http://127.0.0.1:8080/v1/browser/screenshot' \
+  -H 'accept: image/png'
+```
+
+  </Tab>
+</Tabs>
+
+返回 `image/png` 格式的图像：
+
+![](/images/browser-screenshot.png)
+
+
+### GUI 操作
+
+<Tabs>
+  <Tab label="Python">
+
+```python
+from agent_sandbox.browser import (
+    Action_MoveTo, Action_Click, Action_Typing,
+    Action_Scroll, Action_Hotkey, Action_DragTo
+)
+
+# 移动鼠标到坐标
+action_res = client.browser.execute_action(
+    request=Action_MoveTo(x=100, y=100)
+)
+
+# 带选项的点击
+action_res = client.browser.execute_action(
+    request=Action_Click(x=200, y=200, num_clicks=2)
+)
+
+# 使用剪贴板选项输入文本
+action_res = client.browser.execute_action(
+    request=Action_Typing(text="Hello World", use_clipboard=True)
+)
+
+# 滚动页面
+action_res = client.browser.execute_action(
+    request=Action_Scroll(dx=0, dy=100)
+)
+
+# 执行组合键
+action_res = client.browser.execute_action(
+    request=Action_Hotkey(keys=["ctrl", "c"])
+)
+```
+
+  </Tab>
+  <Tab label="Curl">
+
+```bash
+curl -X 'POST' \
+  'http://127.0.0.1:8080/v1/browser/actions' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "action_type": "MOVE_TO",
+  "x": 100,
+  "y": 100
+}'
+```
+
+  </Tab>
+</Tabs>
+
+#### 可用的操作类型
+
+| action\_type | 描述 | 必需参数 | 可选参数 |
+| --- | --- | --- | --- |
+| `MOVE_TO` | 移动鼠标到指定位置 | `x`, `y` | - |
+| `CLICK` | 点击操作 | - | `x`, `y`, `button`, `num_clicks` |
+| `MOUSE_DOWN` | 按下鼠标按钮 | - | `button` |
+| `MOUSE_UP` | 释放鼠标按钮 | - | `button` |
+| `RIGHT_CLICK` | 右键点击 | - | `x`, `y` |
+| `DOUBLE_CLICK` | 双击 | - | `x`, `y` |
+| `DRAG_TO` | 拖拽到指定位置 | `x`, `y` | - |
+| `SCROLL` | 滚动操作 | - | `dx`, `dy` |
+| `TYPING` | 输入文本 | `text` | `use_clipboard` |
+| `PRESS` | 按键 | `key` | - |
+| `KEY_DOWN` | 按下键盘按键 | `key` | - |
+| `KEY_UP` | 释放键盘按键 | `key` | - |
+| `HOTKEY` | 组合键 | `keys` (数组) | - |
+
+示例组合键：`["ctrl", "c"]` 用于复制，`["ctrl", "v"]` 用于粘贴
+
+
+## 接管
+
+如果您想实现浏览器使用的人机协作（Human-in-the-loop），有两种方式：
+
+### 1. VNC 访问
+
+访问 VNC 界面或使用 iframe 直接嵌入到应用程序中：
+
+```bash
+http://localhost:8080/vnc/index.html?autoconnect=true
+```
+
+VNC 服务器提供：
+- 完整的桌面环境
+- 预安装的 Chrome 浏览器
+- 鼠标和键盘交互
+- 屏幕共享功能
+
+> 更多自定义参数请参阅 [EMBEDDING.md](https://github.com/novnc/noVNC/blob/4cb5aa45ae559f8fa85fe2b424abbc6ef6d4c6f9/docs/EMBEDDING.md#parameters)。
+
+### 2. CDP 访问
+
+您可以使用 [@agent-infra/browser-ui](https://www.npmjs.com/package/@agent-infra/browser-ui) React 组件库连接到 CDP 地址进行接管。以下是代码示例：
+
+```typescript
+import React, { useRef } from 'react';
+import { BrowserCanvas, BrowserCanvasRef, Browser, Page } from '@agent-infra/browser-ui';
+
+function App() {
+  const canvasRef = useRef<BrowserCanvasRef>(null);
+
+  const handleReady = ({ browser, page }: { browser: Browser; page: Page }) => {
+    console.log('Browser connected, current URL:', page.url());
+
+    // 监听导航事件
+    page.on('framenavigated', (frame) => {
+      if (frame === page.mainFrame()) {
+        console.log('Navigated to:', frame.url());
+      }
+    });
+  };
+
+  const handleError = (error: Error) => {
+    console.error('Browser connection error:', error);
+  };
+
+  return (
+    <div style={{ width: '100%', height: '800px', position: 'relative' }}>
+      <BrowserCanvas
+        ref={canvasRef}
+        cdpEndpoint="http://localhost:8080/json/version"
+        onReady={handleReady}
+        onError={handleError}
+        onSessionEnd={() => console.log('Session ended')}
+      />
+    </div>
+  );
+}
+```
+
+## VNC 与 Canvas 对比
+
+| **维度** | **VNC** | **Canvas + CDP** |
+| --- | --- | --- |
+| **技术** | 远程桌面协议，传输整个屏幕像素 | 通过 CDP 控制浏览器，在 Canvas 上渲染内容 |
+| **协议** | RFB（远程帧缓冲） | WebSocket + CDP |
+| **内容** | 带标签页的完整浏览器 UI | 仅当前页面内容（标签页可单独实现） |
+| **带宽** | 高（10-50 Mbps） | 低（1-5 Mbps） |
+| **延迟** | 较高（50-200ms） | 较低（10-50ms） |
+| **稳定性** | 不易断开 | 可能断开，需要与 CDP 心跳 |
+| **CPU 使用** | 高（桌面编码） | 低（仅浏览器渲染） |
+| **内存使用** | 高（完整桌面环境） | 低（仅浏览器进程） |
+| **控制范围** | 整个浏览器 | 仅浏览器内部页面 |
+| **自动化** | 基础（鼠标/键盘模拟） | 强大（DOM 操作、网络拦截、JS 注入） |
+| **多窗口** | ✅ 支持 | ❌ 仅单个浏览器窗口 |
+| **文件操作** | ✅ 可访问本地文件 | ❌ 受浏览器沙盒限制 |
+
+## 问答
+
+### CDP 与 MCP 工具 - 有什么区别？
+
+1. **抽象级别**：MCP 提供高级、即用型抽象，而 CDP 提供低级、灵活的控制
+2. **连接稳定性**：MCP 连接更稳定，因为容器的 MCP Server 包装了 CDP 协议并暴露 HTTP 接口
+3. **灵活性**：CDP 更灵活 - 一旦连接，您将获得 `browser` 和 `page` 实例进行细粒度控制

@@ -1,0 +1,19 @@
+[project]
+name = "aio-deepagents"
+version = "0.1.0"
+description = "An example project integrating LangGraph and DeepAgents with aio-sandbox."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "dotenv>=0.9.9",
+    "httpx[socks]>=0.27.2",
+    "agent-sandbox",
+    "deepagents>=0.1.2",
+    "langchain>=1.0.0",
+    "langchain-mcp-adapters>=0.1.11",
+    "langchain-openai>=0.3.0"
+]
+
+[tool.uv.sources]
+agent-sandbox = { path = "../../sdk/python", editable = true }
+

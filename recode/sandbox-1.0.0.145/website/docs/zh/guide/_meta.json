@@ -1,0 +1,12 @@
+[
+  {
+    "type": "dir",
+    "label": "快速开始",
+    "name": "start"
+  },
+  {
+    "type": "dir",
+    "label": "特性",
+    "name": "basic"
+  }
+]
