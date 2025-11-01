@@ -10,6 +10,7 @@ members = [
     "crates/ui",
     "crates/sdk",
     "crates/utils",
+    "crates/sky",
 ]
 
 [workspace.package]
@@ -93,32 +94,3 @@ strip = true
 [profile.dev]
 opt-level = 0
 debug = true
-
-# Examples configuration
-[[example]]
-name = "hello_world"
-path = "examples/hello_world.rs"
-
-[[example]]
-name = "multi_task"
-path = "examples/multi_task.rs"
-
-[[example]]
-name = "task_dag"
-path = "examples/task_dag.rs"
-
-[[example]]
-name = "cloud_provision"
-path = "examples/cloud_provision.rs"
-
-[[example]]
-name = "gpu_task"
-path = "examples/gpu_task.rs"
-
-[[example]]
-name = "batch_jobs"
-path = "examples/batch_jobs.rs"
-
-[[example]]
-name = "distributed_training"
-path = "examples/distributed_training.rs"

@@ -33,6 +33,7 @@ pub mod resources;
 pub mod dag;
 pub mod execution;
 pub mod exceptions;
+pub mod state;
 
 // Cloud and infrastructure
 pub mod clouds;
