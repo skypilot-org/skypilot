@@ -25,3 +25,14 @@ mod tests {
         assert!(!VERSION.is_empty());
     }
 }
+
+// SkyPilot compatibility modules
+pub mod sky_compat;
+pub mod storage;
+pub mod jobs;
+pub mod spot;
+
+pub use sky_compat::{SkyTask, SkyResources, launch, exec, down, status, stop, start};
+pub use storage::{Storage, StorageType, StorageMode, StorageOps};
+pub use jobs::{Job, JobStatus, JobQueue};
+pub use spot::{SpotConfig, SpotJob, SpotOps, RecoveryStrategy};
