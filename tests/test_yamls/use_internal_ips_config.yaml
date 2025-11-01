@@ -1,3 +1,0 @@
-gcp:
-  vpc_name: default
-  use_internal_ips: true

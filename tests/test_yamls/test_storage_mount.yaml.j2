@@ -1,9 +1,0 @@
-file_mounts:
-  /test-mount:
-    name: {{ bucket_name }}
-    store: {{ store }}
-    mode: MOUNT
-
-run: |
-  ls /test-mount
-  echo hello > /test-mount/$(date +%s).txt

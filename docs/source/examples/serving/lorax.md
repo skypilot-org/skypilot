@@ -1,1 +1,0 @@
-../../generated-examples/lorax.md

@@ -1,1 +1,0 @@
-../../generated-examples/distributed_ray_train.md

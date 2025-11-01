@@ -1,8 +1,0 @@
-name: test-k8s-logs
-
-run: |
-  for i in $(seq 1 9)
-  do
-    echo "$i"
-    sleep 0.1
-  done

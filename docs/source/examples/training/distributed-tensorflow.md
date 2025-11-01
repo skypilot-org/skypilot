@@ -1,1 +1,0 @@
-../../generated-examples/tensorflow_distributed.md

@@ -1,1 +1,0 @@
-../../generated-examples/github_actions.md

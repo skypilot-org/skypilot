@@ -1,1 +1,0 @@
-../../generated-examples/vicuna-llama-2.md

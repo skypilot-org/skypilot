@@ -1,1 +1,0 @@
-../../generated-examples/batch_inference.md

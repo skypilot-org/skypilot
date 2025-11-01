@@ -1,1 +1,0 @@
-../../generated-examples/vector_database.md

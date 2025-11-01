@@ -1,7 +1,0 @@
-workspaces:
-  workspace-a:
-    aws:
-      profile: profile-a
-  workspace-b:
-    aws:
-      profile: profile-b

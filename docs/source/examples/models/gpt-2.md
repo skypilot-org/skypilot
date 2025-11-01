@@ -1,1 +1,0 @@
-../../generated-examples/gpt-2.md
