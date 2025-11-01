@@ -1,0 +1,594 @@
+---
+date: 2025-10-29 14:00:00
+sidebar: false
+---
+
+_2025 年 10 月 29 日_
+
+# AIO Sandbox：为 AI Agent 打造的一体化、可定制的沙箱环境
+
+## 背景
+
+随着 LLM 的持续演进，AI 的应用形态经历了三代跃迁：
+
+- **Chatbot**：对话式交互，回答问题
+- **Copilot**：辅助协作，提升效率
+- **Agent**：自主执行，完成任务
+
+Agent 能够自主感知环境、规划步骤、调用工具，能够**像人类一样操作计算机**：自动浏览网页收集信息、生成并运行代码分析数据、执行系统命令管理文件，甚至通过可视化界面完成复杂的多步骤操作。这种能力使 Agent 的交付成果接近甚至超越人类专业水准。
+
+<img src="/images/blog/announcing-0/0.png" width="600" />
+
+### 痛点
+
+1. **🧩 环境割裂**：多个单功能沙盒（如 E2B 支持代码执行，Browserbase 支持浏览器）迫使 Agent 通过 NAS/OSS 跨沙箱传输数据，增加延迟与复杂度。如：深度研究 Agent 完成『将一篇论文 Paper 做成 PPT』需在多沙箱间交换数十个中间文件（JSON 配置、图表图片、预览截图等），增加整个 Agent 系统复杂度和开销。
+
+
+![不同功能沙箱共享协作](/images/blog/announcing-0/1.png)
+
+2. **🎁 定制困难**：不同类型的 Agent 需要预装不同的技术栈，传统沙箱提供统一的预装环境，既无法满足所有 Agent 的个性化需求。
+
+
+![不同 Agent 在沙盒环境的预装包不同](/images/blog/announcing-0/2.png)
+
+3. 🔒 **安全隔离难：** 既要让 Agent 拿到真实系统能力（网络、文件、浏览器、GPU），又要强隔离避免越权与数据外泄。
+4. 🖥️ **可视化交互困难：** 复杂 Agent 任务需要人工接管，功能沙箱需要集成 VNC、Terminal、VSCode 保持一致体验。分辨率切换、截图与 GUI 视觉操作。
+5. **🌐 浏览器环境复杂度高**：反自动化与指纹风控，CDP 不稳定性、带用户名密码的代理支持不完善、GUI 操作缺失。
+
+> 一台配置完善的电脑能显著提升人类的办公效率；同样，一个功能强大的沙箱环境也能提升 Agent 的任务质量与执行速度。
+
+
+
+## 介绍
+
+一句话介绍：AIO Sandbox 在**一个沙盒内**中集成**浏览器**、**代码执行**、**终端**、**可视化接管**、**正反向代理**、**MCP**、**鉴权**等基础功能，可根据需求进行沙盒**环境定制**，让不同的 Agent “在一个环境容器内中更高效地完成任务”。
+
+![](/images/blog/announcing-0/3.png)
+
+- 官网：[sandbox.agent-infra.com](https://sandbox.agent-infra.com/)
+
+- Github：[github.com/agent-infra/sandbox](https://github.com/agent-infra/sandbox)
+
+- API：[sandbox.agent-infra.com/api](https://sandbox.agent-infra.com/api/)
+
+- 论文：[arxiv.org/pdf/2509.02544#S2.SS2](https://arxiv.org/pdf/2509.02544)
+
+
+![AIO（All-in-One）沙箱](/images/blog/announcing-0/4.png)
+
+
+
+### 特性
+
+- **📦 开箱即用**：通过 `/mcp` 协议直连沙箱能力，同时提供 **API /** **SDK** 定制沙箱工具集。
+- **🚀 秒启动**：沙盒全服务启动在秒级完成，预缓存/冷启动后达到毫秒级拉起。
+- **🌈 定制化**：各垂直场景的 Agent 需配套领域工具与依赖；AIO 以统一镜像基座，用约定式路由和服务配置**支持按需扩展**。
+- **🌐 浏览器**：集成 Web Infra 的 RS 轻量内核，提供 CDP、截图、纯视觉 GUI 操作、Proxy 代理配置。
+- **🔄 人工接管**：提供 浏览器 VNC、Code Server、Terminal，支持任务中途**人工接管**与调试。
+- **📡 代理与转发**：支持带账密的正向代理；将 `{port}-{domain}` 泛域名或 `/proxy|/absproxy/{port}` 路径映射到沙箱内服务（便于预览/演示）。
+- **🔒安全鉴权**：JWT Bearer 访问控制；对无法携带 Header 的链接提供短时票据（Short-Lived Ticket）。
+
+<div align="center">
+  <img src="/images/blog/announcing-0/5.png" width="200" />
+</div>
+
+## 示例
+
+| 指令 | 回放 | 截图 |
+| :-- | :-- | :-- |
+|帮我设计一个有趣的网站，为在上小学的孩子介绍侏罗纪和白垩纪时期的蜥脚类恐龙。希望网站是卡通风格的。|[Replay](https://lf3-static.bytednsdoc.com/obj/eden-cn/zyha-aulnh/ljhwZthlaukjlkulzlp/shared-conversations/agent-replay-UcZQrqbkmXyPWlMhWOT5b-1760518911224.html?replay=1)|![](/images/blog/announcing-0/6.png)|
+|搜索关于字节跳动 Seed 1.6 模型的新闻，然后以现代风格编写一个网页并部署|[Replay](https://lf3-static.bytednsdoc.com/obj/eden-cn/zyha-aulnh/ljhwZthlaukjlkulzlp/shared-conversations/agent-tars-SiumVAbquVRmeNqDjrrT9-1756832121376.html?logo=agent-tars&replay=1)|![](/images/blog/announcing-0/7.png)|
+|根据这张 OSWorld 图片，请在互联网上查找最新信息并为其设计一个现代化的网站。|[Replay](https://lf3-static.bytednsdoc.com/obj/eden-cn/zyha-aulnh/ljhwZthlaukjlkulzlp/shared-conversations/agent-tars-4TeM9bFCF1CqujHuEvED2-1757159422304.html?replay=1)|![](/images/blog/announcing-0/8.png)|
+|玩 Poki 2048 游戏|[Replay](https://lf3-static.bytednsdoc.com/obj/eden-cn/zyha-aulnh/ljhwZthlaukjlkulzlp/shared-conversations/agent-replay-UoeDuQrv6mNv-jRfZFIdD-1760000200212.html?replay=1)|![](/images/blog/announcing-0/9.png)|
+
+> 更多见：https://seed-tars.com/showcase/ui-tars-2
+
+
+
+## 快速上手
+
+### 云端
+
+[一键部署 All-in-One Sandbox 应用--函数服务-火山引擎](https://www.volcengine.com/docs/6662/1851199)
+
+![](/images/blog/announcing-0/10.png)
+
+
+
+### 本地
+
+前置需要安装 [Docker](https://www.docker.com/get-started/)，一键本地启动：
+
+```bash
+docker run --security-opt seccomp=unconfined --rm -it -p 8080:8080 ghcr.io/agent-infra/sandbox:latest
+
+# 国内加速访问
+# docker run --rm -it -p 8080:8080 enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+```
+
+![](/images/blog/11.png)
+
+## **系统架构**
+
+### 整体
+
+AIO Sandbox 面向 Agent 提供 Browser、File、Shell、Code 等基础能力，提供**可扩展性**支持开发者根据 Agent 需求组合与**定制专属沙箱**（如`AIO Sandbox for 移动端/医疗/法务/金融/科研`）。
+沙箱定制程度依次递增：
+
+1. **Standard（开箱即用）**：通过 `/mcp` 接入点对 Agent 即插即用，适用于快速 PoC Agent 验证。
+2. **Custom Toolset（工具 / Skills 扩展）**：不改镜像，基于 SDK / API 增加或编排工具（如增加 `web_search`搜索）；同时扩展出 Skills 实现特定沙盒任务的自动化处理。
+3. **Custom Image（定制****镜像****）**：基于 `FROM aio.sandbox`基础镜像，安装特定的基础依赖（如多媒体/图像处理等），挂载自定义服务（例如 `/custom_tools/ocr` 图像识别）。
+
+
+![Sandbox 可扩展架构](/images/blog/announcing-0/12.png)
+
+### 基础组件
+
+![AIO Sandbox 组件图](/images/blog/announcing-0/13.png)
+
+
+#### 浏览器
+
+面向 Agent 的浏览器环境，核心在于提供出 **CDP** 和 VNC，主流 Browser Use 框架都可以直接使用；
+AIO 提供了基于 x11 的浏览器 GUI 视觉操作接口，可以与 CDP 方式组合出更高效、更低风控率的 Browser Use 方案。
+
+![AIO Sandbox Browser 架构](/images/blog/announcing-0/14.png)
+
+
+
+##### CDP
+
+CDP （Chrome Devtools Protocol）是一种用于与 Chrome 或 Chromium 浏览器通信的协议，通过 WebSocket 提供浏览器控制 API，可以执行导航与加载、DOM 操作、JS 执行/调试、网络拦截与模拟、截图与渲染、安全与权限等。
+为更直观了解，以下示例是用 CDP 发起一个 navigate 页面导航指令：
+
+```Bash
+'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' \
+    --disable-gpu \
+    --user-data-dir=./test \
+    --remote-debugging-port=9222 \
+    https://www.chromestatus.com
+```
+
+访问 `http://localhost:9222/json/version`，其中`webSocketDebuggerUrl`就是 CDP 地址：
+
+```Bash
+$ curl http://localhost:9222/json/version
+{
+   "Browser": "Chrome/141.0.7390.66",
+   "Protocol-Version": "1.3",
+   "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+   "V8-Version": "14.1.146.11",
+   "WebKit-Version": "537.36 (@95681a3c3d516c397b75ff45b8980c1088666775)",
+   "webSocketDebuggerUrl": "ws://localhost:9222/devtools/browser/a6c5f19f-5d24-4bed-ba08-9c15cf5aeedb"
+}
+```
+
+与 CDP 建立 WebSocket 连接后，就可以执行浏览器指令：
+
+![](/images/blog/announcing-0/15.png)
+
+> 注：AIO Sandbox 不直接暴露 CDP 接口 `/json/version`，而是通过 uvicorn 服务中转 CDP 并增加了心跳检测，避免出现 ws 断连问题。
+
+
+
+##### GUI 视觉操作
+
+**截图**
+不同于基于 CDP 的截图，视觉的截图 `/v1/browser/screenshot`是带 Tabs（即整个浏览器窗口），操作也是面向整个浏览器窗口。
+
+| GUI 浏览器截图（Tabs） | 基于 CDP 的页面截图（Page） |
+| :--: | :--: |
+| ![](/images/blog/announcing-0/16.png) | ![](/images/blog/announcing-0/17.png) |
+
+
+不同于 CDP 的浏览器操作，视觉操作 `/v1/browser/actions`上**模拟人类行为**进行点击、输入、滑动等操作，可以减少目标网站的风控策略。
+
+**统一动作空间**
+将 GUI 操作抽象为可组合的最小原子动作，如移动鼠标、点击、拖动、滚动、按键、输入文本，以及额外的工具函数如等待，尽可能对齐 VLM 视觉模型在执行实际动作的一致性。
+
+| action\_type | 描述 | 必需参数 | 可选参数 |
+| --- | --- | --- | --- |
+| `MOVE_TO` | 移动鼠标到指定位置 | `x`, `y` | \- |
+| `MOVE_REL` | 移动当前鼠标的相对位置 | `x_offset`，`y_offset` | \- |
+| `CLICK` | 点击操作 | \- | `x`, `y`, `button`, `num_clicks` |\
+| `MOUSE_DOWN` | 按下鼠标按钮 | \- | `button` |
+| `MOUSE_UP` | 释放鼠标按钮 | \- | `button` |
+| `RIGHT_CLICK` | 右键点击 | \- | `x`, `y` |
+| `DOUBLE_CLICK` | 双击 | \- | `x`, `y` |
+| `DRAG_TO` | 拖拽到指定位置 | `x`, `y` | \- |
+| `DRAG_REL` | 当前鼠标拖拽的相对位置 | `x_offset`，`y_offset` | \- |
+| `SCROLL` | 滚动操作 | \- | `dx`, `dy` |
+| `TYPING` | 输入文本 | `text` | \- |
+| `PRESS` | 按键 | `key` | \- |
+| `KEY_DOWN` | 按下键盘按键 | `key` | \- |
+| `KEY_UP` | 释放键盘按键 | `key` | \- |
+| `HOTKEY` | 组合键 | `keys` (数组)，例如：`["ctrl", "c"]` | \- |\
+| `WAIT` | 等待 | `duration` 时间（秒 s） | \- |
+
+
+
+##### 接管
+
+当 Browser Use 遇到要登录的情况，一般需要人工接管，需要提供可交互的浏览器界面，目前有两种做法：
+
+1. VNC 接管：AIO Sandbox 提供 `/vnc/index.html`页面，用户可直接交互。
+
+![](/images/blog/announcing-0/18.png)
+
+2. 前端通过 CDP 连接，在 Canvas 上实时重绘完整浏览器界面（[Playground](https://browser-canvas-render.gf.bytedance.net/)）；我们把前端部分封装了一个组件 [@agent-infra/browser-ui](https://www.npmjs.com/package/browser-ui)。如下左为实际浏览器，右为 browser-ui 投屏：
+
+![](/images/blog/announcing-0/19.mp4)
+
+
+
+
+两种接管方式的差异大致如下：
+
+| **对比维度**   | **VNC**                        | **Canvas + CDP**（Chrome DevTools Protocol）          |
+| -------------- | ------------------------------ | ----------------------------------------------------- |
+| **技术原理**   | 远程桌面协议，传输整个屏幕像素 | 通过 CDP 控制浏览器，Canvas 渲染内容                  |
+| **传输协议**   | RFB (Remote Framebuffer)       | WebSocket + CDP                                       |
+| **传输内容**   | 完整浏览器画面（有 Tabs）      | 仅浏览器当前 page 内容（默认没有 Tabs，可以单独实现） |
+| **带宽占用**   | 高（10-50 Mbps）               | 低（1-5 Mbps）                                        |
+| **延迟**       | 较高（50-200ms）               | 较低（10-50ms）                                       |
+| **稳定性**     | 不易断连                       | 易断连，需要手动增加与 CDP 心跳，避免断连             |
+| **CPU占用**    | 高（桌面编码）                 | 低（仅浏览器渲染）                                    |
+| **内存占用**   | 高（需要完整桌面环境）         | 低（仅浏览器进程）                                    |
+| **控制范围**   | 整个浏览器                     | 仅浏览器内部页面                                      |
+| **自动化能力** | 基础（鼠标键盘模拟）           | 强大（DOM操作、网络拦截、JS注入等）                   |
+| **多窗口支持** | ✅ 支持                         | ❌ 仅单个浏览器窗口                                    |
+| **文件操作**   | ✅ 可以操作本地文件             | ❌ 受浏览器沙箱限制                                    |
+
+
+
+#### 命令行解释器
+
+对于 Coding Agent，大部分任务都可以通过命令行执行完成。设计 Shell 模块时，以 OpenHands 的 [CmdRunAction](https://github.com/All-Hands-AI/OpenHands/blob/2bbe15a329e35f5156cdafcbe63c3fd54978ff98/openhands/runtime/utils/bash.py#L494-L681) 为执行引擎，配合 tmux，实现多会话（multi-session）执行能力。
+
+![](/images/blog/announcing-0/20.jpeg)
+
+
+#### 文件操作
+
+文件/代码编辑只需要两个工具就足够：
+
+- **文件增改查**：封装文件读取/写入/列目录/新建/上传/下载等基础 I/O，配合路径校验与权限控制，覆盖通用文件操作场景。
+
+- **文本编辑器**：实现面向模型的细粒度编辑工具 [str\_replace\_editor](https://docs.claude.com/zh-CN/docs/agents-and-tools/tool-use/text-editor-tool)，支持：
+	- `view`（查看文件或目录，含行范围）
+	- `str_replace`（精确字符串替换）
+	- `insert`（按行插入，旧版支持）
+	- `undo_edit`（撤销）
+
+![](/images/blog/announcing-0/21.jpeg)
+
+
+
+#### 代码执行
+
+综合权衡语言覆盖与镜像体积，使用 [Sandbox Fusion](https://bytedance.github.io/SandboxFusion/) 里的 **Python** **3.10/3.11/3.12** 与 **Node.js** **22** 运行时，并为代码执行提供一体化的安全隔离环境。
+
+![](/images/blog/announcing-0/22.jpeg)
+
+
+
+### MCP Servers 聚合器
+
+通过统一入口 `/mcp` 聚合多个 MCP Server（例如 [chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devtools-mcp)），支持**参数级过滤**，并可为**工具名添加前缀**（namespacing）。
+
+![/mcp 支持 MCP Servers 过滤](/images/blog/announcing-0/23.png)
+
+按 `search` 过滤 MCP Servers，后续将扩展标签（`tags`）与类别（`category`)等多维过滤，减少冗余调用并降低模型 token 开销。
+
+![](/images/blog/announcing-0/24.png)
+
+
+### 代理
+
+在 Agent 沙箱里，一般涉及两类场景，分别对应正反向代理：
+
+1. **正向代理**：Browser Use Agent 可访问私有/全球网络
+
+2. **反向代理**：Coding Agent 在沙箱内开发的服务对外开放，供用户侧预览
+
+
+
+
+#### 正向代理
+
+使用 TinyProxy 代理服务器，绕过地理限制、访问受限内容或在企业内网中提供安全访问。
+
+![AIO Sandbox 正向代理原理](/images/blog/announcing-0/25.png)
+
+为什么 Chrome 有 `--proxy-server` 指定代理，为什么要引入 TinyProxy 代理服务器？
+在 [Chromium 官方文档](https://chromium.googlesource.com/chromium/src/%2B/HEAD/net/docs/proxy.md#proxy-credentials-in-manual-proxy-settings) 写明不会使用任何嵌入在代理设置里的用户名/密码（例如 `http://user:pass@host:port` 这种），认证要走单独的质询弹窗，影响整个 Browser Use 使用（如下图）：
+
+![带用户名密码代理会出现弹窗](/images/blog/announcing-0/26.png)
+
+
+#### 反向代理
+
+![AIO Sandbox 反向代理原理](/images/blog/announcing-0/27.png)
+提供两种访问 Sandbox 内部服务端口的方法：
+
+1. **subdomain 泛域名转发（推荐）**：只要满足 `${port}-${domain}` 的域名格式，都会被转发到沙盒内的端口上。
+
+	![](/images/blog/announcing-0/28.png)
+
+2. **subpath 子路径转发**：会遇到非常多问题：对于路由敏感服务（如前端项目）会因为额外的 `/proxy|absproxy/${端口}` 路径造成资源匹配 404。
+
+
+
+
+### 鉴权
+
+Agent 在沙箱里会产生用户数据，为了在不侵入、不修改任何既有业务路由配置、同时不增加未来扩展的路由配置的心智负担的前提下，实现 AIO Sandbox 全局统一鉴权，在内部 Nginx 网关层设计了**“非对称加密 + JWT”** 反向代理架构来实现鉴权：
+
+![](/images/blog/announcing-0/29.jpeg)
+
+
+
+#### 如何开启（一次配置）
+
+- 生成密钥对
+
+
+```Shell
+openssl genrsa -out private_key.pem 2048
+openssl rsa -in private_key.pem -pubout -out public_key.pem
+echo "密钥对生成完毕！"
+```
+
+- 启动服务（带公钥开启鉴权），使用环境变量 `JWT_PUBLIC_KEY`
+
+
+```Shell
+export JWT_PUBLIC_KEY=$(cat public_key.pem | base64)
+JWT_PUBLIC_KEY="${JWT_PUBLIC_KEY}"
+```
+
+
+
+#### 签发 JWT
+
+业务服务用私钥生成一个有效期为 1 小时的 JWT，以下是简化的脚本来生成 JWT，实际中业务后端应使用成熟的 JWT 库：
+
+```Shell
+# 这是一个简化的脚本来生成JWT，实际中业务后端应使用成熟的 JWT 库 base64url_encode() { openssl base64 -e -A | tr '+/' '-_' | tr -d '='; }
+header='{"alg":"RS256","typ":"JWT"}'
+exp_time=$(($(date +%s) + 3600))
+payload="{\"exp\":${exp_time}}"
+to_be_signed="$(echo -n "$header" | base64url_encode).$(echo -n "$payload" | base64url_encode)"
+signature=$(echo -n "$to_be_signed" | openssl dgst -sha256 -sign private_key.pem | base64url_encode)
+jwt="${to_be_signed}.${signature}"echo "JWT已生成: ${jwt}"
+```
+
+
+
+#### 使用
+
+1. Header 鉴权
+
+	```Shell
+	curl --silent -X GET "http://localhost:8080/v1/sandbox" \
+	     -H "Authorization: Bearer ${jwt}"
+	```
+
+2. 短时票据鉴权示例（以 VNC 页面访问为例）：直接访问**无法通过加 Header 方式完成鉴权**，只能通过 `?ticket=` 票据以 query 参数方式发起访问。
+	- 使用 JWT 从通用端点获取票据（默认有效期是 30s，要增加通过 `TICKET_TTL_SECONDS` 环境变量配置）
+
+	```Bash
+	echo "使用JWT换取通用的一次性票据..."
+
+	ticket_response=$(curl --silent -X POST "http://localhost:8080/tickets" \
+	     -H "Authorization: Bearer ${jwt}")
+
+	ticket=$(echo "$ticket_response" | jq -r .ticket)
+	expires=$(echo "$ticket_response" | jq -r .expires_in)
+
+	echo "获取成功！票据: ${ticket}, 有效期: ${expires}秒"
+	```
+
+	- 客户端构建并使用 VNC URL**：** 现在，就可以使用获取到的 `${ticket}` 变量来构建 VNC URL 并发起访问了。
+
+	```Bash
+	# Bash脚本模拟客户端拼接URL
+	vnc_url="http://localhost:8080/vnc/index.html?ticket=${ticket}&path=websockify%3Fticket%3D${ticket}"
+
+	echo "客户端构建的最终URL: ${vnc_url}"
+
+	# 模拟访问 (实际应在浏览器中进行)
+	# curl -I "${vnc_url}"
+	```
+
+
+## 扩展与生态
+
+### 定制镜像
+
+在 AIO 里，会按约定目录方式，自动挂载服务进程（supervisord）和服务路由（Nginx）
+
+- 服务进程目录：`/opt/gem/supervisord/*.conf`
+- 路由目录：`/opt/gem/nginx/*.conf`
+
+
+如果在 AIO 镜像基础上定制服务和路由，可参考以下镜像代码：
+
+```Dockerfile
+FROM enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+
+# ----------------------
+# 安装额外系统依赖（若有）
+# installed path: /usr/bin/*
+# ----------------------
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        ${your_system_dep} \
+        --no-install-recommends; \
+    # clean up
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*;
+
+# ----------------------
+# npm 安装（若有）
+#
+# ----------------------
+RUN npm i -g ${your_npm_package}
+
+# ----------------------
+# python pip 安装（若有）
+# installed path: /usr/local/bin/*
+# ----------------------
+RUN pip install ${your_python_package}
+
+# 添加自定义 Server 服务
+COPY ./supervisord.agent_server.conf /opt/tiger/run/supervisord/agent_server.conf
+# 绑定 Nginx 路由
+COPY ./nginx.agent_server.conf /opt/gem/nginx/nginx.agent_server.conf
+
+# # 若不需要 AIO 里的服务，可进行删除，例如 Code Server
+# ## 删除 Code Server 进程和路由
+# RUN rm -rf /opt/gem/supervisord/supervisord.code_server.conf
+# ## 删除 Code Server 路由
+# RUN rm -rf /opt/gem/nginx/code_server.conf
+```
+
+
+### SDK 集成
+
+借助 [fern](https://buildwithfern.com/learn/sdks/overview/introduction) 将 AIO Sandbox 里的接口文档直接转成 Python / Go / Node.js SDK，以 Python 为例，几行代码串联起 AIO Sandbox 里的核心功能：
+
+```Python
+from agent_sandbox import Sandbox
+
+client = Sandbox(base_url="http://localhost:8080")
+
+# Execute Shell
+shell_res = client.shell.exec_command(command="ls -la")
+print(shell_res.data.output) # /home/gem
+
+# Browser Screenshot
+screenshot = client.browser.screenshot()
+print(screenshot)
+
+# Get Browser CDP
+browser_info = client.browser.get_browser_info()
+cdp_url = browser_info.data.cdp_url # ws://
+
+# Read File
+file_res = client.file.read_file(file="/home/gem/.bashrc")
+print(file_res.data.content)
+```
+
+> 更多使用示例参考：[agent-infra/sandbox#examples](https://github.com/agent-infra/sandbox/tree/62e910bae02239f69f749b16a1a78d8deb30c533/examples)
+
+
+
+#### browser-use
+
+只需增加 4 行代码接入社区的 [browser-use](https://github.com/browser-use/browser-use)：
+
+![](/images/blog/announcing-0/30.png)
+
+> 完整代码见：[browser-use#main.py](https://github.com/agent-infra/sandbox/blob/b950470e6d70eabf9941b9a98a0affd15dd2e86c/sdk/python/examples/browser-use-integration/main.py)
+
+
+
+#### LangGraph-DeepAgents
+
+![](/images/blog/announcing-0/31.jpeg)
+
+> 完整代码见：[langgraph-deepagents#main.py](https://github.com/agent-infra/sandbox/blob/b950470e6d70eabf9941b9a98a0affd15dd2e86c/sdk/python/examples/langgraph-deepagents/main.py)
+
+
+
+### 自定义工具集
+
+可使用 API / SDK 来组合 Agent 所需要的高阶工具集，例如 `link_reader`给 url 地址返回页面内容：
+
+```Python
+from openai import OpenAI
+from agent_sandbox import Sandbox
+import json
+
+client = OpenAI(
+    api_key="your_api_key",
+)
+sandbox = Sandbox(base_url="http://localhost:8080")
+
+tools = [{
+    "type": "function",
+    "function": {
+        "name": "link_reader",
+        "description": "渲染并读取网页，返回标题、正文与最终URL（基于CDP）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "format": "uri"},
+                "timeout_ms": {"type": "integer", "default": 30000}
+            },
+            "required": ["url"]
+        }
+    }
+}]
+
+async def link_reader(url: str, timeout_ms: int = 30_000) -> dict:
+    cdp_url = sandbox.browser.get_browser_info().cdp_url
+    async with async_playwright() as p:
+        browser = await p.chromium.connect_over_cdp(cdp_url)
+        try:
+            page = await browser.new_page()
+            await page.goto(url, wait_until="networkidle", timeout=timeout_ms)
+            title = await page.title()
+            text = await page.evaluate("document.body.innerText || ''")
+            return {"final_url": page.url, "title": title, "text": text[:8000]}
+        finally:
+            await browser.close()
+```
+
+
+
+### 部署
+
+目前最佳的公有云部署形态是函数计算，并基于 Sandbox 指定实例访问能力：[一键部署 All-in-One Sandbox 应用--函数服务-火山引擎](https://www.volcengine.com/docs/6662/1851199)
+
+![](/images/blog/announcing-0/32.jpeg)
+
+
+
+## 总结与展望
+
+AIO Sandbox 提供**一体化**、**可定制**的基座环境（Agent Env），使 Agent 能在同一环境内完成浏览、执行代码、运行命令与文件操作等多样化任务，并支持根据不同 Agent 定制专属的领域沙盒。这一沙盒体系也将伴随 Agent 智能上限的提升与开发者创造力的激发，持续进化与扩展。
+后续，我们将围绕**稳定性**、**可观测性**与**生态集成**持续打磨，不断完善评测体系与最佳实践，推动 AIO Sandbox 在更多大规模、高要求的 Agent 应用场景中实现稳健落地与高效运行。
+
+![](/images/blog/announcing-0/33.png)
+
+
+## 附录
+
+### 名词解释
+
+| 名词 | 解释 |
+| :-- | :-- |
+| ***Agent*** | 在 LLM 语境下，AI Agent 是某种能自主理解意图、规划决策、执行复杂任务的智能体。Agent 并非ChatGPT 升级版，它不仅告诉你“如何做”，更会帮你去做。如果CoPilot是副驾驶，那么Agent就是主驾驶。类似人类“做事情”的过程，Agent的核心功能，可以归纳为三个步骤的循环：感知（Perception）、规划（Planning）和行动（Action）。 |\
+||
+| ***Copilot*** | Copilot 是指一种基于人工智能的辅助工具，通常与特定的软件或应用程序集成，旨在帮助用户提高工作效率。Copilot 系统通过分析用户的行为、输入、数据和历史记录，提供实时建议、自动化任务或增强功能，帮助用户做出决策或简化操作。 |
+| ***AIO*** | All-In-One，指将多种能力（Browser、Code Execution、Shell、File、可视化接管、鉴权、代理等）在**单一****镜像****/****实例**内集成，减少跨环境切换与数据搬运。 |
+| ***Sandbox*** | 受控、隔离的执行环境。用于运行浏览器、代码或命令行，控制资源与权限，降低对宿主系统的影响与风险。 |
+| ***CDP*** | CDP （Chrome Devtools Protocol）是一种用于与 Chrome 或 Chromium 浏览器通信的协议。它允许开发人员通过发送命令和接收事件来与浏览器进行交互，以便进行调试、分析和自动化浏览器操作。CDP 提供了一组定义了浏览器行为和功能的 API（Application Programming Interface)。 |
+| ***VNC*** | VNC 是一套“远程桌面共享/控制”技术与工具族，基于 RFB（Remote Framebuffer）协议 工作。核心思想：把远程主机的屏幕帧缓冲（像素）编码后通过网络传输到客户端，同时把客户端的键盘、鼠标事件回放到远程主机，实现跨平台远程操作。 |
+| ***MCP*** | *Model Context Protocol**（模型上下文协议）* 是一个开放协议，它规范了应用程序如何为LLMs提供上下文。可以将MCP想象为AI应用的USB-C端口。就像USB-C提供了一种标准方式，让你的设备连接到各种外设和配件，MCP也提供了一种标准方式，让你的AI模型连接到不同的数据源和工具。 |\
+||
+| ***Browser Use*** | Agent 通过浏览器完成搜索、登录、点击、表单填写、下载等任务的总称，既可走 CDP 指令，也可走 GUI 视觉操作。 |
+| ***OpenHands*** | OpenHands 是一个开源的 AI 软件开发代理平台（AI Software Developer Agent Platform），用于训练、评测和运行能够在真实开发环境中“自主编程”的大语言模型（LLM）。它最初以 OpenDevin 名义发布，后更名为 OpenHands，由 All Hands AI 社区维护。 |
+
+
+
+### 参考
+
+- [UI-TARS-2 Technical Report: Advancing GUI Agent with Multi-Turn Reinforcement Learning](https://arxiv.org/pdf/2509.02544)
+- [AIO Sandbox: All-in-One Sandbox for AI Agents & Developers](https://medium.com/coding-nexus/aio-sandbox-all-in-one-sandbox-for-ai-agents-developers-b0a5ca4cf2a8)
+- [Agentic AI基础设施实践经验系列（二）：专用沙盒环境的必要性与实践方案](https://aws.amazon.com/cn/blogs/china/agentic-ai-sandbox-practice/)
+- [Writing effective tools for AI agents—using AI agents](https://www.anthropic.com/engineering/writing-tools-for-agents)
+- [Unifying the Computer Use Action Space](https://scrapybara.com/blog/unified-action-space)

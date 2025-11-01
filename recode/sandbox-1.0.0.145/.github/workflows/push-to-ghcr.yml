@@ -1,0 +1,66 @@
+name: Push Docker Image to GHCR
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  push-to-ghcr:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@1583c0f09d26c58c59d25b0eef29792b7ce99d9a
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull source image
+        id: pull
+        run: |
+          # For releases, use the version tag; otherwise use latest
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            # Remove 'v' prefix from tag name (e.g., v1.0.0.1 -> 1.0.0.1)
+            VERSION="${{ github.event.release.tag_name }}"
+            VERSION="${VERSION#v}"
+            docker pull enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:${VERSION}
+            echo "source_tag=${VERSION}" >> "$GITHUB_OUTPUT"
+          else
+            docker pull enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+            echo "source_tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Mirror multi-arch image to GHCR
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SOURCE_TAG="${{ steps.pull.outputs.source_tag }}"
+          SOURCE_IMAGE="enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:${SOURCE_TAG}"
+          DEST_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+
+          TAG_ARGS=(-t "${DEST_IMAGE}:latest")
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            VERSION="${{ github.event.release.tag_name }}"
+            VERSION="${VERSION#v}"
+            TAG_ARGS+=(-t "${DEST_IMAGE}:${VERSION}")
+          fi
+
+          docker buildx imagetools create "${TAG_ARGS[@]}" "${SOURCE_IMAGE}"

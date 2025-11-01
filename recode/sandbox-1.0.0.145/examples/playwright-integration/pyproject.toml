@@ -1,0 +1,14 @@
+[project]
+name = "playwright-integration"
+version = "0.1.0"
+description = "Integration example with Playwright and agent-sandbox"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "agent-sandbox",
+    "playwright>=1.50.0",
+    "python-dotenv>=1.0.0",
+]
+
+[tool.uv.sources]
+agent-sandbox = { path = "../../sdk/python", editable = true }

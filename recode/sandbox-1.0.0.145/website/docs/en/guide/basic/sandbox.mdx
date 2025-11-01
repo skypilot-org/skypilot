@@ -1,0 +1,219 @@
+# Sandbox Info
+
+import { Tab, Tabs } from '@rspress/core/theme';
+
+![](/images/sandbox.png)
+
+## Overview
+
+The Sandbox API provides a comprehensive environment for executing code, managing files, and interacting with various development tools in an isolated container environment. This API is designed to support multiple programming languages, file operations, browser automation, and terminal interactions.
+
+## Dashboard
+
+The Sandbox Dashboard provides a unified web interface accessible at `/index.html` for interacting with all sandbox features through multiple integrated views.
+
+![](/images/sandbox-dashboard.png)
+
+### Dashboard Views
+
+The dashboard interface includes four main tabs for different development workflows:
+
+#### Code Tab
+The Code tab provides an integrated code editor environment:
+- **File Explorer**: Navigate and manage project files in the sandbox
+- **Code Editor**: Edit files with syntax highlighting and auto-completion
+- **Multi-file Support**: Open and edit multiple files simultaneously
+- **File Operations**: Create, rename, delete files and directories
+- **Integrated Terminal**: Execute commands directly from the code view
+
+#### Browser Tab
+The Browser tab enables web development and testing:
+- **Headless Browser**: Chrome/Chromium instance for web automation
+- **Live Preview**: Real-time preview of web applications
+- **Developer Tools**: Inspect elements, console, network activity
+- **Browser Automation**: Support for automated testing and scraping
+- **Viewport Control**: Adjust screen size and device emulation
+- **Screenshot Capture**: Take screenshots of rendered pages
+
+#### Terminal Tab
+The Terminal tab provides full shell access:
+- **Interactive Shell**: Bash terminal with full command-line access
+- **Multi-session Support**: Create and manage multiple terminal sessions
+- **Command History**: Navigate through previously executed commands
+- **File System Access**: Full access to sandbox file system
+- **Package Management**: Install and manage Python/Node.js packages
+- **Process Management**: Run and monitor background processes
+
+#### Jupyter Tab
+The Jupyter tab offers notebook-based development:
+- **Jupyter Notebooks**: Create and edit `.ipynb` notebook files
+- **Python Kernel**: Execute Python code cells interactively
+- **Rich Output**: Display charts, images, and formatted data
+- **Markdown Support**: Mix code with documentation
+- **Variable Explorer**: Inspect variables and data structures
+- **Session Persistence**: Maintain kernel state across executions
+
+### Accessing the Dashboard
+
+<Tabs>
+  <Tab label="Local Access">
+
+```bash
+# Dashboard is available at
+http://localhost:8080/index.html
+```
+
+  </Tab>
+  <Tab label="Remote Access">
+
+```bash
+# For remote sandbox instances
+http://<sandbox-host>:8080/index.html
+```
+
+  </Tab>
+</Tabs>
+
+### Dashboard Features
+
+**Integrated Development Environment**
+- Seamless switching between Code, Browser, Terminal, and Jupyter views
+- Shared file system across all tabs
+- Persistent session state
+- Real-time updates and synchronization
+
+**Project Management**
+- Upload files and projects via drag-and-drop
+- Download files and project archives
+- Git integration for version control
+- Project templates and quick starts
+
+**Resource Monitoring**
+- CPU and memory usage indicators
+- Disk space utilization
+- Network activity monitoring
+- Process and service status
+
+## Sandbox Context
+
+### /llms.txt
+
+`llms.txt` is an usage manual for Agents. Through this manual, the Agent can better use the sandbox.
+
+![](/images/sandbox_llms.png)
+
+### Get Sandbox Context
+
+<Tabs>
+  <Tab label="Python">
+
+```python
+ctx = client.sandbox.get_context()
+print(ctx)
+```
+
+  </Tab>
+  <Tab label="Curl">
+
+```bash
+curl -X 'GET' \
+  'http://127.0.0.1:8080/v1/sandbox' \
+  -H 'accept: application/json'
+```
+
+  </Tab>
+</Tabs>
+
+Retrieves sandbox environment information including system configuration and available resources.
+
+**Response**: `SandboxResponse`
+- `success`: Boolean indicating operation success
+- `message`: Operation result message
+- `data`: Sandbox environment data
+- `home_dir`: Home directory path in the sandbox
+
+Example `data`:
+
+```json
+System Environment (v1.0.0.93):
+- Linux 6.10.14-linuxkit (x86_64), with internet access
+- User: e3f8da5a6253, with sudo privileges
+- Home directory: /home/gem
+- Timezone: Asia/Shanghai
+- Occupied Ports: 8080,8079,8088,8091,8100,8101,8102,8200,8888,9222
+
+Development Environment:
+- Python 3.12.11 (commands: python3, pip3)
+- Node.js v22.19.0 (commands: node, npm)
+- Git git version 2.34.1 (command: git)
+- GitHub CLI (command: gh)
+- UV uv 0.8.9 (command: uv)
+
+Available Tools:
+- Text editors: vim, nano
+- File operations: wget, curl, tar, zip, unzip, tree
+- Network tools: ping, telnet, netcat, nmap
+- Text processing: grep, sed, awk, jq
+- System monitoring: htop, procps
+- Image processing: imagemagick
+- Audio/Video Downloader: yt-dlp
+```
+
+## Package Management
+
+### Python Packages
+
+
+Lists all installed Python packages in the sandbox environment.
+
+<Tabs>
+  <Tab label="Python">
+
+```python
+python_packages = client.sandbox.python_packages()
+print(python_packages.data) # [{ "name": "requests", "version": "2.32.5" }]
+```
+
+  </Tab>
+  <Tab label="Curl">
+
+```bash
+curl -X 'GET' \
+  'http://127.0.0.1:8080/v1/sandbox/packages/python' \
+  -H 'accept: application/json'
+```
+
+  </Tab>
+</Tabs>
+
+**Response**: `Response`
+- Returns a list of installed Python packages with their versions
+
+### Node.js Packages
+
+Lists all installed Node.js packages in the sandbox environment.
+
+<Tabs>
+  <Tab label="Python">
+
+```python
+nodejs_packages = client.sandbox.nodejs_packages()
+print(nodejs_packages.data)
+```
+
+  </Tab>
+  <Tab label="Curl">
+
+```bash
+curl -X 'GET' \
+  'http://127.0.0.1:8080/v1/sandbox/packages/nodejs' \
+  -H 'accept: application/json'
+```
+
+  </Tab>
+</Tabs>
+
+
+**Response**: `Response`
+- Returns a list of installed npm packages with their versions
+

@@ -1,0 +1,13 @@
+[project]
+name = "volcengine-provider"
+version = "0.1.0"
+description = "Volcengine cloud provider example for agent-sandbox"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "agent-sandbox",
+    "python-dotenv>=1.0.0",
+]
+
+[tool.uv.sources]
+agent-sandbox = { path = "../../sdk/python", editable = true }

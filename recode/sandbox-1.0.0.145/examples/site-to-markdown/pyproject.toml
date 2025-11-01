@@ -1,0 +1,14 @@
+[project]
+name = "site-to-markdown"
+version = "0.1.0"
+description = "Website to markdown converter using agent-sandbox with browser automation"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "agent-sandbox",
+    "playwright>=1.48.0",
+    "python-dotenv>=1.0.0",
+]
+
+[tool.uv.sources]
+agent-sandbox = { path = "../../sdk/python", editable = true }

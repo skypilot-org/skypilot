@@ -1,0 +1,42 @@
+services:
+  sandbox:
+    container_name: aio-sandbox
+    image: ghcr.io/agent-infra/sandbox:latest
+    security_opt:
+      - seccomp:unconfined
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: "unless-stopped"
+    shm_size: "2gb"
+    ports:
+      - "${HOST_PORT:-8080}:8080"
+    environment:
+      PROXY_SERVER: ${PROXY_SERVER:-}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
+      DNS_OVER_HTTPS_TEMPLATES: ${DNS_OVER_HTTPS_TEMPLATES:-"https://cloudflare-dns.com/dns-query{?dns}"}
+      WORKSPACE: ${WORKSPACE:-"/home/gem"}
+      HOMEPAGE: ${HOMEPAGE:-}
+      BROWSER_EXTRA_ARGS: ${BROWSER_EXTRA_ARGS:-}
+      TZ: ${TZ:-Asia/Singapore}
+      DISPLAY_WIDTH: ${DISPLAY_WIDTH:-1280}
+      DISPLAY_HEIGHT: ${DISPLAY_HEIGHT:-1024}
+      WAIT_PORTS: "8079,8091"
+      VNC_SERVER_PORT: 5900
+      PUBLIC_PORT: 8080
+      AUTH_BACKEND_PORT: 8081
+      WEBSOCKET_PROXY_PORT: 6080
+      GEM_SERVER_PORT: 8088
+      MCP_HUB_PORT: 8079
+      SANDBOX_SRV_PORT: 8091
+      JUPYTER_LAB_PORT: 8888
+      CODE_SERVER_PORT: 8200
+      MCP_SERVER_BROWSER_PORT: 8100
+      TINYPROXY_PORT: 8118
+      MCP_SERVER_MARKITDOWN_PORT: 8101
+      MCP_SERVER_CHROME_DEVTOOLS_PORT: 8102
+      BROWSER_REMOTE_DEBUGGING_PORT: 9222
+      PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+      UV_DEFAULT_INDEX: ${UV_DEFAULT_INDEX:-https://pypi.org/simple}
+      NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org}
+      # for gh cli
+      GITHUB_TOKEN: ""

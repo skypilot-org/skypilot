@@ -1,0 +1,5 @@
+snapshots
+snapshot
+node_modules
+dist
+js/coverage

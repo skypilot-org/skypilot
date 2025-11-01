@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=https://schema.buildwithfern.dev/generators-yml.json
+api:
+  specs:
+    - openapi: ../../website/docs/public/v1/openapi.json
+default-group: python-sdk
+groups:
+  python-sdk:
+    generators:
+      - name: fernapi/fern-python-sdk
+        version: 4.28.0
+        config:
+          package_name: "agent_sandbox"
+          pydantic_config:
+            skip_validation: false
+            smart_union: true
+          client_class_name: "Sandbox"
+          client:
+            class_name: "Sandbox"
+        output:
+          location: local-file-system
+          path: ../python/agent_sandbox
+  sdk-go:
+    generators:
+      - name: fernapi/fern-go-sdk
+        version: 1.12.4
+        output:
+          location: local-file-system
+          path: ./sdk-go
+        config:
+          module: github.com/agent-infra/sandbox-sdk-go

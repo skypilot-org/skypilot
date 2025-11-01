@@ -1,0 +1,6377 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "FastAPI",
+    "description": "\n- Browser\n    - CDP: [/cdp/json/version](/cdp/json/version)\n- Jupyter\n    - Notebook: [/jupyter](/jupyter)\n- MCP\n    - Streamable HTTP: [/mcp](/mcp) or [/v1/mcp](/v1/mcp)\n",
+    "version": "1.0.0.143"
+  },
+  "paths": {
+    "/v1/sandbox": {
+      "get": {
+        "tags": [
+          "sandbox"
+        ],
+        "summary": "Get Sandbox Context",
+        "description": "Get sandbox environment information",
+        "operationId": "get_sandbox_context_v1_sandbox_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "sandbox",
+        "x-fern-sdk-method-name": "get_context"
+      }
+    },
+    "/v1/sandbox/packages/python": {
+      "get": {
+        "tags": [
+          "sandbox"
+        ],
+        "summary": "Python Packages",
+        "description": "Get installed packages by language",
+        "operationId": "python_packages_v1_sandbox_packages_python_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "sandbox",
+        "x-fern-sdk-method-name": "get_python_packages"
+      }
+    },
+    "/v1/sandbox/packages/nodejs": {
+      "get": {
+        "tags": [
+          "sandbox"
+        ],
+        "summary": "Nodejs Packages",
+        "description": "Get installed packages by language",
+        "operationId": "nodejs_packages_v1_sandbox_packages_nodejs_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "sandbox",
+        "x-fern-sdk-method-name": "get_nodejs_packages"
+      }
+    },
+    "/v1/shell/exec": {
+      "post": {
+        "tags": [
+          "shell"
+        ],
+        "summary": "Exec Command",
+        "description": "Execute command in the specified shell session\nSupports SSE streaming if Accept header contains 'text/event-stream'",
+        "operationId": "exec_command_v1_shell_exec_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShellExecRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_ShellCommandResult_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "shell",
+        "x-fern-sdk-method-name": "exec_command"
+      }
+    },
+    "/v1/shell/view": {
+      "post": {
+        "tags": [
+          "shell"
+        ],
+        "summary": "View Shell",
+        "description": "View output of the specified shell session\nSupports SSE streaming if Accept header contains 'text/event-stream'",
+        "operationId": "view_shell_v1_shell_view_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShellViewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_ShellViewResult_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "shell",
+        "x-fern-sdk-method-name": "view"
+      }
+    },
+    "/v1/shell/wait": {
+      "post": {
+        "tags": [
+          "shell"
+        ],
+        "summary": "Wait For Process",
+        "description": "Wait for the process in the specified shell session to return",
+        "operationId": "wait_for_process",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShellWaitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_ShellWaitResult_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "shell",
+        "x-fern-sdk-method-name": "wait_for_process"
+      }
+    },
+    "/v1/shell/write": {
+      "post": {
+        "tags": [
+          "shell"
+        ],
+        "summary": "Write To Process",
+        "description": "Write input to the process in the specified shell session",
+        "operationId": "write_to_process",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShellWriteToProcessRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_ShellWriteResult_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "shell",
+        "x-fern-sdk-method-name": "write_to_process"
+      }
+    },
+    "/v1/shell/kill": {
+      "post": {
+        "tags": [
+          "shell"
+        ],
+        "summary": "Kill Process",
+        "description": "Terminate the process in the specified shell session",
+        "operationId": "kill_shell_process",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShellKillProcessRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_ShellKillResult_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "shell",
+        "x-fern-sdk-method-name": "kill_process"
+      }
+    },
+    "/v1/shell/sessions/create": {
+      "post": {
+        "tags": [
+          "shell"
+        ],
+        "summary": "Create Session",
+        "description": "Create a new shell session and return its ID\nIf id already exists, return the existing session",
+        "operationId": "create_shell_session",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShellCreateSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_ShellCreateSessionResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "shell",
+        "x-fern-sdk-method-name": "create_session"
+      }
+    },
+    "/v1/shell/terminal-url": {
+      "get": {
+        "tags": [
+          "shell"
+        ],
+        "summary": "Get Terminal Url",
+        "description": "Create a new shell session and return the terminal URL",
+        "operationId": "get_terminal_url",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_str_"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "shell",
+        "x-fern-sdk-method-name": "get_terminal_url"
+      }
+    },
+    "/v1/shell/sessions": {
+      "get": {
+        "tags": [
+          "shell"
+        ],
+        "summary": "List Sessions",
+        "description": "List all active shell sessions",
+        "operationId": "list_shell_sessions",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_ActiveShellSessionsResult_"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "shell",
+        "x-fern-sdk-method-name": "list_sessions"
+      },
+      "delete": {
+        "tags": [
+          "shell"
+        ],
+        "summary": "Cleanup All Sessions",
+        "description": "Cleanup all active shell sessions",
+        "operationId": "cleanup_all_sessions",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "shell",
+        "x-fern-sdk-method-name": "cleanup_all_sessions"
+      }
+    },
+    "/v1/shell/sessions/{session_id}": {
+      "delete": {
+        "tags": [
+          "shell"
+        ],
+        "summary": "Cleanup Session",
+        "description": "Manually cleanup a specific shell session",
+        "operationId": "cleanup_shell_session",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "shell",
+        "x-fern-sdk-method-name": "cleanup_session"
+      }
+    },
+    "/v1/file/read": {
+      "post": {
+        "tags": [
+          "file"
+        ],
+        "summary": "Read File",
+        "description": "Read file content",
+        "operationId": "read_file",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FileReadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_FileReadResult_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "file",
+        "x-fern-sdk-method-name": "read_file"
+      }
+    },
+    "/v1/file/write": {
+      "post": {
+        "tags": [
+          "file"
+        ],
+        "summary": "Write File",
+        "description": "Write file content (supports both text and binary files)\n\nFor binary files, set encoding to 'base64' and provide base64-encoded content.\nFor text files, use default 'utf-8' encoding.",
+        "operationId": "write_file",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FileWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_FileWriteResult_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "file",
+        "x-fern-sdk-method-name": "write_file"
+      }
+    },
+    "/v1/file/replace": {
+      "post": {
+        "tags": [
+          "file"
+        ],
+        "summary": "Replace In File",
+        "description": "Replace string in file",
+        "operationId": "replace_in_file",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FileReplaceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_FileReplaceResult_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "file",
+        "x-fern-sdk-method-name": "replace_in_file"
+      }
+    },
+    "/v1/file/search": {
+      "post": {
+        "tags": [
+          "file"
+        ],
+        "summary": "Search In File",
+        "description": "Search in file content",
+        "operationId": "search_in_file",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FileSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_FileSearchResult_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "file",
+        "x-fern-sdk-method-name": "search_in_file"
+      }
+    },
+    "/v1/file/find": {
+      "post": {
+        "tags": [
+          "file"
+        ],
+        "summary": "Find Files",
+        "description": "Find files by name pattern",
+        "operationId": "find_files_v1_file_find_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FileFindRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_FileFindResult_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "file",
+        "x-fern-sdk-method-name": "find_files"
+      }
+    },
+    "/v1/file/upload": {
+      "post": {
+        "tags": [
+          "file"
+        ],
+        "summary": "Upload File",
+        "description": "Upload file using streaming",
+        "operationId": "upload_file",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_file"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_FileUploadResult_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "file",
+        "x-fern-sdk-method-name": "upload_file"
+      }
+    },
+    "/v1/file/download": {
+      "get": {
+        "tags": [
+          "file"
+        ],
+        "summary": "Download File",
+        "description": "Download file using FileResponse",
+        "operationId": "download_file",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "file",
+        "x-fern-sdk-method-name": "download_file"
+      }
+    },
+    "/v1/file/list": {
+      "post": {
+        "tags": [
+          "file"
+        ],
+        "summary": "List Path",
+        "description": "List path contents with flexible options",
+        "operationId": "list_path_v1_file_list_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FileListRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_FileListResult_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "file",
+        "x-fern-sdk-method-name": "list_path"
+      }
+    },
+    "/v1/file/str_replace_editor": {
+      "post": {
+        "tags": [
+          "file"
+        ],
+        "summary": "Str Replace Editor",
+        "description": "An filesystem editor tool that allows the agent to\n- view\n- create\n- navigate\n- edit files\nThe tool parameters are defined by Anthropic and are not editable.",
+        "operationId": "str_replace_editor_v1_file_str_replace_editor_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StrReplaceEditorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_StrReplaceEditorResult_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "file",
+        "x-fern-sdk-method-name": "str_replace_editor"
+      }
+    },
+    "/v1/jupyter/execute": {
+      "post": {
+        "tags": [
+          "jupyter"
+        ],
+        "summary": "Execute Jupyter Code",
+        "description": "Execute Python code using Jupyter kernel with session persistence\n\nThis endpoint allows you to execute Python code and get results back.\nYou can optionally specify a kernel_name (defaults to 'python3').\nUse session_id to maintain variable state across multiple requests.\nSessions automatically expire after 30 minutes of inactivity.",
+        "operationId": "jupyter_execute_code",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JupyterExecuteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_JupyterExecuteResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-method-name": "execute_code",
+        "x-fern-sdk-group-name": "jupyter"
+      }
+    },
+    "/v1/jupyter/info": {
+      "get": {
+        "tags": [
+          "jupyter"
+        ],
+        "summary": "Jupyter Info",
+        "description": "Get information about available Jupyter kernels",
+        "operationId": "get_jupyter_info",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_JupyterInfoResponse_"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "jupyter",
+        "x-fern-sdk-method-name": "get_info"
+      }
+    },
+    "/v1/jupyter/sessions": {
+      "get": {
+        "tags": [
+          "jupyter"
+        ],
+        "summary": "List Sessions",
+        "description": "List all active Jupyter sessions",
+        "operationId": "list_jupyter_sessions",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_ActiveSessionsResult_"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "jupyter",
+        "x-fern-sdk-method-name": "list_sessions"
+      },
+      "delete": {
+        "tags": [
+          "jupyter"
+        ],
+        "summary": "Cleanup All Sessions",
+        "description": "Cleanup all active sessions",
+        "operationId": "delete_jupyter_sessions",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "jupyter",
+        "x-fern-sdk-method-name": "delete_sessions"
+      }
+    },
+    "/v1/jupyter/sessions/{session_id}": {
+      "delete": {
+        "tags": [
+          "jupyter"
+        ],
+        "summary": "Cleanup Session",
+        "description": "Manually cleanup a specific session",
+        "operationId": "delete_jupyter_session",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "jupyter",
+        "x-fern-sdk-method-name": "delete_session"
+      }
+    },
+    "/v1/jupyter/sessions/create": {
+      "post": {
+        "tags": [
+          "jupyter"
+        ],
+        "summary": "Create Jupyter Session",
+        "description": "Create a new Jupyter session",
+        "operationId": "create_jupyter_session",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JupyterCreateSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_JupyterCreateSessionResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "jupyter",
+        "x-fern-sdk-method-name": "create_session"
+      }
+    },
+    "/v1/nodejs/execute": {
+      "post": {
+        "tags": [
+          "nodejs"
+        ],
+        "summary": "Execute Nodejs Code",
+        "description": "Execute JavaScript code using Node.js\n\nThis endpoint allows you to execute JavaScript code and get results back.\nEach request creates a fresh execution environment that's cleaned up automatically.",
+        "operationId": "execute_nodejs_code",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NodeJSExecuteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_NodeJSExecuteResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "nodejs",
+        "x-fern-sdk-method-name": "execute_code"
+      }
+    },
+    "/v1/nodejs/info": {
+      "get": {
+        "tags": [
+          "nodejs"
+        ],
+        "summary": "Nodejs Info",
+        "description": "Get information about Node.js runtime and available languages",
+        "operationId": "get_nodejs_info",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_NodeJSRuntimeInfo_"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "nodejs",
+        "x-fern-sdk-method-name": "get_info"
+      }
+    },
+    "/v1/mcp/{server_name}/tools": {
+      "get": {
+        "tags": [
+          "mcp"
+        ],
+        "summary": "List Mcp Tools",
+        "description": "List all available tools from the specified MCP server\n\nArgs:\n    server_name: The name of the MCP server as defined in mcp-servers.json\n\nReturns:\n    Response containing the list of available tools with their descriptions and parameters",
+        "operationId": "list_mcp_tools_v1_mcp__server_name__tools_get",
+        "parameters": [
+          {
+            "name": "server_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Name of the MCP server",
+              "title": "Server Name"
+            },
+            "description": "Name of the MCP server"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_ListToolsResult_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/mcp/{server_name}/tools/{tool_name}": {
+      "post": {
+        "tags": [
+          "mcp"
+        ],
+        "summary": "Execute Mcp Tool",
+        "description": "Execute a specific tool on the specified MCP server\n\nArgs:\n    server_name: The name of the MCP server as defined in mcp-servers.json\n    tool_name: The name of the tool to execute\n    arguments: Tool arguments dictionary\n\nReturns:\n    Response containing the tool execution results",
+        "operationId": "execute_mcp_tool_v1_mcp__server_name__tools__tool_name__post",
+        "parameters": [
+          {
+            "name": "server_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Name of the MCP server",
+              "title": "Server Name"
+            },
+            "description": "Name of the MCP server"
+          },
+          {
+            "name": "tool_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Name of the tool to execute",
+              "title": "Tool Name"
+            },
+            "description": "Name of the tool to execute"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "default": {},
+                "title": "Arguments"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_CallToolResult_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/mcp/servers": {
+      "get": {
+        "tags": [
+          "mcp"
+        ],
+        "summary": "List Mcp Servers",
+        "description": "List all configured MCP servers\n\nReturns:\n    Response containing the list of configured and filtered MCP servers",
+        "operationId": "list_mcp_servers_v1_mcp_servers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_List_str__"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/info": {
+      "get": {
+        "tags": [
+          "browser"
+        ],
+        "summary": "Get Browser Info",
+        "description": "Get information about browser, like cdp url, viewport size, etc.",
+        "operationId": "get_browser_info_v1_browser_info_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_BrowserInfoResult_"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "browser",
+        "x-fern-sdk-method-name": "get_info"
+      }
+    },
+    "/v1/browser/screenshot": {
+      "get": {
+        "tags": [
+          "browser"
+        ],
+        "summary": "Take Screenshot",
+        "description": "Take a screenshot of the current display.\n\nReturns:\n    StreamingResponse: PNG image data with proper headers including display and screenshot dimensions",
+        "operationId": "take_screenshot_v1_browser_screenshot_get",
+        "responses": {
+          "200": {
+            "description": "Screenshot image",
+            "headers": {
+              "x-screen-width": {
+                "description": "Screen width",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-screen-height": {
+                "description": "Screen height",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-image-width": {
+                "description": "Image width",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-image-height": {
+                "description": "Image height",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "image/png": {}
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "browser",
+        "x-fern-sdk-method-name": "screenshot"
+      }
+    },
+    "/v1/browser/actions": {
+      "post": {
+        "tags": [
+          "browser"
+        ],
+        "summary": "Execute Action",
+        "description": "Execute a validated action on the current display.",
+        "operationId": "execute_action_v1_browser_actions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/MoveToAction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/MoveRelAction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ClickAction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/MouseDownAction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/MouseUpAction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RightClickAction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/DoubleClickAction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/DragToAction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/DragRelAction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ScrollAction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TypingAction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/PressAction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/KeyDownAction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/KeyUpAction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/HotkeyAction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/WaitAction"
+                  }
+                ],
+                "title": "Action",
+                "discriminator": {
+                  "propertyName": "action_type",
+                  "mapping": {
+                    "MOVE_TO": "#/components/schemas/MoveToAction",
+                    "MOVE_REL": "#/components/schemas/MoveRelAction",
+                    "CLICK": "#/components/schemas/ClickAction",
+                    "MOUSE_DOWN": "#/components/schemas/MouseDownAction",
+                    "MOUSE_UP": "#/components/schemas/MouseUpAction",
+                    "RIGHT_CLICK": "#/components/schemas/RightClickAction",
+                    "DOUBLE_CLICK": "#/components/schemas/DoubleClickAction",
+                    "DRAG_TO": "#/components/schemas/DragToAction",
+                    "DRAG_REL": "#/components/schemas/DragRelAction",
+                    "SCROLL": "#/components/schemas/ScrollAction",
+                    "TYPING": "#/components/schemas/TypingAction",
+                    "PRESS": "#/components/schemas/PressAction",
+                    "KEY_DOWN": "#/components/schemas/KeyDownAction",
+                    "KEY_UP": "#/components/schemas/KeyUpAction",
+                    "HOTKEY": "#/components/schemas/HotkeyAction",
+                    "WAIT": "#/components/schemas/WaitAction"
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "browser",
+        "x-fern-sdk-method-name": "execute_action"
+      }
+    },
+    "/v1/browser/config": {
+      "post": {
+        "tags": [
+          "browser"
+        ],
+        "summary": "Set Config",
+        "description": "Execute a validated action on the current display.",
+        "operationId": "set_config_v1_browser_config_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserConfigRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "browser",
+        "x-fern-sdk-method-name": "set_config"
+      }
+    },
+    "/v1/code/execute": {
+      "post": {
+        "tags": [
+          "code"
+        ],
+        "summary": "Execute Code",
+        "description": "Run code through the unified runtime, dispatching to Python, Node.js, or future language executors",
+        "operationId": "execute_code_v1_code_execute_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CodeExecuteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_CodeExecuteResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "code",
+        "x-fern-sdk-method-name": "execute_code"
+      }
+    },
+    "/v1/code/info": {
+      "get": {
+        "tags": [
+          "code"
+        ],
+        "summary": "Code Info",
+        "description": "Return metadata about supported code runtimes",
+        "operationId": "code_info_v1_code_info_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_CodeInfoResponse_"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "code",
+        "x-fern-sdk-method-name": "get_info"
+      }
+    },
+    "/v1/util/convert_to_markdown": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "summary": "Convert To Markdown",
+        "description": "Convert a given URI to Markdown format",
+        "operationId": "convert_to_markdown_v1_util_convert_to_markdown_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UtilConvertToMarkdownRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": "util",
+        "x-fern-sdk-method-name": "convert_to_markdown"
+      }
+    },
+    "/terminal": {
+      "get": {
+        "summary": "Serve Terminal",
+        "description": "Serve the terminal HTML page",
+        "operationId": "serve_terminal_terminal_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ActionResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "success",
+            "title": "Status"
+          },
+          "action_performed": {
+            "type": "string",
+            "title": "Action Performed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "action_performed"
+        ],
+        "title": "ActionResponse"
+      },
+      "ActiveSessionsResult": {
+        "properties": {
+          "sessions": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SessionInfo"
+            },
+            "type": "object",
+            "title": "Sessions",
+            "description": "Map of session ID to session info"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sessions"
+        ],
+        "title": "ActiveSessionsResult",
+        "description": "Active sessions result"
+      },
+      "ActiveShellSessionsResult": {
+        "properties": {
+          "sessions": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ShellSessionInfo"
+            },
+            "type": "object",
+            "title": "Sessions",
+            "description": "Map of session ID to session info"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sessions"
+        ],
+        "title": "ActiveShellSessionsResult",
+        "description": "Active shell sessions result"
+      },
+      "Annotations": {
+        "properties": {
+          "audience": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "user",
+                    "assistant"
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audience"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "Annotations"
+      },
+      "AudioContent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "audio",
+            "title": "Type"
+          },
+          "data": {
+            "type": "string",
+            "title": "Data"
+          },
+          "mimeType": {
+            "type": "string",
+            "title": "Mimetype"
+          },
+          "annotations": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Annotations"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "type",
+          "data",
+          "mimeType"
+        ],
+        "title": "AudioContent",
+        "description": "Audio content for a message."
+      },
+      "AvailableTool": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Tool’s command / binary name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Tool’s functionality description",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "AvailableTool",
+        "description": "Describe an available command-line tool."
+      },
+      "BashCommandStatus": {
+        "type": "string",
+        "enum": [
+          "running",
+          "completed",
+          "no_change_timeout",
+          "hard_timeout",
+          "terminated"
+        ],
+        "title": "BashCommandStatus",
+        "description": "Shell command execution status (compatible with OpenHands)"
+      },
+      "BlobResourceContents": {
+        "properties": {
+          "uri": {
+            "type": "string",
+            "minLength": 1,
+            "format": "uri",
+            "title": "Uri"
+          },
+          "mimeType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mimetype"
+          },
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          },
+          "blob": {
+            "type": "string",
+            "title": "Blob"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "uri",
+          "blob"
+        ],
+        "title": "BlobResourceContents",
+        "description": "Binary contents of a resource."
+      },
+      "Body_upload_file": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_file"
+      },
+      "BrowserConfigRequest": {
+        "properties": {
+          "resolution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Resolution"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The desired screen resolution, allowed values are: 1920x1080, 640x480, 1360x768, 1280x720, 800x600, 1024x768, 1280x800, 1920x1200, 1280x960, 1400x1050, 1680x1050, 1280x1024, 1600x1200."
+          }
+        },
+        "type": "object",
+        "title": "BrowserConfigRequest",
+        "description": "Browser configuration request"
+      },
+      "BrowserInfoResult": {
+        "properties": {
+          "user_agent": {
+            "type": "string",
+            "title": "User Agent",
+            "description": "User agent"
+          },
+          "cdp_url": {
+            "type": "string",
+            "title": "Cdp Url",
+            "description": "Browser CDP URL"
+          },
+          "vnc_url": {
+            "type": "string",
+            "title": "Vnc Url",
+            "description": "VNC URL"
+          },
+          "viewport": {
+            "$ref": "#/components/schemas/BrowserViewport",
+            "description": "Viewport size"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_agent",
+          "cdp_url",
+          "vnc_url",
+          "viewport"
+        ],
+        "title": "BrowserInfoResult",
+        "description": "Browser Info result"
+      },
+      "BrowserViewport": {
+        "properties": {
+          "width": {
+            "type": "integer",
+            "title": "Width",
+            "description": "Viewport width"
+          },
+          "height": {
+            "type": "integer",
+            "title": "Height",
+            "description": "Viewport height"
+          }
+        },
+        "type": "object",
+        "required": [
+          "width",
+          "height"
+        ],
+        "title": "BrowserViewport"
+      },
+      "CallToolResult": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          },
+          "content": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TextContent"
+                },
+                {
+                  "$ref": "#/components/schemas/ImageContent"
+                },
+                {
+                  "$ref": "#/components/schemas/AudioContent"
+                },
+                {
+                  "$ref": "#/components/schemas/ResourceLink"
+                },
+                {
+                  "$ref": "#/components/schemas/EmbeddedResource"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Content"
+          },
+          "structuredContent": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Structuredcontent"
+          },
+          "isError": {
+            "type": "boolean",
+            "title": "Iserror",
+            "default": false
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "CallToolResult",
+        "description": "The server's response to a tool call."
+      },
+      "ClickAction": {
+        "properties": {
+          "action_type": {
+            "type": "string",
+            "const": "CLICK",
+            "title": "Action Type",
+            "default": "CLICK"
+          },
+          "x": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "X"
+          },
+          "y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Y"
+          },
+          "button": {
+            "type": "string",
+            "enum": [
+              "left",
+              "right",
+              "middle"
+            ],
+            "title": "Button",
+            "default": "left"
+          },
+          "num_clicks": {
+            "type": "integer",
+            "enum": [
+              1,
+              2,
+              3
+            ],
+            "title": "Num Clicks",
+            "default": 1
+          }
+        },
+        "type": "object",
+        "title": "ClickAction"
+      },
+      "CodeExecuteRequest": {
+        "properties": {
+          "language": {
+            "$ref": "#/components/schemas/Language",
+            "description": "Target runtime language"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "Source code to execute"
+          },
+          "timeout": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 300.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout",
+            "description": "Execution timeout in seconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "language",
+          "code"
+        ],
+        "title": "CodeExecuteRequest",
+        "description": "Unified code execution request model"
+      },
+      "CodeExecuteResponse": {
+        "properties": {
+          "language": {
+            "$ref": "#/components/schemas/Language",
+            "description": "Runtime language that executed the code"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Execution status indicator"
+          },
+          "outputs": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Outputs",
+            "description": "Structured execution outputs"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "Echo of executed code"
+          },
+          "stdout": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stdout",
+            "description": "Captured standard output stream"
+          },
+          "stderr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stderr",
+            "description": "Captured standard error stream"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code",
+            "description": "Process exit code when applicable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "language",
+          "status",
+          "code"
+        ],
+        "title": "CodeExecuteResponse",
+        "description": "Unified code execution response model"
+      },
+      "CodeInfoResponse": {
+        "properties": {
+          "languages": {
+            "items": {
+              "$ref": "#/components/schemas/CodeLanguageInfo"
+            },
+            "type": "array",
+            "title": "Languages",
+            "description": "List of supported languages and metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "languages"
+        ],
+        "title": "CodeInfoResponse",
+        "description": "Unified code information response"
+      },
+      "CodeLanguageInfo": {
+        "properties": {
+          "language": {
+            "$ref": "#/components/schemas/Language",
+            "description": "Supported language identifier"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Human readable runtime description"
+          },
+          "runtime_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Version",
+            "description": "Primary runtime version identifier"
+          },
+          "default_timeout": {
+            "type": "integer",
+            "maximum": 300.0,
+            "minimum": 1.0,
+            "title": "Default Timeout",
+            "description": "Default timeout in seconds",
+            "default": 30
+          },
+          "max_timeout": {
+            "type": "integer",
+            "maximum": 300.0,
+            "minimum": 1.0,
+            "title": "Max Timeout",
+            "description": "Maximum allowed timeout in seconds",
+            "default": 300
+          },
+          "details": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Details",
+            "description": "Additional runtime specific metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "language",
+          "description"
+        ],
+        "title": "CodeLanguageInfo",
+        "description": "Metadata about a supported code runtime"
+      },
+      "ConsoleRecord": {
+        "properties": {
+          "ps1": {
+            "type": "string",
+            "title": "Ps1",
+            "description": "Command prompt"
+          },
+          "command": {
+            "type": "string",
+            "title": "Command",
+            "description": "Executed command"
+          },
+          "output": {
+            "type": "string",
+            "title": "Output",
+            "description": "Command output",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "ps1",
+          "command"
+        ],
+        "title": "ConsoleRecord",
+        "description": "Shell command console record model"
+      },
+      "DoubleClickAction": {
+        "properties": {
+          "action_type": {
+            "type": "string",
+            "const": "DOUBLE_CLICK",
+            "title": "Action Type",
+            "default": "DOUBLE_CLICK"
+          },
+          "x": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "X"
+          },
+          "y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Y"
+          }
+        },
+        "type": "object",
+        "title": "DoubleClickAction"
+      },
+      "DragRelAction": {
+        "properties": {
+          "action_type": {
+            "type": "string",
+            "const": "DRAG_REL",
+            "title": "Action Type",
+            "default": "DRAG_REL"
+          },
+          "x_offset": {
+            "type": "number",
+            "title": "X Offset",
+            "description": "Relative current position x-axis drag movement"
+          },
+          "y_offset": {
+            "type": "number",
+            "title": "Y Offset",
+            "description": "Relative current position y-axis drag movement"
+          }
+        },
+        "type": "object",
+        "required": [
+          "x_offset",
+          "y_offset"
+        ],
+        "title": "DragRelAction"
+      },
+      "DragToAction": {
+        "properties": {
+          "action_type": {
+            "type": "string",
+            "const": "DRAG_TO",
+            "title": "Action Type",
+            "default": "DRAG_TO"
+          },
+          "x": {
+            "type": "number",
+            "title": "X",
+            "description": "Target x-coordinate for drag"
+          },
+          "y": {
+            "type": "number",
+            "title": "Y",
+            "description": "Target y-coordinate for drag"
+          }
+        },
+        "type": "object",
+        "required": [
+          "x",
+          "y"
+        ],
+        "title": "DragToAction"
+      },
+      "EmbeddedResource": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "resource",
+            "title": "Type"
+          },
+          "resource": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TextResourceContents"
+              },
+              {
+                "$ref": "#/components/schemas/BlobResourceContents"
+              }
+            ],
+            "title": "Resource"
+          },
+          "annotations": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Annotations"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "type",
+          "resource"
+        ],
+        "title": "EmbeddedResource",
+        "description": "The contents of a resource, embedded into a prompt or tool call result.\n\nIt is up to the client how best to render embedded resources for the benefit\nof the LLM and/or the user."
+      },
+      "FileContentEncoding": {
+        "type": "string",
+        "enum": [
+          "utf-8",
+          "base64",
+          "raw"
+        ],
+        "title": "FileContentEncoding",
+        "description": "File content encoding type"
+      },
+      "FileFindRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Directory path to search"
+          },
+          "glob": {
+            "type": "string",
+            "title": "Glob",
+            "description": "Filename pattern (glob syntax)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "glob"
+        ],
+        "title": "FileFindRequest",
+        "description": "File find request"
+      },
+      "FileFindResult": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Path of the search directory"
+          },
+          "files": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Files",
+            "description": "List of found files",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "FileFindResult",
+        "description": "File find result"
+      },
+      "FileInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "File name"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Full file path"
+          },
+          "is_directory": {
+            "type": "boolean",
+            "title": "Is Directory",
+            "description": "Whether it's a directory"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size",
+            "description": "File size in bytes"
+          },
+          "modified_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified Time",
+            "description": "Last modified time (ISO format)"
+          },
+          "permissions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Permissions",
+            "description": "File permissions"
+          },
+          "extension": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extension",
+            "description": "File extension"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "path",
+          "is_directory"
+        ],
+        "title": "FileInfo",
+        "description": "File information"
+      },
+      "FileListRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Directory path to list"
+          },
+          "recursive": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recursive",
+            "description": "Whether to list recursively",
+            "default": false
+          },
+          "show_hidden": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Show Hidden",
+            "description": "Whether to show hidden files",
+            "default": true
+          },
+          "file_types": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Types",
+            "description": "Filter by file extensions (e.g., ['.py', '.txt'])"
+          },
+          "max_depth": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Depth",
+            "description": "Maximum depth for recursive listing"
+          },
+          "include_size": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include Size",
+            "description": "Whether to include file size information",
+            "default": true
+          },
+          "include_permissions": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include Permissions",
+            "description": "Whether to include file permissions",
+            "default": false
+          },
+          "sort_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort By",
+            "description": "Sort by: name, size, modified, type",
+            "default": "name"
+          },
+          "sort_desc": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Desc",
+            "description": "Sort in descending order",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "FileListRequest",
+        "description": "File list request"
+      },
+      "FileListResult": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Listed directory path"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/FileInfo"
+            },
+            "type": "array",
+            "title": "Files",
+            "description": "List of files and directories",
+            "default": []
+          },
+          "total_count": {
+            "type": "integer",
+            "title": "Total Count",
+            "description": "Total number of items",
+            "default": 0
+          },
+          "directory_count": {
+            "type": "integer",
+            "title": "Directory Count",
+            "description": "Number of directories",
+            "default": 0
+          },
+          "file_count": {
+            "type": "integer",
+            "title": "File Count",
+            "description": "Number of files",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "FileListResult",
+        "description": "File list result"
+      },
+      "FileReadRequest": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "title": "File",
+            "description": "Absolute file path"
+          },
+          "start_line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Line",
+            "description": "Start line (0-based)"
+          },
+          "end_line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Line",
+            "description": "End line (not inclusive)"
+          },
+          "sudo": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sudo",
+            "description": "Whether to use sudo privileges",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "FileReadRequest",
+        "description": "File read request"
+      },
+      "FileReadResult": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "File content"
+          },
+          "file": {
+            "type": "string",
+            "title": "File",
+            "description": "Path of the read file"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content",
+          "file"
+        ],
+        "title": "FileReadResult",
+        "description": "File read result"
+      },
+      "FileReplaceRequest": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "title": "File",
+            "description": "Absolute file path"
+          },
+          "old_str": {
+            "type": "string",
+            "title": "Old Str",
+            "description": "Original string to replace"
+          },
+          "new_str": {
+            "type": "string",
+            "title": "New Str",
+            "description": "New string to replace with"
+          },
+          "sudo": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sudo",
+            "description": "Whether to use sudo privileges",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "file",
+          "old_str",
+          "new_str"
+        ],
+        "title": "FileReplaceRequest",
+        "description": "File content replacement request"
+      },
+      "FileReplaceResult": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "title": "File",
+            "description": "Path of the operated file"
+          },
+          "replaced_count": {
+            "type": "integer",
+            "title": "Replaced Count",
+            "description": "Number of replacements",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "FileReplaceResult",
+        "description": "File content replacement result"
+      },
+      "FileSearchRequest": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "title": "File",
+            "description": "Absolute file path"
+          },
+          "regex": {
+            "type": "string",
+            "title": "Regex",
+            "description": "Regular expression pattern"
+          },
+          "sudo": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sudo",
+            "description": "Whether to use sudo privileges",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "file",
+          "regex"
+        ],
+        "title": "FileSearchRequest",
+        "description": "File content search request"
+      },
+      "FileSearchResult": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "title": "File",
+            "description": "Path of the searched file"
+          },
+          "matches": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Matches",
+            "description": "List of matched content",
+            "default": []
+          },
+          "line_numbers": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Line Numbers",
+            "description": "List of matched line numbers",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "FileSearchResult",
+        "description": "File content search result"
+      },
+      "FileUploadResult": {
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "title": "File Path",
+            "description": "Path of the uploaded file"
+          },
+          "file_size": {
+            "type": "integer",
+            "title": "File Size",
+            "description": "Size of the uploaded file in bytes"
+          },
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether upload was successful"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file_path",
+          "file_size",
+          "success"
+        ],
+        "title": "FileUploadResult",
+        "description": "File upload result"
+      },
+      "FileWriteRequest": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "title": "File",
+            "description": "Absolute file path"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "Content to write (text or base64 encoded for binary)"
+          },
+          "encoding": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FileContentEncoding"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Content encoding: utf-8 for text, base64 for binary data",
+            "default": "utf-8"
+          },
+          "append": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Append",
+            "description": "Whether to use append mode",
+            "default": false
+          },
+          "leading_newline": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leading Newline",
+            "description": "Whether to add leading newline (only for text mode)",
+            "default": false
+          },
+          "trailing_newline": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trailing Newline",
+            "description": "Whether to add trailing newline (only for text mode)",
+            "default": false
+          },
+          "sudo": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sudo",
+            "description": "Whether to use sudo privileges",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "file",
+          "content"
+        ],
+        "title": "FileWriteRequest",
+        "description": "File write request - supports both text and binary content"
+      },
+      "FileWriteResult": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "title": "File",
+            "description": "Path of the written file"
+          },
+          "bytes_written": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bytes Written",
+            "description": "Number of bytes written"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "FileWriteResult",
+        "description": "File write result"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HotkeyAction": {
+        "properties": {
+          "action_type": {
+            "type": "string",
+            "const": "HOTKEY",
+            "title": "Action Type",
+            "default": "HOTKEY"
+          },
+          "keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Keys"
+          }
+        },
+        "type": "object",
+        "required": [
+          "keys"
+        ],
+        "title": "HotkeyAction"
+      },
+      "Icon": {
+        "properties": {
+          "src": {
+            "type": "string",
+            "title": "Src"
+          },
+          "mimeType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mimetype"
+          },
+          "sizes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sizes"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "src"
+        ],
+        "title": "Icon",
+        "description": "An icon for display in user interfaces."
+      },
+      "ImageContent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "image",
+            "title": "Type"
+          },
+          "data": {
+            "type": "string",
+            "title": "Data"
+          },
+          "mimeType": {
+            "type": "string",
+            "title": "Mimetype"
+          },
+          "annotations": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Annotations"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "type",
+          "data",
+          "mimeType"
+        ],
+        "title": "ImageContent",
+        "description": "Image content for a message."
+      },
+      "JupyterCreateSessionRequest": {
+        "properties": {
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id",
+            "description": "Unique identifier for the session, auto-generated if not provided"
+          },
+          "kernel_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kernel Name",
+            "description": "Kernel name to use (e.g., 'python3', 'python3.11', 'python3.12'). Defaults to 'python3'",
+            "default": "python3"
+          }
+        },
+        "type": "object",
+        "title": "JupyterCreateSessionRequest",
+        "description": "Jupyter session creation request model"
+      },
+      "JupyterCreateSessionResponse": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id",
+            "description": "Unique identifier of the created session"
+          },
+          "kernel_name": {
+            "type": "string",
+            "title": "Kernel Name",
+            "description": "Name of the kernel associated with the session"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Status message about session creation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "kernel_name",
+          "message"
+        ],
+        "title": "JupyterCreateSessionResponse",
+        "description": "Jupyter session creation response model"
+      },
+      "JupyterExecuteRequest": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "Python code to execute"
+          },
+          "timeout": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 300.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout",
+            "description": "Execution timeout in seconds",
+            "default": 30
+          },
+          "kernel_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kernel Name",
+            "description": "Kernel name to use (e.g., 'python3', 'python3.11', 'python3.12'). Defaults to 'python3'",
+            "default": "python3"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id",
+            "description": "Session ID to maintain kernel state across requests"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "JupyterExecuteRequest",
+        "description": "Jupyter code execution request model"
+      },
+      "JupyterExecuteResponse": {
+        "properties": {
+          "kernel_name": {
+            "type": "string",
+            "title": "Kernel Name",
+            "description": "Name of the kernel used for execution"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id",
+            "description": "Session ID for this kernel instance"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Execution status: ok, error, or timeout"
+          },
+          "execution_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Count",
+            "description": "Execution count from the kernel"
+          },
+          "outputs": {
+            "items": {
+              "$ref": "#/components/schemas/JupyterOutput"
+            },
+            "type": "array",
+            "title": "Outputs",
+            "description": "List of execution outputs"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "The executed code"
+          },
+          "msg_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Msg Id",
+            "description": "Message ID from Jupyter kernel"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kernel_name",
+          "session_id",
+          "status",
+          "outputs",
+          "code"
+        ],
+        "title": "JupyterExecuteResponse",
+        "description": "Jupyter code execution response model"
+      },
+      "JupyterInfoResponse": {
+        "properties": {
+          "default_kernel": {
+            "type": "string",
+            "title": "Default Kernel",
+            "description": "Default kernel name"
+          },
+          "available_kernels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Available Kernels",
+            "description": "List of available kernel names"
+          },
+          "active_sessions": {
+            "type": "integer",
+            "title": "Active Sessions",
+            "description": "Number of active sessions"
+          },
+          "session_timeout_seconds": {
+            "type": "integer",
+            "title": "Session Timeout Seconds",
+            "description": "Session timeout in seconds"
+          },
+          "max_sessions": {
+            "type": "integer",
+            "title": "Max Sessions",
+            "description": "Maximum number of concurrent sessions"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Service description"
+          },
+          "kernel_detection": {
+            "type": "string",
+            "title": "Kernel Detection",
+            "description": "Kernel detection strategy"
+          }
+        },
+        "type": "object",
+        "required": [
+          "default_kernel",
+          "available_kernels",
+          "active_sessions",
+          "session_timeout_seconds",
+          "max_sessions",
+          "description",
+          "kernel_detection"
+        ],
+        "title": "JupyterInfoResponse",
+        "description": "Jupyter service information response model"
+      },
+      "JupyterOutput": {
+        "properties": {
+          "output_type": {
+            "type": "string",
+            "title": "Output Type",
+            "description": "Type of output: stream, execute_result, display_data, or error"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "Stream name (stdout/stderr) for stream outputs"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text",
+            "description": "Text content for stream outputs"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data",
+            "description": "Output data for execute_result/display_data"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata",
+            "description": "Output metadata"
+          },
+          "execution_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Count",
+            "description": "Execution count for execute_result"
+          },
+          "ename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ename",
+            "description": "Error name for error outputs"
+          },
+          "evalue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evalue",
+            "description": "Error value for error outputs"
+          },
+          "traceback": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Traceback",
+            "description": "Error traceback for error outputs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "output_type"
+        ],
+        "title": "JupyterOutput",
+        "description": "Jupyter execution output model"
+      },
+      "KeyDownAction": {
+        "properties": {
+          "action_type": {
+            "type": "string",
+            "const": "KEY_DOWN",
+            "title": "Action Type",
+            "default": "KEY_DOWN"
+          },
+          "key": {
+            "type": "string",
+            "title": "Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key"
+        ],
+        "title": "KeyDownAction"
+      },
+      "KeyUpAction": {
+        "properties": {
+          "action_type": {
+            "type": "string",
+            "const": "KEY_UP",
+            "title": "Action Type",
+            "default": "KEY_UP"
+          },
+          "key": {
+            "type": "string",
+            "title": "Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key"
+        ],
+        "title": "KeyUpAction"
+      },
+      "Language": {
+        "type": "string",
+        "enum": [
+          "python",
+          "javascript"
+        ],
+        "title": "Language",
+        "description": "Supported programming languages for code execution"
+      },
+      "ListToolsResult": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/Tool"
+            },
+            "type": "array",
+            "title": "Tools"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "tools"
+        ],
+        "title": "ListToolsResult",
+        "description": "The server's response to a tools/list request from the client."
+      },
+      "MouseDownAction": {
+        "properties": {
+          "action_type": {
+            "type": "string",
+            "const": "MOUSE_DOWN",
+            "title": "Action Type",
+            "default": "MOUSE_DOWN"
+          },
+          "button": {
+            "type": "string",
+            "enum": [
+              "left",
+              "right",
+              "middle"
+            ],
+            "title": "Button",
+            "default": "left"
+          }
+        },
+        "type": "object",
+        "title": "MouseDownAction"
+      },
+      "MouseUpAction": {
+        "properties": {
+          "action_type": {
+            "type": "string",
+            "const": "MOUSE_UP",
+            "title": "Action Type",
+            "default": "MOUSE_UP"
+          },
+          "button": {
+            "type": "string",
+            "enum": [
+              "left",
+              "right",
+              "middle"
+            ],
+            "title": "Button",
+            "default": "left"
+          }
+        },
+        "type": "object",
+        "title": "MouseUpAction"
+      },
+      "MoveRelAction": {
+        "properties": {
+          "action_type": {
+            "type": "string",
+            "const": "MOVE_REL",
+            "title": "Action Type",
+            "default": "MOVE_REL"
+          },
+          "x_offset": {
+            "type": "number",
+            "title": "X Offset",
+            "description": "Relative current position x-axis movement"
+          },
+          "y_offset": {
+            "type": "number",
+            "title": "Y Offset",
+            "description": "Relative current position y-axis movement"
+          }
+        },
+        "type": "object",
+        "required": [
+          "x_offset",
+          "y_offset"
+        ],
+        "title": "MoveRelAction"
+      },
+      "MoveToAction": {
+        "properties": {
+          "action_type": {
+            "type": "string",
+            "const": "MOVE_TO",
+            "title": "Action Type",
+            "default": "MOVE_TO"
+          },
+          "x": {
+            "type": "number",
+            "title": "X",
+            "description": "Target x-coordinate"
+          },
+          "y": {
+            "type": "number",
+            "title": "Y",
+            "description": "Target y-coordinate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "x",
+          "y"
+        ],
+        "title": "MoveToAction"
+      },
+      "NodeJSExecuteRequest": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "JavaScript code to execute"
+          },
+          "timeout": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 300.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout",
+            "description": "Execution timeout in seconds",
+            "default": 30
+          },
+          "stdin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stdin",
+            "description": "Standard input for the process"
+          },
+          "files": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files",
+            "description": "Additional files to create in execution directory"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "NodeJSExecuteRequest"
+      },
+      "NodeJSExecuteResponse": {
+        "properties": {
+          "language": {
+            "type": "string",
+            "const": "javascript",
+            "title": "Language",
+            "description": "Language that was executed (always 'javascript')"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Execution status: ok, error, or timeout"
+          },
+          "execution_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Count",
+            "description": "Execution count"
+          },
+          "outputs": {
+            "items": {
+              "$ref": "#/components/schemas/NodeJSOutput"
+            },
+            "type": "array",
+            "title": "Outputs",
+            "description": "List of execution outputs",
+            "default": []
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "Code that was executed"
+          },
+          "stdout": {
+            "type": "string",
+            "title": "Stdout",
+            "description": "Standard output",
+            "default": ""
+          },
+          "stderr": {
+            "type": "string",
+            "title": "Stderr",
+            "description": "Standard error",
+            "default": ""
+          },
+          "exit_code": {
+            "type": "integer",
+            "title": "Exit Code",
+            "description": "Process exit code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "language",
+          "status",
+          "code",
+          "exit_code"
+        ],
+        "title": "NodeJSExecuteResponse"
+      },
+      "NodeJSOutput": {
+        "properties": {
+          "output_type": {
+            "type": "string",
+            "title": "Output Type",
+            "description": "Type of output: stream, error, or execute_result"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "Stream name (stdout/stderr) for stream outputs"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text",
+            "description": "Text content for stream outputs"
+          },
+          "ename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ename",
+            "description": "Error name for error outputs"
+          },
+          "evalue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evalue",
+            "description": "Error value for error outputs"
+          },
+          "traceback": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Traceback",
+            "description": "Error traceback for error outputs"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data",
+            "description": "Data for execute_result outputs"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata",
+            "description": "Metadata for outputs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "output_type"
+        ],
+        "title": "NodeJSOutput"
+      },
+      "NodeJSRuntimeInfo": {
+        "properties": {
+          "node_version": {
+            "type": "string",
+            "title": "Node Version",
+            "description": "Node.js version"
+          },
+          "npm_version": {
+            "type": "string",
+            "title": "Npm Version",
+            "description": "npm version"
+          },
+          "supported_languages": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Supported Languages",
+            "description": "List of supported languages"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Service description"
+          },
+          "runtime_directory": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Directory",
+            "description": "Runtime directory path"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Error message if runtime info retrieval failed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "node_version",
+          "npm_version",
+          "supported_languages",
+          "description"
+        ],
+        "title": "NodeJSRuntimeInfo",
+        "description": "NodeJS runtime information model"
+      },
+      "PressAction": {
+        "properties": {
+          "action_type": {
+            "type": "string",
+            "const": "PRESS",
+            "title": "Action Type",
+            "default": "PRESS"
+          },
+          "key": {
+            "type": "string",
+            "title": "Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key"
+        ],
+        "title": "PressAction"
+      },
+      "Resolution": {
+        "properties": {
+          "width": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Width",
+            "description": "Screen width in pixels."
+          },
+          "height": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Height",
+            "description": "Screen height in pixels."
+          }
+        },
+        "type": "object",
+        "required": [
+          "width",
+          "height"
+        ],
+        "title": "Resolution"
+      },
+      "ResourceLink": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "uri": {
+            "type": "string",
+            "minLength": 1,
+            "format": "uri",
+            "title": "Uri"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "mimeType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mimetype"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "icons": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/Icon"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icons"
+          },
+          "annotations": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Annotations"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          },
+          "type": {
+            "type": "string",
+            "const": "resource_link",
+            "title": "Type"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "name",
+          "uri",
+          "type"
+        ],
+        "title": "ResourceLink",
+        "description": "A resource that the server is capable of reading, included in a prompt or tool call result.\n\nNote: resource links returned by tools are not guaranteed to appear in the results of `resources/list` requests."
+      },
+      "Response": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data",
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response",
+        "description": "Generic response model for API interface return results"
+      },
+      "Response_ActiveSessionsResult_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActiveSessionsResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[ActiveSessionsResult]"
+      },
+      "Response_ActiveShellSessionsResult_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActiveShellSessionsResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[ActiveShellSessionsResult]"
+      },
+      "Response_BrowserInfoResult_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BrowserInfoResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[BrowserInfoResult]"
+      },
+      "Response_CallToolResult_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CallToolResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[CallToolResult]"
+      },
+      "Response_CodeExecuteResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CodeExecuteResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[CodeExecuteResponse]"
+      },
+      "Response_CodeInfoResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CodeInfoResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[CodeInfoResponse]"
+      },
+      "Response_FileFindResult_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FileFindResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[FileFindResult]"
+      },
+      "Response_FileListResult_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FileListResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[FileListResult]"
+      },
+      "Response_FileReadResult_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FileReadResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[FileReadResult]"
+      },
+      "Response_FileReplaceResult_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FileReplaceResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[FileReplaceResult]"
+      },
+      "Response_FileSearchResult_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FileSearchResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[FileSearchResult]"
+      },
+      "Response_FileUploadResult_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FileUploadResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[FileUploadResult]"
+      },
+      "Response_FileWriteResult_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FileWriteResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[FileWriteResult]"
+      },
+      "Response_JupyterCreateSessionResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JupyterCreateSessionResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[JupyterCreateSessionResponse]"
+      },
+      "Response_JupyterExecuteResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JupyterExecuteResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[JupyterExecuteResponse]"
+      },
+      "Response_JupyterInfoResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JupyterInfoResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[JupyterInfoResponse]"
+      },
+      "Response_ListToolsResult_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ListToolsResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[ListToolsResult]"
+      },
+      "Response_List_str__": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data",
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[List[str]]"
+      },
+      "Response_NodeJSExecuteResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NodeJSExecuteResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[NodeJSExecuteResponse]"
+      },
+      "Response_NodeJSRuntimeInfo_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NodeJSRuntimeInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[NodeJSRuntimeInfo]"
+      },
+      "Response_ShellCommandResult_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ShellCommandResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[ShellCommandResult]"
+      },
+      "Response_ShellCreateSessionResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ShellCreateSessionResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[ShellCreateSessionResponse]"
+      },
+      "Response_ShellKillResult_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ShellKillResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[ShellKillResult]"
+      },
+      "Response_ShellViewResult_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ShellViewResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[ShellViewResult]"
+      },
+      "Response_ShellWaitResult_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ShellWaitResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[ShellWaitResult]"
+      },
+      "Response_ShellWriteResult_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ShellWriteResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[ShellWriteResult]"
+      },
+      "Response_StrReplaceEditorResult_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StrReplaceEditorResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[StrReplaceEditorResult]"
+      },
+      "Response_str_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data",
+            "description": "Data returned from the operation"
+          }
+        },
+        "type": "object",
+        "title": "Response[str]"
+      },
+      "RightClickAction": {
+        "properties": {
+          "action_type": {
+            "type": "string",
+            "const": "RIGHT_CLICK",
+            "title": "Action Type",
+            "default": "RIGHT_CLICK"
+          },
+          "x": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "X"
+          },
+          "y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Y"
+          }
+        },
+        "type": "object",
+        "title": "RightClickAction"
+      },
+      "RuntimeEnv": {
+        "properties": {
+          "python": {
+            "items": {
+              "$ref": "#/components/schemas/ToolSpec"
+            },
+            "type": "array",
+            "title": "Python"
+          },
+          "nodejs": {
+            "items": {
+              "$ref": "#/components/schemas/ToolSpec"
+            },
+            "type": "array",
+            "title": "Nodejs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "python",
+          "nodejs"
+        ],
+        "title": "RuntimeEnv",
+        "description": "version, path, etc. (python3, python3.11, python3.12, pip3, pip, uv, jupyter)"
+      },
+      "SandboxDetail": {
+        "properties": {
+          "system": {
+            "$ref": "#/components/schemas/SystemEnv"
+          },
+          "runtime": {
+            "$ref": "#/components/schemas/RuntimeEnv"
+          },
+          "utils": {
+            "items": {
+              "$ref": "#/components/schemas/ToolCategory"
+            },
+            "type": "array",
+            "title": "Utils"
+          }
+        },
+        "type": "object",
+        "required": [
+          "system",
+          "runtime",
+          "utils"
+        ],
+        "title": "SandboxDetail",
+        "description": "system environment info"
+      },
+      "SandboxResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Whether the operation was successful",
+            "default": true
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operation result message",
+            "default": "Operation successful"
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data",
+            "description": "Data returned from the operation"
+          },
+          "home_dir": {
+            "type": "string",
+            "title": "Home Dir"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "detail": {
+            "$ref": "#/components/schemas/SandboxDetail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "home_dir",
+          "version",
+          "detail"
+        ],
+        "title": "SandboxResponse"
+      },
+      "ScrollAction": {
+        "properties": {
+          "action_type": {
+            "type": "string",
+            "const": "SCROLL",
+            "title": "Action Type",
+            "default": "SCROLL"
+          },
+          "dx": {
+            "type": "integer",
+            "title": "Dx",
+            "default": 0
+          },
+          "dy": {
+            "type": "integer",
+            "title": "Dy",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "ScrollAction"
+      },
+      "SessionInfo": {
+        "properties": {
+          "kernel_name": {
+            "type": "string",
+            "title": "Kernel Name",
+            "description": "Kernel name"
+          },
+          "last_used": {
+            "type": "number",
+            "title": "Last Used",
+            "description": "Last used timestamp"
+          },
+          "age_seconds": {
+            "type": "integer",
+            "title": "Age Seconds",
+            "description": "Age of session in seconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kernel_name",
+          "last_used",
+          "age_seconds"
+        ],
+        "title": "SessionInfo",
+        "description": "Active session information"
+      },
+      "ShellCommandResult": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id",
+            "description": "Shell session ID"
+          },
+          "command": {
+            "type": "string",
+            "title": "Command",
+            "description": "Executed command"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BashCommandStatus",
+            "description": "Command execution status"
+          },
+          "output": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output",
+            "description": "Command execution output, only has value when status is completed"
+          },
+          "console": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ConsoleRecord"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Console",
+            "description": "Console command records"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code",
+            "description": "Command execution exit code, only has value when status is completed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "command",
+          "status"
+        ],
+        "title": "ShellCommandResult",
+        "description": "Shell command execution result model"
+      },
+      "ShellCreateSessionRequest": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Unique identifier for the shell session, auto-generated if not provided"
+          },
+          "exec_dir": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exec Dir",
+            "description": "Working directory for the new session (must use absolute path)"
+          }
+        },
+        "type": "object",
+        "title": "ShellCreateSessionRequest",
+        "description": "Shell session creation request model"
+      },
+      "ShellCreateSessionResponse": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id",
+            "description": "Unique identifier of the created shell session"
+          },
+          "working_dir": {
+            "type": "string",
+            "title": "Working Dir",
+            "description": "Working directory of the created session"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "working_dir"
+        ],
+        "title": "ShellCreateSessionResponse",
+        "description": "Shell session creation response model"
+      },
+      "ShellExecRequest": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id",
+            "description": "Unique identifier of the target shell session, if not provided, one will be automatically created"
+          },
+          "exec_dir": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exec Dir",
+            "description": "Working directory for command execution (must use absolute path)"
+          },
+          "command": {
+            "type": "string",
+            "title": "Command",
+            "description": "Shell command to execute"
+          },
+          "async_mode": {
+            "type": "boolean",
+            "title": "Async Mode",
+            "description": "Whether to execute command asynchronously (default: False for async, False for synchronous execution)",
+            "default": false
+          },
+          "timeout": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout",
+            "description": "Maximum time (seconds) to wait for command completion before returning running status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "command"
+        ],
+        "title": "ShellExecRequest",
+        "description": "Shell command execution request model"
+      },
+      "ShellKillProcessRequest": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Unique identifier of the target shell session"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "ShellKillProcessRequest",
+        "description": "Request model for terminating a running process"
+      },
+      "ShellKillResult": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/BashCommandStatus",
+            "description": "Process status"
+          },
+          "returncode": {
+            "type": "integer",
+            "title": "Returncode",
+            "description": "Process return code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "returncode"
+        ],
+        "title": "ShellKillResult",
+        "description": "Process termination result model"
+      },
+      "ShellSessionInfo": {
+        "properties": {
+          "working_dir": {
+            "type": "string",
+            "title": "Working Dir",
+            "description": "Working directory"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Creation timestamp"
+          },
+          "last_used_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Used At",
+            "description": "Last used timestamp"
+          },
+          "age_seconds": {
+            "type": "integer",
+            "title": "Age Seconds",
+            "description": "Age of session in seconds"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Session status"
+          },
+          "current_command": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Command",
+            "description": "Currently executing command"
+          }
+        },
+        "type": "object",
+        "required": [
+          "working_dir",
+          "created_at",
+          "last_used_at",
+          "age_seconds",
+          "status"
+        ],
+        "title": "ShellSessionInfo",
+        "description": "Shell session information"
+      },
+      "ShellViewRequest": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Unique identifier of the target shell session"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "ShellViewRequest",
+        "description": "Shell session content view request model"
+      },
+      "ShellViewResult": {
+        "properties": {
+          "output": {
+            "type": "string",
+            "title": "Output",
+            "description": "Shell session output content"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id",
+            "description": "Shell session ID"
+          },
+          "console": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ConsoleRecord"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Console",
+            "description": "Console command records"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BashCommandStatus",
+            "description": "Shell session status"
+          },
+          "command": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Command",
+            "description": "Last executed or currently executing command"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code",
+            "description": "Command execution exit code, only has value when status is completed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "output",
+          "session_id",
+          "status"
+        ],
+        "title": "ShellViewResult",
+        "description": "Shell session content view result model"
+      },
+      "ShellWaitRequest": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Unique identifier of the target shell session"
+          },
+          "seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seconds",
+            "description": "Wait time (seconds)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "ShellWaitRequest",
+        "description": "Shell process wait request model"
+      },
+      "ShellWaitResult": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/BashCommandStatus",
+            "description": "Process status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "ShellWaitResult",
+        "description": "Process wait result model"
+      },
+      "ShellWriteResult": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/BashCommandStatus",
+            "description": "Write status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "ShellWriteResult",
+        "description": "Process input write result model"
+      },
+      "ShellWriteToProcessRequest": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Unique identifier of the target shell session"
+          },
+          "input": {
+            "type": "string",
+            "title": "Input",
+            "description": "Input content to write to the process"
+          },
+          "press_enter": {
+            "type": "boolean",
+            "title": "Press Enter",
+            "description": "Whether to press enter key after input"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "input",
+          "press_enter"
+        ],
+        "title": "ShellWriteToProcessRequest",
+        "description": "Request model for writing input to a running process"
+      },
+      "StrReplaceEditorRequest": {
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "view",
+              "create",
+              "str_replace",
+              "insert",
+              "undo_edit"
+            ],
+            "title": "Command",
+            "description": "The commands to run. Allowed options are: `view`, `create`, `str_replace`, `insert`, `undo_edit`."
+          },
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Absolute path to file or directory, e.g. `/workspace/file.py` or `/workspace`."
+          },
+          "file_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Text",
+            "description": "Required parameter of `create` command, with the content of the file to be created."
+          },
+          "old_str": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Str",
+            "description": "Required parameter of `str_replace` command containing the string in `path` to replace."
+          },
+          "new_str": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Str",
+            "description": "Optional parameter of `str_replace` command containing the new string (if not given, no string will be added). Required parameter of `insert` command containing the string to insert."
+          },
+          "insert_line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Insert Line",
+            "description": "Required parameter of `insert` command. The `new_str` will be inserted AFTER the line `insert_line` of `path`."
+          },
+          "view_range": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "View Range",
+            "description": "Optional parameter of `view` command when `path` points to a file. If none is given, the full file is shown. If provided, the file will be shown in the indicated line number range, e.g. [11, 12] will show lines 11 and 12. Indexing at 1 to start. Setting `[start_line, -1]` shows all lines from `start_line` to the end of the file.",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "command",
+          "path"
+        ],
+        "title": "StrReplaceEditorRequest",
+        "description": "String replace editor request based on openhands_aci"
+      },
+      "StrReplaceEditorResult": {
+        "properties": {
+          "output": {
+            "type": "string",
+            "title": "Output",
+            "description": "Command execution output"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Error message if any"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "File path that was operated on"
+          },
+          "prev_exist": {
+            "type": "boolean",
+            "title": "Prev Exist",
+            "description": "Whether the file existed before operation"
+          },
+          "old_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Content",
+            "description": "Previous file content"
+          },
+          "new_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Content",
+            "description": "New file content after operation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "output",
+          "path",
+          "prev_exist"
+        ],
+        "title": "StrReplaceEditorResult",
+        "description": "String replace editor result based on openhands_aci CLIResult"
+      },
+      "SystemEnv": {
+        "properties": {
+          "os": {
+            "type": "string",
+            "title": "Os"
+          },
+          "os_version": {
+            "type": "string",
+            "title": "Os Version"
+          },
+          "arch": {
+            "type": "string",
+            "title": "Arch"
+          },
+          "user": {
+            "type": "string",
+            "title": "User"
+          },
+          "home_dir": {
+            "type": "string",
+            "title": "Home Dir"
+          },
+          "timezone": {
+            "type": "string",
+            "title": "Timezone"
+          },
+          "occupied_ports": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Occupied Ports"
+          }
+        },
+        "type": "object",
+        "required": [
+          "os",
+          "os_version",
+          "arch",
+          "user",
+          "home_dir",
+          "timezone",
+          "occupied_ports"
+        ],
+        "title": "SystemEnv"
+      },
+      "TextContent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "text",
+            "title": "Type"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "annotations": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Annotations"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "type",
+          "text"
+        ],
+        "title": "TextContent",
+        "description": "Text content for a message."
+      },
+      "TextResourceContents": {
+        "properties": {
+          "uri": {
+            "type": "string",
+            "minLength": 1,
+            "format": "uri",
+            "title": "Uri"
+          },
+          "mimeType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mimetype"
+          },
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "uri",
+          "text"
+        ],
+        "title": "TextResourceContents",
+        "description": "Text contents of a resource."
+      },
+      "Tool": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "inputSchema": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Inputschema"
+          },
+          "outputSchema": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outputschema"
+          },
+          "icons": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/Icon"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icons"
+          },
+          "annotations": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ToolAnnotations"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "name",
+          "inputSchema"
+        ],
+        "title": "Tool",
+        "description": "Definition for a tool the client can call."
+      },
+      "ToolAnnotations": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "readOnlyHint": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Readonlyhint"
+          },
+          "destructiveHint": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Destructivehint"
+          },
+          "idempotentHint": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotenthint"
+          },
+          "openWorldHint": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Openworldhint"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "ToolAnnotations",
+        "description": "Additional properties describing a Tool to clients.\n\nNOTE: all properties in ToolAnnotations are **hints**.\nThey are not guaranteed to provide a faithful description of\ntool behavior (including descriptive properties like `title`).\n\nClients should never make tool use decisions based on ToolAnnotations\nreceived from untrusted servers."
+      },
+      "ToolCategory": {
+        "properties": {
+          "category": {
+            "type": "string",
+            "title": "Category",
+            "description": "Name of tool category"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/AvailableTool"
+            },
+            "type": "array",
+            "title": "Tools",
+            "description": "List of tools under this category"
+          }
+        },
+        "type": "object",
+        "required": [
+          "category",
+          "tools"
+        ],
+        "title": "ToolCategory",
+        "description": "将可用工具按功能分类"
+      },
+      "ToolSpec": {
+        "properties": {
+          "ver": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ver"
+          },
+          "bin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bin"
+          },
+          "alias": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Alias"
+          }
+        },
+        "type": "object",
+        "title": "ToolSpec",
+        "description": "Tool specification"
+      },
+      "TypingAction": {
+        "properties": {
+          "action_type": {
+            "type": "string",
+            "const": "TYPING",
+            "title": "Action Type",
+            "default": "TYPING"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Text"
+          },
+          "use_clipboard": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Use Clipboard",
+            "description": "Use clipboard for better character support (recommended for special/ASCII characters)",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "TypingAction"
+      },
+      "UtilConvertToMarkdownRequest": {
+        "properties": {
+          "uri": {
+            "type": "string",
+            "title": "Uri",
+            "description": "The URI of the resource to convert"
+          }
+        },
+        "type": "object",
+        "required": [
+          "uri"
+        ],
+        "title": "UtilConvertToMarkdownRequest",
+        "description": "convert to markdown request"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "WaitAction": {
+        "properties": {
+          "action_type": {
+            "type": "string",
+            "const": "WAIT",
+            "title": "Action Type",
+            "default": "WAIT"
+          },
+          "duration": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Duration",
+            "description": "Duration to wait in seconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "duration"
+        ],
+        "title": "WaitAction"
+      }
+    }
+  }
+}

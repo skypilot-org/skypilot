@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-sandbox"
+version = "0.0.16"
+description = "Python SDK for the All-in-One Sandbox API, >=1.0.0.142"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "zhengxi.zhou", email = "zhengxi.zhou@bytedance.com" },
+    { name = "jinxin001", email = "jinxin001@bytedance.com" },
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "httpx[socks]>=0.23.0,<1",
+    "pydantic>=1.9.0,<3",
+    "typing_extensions>=4.0.0; python_version < '3.10'",
+    "volcengine-python-sdk>=4.0.17",
+]
+
+[project.urls]
+Homepage = "https://github.com/agent-infra/sandbox-sdk"
+Repository = "https://github.com/agent-infra/sandbox-sdk"
+Documentation = "https://github.com/agent-infra/sandbox-sdk#readme"

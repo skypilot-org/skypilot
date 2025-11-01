@@ -1,0 +1,13 @@
+[project]
+name = "basic-file-operations"
+version = "0.1.0"
+description = "Basic file operations example for agent-sandbox"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "agent-sandbox",
+    "python-dotenv>=1.0.0",
+]
+
+[tool.uv.sources]
+agent-sandbox = { path = "../../sdk/python", editable = true }

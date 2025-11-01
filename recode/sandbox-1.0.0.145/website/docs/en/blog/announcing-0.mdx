@@ -1,0 +1,595 @@
+---
+date: 2025-10-29 14:00:00
+sidebar: false
+---
+
+_October 29, 2025_
+
+# AIO Sandbox: An Integrated and Customizable Sandbox Environment for AI Agents
+
+## Background
+
+As LLMs continue to evolve, AI application forms have undergone three generational shifts:
+
+- **Chatbot**: Conversational interaction, answering questions
+- **Copilot**: Collaborative assistance, improving efficiency
+- **Agent**: Autonomous execution, completing tasks
+
+Agents can autonomously perceive their environment, plan steps, and invoke tools, enabling them to **operate computers like humans**: automatically browsing web pages to collect information, generating and running code to analyze data, executing system commands to manage files, and even completing complex multi-step operations through visual interfaces. This capability allows Agent deliverables to approach or even exceed human professional standards.
+
+<img src="/images/blog/announcing-0/0.png" width="600" />
+
+### Pain Points
+
+1. **🧩 Environment Fragmentation**: Multiple single-function sandboxes (like E2B for code execution, Browserbase for browsers) force Agents to transfer data across sandboxes via NAS/OSS, increasing latency and complexity. For example: a deep research Agent completing 'convert a paper into a PPT' needs to exchange dozens of intermediate files (JSON configs, chart images, preview screenshots, etc.) across multiple sandboxes, adding complexity and overhead to the entire Agent system.
+
+
+![Different functional sandboxes sharing and collaborating](/images/blog/announcing-0/1.png)
+
+2. **🎁 Difficult Customization**: Different types of Agents require different pre-installed tech stacks. Traditional sandboxes provide unified pre-installed environments that cannot meet all Agents' personalized needs.
+
+
+![Different Agents have different pre-installed packages in sandbox environments](/images/blog/announcing-0/2.png)
+
+3. 🔒 **Security Isolation Challenges:** Need to give Agents real system capabilities (network, files, browser, GPU) while maintaining strong isolation to prevent unauthorized access and data leaks.
+4. 🖥️ **Difficult Visual Interaction:** Complex Agent tasks require human takeover, functional sandboxes need to integrate VNC, Terminal, VSCode to maintain consistent experience. Resolution switching, screenshots, and GUI visual operations.
+5. **🌐 Browser Environment Complexity**: Anti-automation and fingerprint risk control, CDP instability, inadequate proxy support with username/password, missing GUI operations.
+
+> A well-configured computer can significantly improve human work efficiency; similarly, a powerful sandbox environment can also improve Agent task quality and execution speed.
+
+
+
+## Introduction
+
+One-sentence introduction: AIO Sandbox integrates **browser**, **code execution**, **terminal**, **visual takeover**, **forward and reverse proxy**, **MCP**, **authentication** and other basic functions **in a single sandbox**, allowing **environment customization** based on needs, enabling different Agents to "complete tasks more efficiently in a unified environment container".
+
+![](/images/blog/announcing-0/3.png)
+
+- Website: [sandbox.agent-infra.com](https://sandbox.agent-infra.com/)
+
+- Github: [github.com/agent-infra/sandbox](https://github.com/agent-infra/sandbox)
+
+- API: [sandbox.agent-infra.com/api](https://sandbox.agent-infra.com/api/)
+
+- Paper: [arxiv.org/pdf/2509.02544#S2.SS2](https://arxiv.org/pdf/2509.02544)
+
+
+![AIO (All-in-One) Sandbox](/images/blog/announcing-0/4.png)
+
+
+
+### Features
+
+- **📦 Out-of-the-box**: Connect directly to sandbox capabilities via `/mcp` protocol, also providing **API** / **SDK** for customizing sandbox toolsets.
+- **🚀 Second-level Startup**: Full sandbox service startup completes in seconds, reaching millisecond-level after pre-caching/cold start.
+- **🌈 Customizable**: Agents in various vertical scenarios need domain-specific tools and dependencies; AIO provides a unified image base, supporting **on-demand expansion** with convention-based routing and service configuration.
+- **🌐 Browser**: Integrates Web Infra's RS lightweight kernel, providing CDP, screenshots, pure visual GUI operations, and Proxy configuration.
+- **🔄 Human Takeover**: Provides browser VNC, Code Server, Terminal, supporting **human takeover** and debugging mid-task.
+- **📡 Proxy and Forwarding**: Supports forward proxy with authentication; maps `{port}-{domain}` wildcard domains or `/proxy|/absproxy/{port}` paths to services inside the sandbox (convenient for preview/demo).
+- **🔒Security Authentication**: JWT Bearer access control; provides Short-Lived Tickets for links that cannot carry Headers.
+
+<div align="center">
+  <img src="/images/blog/announcing-0/5.png" width="200" />
+</div>
+
+## Examples
+
+| Instruction | Replay | Screenshot |
+| :-- | :-- | :-- |
+|Help me design an interesting website to introduce sauropod dinosaurs from the Jurassic and Cretaceous periods for elementary school children. I want the website to be cartoon-styled.|[Replay](https://lf3-static.bytednsdoc.com/obj/eden-cn/zyha-aulnh/ljhwZthlaukjlkulzlp/shared-conversations/agent-replay-UcZQrqbkmXyPWlMhWOT5b-1760518911224.html?replay=1)|![](/images/blog/announcing-0/6.png)|
+|Search for news about ByteDance's Seed 1.6 model, then write a modern-styled webpage and deploy it|[Replay](https://lf3-static.bytednsdoc.com/obj/eden-cn/zyha-aulnh/ljhwZthlaukjlkulzlp/shared-conversations/agent-tars-SiumVAbquVRmeNqDjrrT9-1756832121376.html?logo=agent-tars&replay=1)|![](/images/blog/announcing-0/7.png)|
+|Based on this OSWorld image, please search for the latest information on the internet and design a modern website for it.|[Replay](https://lf3-static.bytednsdoc.com/obj/eden-cn/zyha-aulnh/ljhwZthlaukjlkulzlp/shared-conversations/agent-tars-4TeM9bFCF1CqujHuEvED2-1757159422304.html?replay=1)|![](/images/blog/announcing-0/8.png)|
+|Play Poki 2048 game|[Replay](https://lf3-static.bytednsdoc.com/obj/eden-cn/zyha-aulnh/ljhwZthlaukjlkulzlp/shared-conversations/agent-replay-UoeDuQrv6mNv-jRfZFIdD-1760000200212.html?replay=1)|![](/images/blog/announcing-0/9.png)|
+
+> More at: https://seed-tars.com/showcase/ui-tars-2
+
+
+
+## Quick Start
+
+### Cloud
+
+[One-Click Deploy All-in-One Sandbox Application--Function Service-Volcano Engine](https://www.volcengine.com/docs/6662/1851199)
+
+![](/images/blog/announcing-0/10.png)
+
+
+
+### Local
+
+Prerequisites: Install [Docker](https://www.docker.com/get-started/), then start locally with one command:
+
+```bash
+docker run --rm -it -p 8080:8080 ghcr.io/agent-infra/sandbox:latest
+
+# For faster access in China
+# docker run --security-opt seccomp=unconfined --rm -it -p 8080:8080 enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+```
+
+![](/images/blog/announcing-0/11.png)
+
+## **System Architecture**
+
+### Overview
+
+AIO Sandbox provides Agents with basic capabilities like Browser, File, Shell, Code, and offers **extensibility** to support developers in combining and **customizing dedicated sandboxes** based on Agent needs (such as `AIO Sandbox for Mobile/Medical/Legal/Finance/Scientific Research`).
+Sandbox customization levels increase progressively:
+
+1. **Standard (Out-of-the-box)**: Plug-and-play for Agents via `/mcp` endpoint, suitable for quick PoC Agent validation.
+2. **Custom Toolset (Tool/Skills Extension)**: Without modifying the image, add or orchestrate tools based on SDK/API (such as adding `web_search`); also extend Skills to implement automated handling of specific sandbox tasks.
+3. **Custom Image**: Based on `FROM aio.sandbox` base image, install specific dependencies (such as multimedia/image processing, etc.), mount custom services (e.g., `/custom_tools/ocr` image recognition).
+
+
+![Sandbox Extensible Architecture](/images/blog/announcing-0/12.png)
+
+### Core Components
+
+![AIO Sandbox Component Diagram](/images/blog/announcing-0/13.png)
+
+
+#### Browser
+
+Browser environment for Agents, core is providing **CDP** and VNC, mainstream Browser Use frameworks can be used directly;
+AIO provides x11-based browser GUI visual operation interface, which can be combined with CDP for more efficient, lower risk-control Browser Use solutions.
+
+![AIO Sandbox Browser Architecture](/images/blog/announcing-0/14.png)
+
+
+
+##### CDP
+
+CDP (Chrome Devtools Protocol) is a protocol for communicating with Chrome or Chromium browsers, providing browser control APIs via WebSocket for navigation and loading, DOM manipulation, JS execution/debugging, network interception and simulation, screenshots and rendering, security and permissions, etc.
+For a more intuitive understanding, here's an example of using CDP to initiate a page navigation command:
+
+```Bash
+'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' \
+    --disable-gpu \
+    --user-data-dir=./test \
+    --remote-debugging-port=9222 \
+    https://www.chromestatus.com
+```
+
+Visit `http://localhost:9222/json/version`, where `webSocketDebuggerUrl` is the CDP address:
+
+```Bash
+$ curl http://localhost:9222/json/version
+{
+   "Browser": "Chrome/141.0.7390.66",
+   "Protocol-Version": "1.3",
+   "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+   "V8-Version": "14.1.146.11",
+   "WebKit-Version": "537.36 (@95681a3c3d516c397b75ff45b8980c1088666775)",
+   "webSocketDebuggerUrl": "ws://localhost:9222/devtools/browser/a6c5f19f-5d24-4bed-ba08-9c15cf5aeedb"
+}
+```
+
+After establishing a WebSocket connection with CDP, you can execute browser commands:
+
+![](/images/blog/announcing-0/15.png)
+
+> Note: AIO Sandbox doesn't directly expose the CDP interface `/json/version`, but relays CDP through the uvicorn service and adds heartbeat detection to avoid ws disconnection issues.
+
+
+
+##### GUI Visual Operations
+
+**Screenshots**
+Unlike CDP-based screenshots, visual screenshots `/v1/browser/screenshot` include Tabs (the entire browser window), and operations target the entire browser window.
+
+| GUI Browser Screenshot (Tabs) | CDP-based Page Screenshot (Page) |
+| :--: | :--: |
+| ![](/images/blog/announcing-0/16.png) | ![](/images/blog/announcing-0/17.png) |
+
+
+Unlike CDP browser operations, visual operations `/v1/browser/actions` **simulate human behavior** for clicking, typing, scrolling, etc., which can reduce target website risk control strategies.
+
+**Unified Action Space**
+Abstract GUI operations into composable minimal atomic actions, such as moving mouse, clicking, dragging, scrolling, key press, text input, and additional utility functions like wait, aligning as closely as possible with VLM visual models executing actual actions.
+
+| action\_type | Description | Required Parameters | Optional Parameters |
+| --- | --- | --- | --- |
+| `MOVE_TO` | Move mouse to specified position | `x`, `y` | \- |
+| `MOVE_REL` | Move relative to current mouse position | `x_offset`, `y_offset` | \- |
+| `CLICK` | Click operation | \- | `x`, `y`, `button`, `num_clicks` |
+| `MOUSE_DOWN` | Press mouse button | \- | `button` |
+| `MOUSE_UP` | Release mouse button | \- | `button` |
+| `RIGHT_CLICK` | Right click | \- | `x`, `y` |
+| `DOUBLE_CLICK` | Double click | \- | `x`, `y` |
+| `DRAG_TO` | Drag to specified position | `x`, `y` | \- |
+| `DRAG_REL` | Drag relative to current mouse position | `x_offset`, `y_offset` | \- |
+| `SCROLL` | Scroll operation | \- | `dx`, `dy` |
+| `TYPING` | Type text | `text` | \- |
+| `PRESS` | Press key | `key` | \- |
+| `KEY_DOWN` | Press keyboard key | `key` | \- |
+| `KEY_UP` | Release keyboard key | `key` | \- |
+| `HOTKEY` | Key combination | `keys` (array), e.g.: `["ctrl", "c"]` | \- |
+| `WAIT` | Wait | `duration` time (seconds s) | \- |
+
+
+
+##### Takeover
+
+When Browser Use encounters login requirements, human takeover is generally needed, requiring an interactive browser interface. Currently there are two approaches:
+
+1. VNC Takeover: AIO Sandbox provides `/vnc/index.html` page for direct user interaction.
+
+![](/images/blog/announcing-0/18.png)
+
+2. Frontend connects via CDP, real-time redrawing complete browser interface on Canvas ([Playground](https://browser-canvas-render.gf.bytedance.net/)); we've packaged the frontend part into a component [@agent-infra/browser-ui](https://www.npmjs.com/package/browser-ui). Below, left is the actual browser, right is browser-ui screen mirroring:
+
+![](/images/blog/announcing-0/19.mp4)
+
+
+
+
+The differences between the two takeover methods are roughly as follows:
+
+| **Comparison Dimension**   | **VNC**                        | **Canvas + CDP** (Chrome DevTools Protocol)          |
+| -------------- | ------------------------------ | ----------------------------------------------------- |
+| **Technical Principle**   | Remote desktop protocol, transmits entire screen pixels | Controls browser via CDP, Canvas renders content                  |
+| **Transport Protocol**   | RFB (Remote Framebuffer)       | WebSocket + CDP                                       |
+| **Transport Content**   | Complete browser view (with Tabs)      | Only browser current page content (no Tabs by default, can be implemented separately) |
+| **Bandwidth Usage**   | High (10-50 Mbps)               | Low (1-5 Mbps)                                        |
+| **Latency**       | Higher (50-200ms)               | Lower (10-50ms)                                       |
+| **Stability**     | Not easily disconnected                       | Easily disconnected, needs manual heartbeat with CDP to avoid disconnection             |
+| **CPU Usage**    | High (desktop encoding)                 | Low (browser rendering only)                                    |
+| **Memory Usage**   | High (needs complete desktop environment)         | Low (browser process only)                                    |
+| **Control Range**   | Entire browser                     | Browser internal pages only                                      |
+| **Automation Capability** | Basic (mouse keyboard simulation)           | Powerful (DOM operations, network interception, JS injection, etc.)                   |
+| **Multi-window Support** | ✅ Supported                         | ❌ Single browser window only                                    |
+| **File Operations**   | ✅ Can operate local files             | ❌ Limited by browser sandbox                                    |
+
+
+
+#### Command Line Interpreter
+
+For Coding Agents, most tasks can be completed through command line execution. When designing the Shell module, using OpenHands' [CmdRunAction](https://github.com/All-Hands-AI/OpenHands/blob/2bbe15a329e35f5156cdafcbe63c3fd54978ff98/openhands/runtime/utils/bash.py#L494-L681) as the execution engine, combined with tmux, implements multi-session execution capability.
+
+![](/images/blog/announcing-0/20.jpeg)
+
+
+#### File Operations
+
+File/code editing only requires two tools:
+
+- **File CRUD**: Encapsulates basic I/O for file read/write/list directory/create/upload/download, with path validation and permission control, covering common file operation scenarios.
+
+- **Text Editor**: Implements model-oriented fine-grained editing tool [str\_replace\_editor](https://docs.claude.com/zh-CN/docs/agents-and-tools/tool-use/text-editor-tool), supporting:
+	- `view` (view file or directory, including line range)
+	- `str_replace` (exact string replacement)
+	- `insert` (insert by line, legacy version support)
+	- `undo_edit` (undo)
+
+![](/images/blog/announcing-0/21.jpeg)
+
+
+
+#### Code Execution
+
+Balancing language coverage and image size, using **Python** **3.10/3.11/3.12** and **Node.js** **22** runtimes from [Sandbox Fusion](https://bytedance.github.io/SandboxFusion/), providing an integrated secure isolation environment for code execution.
+
+![](/images/blog/announcing-0/22.jpeg)
+
+
+
+### MCP Servers Aggregator
+
+Aggregates multiple MCP Servers (e.g., [chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devtools-mcp)) through unified entry point `/mcp`, supporting **parameter-level filtering**, and allowing **tool name prefixing** (namespacing).
+
+![/mcp supports MCP Servers filtering](/images/blog/announcing-0/23.png)
+
+Filter MCP Servers by `search`, future expansion will include tags (`tags`) and category (`category`) multi-dimensional filtering to reduce redundant calls and lower model token costs.
+
+![](/images/blog/announcing-0/24.png)
+
+
+### Proxy
+
+In Agent sandboxes, there are generally two types of scenarios corresponding to forward and reverse proxies:
+
+1. **Forward Proxy**: Browser Use Agent can access private/global networks
+
+2. **Reverse Proxy**: Coding Agent services developed inside the sandbox are exposed externally for user-side preview
+
+
+
+
+#### Forward Proxy
+
+Using TinyProxy proxy server to bypass geographic restrictions, access restricted content, or provide secure access within corporate intranets.
+
+![AIO Sandbox Forward Proxy Principle](/images/blog/announcing-0/25.png)
+
+Why introduce TinyProxy when Chrome has `--proxy-server` to specify proxy?
+The [Chromium official documentation](https://chromium.googlesource.com/chromium/src/%2B/HEAD/net/docs/proxy.md#proxy-credentials-in-manual-proxy-settings) states that it will not use any username/password embedded in proxy settings (e.g., `http://user:pass@host:port`), authentication must go through a separate challenge dialog, affecting the entire Browser Use experience (as shown below):
+
+![Proxy with username and password triggers dialog](/images/blog/announcing-0/26.png)
+
+
+#### Reverse Proxy
+
+![AIO Sandbox Reverse Proxy Principle](/images/blog/announcing-0/27.png)
+Provides two methods to access service ports inside the Sandbox:
+
+1. **subdomain wildcard forwarding (recommended)**: Any domain matching `${port}-${domain}` format will be forwarded to ports inside the sandbox.
+
+	![](/images/blog/announcing-0/28.png)
+
+2. **subpath forwarding**: Encounters many issues: for routing-sensitive services (like frontend projects), the additional `/proxy|absproxy/${port}` path causes resource matching 404s.
+
+
+
+
+### Authentication
+
+Agent operations in the sandbox generate user data. To implement unified AIO Sandbox authentication without intrusion, without modifying any existing business routing configuration, and without increasing the mental burden of future routing configuration expansion, an **"asymmetric encryption + JWT"** reverse proxy architecture was designed at the internal Nginx gateway layer:
+
+![](/images/blog/announcing-0/29.jpeg)
+
+
+
+#### How to Enable (One-time Configuration)
+
+- Generate key pair
+
+
+```Shell
+openssl genrsa -out private_key.pem 2048
+openssl rsa -in private_key.pem -pubout -out public_key.pem
+echo "Key pair generation complete!"
+```
+
+- Start service (with public key to enable authentication), using environment variable `JWT_PUBLIC_KEY`
+
+
+```Shell
+export JWT_PUBLIC_KEY=$(cat public_key.pem | base64)
+JWT_PUBLIC_KEY="${JWT_PUBLIC_KEY}"
+```
+
+
+
+#### Issue JWT
+
+Business service uses private key to generate a JWT valid for 1 hour. Below is a simplified script to generate JWT, in practice business backend should use mature JWT libraries:
+
+```Shell
+# This is a simplified script to generate JWT, in practice business backend should use mature JWT libraries
+base64url_encode() { openssl base64 -e -A | tr '+/' '-_' | tr -d '='; }
+header='{"alg":"RS256","typ":"JWT"}'
+exp_time=$(($(date +%s) + 3600))
+payload="{\"exp\":${exp_time}}"
+to_be_signed="$(echo -n "$header" | base64url_encode).$(echo -n "$payload" | base64url_encode)"
+signature=$(echo -n "$to_be_signed" | openssl dgst -sha256 -sign private_key.pem | base64url_encode)
+jwt="${to_be_signed}.${signature}"
+echo "JWT generated: ${jwt}"
+```
+
+
+
+#### Usage
+
+1. Header Authentication
+
+	```Shell
+	curl --silent -X GET "http://localhost:8080/v1/sandbox" \
+	     -H "Authorization: Bearer ${jwt}"
+	```
+
+2. Short-Lived Ticket Authentication Example (using VNC page access): Direct access **cannot authenticate via Header method**, can only use `?ticket=` ticket as query parameter.
+	- Use JWT to obtain ticket from common endpoint (default validity is 30s, can be configured via `TICKET_TTL_SECONDS` environment variable)
+
+	```Bash
+	echo "Using JWT to exchange for common one-time ticket..."
+
+	ticket_response=$(curl --silent -X POST "http://localhost:8080/tickets" \
+	     -H "Authorization: Bearer ${jwt}")
+
+	ticket=$(echo "$ticket_response" | jq -r .ticket)
+	expires=$(echo "$ticket_response" | jq -r .expires_in)
+
+	echo "Successfully obtained! Ticket: ${ticket}, Validity: ${expires} seconds"
+	```
+
+	- Client builds and uses VNC URL: Now you can use the obtained `${ticket}` variable to build the VNC URL and initiate access.
+
+	```Bash
+	# Bash script simulates client URL concatenation
+	vnc_url="http://localhost:8080/vnc/index.html?ticket=${ticket}&path=websockify%3Fticket%3D${ticket}"
+
+	echo "Client-built final URL: ${vnc_url}"
+
+	# Simulate access (should be done in browser)
+	# curl -I "${vnc_url}"
+	```
+
+
+## Extension and Ecosystem
+
+### Custom Images
+
+In AIO, service processes (supervisord) and service routing (Nginx) are automatically mounted following convention-based directories:
+
+- Service process directory: `/opt/gem/supervisord/*.conf`
+- Routing directory: `/opt/gem/nginx/*.conf`
+
+
+To customize services and routing on top of the AIO image, refer to the following image code:
+
+```Dockerfile
+FROM enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+
+# ----------------------
+# Install additional system dependencies (if any)
+# installed path: /usr/bin/*
+# ----------------------
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        ${your_system_dep} \
+        --no-install-recommends; \
+    # clean up
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*;
+
+# ----------------------
+# npm install (if any)
+#
+# ----------------------
+RUN npm i -g ${your_npm_package}
+
+# ----------------------
+# python pip install (if any)
+# installed path: /usr/local/bin/*
+# ----------------------
+RUN pip install ${your_python_package}
+
+# Add custom Server service
+COPY ./supervisord.agent_server.conf /opt/tiger/run/supervisord/agent_server.conf
+# Bind Nginx routing
+COPY ./nginx.agent_server.conf /opt/gem/nginx/nginx.agent_server.conf
+
+# # If you don't need services in AIO, you can delete them, e.g., Code Server
+# ## Delete Code Server process and routing
+# RUN rm -rf /opt/gem/supervisord/supervisord.code_server.conf
+# ## Delete Code Server routing
+# RUN rm -rf /opt/gem/nginx/code_server.conf
+```
+
+
+### SDK Integration
+
+Using [fern](https://buildwithfern.com/learn/sdks/overview/introduction) to convert AIO Sandbox API documentation directly into Python / Go / Node.js SDKs. Using Python as an example, a few lines of code connect AIO Sandbox's core functionality:
+
+```Python
+from agent_sandbox import Sandbox
+
+client = Sandbox(base_url="http://localhost:8080")
+
+# Execute Shell
+shell_res = client.shell.exec_command(command="ls -la")
+print(shell_res.data.output) # /home/gem
+
+# Browser Screenshot
+screenshot = client.browser.screenshot()
+print(screenshot)
+
+# Get Browser CDP
+browser_info = client.browser.get_browser_info()
+cdp_url = browser_info.data.cdp_url # ws://
+
+# Read File
+file_res = client.file.read_file(file="/home/gem/.bashrc")
+print(file_res.data.content)
+```
+
+> More usage examples: [agent-infra/sandbox#examples](https://github.com/agent-infra/sandbox/tree/62e910bae02239f69f749b16a1a78d8deb30c533/examples)
+
+
+
+#### browser-use
+
+Just add 4 lines of code to integrate the community's [browser-use](https://github.com/browser-use/browser-use):
+
+![](/images/blog/announcing-0/30.png)
+
+> Complete code: [browser-use#main.py](https://github.com/agent-infra/sandbox/blob/b950470e6d70eabf9941b9a98a0affd15dd2e86c/sdk/python/examples/browser-use-integration/main.py)
+
+
+
+#### LangGraph-DeepAgents
+
+![](/images/blog/announcing-0/31.jpeg)
+
+> Complete code: [langgraph-deepagents#main.py](https://github.com/agent-infra/sandbox/blob/b950470e6d70eabf9941b9a98a0affd15dd2e86c/sdk/python/examples/langgraph-deepagents/main.py)
+
+
+
+### Custom Toolsets
+
+You can use API / SDK to compose high-level toolsets needed by Agents, for example `link_reader` returns page content for a URL:
+
+```Python
+from openai import OpenAI
+from agent_sandbox import Sandbox
+import json
+
+client = OpenAI(
+    api_key="your_api_key",
+)
+sandbox = Sandbox(base_url="http://localhost:8080")
+
+tools = [{
+    "type": "function",
+    "function": {
+        "name": "link_reader",
+        "description": "Render and read webpage, return title, body text, and final URL (based on CDP).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "format": "uri"},
+                "timeout_ms": {"type": "integer", "default": 30000}
+            },
+            "required": ["url"]
+        }
+    }
+}]
+
+async def link_reader(url: str, timeout_ms: int = 30_000) -> dict:
+    cdp_url = sandbox.browser.get_browser_info().cdp_url
+    async with async_playwright() as p:
+        browser = await p.chromium.connect_over_cdp(cdp_url)
+        try:
+            page = await browser.new_page()
+            await page.goto(url, wait_until="networkidle", timeout=timeout_ms)
+            title = await page.title()
+            text = await page.evaluate("document.body.innerText || ''")
+            return {"final_url": page.url, "title": title, "text": text[:8000]}
+        finally:
+            await browser.close()
+```
+
+
+
+### Deployment
+
+Currently the best public cloud deployment form is function computing, based on Sandbox's designated instance access capability: [One-Click Deploy All-in-One Sandbox Application--Function Service-Volcano Engine](https://www.volcengine.com/docs/6662/1851199)
+
+![](/images/blog/announcing-0/32.jpeg)
+
+
+
+## Summary and Outlook
+
+AIO Sandbox provides an **integrated**, **customizable** base environment (Agent Env), enabling Agents to complete diverse tasks including browsing, executing code, running commands, and file operations within the same environment, while supporting customization of domain-specific sandboxes for different Agents. This sandbox system will continue to evolve and expand alongside the rising intelligence ceiling of Agents and the creativity of developers.
+
+Going forward, we will continue to refine **stability**, **observability**, and **ecosystem integration**, continuously improve evaluation systems and best practices, driving robust deployment and efficient operation of AIO Sandbox in more large-scale, high-demand Agent application scenarios.
+
+![](/images/blog/announcing-0/33.png)
+
+
+## Appendix
+
+### Terminology
+
+| Term | Explanation |
+| :-- | :-- |
+| ***Agent*** | In the LLM context, an AI Agent is an intelligent entity that can autonomously understand intent, plan decisions, and execute complex tasks. An Agent is not an upgraded version of ChatGPT; it doesn't just tell you "how to do it," but actually helps you do it. If Copilot is the co-pilot, then Agent is the main driver. Similar to the human process of "doing things," an Agent's core functions can be summarized as a loop of three steps: Perception, Planning, and Action. |
+| ***Copilot*** | Copilot refers to an AI-based assistance tool, typically integrated with specific software or applications, designed to help users improve work efficiency. Copilot systems analyze user behavior, inputs, data, and history to provide real-time suggestions, automate tasks, or enhance functionality, helping users make decisions or simplify operations. |
+| ***AIO*** | All-In-One, refers to integrating multiple capabilities (Browser, Code Execution, Shell, File, visual takeover, authentication, proxy, etc.) within a **single image/instance**, reducing cross-environment switching and data transfer. |
+| ***Sandbox*** | A controlled, isolated execution environment. Used to run browsers, code, or command lines, controlling resources and permissions, reducing impact and risk to the host system. |
+| ***CDP*** | CDP (Chrome Devtools Protocol) is a protocol for communicating with Chrome or Chromium browsers. It allows developers to interact with browsers by sending commands and receiving events for debugging, analysis, and automated browser operations. CDP provides a set of APIs (Application Programming Interface) defining browser behavior and functionality. |
+| ***VNC*** | VNC is a suite of "remote desktop sharing/control" technologies and tools based on the RFB (Remote Framebuffer) protocol. Core idea: encode the remote host's screen framebuffer (pixels) and transmit over network to the client, while replaying client keyboard and mouse events to the remote host, enabling cross-platform remote operation. |
+| ***MCP*** | Model Context Protocol is an open protocol that standardizes how applications provide context to LLMs. Think of MCP as the USB-C port for AI applications. Just like USB-C provides a standard way for your devices to connect to various peripherals and accessories, MCP provides a standard way for your AI models to connect to different data sources and tools. |
+| ***Browser Use*** | General term for Agents completing tasks like search, login, clicking, form filling, downloading through browsers, either via CDP commands or GUI visual operations. |
+| ***OpenHands*** | OpenHands is an open-source AI Software Developer Agent Platform for training, evaluating, and running large language models (LLM) that can "autonomously program" in real development environments. It was initially released as OpenDevin, later renamed to OpenHands, maintained by the All Hands AI community. |
+
+
+
+### References
+
+- [UI-TARS-2 Technical Report: Advancing GUI Agent with Multi-Turn Reinforcement Learning](https://arxiv.org/pdf/2509.02544)
+- [AIO Sandbox: All-in-One Sandbox for AI Agents & Developers](https://medium.com/coding-nexus/aio-sandbox-all-in-one-sandbox-for-ai-agents-developers-b0a5ca4cf2a8)
+- [Agentic AI Infrastructure Practice Series (2): Necessity and Practice of Dedicated Sandbox Environment](https://aws.amazon.com/cn/blogs/china/agentic-ai-sandbox-practice/)
+- [Writing effective tools for AI agents—using AI agents](https://www.anthropic.com/engineering/writing-tools-for-agents)
+- [Unifying the Computer Use Action Space](https://scrapybara.com/blog/unified-action-space)
