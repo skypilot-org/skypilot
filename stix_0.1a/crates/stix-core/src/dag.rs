@@ -8,6 +8,7 @@ use daggy::{Dag as DaggyDag, NodeIndex, Walker};
 use petgraph::algo::toposort;
 use std::collections::{HashMap, HashSet, VecDeque};
 use tokio::sync::Mutex;
+use daggy::NodeWeightsMut;
 
 /// Node in the DAG representing a task
 #[derive(Debug, Clone)]
