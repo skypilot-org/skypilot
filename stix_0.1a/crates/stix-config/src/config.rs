@@ -52,7 +52,7 @@ fn default_true() -> bool {
 }
 
 /// Global settings
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     /// Enable verbose logging
     #[serde(default)]
@@ -69,6 +69,17 @@ pub struct Settings {
     /// Additional custom settings
     #[serde(default)]
     pub custom: HashMap<String, serde_yaml::Value>,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            verbose: false,
+            dry_run: false,
+            timeout: default_timeout(),
+            custom: HashMap::new(),
+        }
+    }
 }
 
 fn default_timeout() -> u64 {
