@@ -83,7 +83,7 @@ uuid = { version = "1.10", features = ["v4", "serde"] }
 reqwest = { version = "0.12", features = ["json"] }
 
 # Kubernetes
-k8s-openapi = { version = "0.23", features = ["latest"] }
+k8s-openapi = { version = "0.23", features = ["v1_28"] }
 
 # Testing
 criterion = "0.5"
