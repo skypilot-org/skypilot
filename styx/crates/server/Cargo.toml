@@ -33,10 +33,12 @@ prost = "0.13"
 # Authentication
 jsonwebtoken.workspace = true
 
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite", "chrono"] }
+chrono.workspace = true
+
 [build-dependencies]
 tonic-build = "0.12"
 
 [dependencies.uuid]
 workspace = true
-
-version = "0.3"
