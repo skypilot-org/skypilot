@@ -39,6 +39,8 @@
 ----
 
 :fire: *News* :fire:
+
+- [Oct 2025] Serve models with **Nvidia Dynamo** for high-performance multi-node inference: [**example**](./examples/serve/nvidia-dynamo/)
 - [Oct 2025] Run **RL training for LLMs** with SkyRL on your Kubernetes or clouds: [**example**](./llm/skyrl/)
 - [Oct 2025] Train and serve [Andrej Karpathy's](https://x.com/karpathy/status/1977755427569111362) **nanochat** - the best ChatGPT that $100 can buy: [**example**](./llm/nanochat)
 - [Oct 2025] Run large-scale **LLM training with TorchTitan** on any AI infra: [**example**](./examples/training/torchtitan)
