@@ -22,10 +22,13 @@ pub mod models;
 pub mod repo;
 
 // Re-exports
-pub use error::{DbError, Result};
+pub use error::DbError;
 pub use pool::DbPool;
 pub use models::{TaskRow, EdgeRow};
 pub use repo::TaskRepo;
+
+/// Result type alias
+pub type Result<T> = std::result::Result<T, DbError>;
 
 #[cfg(test)]
 mod tests {
