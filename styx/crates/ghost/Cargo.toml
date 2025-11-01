@@ -7,7 +7,7 @@ description = "Ghost - Isolated execution caves for running code in containers"
 
 [dependencies]
 # Core
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
@@ -21,7 +21,7 @@ async-trait = { workspace = true }
 futures = "0.3"
 
 # Docker
-bollard = "0.17"  # Docker SDK for Rust
+bollard = "0.17"
 
 # Kubernetes
 kube = { workspace = true }
@@ -35,9 +35,20 @@ rand = "0.8"
 
 # Logging
 tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 # HTTP
 reqwest = { workspace = true }
+axum = { workspace = true }
+tower-http = "0.5"
+
+# WebSocket
+tokio-tungstenite = "0.23"
+
+# CLI
+clap = { workspace = true }
+colored = { workspace = true }
+dirs = "5.0"
 
 [dev-dependencies]
 tokio-test = "0.4"

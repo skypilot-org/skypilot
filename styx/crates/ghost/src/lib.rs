@@ -25,6 +25,8 @@ pub mod compose;
 pub mod kubernetes;
 pub mod secrets;
 pub mod executor;
+pub mod cli;
+pub mod features;
 
 // Re-exports
 pub use cave::{Cave, CaveConfig, CaveStatus, CaveType};
