@@ -143,11 +143,39 @@ class LazyDataFrame:
             try:
                 self._df = pd.read_csv(self._filename)
             except Exception as e:  # pylint: disable=broad-except
-                # As users can manually modify the catalog, read_csv can fail.
-                logger.error(f'Failed to read {self._filename}. '
-                             'To fix: delete the csv file and try again.')
-                with ux_utils.print_exception_no_traceback():
-                    raise e
+                # If the catalog file exists but is empty/corrupted,
+                # attempt one forced refresh before surfacing the error.
+                try:
+                    is_empty = False
+                    try:
+                        # pandas raises EmptyDataError for empty files; detect
+                        # that case without importing pandas symbols directly.
+                        is_empty = isinstance(e, pd.errors.EmptyDataError)
+                    except Exception:  # pylint: disable=broad-except
+                        is_empty = False
+                    if (not is_empty and os.path.exists(self._filename) and
+                            os.path.getsize(self._filename) == 0):
+                        is_empty = True
+
+                    if is_empty:
+                        # Remove the empty file to force an update, then retry.
+                        try:
+                            os.remove(self._filename)
+                        except Exception:  # pylint: disable=broad-except
+                            pass
+                        # Force refresh and retry a single time.
+                        self._update_if_stale_func()
+                        self._df = pd.read_csv(self._filename)
+                    else:
+                        raise e
+                except Exception as e2:  # pylint: disable=broad-except
+                    # As users can manually modify the catalog, read_csv can
+                    # fail. Provide a helpful message and re-raise.
+                    logger.error(
+                        f'Failed to read {self._filename}. '
+                        'To fix: delete the csv file and try again.')
+                    with ux_utils.print_exception_no_traceback():
+                        raise e2
         return self._df
 
     def __getattr__(self, name: str):
@@ -220,14 +248,29 @@ def read_catalog(filename: str,
                         f'Updating {cloud} catalog: {filename}') +
                     f'{update_frequency_str}'):
                 try:
+                    used_fallback = False
                     r = requests.get(url=url, headers=headers)
                     if r.status_code == 429:
-                        # fallback to s3 mirror, github introduced rate
+                        # Fallback to s3 mirror, github introduced rate
                         # limit after 2025-05, see
                         # https://github.com/skypilot-org/skypilot/issues/5438
                         # for more details
                         r = requests.get(url=url_fallback, headers=headers)
+                        used_fallback = True
                     r.raise_for_status()
+
+                    text = r.text
+                    # Guard against servers returning 200 with empty body.
+                    if not text.strip():
+                        if not used_fallback:
+                            r_fb = requests.get(url=url_fallback,
+                                                headers=headers)
+                            r_fb.raise_for_status()
+                            text = r_fb.text
+                    if not text.strip():
+                        raise requests.exceptions.RequestException(
+                            f'Fetched empty catalog for {cloud}: {filename}')
+
                 except requests.exceptions.RequestException as e:
                     error_str = (f'Failed to fetch {cloud} catalog '
                                  f'{filename}. ')
@@ -245,9 +288,9 @@ def read_catalog(filename: str,
                     # Download successful, save the catalog to a local file.
                     os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
                     with open(catalog_path, 'w', encoding='utf-8') as f:
-                        f.write(r.text)
+                        f.write(text)
                     with open(meta_path + '.md5', 'w', encoding='utf-8') as f:
-                        f.write(hashlib.md5(r.text.encode()).hexdigest())
+                        f.write(hashlib.md5(text.encode()).hexdigest())
             logger.debug(f'Updated {cloud} catalog {filename}.')
         return True
 
