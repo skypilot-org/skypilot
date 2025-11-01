@@ -29,15 +29,10 @@ def get_output_path() -> str:
     return os.path.join(mithril_dir, 'vms.csv')
 
 
-# GPU memory mapping (in MiB)
+# GPU memory mapping (in MiB) - Only GPUs supported by Mithril
 GPU_MEMORY_MAP = {
-    'A100': 40960,  # 40 GB
-    'A100-80GB': 81920,  # 80 GB
+    'A100': 81920,  # 80 GB
     'H100': 81920,  # 80 GB
-    'V100': 16384,  # 16 GB
-    'A10': 24576,  # 24 GB
-    'L40': 49152,  # 48 GB
-    'L4': 24576,  # 24 GB
 }
 
 
@@ -61,19 +56,32 @@ def get_api_key(api_key: Optional[str] = None) -> str:
     return api_key
 
 
-def parse_gpu_info(gpu_name: str, gpu_count: int) -> str:
-    """Create GPU info JSON string."""
-    gpu_memory = GPU_MEMORY_MAP.get(gpu_name, 0)
+def parse_gpu_info(gpu_name: str,
+                   gpu_count: int,
+                   gpu_memory_gb: Optional[int] = None) -> str:
+    """Create GPU info JSON string.
+
+    Args:
+        gpu_name: Name of the GPU
+        gpu_count: Number of GPUs
+        gpu_memory_gb: GPU memory in GB (from API). Falls back to
+            GPU_MEMORY_MAP if not provided.
+    """
+    if gpu_memory_gb:
+        gpu_memory_mib = gpu_memory_gb * 1024
+    else:
+        gpu_memory_mib = GPU_MEMORY_MAP.get(gpu_name, 0)
+
     gpu_info = {
         'Gpus': [{
             'Name': gpu_name,
             'Manufacturer': 'NVIDIA',
             'Count': gpu_count,
             'MemoryInfo': {
-                'SizeInMiB': gpu_memory
+                'SizeInMiB': gpu_memory_mib
             },
         }],
-        'TotalGpuMemoryInMiB': gpu_memory * gpu_count
+        'TotalGpuMemoryInMiB': gpu_memory_mib * gpu_count
     }
     return json.dumps(gpu_info).replace('"', '\'')
 
@@ -91,7 +99,7 @@ def fetch_instance_types(api_key: str) -> List[Dict[str, Any]]:
                                 timeout=30)
         response.raise_for_status()
         data = response.json()
-        # Mithril API returns a dict with 'data' key containing the lis
+        # Mithril API returns a dict with 'data' key containing the list
         if isinstance(data, dict):
             if 'data' in data:
                 return data['data']
@@ -103,13 +111,17 @@ def fetch_instance_types(api_key: str) -> List[Dict[str, Any]]:
         raise RuntimeError(f'Failed to fetch instance types: {e}') from e
 
 
-def fetch_spot_availability(api_key: str) -> Dict[str, List[Dict[str, Any]]]:
+def fetch_spot_availability(
+        api_key: str,
+        fid_to_name: Dict[str, str]) -> Dict[str, List[Dict[str, Any]]]:
     """Fetch per-region spot availability and pricing.
+
+    Args:
+        api_key: API key for authentication
+        fid_to_name: Mapping from instance FID to instance name
 
     Returns a mapping from instance type name to a list of entries with keys:
       { 'region': str, 'spot_price': float }
-
-    The function is defensive against API response shape differences.
     """
     headers = {
         'Authorization': f'Bearer {api_key}',
@@ -128,20 +140,25 @@ def fetch_spot_availability(api_key: str) -> Dict[str, List[Dict[str, Any]]]:
     # Normalize into { instance_type: [ {region, spot_price}, ... ] }
     availability: Dict[str, List[Dict[str, Any]]] = {}
 
-    # Common shapes we may handle:
-    # 1) { data: [ { name|instance_type, region, spot_price|price,
-    #      available }, ... ] }
-    # 2) [ { name|instance_type, region, spot_price|price, available }, ... ]
-    # 3) { instance_type: { region: { price, ... }, ... }, ... }
-    records = data.get('data', data)
+    # Mithril API returns a list of records with:
+    # - 'instance_type': FID (e.g. 'it_XqgKWbhZ5gznAYsG')
+    # - 'region': region name
+    # - 'last_instance_price': price as string with '$' prefix
+    records = data if isinstance(data, list) else data.get('data', [])
 
     if isinstance(records, list):
         for rec in records:
-            inst = rec.get('instance_type') or rec.get('name') or rec.get(
-                'type')
+            # Get instance FID and map to name
+            inst_fid = rec.get('instance_type')
+            inst_name = fid_to_name.get(inst_fid) if inst_fid else None
+
             region = rec.get('region')
-            price_val = rec.get('spot_price') or rec.get('price')
-            # Some APIs return price with currency symbol, e.g. "$2.50"
+
+            # Try multiple price fields
+            price_val = (rec.get('last_instance_price') or
+                         rec.get('spot_price') or rec.get('price'))
+
+            # Parse price string (e.g. "$12.00")
             if isinstance(price_val, str):
                 price_str = price_val.strip().lstrip('$')
                 try:
@@ -151,9 +168,9 @@ def fetch_spot_availability(api_key: str) -> Dict[str, List[Dict[str, Any]]]:
             else:
                 price = price_val
 
-            if not inst or not region or price is None:
+            if not inst_name or not region or price is None:
                 continue
-            availability.setdefault(inst, []).append({
+            availability.setdefault(inst_name, []).append({
                 'region': region,
                 'spot_price': price,
             })
@@ -189,7 +206,16 @@ def create_catalog(api_key: Optional[str] = None) -> None:
     print('Fetching Mithril instance types...')
     api_key = get_api_key(api_key)
     instance_types = fetch_instance_types(api_key)
-    availability = fetch_spot_availability(api_key)
+
+    # Build FID to instance name mapping
+    fid_to_name: Dict[str, str] = {}
+    for inst in instance_types:
+        fid = inst.get('fid')
+        name = inst.get('name')
+        if fid and name:
+            fid_to_name[fid] = name
+
+    availability = fetch_spot_availability(api_key, fid_to_name)
 
     print(f'Found {len(instance_types)} instance types')
 
@@ -213,6 +239,7 @@ def create_catalog(api_key: Optional[str] = None) -> None:
                 continue
             gpu_name = instance.get('gpu_type')
             gpu_count = instance.get('num_gpus', 0)
+            gpu_memory_gb = instance.get('gpu_memory_gb')
             vcpus = instance.get('num_cpus', 0)
             memory_gb = instance.get('ram_gb', 0)
 
@@ -243,7 +270,7 @@ def create_catalog(api_key: Optional[str] = None) -> None:
             # Create GPU info if GPUs are present
             gpu_info = ''
             if gpu_name and gpu_count > 0:
-                gpu_info = parse_gpu_info(gpu_name, gpu_count)
+                gpu_info = parse_gpu_info(gpu_name, gpu_count, gpu_memory_gb)
 
             # Write one row per available region with current spot price.
             # As Mithril is spot-based, we mirror SpotPrice into Price for
