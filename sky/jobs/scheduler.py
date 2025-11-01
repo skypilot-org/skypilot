@@ -199,18 +199,32 @@ def get_alive_controllers() -> typing.Optional[int]:
         return None
 
     alive = 0
+    alive_pids = []
     for pid in pids:
         try:
             # TODO(luca) there is a chance that the process that is alive is
             # not the same controller process. a better solution is to also
             # include a random UUID with each controller and store that in the
             # db as well/in the command that spawns it.
-            if subprocess_utils.is_process_alive(int(pid.strip())):
+            # NOTE(tian): We need to check the process's cmdline is correct
+            # (which means it contains `controller`). This is because the pid
+            # can be reused by a different process. And we will persist this
+            # pid file in PVC in a remote API server deployment, and after an
+            # api server pod restart, the pid is likely to be reused by a
+            # different process.
+            if managed_job_utils.controller_process_alive(int(pid.strip())):
                 alive += 1
+                alive_pids.append(pid)
         except ValueError:
             # if the pid is not an integer, let's assume it's alive to not
             # over start new processes
             alive += 1
+            alive_pids.append(pid)
+
+    # Update the pid file with the alive pids.
+    with open(JOB_CONTROLLER_PID_PATH, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(alive_pids) + '\n')
+
     return alive
 
 
