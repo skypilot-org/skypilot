@@ -1,3 +1,16 @@
+ [package]
+ name = "skypilot-utils"
+ version = "0.1.0"
+ edition = "2021"
+
+ [lib]
+ crate-type = ["rlib"]
+
+ [dependencies]
+bytecount = "0.6"
+
+[dev-dependencies]
+tempfile = "3"
 [package]
 name = "skypilot-utils"
 version.workspace = true

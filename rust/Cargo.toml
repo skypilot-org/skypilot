@@ -1,3 +1,12 @@
+ [workspace]
+ members = ["skypilot-utils"]
+ resolver = "2"
+
+ [workspace.package]
+ edition = "2021"
+ license = "Apache-2.0"
+ authors = ["SkyPilot Maintainers"]
+ repository = "https://github.com/skypilot-org/skypilot"
 [workspace]
 resolver = "2"
 members = ["skypilot-utils"]
