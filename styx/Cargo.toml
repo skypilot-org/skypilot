@@ -11,6 +11,7 @@ members = [
     "crates/sdk",
     "crates/utils",
     "crates/sky",
+    "crates/ghost",  # ?? Ghost - Isolated execution caves!
 ]
 
 [workspace.package]
