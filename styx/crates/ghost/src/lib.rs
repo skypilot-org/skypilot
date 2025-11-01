@@ -27,6 +27,8 @@ pub mod secrets;
 pub mod executor;
 pub mod cli;
 pub mod features;
+pub mod api;
+pub mod mcp;
 
 // Re-exports
 pub use cave::{Cave, CaveConfig, CaveStatus, CaveType};
