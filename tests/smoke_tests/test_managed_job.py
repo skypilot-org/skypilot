@@ -1598,6 +1598,7 @@ def test_managed_jobs_failed_precheck_storage_spec_error(
 
 @pytest.mark.no_remote_server  # Need an isolated API server for this test case
 @pytest.mark.managed_jobs
+@pytest.mark.no_dependency  # restart api server requires full dependency installed
 def test_managed_jobs_logs_gc(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
 
