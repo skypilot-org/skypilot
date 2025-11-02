@@ -8,6 +8,7 @@
 
 envs:
   HF_TOKEN:
+  WANDB_NAME: ""
 
 # Required if using W&B for experiment tracking
 # secrets:
@@ -50,7 +51,7 @@ run: |
   source .venv/bin/activate
   # Configure W&B if API key is set
   if [ -n "$WANDB_API_KEY" ]; then
-    export WANDB_NAME=llama4-scout-sft-run
+    export WANDB_NAME=${WANDB_NAME:-llama4-scout-sft-run}
     export WANDB_RUN_ID=$SKYPILOT_TASK_ID
     echo "W&B tracking enabled"
     uv pip install wandb
