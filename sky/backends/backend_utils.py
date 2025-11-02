@@ -3215,8 +3215,6 @@ def get_clusters(
         workspaces_filter=accessible_workspaces,
         cluster_names=cluster_names,
         summary_response=summary_response)
-    
-    logger.info(f'!!!! len(records) = {len(records)}')
 
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT
@@ -3224,8 +3222,6 @@ def get_clusters(
 
     if cluster_names is not None:
         record_names = {record['name'] for record in records}
-        logger.info(f'!!!! record_names = {record_names}')
-        logger.info(f'!!!! cluster_names = {cluster_names}')
         not_found_clusters = ux_utils.get_non_matched_query(
             cluster_names, record_names)
         if not_found_clusters:
