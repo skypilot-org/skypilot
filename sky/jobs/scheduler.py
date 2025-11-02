@@ -263,6 +263,7 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
 
             if started > 0:
                 logger.info(f'Started {started} controllers')
+
     except filelock.Timeout:
         # If we can't get the lock, just exit. The process holding the lock
         # should launch any pending jobs.

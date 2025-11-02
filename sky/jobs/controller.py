@@ -7,6 +7,7 @@ import pathlib
 import resource
 import shutil
 import sys
+import threading
 import time
 import traceback
 import typing
@@ -24,6 +25,7 @@ from sky.backends import cloud_vm_ray_backend
 from sky.data import data_utils
 from sky.jobs import constants as jobs_constants
 from sky.jobs import file_content_utils
+from sky.jobs import log_gc
 from sky.jobs import recovery_strategy
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
@@ -1066,8 +1068,7 @@ class ControllerManager:
         os.makedirs(log_dir, exist_ok=True)
         log_file = os.path.join(log_dir, f'{job_id}.log')
 
-        logger.info('Starting job %s (pool=%s). Logs: %s', job_id, pool,
-                    log_file)
+        logger.info(f'Starting job {job_id} with log_file={log_file}')
 
         async with self._job_tasks_lock:
             self.starting.add(job_id)
@@ -1190,7 +1191,10 @@ async def main(controller_uuid: str):
     # Will loop forever, do it in the background
     cancel_job_task = asyncio.create_task(controller.cancel_job())
     monitor_loop_task = asyncio.create_task(controller.monitor_loop())
-
+    # Run the garbage collector in a dedicated daemon thread to avoid affecting
+    # the main event loop.
+    gc_thread = threading.Thread(target=log_gc.elect_for_log_gc, daemon=True)
+    gc_thread.start()
     try:
         await asyncio.gather(cancel_job_task, monitor_loop_task)
     except Exception as e:  # pylint: disable=broad-except

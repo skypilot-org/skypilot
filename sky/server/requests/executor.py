@@ -396,7 +396,10 @@ def _request_execution_wrapper(request_id: str,
     rss_begin = proc.memory_info().rss
     db_utils.set_max_connections(num_db_connections_per_worker)
     # Handle the SIGTERM signal to abort the request processing gracefully.
-    signal.signal(signal.SIGTERM, _sigterm_handler)
+    # Only set up signal handlers in the main thread, as signal.signal() raises
+    # ValueError if called from a non-main thread (e.g., in tests).
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGTERM, _sigterm_handler)
 
     logger.info(f'Running request {request_id} with pid {pid}')
 

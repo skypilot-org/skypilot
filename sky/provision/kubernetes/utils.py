@@ -736,6 +736,7 @@ def detect_gpu_label_formatter(
         for label, value in node.metadata.labels.items():
             node_labels[node.metadata.name].append((label, value))
 
+    invalid_label_values: List[Tuple[str, str, str, str]] = []
     # Check if the node labels contain any of the GPU label prefixes
     for lf in LABEL_FORMATTER_REGISTRY:
         skip = False
@@ -749,17 +750,21 @@ def detect_gpu_label_formatter(
                     if valid:
                         return lf(), node_labels
                     else:
-                        logger.warning(f'GPU label {label} matched for label '
-                                       f'formatter {lf.__class__.__name__}, '
-                                       f'but has invalid value {value}. '
-                                       f'Reason: {reason}. '
-                                       'Skipping...')
+                        invalid_label_values.append(
+                            (label, lf.__name__, value, reason))
                         skip = True
                         break
             if skip:
                 break
         if skip:
             continue
+
+    for label, lf_name, value, reason in invalid_label_values:
+        logger.warning(f'GPU label {label} matched for label '
+                       f'formatter {lf_name}, '
+                       f'but has invalid value {value}. '
+                       f'Reason: {reason}. '
+                       'Skipping...')
 
     return None, node_labels
 
