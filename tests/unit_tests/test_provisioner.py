@@ -24,11 +24,9 @@ class _DummySocket:
 def _setup_successful_socket(monkeypatch):
     dummy_socket = _DummySocket()
     create_connection_mock = mock.MagicMock(return_value=dummy_socket)
-    monkeypatch.setattr(provisioner.socket,
-                        'create_connection',
+    monkeypatch.setattr(provisioner.socket, 'create_connection',
                         create_connection_mock)
-    monkeypatch.setattr(provisioner,
-                        '_wait_ssh_connection_indirect',
+    monkeypatch.setattr(provisioner, '_wait_ssh_connection_indirect',
                         mock.MagicMock(return_value=(True, '')))
     return create_connection_mock
 
@@ -53,12 +51,11 @@ def test_wait_ssh_connection_direct_env_override(monkeypatch):
     monkeypatch.setenv('SKYPILOT_SSH_SOCKET_CONNECT_TIMEOUT', '2.5')
     create_connection_mock = _setup_successful_socket(monkeypatch)
 
-    success, _ = provisioner._wait_ssh_connection_direct(
-        '5.6.7.8',
-        22,
-        ssh_user='user',
-        ssh_private_key='key',
-        ssh_probe_timeout=5)
+    success, _ = provisioner._wait_ssh_connection_direct('5.6.7.8',
+                                                         22,
+                                                         ssh_user='user',
+                                                         ssh_private_key='key',
+                                                         ssh_probe_timeout=5)
 
     assert success
     assert create_connection_mock.call_args.kwargs['timeout'] == pytest.approx(
@@ -69,11 +66,9 @@ def test_wait_ssh_connection_direct_env_override(monkeypatch):
 def test_wait_ssh_connection_direct_invalid_env(monkeypatch, value):
     monkeypatch.setenv('SKYPILOT_SSH_SOCKET_CONNECT_TIMEOUT', value)
     create_connection_mock = mock.MagicMock()
-    monkeypatch.setattr(provisioner.socket,
-                        'create_connection',
+    monkeypatch.setattr(provisioner.socket, 'create_connection',
                         create_connection_mock)
-    monkeypatch.setattr(provisioner,
-                        '_wait_ssh_connection_indirect',
+    monkeypatch.setattr(provisioner, '_wait_ssh_connection_indirect',
                         mock.MagicMock(return_value=(True, '')))
 
     success, stderr = provisioner._wait_ssh_connection_direct(
