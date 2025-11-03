@@ -93,11 +93,9 @@ export async function getWorkspaceClusters(workspaceName) {
     );
     return filteredClusters;
   } catch (error) {
-    console.error(
-      `Error fetching clusters for workspace ${workspaceName}:`,
-      error
-    );
-    return [];
+    const msg = `Error fetching clusters for workspace ${workspaceName}: ${error.message}`;
+    console.error(msg);
+    throw new Error(msg);
   }
 }
 
@@ -112,8 +110,29 @@ export async function getWorkspaceManagedJobs(workspaceName) {
       override_skypilot_config: { active_workspace: workspaceName },
     });
 
+    // Check if initial request succeeded
+    if (!response.ok) {
+      console.error(
+        `Initial API request to get managed jobs failed with status ${response.status} for workspace ${workspaceName}`
+      );
+      return { __skipCache: true, jobs: [] };
+    }
+
     const id = response.headers.get('X-Skypilot-Request-ID');
+    // Handle empty request ID
+    if (!id) {
+      console.error(
+        `No request ID received from server for getting managed jobs for workspace ${workspaceName}`
+      );
+      return { __skipCache: true, jobs: [] };
+    }
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
+    if (!fetchedData.ok) {
+      console.error(
+        `API request to get managed jobs result failed with status ${fetchedData.status} for workspace ${workspaceName}`
+      );
+      return { __skipCache: true, jobs: [] };
+    }
     const data = await fetchedData.json();
     const jobsData = data.return_value
       ? JSON.parse(data.return_value)
@@ -138,7 +157,7 @@ export async function getWorkspaceManagedJobs(workspaceName) {
       `Error fetching managed jobs for workspace ${workspaceName}:`,
       error
     );
-    return { jobs: [] };
+    return { __skipCache: true, jobs: [] };
   }
 }
 

@@ -111,7 +111,7 @@ export async function getClusters({ clusterNames = null } = {}) {
     return clusterData;
   } catch (error) {
     console.error('Error fetching clusters:', error);
-    return [];
+    throw error;
   }
 }
 
@@ -186,7 +186,7 @@ export async function getClusterHistory(clusterHash = null, days = 30) {
     return historyData;
   } catch (error) {
     console.error('Error fetching cluster history:', error);
-    return [];
+    throw error;
   }
 }
 
@@ -317,7 +317,7 @@ export async function getClusterJobs({ clusterName, workspace }) {
     return jobData;
   } catch (error) {
     console.error('Error fetching cluster jobs:', error);
-    return [];
+    throw error;
   }
 }
 

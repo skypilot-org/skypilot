@@ -42,7 +42,7 @@ export async function getVolumes() {
     return transformedData;
   } catch (error) {
     console.error('Failed to fetch volumes:', error);
-    return [];
+    throw error;
   }
 }
 
@@ -52,9 +52,25 @@ export async function deleteVolume(volumeName) {
     const response = await apiClient.post('/volumes/delete', {
       names: [volumeName],
     });
+    if (!response.ok) {
+      console.error(
+        `Initial API request to delete volume failed with status ${response.status}`
+      );
+      return {
+        success: false,
+        msg: `Delete API request failed with status ${response.status}`,
+      };
+    }
     const id =
       response.headers.get('X-SkyPilot-Request-ID') ||
       response.headers.get('X-Request-ID');
+    if (!id) {
+      console.error('No request ID received from server for deleting volume');
+      return {
+        success: false,
+        msg: 'No request ID received from server for deleting volume',
+      };
+    }
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
     if (fetchedData.status === 500) {
       try {
@@ -64,13 +80,21 @@ export async function deleteVolume(volumeName) {
             const error = JSON.parse(data.detail.error);
             // Handle specific error types
             msg = error.message;
+            return { success: false, msg: msg };
           } catch (jsonError) {
+            msg = `Error parsing JSON: ${jsonError}`;
             console.error('Error parsing JSON:', jsonError);
           }
         }
       } catch (parseError) {
+        msg = `Error parsing JSON: ${parseError}`;
         console.error('Error parsing JSON:', parseError);
       }
+      return { success: false, msg: msg };
+    }
+    if (!fetchedData.ok) {
+      msg = `API request to get volume deletion result failed with status ${fetchedData.status}`;
+      console.error(msg);
       return { success: false, msg: msg };
     }
     return { success: true };
