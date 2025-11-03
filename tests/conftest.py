@@ -566,12 +566,13 @@ def setup_policy_server(request, tmp_path_factory):
                     launch_server = False
                 except RuntimeError:
                     # There is a broken state from previous crashed test, recover it
-                    print(f'Policy server {policy_server_url} is not running, launching new server',
-                          file=sys.stderr,
-                          flush=True)
+                    print(
+                        f'Policy server {policy_server_url} is not running, launching new server',
+                        file=sys.stderr,
+                        flush=True)
                     pathlib.Path(counter_file).unlink(missing_ok=True)
                     launch_server = True
-            
+
             if launch_server:
                 # Launch the policy server
                 port = common_utils.find_free_port(start_port=10000)
