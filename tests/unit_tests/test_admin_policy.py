@@ -406,6 +406,7 @@ def test_user_request_encode_decode(task):
     with mock.patch('sky.utils.common_utils.get_current_user',
                     return_value=models.User(id='123', name='test')):
         user_request = sky.UserRequest(task=task,
+                                       request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
                                        skypilot_config=sky.Config(),
                                        at_client_side=False,
                                        user=models.User(id='123', name='test'))
@@ -415,6 +416,7 @@ def test_user_request_encode_decode(task):
         assert decoded_request.skypilot_config == sky.Config()
         assert decoded_request.at_client_side == False
         assert decoded_request.user == models.User(id='123', name='test')
+        assert decoded_request.request_name == request_names.AdminPolicyRequestName.CLUSTER_LAUNCH
 
 
 def test_restful_policy(add_example_policy_paths, task):
