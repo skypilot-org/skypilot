@@ -26,6 +26,7 @@ Install SkyPilot using pip:
           pip install "skypilot[aws]"
           pip install "skypilot[gcp]"
           pip install "skypilot[azure]"
+          pip install "skypilot[coreweave]"
           # Nebius is only supported for Python >= 3.10
           pip install "skypilot[nebius]"
           # Clouds below are supported/maintained by community/cloud providers.
@@ -63,6 +64,7 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[aws]"
           pip install "skypilot-nightly[gcp]"
           pip install "skypilot-nightly[azure]"
+          pip install "skypilot-nightly[coreweave]"
           # Nebius is only supported for Python >= 3.10
           pip install "skypilot-nightly[nebius]"
           # Clouds below are supported/maintained by community/cloud providers.
