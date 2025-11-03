@@ -1805,12 +1805,18 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         version=sky.__version__,
         version_on_disk=common.get_skypilot_version_on_disk(),
         commit=sky.__commit__,
+        # Whether basic auth on api server is enabled
         basic_auth_enabled=os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH,
                                           'false').lower() == 'true',
         user=user if user is not None else None,
+        # Whether service account token is enabled
         service_account_token_enabled=(os.environ.get(
             constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS,
             'false').lower() == 'true'),
+        # Whether basic auth on ingress is enabled
+        ingress_basic_auth_enabled=os.environ.get(
+            constants.SKYPILOT_INGRESS_BASIC_AUTH_ENABLED,
+            'false').lower() == 'true',
     )
 
 
