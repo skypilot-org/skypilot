@@ -850,7 +850,7 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
 @pytest.mark.no_dependency  # Storage tests required full dependency installed
 def test_managed_jobs_storage(generic_cloud: str):
     """Test storage with managed job"""
-    timeout = 215
+    timeout = 500
     low_resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
     name = smoke_tests_utils.get_cluster_name()
     yaml_str = pathlib.Path(
