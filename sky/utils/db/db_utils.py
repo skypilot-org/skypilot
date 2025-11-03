@@ -447,14 +447,21 @@ def get_engine(
                 elif _max_connections == 1:
                     _postgres_engine_cache[conn_string] = (
                         sqlalchemy.create_engine(
-                            conn_string, poolclass=sqlalchemy.pool.StaticPool))
+                            conn_string,
+                            poolclass=sqlalchemy.pool.QueuePool,
+                            pool_size=1,
+                            max_overflow=5,
+                            pool_pre_ping=True,
+                            pool_recycle=1800))
                 else:
                     _postgres_engine_cache[conn_string] = (
                         sqlalchemy.create_engine(
                             conn_string,
                             poolclass=sqlalchemy.pool.QueuePool,
-                            size=_max_connections,
-                            max_overflow=0))
+                            pool_size=_max_connections,
+                            max_overflow=0,
+                            pool_pre_ping=True,
+                            pool_recycle=1800))
             engine = _postgres_engine_cache[conn_string]
     else:
         assert db_name is not None, 'db_name must be provided for SQLite'
