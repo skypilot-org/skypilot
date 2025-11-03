@@ -310,34 +310,6 @@
                         "null"
                     ]
                 },
-                "hosts": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "host": {
-                                "type": "string"
-                            },
-                            "paths": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "path": {
-                                            "type": "string"
-                                        },
-                                        "serviceName": {
-                                            "type": "string"
-                                        },
-                                        "servicePort": {
-                                            "type": "integer"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                },
                 "httpNodePort": {
                     "type": [
                         "number",
