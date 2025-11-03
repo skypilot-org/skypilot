@@ -302,7 +302,7 @@ def test_launch_fast_with_autostop(generic_cloud: str):
         'test_launch_fast_with_autostop',
         [
             # First launch to create the cluster with a short autostop
-            f's=$(SKYPILOT_DEBUG=0 export PYTHONWARNINGS="ignore::FutureWarning" sky launch -y -c {name} --infra {generic_cloud} --fast -i 1 {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 PYTHONWARNINGS="ignore::FutureWarning" sky launch -y -c {name} --infra {generic_cloud} --fast -i 1 {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 1 --status',
             f'sky status -r {name} | grep UP',
 
@@ -316,7 +316,7 @@ def test_launch_fast_with_autostop(generic_cloud: str):
             # FIXME(aylei): this can be flaky, sleep longer for now.
             f'sleep 60',
             # Launch again. Do full output validation - we expect the cluster to re-launch
-            f's=$(SKYPILOT_DEBUG=0 PYTHONWARNINGS="ignore::FutureWarning"sky launch -y -c {name} --fast -i 1 tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 PYTHONWARNINGS="ignore::FutureWarning" sky launch -y -c {name} --fast -i 1 tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 2 --status',
             f'sky status -r {name} | grep UP',
         ],
