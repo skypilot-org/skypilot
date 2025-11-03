@@ -81,7 +81,8 @@ class RequestName(str, enum.Enum):
 
 
 class AdminPolicyRequestName(str, enum.Enum):
-    """Enum of all the request names that are used for admin policy application."""
+    """Enum of all the request names that are
+    used for admin policy application."""
     # General requests
     # validate call is not stored in the request db,
     # but is defined here for admin policy application
