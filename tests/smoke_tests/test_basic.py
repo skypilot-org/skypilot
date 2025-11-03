@@ -1611,9 +1611,10 @@ def test_launch_and_cancel_race_condition(generic_cloud: str):
             # Cancel immediately
             cancelled_request_ids = sky.get(
                 sky.api_cancel(request_ids=[request_id]))
-            assert len(cancelled_request_ids) == 1
-            assert cancelled_request_ids[0] == request_id
-            yield f'Cancelled 1 request: {request_id}'
+            assert len(cancelled_request_ids) == 1, \
+                f'Expected to cancel 1 request, got {len(cancelled_request_ids)}'
+            assert cancelled_request_ids[0] == request_id, \
+                f'Expected to cancel request {request_id}, got {cancelled_request_ids[0]}'
 
             # Clean up
             sky.down(cluster_name)
