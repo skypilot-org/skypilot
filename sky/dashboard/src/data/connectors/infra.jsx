@@ -33,6 +33,7 @@ export async function getCloudInfrastructure(forceRefresh = false) {
             const msg = 'No request ID received from server for sky check';
             throw new Error(msg);
           }
+
           // Wait for the check to complete
           const checkResult = await apiClient.get(
             `/api/get?request_id=${checkId}`

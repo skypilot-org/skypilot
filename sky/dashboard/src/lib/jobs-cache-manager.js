@@ -177,16 +177,8 @@ class JobsCacheManager {
         cacheStatus: 'server_page_fetch',
       };
     } catch (error) {
-      console.error('Error in getPaginatedJobs:', error);
-      return {
-        jobs: [],
-        total: 0,
-        totalNoFilter: 0,
-        controllerStopped: false,
-        statusCounts: {},
-        fromCache: false,
-        cacheStatus: 'error',
-      };
+      console.error('Error in getPaginatedJobs:', error.message);
+      throw error;
     }
   }
 

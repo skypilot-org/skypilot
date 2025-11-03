@@ -112,26 +112,20 @@ export async function getWorkspaceManagedJobs(workspaceName) {
 
     // Check if initial request succeeded
     if (!response.ok) {
-      console.error(
-        `Initial API request to get managed jobs failed with status ${response.status} for workspace ${workspaceName}`
-      );
-      return { __skipCache: true, jobs: [] };
+      const msg = `Initial API request to get managed jobs failed with status ${response.status} for workspace ${workspaceName}`;
+      throw new Error(msg);
     }
 
     const id = response.headers.get('X-Skypilot-Request-ID');
     // Handle empty request ID
     if (!id) {
-      console.error(
-        `No request ID received from server for getting managed jobs for workspace ${workspaceName}`
-      );
-      return { __skipCache: true, jobs: [] };
+      const msg = `No request ID received from server for getting managed jobs for workspace ${workspaceName}`;
+      throw new Error(msg);
     }
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
     if (!fetchedData.ok) {
-      console.error(
-        `API request to get managed jobs result failed with status ${fetchedData.status} for workspace ${workspaceName}`
-      );
-      return { __skipCache: true, jobs: [] };
+      const msg = `API request to get managed jobs result failed with status ${fetchedData.status} for workspace ${workspaceName}`;
+      throw new Error(msg);
     }
     const data = await fetchedData.json();
     const jobsData = data.return_value
@@ -153,11 +147,9 @@ export async function getWorkspaceManagedJobs(workspaceName) {
 
     return jobsData;
   } catch (error) {
-    console.error(
-      `Error fetching managed jobs for workspace ${workspaceName}:`,
-      error
-    );
-    return { __skipCache: true, jobs: [] };
+    const msg = `Error fetching managed jobs for workspace ${workspaceName}: ${error.message}`;
+    console.error(msg);
+    throw new Error(msg);
   }
 }
 
