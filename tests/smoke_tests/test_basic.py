@@ -1609,7 +1609,7 @@ def test_launch_and_cancel_race_condition(generic_cloud: str):
             request_id = sky.launch(task, cluster_name=cluster_name)
 
             # Cancel immediately
-            sky.api_cancel(request_ids=[request_id], silent=True)
+            sky.api_cancel(request_ids=[request_id])
 
             # Clean up
             sky.down(cluster_name)
