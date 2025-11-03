@@ -291,6 +291,26 @@ def _shlex_join(command: List[str]) -> str:
     return ' '.join(shlex.quote(arg) for arg in command)
 
 
+def _socket_connect_timeout_seconds() -> float:
+    """Returns the socket connect timeout used for SSH readiness probing."""
+    env_value = os.getenv('SKYPILOT_SSH_SOCKET_CONNECT_TIMEOUT')
+    if env_value is None:
+        return 1.0
+    try:
+        timeout = float(env_value)
+    except ValueError as e:
+        message = ('Invalid SKYPILOT_SSH_SOCKET_CONNECT_TIMEOUT value '
+                   f'{env_value!r}; must be a positive number.')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(message) from e
+    if timeout <= 0:
+        message = ('Invalid SKYPILOT_SSH_SOCKET_CONNECT_TIMEOUT value '
+                   f'{env_value!r}; must be a positive number.')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(message)
+    return timeout
+
+
 def _wait_ssh_connection_direct(ip: str,
                                 ssh_port: int,
                                 ssh_user: str,
@@ -314,7 +334,9 @@ def _wait_ssh_connection_direct(ip: str,
     try:
         success = False
         stderr = ''
-        with socket.create_connection((ip, ssh_port), timeout=1) as s:
+        connect_timeout = _socket_connect_timeout_seconds()
+        with socket.create_connection((ip, ssh_port),
+                                      timeout=connect_timeout) as s:
             if s.recv(100).startswith(b'SSH'):
                 # Wait for SSH being actually ready, otherwise we may get the
                 # following error:
