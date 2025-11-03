@@ -37,7 +37,6 @@ from sky import skypilot_config
 from sky.skylet import constants
 from sky.skylet import events
 from sky.utils import common_utils
-from sky.utils import context
 from sky.utils import yaml_utils
 
 
@@ -1596,7 +1595,6 @@ def test_launch_and_cancel_race_condition(generic_cloud: str):
 
     def launch_and_cancel(idx: int):
         try:
-            context.initialize()
             cluster_name = f'{name}-{idx}'
 
             # Create a minimal task
