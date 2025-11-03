@@ -856,6 +856,7 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
         # server thread.
         with admin_policy_utils.apply_and_use_config_in_current_request(
                 dag,
+                request_name=request_names.AdminPolicyRequestName.VALIDATE,
                 request_options=validate_body.get_request_options()) as dag:
             dag.resolve_and_validate_volumes()
             # Skip validating workdir and file_mounts, as those need to be

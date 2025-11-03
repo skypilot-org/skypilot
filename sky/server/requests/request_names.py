@@ -78,3 +78,24 @@ class RequestName(str, enum.Enum):
     REQUEST_DAEMON_MANAGED_JOB_STATUS_REFRESH = 'managed-job-status-refresh'
     REQUEST_DAEMON_SKY_SERVE_STATUS_REFRESH = 'sky-serve-status-refresh'
     REQUEST_DAEMON_POOL_STATUS_REFRESH = 'pool-status-refresh'
+
+
+class AdminPolicyRequestName(str, enum.Enum):
+    """Enum of all the request names that are used for admin policy application."""
+    # General requests
+    # validate call is not stored in the request db,
+    # but is defined here for admin policy application
+    VALIDATE = 'validate'
+    OPTIMIZE = RequestName.OPTIMIZE
+    # Cluster requests
+    CLUSTER_LAUNCH = RequestName.CLUSTER_LAUNCH
+    CLUSTER_EXEC = RequestName.CLUSTER_EXEC
+    # Jobs requests
+    JOBS_LAUNCH = RequestName.JOBS_LAUNCH
+    JOBS_POOL_APPLY = RequestName.JOBS_POOL_APPLY
+    # Serve requests
+    SERVE_UP = RequestName.SERVE_UP
+    SERVE_UPDATE = RequestName.SERVE_UPDATE
+    # serve launch replica request is not stored in the request db,
+    # but is defined here for admin policy application
+    SERVE_LAUNCH_REPLICA = 'serve.launch_replica'
