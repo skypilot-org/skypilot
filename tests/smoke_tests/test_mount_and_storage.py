@@ -314,10 +314,34 @@ def test_aws_storage_mounts_arm64():
 @pytest.mark.parametrize(
     'ami',
     [
-        'ami-0f5fcdfbd140e4ab7',  # dpkg
-        'ami-0a5a5b7e2278263e5'  # yum
+        None,  # Default image
+        # The image ID is retrieved with:
+        # aws ec2 describe-images \
+        # --owners 099720109477 \
+        # --filters "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-bionic-18.04-amd64-server-*" \
+        # --query 'Images | sort_by(@, &CreationDate) | [-1].[ImageId,Name,CreationDate]' \
+        # --output text --region us-east-2
+        'ami-0bb220fc4bffd88dd',  # Ubuntu 18.04 (dpkg)
+        # aws ec2 describe-images \
+        # --owners 099720109477 \
+        # --filters "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*" \
+        # --query 'Images | sort_by(@, &CreationDate) | [-1].[ImageId,Name,CreationDate]' \
+        # --output text --region us-east-2
+        'ami-076838d6a293cb49e',  # Ubuntu 20.04 (dpkg)
+        # aws ec2 describe-images \
+        # --owners 099720109477 \
+        # --filters "Name=name,Values=ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*" \
+        # --query 'Images | sort_by(@, &CreationDate) | [-1].[ImageId,Name,CreationDate]' \
+        # --output text --region us-east-2
+        'ami-0f5fcdfbd140e4ab7',  # Ubuntu 24.04 (dpkg)
+        # aws ec2 describe-images \
+        # --owners amazon \
+        # --filters "Name=name,Values=al2023-ami-2023.*-x86_64" \
+        # --query 'Images | sort_by(@, &CreationDate) | [-1].[ImageId,Name]' \
+        # --output text --region us-east-2
+        'ami-0a5a5b7e2278263e5'  # Amazon Linux 2023 (yum)
     ])
-def test_aws_storage_mounts_cached(ami: str):
+def test_aws_storage_mounts_cached(ami: Optional[str]):
     name = smoke_tests_utils.get_cluster_name()
     cloud = 'aws'
     storage_name = f'sky-test-{int(time.time())}'
@@ -328,9 +352,10 @@ def test_aws_storage_mounts_cached(ami: str):
 
             for i, cmd in enumerate(test_commands):
                 if cmd.startswith('sky launch') and '--infra aws' in cmd:
-                    test_commands[i] = cmd.replace(
-                        '--infra aws',
-                        f'--infra aws/us-east-2 --image-id {ami}')
+                    if ami is not None:
+                        test_commands[i] = cmd.replace(
+                            '--infra aws',
+                            f'--infra aws/us-east-2 --image-id {ami}')
                     break
 
             test = smoke_tests_utils.Test(
