@@ -26,6 +26,8 @@ import { Settings, User } from 'lucide-react';
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
+import { SignOut } from '../auth/signout';
+import { useAuthMethod } from '@/hooks/auth/useAuthMethod';
 
 // Create a context for sidebar state management
 const SidebarContext = createContext(null);
@@ -161,6 +163,7 @@ export function TopBar() {
   const { userEmail, userRole, isMobileSidebarOpen, toggleMobileSidebar } =
     useSidebar();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const authMethod = useAuthMethod();
 
   const dropdownRef = useRef(null);
   const mobileNavRef = useRef(null);
@@ -487,6 +490,11 @@ export function TopBar() {
                     >
                       See all users
                     </Link>
+                    {authMethod === 'oauth2' && (
+                      <SignOut className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-blue-600">
+                        Sign Out
+                      </SignOut>
+                    )}
                   </div>
                 )}
               </div>
