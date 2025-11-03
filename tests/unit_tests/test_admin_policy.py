@@ -17,6 +17,7 @@ from sky import exceptions
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.server.requests import request_names
 from sky.utils import admin_policy_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -61,6 +62,7 @@ def _load_task_and_apply_policy(
     importlib.reload(skypilot_config)
     return admin_policy_utils.apply(
         task,
+        request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
         request_options=sky.admin_policy.RequestOptions(
             cluster_name='test',
             idle_minutes_to_autostop=idle_minutes_to_autostop,
@@ -100,7 +102,9 @@ def test_use_spot_for_all_gpus_policy(add_example_policy_paths, task):
 
 def test_add_labels_policy(add_example_policy_paths, task):
     task = _load_task(task, os.path.join(POLICY_PATH, 'add_labels.yaml'))
-    with admin_policy_utils.apply_and_use_config_in_current_request(task):
+    with admin_policy_utils.apply_and_use_config_in_current_request(
+            task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH):
         assert 'app' in skypilot_config.get_nested(
             ('kubernetes', 'custom_metadata', 'labels'),
             {}), ('label should be set')
@@ -215,7 +219,10 @@ def test_dynamic_kubernetes_contexts_policy(add_example_policy_paths, task):
             None) == ['kind-skypilot', 'kind-skypilot2'
                      ], 'Kubernetes allowed contexts should be updated'
 
-        with admin_policy_utils.apply_and_use_config_in_current_request(dag):
+        with admin_policy_utils.apply_and_use_config_in_current_request(
+                dag,
+                request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH
+        ):
             assert skypilot_config.get_nested(
                 ('kubernetes', 'allowed_contexts'),
                 None) == ['kind-skypilot', 'kind-skypilot2'
