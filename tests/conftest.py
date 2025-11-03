@@ -550,6 +550,7 @@ def setup_policy_server(request, tmp_path_factory):
     try:
         policy_server_url: Optional[str] = None
         with filelock.FileLock(str(fn) + ".lock"):
+            launch_server = True
             if fn.is_file():
                 ref_count(1)
                 policy_server_url = fn.read_text().strip()
@@ -557,7 +558,22 @@ def setup_policy_server(request, tmp_path_factory):
                     f'Using existing policy server {policy_server_url}, file: {fn}',
                     file=sys.stderr,
                     flush=True)
-            else:
+                port = int(policy_server_url.split(':')[2])
+                # Healthz check the running server
+                try:
+                    wait_server(port)
+                    # The server is running, reuse it
+                    launch_server = False
+                except RuntimeError:
+                    # There is a broken state from previous crashed test, recover it
+                    print(
+                        f'Policy server {policy_server_url} is not running, launching new server',
+                        file=sys.stderr,
+                        flush=True)
+                    pathlib.Path(counter_file).unlink(missing_ok=True)
+                    launch_server = True
+
+            if launch_server:
                 # Launch the policy server
                 port = common_utils.find_free_port(start_port=10000)
                 policy_server_url = f'http://127.0.0.1:{port}'
@@ -583,7 +599,7 @@ def setup_policy_server(request, tmp_path_factory):
     finally:
         with filelock.FileLock(str(fn) + ".lock"):
             count = ref_count(-1)
-            if count == 0:
+            if count <= 0:
                 # All workers are done, run post cleanup.
                 pid = pid_file.read_text().strip()
                 if pid:
