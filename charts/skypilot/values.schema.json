@@ -304,48 +304,39 @@
                 "enabled": {
                     "type": "boolean"
                 },
-                "hosts": {
-                    "type": "array",
-                    "description": "List of host definitions for multi-host ingress support.",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                        "host": {
-                            "type": "string",
-                            "description": "Hostname (e.g., skypilot.company.com)."
-                        },
-                        "paths": {
-                            "type": "array",
-                            "description": "List of paths and backend services for this host.",
-                            "items": {
-                            "type": "object",
-                            "properties": {
-                                "path": {
-                                "type": "string",
-                                "description": "Path prefix for this backend (e.g., / or /grafana)."
-                                },
-                                "serviceName": {
-                                "type": "string",
-                                "description": "Kubernetes Service name to route to."
-                                },
-                                "servicePort": {
-                                "type": "integer",
-                                "description": "Service port number to route to."
-                                }
-                            },
-                            "required": ["path", "serviceName", "servicePort"]
-                            }
-                        }
-                        },
-                        "required": ["host", "paths"]
-                    }
-                },
                 "host": {
                     "type": [
                         "string",
                         "null"
-                    ],
-                    "description": "(Deprecated) Single hostname for the ingress."
+                    ]
+                },
+                "hosts": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "host": {
+                                "type": "string"
+                            },
+                            "paths": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "path": {
+                                            "type": "string"
+                                        },
+                                        "serviceName": {
+                                            "type": "string"
+                                        },
+                                        "servicePort": {
+                                            "type": "integer"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 },
                 "httpNodePort": {
                     "type": [
@@ -424,8 +415,7 @@
                     }
                 },
                 "path": {
-                    "type": "string",
-                    "description": "(Deprecated) Path prefix for the ingress (default: /)."
+                    "type": "string"
                 }
             }
         },
