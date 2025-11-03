@@ -27,9 +27,25 @@ case "$PROVIDER" in
   aws|AWS)
     CLUSTER_NAME=${1:-"$CLUSTER_NAME_DEFAULT"}
     REGION=${2:-"us-east-2"}
-    echo "Deleting EKS cluster '$CLUSTER_NAME' in region '$REGION'..."
-    eksctl delete cluster --name "$CLUSTER_NAME" --region "$REGION" || true
-    echo "EKS cluster '$CLUSTER_NAME' deleted (or did not exist)."
+    # Use timeout of 3600 seconds (1 hour) for EKS cluster deletion
+    # CloudFormation stack deletion can take a long time
+    TIMEOUT_SECONDS=${3:-3600}
+    echo "Deleting EKS cluster '$CLUSTER_NAME' in region '$REGION' (timeout: ${TIMEOUT_SECONDS}s)..."
+    # Temporarily disable set -e to handle timeout gracefully
+    set +e
+    timeout "$TIMEOUT_SECONDS" eksctl delete cluster --name "$CLUSTER_NAME" --region "$REGION"
+    exit_code=$?
+    set -e
+
+    if [ $exit_code -eq 124 ]; then
+        echo "⚠️  Warning: EKS cluster deletion timed out after ${TIMEOUT_SECONDS} seconds"
+        echo "Cluster deletion may still be in progress in the background"
+    elif [ $exit_code -eq 0 ]; then
+        echo "EKS cluster '$CLUSTER_NAME' deleted successfully"
+    else
+        echo "EKS cluster deletion completed with exit code: $exit_code"
+    fi
+    echo "EKS cluster '$CLUSTER_NAME' deletion process finished."
     ;;
   *)
     echo "Unsupported provider: $PROVIDER"
