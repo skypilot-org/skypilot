@@ -123,8 +123,6 @@ def apply(
         - The new copy of dag after applying the policy
         - The new copy of skypilot config after applying the policy.
     """
-    # TODO (this PR): pass request_name to UserRequest
-    del request_name
     if isinstance(entrypoint, task_lib.Task):
         dag = dag_lib.Dag()
         dag.add(entrypoint)
@@ -150,8 +148,8 @@ def apply(
 
     mutated_config = None
     for task in dag.tasks:
-        user_request = admin_policy.UserRequest(task, config, request_options,
-                                                at_client_side, user)
+        user_request = admin_policy.UserRequest(task, config, str(request_name),
+                                                request_options, at_client_side, user)
         try:
             mutated_user_request = policy.apply(user_request)
         # Avoid duplicate exception wrapping.

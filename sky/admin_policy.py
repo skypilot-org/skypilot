@@ -50,6 +50,7 @@ class _UserRequestBody(pydantic.BaseModel):
     # will be converted to JSON string, which will lose the None key.
     task: str
     skypilot_config: str
+    request_name: str
     request_options: Optional[RequestOptions] = None
     at_client_side: bool = False
     user: str
@@ -81,6 +82,7 @@ class UserRequest:
     """
     task: 'sky.Task'
     skypilot_config: 'sky.Config'
+    request_name: str
     request_options: Optional['RequestOptions'] = None
     at_client_side: bool = False
     user: Optional['models.User'] = None
@@ -90,6 +92,7 @@ class UserRequest:
             task=yaml_utils.dump_yaml_str(self.task.to_yaml_config()),
             skypilot_config=yaml_utils.dump_yaml_str(dict(
                 self.skypilot_config)),
+            request_name=self.request_name,
             request_options=self.request_options,
             at_client_side=self.at_client_side,
             user=(yaml_utils.dump_yaml_str(self.user.to_dict())
@@ -110,6 +113,7 @@ class UserRequest:
             skypilot_config=config_utils.Config.from_dict(
                 yaml_utils.read_yaml_all_str(
                     user_request_body.skypilot_config)[0]),
+            request_name=user_request_body.request_name,
             request_options=user_request_body.request_options,
             at_client_side=user_request_body.at_client_side,
             user=user,

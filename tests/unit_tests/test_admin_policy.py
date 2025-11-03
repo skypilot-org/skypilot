@@ -272,9 +272,11 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
                          {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
         fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
         fresh_task.run = None
-        user_request = sky.UserRequest(task=fresh_task,
-                                       skypilot_config=None,
-                                       at_client_side=True)
+        user_request = sky.UserRequest(
+            task=fresh_task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=None,
+            at_client_side=True)
         mutated_request = policy.apply(user_request)
 
         # Check that the credentials file is mounted
@@ -296,9 +298,11 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
         fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
         original_run_cmd = 'echo "hello world"'
         fresh_task.run = original_run_cmd
-        user_request = sky.UserRequest(task=fresh_task,
-                                       skypilot_config=None,
-                                       at_client_side=True)
+        user_request = sky.UserRequest(
+            task=fresh_task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=None,
+            at_client_side=True)
         mutated_request = policy.apply(user_request)
 
         # Check that the gcloud auth command is prepended
@@ -316,9 +320,11 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
     with mock.patch.dict(os.environ, env_without_creds, clear=True):
         fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
         original_run_cmd = fresh_task.run
-        user_request = sky.UserRequest(task=fresh_task,
-                                       skypilot_config=None,
-                                       at_client_side=True)
+        user_request = sky.UserRequest(
+            task=fresh_task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=None,
+            at_client_side=True)
         mutated_request = policy.apply(user_request)
 
         # Check that the entire gcloud directory is mounted
@@ -333,9 +339,11 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
                          {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
         fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
         fresh_task.file_mounts = {'/existing/mount': '/local/path'}
-        user_request = sky.UserRequest(task=fresh_task,
-                                       skypilot_config=None,
-                                       at_client_side=True)
+        user_request = sky.UserRequest(
+            task=fresh_task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=None,
+            at_client_side=True)
         mutated_request = policy.apply(user_request)
 
         # Check that both existing and new mounts are present
@@ -348,9 +356,11 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
     with mock.patch.dict(os.environ,
                          {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
         fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
-        user_request = sky.UserRequest(task=fresh_task,
-                                       skypilot_config=None,
-                                       at_client_side=False)
+        user_request = sky.UserRequest(
+            task=fresh_task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=None,
+            at_client_side=False)
         # Should reject the request if it is not applied at client-side
         with pytest.raises(RuntimeError,
                            match='Policy UseLocalGcpCredentialsPolicy was not '
@@ -360,12 +370,15 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
     with mock.patch.dict(os.environ,
                          {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
         fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
-        user_request = sky.UserRequest(task=fresh_task,
-                                       skypilot_config=None,
-                                       at_client_side=True)
+        user_request = sky.UserRequest(
+            task=fresh_task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=None,
+            at_client_side=True)
         mr = policy.apply(user_request)
         mutated_user_request = sky.UserRequest(
             task=mr.task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
             skypilot_config=mr.skypilot_config,
             at_client_side=False)
         # Server accept the request if it is applied at client-side
@@ -376,9 +389,11 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
                          {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
         fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
         fresh_task.envs['SKYPILOT_LOCAL_GCP_CREDENTIALS_SET'] = 'v0'
-        user_request = sky.UserRequest(task=fresh_task,
-                                       skypilot_config=None,
-                                       at_client_side=False)
+        user_request = sky.UserRequest(
+            task=fresh_task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=None,
+            at_client_side=False)
         # Should reject the request due to version mismatch
         with pytest.raises(RuntimeError,
                            match='Policy UseLocalGcpCredentialsPolicy at v0 '
