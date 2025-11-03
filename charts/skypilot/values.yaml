@@ -273,12 +273,12 @@ ingress:
   ##   - one or more backend services (paths)
   ##
   ## Example:
-  hosts:
-    - host: skypilot.company.com
-      paths:
-        - path: /
-          serviceName: skypilot-api-service
-          servicePort: 80
+  ## hosts:
+  ##   - host: null
+  ##     paths:
+  ##       - path: /
+  ##         serviceName: skypilot-api-service
+  ##         servicePort: 80
   ##         - path: /grafana
   ##           serviceName: skypilot-grafana
   ##           servicePort: 80
