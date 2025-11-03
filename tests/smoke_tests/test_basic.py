@@ -1643,8 +1643,8 @@ def test_launch_and_cancel_race_condition(generic_cloud: str):
             run_parallel_launch_and_cancel,
             # Sleep shortly, so that if there is any leaked cluster it can be shown in sky status.
             'sleep 10',
-            # Verify the cluster is not created.
-            f'sky status {name} | grep "not found"',
+            # Verify the cluster(s) are not created.
+            f'sky status "{name}*" | grep "not found"',
         ],
         timeout=smoke_tests_utils.get_timeout(generic_cloud),
     )
