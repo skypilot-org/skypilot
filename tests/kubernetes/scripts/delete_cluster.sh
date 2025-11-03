@@ -31,4 +31,9 @@ case "$PROVIDER" in
     eksctl delete cluster --name "$CLUSTER_NAME" --region "$REGION" || true
     echo "EKS cluster '$CLUSTER_NAME' deleted (or did not exist)."
     ;;
+  *)
+    echo "Unsupported provider: $PROVIDER"
+    echo "Usage: $0 <gcp|aws> [args...]"
+    exit 1
+    ;;
 esac
