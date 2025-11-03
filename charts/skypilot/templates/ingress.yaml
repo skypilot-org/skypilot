@@ -70,10 +70,10 @@ spec:
         paths:
         {{- range .paths }}
         - pathType: {{ if eq .path "/" }}Prefix{{ else }}ImplementationSpecific{{ end }}
-          path: {{ .path }}{{ if ne .path "/" }}(/|$)(.*){{ end }}
+          path: {{ .path }}
           backend:
             service:
-              name: {{ printf "%s-%s" $.Release.Name .serviceName }}
+              name: {{ printf "%s-%s" $.Release.Namespace .serviceName }}
               port:
                 number: {{ .servicePort }}
         {{- end }}
