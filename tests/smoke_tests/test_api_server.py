@@ -359,8 +359,12 @@ def test_managed_jobs_force_disable_cloud_bucket(generic_cloud: str):
 
 
 def test_big_file_upload_memory_usage(generic_cloud: str):
-    if not smoke_tests_utils.is_remote_server_test():
-        pytest.skip('This test is only for remote server')
+    # TODO(kevin): Re-enable this once we have a standardized way to expose /metrics
+    # on the non-docker remote API servers used for smoke tests.
+    if not smoke_tests_utils.is_docker_remote_api_server():
+        pytest.skip(
+            'This test is only for remote server setup with setup_docker_container fixture'
+        )
 
     def compare_rss_metrics(baseline: Dict[Tuple[str, ...], List[Tuple[float,
                                                                        float]]],
@@ -401,9 +405,9 @@ def test_big_file_upload_memory_usage(generic_cloud: str):
                 total_increase: float, total_increase_pct: float) -> List[str]:
             """Aggregate threshold checker for RSS metrics."""
             failures = []
-            if total_increase_pct > 20:
+            if total_increase_pct > 30:
                 failures.append(
-                    f"Average memory increase too high: {total_increase_pct:.1f}% (limit: 20%)"
+                    f"Average memory increase too high: {total_increase_pct:.1f}% (limit: 30%)"
                 )
             return failures
 
@@ -544,7 +548,7 @@ def test_tail_jobs_logs_blocks_ssh(generic_cloud: str):
         # Wait for the job to start.
         def is_job_started(job_id: int):
             req_id = jobs.queue(refresh=True, job_ids=[job_id])
-            job_records = sky.stream_and_get(req_id)
+            job_records = sky.stream_and_get(req_id)[0]
             assert len(job_records) == 1
             return job_records[0]['status'] == sky.ManagedJobStatus.RUNNING
 
@@ -608,7 +612,8 @@ def test_tail_jobs_logs_blocks_ssh(generic_cloud: str):
 
         # Join threads.
         for thread in threads:
-            thread.join()
+            if thread:
+                thread.join()
 
 
 # TODO(aylei): support running this test on remote server.

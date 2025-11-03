@@ -18,6 +18,7 @@ from sky import sky_logging
 from sky.adaptors import aws
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
+from sky.adaptors import coreweave
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
@@ -602,6 +603,77 @@ class NebiusCloudStorage(CloudStorage):
         return ' && '.join(all_commands)
 
 
+class CoreWeaveCloudStorage(CloudStorage):
+    """CoreWeave Cloud Storage."""
+
+    # List of commands to install AWS CLI
+    _GET_AWSCLI = [
+        'aws --version >/dev/null 2>&1 || '
+        f'{constants.SKY_UV_PIP_CMD} install awscli',
+    ]
+
+    def is_directory(self, url: str) -> bool:
+        """Checks if the coreweave object is a directory.
+
+        In cloud object stores, a "directory" refers to a regular object whose
+        name is a prefix of other objects.
+
+        Args:
+            url: coreweave object URL.
+        """
+        cw = coreweave.resource('s3')
+        bucket_name, path = data_utils.split_coreweave_path(url)
+        bucket = cw.Bucket(bucket_name)
+
+        num_objects = 0
+        for obj in bucket.objects.filter(Prefix=path):
+            num_objects += 1
+            if obj.key == path:
+                return False
+            # If there are more than 1 object in filter, then it is a directory
+            if num_objects == 3:
+                return True
+
+        # A directory with few or no items
+        return True
+
+    def make_sync_dir_command(self, source: str, destination: str) -> str:
+        """Downloads using AWS CLI."""
+        # AWS Sync by default uses 10 threads to upload files to the bucket.
+        # To increase parallelism, modify max_concurrent_requests in your
+        # aws config file (Default path: ~/.coreweave/cw.config).
+        assert 'cw://' in source, 'cw:// is not in source'
+        source = source.replace('cw://', 's3://')
+        download_via_awscli = (
+            'AWS_SHARED_CREDENTIALS_FILE='
+            f'{coreweave.COREWEAVE_CREDENTIALS_PATH} '
+            f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} '
+            f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+            'sync --no-follow-symlinks '
+            f'{source} {destination} '
+            f'--profile={coreweave.COREWEAVE_PROFILE_NAME}')
+
+        all_commands = list(self._GET_AWSCLI)
+        all_commands.append(download_via_awscli)
+        return ' && '.join(all_commands)
+
+    def make_sync_file_command(self, source: str, destination: str) -> str:
+        """Downloads a file using AWS CLI."""
+        assert 'cw://' in source, 'cw:// is not in source'
+        source = source.replace('cw://', 's3://')
+        download_via_awscli = (
+            'AWS_SHARED_CREDENTIALS_FILE='
+            f'{coreweave.COREWEAVE_CREDENTIALS_PATH} '
+            f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} '
+            f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+            f'cp {source} {destination} '
+            f'--profile={coreweave.COREWEAVE_PROFILE_NAME}')
+
+        all_commands = list(self._GET_AWSCLI)
+        all_commands.append(download_via_awscli)
+        return ' && '.join(all_commands)
+
+
 def get_storage_from_path(url: str) -> CloudStorage:
     """Returns a CloudStorage by identifying the scheme:// in a URL."""
     result = urllib.parse.urlsplit(url)
@@ -619,6 +691,7 @@ _REGISTRY = {
     'cos': IBMCosCloudStorage(),
     'oci': OciCloudStorage(),
     'nebius': NebiusCloudStorage(),
+    'cw': CoreWeaveCloudStorage(),
     # TODO: This is a hack, as Azure URL starts with https://, we should
     # refactor the registry to be able to take regex, so that Azure blob can
     # be identified with `https://(.*?)\.blob\.core\.windows\.net`

@@ -156,8 +156,8 @@ async def test_api_cancel_race_condition(isolated_database):
     assert await requests_lib.create_if_not_exists_async(req) is True
 
     # Cancel the request before the executor starts.
-    cancelled = requests_lib.kill_requests(['race-cancel-before'])
-    assert cancelled == ['race-cancel-before']
+    cancelled = await requests_lib.kill_request_async('race-cancel-before')
+    assert cancelled is True
 
     # Execute wrapper should detect CANCELLED and return immediately.
     executor._request_execution_wrapper('race-cancel-before',

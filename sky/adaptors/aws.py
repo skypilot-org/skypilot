@@ -34,6 +34,7 @@ import time
 import typing
 from typing import Callable, Literal, Optional, TypeVar
 
+from sky import skypilot_config
 from sky.adaptors import common
 from sky.utils import annotations
 from sky.utils import common_utils
@@ -119,12 +120,27 @@ def _create_aws_object(creation_fn_or_cls: Callable[[], T],
                         f'{common_utils.format_exception(e)}.')
 
 
+def get_workspace_profile() -> Optional[str]:
+    """Get AWS profile name from workspace config."""
+    return skypilot_config.get_workspace_cloud('aws').get('profile', None)
+
+
 # The LRU cache needs to be thread-local to avoid multiple threads sharing the
 # same session object, which is not guaranteed to be thread-safe.
 @_thread_local_lru_cache()
-def session(check_credentials: bool = True):
-    """Create an AWS session."""
-    s = _create_aws_object(boto3.session.Session, 'session')
+def session(check_credentials: bool = True, profile: Optional[str] = None):
+    """Create an AWS session.
+
+    Args:
+        check_credentials: Whether to check if credentials are available.
+        profile: AWS profile name to use. If None, uses default credentials.
+    """
+    if profile is not None:
+        logger.debug(f'Using AWS profile \'{profile}\'.')
+        s = _create_aws_object(
+            lambda: boto3.session.Session(profile_name=profile), 'session')
+    else:
+        s = _create_aws_object(boto3.session.Session, 'session')
     if check_credentials and s.get_credentials() is None:
         # s.get_credentials() can be None if there are actually no credentials,
         # or if we fail to get credentials from IMDS (e.g. due to throttling).
@@ -180,13 +196,14 @@ def resource(service_name: str, **kwargs):
         kwargs['config'] = config
 
     check_credentials = kwargs.pop('check_credentials', True)
+    profile = get_workspace_profile()
 
     # Need to use the client retrieved from the per-thread session to avoid
     # thread-safety issues (Directly creating the client with boto3.resource()
     # is not thread-safe). Reference: https://stackoverflow.com/a/59635814
     return _create_aws_object(
-        lambda: session(check_credentials=check_credentials).resource(
-            service_name, **kwargs), 'resource')
+        lambda: session(check_credentials=check_credentials, profile=profile).
+        resource(service_name, **kwargs), 'resource')
 
 
 # New typing overloads can be added as needed.
@@ -221,14 +238,15 @@ def client(service_name: str, **kwargs):
     _assert_kwargs_builtin_type(kwargs)
 
     check_credentials = kwargs.pop('check_credentials', True)
+    profile = get_workspace_profile()
 
     # Need to use the client retrieved from the per-thread session to avoid
     # thread-safety issues (Directly creating the client with boto3.client() is
     # not thread-safe). Reference: https://stackoverflow.com/a/59635814
 
     return _create_aws_object(
-        lambda: session(check_credentials=check_credentials).client(
-            service_name, **kwargs), 'client')
+        lambda: session(check_credentials=check_credentials, profile=profile).
+        client(service_name, **kwargs), 'client')
 
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)

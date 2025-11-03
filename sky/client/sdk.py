@@ -2099,16 +2099,16 @@ def stream_and_get(
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None),
         stream=True)
+    if response.status_code in [404, 400]:
+        detail = response.json().get('detail')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClientError(f'Failed to stream logs: {detail}')
     stream_request_id: Optional[server_common.RequestId[
         T]] = server_common.get_stream_request_id(response)
     if request_id is not None and stream_request_id is not None:
         assert request_id == stream_request_id
     if request_id is None:
         request_id = stream_request_id
-    if response.status_code in [404, 400]:
-        detail = response.json().get('detail')
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClientError(f'Failed to stream logs: {detail}')
     elif response.status_code != 200:
         # TODO(syang): handle the case where the requestID is not provided
         # see https://github.com/skypilot-org/skypilot/issues/6549

@@ -153,6 +153,14 @@ apiService:
   # [Internal] Enable developer mode for SkyPilot
   skypilotDev: false
 
+  # Configure how to manage API server logs
+  logs:
+    retention:
+      # Whether to enable log retention
+      enabled: true
+      # The size of the log file to retain
+      size: 10M
+
 # Authentication configuration for the API server
 # Refer to https://docs.skypilot.co/en/latest/reference/auth.html for more details.
 # @schema type: [object, null]
@@ -477,10 +485,16 @@ awsCredentials:
   enabled: false
   # Name of the secret containing the aws credentials. Only used if enabled is true.
   awsSecretName: aws-credentials
+
+  # Set to true to mount a complete AWS credentials file with multiple profiles.
+  # This is required for using different AWS profiles with different workspaces.
+  useCredentialsFile: false
+
   # Key name used to set AWS_ACCESS_KEY_ID.
   accessKeyIdKeyName: aws_access_key_id
   # Key name used to set AWS_SECRET_ACCESS_KEY.
   secretAccessKeyKeyName: aws_secret_access_key
+
 
 gcpCredentials:
   enabled: false
@@ -603,7 +617,10 @@ grafana:
     enableAuthedIngress: true
     path: "/grafana"
     ingressClassName: nginx
-    hosts: null
+    # @schema type: [array]; item: string
+    # If you set hosts to null, the Grafana Helm chart will use its default value ([chart-example.local]).
+    # To match all hosts, set hosts to an empty array ([]).
+    hosts: []
   grafana.ini:
     server:
       domain: localhost

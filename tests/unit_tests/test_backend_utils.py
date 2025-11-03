@@ -214,8 +214,8 @@ def test_get_clusters_launch_refresh(monkeypatch):
             _mock_cluster(True, 'None')
         ]
 
-    def get_readable_resources_repr(handle, simplify):
-        return ''
+    def get_readable_resources_repr(handle, simplified_only):
+        return ('', None) if simplified_only else ('', '')
 
     def ssh_credentials_from_handles(handles):
         return []
@@ -235,7 +235,7 @@ def test_get_clusters_launch_refresh(monkeypatch):
         return [magic_mock]
 
     monkeypatch.setattr('sky.global_user_state.get_clusters', get_clusters_mock)
-    monkeypatch.setattr('sky.utils.resources_utils',
+    monkeypatch.setattr('sky.utils.resources_utils.get_readable_resources_repr',
                         get_readable_resources_repr)
     monkeypatch.setattr(
         'sky.backends.backend_utils.ssh_credentials_from_handles',

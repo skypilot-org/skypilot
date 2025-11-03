@@ -6,6 +6,7 @@ import base64
 from concurrent.futures import ThreadPoolExecutor
 import contextlib
 import datetime
+from enum import IntEnum
 import hashlib
 import json
 import multiprocessing
@@ -15,6 +16,7 @@ import posixpath
 import re
 import resource
 import shutil
+import struct
 import sys
 import threading
 import traceback
@@ -25,6 +27,7 @@ import zipfile
 import aiofiles
 import anyio
 import fastapi
+from fastapi import responses as fastapi_responses
 from fastapi.middleware import cors
 import starlette.middleware.base
 import uvloop
@@ -61,6 +64,7 @@ from sky.server.auth import oauth2_proxy
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
+from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.ssh_node_pools import server as ssh_node_pools_rest
@@ -459,7 +463,7 @@ async def schedule_on_boot_check_async():
     try:
         await executor.schedule_request_async(
             request_id='skypilot-server-on-boot-check',
-            request_name='check',
+            request_name=request_names.RequestName.CHECK,
             request_body=payloads.CheckBody(),
             func=sky_check.check,
             schedule_type=requests_lib.ScheduleType.SHORT,
@@ -731,7 +735,7 @@ async def check(request: fastapi.Request,
     """Checks enabled clouds."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='check',
+        request_name=request_names.RequestName.CHECK,
         request_body=check_body,
         func=sky_check.check,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -745,7 +749,7 @@ async def enabled_clouds(request: fastapi.Request,
     """Gets enabled clouds on the server."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='enabled_clouds',
+        request_name=request_names.RequestName.ENABLED_CLOUDS,
         request_body=payloads.EnabledCloudsBody(workspace=workspace,
                                                 expand=expand),
         func=core.enabled_clouds,
@@ -761,7 +765,8 @@ async def realtime_kubernetes_gpu_availability(
     """Gets real-time Kubernetes GPU availability."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='realtime_kubernetes_gpu_availability',
+        request_name=request_names.RequestName.
+        REALTIME_KUBERNETES_GPU_AVAILABILITY,
         request_body=realtime_gpu_availability_body,
         func=core.realtime_kubernetes_gpu_availability,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -776,7 +781,7 @@ async def kubernetes_node_info(
     """Gets Kubernetes nodes information and hints."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='kubernetes_node_info',
+        request_name=request_names.RequestName.KUBERNETES_NODE_INFO,
         request_body=kubernetes_node_info_body,
         func=kubernetes_utils.get_kubernetes_node_info,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -788,7 +793,7 @@ async def status_kubernetes(request: fastapi.Request) -> None:
     """Gets Kubernetes status."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='status_kubernetes',
+        request_name=request_names.RequestName.STATUS_KUBERNETES,
         request_body=payloads.RequestBody(),
         func=core.status_kubernetes,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -802,7 +807,7 @@ async def list_accelerators(
     """Gets list of accelerators from cloud catalog."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='list_accelerators',
+        request_name=request_names.RequestName.LIST_ACCELERATORS,
         request_body=list_accelerator_counts_body,
         func=catalog.list_accelerators,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -817,7 +822,7 @@ async def list_accelerator_counts(
     """Gets list of accelerator counts from cloud catalog."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='list_accelerator_counts',
+        request_name=request_names.RequestName.LIST_ACCELERATOR_COUNTS,
         request_body=list_accelerator_counts_body,
         func=catalog.list_accelerator_counts,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -874,7 +879,7 @@ async def optimize(optimize_body: payloads.OptimizeBody,
     """Optimizes the user's DAG."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='optimize',
+        request_name=request_names.RequestName.OPTIMIZE,
         request_body=optimize_body,
         ignore_return_value=True,
         func=core.optimize,
@@ -1084,7 +1089,7 @@ async def launch(launch_body: payloads.LaunchBody,
     logger.info(f'Launching request: {request_id}')
     await executor.schedule_request_async(
         request_id,
-        request_name='launch',
+        request_name=request_names.RequestName.CLUSTER_LAUNCH,
         request_body=launch_body,
         func=execution.launch,
         schedule_type=requests_lib.ScheduleType.LONG,
@@ -1100,7 +1105,7 @@ async def exec(request: fastapi.Request, exec_body: payloads.ExecBody) -> None:
     cluster_name = exec_body.cluster_name
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='exec',
+        request_name=request_names.RequestName.CLUSTER_EXEC,
         request_body=exec_body,
         func=execution.exec,
         precondition=preconditions.ClusterStartCompletePrecondition(
@@ -1118,7 +1123,7 @@ async def stop(request: fastapi.Request,
     """Stops a cluster."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='stop',
+        request_name=request_names.RequestName.CLUSTER_STOP,
         request_body=stop_body,
         func=core.stop,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -1138,7 +1143,7 @@ async def status(
             detail='Server is shutting down, please try again later.')
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='status',
+        request_name=request_names.RequestName.CLUSTER_STATUS,
         request_body=status_body,
         func=core.status,
         schedule_type=(requests_lib.ScheduleType.LONG if
@@ -1153,7 +1158,7 @@ async def endpoints(request: fastapi.Request,
     """Gets the endpoint for a given cluster and port number (endpoint)."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='endpoints',
+        request_name=request_names.RequestName.CLUSTER_ENDPOINTS,
         request_body=endpoint_body,
         func=core.endpoints,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -1167,7 +1172,7 @@ async def down(request: fastapi.Request,
     """Tears down a cluster."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='down',
+        request_name=request_names.RequestName.CLUSTER_DOWN,
         request_body=down_body,
         func=core.down,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -1181,7 +1186,7 @@ async def start(request: fastapi.Request,
     """Restarts a cluster."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='start',
+        request_name=request_names.RequestName.CLUSTER_START,
         request_body=start_body,
         func=core.start,
         schedule_type=requests_lib.ScheduleType.LONG,
@@ -1195,7 +1200,7 @@ async def autostop(request: fastapi.Request,
     """Schedules an autostop/autodown for a cluster."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='autostop',
+        request_name=request_names.RequestName.CLUSTER_AUTOSTOP,
         request_body=autostop_body,
         func=core.autostop,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -1209,7 +1214,7 @@ async def queue(request: fastapi.Request,
     """Gets the job queue of a cluster."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='queue',
+        request_name=request_names.RequestName.CLUSTER_QUEUE,
         request_body=queue_body,
         func=core.queue,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -1223,7 +1228,7 @@ async def job_status(request: fastapi.Request,
     """Gets the status of a job."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='job_status',
+        request_name=request_names.RequestName.CLUSTER_JOB_STATUS,
         request_body=job_status_body,
         func=core.job_status,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -1237,7 +1242,7 @@ async def cancel(request: fastapi.Request,
     """Cancels jobs on a cluster."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='cancel',
+        request_name=request_names.RequestName.CLUSTER_JOB_CANCEL,
         request_body=cancel_body,
         func=core.cancel,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -1257,7 +1262,7 @@ async def logs(
     executor.check_request_thread_executor_available()
     request_task = await executor.prepare_request_async(
         request_id=request.state.request_id,
-        request_name='logs',
+        request_name=request_names.RequestName.CLUSTER_JOB_LOGS,
         request_body=cluster_job_body,
         func=core.tail_logs,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -1288,7 +1293,7 @@ async def download_logs(
     cluster_jobs_body.local_dir = str(logs_dir_on_api_server)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='download_logs',
+        request_name=request_names.RequestName.CLUSTER_JOB_DOWNLOAD_LOGS,
         request_body=cluster_jobs_body,
         func=core.download_logs,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -1439,7 +1444,7 @@ async def cost_report(request: fastapi.Request,
     """Gets the cost report of a cluster."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='cost_report',
+        request_name=request_names.RequestName.CLUSTER_COST_REPORT,
         request_body=cost_report_body,
         func=core.cost_report,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -1451,7 +1456,7 @@ async def storage_ls(request: fastapi.Request) -> None:
     """Gets the storages."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='storage_ls',
+        request_name=request_names.RequestName.STORAGE_LS,
         request_body=payloads.RequestBody(),
         func=core.storage_ls,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -1464,7 +1469,7 @@ async def storage_delete(request: fastapi.Request,
     """Deletes a storage."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='storage_delete',
+        request_name=request_names.RequestName.STORAGE_DELETE,
         request_body=storage_body,
         func=core.storage_delete,
         schedule_type=requests_lib.ScheduleType.LONG,
@@ -1477,7 +1482,7 @@ async def local_up(request: fastapi.Request,
     """Launches a Kubernetes cluster on API server."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='local_up',
+        request_name=request_names.RequestName.LOCAL_UP,
         request_body=local_up_body,
         func=core.local_up,
         schedule_type=requests_lib.ScheduleType.LONG,
@@ -1490,17 +1495,34 @@ async def local_down(request: fastapi.Request,
     """Tears down the Kubernetes cluster started by local_up."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='local_down',
+        request_name=request_names.RequestName.LOCAL_DOWN,
         request_body=local_down_body,
         func=core.local_down,
         schedule_type=requests_lib.ScheduleType.LONG,
     )
 
 
+async def get_expanded_request_id(request_id: str) -> str:
+    """Gets the expanded request ID for a given request ID prefix."""
+    request_tasks = await requests_lib.get_requests_async_with_prefix(
+        request_id, fields=['request_id'])
+    if request_tasks is None:
+        raise fastapi.HTTPException(status_code=404,
+                                    detail=f'Request {request_id!r} not found')
+    if len(request_tasks) > 1:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail=('Multiple requests found for '
+                                            f'request ID prefix: {request_id}'))
+    return request_tasks[0].request_id
+
+
 # === API server related APIs ===
-@app.get('/api/get')
+@app.get('/api/get', response_class=fastapi_responses.ORJSONResponse)
 async def api_get(request_id: str) -> payloads.RequestPayload:
     """Gets a request with a given request ID prefix."""
+    # Validate request_id prefix matches a single request.
+    request_id = await get_expanded_request_id(request_id)
+
     while True:
         req_status = await requests_lib.get_request_status_async(request_id)
         if req_status is None:
@@ -1560,10 +1582,15 @@ async def stream(
             clients, console for CLI/API clients), 'plain' (force plain text),
             'html' (force HTML), or 'console' (force console)
     """
+    # We need to save the user-supplied request ID for the response header.
+    user_supplied_request_id = request_id
     if request_id is not None and log_path is not None:
         raise fastapi.HTTPException(
             status_code=400,
             detail='Only one of request_id and log_path can be provided')
+
+    if request_id is not None:
+        request_id = await get_expanded_request_id(request_id)
 
     if request_id is None and log_path is None:
         request_id = await requests_lib.get_latest_request_id_async()
@@ -1654,7 +1681,9 @@ async def stream(
         'Transfer-Encoding': 'chunked'
     }
     if request_id is not None:
-        headers[server_constants.STREAM_REQUEST_HEADER] = request_id
+        headers[server_constants.STREAM_REQUEST_HEADER] = (
+            user_supplied_request_id
+            if user_supplied_request_id else request_id)
 
     return fastapi.responses.StreamingResponse(
         content=stream_utils.log_streamer(request_id,
@@ -1674,9 +1703,9 @@ async def api_cancel(request: fastapi.Request,
     """Cancels requests."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='api_cancel',
+        request_name=request_names.RequestName.API_CANCEL,
         request_body=request_cancel_body,
-        func=requests_lib.kill_requests,
+        func=requests_lib.kill_requests_with_prefix,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
@@ -1684,7 +1713,7 @@ async def api_cancel(request: fastapi.Request,
 @app.get('/api/status')
 async def api_status(
     request_ids: Optional[List[str]] = fastapi.Query(
-        None, description='Request IDs to get status for.'),
+        None, description='Request ID prefixes to get status for.'),
     all_status: bool = fastapi.Query(
         False, description='Get finished requests as well.'),
     limit: Optional[int] = fastapi.Query(
@@ -1711,10 +1740,12 @@ async def api_status(
     else:
         encoded_request_tasks = []
         for request_id in request_ids:
-            request_task = await requests_lib.get_request_async(request_id)
-            if request_task is None:
+            request_tasks = await requests_lib.get_requests_async_with_prefix(
+                request_id)
+            if request_tasks is None:
                 continue
-            encoded_request_tasks.append(request_task.readable_encode())
+            for request_task in request_tasks:
+                encoded_request_tasks.append(request_task.readable_encode())
         return encoded_request_tasks
 
 
@@ -1774,18 +1805,39 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         version=sky.__version__,
         version_on_disk=common.get_skypilot_version_on_disk(),
         commit=sky.__commit__,
+        # Whether basic auth on api server is enabled
         basic_auth_enabled=os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH,
                                           'false').lower() == 'true',
         user=user if user is not None else None,
+        # Whether service account token is enabled
+        service_account_token_enabled=(os.environ.get(
+            constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS,
+            'false').lower() == 'true'),
+        # Whether basic auth on ingress is enabled
+        ingress_basic_auth_enabled=os.environ.get(
+            constants.SKYPILOT_INGRESS_BASIC_AUTH_ENABLED,
+            'false').lower() == 'true',
     )
 
 
+class KubernetesSSHMessageType(IntEnum):
+    REGULAR_DATA = 0
+    PINGPONG = 1
+    LATENCY_MEASUREMENT = 2
+
+
 @app.websocket('/kubernetes-pod-ssh-proxy')
-async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
-                                   cluster_name: str) -> None:
+async def kubernetes_pod_ssh_proxy(
+        websocket: fastapi.WebSocket,
+        cluster_name: str,
+        client_version: Optional[int] = None) -> None:
     """Proxies SSH to the Kubernetes pod with websocket."""
     await websocket.accept()
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
+
+    timestamps_supported = client_version is not None and client_version > 21
+    logger.info(f'Websocket timestamps supported: {timestamps_supported}, \
+        client_version = {client_version}')
 
     # Run core.status in another thread to avoid blocking the event loop.
     with ThreadPoolExecutor(max_workers=1) as thread_pool_executor:
@@ -1841,6 +1893,42 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
         async def websocket_to_ssh():
             try:
                 async for message in websocket.iter_bytes():
+                    if timestamps_supported:
+                        type_size = struct.calcsize('!B')
+                        message_type = struct.unpack('!B',
+                                                     message[:type_size])[0]
+                        if (message_type ==
+                                KubernetesSSHMessageType.REGULAR_DATA):
+                            # Regular data - strip type byte and forward to SSH
+                            message = message[type_size:]
+                        elif message_type == KubernetesSSHMessageType.PINGPONG:
+                            # PING message - respond with PONG (type 1)
+                            ping_id_size = struct.calcsize('!I')
+                            if len(message) != type_size + ping_id_size:
+                                raise ValueError('Invalid PING message '
+                                                 f'length: {len(message)}')
+                            # Return the same PING message, so that the client
+                            # can measure the latency.
+                            await websocket.send_bytes(message)
+                            continue
+                        elif (message_type ==
+                              KubernetesSSHMessageType.LATENCY_MEASUREMENT):
+                            # Latency measurement from client
+                            latency_size = struct.calcsize('!Q')
+                            if len(message) != type_size + latency_size:
+                                raise ValueError(
+                                    'Invalid latency measurement '
+                                    f'message length: {len(message)}')
+                            avg_latency_ms = struct.unpack(
+                                '!Q',
+                                message[type_size:type_size + latency_size])[0]
+                            latency_seconds = avg_latency_ms / 1000
+                            metrics_utils.SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS.labels(pid=os.getpid()).observe(latency_seconds)  # pylint: disable=line-too-long
+                            continue
+                        else:
+                            # Unknown message type.
+                            raise ValueError(
+                                f'Unknown message type: {message_type}')
                     writer.write(message)
                     try:
                         await writer.drain()
@@ -1871,6 +1959,11 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
                             nonlocal ssh_failed
                             ssh_failed = True
                         break
+                    if timestamps_supported:
+                        # Prepend message type byte (0 = regular data)
+                        message_type_bytes = struct.pack(
+                            '!B', KubernetesSSHMessageType.REGULAR_DATA.value)
+                        data = message_type_bytes + data
                     await websocket.send_bytes(data)
             except Exception:  # pylint: disable=broad-except
                 pass
@@ -1910,7 +2003,7 @@ async def all_contexts(request: fastapi.Request) -> None:
 
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='all_contexts',
+        request_name=request_names.RequestName.ALL_CONTEXTS,
         request_body=payloads.RequestBody(),
         func=core.get_all_contexts,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -2024,7 +2117,6 @@ if __name__ == '__main__':
     # Serve metrics on a separate port to isolate it from the application APIs:
     # metrics port will not be exposed to the public network typically.
     parser.add_argument('--metrics-port', default=9090, type=int)
-    parser.add_argument('--start-with-python', action='store_true')
     cmd_args = parser.parse_args()
     if cmd_args.port == cmd_args.metrics_port:
         logger.error('port and metrics-port cannot be the same, exiting.')
@@ -2039,9 +2131,18 @@ if __name__ == '__main__':
         logger.error(f'Port {cmd_args.port} is not available, exiting.')
         raise RuntimeError(f'Port {cmd_args.port} is not available')
 
-    if not cmd_args.start_with_python:
-        # Maybe touch the signal file on API server startup.
-        managed_job_utils.is_consolidation_mode(on_api_restart=True)
+    # Maybe touch the signal file on API server startup. Do it again here even
+    # if we already touched it in the sky/server/common.py::_start_api_server.
+    # This is because the sky/server/common.py::_start_api_server function call
+    # is running outside the skypilot API server process tree. The process tree
+    # starts within that function (see the `subprocess.Popen` call in
+    # sky/server/common.py::_start_api_server). When pg is used, the
+    # _start_api_server function will not load the config file from db, which
+    # will ignore the consolidation mode config. Here, inside the process tree,
+    # we already reload the config as a server (with env var _start_api_server),
+    # so we will respect the consolidation mode config.
+    # Refers to #7717 for more details.
+    managed_job_utils.is_consolidation_mode(on_api_restart=True)
 
     # Show the privacy policy if it is not already shown. We place it here so
     # that it is shown only when the API server is started.

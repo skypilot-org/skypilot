@@ -7,6 +7,7 @@ from typing import Callable
 from sky import sky_logging
 from sky import skypilot_config
 from sky.server import constants as server_constants
+from sky.server.requests import request_names
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import env_options
@@ -26,7 +27,7 @@ class InternalRequestDaemon:
     """Internal daemon that runs an event in the background."""
 
     id: str
-    name: str
+    name: request_names.RequestName
     event_fn: Callable[[], None]
     default_log_level: str = 'INFO'
     should_skip: Callable[[], bool] = _default_should_skip
@@ -195,26 +196,31 @@ INTERNAL_REQUEST_DAEMONS = [
     # This status refresh daemon can cause the autostopp'ed/autodown'ed cluster
     # set to updated status automatically, without showing users the hint of
     # cluster being stopped or down when `sky status -r` is called.
-    InternalRequestDaemon(id='skypilot-status-refresh-daemon',
-                          name='status-refresh',
-                          event_fn=refresh_cluster_status_event,
-                          default_log_level='DEBUG'),
+    InternalRequestDaemon(
+        id='skypilot-status-refresh-daemon',
+        name=request_names.RequestName.REQUEST_DAEMON_STATUS_REFRESH,
+        event_fn=refresh_cluster_status_event,
+        default_log_level='DEBUG'),
     # Volume status refresh daemon to update the volume status periodically.
-    InternalRequestDaemon(id='skypilot-volume-status-refresh-daemon',
-                          name='volume-refresh',
-                          event_fn=refresh_volume_status_event),
+    InternalRequestDaemon(
+        id='skypilot-volume-status-refresh-daemon',
+        name=request_names.RequestName.REQUEST_DAEMON_VOLUME_REFRESH,
+        event_fn=refresh_volume_status_event),
     InternalRequestDaemon(id='managed-job-status-refresh-daemon',
-                          name='managed-job-status-refresh',
+                          name=request_names.RequestName.
+                          REQUEST_DAEMON_MANAGED_JOB_STATUS_REFRESH,
                           event_fn=managed_job_status_refresh_event,
                           should_skip=should_skip_managed_job_status_refresh),
-    InternalRequestDaemon(id='sky-serve-status-refresh-daemon',
-                          name='sky-serve-status-refresh',
-                          event_fn=sky_serve_status_refresh_event,
-                          should_skip=should_skip_sky_serve_status_refresh),
-    InternalRequestDaemon(id='pool-status-refresh-daemon',
-                          name='pool-status-refresh',
-                          event_fn=pool_status_refresh_event,
-                          should_skip=should_skip_pool_status_refresh),
+    InternalRequestDaemon(
+        id='sky-serve-status-refresh-daemon',
+        name=request_names.RequestName.REQUEST_DAEMON_SKY_SERVE_STATUS_REFRESH,
+        event_fn=sky_serve_status_refresh_event,
+        should_skip=should_skip_sky_serve_status_refresh),
+    InternalRequestDaemon(
+        id='pool-status-refresh-daemon',
+        name=request_names.RequestName.REQUEST_DAEMON_POOL_STATUS_REFRESH,
+        event_fn=pool_status_refresh_event,
+        should_skip=should_skip_pool_status_refresh),
 ]
 
 

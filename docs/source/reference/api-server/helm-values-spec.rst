@@ -73,6 +73,10 @@ Below is the available helm value keys and the default value of each key:
     :ref:`extraEnvs <helm-values-apiService-extraEnvs>`: null
     :ref:`extraVolumes <helm-values-apiService-extraVolumes>`: null
     :ref:`extraVolumeMounts <helm-values-apiService-extraVolumeMounts>`: null
+    :ref:`logs <helm-values-apiService-logs>`:
+      :ref:`retention <helm-values-apiService-logs-retention>`:
+        :ref:`enabled <helm-values-apiService-logs-retention-enabled>`: false
+        :ref:`size <helm-values-apiService-logs-retention-size>`: 10M
 
   :ref:`auth <helm-values-auth>`:
     :ref:`oauth <helm-values-auth-oauth>`:
@@ -196,6 +200,7 @@ Below is the available helm value keys and the default value of each key:
   :ref:`awsCredentials <helm-values-awsCredentials>`:
     :ref:`enabled <helm-values-awsCredentials-enabled>`: false
     :ref:`awsSecretName <helm-values-awsCredentials-awsSecretName>`: aws-credentials
+    :ref:`useCredentialsFile <helm-values-awsCredentials-useCredentialsFile>`: false
     :ref:`accessKeyIdKeyName <helm-values-awsCredentials-accessKeyIdKeyName>`: aws_access_key_id
     :ref:`secretAccessKeyKeyName <helm-values-awsCredentials-secretAccessKeyKeyName>`: aws_secret_access_key
 
@@ -690,6 +695,62 @@ Default: ``null``
       - name: my-volume
         mountPath: /my-path
         subPath: my-file
+
+.. _helm-values-apiService-logs:
+
+``apiService.logs``
+^^^^^^^^^^^^^^^^^^^
+
+Configuration for managing API server logs.
+
+Default: see the yaml below.
+
+.. code-block:: yaml
+
+  apiService:
+    logs:
+      retention:
+        enabled: false
+        size: 10M
+
+.. _helm-values-apiService-logs-retention:
+
+``apiService.logs.retention``
+'''''''''''''''''''''''''''''
+
+Configuration for log retention settings.
+
+.. _helm-values-apiService-logs-retention-enabled:
+
+``apiService.logs.retention.enabled``
+''''''''''''''''''''''''''''''''''''''
+
+Whether to enable log retention for the API server. When enabled, logs will be automatically rotated and managed according to the specified size limit.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  apiService:
+    logs:
+      retention:
+        enabled: true
+
+.. _helm-values-apiService-logs-retention-size:
+
+``apiService.logs.retention.size``
+'''''''''''''''''''''''''''''''''''
+
+The maximum size of the log file before rotation. When the log file reaches this size, it will be rotated to preserve disk space. Only used when ``enabled`` is ``true``.
+
+Default: ``10M``
+
+.. code-block:: yaml
+
+  apiService:
+    logs:
+      retention:
+        size: 50M
 
 
 .. _helm-values-auth:
@@ -1688,12 +1749,38 @@ Default: ``aws-credentials``
   awsCredentials:
     awsSecretName: aws-credentials
 
+.. _helm-values-awsCredentials-useCredentialsFile:
+
+``awsCredentials.useCredentialsFile``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Set to ``true`` to mount a complete AWS credentials file with multiple profiles. This is required for using different AWS profiles with different :ref:`workspaces <workspaces>`.
+
+If set to ``true``, the secret must contain a key named ``credentials`` with the full AWS credentials file content. Create the secret with:
+
+.. code-block:: bash
+
+    kubectl create secret generic aws-credentials \
+      --namespace $NAMESPACE \
+      --from-file=credentials=$HOME/.aws/credentials
+
+If set to ``false`` (default), ``accessKeyIdKeyName`` and ``secretAccessKeyKeyName`` are used as the default profile credentials.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  awsCredentials:
+    enabled: true
+    useCredentialsFile: true
+
+
 .. _helm-values-awsCredentials-accessKeyIdKeyName:
 
 ``awsCredentials.accessKeyIdKeyName``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Key name used to set AWS_ACCESS_KEY_ID.
+Key name used to set AWS_ACCESS_KEY_ID. Only used when ``useCredentialsFile`` is ``false``.
 
 Default: ``aws_access_key_id``
 
@@ -1707,7 +1794,7 @@ Default: ``aws_access_key_id``
 ``awsCredentials.secretAccessKeyKeyName``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Key name used to set AWS_SECRET_ACCESS_KEY.
+Key name used to set AWS_SECRET_ACCESS_KEY. Only used when ``useCredentialsFile`` is ``false``.
 
 Default: ``aws_secret_access_key``
 
