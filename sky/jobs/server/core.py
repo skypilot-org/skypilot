@@ -474,7 +474,7 @@ def launch(
                             retry_until_up=True,
                             fast=True,
                             _request_name=request_names.AdminPolicyRequestName.
-                            JOBS_LAUNCH,
+                            JOBS_LAUNCH_CONTROLLER,
                             _disable_controller_check=True)
                     # Manually launch the scheduler in consolidation mode.
                     local_handle = backend_utils.is_controller_accessible(

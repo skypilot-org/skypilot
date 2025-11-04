@@ -93,9 +93,15 @@ class AdminPolicyRequestName(str, enum.Enum):
     CLUSTER_EXEC = RequestName.CLUSTER_EXEC
     # Jobs requests
     JOBS_LAUNCH = RequestName.JOBS_LAUNCH
+    # jobs launch controller request is not stored in the request db,
+    # but is defined here for admin policy application
+    JOBS_LAUNCH_CONTROLLER = 'jobs.launch_controller'
     JOBS_POOL_APPLY = RequestName.JOBS_POOL_APPLY
     # Serve requests
     SERVE_UP = RequestName.SERVE_UP
+    # serve launch controller request is not stored in the request db,
+    # but is defined here for admin policy application
+    SERVE_LAUNCH_CONTROLLER = 'serve.launch_controller'
     SERVE_UPDATE = RequestName.SERVE_UPDATE
     # serve launch replica request is not stored in the request db,
     # but is defined here for admin policy application

@@ -280,7 +280,7 @@ def up(
                         cluster_name=controller_name,
                         retry_until_up=True,
                         _request_name=request_names.AdminPolicyRequestName.
-                        SERVE_UP,
+                        SERVE_LAUNCH_CONTROLLER,
                         _disable_controller_check=True,
                     )
         else:
