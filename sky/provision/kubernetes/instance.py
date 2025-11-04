@@ -1706,11 +1706,12 @@ def query_instances(
             _request_timeout=kubernetes.API_TIMEOUT)
 
         # log PodList response info
-        logger.debug(f'k8s api response for skypilot-cluster='
-                     f'{cluster_name_on_cloud}: '
-                     f'apiVersion={response.api_version}, '
-                     f'kind={response.kind}, '
-                     f'metadata={response.metadata}')
+        if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+            logger.debug(f'k8s api response for skypilot-cluster='
+                         f'{cluster_name_on_cloud}: '
+                         f'apiVersion={response.api_version}, '
+                         f'kind={response.kind}, '
+                         f'metadata={response.metadata}')
 
         pods = response.items
 
@@ -1719,13 +1720,21 @@ def query_instances(
                      f'len(pods)={len(pods)}')
 
         # log detailed Pod info
-        for pod in pods:
-            logger.debug(
-                f'k8s pod info for skypilot cluster={cluster_name_on_cloud}: '
-                f'pod.apiVersion={pod.api_version}, '
-                f'pod.kind={pod.kind}, '
-                f'pod.metadata={pod.metadata}, '
-                f'pod.status={pod.status}')
+        if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+            for pod in pods:
+                logger.debug(f'k8s pod info for '
+                             f'skypilot cluster={cluster_name_on_cloud}: '
+                             f'pod.apiVersion={pod.api_version}, '
+                             f'pod.kind={pod.kind}, \n'
+                             f'pod.name={pod.metadata.name}, '
+                             f'pod.namespace={pod.metadata.namespace}, \n'
+                             f'pod.labels={pod.metadata.labels}, \n'
+                             f'pod.annotations={pod.metadata.annotations}, \n'
+                             'pod.creationTimestamp='
+                             f'{pod.metadata.creation_timestamp}, '
+                             'pod.deletionTimestamp='
+                             f'{pod.metadata.deletion_timestamp}, \n'
+                             f'pod.status={pod.status}')
 
     except kubernetes.max_retry_error():
         with ux_utils.print_exception_no_traceback():
