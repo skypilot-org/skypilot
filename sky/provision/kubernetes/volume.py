@@ -5,6 +5,7 @@ from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky.adaptors import kubernetes
+from sky.provision import constants
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -128,7 +129,7 @@ def _get_volume_usedby(
                 usedby_pods.append(pod.metadata.name)
                 # Get the real cluster name
                 cluster_name_on_cloud = pod.metadata.labels.get(
-                    k8s_constants.TAG_SKYPILOT_CLUSTER_NAME)
+                    constants.TAG_SKYPILOT_CLUSTER_NAME)
                 if cluster_name_on_cloud is None:
                     continue
                 cluster_name = cloud_to_name_map.get(cluster_name_on_cloud)
@@ -205,7 +206,7 @@ def get_all_volumes_usedby(
                     used_by_pods[context][namespace][volume_name].append(
                         pod.metadata.name)
                     cluster_name_on_cloud = pod.metadata.labels.get(
-                        k8s_constants.TAG_SKYPILOT_CLUSTER_NAME)
+                        constants.TAG_SKYPILOT_CLUSTER_NAME)
                     if cluster_name_on_cloud is None:
                         continue
                     cluster_name = cloud_to_name_map.get(cluster_name_on_cloud)

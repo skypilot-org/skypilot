@@ -209,7 +209,9 @@ provider:
         metadata:
           labels:
             parent: skypilot
+            # TODO (kyuds): remove this label for v0.12.0, as skypilot-cluster label is deprecated in favor of skypilot-cluster-name.
             skypilot-cluster: {{cluster_name_on_cloud}}
+            skypilot-cluster-name: {{cluster_name_on_cloud}}
             skypilot-user: {{ user }}
           name: {{cluster_name_on_cloud}}-head-ssh
         spec:
@@ -227,7 +229,9 @@ provider:
         metadata:
             labels:
               parent: skypilot
+              # TODO (kyuds): remove this label for v0.12.0, as skypilot-cluster label is deprecated in favor of skypilot-cluster-name.
               skypilot-cluster: {{cluster_name_on_cloud}}
+              skypilot-cluster-name: {{cluster_name_on_cloud}}
               skypilot-user: {{ user }}
             # NOTE: If you're running multiple Ray clusters with services
             # on one Kubernetes cluster, they must have unique service
@@ -247,7 +251,9 @@ provider:
         metadata:
           labels:
             parent: skypilot
+            # TODO (kyuds): remove this label for v0.12.0, as skypilot-cluster label is deprecated in favor of skypilot-cluster-name.
             skypilot-cluster: {{cluster_name_on_cloud}}
+            skypilot-cluster-name: {{cluster_name_on_cloud}}
             skypilot-user: {{ user }}
           name: {{cluster_name_on_cloud}}-worker{{ worker_id }}
         spec:
@@ -272,6 +278,7 @@ available_node_types:
         labels:
             parent: skypilot
             # component will be set for the head node pod to be the same as the head node service selector above if a
+            # TODO (kyuds): remove this label for v0.11.0, as skypilot-cluster label is deprecated in favor of skypilot-cluster-name.
             skypilot-cluster: {{cluster_name_on_cloud}}
             skypilot-user: {{ user }}
             # Custom tags for the pods
