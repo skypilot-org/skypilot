@@ -124,6 +124,17 @@ export default function PoolDetailPage() {
     return '';
   };
 
+  // Helper function to build URL for filtering jobs by pool
+  const getJobsUrlForPool = (poolName) => {
+    if (!poolName) return '/jobs';
+    const params = new URLSearchParams({
+      property: 'pool',
+      operator: ':',
+      value: poolName,
+    });
+    return `/jobs?${params.toString()}`;
+  };
+
   // Helper functions
   const getWorkersCount = (pool) => {
     if (!pool || !pool.replica_info || pool.replica_info.length === 0)
@@ -400,6 +411,20 @@ export default function PoolDetailPage() {
                     </div>
                     <div className="text-base mt-1">
                       {poolData.policy || '-'}
+                    </div>
+                  </div>
+
+                  {/* See all jobs button */}
+                  <div>
+                    <div className="text-gray-600 font-medium text-base">
+                      Actions
+                    </div>
+                    <div className="text-base mt-1">
+                      <Link href={getJobsUrlForPool(poolName)}>
+                        <Button variant="outline" size="sm" className="text-xs">
+                          See all jobs
+                        </Button>
+                      </Link>
                     </div>
                   </div>
                 </div>
