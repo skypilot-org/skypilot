@@ -185,7 +185,7 @@ def add_column_to_table_sqlalchemy(
             pass
         else:
             raise
-    #postgressql
+    #postgresql
     except sqlalchemy_exc.ProgrammingError as e:
         if 'already exists' in str(e):
             pass

@@ -1115,7 +1115,7 @@ def release_memory():
         gc.collect()
         if sys.platform.startswith('linux'):
             # Will fail on musl (alpine), but at least it works on our
-            # offical docker images.
+            # official docker images.
             libc = ctypes.CDLL('libc.so.6')
             return libc.malloc_trim(0)
         return 0
