@@ -110,6 +110,23 @@ def test_add_labels_policy(add_example_policy_paths, task):
             {}), ('label should be set')
 
 
+def test_add_labels_conditional_policy(add_example_policy_paths, task):
+    task = _load_task(task,
+                      os.path.join(POLICY_PATH, 'add_labels_conditional.yaml'))
+    with admin_policy_utils.apply_and_use_config_in_current_request(
+            task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH):
+        assert 'app' in skypilot_config.get_nested(
+            ('kubernetes', 'custom_metadata', 'labels'),
+            {}), ('label should be set')
+    with admin_policy_utils.apply_and_use_config_in_current_request(
+            task,
+            request_name=request_names.AdminPolicyRequestName.VALIDATE):
+        assert 'app' not in skypilot_config.get_nested(
+            ('kubernetes', 'custom_metadata', 'labels'),
+            {}), ('label should not be set for validate request')
+
+
 def test_reject_all_policy(add_example_policy_paths, task):
     with pytest.raises(exceptions.UserRequestRejectedByPolicy,
                        match='Reject all policy'):

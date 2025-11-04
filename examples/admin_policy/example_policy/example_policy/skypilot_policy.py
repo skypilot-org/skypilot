@@ -4,6 +4,7 @@ from typing import List
 
 import sky
 from sky.schemas.api import responses
+from sky.server.requests import request_names
 from sky.utils import common
 
 
@@ -34,6 +35,24 @@ class AddLabelsPolicy(sky.AdminPolicy):
     @classmethod
     def validate_and_mutate(
             cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+        config = user_request.skypilot_config
+        labels = config.get_nested(('kubernetes', 'custom_metadata', 'labels'),
+                                   {})
+        labels['app'] = 'skypilot'
+        config.set_nested(('kubernetes', 'custom_metadata', 'labels'), labels)
+        return sky.MutatedUserRequest(user_request.task, config)
+
+
+class AddLabelsConditionalPolicy(sky.AdminPolicy):
+    """Example policy: adds a kubernetes label for skypilot_config 
+    if the request is a cluster launch request."""
+
+    @classmethod
+    def validate_and_mutate(
+            cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+        if user_request.request_name != request_names.AdminPolicyRequestName.CLUSTER_LAUNCH:
+            return sky.MutatedUserRequest(user_request.task,
+                                          user_request.skypilot_config)
         config = user_request.skypilot_config
         labels = config.get_nested(('kubernetes', 'custom_metadata', 'labels'),
                                    {})
