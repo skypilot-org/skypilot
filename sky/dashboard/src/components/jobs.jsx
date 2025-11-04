@@ -2053,7 +2053,9 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                   </TableCell>
                   <TableCell>{pool.requested_resources_str || '-'}</TableCell>
                   <TableCell>
-                    <Link href={buildFilterUrl('/jobs', 'pool', ':', pool.name)}>
+                    <Link
+                      href={buildFilterUrl('/jobs', 'pool', ':', pool.name)}
+                    >
                       <Button variant="outline" size="sm" className="text-xs">
                         See all jobs
                       </Button>

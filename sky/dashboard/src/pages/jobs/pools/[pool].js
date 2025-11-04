@@ -410,7 +410,9 @@ export default function PoolDetailPage() {
                       Actions
                     </div>
                     <div className="text-base mt-1">
-                      <Link href={buildFilterUrl('/jobs', 'pool', ':', poolName)}>
+                      <Link
+                        href={buildFilterUrl('/jobs', 'pool', ':', poolName)}
+                      >
                         <Button variant="outline" size="sm" className="text-xs">
                           See all jobs
                         </Button>
