@@ -14,6 +14,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
+from sky.server.requests import request_names
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import ux_utils
@@ -77,6 +78,7 @@ def _get_policy_impl(
 @contextlib.contextmanager
 def apply_and_use_config_in_current_request(
     entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
+    request_name: request_names.AdminPolicyRequestName,
     request_options: Optional[admin_policy.RequestOptions] = None,
     at_client_side: bool = False,
 ) -> Iterator['dag_lib.Dag']:
@@ -90,7 +92,8 @@ def apply_and_use_config_in_current_request(
     Refer to `apply()` for more details.
     """
     original_config = skypilot_config.to_dict()
-    dag, mutated_config = apply(entrypoint, request_options, at_client_side)
+    dag, mutated_config = apply(entrypoint, request_name, request_options,
+                                at_client_side)
     if mutated_config != original_config:
         with skypilot_config.replace_skypilot_config(mutated_config):
             yield dag
@@ -100,6 +103,7 @@ def apply_and_use_config_in_current_request(
 
 def apply(
     entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
+    request_name: request_names.AdminPolicyRequestName,
     request_options: Optional[admin_policy.RequestOptions] = None,
     at_client_side: bool = False,
 ) -> Tuple['dag_lib.Dag', config_utils.Config]:
@@ -144,8 +148,9 @@ def apply(
 
     mutated_config = None
     for task in dag.tasks:
-        user_request = admin_policy.UserRequest(task, config, request_options,
-                                                at_client_side, user)
+        user_request = admin_policy.UserRequest(task, config, request_name,
+                                                request_options, at_client_side,
+                                                user)
         try:
             mutated_user_request = policy.apply(user_request)
         # Avoid duplicate exception wrapping.
