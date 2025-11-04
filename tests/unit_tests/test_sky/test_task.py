@@ -905,3 +905,25 @@ def test_resources_to_config():
     assert len(ordered) == 2
     assert ordered[0] == {}
     assert float(ordered[1]['memory']) == 10.0
+
+def test_task_resource_config_modification():
+    t = task.Task()
+    resource1 = resources_lib.Resources(cloud='aws',
+                                        region='us-west1',
+                                        zone='a')
+    resource2 = resource1.copy(memory='10GB')
+    t.resources = [resource1, resource2]
+    resource_config = t.get_resource_config()
+    assert len(resource_config['ordered']) == 2
+
+    # Modify one of the ordered resources
+    resource_config['ordered'][0]['memory'] = '20GB'
+    t.set_resources(resource_config)
+    assert float(t.resources[0].memory) == 20.0
+    assert float(t.resources[1].memory) == 10.0
+
+    # Modify the autostop config for all resources
+    resource_config['autostop'] = {'idle_minutes': 10}
+    t.set_resources(resource_config)
+    assert t.resources[0].autostop_config.idle_minutes == 10
+    assert t.resources[1].autostop_config.idle_minutes == 10
