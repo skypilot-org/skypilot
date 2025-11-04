@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.provision import common
+from sky.provision import constants as provision_constants
 from sky.provision.kubernetes import constants
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -56,7 +57,7 @@ def _open_ports_using_loadbalancer(
         context=context,
         service_name=service_name,
         ports=ports,
-        selector_key=constants.TAG_SKYPILOT_CLUSTER_NAME,
+        selector_key=provision_constants.TAG_SKYPILOT_CLUSTER_NAME,
         selector_value=cluster_name_on_cloud,
     )
 
@@ -110,7 +111,7 @@ def _open_ports_using_ingress(
         context=context,
         service_details=service_details,
         ingress_name=f'{cluster_name_on_cloud}-skypilot-ingress',
-        selector_key=constants.TAG_SKYPILOT_CLUSTER_NAME,
+        selector_key=provision_constants.TAG_SKYPILOT_CLUSTER_NAME,
         selector_value=cluster_name_on_cloud,
     )
 

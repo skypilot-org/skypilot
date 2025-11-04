@@ -3301,7 +3301,7 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
 
     try:
         pods = kubernetes.core_api(context).list_pod_for_all_namespaces(
-            label_selector=kubernetes_constants.TAG_SKYPILOT_CLUSTER_NAME,
+            label_selector=provision_constants.TAG_SKYPILOT_CLUSTER_NAME,
             _request_timeout=kubernetes.API_TIMEOUT).items
     except kubernetes.max_retry_error():
         raise exceptions.ResourcesUnavailableError(
@@ -3445,7 +3445,7 @@ def process_skypilot_pods(
 
     for pod in pods:
         cluster_name_on_cloud = pod.metadata.labels.get(
-            kubernetes_constants.TAG_SKYPILOT_CLUSTER_NAME)
+            provision_constants.TAG_SKYPILOT_CLUSTER_NAME)
         cluster_name = cluster_name_on_cloud.rsplit(
             '-', 1
         )[0]  # Remove the user hash to get cluster name (e.g., mycluster-2ea4)
