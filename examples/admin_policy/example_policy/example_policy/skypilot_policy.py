@@ -4,7 +4,6 @@ from typing import List
 
 import sky
 from sky.schemas.api import responses
-from sky.server.requests import request_names
 from sky.utils import common
 
 
@@ -50,7 +49,7 @@ class AddLabelsConditionalPolicy(sky.AdminPolicy):
     @classmethod
     def validate_and_mutate(
             cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
-        if user_request.request_name != request_names.AdminPolicyRequestName.CLUSTER_LAUNCH:
+        if user_request.request_name != sky.AdminPolicyRequestName.CLUSTER_LAUNCH:
             return sky.MutatedUserRequest(user_request.task,
                                           user_request.skypilot_config)
         config = user_request.skypilot_config

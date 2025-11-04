@@ -122,6 +122,7 @@ from sky.data import StoreType
 from sky.jobs import ManagedJobStatus
 from sky.optimizer import Optimizer
 from sky.resources import Resources
+from sky.server.requests.request_names import AdminPolicyRequestName
 from sky.skylet.job_lib import JobStatus
 from sky.task import Task
 from sky.utils.common import OptimizeTarget
@@ -228,6 +229,7 @@ __all__ = [
     'MutatedUserRequest',
     'AdminPolicy',
     'Config',
+    'AdminPolicyRequestName',
     # Registry
     'CLOUD_REGISTRY',
     'JOBS_RECOVERY_STRATEGY_REGISTRY',
