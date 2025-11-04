@@ -1707,7 +1707,7 @@ def query_instances(
 
         # Log response metadata
         # pylint: disable=protected-access
-        logger.info(
+        logger.debug(
             f'Query response for skypilot cluster {cluster_name_on_cloud}: '
             f'resource_version={response.metadata.resource_version}, '
             f'pod_count={len(pods)}, '
