@@ -5,7 +5,6 @@ from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision import constants as provision_constants
-from sky.provision.kubernetes import constants
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import kubernetes_enums
