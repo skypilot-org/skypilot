@@ -1716,11 +1716,10 @@ def query_instances(
 
         pods = response.items
 
-        logger.debug(f'k8s api response for `{label_selector}`: '
-                     f'len(pods)={len(pods)}')
-
         # log detailed Pod info
         if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+            logger.debug(f'k8s api response for `{label_selector}`: '
+                         f'len(pods)={len(pods)}')
             for pod in pods:
                 logger.debug(f'k8s pod info for `{label_selector}`: '
                              f'pod.apiVersion={pod.api_version}, '
