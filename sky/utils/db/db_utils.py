@@ -444,22 +444,13 @@ def get_engine(
                     _postgres_engine_cache[conn_string] = (
                         sqlalchemy.create_engine(
                             conn_string, poolclass=sqlalchemy.pool.NullPool))
-                elif _max_connections == 1:
-                    _postgres_engine_cache[conn_string] = (
-                        sqlalchemy.create_engine(
-                            conn_string,
-                            poolclass=sqlalchemy.pool.QueuePool,
-                            pool_size=1,
-                            max_overflow=5,
-                            pool_pre_ping=True,
-                            pool_recycle=1800))
                 else:
                     _postgres_engine_cache[conn_string] = (
                         sqlalchemy.create_engine(
                             conn_string,
                             poolclass=sqlalchemy.pool.QueuePool,
                             pool_size=_max_connections,
-                            max_overflow=0,
+                            max_overflow=max(0, 5 - _max_connections),
                             pool_pre_ping=True,
                             pool_recycle=1800))
             engine = _postgres_engine_cache[conn_string]
