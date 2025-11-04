@@ -1694,6 +1694,7 @@ def query_instances(
 
     # Get all the pods with the label skypilot-cluster-name: <cluster_name>
     try:
+        # log the query parameters we pass to the k8s api
         logger.debug(
             f'Querying k8s api for pods in context: {context} and '
             f'namespace: {namespace} with '
@@ -1703,15 +1704,29 @@ def query_instances(
             namespace,
             label_selector=f'skypilot-cluster={cluster_name_on_cloud}',
             _request_timeout=kubernetes.API_TIMEOUT)
+
+        # log PodList response info
+        logger.debug(f'k8s api response for skypilot-cluster='
+                     f'{cluster_name_on_cloud}: '
+                     f'apiVersion={response.api_version}, '
+                     f'kind={response.kind}, '
+                     f'metadata={response.metadata}')
+
         pods = response.items
 
-        # Log response metadata
-        # pylint: disable=protected-access
-        logger.debug(
-            f'Query response for skypilot cluster {cluster_name_on_cloud}: '
-            f'resource_version={response.metadata.resource_version}, '
-            f'pod_count={len(pods)}, '
-            f'continue_token={response.metadata._continue}')
+        logger.debug(f'k8s api response for skypilot-cluster='
+                     f'{cluster_name_on_cloud}: '
+                     f'len(pods)={len(pods)}')
+
+        # log detailed Pod info
+        for pod in pods:
+            logger.debug(
+                f'k8s pod info for skypilot cluster={cluster_name_on_cloud}: '
+                f'pod.apiVersion={pod.api_version}, '
+                f'pod.kind={pod.kind}, '
+                f'pod.metadata={pod.metadata}, '
+                f'pod.status={pod.status}')
+
     except kubernetes.max_retry_error():
         with ux_utils.print_exception_no_traceback():
             if is_ssh:
