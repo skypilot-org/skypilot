@@ -1672,8 +1672,8 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
 
 
 def list_namespaced_pod(context: Optional[str], namespace: str,
-                        cluster_name_on_cloud: str, is_ssh: bool,
-                        identity: str, label_selector: str) -> List[Any]:
+                        cluster_name_on_cloud: str, is_ssh: bool, identity: str,
+                        label_selector: str) -> List[Any]:
     # Get all the pods with the label skypilot-cluster-name: <cluster_name>
     try:
         # log the query parameters we pass to the k8s api
