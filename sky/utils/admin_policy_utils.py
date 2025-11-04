@@ -149,7 +149,8 @@ def apply(
     mutated_config = None
     for task in dag.tasks:
         user_request = admin_policy.UserRequest(task, config, request_name,
-                                                request_options, at_client_side, user)
+                                                request_options, at_client_side,
+                                                user)
         try:
             mutated_user_request = policy.apply(user_request)
         # Avoid duplicate exception wrapping.

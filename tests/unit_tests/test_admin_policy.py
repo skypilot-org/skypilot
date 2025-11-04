@@ -421,11 +421,12 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
 def test_user_request_encode_decode(task):
     with mock.patch('sky.utils.common_utils.get_current_user',
                     return_value=models.User(id='123', name='test')):
-        user_request = sky.UserRequest(task=task,
-                                       request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
-                                       skypilot_config=sky.Config(),
-                                       at_client_side=False,
-                                       user=models.User(id='123', name='test'))
+        user_request = sky.UserRequest(
+            task=task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=sky.Config(),
+            at_client_side=False,
+            user=models.User(id='123', name='test'))
         encoded_request = user_request.encode()
         decoded_request = sky.UserRequest.decode(encoded_request)
         assert repr(decoded_request.task) == repr(task)
