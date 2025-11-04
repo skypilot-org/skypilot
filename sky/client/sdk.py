@@ -2343,15 +2343,20 @@ def api_stop() -> None:
     with filelock.FileLock(
             os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
         try:
-            with open(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH),
-                      'r',
-                      encoding='utf-8') as f:
-                pids = f.read().split('\n')[:-1]
-                for pid in pids:
-                    if subprocess_utils.is_process_alive(int(pid.strip())):
-                        subprocess_utils.kill_children_processes(
-                            parent_pids=[int(pid.strip())], force=True)
-            os.remove(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH))
+            records = scheduler.get_controller_process_records()
+            if records is not None:
+                for pid, started_at in records:
+                    try:
+                        process = psutil.Process(pid)
+                        if started_at is not None and process.create_time(
+                        ) != started_at:
+                            continue
+                        if process.is_running():
+                            subprocess_utils.kill_children_processes(
+                                parent_pids=[pid], force=True)
+                    except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                        continue
+                os.remove(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH))
         except FileNotFoundError:
             # its fine we will create it
             pass

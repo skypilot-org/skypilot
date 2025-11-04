@@ -282,11 +282,14 @@ def ha_recovery_for_consolidation_mode():
               encoding='utf-8') as f:
         start = time.time()
         f.write(f'Starting HA recovery at {datetime.datetime.now()}\n')
-        jobs, _ = managed_job_state.get_managed_jobs_with_filters(
-            fields=['job_id', 'controller_pid', 'schedule_state', 'status'])
+        jobs, _ = managed_job_state.get_managed_jobs_with_filters(fields=[
+            'job_id', 'controller_pid', 'controller_pid_started_at',
+            'schedule_state', 'status'
+        ])
         for job in jobs:
             job_id = job['job_id']
             controller_pid = job['controller_pid']
+            controller_pid_started_at = job.get('controller_pid_started_at')
 
             # In consolidation mode, it is possible that only the API server
             # process is restarted, and the controller process is not. In such
@@ -294,7 +297,10 @@ def ha_recovery_for_consolidation_mode():
             # just keep running.
             if controller_pid is not None:
                 try:
-                    if controller_process_alive(controller_pid, job_id):
+                    if controller_process_alive(
+                            managed_job_state.ControllerPidRecord(
+                                pid=controller_pid,
+                                started_at=controller_pid_started_at), job_id):
                         f.write(f'Controller pid {controller_pid} for '
                                 f'job {job_id} is still running. '
                                 'Skipping recovery.\n')
@@ -419,17 +425,29 @@ async def get_job_status(
     return None
 
 
-def controller_process_alive(pid: int, job_id: int) -> bool:
-    """Check if the controller process is alive."""
+def controller_process_alive(record: Optional[
+    managed_job_state.ControllerPidRecord], job_id: int) -> bool:
+    """Check if the controller process is alive and matches the recorded PID."""
+    if record is None:
+        return False
+
+    actual_pid = -record.pid if record.pid < 0 else record.pid
     try:
-        if pid < 0:
-            # new job controller process will always be negative
-            pid = -pid
-        process = psutil.Process(pid)
-        cmd_str = ' '.join(process.cmdline())
-        return process.is_running() and ((f'--job-id {job_id}' in cmd_str) or
-                                         ('controller' in cmd_str))
-    except psutil.NoSuchProcess:
+        process = psutil.Process(actual_pid)
+
+        if record.started_at is not None:
+            if process.create_time() != record.started_at:
+                return False
+        else:
+            # If we can't check the create_time try to check the cmdline instead
+            cmd_str = ' '.join(process.cmdline())
+            if ((f'--job-id {job_id}' not in cmd_str) and
+                ('controller' not in cmd_str)):
+                return False
+
+        return process.is_running()
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess,
+            OSError):
         return False
 
 
@@ -551,6 +569,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
 
         # Handle jobs with schedule state (non-legacy jobs):
         pid = tasks[0]['controller_pid']
+        pid_started_at = tasks[0].get('controller_pid_started_at')
         if schedule_state == managed_job_state.ManagedJobScheduleState.DONE:
             # There are two cases where we could get a job that is DONE.
             # 1. At query time (get_jobs_to_check_status), the job was not yet
@@ -603,7 +622,9 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             failure_reason = f'No controller pid set for {schedule_state.value}'
         else:
             logger.debug(f'Checking controller pid {pid}')
-            if controller_process_alive(pid, job_id):
+            if controller_process_alive(
+                    managed_job_state.ControllerPidRecord(
+                        pid=pid, started_at=pid_started_at), job_id):
                 # The controller is still running, so this job is fine.
                 continue
 
@@ -831,8 +852,8 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
 
         update_managed_jobs_statuses(job_id)
 
-        job_controller_pid = managed_job_state.get_job_controller_pid(job_id)
-        if job_controller_pid is not None and job_controller_pid < 0:
+        controller_process = managed_job_state.get_job_controller_pid(job_id)
+        if controller_process is not None and controller_process.pid < 0:
             # This is a consolidated job controller, so we need to cancel the
             # with the controller server API
             try:
