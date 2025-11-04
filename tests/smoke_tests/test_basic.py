@@ -23,10 +23,11 @@ import json
 import os
 import pathlib
 import subprocess
-import sys
 import tempfile
 import textwrap
+import threading
 import time
+from typing import Generator
 
 import pytest
 from smoke_tests import smoke_tests_utils
@@ -1587,23 +1588,67 @@ def test_loopback_access_with_basic_auth(generic_cloud: str):
 # concurrency issue in our code.
 def test_launch_and_cancel_race_condition(generic_cloud: str):
     """Test that launch and cancel race condition is handled correctly."""
-
     name = smoke_tests_utils.get_cluster_name()
-    launch_cmd = f'sky launch -y -c {name}-$i --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "sleep 120" --async'
-    extract_id = r'echo "$s" | sed -n "s/.*Submitted sky\.launch request: \([0-9a-f-]\{36\}\).*/\1/p"'
-    launch_then_cancel = f's=$({launch_cmd}) && echo $s && id=$({extract_id}) && sky api cancel $id && sky down -y {name}-$i'
+
+    threads = []
+    exceptions = []
+
+    def launch_and_cancel(idx: int):
+        try:
+            cluster_name = f'{name}-{idx}'
+
+            # Create a minimal task
+            task = sky.Task(run='sleep 120')
+            task.set_resources(
+                sky.Resources(infra=generic_cloud,
+                              **smoke_tests_utils.LOW_RESOURCE_PARAM))
+
+            # Launch async
+            request_id = sky.launch(task, cluster_name=cluster_name)
+
+            # Cancel immediately
+            cancelled_request_ids = sky.get(
+                sky.api_cancel(request_ids=[request_id]))
+            assert len(cancelled_request_ids) == 1, \
+                f'Expected to cancel 1 request, got {len(cancelled_request_ids)}'
+            assert cancelled_request_ids[0] == request_id, \
+                f'Expected to cancel request {request_id}, got {cancelled_request_ids[0]}'
+
+            # Clean up
+            sky.down(cluster_name)
+        except Exception as e:  # pylint: disable=broad-except
+            exceptions.append((idx, e))
+
+    def run_parallel_launch_and_cancel() -> Generator[str, None, None]:
+        yield 'Running 30 parallel launch and cancel operations using SDK'
+        # Run multiple launch and cancel in parallel to introduce request queuing.
+        # This can trigger race conditions more frequently.
+        for i in range(30):
+            thread = threading.Thread(target=launch_and_cancel,
+                                      args=(i,),
+                                      daemon=True)
+            threads.append(thread)
+            thread.start()
+
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+
+        # Check for exceptions
+        if exceptions:
+            raise Exception(
+                f'Exceptions occurred in {len(exceptions)} threads: {exceptions}'
+            )
+
     test = smoke_tests_utils.Test(
         'launch_and_cancel_race_condition',
         [
-            # Run multiple launch and cancel in parallel to introduce request queuing.
-            # This can trigger race conditions more frequently.
-            f'for i in {{1..20}}; do ({launch_then_cancel}) & done; wait',
+            run_parallel_launch_and_cancel,
             # Sleep shortly, so that if there is any leaked cluster it can be shown in sky status.
             'sleep 10',
-            # Verify the cluster is not created.
-            f'sky status {name} | grep "not found"',
+            # Verify the cluster(s) are not created.
+            f'sky status "{name}*" | grep "not found"',
         ],
-        # teardown=f'sky down -y {name} || true',
         timeout=smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)
