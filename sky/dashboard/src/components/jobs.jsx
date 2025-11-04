@@ -612,7 +612,7 @@ export function ManagedJobsTable({
 
   // Populate valueList for filter dropdown
   useEffect(() => {
-    if (!data || data.length === 0 || !setValueList) {
+    if (!setValueList) {
       return;
     }
 
@@ -628,13 +628,41 @@ export function ManagedJobsTable({
       if (job.pool) pools.add(job.pool);
     });
 
+    // Extract pool names from poolsData, but only include pools that:
+    // 1. Have running jobs (non-terminal status jobs), OR
+    // 2. Were created in the last day (based on uptime)
+    if (poolsData && Array.isArray(poolsData)) {
+      const oneDayInSeconds = 24 * 60 * 60; // 24 hours in seconds
+
+      poolsData.forEach((pool) => {
+        if (!pool.name) return;
+
+        // Check if pool has running jobs (non-terminal status)
+        const hasRunningJobs =
+          pool.jobCounts && Object.keys(pool.jobCounts).length > 0;
+
+        // Check if pool was created in the last day
+        // uptime is seconds since pool was created
+        // If uptime is null/undefined, we can't determine creation time
+        const createdInLastDay =
+          pool.uptime !== null &&
+          pool.uptime !== undefined &&
+          pool.uptime > 0 &&
+          pool.uptime < oneDayInSeconds;
+
+        if (hasRunningJobs || createdInLastDay) {
+          pools.add(pool.name);
+        }
+      });
+    }
+
     setValueList({
       name: Array.from(names).sort(),
       user: Array.from(users).sort(),
       workspace: Array.from(workspaces).sort(),
       pool: Array.from(pools).sort(),
     });
-  }, [data, setValueList]);
+  }, [data, poolsData, setValueList]);
 
   const requestSort = (key) => {
     let direction = 'ascending';
