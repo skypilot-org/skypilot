@@ -1704,7 +1704,7 @@ def query_instances(
 
         response = kubernetes.core_api(context).list_namespaced_pod(
             namespace,
-            label_selector=f'skypilot-cluster={cluster_name_on_cloud}',
+            label_selector=label_selector,
             _request_timeout=kubernetes.API_TIMEOUT)
 
         # log PodList response info
