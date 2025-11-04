@@ -1697,8 +1697,9 @@ def query_instances(
     # Get all the pods with the label skypilot-cluster-name: <cluster_name>
     try:
         # log the query parameters we pass to the k8s api
-        logger.debug(f'Querying k8s api for pods in context: {context} and '
-                     f'namespace: {namespace} with '
+        logger.debug(f'Querying k8s api for pods:\n'
+                     f'context: {context}\n'
+                     f'namespace: {namespace}\n'
                      f'label selector:`{label_selector}`.')
 
         response = kubernetes.core_api(context).list_namespaced_pod(
@@ -1708,9 +1709,9 @@ def query_instances(
 
         # log PodList response info
         if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
-            logger.debug(f'k8s api response for `{label_selector}`: '
+            logger.debug(f'k8s api response for `{label_selector}`:\n'
                          f'apiVersion={response.api_version}, '
-                         f'kind={response.kind}, '
+                         f'kind={response.kind},\n'
                          f'metadata={response.metadata}')
 
         pods = response.items
