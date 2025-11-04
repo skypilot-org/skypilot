@@ -48,8 +48,44 @@ fi
 
 if [ -z "$context" ] || [ "$context_lower" = "none" ]; then
     # If context is none, it means we are using incluster auth. In this case,
-    # use need to set KUBECONFIG to /dev/null to avoid using kubeconfig file.
-    kubectl exec -i "$resource_type/$resource_name" -n "$namespace" --kubeconfig=/dev/null -- "$@"
+    # we need to set KUBECONFIG to /dev/null to avoid using kubeconfig file.
+    kubectl_cmd_base="kubectl exec \"$resource_type/$resource_name\" -n \"$namespace\" --kubeconfig=/dev/null --"
 else
-    kubectl exec -i "$resource_type/$resource_name" -n "$namespace" --context="$context" -- "$@"
+    kubectl_cmd_base="kubectl exec \"$resource_type/$resource_name\" -n \"$namespace\" --context=\"$context\" --"
 fi
+
+# Wait for rsync to be available. Rsync installation happens asynchronously
+# during pod startup, so we need to wait for it to be available.
+wait_for_rsync() {
+    # Check if rsync is available once
+    # Build kubectl command array with proper context handling and timeout
+    kubectl_cmd=(kubectl exec "$resource_type/$resource_name" -n "$namespace" --pod-running-timeout=5s)
+    if [ -z "$context" ] || [ "$context_lower" = "none" ]; then
+        kubectl_cmd+=(--kubeconfig=/dev/null)
+    else
+        kubectl_cmd+=(--context="$context")
+    fi
+    kubectl_cmd+=(--)
+    
+    if timeout 5s "${kubectl_cmd[@]}" which rsync >/dev/null 2>&1 </dev/null; then
+        echo "Worked on first check" >&2
+        exit 1
+    fi
+    
+    # If not available, wait 60 seconds for installation to complete
+    echo "rsync not found, waiting 60s for installation to complete..." >&2
+    sleep 60
+    
+    # Check again after waiting
+    if timeout 5s bash -c "eval \"$kubectl_cmd_base\" which rsync >/dev/null 2>&1 </dev/null"; then
+        echo "Worked on second check" >&2
+        exit 1
+    fi
+    
+    echo "Error: rsync not available after waiting 60s, package installation may have failed." >&2
+    exit 1
+}
+wait_for_rsync
+
+# Insert -i flag before the -- separator and execute
+eval "${kubectl_cmd_base% --} -i -- \"\$@\""
