@@ -100,8 +100,7 @@ class UserRequest:
     def decode(cls, body: str) -> 'UserRequest':
         user_request_body = _UserRequestBody.model_validate_json(body)
         user_dict = yaml_utils.read_yaml_str(
-            user_request_body.user
-        ) if user_request_body.user is not '' else None
+            user_request_body.user) if user_request_body.user != '' else None
         user = models.User(
             id=user_dict['id'],
             name=user_dict['name']) if user_dict is not None else None
