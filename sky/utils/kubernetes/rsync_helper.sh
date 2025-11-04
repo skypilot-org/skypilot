@@ -54,22 +54,13 @@ else
     kubectl_cmd_base="kubectl exec \"$resource_type/$resource_name\" -n \"$namespace\" --context=\"$context\" --"
 fi
 
-# Wait for rsync to be available. Rsync installation happens asynchronously
-# during pod startup, so we need to wait for it to be available.
+# Check if rsync is available, if not wait. Rsync installation happens 
+# asynchronously during pod startup, so we need to wait for it to be available.
 wait_for_rsync() {
-    # Check if rsync is available once
-    # Build kubectl command array with proper context handling and timeout
-    kubectl_cmd=(kubectl exec "$resource_type/$resource_name" -n "$namespace" --pod-running-timeout=5s)
-    if [ -z "$context" ] || [ "$context_lower" = "none" ]; then
-        kubectl_cmd+=(--kubeconfig=/dev/null)
-    else
-        kubectl_cmd+=(--context="$context")
-    fi
-    kubectl_cmd+=(--)
-    
-    if timeout 5s "${kubectl_cmd[@]}" which rsync >/dev/null 2>&1 </dev/null; then
+    # Check if rsync is available.
+    if timeout 5s bash -c "eval \"$kubectl_cmd_base\" which rsync" >/dev/null 2>&1 </dev/null; then
         echo "Worked on first check" >&2
-        exit 1
+        return 0
     fi
     
     # If not available, wait 60 seconds for installation to complete
@@ -79,11 +70,11 @@ wait_for_rsync() {
     # Check again after waiting
     if timeout 5s bash -c "eval \"$kubectl_cmd_base\" which rsync >/dev/null 2>&1 </dev/null"; then
         echo "Worked on second check" >&2
-        exit 1
+        return 0
     fi
     
-    echo "Error: rsync not available after waiting 60s, package installation may have failed." >&2
-    exit 1
+    echo "Error: rsync not available after waiting 60s, package installation is either slow or failed.." >&2
+    return 1
 }
 wait_for_rsync
 
