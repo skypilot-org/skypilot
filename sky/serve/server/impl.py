@@ -159,8 +159,9 @@ def up(
     assert task.service is not None
     if pool:
         if task.run is not None:
-            logger.warning(f'{colorama.Fore.YELLOW}The `run` section will be '
-                           f'ignored for pool.{colorama.Style.RESET_ALL}')
+            logger.warning(
+                f'{colorama.Fore.YELLOW}The `run` section will be '
+                f'ignored for pool creation.{colorama.Style.RESET_ALL}')
         # Use dummy run script for cluster pool.
         task.run = serve_constants.POOL_DUMMY_RUN_COMMAND
 
@@ -545,8 +546,9 @@ def update(
     task = dag.tasks[0]
     if pool:
         if task.run is not None:
-            logger.warning(f'{colorama.Fore.YELLOW}The `run` section will be '
-                           f'ignored for pool.{colorama.Style.RESET_ALL}')
+            logger.warning(
+                f'{colorama.Fore.YELLOW}The `run` section will be '
+                f'ignored for pool creation.{colorama.Style.RESET_ALL}')
         # Use dummy run script for cluster pool.
         task.run = serve_constants.POOL_DUMMY_RUN_COMMAND
 
