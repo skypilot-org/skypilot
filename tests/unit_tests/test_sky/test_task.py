@@ -875,3 +875,33 @@ def test_resolve_volumes_with_envs_dict():
     }
     t = task.Task.from_yaml_config(config)
     assert t._volumes == {'/mnt': {'name': 'vol1_suffix'}}
+
+
+def test_resources_to_config():
+    t = task.Task()
+    resource1 = resources_lib.Resources(cloud='aws',
+                                        region='us-west1',
+                                        zone='a')
+    t.resources = [resource1]
+    assert t.get_resource_config() == resource1.to_yaml_config()
+
+    t.resources = [resource1, resource1]
+    assert t.get_resource_config() == resource1.to_yaml_config()
+
+    t.resources = {resource1, resource1}
+    assert t.get_resource_config() == resource1.to_yaml_config()
+
+    resource2 = resources_lib.Resources(cloud='aws',
+                                        region='us-west1',
+                                        zone='a',
+                                        memory='10GB')
+    t.resources = [resource1, resource2]
+    common_config = resources_lib.Resources(cloud='aws',
+                                            region='us-west1',
+                                            zone='a').to_yaml_config()
+    returned_config = t.get_resource_config()
+    ordered = returned_config.pop('ordered')
+    assert returned_config == common_config
+    assert len(ordered) == 2
+    assert ordered[0] == {}
+    assert float(ordered[1]['memory']) == 10.0
