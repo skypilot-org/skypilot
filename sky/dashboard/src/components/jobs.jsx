@@ -57,6 +57,7 @@ import {
   Filters,
   updateURLParams as sharedUpdateURLParams,
   updateFiltersByURLParams as sharedUpdateFiltersByURLParams,
+  buildFilterUrl,
 } from '@/components/shared/FilterSystem';
 
 // Define status groups for active and finished jobs
@@ -2016,13 +2017,14 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
               >
                 Worker Resources{getSortDirection('requested_resources_str')}
               </TableHead>
+              <TableHead className="whitespace-nowrap w-32">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading && isInitialLoad ? (
               <TableRow>
                 <TableCell
-                  colSpan={5}
+                  colSpan={6}
                   className="text-center py-6 text-gray-500"
                 >
                   <div className="flex justify-center items-center">
@@ -2050,12 +2052,19 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                     <InfraBadges replicaInfo={pool.replica_info} />
                   </TableCell>
                   <TableCell>{pool.requested_resources_str || '-'}</TableCell>
+                  <TableCell>
+                    <Link href={buildFilterUrl('/jobs', 'pool', ':', pool.name)}>
+                      <Button variant="outline" size="sm" className="text-xs">
+                        See all jobs
+                      </Button>
+                    </Link>
+                  </TableCell>
                 </TableRow>
               ))
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={5}
+                  colSpan={6}
                   className="text-center py-6 text-gray-500"
                 >
                   No pools found

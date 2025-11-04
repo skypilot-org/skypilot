@@ -37,6 +37,7 @@ import {
   TableCell,
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
+import { buildFilterUrl } from '@/components/shared/FilterSystem';
 
 export default function PoolDetailPage() {
   const router = useRouter();
@@ -122,17 +123,6 @@ export default function PoolDetailPage() {
       return sortConfig.direction === 'ascending' ? ' ↑' : ' ↓';
     }
     return '';
-  };
-
-  // Helper function to build URL for filtering jobs by pool
-  const getJobsUrlForPool = (poolName) => {
-    if (!poolName) return '/jobs';
-    const params = new URLSearchParams({
-      property: 'pool',
-      operator: ':',
-      value: poolName,
-    });
-    return `/jobs?${params.toString()}`;
   };
 
   // Helper functions
@@ -420,7 +410,7 @@ export default function PoolDetailPage() {
                       Actions
                     </div>
                     <div className="text-base mt-1">
-                      <Link href={getJobsUrlForPool(poolName)}>
+                      <Link href={buildFilterUrl('/jobs', 'pool', ':', poolName)}>
                         <Button variant="outline" size="sm" className="text-xs">
                           See all jobs
                         </Button>
