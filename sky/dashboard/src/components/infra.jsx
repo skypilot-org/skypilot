@@ -223,8 +223,8 @@ export function InfrastructureSection({
                       // Get workspace information for this context
                       const workspaces = contextWorkspaceMap[context] || [];
                       const workspaceDisplay =
-                        workspaces.length > 0
-                          ? ` (${workspaces.join(', ')})`
+                        workspaces.length > 1
+                          ? ` (workspaces: ${workspaces.join(', ')})`
                           : '';
 
                       return (
