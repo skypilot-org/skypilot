@@ -9,6 +9,7 @@ import pydantic
 
 import sky
 from sky import exceptions
+from sky import models
 from sky.adaptors import common as adaptors_common
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -51,6 +52,7 @@ class _UserRequestBody(pydantic.BaseModel):
     skypilot_config: str
     request_options: Optional[RequestOptions] = None
     at_client_side: bool = False
+    user: str
 
 
 @dataclasses.dataclass
@@ -73,11 +75,15 @@ class UserRequest:
         skypilot_config: Global skypilot config to be used in this request.
         request_options: Request options. It is None for jobs and services.
         at_client_side: Is the request intercepted by the policy at client-side?
+        user: User who made the request.
+              Only available on the server side.
+              This value is None if at_client_side is True.
     """
     task: 'sky.Task'
     skypilot_config: 'sky.Config'
     request_options: Optional['RequestOptions'] = None
     at_client_side: bool = False
+    user: Optional['models.User'] = None
 
     def encode(self) -> str:
         return _UserRequestBody(
@@ -86,11 +92,18 @@ class UserRequest:
                 self.skypilot_config)),
             request_options=self.request_options,
             at_client_side=self.at_client_side,
+            user=(yaml_utils.dump_yaml_str(self.user.to_dict())
+                  if self.user is not None else ''),
         ).model_dump_json()
 
     @classmethod
     def decode(cls, body: str) -> 'UserRequest':
         user_request_body = _UserRequestBody.model_validate_json(body)
+        user_dict = yaml_utils.read_yaml_str(
+            user_request_body.user) if user_request_body.user != '' else None
+        user = models.User(
+            id=user_dict['id'],
+            name=user_dict['name']) if user_dict is not None else None
         return cls(
             task=sky.Task.from_yaml_config(
                 yaml_utils.read_yaml_all_str(user_request_body.task)[0]),
@@ -99,6 +112,7 @@ class UserRequest:
                     user_request_body.skypilot_config)[0]),
             request_options=user_request_body.request_options,
             at_client_side=user_request_body.at_client_side,
+            user=user,
         )
 
 
