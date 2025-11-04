@@ -274,7 +274,7 @@ class PostgresLock(DistributedLock):
             cursor.execute('SELECT pg_advisory_unlock(%s)', (self._lock_key,))
             result = cursor.fetchone()[0]
             if result:
-                # The lock is held by current routine and unlock suceed
+                # The lock is held by current routine and unlock succeed
                 self._connection.commit()
                 self._acquired = False
                 return

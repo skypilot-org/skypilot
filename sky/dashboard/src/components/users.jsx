@@ -257,6 +257,8 @@ export function Users() {
   const [basicAuthEnabled, setBasicAuthEnabled] = useState(undefined);
   const [serviceAccountTokenEnabled, setServiceAccountTokenEnabled] =
     useState(undefined);
+  const [ingressBasicAuthEnabled, setIngressBasicAuthEnabled] =
+    useState(undefined);
   const [healthCheckLoading, setHealthCheckLoading] = useState(true);
   const [activeMainTab, setActiveMainTab] = useState('users');
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -373,13 +375,16 @@ export function Users() {
           const data = await resp.json();
           setBasicAuthEnabled(!!data.basic_auth_enabled);
           setServiceAccountTokenEnabled(!!data.service_account_token_enabled);
+          setIngressBasicAuthEnabled(!!data.ingress_basic_auth_enabled);
         } else {
           setBasicAuthEnabled(false);
           setServiceAccountTokenEnabled(false);
+          setIngressBasicAuthEnabled(false);
         }
       } catch {
         setBasicAuthEnabled(false);
         setServiceAccountTokenEnabled(false);
+        setIngressBasicAuthEnabled(false);
       } finally {
         setHealthCheckLoading(false);
       }
@@ -866,6 +871,7 @@ export function Users() {
           onResetPassword={handleResetPasswordClick}
           onDeleteUser={handleDeleteUserClick}
           basicAuthEnabled={basicAuthEnabled}
+          ingressBasicAuthEnabled={ingressBasicAuthEnabled}
           currentUserRole={userRoleCache?.role}
           currentUserId={userRoleCache?.id}
           filters={filters}
@@ -1289,6 +1295,7 @@ function UsersTable({
   onResetPassword,
   onDeleteUser,
   basicAuthEnabled,
+  ingressBasicAuthEnabled,
   currentUserRole,
   currentUserId,
   filters,
@@ -2027,7 +2034,7 @@ function UsersTable({
                   User ID{getSortDirection('fullEmailID')}
                 </TableHead>
               )}
-              {!deduplicateUsers && (
+              {!deduplicateUsers && !ingressBasicAuthEnabled && (
                 <TableHead
                   onClick={() => requestSort('role')}
                   className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
@@ -2079,7 +2086,7 @@ function UsersTable({
                     {user.fullEmailID}
                   </TableCell>
                 )}
-                {!deduplicateUsers && (
+                {!deduplicateUsers && !ingressBasicAuthEnabled && (
                   <TableCell className="truncate" title={user.role}>
                     <div className="flex items-center gap-2">
                       {editingUserId === user.userId ? (
@@ -2266,6 +2273,7 @@ UsersTable.propTypes = {
   onResetPassword: PropTypes.func.isRequired,
   onDeleteUser: PropTypes.func.isRequired,
   basicAuthEnabled: PropTypes.bool,
+  ingressBasicAuthEnabled: PropTypes.bool,
   currentUserRole: PropTypes.string,
   currentUserId: PropTypes.string,
 };
