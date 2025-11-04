@@ -1691,39 +1691,37 @@ def query_instances(
     context = kubernetes_utils.get_context_from_config(provider_config)
     is_ssh = context.startswith('ssh-') if context else False
     identity = 'SSH Node Pool' if is_ssh else 'Kubernetes cluster'
+    label_selector = (f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
+                      f'{cluster_name_on_cloud}')
 
     # Get all the pods with the label skypilot-cluster-name: <cluster_name>
     try:
         # log the query parameters we pass to the k8s api
-        logger.debug(
-            f'Querying k8s api for pods in context: {context} and '
-            f'namespace: {namespace} with '
-            f'`skypilot-cluster={cluster_name_on_cloud}` label selector.')
+        logger.debug(f'Querying k8s api for pods in context: {context} and '
+                     f'namespace: {namespace} with '
+                     f'label selector:`{label_selector}`.')
 
         response = kubernetes.core_api(context).list_namespaced_pod(
             namespace,
-            label_selector=f'skypilot-cluster={cluster_name_on_cloud}',
+            label_selector=label_selector,
             _request_timeout=kubernetes.API_TIMEOUT)
 
         # log PodList response info
         if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
-            logger.debug(f'k8s api response for skypilot-cluster='
-                         f'{cluster_name_on_cloud}: '
+            logger.debug(f'k8s api response for `{label_selector}`: '
                          f'apiVersion={response.api_version}, '
                          f'kind={response.kind}, '
                          f'metadata={response.metadata}')
 
         pods = response.items
 
-        logger.debug(f'k8s api response for skypilot-cluster='
-                     f'{cluster_name_on_cloud}: '
+        logger.debug(f'k8s api response for `{label_selector}`: '
                      f'len(pods)={len(pods)}')
 
         # log detailed Pod info
         if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
             for pod in pods:
-                logger.debug(f'k8s pod info for '
-                             f'skypilot cluster={cluster_name_on_cloud}: '
+                logger.debug(f'k8s pod info for `{label_selector}`: '
                              f'pod.apiVersion={pod.api_version}, '
                              f'pod.kind={pod.kind}, \n'
                              f'pod.name={pod.metadata.name}, '
