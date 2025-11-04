@@ -733,8 +733,8 @@ class TestControllerProcessAlive:
                 return True
 
         monkeypatch.setattr(jobs_utils.psutil, 'Process', _KeywordProcess)
-        record = managed_job_state.ControllerPidRecord(
-            pid=expected_pid, started_at=None)
+        record = managed_job_state.ControllerPidRecord(pid=expected_pid,
+                                                       started_at=None)
         assert jobs_utils.controller_process_alive(record, job_id=42) is True
 
         class _NoKeywordProcess(_KeywordProcess):
