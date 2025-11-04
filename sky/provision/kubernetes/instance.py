@@ -1694,10 +1694,24 @@ def query_instances(
 
     # Get all the pods with the label skypilot-cluster: <cluster_name>
     try:
-        pods = kubernetes.core_api(context).list_namespaced_pod(
+        logger.debug(
+            f'Querying k8s api for pods in context: {context} and '
+            f'namespace: {namespace} with '
+            f'`skypilot-cluster={cluster_name_on_cloud}` label selector.')
+
+        response = kubernetes.core_api(context).list_namespaced_pod(
             namespace,
             label_selector=f'skypilot-cluster={cluster_name_on_cloud}',
-            _request_timeout=kubernetes.API_TIMEOUT).items
+            _request_timeout=kubernetes.API_TIMEOUT)
+        pods = response.items
+
+        # Log response metadata
+        # pylint: disable=protected-access
+        logger.debug(
+            f'Query response for skypilot cluster {cluster_name_on_cloud}: '
+            f'resource_version={response.metadata.resource_version}, '
+            f'pod_count={len(pods)}, '
+            f'continue_token={response.metadata._continue}')
     except kubernetes.max_retry_error():
         with ux_utils.print_exception_no_traceback():
             if is_ssh:
