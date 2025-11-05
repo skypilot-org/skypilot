@@ -45,8 +45,7 @@ export async function getCloudInfrastructure(forceRefresh = false) {
           const checkData = await checkResult.json();
           console.log('Sky check completed:', checkData);
         } catch (checkError) {
-          const msg = `Error running sky check: ${checkError.message}`;
-          console.error(msg);
+          console.error('Error running sky check:', checkError);
           // Continue anyway - we'll still try to get the cached enabled clouds
         }
       }
