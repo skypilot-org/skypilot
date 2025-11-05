@@ -431,7 +431,7 @@ deploy_and_login() {
 
     echo "🔄 Performing automated login for mode: $mode..."
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    LOGIN_OUTPUT=$(python3 "$SCRIPT_DIR/okta_auto_login.py" --endpoint "$ENDPOINT" --username "$OKTA_TEST_USERNAME" --password "$OKTA_TEST_PASSWORD" --client-id "$OKTA_CLIENT_ID")
+    LOGIN_OUTPUT=$(python3 "$SCRIPT_DIR/okta_auto_login.py direct --endpoint "$ENDPOINT" --username "$OKTA_TEST_USERNAME" --password "$OKTA_TEST_PASSWORD" --client-id "$OKTA_CLIENT_ID")
     if [[ $? -eq 0 ]] && [[ "$LOGIN_OUTPUT" == SUCCESS* ]]; then
         echo "✅ Automated test complete for mode: $mode"
     else
