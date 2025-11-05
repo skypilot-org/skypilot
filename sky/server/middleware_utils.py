@@ -44,6 +44,9 @@ def websocket_aware(
             else:
                 raise ValueError(f'Invalid scope type: {scope_type}')
 
+        async def dispatch(self, request: fastapi.Request, call_next):
+            return await self.middleware.dispatch(request, call_next)
+
         async def _handle_websocket(self, scope, receive, send):
             """Handle websocket connection by delegating to HTTP middleware."""
             decision = await self._run_websocket_dispatch(scope)
@@ -82,7 +85,7 @@ def websocket_aware(
                 return stub_response
 
             try:
-                response = await self.middleware.dispatch(request, call_next)
+                response = await self.dispatch(request, call_next)
             except Exception as e:  # pylint: disable=broad-except
                 logger.error('Exception occurred in middleware dispatch for '
                              f'WebSocket scope: {e}')
