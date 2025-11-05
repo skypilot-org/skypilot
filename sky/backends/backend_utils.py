@@ -3355,8 +3355,8 @@ def get_clusters(
     def _refresh_cluster_record(cluster_name):
         record = _refresh_cluster(cluster_name,
                                   force_refresh_statuses=force_refresh_statuses,
-                                  retry_if_missing=force_refresh_statuses
-                                  is not None,
+                                  retry_if_missing=(force_refresh_statuses
+                                                    is not None),
                                   include_user_info=True,
                                   summary_response=summary_response)
         # record may be None if the cluster is deleted during refresh,
