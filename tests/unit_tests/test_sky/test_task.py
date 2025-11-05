@@ -906,6 +906,7 @@ def test_resources_to_config():
     assert ordered[0] == {}
     assert float(ordered[1]['memory']) == 10.0
 
+
 def test_task_resource_config_modification():
     t = task.Task()
     resource1 = resources_lib.Resources(cloud='aws',
