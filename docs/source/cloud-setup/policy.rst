@@ -281,6 +281,55 @@ Tips for writing an admin policy
 
 When writing an admin policy, you can leverage the following tips to make your policy more robust and flexible.
 
+Access user information
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Use ``UserRequest.user`` to access the user who made the request.
+This field is only available when the policy is applied at the server-side.
+
+Useful for:
+
+- Logging the user who made a specific request.
+- Implementing per-user quotas or rate limits.
+- Changing the behavior of the policy based on the user.
+
+Access request name
+~~~~~~~~~~~~~~~~~~~
+
+Use ``UserRequest.request_name`` to access the request name.
+
+Useful for:
+
+- Activating a policy selectively for certain request types.
+- Implementing per-request rate limits.
+- Changing the behavior of the policy based on the request name.
+
+Inspect and modify resources
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Use ``UserRequest.task.resources.get_resource_config()`` to get the resource configuration of a task.
+
+The resource configuration is a dictionary conforming to the :ref:`resource config schema <yaml-spec>`.
+
+Once the resource configuration is modified, you can use 
+``UserRequest.task.resources.set_resource_config(resource_config)``
+to set the modified resource configuration back to the task.
+
+.. code-block:: python
+
+    resource_config = user_request.task.resources.get_resource_config()
+    resource_config['use_spot'] = True
+    if 'any_of' in resource_config:
+        for any_of_config in resource_config['any_of']:
+            any_of_config['use_spot'] = True
+    elif 'ordered' in resource_config:
+        for ordered_config in resource_config['ordered']:
+            ordered_config['use_spot'] = True
+    user_request.task.resources.set_resource_config(resource_config)
+
+Useful for:
+
+- Enforcing resource constraints (e.g. use spot instances for all GPU tasks, enforce autostop for all tasks).
 
 Example policies
 ----------------
