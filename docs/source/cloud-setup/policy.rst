@@ -307,17 +307,17 @@ Useful for:
 Inspect and modify resources
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Use ``UserRequest.task.resources.get_resource_config()`` to get the resource configuration of a task.
+Use ``UserRequest.task.get_resource_config()`` to get the resource configuration of a task.
 
 The resource configuration is a dictionary conforming to the :ref:`resource config schema <yaml-spec>`.
 
 Once the resource configuration is modified, you can use 
-``UserRequest.task.resources.set_resource_config(resource_config)``
+``UserRequest.task.set_resources(resource_config)``
 to set the modified resource configuration back to the task.
 
 .. code-block:: python
 
-    resource_config = user_request.task.resources.get_resource_config()
+    resource_config = user_request.task.get_resource_config()
     resource_config['use_spot'] = True
     if 'any_of' in resource_config:
         for any_of_config in resource_config['any_of']:
@@ -325,7 +325,7 @@ to set the modified resource configuration back to the task.
     elif 'ordered' in resource_config:
         for ordered_config in resource_config['ordered']:
             ordered_config['use_spot'] = True
-    user_request.task.resources.set_resource_config(resource_config)
+    user_request.task.set_resources(resource_config)
 
 Useful for:
 
