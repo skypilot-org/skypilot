@@ -1951,7 +1951,8 @@ def tag_filter_for_cluster(cluster_name: str) -> Dict[str, str]:
 
 @context_utils.cancellation_guard
 def _query_cluster_status_via_cloud_api(
-    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
+    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+    retry_if_missing: bool = False,
 ) -> List[Tuple[status_lib.ClusterStatus, Optional[str]]]:
     """Returns the status of the cluster as a list of tuples corresponding
     to the node status and an optional reason string for said status.
@@ -1982,7 +1983,7 @@ def _query_cluster_status_via_cloud_api(
                 cluster_name,
                 cluster_name_on_cloud,
                 provider_config,
-                retry_if_missing=True)
+                retry_if_missing=retry_if_missing)
             logger.debug(f'Querying {cloud_name} cluster '
                          f'{cluster_name_in_hint} '
                          f'status:\n{pprint.pformat(node_status_dict)}')
@@ -2164,7 +2165,8 @@ def _update_cluster_status(
         cluster_name: str,
         record: Dict[str, Any],
         include_user_info: bool = True,
-        summary_response: bool = False) -> Optional[Dict[str, Any]]:
+        summary_response: bool = False,
+        retry_if_missing: bool = False) -> Optional[Dict[str, Any]]:
     """Update the cluster status.
 
     The cluster status is updated by checking ray cluster and real status from
@@ -2209,7 +2211,8 @@ def _update_cluster_status(
         return record
     cluster_name = handle.cluster_name
 
-    node_statuses = _query_cluster_status_via_cloud_api(handle)
+    node_statuses = _query_cluster_status_via_cloud_api(
+        handle, retry_if_missing=retry_if_missing)
 
     all_nodes_up = (all(status[0] == status_lib.ClusterStatus.UP
                         for status in node_statuses) and
@@ -2384,7 +2387,8 @@ def _update_cluster_status(
             # and check again. This is a best-effort leak prevention check.
             # See https://github.com/skypilot-org/skypilot/issues/4431.
             time.sleep(_LAUNCH_DOUBLE_CHECK_DELAY)
-            node_statuses = _query_cluster_status_via_cloud_api(handle)
+            node_statuses = _query_cluster_status_via_cloud_api(
+                handle, retry_if_missing=False)
             # Note: even if all the node_statuses are UP now, we will still
             # consider this cluster abnormal, and its status will be INIT.
 
@@ -2628,7 +2632,8 @@ def refresh_cluster_record(
         cluster_lock_already_held: bool = False,
         cluster_status_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS,
         include_user_info: bool = True,
-        summary_response: bool = False) -> Optional[Dict[str, Any]]:
+        summary_response: bool = False,
+        retry_if_missing: bool = False) -> Optional[Dict[str, Any]]:
     """Refresh the cluster, and return the possibly updated record.
 
     The function will update the cached cluster status in the global state. For
@@ -2704,7 +2709,8 @@ def refresh_cluster_record(
             if cluster_lock_already_held:
                 return _update_cluster_status(cluster_name, record,
                                               include_user_info,
-                                              summary_response)
+                                              summary_response,
+                                              retry_if_missing)
 
             # Try to acquire the lock so we can fetch the status.
             try:
@@ -2721,7 +2727,8 @@ def refresh_cluster_record(
                     # Update and return the cluster status.
                     return _update_cluster_status(cluster_name, record,
                                                   include_user_info,
-                                                  summary_response)
+                                                  summary_response,
+                                                  retry_if_missing)
 
             except locks.LockTimeout:
                 # lock.acquire() will throw a Timeout exception if the lock is not
@@ -3085,18 +3092,20 @@ def _get_glob_clusters(
     return list(set(glob_clusters))
 
 
-def _refresh_cluster(
-        cluster_name: str,
-        force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]],
-        include_user_info: bool = True,
-        summary_response: bool = False) -> Optional[Dict[str, Any]]:
+def _refresh_cluster(cluster_name: str,
+                     force_refresh_statuses: Optional[Set[
+                         status_lib.ClusterStatus]],
+                     include_user_info: bool = True,
+                     summary_response: bool = False,
+                     retry_if_missing: bool = True) -> Optional[Dict[str, Any]]:
     try:
         record = refresh_cluster_record(
             cluster_name,
             force_refresh_statuses=force_refresh_statuses,
             cluster_lock_already_held=False,
             include_user_info=include_user_info,
-            summary_response=summary_response)
+            summary_response=summary_response,
+            retry_if_missing=retry_if_missing)
     except (exceptions.ClusterStatusFetchingError,
             exceptions.CloudUserIdentityError,
             exceptions.ClusterOwnerIdentityMismatchError) as e:
@@ -3146,7 +3155,8 @@ def refresh_cluster_records() -> None:
                                 force_refresh_statuses=set(
                                     status_lib.ClusterStatus),
                                 include_user_info=False,
-                                summary_response=True)
+                                summary_response=True,
+                                retry_if_missing=True)
 
     if len(cluster_names_without_launch_request) > 0:
         # Do not refresh the clusters that have an active launch request.
@@ -3346,7 +3356,8 @@ def get_clusters(
         record = _refresh_cluster(cluster_name,
                                   force_refresh_statuses=force_refresh_statuses,
                                   include_user_info=True,
-                                  summary_response=summary_response)
+                                  summary_response=summary_response,
+                                  retry_if_missing=True)
         # record may be None if the cluster is deleted during refresh,
         # e.g. all the Pods of a cluster on Kubernetes have been
         # deleted before refresh.
