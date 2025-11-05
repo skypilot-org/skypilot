@@ -1087,7 +1087,11 @@ def test_kubernetes_show_gpus(generic_cloud: str):
 
 @pytest.mark.no_kubernetes
 def test_show_gpus(generic_cloud: str):
-    check_cmd = 'echo "$s" && echo "$s" | grep -E "^[A-Z0-9-]+[[:space:]]+[0-9, ]+"'
+    # Check that output contains GPU table headers and common GPU types
+    check_cmd = ('echo "$s" && '
+                 'echo "$s" | grep "COMMON_GPU" && '
+                 'echo "$s" | grep "AVAILABLE_QUANTITIES" && '
+                 'echo "$s" | grep -E "A100|H100|H200|L4|T4|B200"')
     test = smoke_tests_utils.Test(
         'show_gpus',
         [
