@@ -3155,8 +3155,7 @@ def refresh_cluster_records() -> None:
                                 force_refresh_statuses=set(
                                     status_lib.ClusterStatus),
                                 include_user_info=False,
-                                summary_response=True,
-                                retry_if_missing=True)
+                                summary_response=True)
 
     if len(cluster_names_without_launch_request) > 0:
         # Do not refresh the clusters that have an active launch request.
@@ -3356,8 +3355,7 @@ def get_clusters(
         record = _refresh_cluster(cluster_name,
                                   force_refresh_statuses=force_refresh_statuses,
                                   include_user_info=True,
-                                  summary_response=summary_response,
-                                  retry_if_missing=True)
+                                  summary_response=summary_response)
         # record may be None if the cluster is deleted during refresh,
         # e.g. all the Pods of a cluster on Kubernetes have been
         # deleted before refresh.
