@@ -357,10 +357,18 @@ export default function PoolDetailPage() {
                       Jobs
                     </div>
                     <div className="text-base mt-1">
-                      <JobStatusBadges
-                        jobCounts={getJobStatusCounts(poolData)}
-                        getStatusStyle={getStatusStyle}
-                      />
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <JobStatusBadges
+                          jobCounts={getJobStatusCounts(poolData)}
+                          getStatusStyle={getStatusStyle}
+                        />
+                        <Link
+                          href={buildFilterUrl('/jobs', 'pool', ':', poolName)}
+                          className="text-blue-600 hover:text-blue-800 text-xs"
+                        >
+                          See all jobs
+                        </Link>
+                      </div>
                     </div>
                   </div>
 
@@ -401,22 +409,6 @@ export default function PoolDetailPage() {
                     </div>
                     <div className="text-base mt-1">
                       {poolData.policy || '-'}
-                    </div>
-                  </div>
-
-                  {/* See all jobs button */}
-                  <div>
-                    <div className="text-gray-600 font-medium text-base">
-                      Actions
-                    </div>
-                    <div className="text-base mt-1">
-                      <Link
-                        href={buildFilterUrl('/jobs', 'pool', ':', poolName)}
-                      >
-                        <Button variant="outline" size="sm" className="text-xs">
-                          See all jobs
-                        </Button>
-                      </Link>
                     </div>
                   </div>
                 </div>

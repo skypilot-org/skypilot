@@ -2017,14 +2017,13 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
               >
                 Worker Resources{getSortDirection('requested_resources_str')}
               </TableHead>
-              <TableHead className="whitespace-nowrap w-32">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading && isInitialLoad ? (
               <TableRow>
                 <TableCell
-                  colSpan={6}
+                  colSpan={5}
                   className="text-center py-6 text-gray-500"
                 >
                   <div className="flex justify-center items-center">
@@ -2045,28 +2044,27 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                     </Link>
                   </TableCell>
                   <TableCell>
-                    <JobStatusBadges jobCounts={pool.jobCounts} />
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <JobStatusBadges jobCounts={pool.jobCounts} />
+                      <Link
+                        href={buildFilterUrl('/jobs', 'pool', ':', pool.name)}
+                        className="text-blue-600 hover:text-blue-800 text-xs"
+                      >
+                        See all jobs
+                      </Link>
+                    </div>
                   </TableCell>
                   <TableCell>{getWorkersCount(pool)}</TableCell>
                   <TableCell>
                     <InfraBadges replicaInfo={pool.replica_info} />
                   </TableCell>
                   <TableCell>{pool.requested_resources_str || '-'}</TableCell>
-                  <TableCell>
-                    <Link
-                      href={buildFilterUrl('/jobs', 'pool', ':', pool.name)}
-                    >
-                      <Button variant="outline" size="sm" className="text-xs">
-                        See all jobs
-                      </Button>
-                    </Link>
-                  </TableCell>
                 </TableRow>
               ))
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={6}
+                  colSpan={5}
                   className="text-center py-6 text-gray-500"
                 >
                   No pools found
