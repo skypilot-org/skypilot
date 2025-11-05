@@ -40,6 +40,7 @@ def websocket_aware(
             """Handle websocket connection by delegating to HTTP middleware."""
             decision, headers = await self._run_websocket_dispatch(scope)
             if decision == 'accept':
+                logger.info('accepting websocket connection')
                 await self._call_with_accept_headers(scope, receive, send,
                                                      headers)
             elif decision == 'unauthorized':
@@ -101,6 +102,7 @@ def websocket_aware(
         async def _call_with_accept_headers(self, scope, receive, send,
                                             headers: List[Tuple[bytes, bytes]]):
             if not headers:
+                logger.info('calling websocket app')
                 await self.app(scope, receive, send)
                 return
 
@@ -117,6 +119,7 @@ def websocket_aware(
                     message['headers'] = additional_headers
                 await send(message)
 
+            logger.info('calling websocket app with accept headers')
             await self.app(scope, receive, send_wrapper)
 
         @staticmethod
