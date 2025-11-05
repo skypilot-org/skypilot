@@ -1952,7 +1952,7 @@ def tag_filter_for_cluster(cluster_name: str) -> Dict[str, str]:
 @context_utils.cancellation_guard
 def _query_cluster_status_via_cloud_api(
     handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
-    retry_if_missing: bool = False,
+    retry_if_missing: bool,
 ) -> List[Tuple[status_lib.ClusterStatus, Optional[str]]]:
     """Returns the status of the cluster as a list of tuples corresponding
     to the node status and an optional reason string for said status.
@@ -2164,9 +2164,9 @@ def check_can_clone_disk_and_override_task(
 def _update_cluster_status(
         cluster_name: str,
         record: Dict[str, Any],
+        retry_if_missing: bool,
         include_user_info: bool = True,
-        summary_response: bool = False,
-        retry_if_missing: bool = False) -> Optional[Dict[str, Any]]:
+        summary_response: bool = False) -> Optional[Dict[str, Any]]:
     """Update the cluster status.
 
     The cluster status is updated by checking ray cluster and real status from
@@ -2708,9 +2708,9 @@ def refresh_cluster_record(
 
             if cluster_lock_already_held:
                 return _update_cluster_status(cluster_name, record,
+                                              retry_if_missing,
                                               include_user_info,
-                                              summary_response,
-                                              retry_if_missing)
+                                              summary_response)
 
             # Try to acquire the lock so we can fetch the status.
             try:
@@ -2726,9 +2726,9 @@ def refresh_cluster_record(
                         return record
                     # Update and return the cluster status.
                     return _update_cluster_status(cluster_name, record,
+                                                  retry_if_missing,
                                                   include_user_info,
-                                                  summary_response,
-                                                  retry_if_missing)
+                                                  summary_response)
 
             except locks.LockTimeout:
                 # lock.acquire() will throw a Timeout exception if the lock is not
@@ -3092,12 +3092,12 @@ def _get_glob_clusters(
     return list(set(glob_clusters))
 
 
-def _refresh_cluster(cluster_name: str,
-                     force_refresh_statuses: Optional[Set[
-                         status_lib.ClusterStatus]],
-                     include_user_info: bool = True,
-                     summary_response: bool = False,
-                     retry_if_missing: bool = True) -> Optional[Dict[str, Any]]:
+def _refresh_cluster(
+        cluster_name: str,
+        force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]],
+        retry_if_missing: bool,
+        include_user_info: bool = True,
+        summary_response: bool = False) -> Optional[Dict[str, Any]]:
     try:
         record = refresh_cluster_record(
             cluster_name,
@@ -3154,6 +3154,7 @@ def refresh_cluster_records() -> None:
         return _refresh_cluster(cluster_name,
                                 force_refresh_statuses=set(
                                     status_lib.ClusterStatus),
+                                retry_if_missing=True,
                                 include_user_info=False,
                                 summary_response=True)
 
@@ -3354,6 +3355,7 @@ def get_clusters(
     def _refresh_cluster_record(cluster_name):
         record = _refresh_cluster(cluster_name,
                                   force_refresh_statuses=force_refresh_statuses,
+                                  retry_if_missing=True,
                                   include_user_info=True,
                                   summary_response=summary_response)
         # record may be None if the cluster is deleted during refresh,
