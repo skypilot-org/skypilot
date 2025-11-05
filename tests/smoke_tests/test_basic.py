@@ -1085,6 +1085,21 @@ def test_kubernetes_show_gpus(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_kubernetes
+def test_show_gpus(generic_cloud: str):
+    check_cmd = 'echo "$s" && echo "$s" | grep -E "^[A-Z0-9-]+[[:space:]]+[0-9, ]+"'
+    test = smoke_tests_utils.Test(
+        'show_gpus',
+        [
+            (f's=$(SKYPILOT_DEBUG=0 sky show-gpus --infra {generic_cloud}) && '
+             f'{check_cmd}'),
+            (f's=$(SKYPILOT_DEBUG=0 sky show-gpus --infra {generic_cloud} --all) && '
+             f'{check_cmd}'),
+        ],
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.no_seeweb  # Seeweb fails to provision resources
 def test_launch_and_exec_async(generic_cloud: str):
     """Test if the launch and exec commands work correctly with --async."""
