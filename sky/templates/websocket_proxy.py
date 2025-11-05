@@ -237,14 +237,16 @@ if __name__ == '__main__':
         # TODO(aylei): Remove this after 0.10.0
         server_url = f'http://{server_url}'
 
-    health_url = f'{server_url}/api/health'
-    health_response = requests.get(health_url)
-    health_data = health_response.json()
-    timestamps_are_supported = int(health_data['api_version']) > 21
     disable_latency_measurement = os.environ.get(
         skylet_constants.SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR, '0') == '1'
-    timestamps_are_supported = (timestamps_are_supported and
-                                not disable_latency_measurement)
+    if disable_latency_measurement:
+        timestamps_are_supported = False
+    else:
+        health_url = f'{server_url}/api/health'
+        cookie_hdr = _get_cookie_header(health_url)
+        health_response = requests.get(health_url, headers=cookie_hdr)
+        health_data = health_response.json()
+        timestamps_are_supported = int(health_data.get('api_version', 0)) > 21
 
     server_proto, server_fqdn = server_url.split('://')
     websocket_proto = 'ws'
