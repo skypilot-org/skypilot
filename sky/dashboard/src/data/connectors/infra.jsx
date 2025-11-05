@@ -74,7 +74,7 @@ export async function getCloudInfrastructure(forceRefresh = false) {
         : [];
       console.log('Enabled clouds:', enabledCloudsList);
     } catch (error) {
-      console.error('Error fetching enabled clouds:', error.message);
+      console.error('Error fetching enabled clouds:', error);
       // If there's an error, we'll use clusters and jobs to determine enabled clouds
       enabledCloudsList = [];
     }
@@ -136,7 +136,7 @@ export async function getCloudInfrastructure(forceRefresh = false) {
       enabledClouds,
     };
   } catch (error) {
-    console.error('Error fetching cloud infrastructure:', error.message);
+    console.error('Error fetching cloud infrastructure:', error);
     throw error;
   }
 }

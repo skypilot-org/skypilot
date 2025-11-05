@@ -93,7 +93,7 @@ export async function getWorkspaceClusters(workspaceName) {
     );
     return filteredClusters;
   } catch (error) {
-    const msg = `Error fetching clusters for workspace ${workspaceName}: ${error.message}`;
+    const msg = `Error fetching clusters for workspace ${workspaceName}: ${error}`;
     console.error(msg);
     throw new Error(msg);
   }
@@ -147,7 +147,7 @@ export async function getWorkspaceManagedJobs(workspaceName) {
 
     return jobsData;
   } catch (error) {
-    const msg = `Error fetching managed jobs for workspace ${workspaceName}: ${error.message}`;
+    const msg = `Error fetching managed jobs for workspace ${workspaceName}: ${error}`;
     console.error(msg);
     throw new Error(msg);
   }

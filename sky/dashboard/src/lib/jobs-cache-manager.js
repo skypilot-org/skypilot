@@ -177,7 +177,7 @@ class JobsCacheManager {
         cacheStatus: 'server_page_fetch',
       };
     } catch (error) {
-      console.error('Error in getPaginatedJobs:', error.message);
+      console.error('Error in getPaginatedJobs:', error);
       throw error;
     }
   }

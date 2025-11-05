@@ -51,7 +51,7 @@ export const apiClient = {
       const data = await fetchedData.json();
       return data.return_value ? JSON.parse(data.return_value) : [];
     } catch (error) {
-      const msg = `Error in apiClient.fetch for ${path}: ${error.message}`;
+      const msg = `Error in apiClient.fetch for ${path}: ${error}`;
       console.error(msg);
       throw new Error(msg);
     }

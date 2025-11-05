@@ -58,7 +58,7 @@ export async function deleteVolume(volumeName) {
       );
       return {
         success: false,
-        msg: `Delete API request failed with status ${response.status}`,
+        msg: `Failed to delete volume with status ${response.status}`,
       };
     }
     const id =
@@ -72,34 +72,15 @@ export async function deleteVolume(volumeName) {
       };
     }
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
-    if (fetchedData.status === 500) {
-      try {
-        const data = await fetchedData.json();
-        if (data.detail && data.detail.error) {
-          try {
-            const error = JSON.parse(data.detail.error);
-            // Handle specific error types
-            msg = error.message;
-            return { success: false, msg: msg };
-          } catch (jsonError) {
-            msg = `Error parsing JSON: ${jsonError}`;
-            console.error('Error parsing JSON:', jsonError);
-          }
-        }
-      } catch (parseError) {
-        msg = `Error parsing JSON: ${parseError}`;
-        console.error('Error parsing JSON:', parseError);
-      }
-      return { success: false, msg: msg };
-    }
     if (!fetchedData.ok) {
-      msg = `API request to get volume deletion result failed with status ${fetchedData.status}`;
+      msg = `Failed to delete volume with status ${fetchedData.status}`;
       console.error(msg);
       return { success: false, msg: msg };
     }
     return { success: true };
   } catch (error) {
-    console.error('Failed to delete volume:', error);
-    return { success: false, msg: error.message };
+    msg = `Failed to delete volume: ${error}`;
+    console.error(msg);
+    return { success: false, msg: msg };
   }
 }

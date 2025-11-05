@@ -220,7 +220,7 @@ export async function getManagedJobs(options = {}) {
       statusCounts,
     };
   } catch (error) {
-    console.error('Error fetching managed job data:', error.message);
+    console.error('Error fetching managed job data:', error);
     // Signal to the cache to not overwrite previously cached data
     throw error;
   }
@@ -362,7 +362,7 @@ export async function getPoolStatus() {
         jobsData = jobsResponse;
       }
     } catch (jobsError) {
-      const msg = `Failed to fetch jobs for pool job counts: ${jobsError.message}`;
+      const msg = `Failed to fetch jobs for pool job counts: ${jobsError}`;
       throw new Error(msg);
     }
 
@@ -401,7 +401,7 @@ export async function getPoolStatus() {
 
     return { pools, controllerStopped: false };
   } catch (error) {
-    console.error('Error fetching pools:', error.message);
+    console.error('Error fetching pools:', error);
     throw error;
   }
 }
