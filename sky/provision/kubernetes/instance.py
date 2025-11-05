@@ -1770,12 +1770,16 @@ def query_instances(
                                is_ssh, identity, label_selector)
     while (retry_if_missing and not pods and
            attempts < _MAX_QUERY_INSTANCES_RETRIES):
-        attempts += 1
         logger.debug(f'Retrying to query k8s api for {cluster_name_on_cloud} '
-                     f'{attempts}/{_MAX_QUERY_INSTANCES_RETRIES} times.')
+                     f'{attempts}/{_MAX_QUERY_INSTANCES_RETRIES} times.'
+                     f'after {_QUERY_INSTANCES_RETRY_INTERVAL} seconds.')
+        time.sleep(_QUERY_INSTANCES_RETRY_INTERVAL)
+        attempts += 1
         pods = list_namespaced_pod(context, namespace, cluster_name_on_cloud,
                                    is_ssh, identity, label_selector)
-        time.sleep(_QUERY_INSTANCES_RETRY_INTERVAL)
+        if len(pods) > 0:
+            logger.info(f'Found {len(pods)} pods for {label_selector} after'
+                        f'{attempts} retries.')
 
     # Check if the pods are running or pending
     cluster_status: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
