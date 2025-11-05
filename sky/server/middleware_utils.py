@@ -1,6 +1,6 @@
-"""Utilities for building ASGI middlewares."""
+"""Utilities for building middlewares."""
 import http
-from typing import Any, Dict, List, Tuple, Type
+from typing import List, Tuple, Type
 
 import fastapi
 import starlette.middleware.base
@@ -88,7 +88,8 @@ def websocket_aware(
             status_code = response.status_code
 
             if call_next_called and 200 <= status_code < 400:
-                return 'accept', List[Tuple[bytes, bytes]](response.raw_headers)
+                # Capture mutated headers from the HTTP middleware if any.
+                return 'accept', response.raw_headers
 
             if status_code == http.HTTPStatus.UNAUTHORIZED:
                 return 'unauthorized', []
@@ -110,10 +111,9 @@ def websocket_aware(
                 if (message['type'] == 'websocket.accept' and
                         not first_accept_sent):
                     first_accept_sent = True
-                    additional_headers = List[Tuple[bytes, bytes]](message.get(
-                        'headers', []))
+                    additional_headers: List[Tuple[bytes, bytes]] = message.get(
+                        'headers', [])
                     additional_headers.extend(headers)
-                    message = Dict[Any, Any](message)
                     message['headers'] = additional_headers
                 await send(message)
 
