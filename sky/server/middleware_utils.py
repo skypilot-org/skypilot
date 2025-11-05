@@ -1,6 +1,7 @@
 """Utilities for building middlewares."""
+import enum
 import http
-from typing import List, Tuple, Type
+from typing import Type
 
 import fastapi
 import starlette.middleware.base
@@ -8,6 +9,13 @@ import starlette.middleware.base
 from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
+
+
+class WebSocketDecision(enum.Enum):
+    ACCEPT = 'accept'
+    UNAUTHORIZED = 'unauthorized'
+    FORBIDDEN = 'forbidden'
+    ERROR = 'error'
 
 
 def websocket_aware(
@@ -38,18 +46,16 @@ def websocket_aware(
 
         async def _handle_websocket(self, scope, receive, send):
             """Handle websocket connection by delegating to HTTP middleware."""
-            decision, headers = await self._run_websocket_dispatch(scope)
-            if decision == 'accept':
-                logger.info('accepting websocket connection')
-                await self._call_with_accept_headers(scope, receive, send,
-                                                     headers)
-            elif decision == 'unauthorized':
+            decision = await self._run_websocket_dispatch(scope)
+            if decision == WebSocketDecision.ACCEPT:
+                await self.app(scope, receive, send)
+            elif decision == WebSocketDecision.UNAUTHORIZED:
                 await send({
                     'type': 'websocket.close',
                     'code': 4401,
                     'reason': 'Unauthorized',
                 })
-            elif decision == 'forbidden':
+            elif decision == WebSocketDecision.FORBIDDEN:
                 await send({
                     'type': 'websocket.close',
                     'code': 4403,
@@ -62,8 +68,7 @@ def websocket_aware(
                     'reason': 'Internal Server Error',
                 })
 
-        async def _run_websocket_dispatch(
-                self, scope) -> Tuple[str, List[Tuple[bytes, bytes]]]:
+        async def _run_websocket_dispatch(self, scope) -> WebSocketDecision:
             http_scope = self._build_http_scope(scope)
             http_receive = self._http_receive_adapter()
             request = fastapi.Request(http_scope, receive=http_receive)
@@ -81,7 +86,7 @@ def websocket_aware(
             except Exception as e:  # pylint: disable=broad-except
                 logger.error('Exception occurred in middleware dispatch for '
                              f'WebSocket scope: {e}')
-                return 'error', []
+                return WebSocketDecision.ERROR
 
             if response is None:
                 response = stub_response
@@ -89,38 +94,12 @@ def websocket_aware(
             status_code = response.status_code
 
             if call_next_called and 200 <= status_code < 400:
-                # Capture mutated headers from the HTTP middleware if any.
-                return 'accept', response.raw_headers
-
+                return WebSocketDecision.ACCEPT
             if status_code == http.HTTPStatus.UNAUTHORIZED:
-                return 'unauthorized', []
+                return WebSocketDecision.UNAUTHORIZED
             if status_code == http.HTTPStatus.FORBIDDEN:
-                return 'forbidden', []
-
-            return 'error', []
-
-        async def _call_with_accept_headers(self, scope, receive, send,
-                                            headers: List[Tuple[bytes, bytes]]):
-            if not headers:
-                logger.info('calling websocket app')
-                await self.app(scope, receive, send)
-                return
-
-            first_accept_sent = False
-
-            async def send_wrapper(message):
-                nonlocal first_accept_sent
-                if (message['type'] == 'websocket.accept' and
-                        not first_accept_sent):
-                    first_accept_sent = True
-                    additional_headers: List[Tuple[bytes, bytes]] = message.get(
-                        'headers', [])
-                    additional_headers.extend(headers)
-                    message['headers'] = additional_headers
-                await send(message)
-
-            logger.info('calling websocket app with accept headers')
-            await self.app(scope, receive, send_wrapper)
+                return WebSocketDecision.FORBIDDEN
+            return WebSocketDecision.ERROR
 
         @staticmethod
         def _build_http_scope(scope):
