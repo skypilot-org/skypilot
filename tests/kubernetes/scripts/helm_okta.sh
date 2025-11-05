@@ -451,3 +451,7 @@ kubectl delete namespace $NAMESPACE --ignore-not-found=true
 echo "✅ Namespace $NAMESPACE deleted"
 
 deploy_and_login "new"
+
+# Run basic tests.
+echo "Running basic tests..."
+pytest tests/smoke_tests/test_basic.py --kubernetes -k test_kubernetes_ssh_proxy_connection
