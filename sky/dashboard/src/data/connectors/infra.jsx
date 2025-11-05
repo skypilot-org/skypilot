@@ -8,11 +8,21 @@ export async function getCloudInfrastructure(forceRefresh = false) {
   const { getClusters } = await import('@/data/connectors/clusters');
   const { getManagedJobs } = await import('@/data/connectors/jobs');
   try {
-    const jobsData = await dashboardCache.get(getManagedJobs, [
-      { allUsers: true, skipFinished: true, fields: ['cloud', 'region'] },
-    ]);
+    let jobsData = {jobs: []};
+    try {
+      jobsData = await dashboardCache.get(getManagedJobs, [
+        { allUsers: true, skipFinished: true, fields: ['cloud', 'region'] },
+      ]);
+    } catch (error) {
+      console.error('Error fetching managed jobs:', error);
+    }
     const jobs = jobsData?.jobs || [];
-    const clustersData = await dashboardCache.get(getClusters);
+    let clustersData = [];
+    try {
+      clustersData = await dashboardCache.get(getClusters);
+    } catch (error) {
+      console.error('Error fetching clusters:', error);
+    }
     const clusters = clustersData || [];
     // Get enabled clouds
     let enabledCloudsList = [];
@@ -267,7 +277,12 @@ export async function getWorkspaceInfrastructure() {
     // Step 3: Get detailed GPU information for all contexts
     const { getClusters } = await import('@/data/connectors/clusters');
     const dashboardCache = (await import('@/lib/cache')).default;
-    const clustersData = await dashboardCache.get(getClusters);
+    let clustersData = [];
+    try {
+      clustersData = await dashboardCache.get(getClusters);
+    } catch (error) {
+      console.error('Error fetching clusters:', error);
+    }
     const clusters = clustersData || [];
 
     // Get context stats (cluster counts)
@@ -277,7 +292,16 @@ export async function getWorkspaceInfrastructure() {
     const validContexts = [...new Set(allContextsAcrossWorkspaces)].filter(
       (context) => context && typeof context === 'string'
     );
-    const gpuData = await getKubernetesGPUsFromContexts(validContexts);
+    let gpuData = {
+      allGPUs: [],
+      perContextGPUs: [],
+      perNodeGPUs: [],
+    };
+    try {
+      gpuData = await getKubernetesGPUsFromContexts(validContexts);
+    } catch (error) {
+      console.error('Error fetching Kubernetes GPUs:', error);
+    }
 
     const finalResult = {
       workspaces: workspaceInfraData,
@@ -740,7 +764,7 @@ export async function getDetailedGpuInfo(filter) {
       );
     } catch (parseError) {
       console.error('Error parsing GPU data:', parseError);
-      throw new Error(parseError);
+      throw parseError;
     }
 
     const formattedData = [];

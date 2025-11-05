@@ -362,8 +362,7 @@ export async function getPoolStatus() {
         jobsData = jobsResponse;
       }
     } catch (jobsError) {
-      const msg = `Failed to fetch jobs for pool job counts: ${jobsError}`;
-      throw new Error(msg);
+      console.warn('Failed to fetch jobs for pool job counts:', jobsError);
     }
 
     // Process job counts by pool and status

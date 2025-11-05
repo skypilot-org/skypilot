@@ -4,7 +4,7 @@ export async function getUsers() {
   try {
     const response = await apiClient.get(`/users`);
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      throw new Error(`Failed to fetch users with status ${response.status}`);
     }
     const data = await response.json();
     // Data from API is: [{ id: 'user_hash', name: 'username' }, ...]
