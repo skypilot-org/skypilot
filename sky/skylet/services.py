@@ -216,10 +216,12 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                 if pool is not None:
                     pool_hash = serve_state.get_service_hash(pool)
                 # Add the managed job to job queue database.
+                user_id = managed_job.user_id if managed_job.HasField(
+                    'user_id') else None
                 managed_job_state.set_job_info(job_id, managed_job.name,
                                                managed_job.workspace,
                                                managed_job.entrypoint, pool,
-                                               pool_hash)
+                                               pool_hash, user_id)
                 # Set the managed job to PENDING state to make sure that
                 # this managed job appears in the `sky jobs queue`, even
                 # if it needs to wait to be submitted.
@@ -405,18 +407,22 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
         context: grpc.ServicerContext
     ) -> managed_jobsv1_pb2.GetJobTableResponse:
         try:
-            accessible_workspaces = list(request.accessible_workspaces)
-            job_ids = list(request.job_ids.ids) if request.job_ids else None
+            accessible_workspaces = (
+                list(request.accessible_workspaces.workspaces)
+                if request.HasField('accessible_workspaces') else None)
+            job_ids = (list(request.job_ids.ids)
+                       if request.HasField('job_ids') else None)
             user_hashes: Optional[List[Optional[str]]] = None
-            if request.user_hashes:
+            if request.HasField('user_hashes'):
                 user_hashes = list(request.user_hashes.hashes)
                 # For backwards compatibility, we show jobs that do not have a
                 # user_hash. TODO: Remove before 0.12.0.
                 if request.show_jobs_without_user_hash:
                     user_hashes.append(None)
-            statuses = list(
-                request.statuses.statuses) if request.statuses else None
-
+            statuses = (list(request.statuses.statuses)
+                        if request.HasField('statuses') else None)
+            fields = (list(request.fields.fields)
+                      if request.HasField('fields') else None)
             job_queue = managed_job_utils.get_managed_job_queue(
                 skip_finished=request.skip_finished,
                 accessible_workspaces=accessible_workspaces,
@@ -430,7 +436,9 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 page=request.page if request.HasField('page') else None,
                 limit=request.limit if request.HasField('limit') else None,
                 user_hashes=user_hashes,
-                statuses=statuses)
+                statuses=statuses,
+                fields=fields,
+            )
             jobs = job_queue['jobs']
             total = job_queue['total']
             total_no_filter = job_queue['total_no_filter']
@@ -438,7 +446,16 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
 
             jobs_info = []
             for job in jobs:
+                converted_metadata = None
+                metadata = job.get('metadata')
+                if metadata:
+                    converted_metadata = {
+                        k: v for k, v in metadata.items() if v is not None
+                    }
                 job_info = managed_jobsv1_pb2.ManagedJobInfo(
+                    # The `spot.job_id`, which can be used to identify
+                    # different tasks for the same job
+                    _job_id=job.get('_job_id'),
                     job_id=job.get('job_id'),
                     task_id=job.get('task_id'),
                     job_name=job.get('job_name'),
@@ -466,11 +483,7 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     end_at=job.get('end_at'),
                     user_yaml=job.get('user_yaml'),
                     entrypoint=job.get('entrypoint'),
-                    metadata={
-                        k: v
-                        for k, v in job.get('metadata', {}).items()
-                        if v is not None
-                    },
+                    metadata=converted_metadata,
                     pool=job.get('pool'),
                     pool_hash=job.get('pool_hash'))
                 jobs_info.append(job_info)

@@ -42,6 +42,27 @@ class AddLabelsPolicy(sky.AdminPolicy):
         return sky.MutatedUserRequest(user_request.task, config)
 
 
+class AddLabelsConditionalPolicy(sky.AdminPolicy):
+    """Example policy: adds a kubernetes label for skypilot_config
+    if the request is a cluster launch request."""
+
+    @classmethod
+    def validate_and_mutate(
+            cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+        if user_request.request_name in [
+                sky.AdminPolicyRequestName.VALIDATE,
+                sky.AdminPolicyRequestName.OPTIMIZE
+        ]:
+            return sky.MutatedUserRequest(user_request.task,
+                                          user_request.skypilot_config)
+        config = user_request.skypilot_config
+        labels = config.get_nested(('kubernetes', 'custom_metadata', 'labels'),
+                                   {})
+        labels['app'] = 'skypilot'
+        config.set_nested(('kubernetes', 'custom_metadata', 'labels'), labels)
+        return sky.MutatedUserRequest(user_request.task, config)
+
+
 class DisablePublicIpPolicy(sky.AdminPolicy):
     """Example policy: disables public IP for all AWS tasks."""
 
@@ -94,15 +115,17 @@ class EnforceAutostopPolicy(sky.AdminPolicy):
         policy is applied, we should expect a few seconds latency when a user
         run a request.
         """
-        request_options = user_request.request_options
-
-        # Request options is None when a task is executed with `jobs launch` or
-        # `sky serve up`.
-        if request_options is None:
+        if user_request.request_name not in [
+                sky.AdminPolicyRequestName.CLUSTER_LAUNCH,
+                sky.AdminPolicyRequestName.CLUSTER_EXEC,
+        ]:
             return sky.MutatedUserRequest(
                 task=user_request.task,
                 skypilot_config=user_request.skypilot_config)
 
+        request_options = user_request.request_options
+        # Request options is not None when a task is executed with `sky launch`.
+        assert request_options is not None
         # Get the cluster record to operate on.
         cluster_name = request_options.cluster_name
         cluster_records: List[responses.StatusResponse] = []

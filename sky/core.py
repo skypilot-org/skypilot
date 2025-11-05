@@ -25,6 +25,7 @@ from sky.jobs.server import core as managed_jobs_core
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
+from sky.server.requests import request_names
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -84,7 +85,9 @@ def optimize(
     # but we do not apply the admin policy there. We should apply the admin
     # policy in the optimizer, but that will require some refactoring.
     with admin_policy_utils.apply_and_use_config_in_current_request(
-            dag, request_options=request_options) as dag:
+            dag,
+            request_name=request_names.AdminPolicyRequestName.OPTIMIZE,
+            request_options=request_options) as dag:
         dag.resolve_and_validate_volumes()
         return optimizer.Optimizer.optimize(dag=dag,
                                             minimize=minimize,
@@ -99,6 +102,7 @@ def status(
     all_users: bool = False,
     include_credentials: bool = False,
     summary_response: bool = False,
+    include_handle: bool = True,
 ) -> List[responses.StatusResponse]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets cluster statuses.
@@ -179,7 +183,8 @@ def status(
         cluster_names=cluster_names,
         all_users=all_users,
         include_credentials=include_credentials,
-        summary_response=summary_response)
+        summary_response=summary_response,
+        include_handle=include_handle)
 
     status_responses = []
     for cluster in clusters:
@@ -414,12 +419,12 @@ def cost_report(
         # compatibility
         num_nodes = record.get('num_nodes', 1)
         try:
-            resource_str_simple = resources_utils.format_resource(resources,
-                                                                  simplify=True)
+            resource_str_simple, resource_str_full = (
+                resources_utils.format_resource(
+                    resources, simplified_only=abbreviate_response))
             record['resources_str'] = f'{num_nodes}x{resource_str_simple}'
             if not abbreviate_response:
-                resource_str_full = resources_utils.format_resource(
-                    resources, simplify=False)
+                assert resource_str_full is not None
                 record[
                     'resources_str_full'] = f'{num_nodes}x{resource_str_full}'
         except Exception as e:  # pylint: disable=broad-except

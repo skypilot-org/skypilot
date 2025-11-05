@@ -1019,7 +1019,7 @@ class Optimizer:
                             if res.instance_type is not None
                         ])
                         candidate_str = resources_utils.format_resource(
-                            best_resources, simplify=True)
+                            best_resources, simplified_only=True)[0]
 
                         logger.info(
                             f'{colorama.Style.DIM}🔍 Multiple {cloud} instances '

@@ -118,6 +118,17 @@ _DEFAULT_REQUEST_FIELDS_TO_SHOW = [
 _VERBOSE_REQUEST_FIELDS_TO_SHOW = _DEFAULT_REQUEST_FIELDS_TO_SHOW + [
     'cluster_name'
 ]
+_DEFAULT_MANAGED_JOB_FIELDS_TO_GET = [
+    'job_id', 'task_id', 'workspace', 'job_name', 'task_name', 'resources',
+    'submitted_at', 'end_at', 'job_duration', 'recovery_count', 'status', 'pool'
+]
+_VERBOSE_MANAGED_JOB_FIELDS_TO_GET = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET + [
+    'current_cluster_name', 'job_id_on_pool_cluster', 'start_at', 'infra',
+    'cloud', 'region', 'zone', 'cluster_resources', 'schedule_state', 'details',
+    'failure_reason', 'metadata'
+]
+_USER_NAME_FIELD = ['user_name']
+_USER_HASH_FIELD = ['user_hash']
 
 _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE = (
     '{cluster_num} cluster{plural} {verb}. Please specify {cause} '
@@ -158,12 +169,17 @@ def _get_cluster_records_and_set_ssh_config(
     # Update the SSH config for all clusters
     for record in cluster_records:
         handle = record['handle']
-
+        name = record['name']
         if not (handle is not None and handle.cached_external_ips is not None
                 and 'credentials' in record):
             # If the cluster is not UP or does not have credentials available,
             # we need to remove the cluster from the SSH config.
-            cluster_utils.SSHConfigHelper.remove_cluster(record['name'])
+            cluster_utils.SSHConfigHelper.remove_cluster(name)
+            continue
+        if not record['credentials']:
+            # The credential is missing for some reason, continue.
+            logger.debug(
+                f'Client did not receive SSH credential for cluster {name}')
             continue
 
         # During the failover, even though a cluster does not exist, the handle
@@ -1328,14 +1344,22 @@ def exec(
 
 
 def _handle_jobs_queue_request(
-        request_id: server_common.RequestId[List[responses.ManagedJobRecord]],
-        show_all: bool,
-        show_user: bool,
-        max_num_jobs_to_show: Optional[int],
-        is_called_by_user: bool = False) -> Tuple[Optional[int], str]:
+    request_id: server_common.RequestId[Union[
+        List[responses.ManagedJobRecord],
+        Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int]]],
+    show_all: bool,
+    show_user: bool,
+    max_num_jobs_to_show: Optional[int],
+    pool_status_request_id: Optional[server_common.RequestId[List[Dict[
+        str, Any]]]] = None,
+    is_called_by_user: bool = False,
+    only_in_progress: bool = False,
+) -> Tuple[Optional[int], str]:
     """Get the in-progress managed jobs.
 
     Args:
+        request_id: The request ID for managed jobs.
+        pool_status_request_id: The request ID for pool status, or None.
         show_all: Show all information of each job (e.g., region, price).
         show_user: Show the user who submitted the job.
         max_num_jobs_to_show: If not None, limit the number of jobs to show to
@@ -1343,6 +1367,7 @@ def _handle_jobs_queue_request(
             and `sky jobs queue`.
         is_called_by_user: If this function is called by user directly, or an
             internal call.
+        only_in_progress: If True, only return the number of in-progress jobs.
 
     Returns:
         A tuple of (num_in_progress_jobs, msg). If num_in_progress_jobs is None,
@@ -1353,11 +1378,47 @@ def _handle_jobs_queue_request(
     # TODO(SKY-980): remove unnecessary fallbacks on the client side.
     num_in_progress_jobs = None
     msg = ''
+    status_counts: Optional[Dict[str, int]] = None
+    pool_status_result = None
     try:
         if not is_called_by_user:
             usage_lib.messages.usage.set_internal()
-        managed_jobs_ = sdk.stream_and_get(request_id)
-        num_in_progress_jobs = len(set(job['job_id'] for job in managed_jobs_))
+        # Call both stream_and_get functions in parallel
+        def get_jobs_queue_result():
+            return sdk.stream_and_get(request_id)
+
+        def get_pool_status_result():
+            if pool_status_request_id is not None:
+                try:
+                    return sdk.stream_and_get(pool_status_request_id)
+                except Exception:  # pylint: disable=broad-except
+                    # If getting pool status fails, just continue without it
+                    return None
+            return None
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            jobs_future = executor.submit(get_jobs_queue_result)
+            pool_status_future = executor.submit(get_pool_status_result)
+
+            result = jobs_future.result()
+            pool_status_result = pool_status_future.result()
+
+        if isinstance(result, tuple):
+            managed_jobs_, total, status_counts, _ = result
+            if only_in_progress:
+                num_in_progress_jobs = 0
+                if status_counts:
+                    for status_value, count in status_counts.items():
+                        status_enum = managed_jobs.ManagedJobStatus(
+                            status_value)
+                        if not status_enum.is_terminal():
+                            num_in_progress_jobs += count
+            else:
+                num_in_progress_jobs = total
+        else:
+            managed_jobs_ = result
+            num_in_progress_jobs = len(
+                set(job['job_id'] for job in managed_jobs_))
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
         msg = str(e)
@@ -1401,10 +1462,14 @@ def _handle_jobs_queue_request(
         msg += ('Failed to query managed jobs: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
     else:
-        msg = table_utils.format_job_table(managed_jobs_,
-                                           show_all=show_all,
-                                           show_user=show_user,
-                                           max_jobs=max_num_jobs_to_show)
+        msg = table_utils.format_job_table(
+            managed_jobs_,
+            pool_status=pool_status_result,
+            show_all=show_all,
+            show_user=show_user,
+            max_jobs=max_num_jobs_to_show,
+            status_counts=status_counts,
+        )
     return num_in_progress_jobs, msg
 
 
@@ -1793,9 +1858,16 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
 
     # Phase 2: Parallel submission of all API requests
     def submit_managed_jobs():
-        return managed_jobs.queue(refresh=False,
-                                  skip_finished=True,
-                                  all_users=all_users)
+        fields = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET
+        if all_users:
+            fields = fields + _USER_NAME_FIELD
+        return managed_jobs.queue(
+            refresh=False,
+            skip_finished=True,
+            all_users=all_users,
+            fields=fields,
+            limit=_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS,
+        )
 
     def submit_services(
     ) -> Optional[server_common.RequestId[List[Dict[str, Any]]]]:
@@ -1868,7 +1940,8 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     controllers = []
     for cluster_record in cluster_records:
         cluster_name = cluster_record['name']
-        controller = controller_utils.Controllers.from_name(cluster_name)
+        controller = controller_utils.Controllers.from_name(
+            cluster_name, expect_exact_match=False)
         if controller is not None:
             controllers.append(cluster_record)
         else:
@@ -1897,10 +1970,12 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
             try:
                 num_in_progress_jobs, msg = _handle_jobs_queue_request(
                     managed_jobs_queue_request_id,
+                    pool_status_request_id=pool_status_request_id,
                     show_all=False,
                     show_user=all_users,
                     max_num_jobs_to_show=_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS,
-                    is_called_by_user=False)
+                    is_called_by_user=False,
+                    only_in_progress=True)
             except KeyboardInterrupt:
                 sdk.api_cancel(managed_jobs_queue_request_id, silent=True)
                 managed_jobs_query_interrupted = True
@@ -2034,7 +2109,8 @@ def cost_report(all: bool, days: int):  # pylint: disable=redefined-builtin
     for cluster_record in cluster_records:
         cluster_name = cluster_record['name']
         try:
-            controller = controller_utils.Controllers.from_name(cluster_name)
+            controller = controller_utils.Controllers.from_name(
+                cluster_name, expect_exact_match=False)
         except AssertionError:
             # There could be some old controller clusters from previous
             # versions that we should not show in the cost report.
@@ -2143,6 +2219,12 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
               is_flag=True,
               default=False,
               help='Stream the cluster provisioning logs (provision.log).')
+@click.option('--worker',
+              '-w',
+              default=None,
+              type=int,
+              help='The worker ID to stream the logs from. '
+              'If not set, stream the logs of the head node.')
 @click.option(
     '--sync-down',
     '-s',
@@ -2180,6 +2262,7 @@ def logs(
     cluster: str,
     job_ids: Tuple[str, ...],
     provision: bool,
+    worker: Optional[int],
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
     follow: bool,
@@ -2209,6 +2292,13 @@ def logs(
     4. If the job fails or fetching the logs fails, the command will exit with
     a non-zero return code.
     """
+    if worker is not None:
+        if not provision:
+            raise click.UsageError(
+                '--worker can only be used with --provision.')
+        if worker < 1:
+            raise click.UsageError('--worker must be a positive integer.')
+
     if provision and (sync_down or status or job_ids):
         raise click.UsageError(
             '--provision cannot be combined with job log options '
@@ -2228,7 +2318,11 @@ def logs(
 
     if provision:
         # Stream provision logs
-        sys.exit(sdk.tail_provision_logs(cluster, follow=follow, tail=tail))
+        sys.exit(
+            sdk.tail_provision_logs(cluster_name=cluster,
+                                    worker=worker,
+                                    follow=follow,
+                                    tail=tail))
 
     if sync_down:
         with rich_utils.client_status(
@@ -2406,7 +2500,8 @@ def cancel(
                                     job_ids=job_ids_to_cancel)
             _async_call_or_wait(request_id, async_call, 'sky.cancel')
         except exceptions.NotSupportedError as e:
-            controller = controller_utils.Controllers.from_name(cluster)
+            controller = controller_utils.Controllers.from_name(
+                cluster, expect_exact_match=False)
             assert controller is not None, cluster
             with ux_utils.print_exception_no_traceback():
                 raise click.UsageError(
@@ -2707,7 +2802,8 @@ def start(
         # Get all clusters that are not controllers.
         cluster_records = [
             cluster for cluster in all_clusters
-            if controller_utils.Controllers.from_name(cluster['name']) is None
+            if controller_utils.Controllers.from_name(
+                cluster['name'], expect_exact_match=False) is None
         ]
     if cluster_records is None:
         # Get GLOB cluster names
@@ -2769,7 +2865,8 @@ def start(
     # Checks for controller clusters (jobs controller / sky serve controller).
     controllers, normal_clusters = [], []
     for name in to_start:
-        if controller_utils.Controllers.from_name(name) is not None:
+        if controller_utils.Controllers.from_name(
+                name, expect_exact_match=False) is not None:
             controllers.append(name)
         else:
             normal_clusters.append(name)
@@ -2905,16 +3002,26 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
             to be torn down (e.g., because it has jobs running or
             it is in init state)
     """
-    controller = controller_utils.Controllers.from_name(controller_name)
+    controller = controller_utils.Controllers.from_name(
+        controller_name, expect_exact_match=False)
     assert controller is not None, controller_name
 
+    status_counts: Optional[Dict[str, int]] = None
     with rich_utils.client_status(
             '[bold cyan]Checking for in-progress managed jobs and pools[/]'):
         try:
-            request_id = managed_jobs.queue(refresh=False,
-                                            skip_finished=True,
-                                            all_users=True)
-            managed_jobs_ = sdk.stream_and_get(request_id)
+            fields = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET + _USER_NAME_FIELD
+            request_id = managed_jobs.queue(
+                refresh=False,
+                skip_finished=True,
+                all_users=True,
+                fields=fields,
+            )
+            result = sdk.stream_and_get(request_id)
+            if isinstance(result, tuple):
+                managed_jobs_, _, status_counts, _ = result
+            else:
+                managed_jobs_ = result
             request_id_pools = managed_jobs.pool_status(pool_names=None)
             pools_ = sdk.stream_and_get(request_id_pools)
         except exceptions.ClusterNotUpError as e:
@@ -2945,10 +3052,17 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
                 }}):
                 # Check again with the consolidation mode disabled. This is to
                 # make sure there is no in-progress managed jobs.
-                request_id = managed_jobs.queue(refresh=False,
-                                                skip_finished=True,
-                                                all_users=True)
-                managed_jobs_ = sdk.stream_and_get(request_id)
+                request_id = managed_jobs.queue(
+                    refresh=False,
+                    skip_finished=True,
+                    all_users=True,
+                    fields=fields,
+                )
+                result = sdk.stream_and_get(request_id)
+                if isinstance(result, tuple):
+                    managed_jobs_, _, status_counts, _ = result
+                else:
+                    managed_jobs_ = result
                 request_id_pools = managed_jobs.pool_status(pool_names=None)
                 pools_ = sdk.stream_and_get(request_id_pools)
 
@@ -2959,9 +3073,12 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
            'jobs (output of `sky jobs queue`) will be lost.')
     click.echo(msg)
     if managed_jobs_:
-        job_table = table_utils.format_job_table(managed_jobs_,
-                                                 show_all=False,
-                                                 show_user=True)
+        job_table = table_utils.format_job_table(
+            managed_jobs_,
+            show_all=False,
+            show_user=True,
+            status_counts=status_counts,
+        )
         msg = controller.value.decline_down_for_dirty_controller_hint
         # Add prefix to each line to align with the bullet point.
         msg += '\n'.join(
@@ -3004,7 +3121,8 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str,
             to be torn down (e.g., because it has services running or
             it is in init state)
     """
-    controller = controller_utils.Controllers.from_name(controller_name)
+    controller = controller_utils.Controllers.from_name(
+        controller_name, expect_exact_match=False)
     assert controller is not None, controller_name
     with rich_utils.client_status('[bold cyan]Checking for live services[/]'):
         try:
@@ -3115,14 +3233,15 @@ def _down_or_stop_clusters(
     names = list(names)
     if names:
         controllers = [
-            name for name in names
-            if controller_utils.Controllers.from_name(name) is not None
+            name for name in names if controller_utils.Controllers.from_name(
+                name, expect_exact_match=False) is not None
         ]
         controllers_str = ', '.join(map(repr, controllers))
         names = [
             cluster['name']
             for cluster in _get_cluster_records_and_set_ssh_config(names)
-            if controller_utils.Controllers.from_name(cluster['name']) is None
+            if controller_utils.Controllers.from_name(
+                cluster['name'], expect_exact_match=False) is None
         ]
 
         # Make sure the controllers are explicitly specified without other
@@ -3147,7 +3266,7 @@ def _down_or_stop_clusters(
                     f'{controllers_str} is currently not supported.')
             else:
                 controller = controller_utils.Controllers.from_name(
-                    controller_name)
+                    controller_name, expect_exact_match=False)
                 assert controller is not None
                 hint_or_raise = _controller_to_hint_or_raise(controller)
                 try:
@@ -3195,9 +3314,10 @@ def _down_or_stop_clusters(
         names = [
             record['name']
             for record in all_clusters
-            if controller_utils.Controllers.from_name(record['name']) is None
-            and (down or idle_minutes_to_autostop is not None or
-                 record['status'] != status_lib.ClusterStatus.STOPPED)
+            if controller_utils.Controllers.from_name(
+                record['name'], expect_exact_match=False) is None and
+            (down or idle_minutes_to_autostop is not None or
+             record['status'] != status_lib.ClusterStatus.STOPPED)
         ]
 
     clusters = names
@@ -3227,6 +3347,9 @@ def _down_or_stop_clusters(
 
     request_ids = []
 
+    successes: List[str] = []
+    failures: List[Tuple[str, str]] = []
+
     def _down_or_stop(name: str):
         success_progress = False
         if idle_minutes_to_autostop is not None:
@@ -3234,16 +3357,20 @@ def _down_or_stop_clusters(
                 request_id = sdk.autostop(name, idle_minutes_to_autostop,
                                           wait_for, down)
                 request_ids.append(request_id)
+                progress.stop()
                 _async_call_or_wait(
                     request_id, async_call,
                     server_constants.REQUEST_NAME_PREFIX + operation)
-            except (exceptions.NotSupportedError,
-                    exceptions.ClusterNotUpError) as e:
+                progress.start()
+            except (exceptions.NotSupportedError, exceptions.ClusterNotUpError,
+                    exceptions.CloudError) as e:
                 message = str(e)
+                failures.append((name, str(e)))
             else:  # no exception raised
                 success_progress = True
                 message = (f'{colorama.Fore.GREEN}{operation} '
                            f'cluster {name!r}...done{colorama.Style.RESET_ALL}')
+                successes.append(name)
                 if idle_minutes_to_autostop >= 0:
                     option_str = 'down' if down else 'stop'
                     passive_str = 'downed' if down else 'stopped'
@@ -3263,9 +3390,11 @@ def _down_or_stop_clusters(
                 else:
                     request_id = sdk.stop(name, purge=purge)
                 request_ids.append(request_id)
+                progress.stop()
                 _async_call_or_wait(
                     request_id, async_call,
                     server_constants.REQUEST_NAME_PREFIX + operation)
+                progress.start()
                 if not async_call:
                     # Remove the cluster from the SSH config file as soon as it
                     # is stopped or downed.
@@ -3275,13 +3404,17 @@ def _down_or_stop_clusters(
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
                     f'{colorama.Style.RESET_ALL}'
                     f'\nReason: {common_utils.format_exception(e)}.')
+                failures.append((name, str(e)))
             except (exceptions.NotSupportedError,
-                    exceptions.ClusterOwnerIdentityMismatchError) as e:
+                    exceptions.ClusterOwnerIdentityMismatchError,
+                    exceptions.CloudError) as e:
                 message = str(e)
+                failures.append((name, str(e)))
             else:  # no exception raised
                 message = (
                     f'{colorama.Fore.GREEN}{operation} cluster {name}...done.'
                     f'{colorama.Style.RESET_ALL}')
+                successes.append(name)
                 if not down:
                     message += ('\n  To restart the cluster, run: '
                                 f'{colorama.Style.BRIGHT}sky start {name}'
@@ -3295,6 +3428,10 @@ def _down_or_stop_clusters(
         progress.start()
 
     with progress:
+        # we write a new line here to avoid the "Waiting for 'sky.down'
+        # request to be scheduled" message from being printed on the same line
+        # as the "Terminating <num> clusters..." message
+        click.echo('')
         subprocess_utils.run_in_parallel(_down_or_stop, clusters)
         progress.live.transient = False
         # Make sure the progress bar not mess up the terminal.
@@ -3303,6 +3440,31 @@ def _down_or_stop_clusters(
     if async_call:
         click.secho(f'{operation} requests are sent. Check the requests\' '
                     'status with `sky request get <request_id>`.')
+
+    show_summary = len(clusters) > 1
+
+    if show_summary:
+        click.echo('\nSummary:')
+        if successes:
+            # Preserve the original order of clusters as provided by user.
+            click.echo('  ✓ Succeeded: ' + ', '.join(successes))
+        if failures:
+            # Format failures: if one failure, keep on same line. If multiple,
+            # indent each failed cluster on its own line for readability.
+            if len(failures) == 1:
+                name, reason = failures[0]
+                first = reason.strip().splitlines()[0]
+                first = first if len(first) <= 120 else first[:120] + '…'
+                click.echo(f'  ✗ Failed: {name} ({first})')
+            else:
+                click.echo('  ✗ Failed:')
+                for name, reason in failures:
+                    first = reason.strip().splitlines()[0]
+                    first = first if len(first) <= 120 else first[:120] + '…'
+                    click.echo(f'      {name} ({first})')
+
+    if failures:
+        click.echo('Cluster(s) failed. See details above.')
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -4103,6 +4265,10 @@ def volumes():
     pass
 
 
+# Add 'volume' as an alias for 'volumes'
+cli.add_command(volumes, name='volume')
+
+
 @volumes.command('apply', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @click.argument('entrypoint',
@@ -4499,21 +4665,6 @@ def jobs_launch(
 
     job_ids = [job_id_handle[0]] if isinstance(job_id_handle[0],
                                                int) else job_id_handle[0]
-    if pool:
-        # Display the worker assignment for the jobs.
-        logger.debug(f'Getting service records for pool: {pool}')
-        records_request_id = managed_jobs.pool_status(pool_names=pool)
-        service_records = _async_call_or_wait(records_request_id, async_call,
-                                              'sky.jobs.pool_status')
-        logger.debug(f'Pool status: {service_records}')
-        replica_infos = service_records[0]['replica_info']
-        for replica_info in replica_infos:
-            job_id = replica_info.get('used_by', None)
-            if job_id in job_ids:
-                worker_id = replica_info['replica_id']
-                version = replica_info['version']
-                logger.info(f'Job ID: {job_id} assigned to pool {pool} '
-                            f'(worker: {worker_id}, version: {version})')
 
     if not detach_run:
         if len(job_ids) == 1:
@@ -4526,7 +4677,8 @@ def jobs_launch(
         else:
             # TODO(tian): This can be very long. Considering have a "group id"
             # and query all job ids with the same group id.
-            job_ids_str = ','.join(map(str, job_ids))
+            # Sort job ids to ensure consistent ordering.
+            job_ids_str = ','.join(map(str, sorted(job_ids)))
             click.secho(
                 f'Jobs submitted with IDs: {colorama.Fore.CYAN}'
                 f'{job_ids_str}{colorama.Style.RESET_ALL}.'
@@ -4546,6 +4698,14 @@ def jobs_launch(
 @flags.config_option(expose_value=False)
 @flags.verbose_option()
 @click.option(
+    '--limit',
+    '-l',
+    default=_NUM_MANAGED_JOBS_TO_SHOW,
+    type=int,
+    required=False,
+    help=(f'Number of jobs to show, default is {_NUM_MANAGED_JOBS_TO_SHOW},'
+          f' use "-a/--all" to show all jobs.'))
+@click.option(
     '--refresh',
     '-r',
     default=False,
@@ -4564,7 +4724,7 @@ def jobs_launch(
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
-               all_users: bool, all: bool):
+               all_users: bool, all: bool, limit: int):
     """Show statuses of managed jobs.
 
     Each managed jobs can have one of the following statuses:
@@ -4615,14 +4775,48 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
 
       watch -n60 sky jobs queue
 
+    (Tip) To show only the latest 10 jobs, use ``-l/--limit 10``:
+
+    .. code-block:: bash
+
+      sky jobs queue -l 10
+
     """
     click.secho('Fetching managed job statuses...', fg='cyan')
     with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
-        managed_jobs_request_id = managed_jobs.queue(
-            refresh=refresh, skip_finished=skip_finished, all_users=all_users)
-        max_num_jobs_to_show = (_NUM_MANAGED_JOBS_TO_SHOW if not all else None)
+        max_num_jobs_to_show = (limit if not all else None)
+        fields = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET
+        if verbose:
+            fields = _VERBOSE_MANAGED_JOB_FIELDS_TO_GET
+        if all_users:
+            fields = fields + _USER_NAME_FIELD
+            if verbose:
+                fields = fields + _USER_HASH_FIELD
+        # Call both managed_jobs.queue and managed_jobs.pool_status in parallel
+        def get_managed_jobs_queue():
+            return managed_jobs.queue(refresh=refresh,
+                                      skip_finished=skip_finished,
+                                      all_users=all_users,
+                                      limit=max_num_jobs_to_show,
+                                      fields=fields)
+
+        def get_pool_status():
+            try:
+                return managed_jobs.pool_status(pool_names=None)
+            except Exception:  # pylint: disable=broad-except
+                # If pool_status fails, we'll just skip the worker information
+                return None
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            managed_jobs_future = executor.submit(get_managed_jobs_queue)
+            pool_status_future = executor.submit(get_pool_status)
+
+            managed_jobs_request_id = managed_jobs_future.result()
+            pool_status_request_id = pool_status_future.result()
+
         num_jobs, msg = _handle_jobs_queue_request(
             managed_jobs_request_id,
+            pool_status_request_id=pool_status_request_id,
             show_all=verbose,
             show_user=all_users,
             max_num_jobs_to_show=max_num_jobs_to_show,
@@ -4639,7 +4833,8 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
             f'{colorama.Fore.CYAN}'
             f'Only showing the latest {max_num_jobs_to_show} '
             f'managed jobs'
-            f'(use --all to show all managed jobs) {colorama.Style.RESET_ALL} ')
+            f'(use --limit to show more managed jobs or '
+            f'--all to show all managed jobs) {colorama.Style.RESET_ALL} ')
 
 
 @jobs.command('cancel', cls=_DocumentedCodeCommand)
@@ -6135,20 +6330,22 @@ def api_logs(request_id: Optional[str], server_logs: bool,
                 **_get_shell_complete_args(_complete_api_request))
 @flags.all_option('Cancel all your requests.')
 @flags.all_users_option('Cancel all requests from all users.')
+@flags.yes_option()
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool):
+def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool,
+               yes: bool):
     """Cancel a request running on SkyPilot API server."""
     if all or all_users:
-        keyword = 'ALL USERS\'' if all_users else 'YOUR'
-        user_input = click.prompt(
-            f'This will cancel all {keyword} requests.\n'
-            f'To proceed, please type {colorama.Style.BRIGHT}'
-            f'\'cancel all requests\'{colorama.Style.RESET_ALL}',
-            type=str)
-        if user_input != 'cancel all requests':
-            raise click.Abort()
-    if all:
+        if not yes:
+            keyword = 'ALL USERS\'' if all_users else 'YOUR'
+            user_input = click.prompt(
+                f'This will cancel all {keyword} requests.\n'
+                f'To proceed, please type {colorama.Style.BRIGHT}'
+                f'\'cancel all requests\'{colorama.Style.RESET_ALL}',
+                type=str)
+            if user_input != 'cancel all requests':
+                raise click.Abort()
         request_ids = None
     cancelled_request_ids = sdk.get(
         sdk.api_cancel(request_ids=request_ids, all_users=all_users))
@@ -6183,7 +6380,7 @@ INT_OR_NONE = IntOrNone()
 
 @api.command('status', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
-@click.argument('request_ids',
+@click.argument('request_id_prefixes',
                 required=False,
                 type=str,
                 nargs=-1,
@@ -6193,7 +6390,9 @@ INT_OR_NONE = IntOrNone()
               is_flag=True,
               default=False,
               required=False,
-              help='Show requests of all statuses.')
+              help=('Show requests of all statuses, including finished ones '
+                    '(SUCCEEDED, FAILED, CANCELLED). By default, only active '
+                    'requests (PENDING, RUNNING) are shown.'))
 @click.option(
     '--limit',
     '-l',
@@ -6205,15 +6404,16 @@ INT_OR_NONE = IntOrNone()
 @flags.verbose_option('Show more details.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def api_status(request_ids: Optional[List[str]], all_status: bool,
+def api_status(request_id_prefixes: Optional[List[str]], all_status: bool,
                verbose: bool, limit: Optional[int]):
     """List requests on SkyPilot API server."""
-    if not request_ids:
-        request_ids = None
+    if not request_id_prefixes:
+        request_id_prefixes = None
     fields = _DEFAULT_REQUEST_FIELDS_TO_SHOW
     if verbose:
         fields = _VERBOSE_REQUEST_FIELDS_TO_SHOW
-    request_list = sdk.api_status(request_ids, all_status, limit, fields)
+    request_list = sdk.api_status(request_id_prefixes, all_status, limit,
+                                  fields)
     columns = ['ID', 'User', 'Name']
     if verbose:
         columns.append('Cluster')

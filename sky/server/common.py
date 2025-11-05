@@ -17,7 +17,6 @@ import time
 import typing
 from typing import (Any, Callable, cast, Dict, Generic, Literal, Optional,
                     Tuple, TypeVar, Union)
-from urllib import parse
 import uuid
 
 import cachetools
@@ -342,18 +341,7 @@ def get_server_url(host: Optional[str] = None) -> str:
 @annotations.lru_cache(scope='global')
 def get_dashboard_url(server_url: str,
                       starting_page: Optional[str] = None) -> str:
-    # The server_url may include username or password with the
-    # format of https://username:password@example.com:8080/path
-    # We need to remove the username and password and only
-    # return `https://example.com:8080/path`
-    parsed = parse.urlparse(server_url)
-    # Reconstruct the URL without credentials but keeping the scheme
-    dashboard_url = f'{parsed.scheme}://{parsed.hostname}'
-    if parsed.port:
-        dashboard_url = f'{dashboard_url}:{parsed.port}'
-    if parsed.path:
-        dashboard_url = f'{dashboard_url}{parsed.path}'
-    dashboard_url = dashboard_url.rstrip('/')
+    dashboard_url = server_url.rstrip('/')
     dashboard_url = f'{dashboard_url}/dashboard'
     if starting_page:
         dashboard_url = f'{dashboard_url}/{starting_page}'
@@ -490,6 +478,7 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
 def handle_request_error(response: 'requests.Response') -> None:
     # Keep the original HTTPError if the response code >= 400
     response.raise_for_status()
+
     # Other status codes are not expected neither, e.g. we do not expect to
     # handle redirection here.
     if response.status_code != 200:
@@ -550,19 +539,27 @@ def _start_api_server(deploy: bool = False,
                                'is not a local URL')
 
         # Check available memory before starting the server.
-        avail_mem_size_gb: float = common_utils.get_mem_size_gb()
-        # pylint: disable=import-outside-toplevel
-        import sky.jobs.utils as job_utils
-        max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
-                      if job_utils.is_consolidation_mode() else
-                      server_constants.MIN_AVAIL_MEM_GB)
-        if avail_mem_size_gb <= max_memory:
-            logger.warning(
-                f'{colorama.Fore.YELLOW}Your SkyPilot API server machine only '
-                f'has {avail_mem_size_gb:.1f}GB memory available. '
-                f'At least {max_memory}GB is recommended to support higher '
-                'load with better performance.'
-                f'{colorama.Style.RESET_ALL}')
+        # Skip this warning if postgres is used, as:
+        #   1) that's almost certainly a remote API server;
+        #   2) the actual consolidation mode config is stashed in the database,
+        #      and the value of `job_utils.is_consolidation_mode` will not be
+        #      the actual value in the db, but only None as in this case, the
+        #      whole YAML config is really just `db: <URI>`.
+        if skypilot_config.get_nested(('db',), None) is None:
+            avail_mem_size_gb: float = common_utils.get_mem_size_gb()
+            # pylint: disable=import-outside-toplevel
+            import sky.jobs.utils as job_utils
+            max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
+                          if job_utils.is_consolidation_mode(
+                              on_api_restart=True) else
+                          server_constants.MIN_AVAIL_MEM_GB)
+            if avail_mem_size_gb <= max_memory:
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}Your SkyPilot API server machine '
+                    f'only has {avail_mem_size_gb:.1f}GB memory available. '
+                    f'At least {max_memory}GB is recommended to support higher '
+                    'load with better performance.'
+                    f'{colorama.Style.RESET_ALL}')
 
         args = [sys.executable, *API_SERVER_CMD.split()]
         if deploy:
@@ -914,12 +911,18 @@ def reload_for_new_request(client_entrypoint: Optional[str],
                            client_command: Optional[str],
                            using_remote_api_server: bool, user: 'models.User',
                            request_id: str) -> None:
-    """Reload modules, global variables, and usage message for a new request."""
+    """Reload modules, global variables, and usage message for a new request.
+
+    Must be called within the request's context.
+    """
     # This should be called first to make sure the logger is up-to-date.
     sky_logging.reload_logger()
 
     # Reload the skypilot config to make sure the latest config is used.
-    skypilot_config.safe_reload_config()
+    # We don't need to grab the lock here because this function is only
+    # run once we are inside the request's context, so there shouldn't
+    # be any race conditions when reloading the config.
+    skypilot_config.reload_config()
 
     # Reset the client entrypoint and command for the usage message.
     common_utils.set_request_context(

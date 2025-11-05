@@ -37,6 +37,7 @@ from sky.server import common as server_common
 from sky.server import rest
 from sky.server import versions
 from sky.server.requests import payloads
+from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -98,6 +99,9 @@ def reload_config() -> None:
     skypilot_config.safe_reload_config()
 
 
+# The overloads are not comprehensive - e.g. get_result Literal[False] could be
+# specified to return None. We can add more overloads if needed. To do that see
+# https://github.com/python/mypy/issues/8634#issuecomment-609411104
 @typing.overload
 def stream_response(request_id: None,
                     response: 'requests.Response',
@@ -112,7 +116,16 @@ def stream_response(request_id: server_common.RequestId[T],
                     response: 'requests.Response',
                     output_stream: Optional['io.TextIOBase'] = None,
                     resumable: bool = False,
-                    get_result: bool = True) -> T:
+                    get_result: Literal[True] = True) -> T:
+    ...
+
+
+@typing.overload
+def stream_response(request_id: server_common.RequestId[T],
+                    response: 'requests.Response',
+                    output_stream: Optional['io.TextIOBase'] = None,
+                    resumable: bool = False,
+                    get_result: bool = True) -> Optional[T]:
     ...
 
 
@@ -591,7 +604,10 @@ def launch(
         down=down,
         dryrun=dryrun)
     with admin_policy_utils.apply_and_use_config_in_current_request(
-            dag, request_options=request_options, at_client_side=True) as dag:
+            dag,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            request_options=request_options,
+            at_client_side=True) as dag:
         return _launch(
             dag,
             cluster_name,
@@ -913,6 +929,7 @@ def tail_logs(
 @annotations.client_api
 @rest.retry_transient_errors()
 def tail_provision_logs(cluster_name: str,
+                        worker: Optional[int] = None,
                         follow: bool = True,
                         tail: int = 0,
                         output_stream: Optional['io.TextIOBase'] = None) -> int:
@@ -920,17 +937,31 @@ def tail_provision_logs(cluster_name: str,
 
     Args:
         cluster_name: name of the cluster.
+        worker: worker id in multi-node cluster.
+             If None, stream the logs of the head node.
         follow: follow the logs.
         tail: lines from end to tail.
         output_stream: optional stream to write logs.
     Returns:
         Exit code 0 on streaming success; raises on HTTP error.
     """
-    body = payloads.ClusterNameBody(cluster_name=cluster_name)
+    body = payloads.ProvisionLogsBody(cluster_name=cluster_name)
+
+    if worker is not None:
+        remote_api_version = versions.get_remote_api_version()
+        if remote_api_version is not None and remote_api_version >= 21:
+            if worker < 1:
+                raise ValueError('Worker must be a positive integer.')
+            body.worker = worker
+        else:
+            raise exceptions.APINotSupportedError(
+                'Worker node provision logs are not supported in your API '
+                'server. Please upgrade to a newer API server to use it.')
     params = {
         'follow': str(follow).lower(),
         'tail': tail,
     }
+
     response = server_common.make_authenticated_request(
         'POST',
         '/provision_logs',
@@ -939,13 +970,21 @@ def tail_provision_logs(cluster_name: str,
         stream=True,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None))
+    # Check for HTTP errors before streaming the response
+    if response.status_code != 200:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.CommandError(response.status_code,
+                                          'tail_provision_logs',
+                                          'Failed to stream provision logs',
+                                          response.text)
+
     # Log request is idempotent when tail is 0, thus can resume previous
     # streaming point on retry.
     # request_id=None here because /provision_logs does not create an async
     # request. Instead, it streams a plain file from the server. This does NOT
     # violate the stream_response doc warning about None in multi-user
-    # environments: we are not asking stream_response to select “the latest
-    # request”. We already have the HTTP response to stream; request_id=None
+    # environments: we are not asking stream_response to select "the latest
+    # request". We already have the HTTP response to stream; request_id=None
     # merely disables the follow-up GET. It is also necessary for --no-follow
     # to return cleanly after printing the tailed lines. If we provided a
     # non-None request_id here, the get(request_id) in stream_response(
@@ -2064,16 +2103,16 @@ def stream_and_get(
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None),
         stream=True)
+    if response.status_code in [404, 400]:
+        detail = response.json().get('detail')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClientError(f'Failed to stream logs: {detail}')
     stream_request_id: Optional[server_common.RequestId[
         T]] = server_common.get_stream_request_id(response)
     if request_id is not None and stream_request_id is not None:
         assert request_id == stream_request_id
     if request_id is None:
         request_id = stream_request_id
-    if response.status_code in [404, 400]:
-        detail = response.json().get('detail')
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClientError(f'Failed to stream logs: {detail}')
     elif response.status_code != 200:
         # TODO(syang): handle the case where the requestID is not provided
         # see https://github.com/skypilot-org/skypilot/issues/6549

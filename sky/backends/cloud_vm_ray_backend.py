@@ -605,7 +605,11 @@ class RayCodeGen:
                 # skip the scheduling step.
                 job_lib.scheduler.schedule_step()
 
-                total_num_nodes = len(ray.nodes())
+                # If some nodes are down and then new nodes are added after launching again,
+                # the result of `ray.nodes()` will include all the nodes, so we need to get
+                # the alive nodes.
+                alive_nodes = [n for n in ray.nodes() if 'Alive' in n and n['Alive']]
+                total_num_nodes = len(alive_nodes)
                 setup_bundles = [{{"CPU": _SETUP_CPUS}} for _ in range(total_num_nodes)]
                 setup_pg = ray.util.placement_group(setup_bundles, strategy='STRICT_SPREAD')
                 setup_workers = [run_bash_command_with_log_and_return_pid \\
@@ -2365,9 +2369,8 @@ class RetryingVmProvisioner(object):
                 for (resource, exception) in resource_exceptions.items():
                     table.add_row([
                         resource.infra.formatted_str(),
-                        resources_utils.format_resource(resource,
-                                                        simplify=True),
-                        exception
+                        resources_utils.format_resource(
+                            resource, simplified_only=True)[0], exception
                     ])
                 # Set the max width of REASON column to 80 to avoid the table
                 # being wrapped in a unreadable way.
@@ -2466,6 +2469,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
     def get_cluster_name(self):
         return self.cluster_name
+
+    def get_cluster_name_on_cloud(self):
+        return self.cluster_name_on_cloud
 
     def _use_internal_ips(self):
         """Returns whether to use internal IPs for SSH connections."""
@@ -2949,6 +2955,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     @cluster_yaml.setter
     def cluster_yaml(self, value: Optional[str]):
         self._cluster_yaml = value
+
+    @property
+    def instance_ids(self):
+        if self.cached_cluster_info is not None:
+            return self.cached_cluster_info.instance_ids()
+        return None
 
     @property
     def ssh_user(self):
@@ -3619,9 +3631,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         gap_seconds = _RETRY_UNTIL_UP_INIT_GAP_SECONDS
                         retry_message = ux_utils.retry_message(
                             f'Retry after {gap_seconds:.0f}s ')
-                        hint_message = (f'\n{retry_message} '
-                                        f'{ux_utils.log_path_hint(log_path)}'
-                                        f'{colorama.Style.RESET_ALL}')
+                        hint_message = (
+                            f'\n{retry_message} '
+                            f'{ux_utils.provision_hint(cluster_name)}'
+                            f'{colorama.Style.RESET_ALL}')
 
                         # Add cluster event for retry.
                         global_user_state.add_cluster_event(
@@ -3650,7 +3663,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     logger.error(
                         ux_utils.error_message(
                             'Failed to provision resources. '
-                            f'{ux_utils.log_path_hint(log_path)}'))
+                            f'{ux_utils.provision_hint(cluster_name)}'))
                     error_message += (
                         '\nTo keep retrying until the cluster is up, use '
                         'the `--retry-until-up` flag.')
@@ -3709,6 +3722,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # manually or by the cloud provider.
                 # Optimize the case where the cluster's IPs can be retrieved
                 # from cluster_info.
+                handle.cached_cluster_info = cluster_info
                 handle.docker_user = cluster_info.docker_user
                 handle.update_cluster_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
                                           cluster_info=cluster_info)
@@ -3720,7 +3734,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
                 self._update_after_cluster_provisioned(
                     handle, to_provision_config.prev_handle, task,
-                    prev_cluster_status, lock_id, config_hash)
+                    prev_cluster_status, config_hash)
                 return handle, False
 
             cluster_config_file = config_dict['ray']
@@ -3792,7 +3806,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             self._update_after_cluster_provisioned(
                 handle, to_provision_config.prev_handle, task,
-                prev_cluster_status, lock_id, config_hash)
+                prev_cluster_status, config_hash)
             return handle, False
 
     def _open_ports(self, handle: CloudVmRayResourceHandle) -> None:
@@ -3810,7 +3824,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             prev_handle: Optional[CloudVmRayResourceHandle],
             task: task_lib.Task,
             prev_cluster_status: Optional[status_lib.ClusterStatus],
-            lock_id: str, config_hash: str) -> None:
+            config_hash: str) -> None:
         usage_lib.messages.usage.update_cluster_resources(
             handle.launched_nodes, handle.launched_resources)
         usage_lib.messages.usage.update_final_cluster_status(
@@ -3921,8 +3935,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 handle.cluster_name, handle.cached_external_ips, auth_config,
                 handle.cached_external_ssh_ports, handle.docker_user,
                 handle.ssh_user)
-
-            locks.get_lock(lock_id).force_unlock()
 
     def _sync_workdir(self, handle: CloudVmRayResourceHandle,
                       workdir: Union[Path, Dict[str, Any]],
@@ -4218,6 +4230,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         codegen: str,
         job_id: int,
         managed_job_dag: Optional['dag.Dag'] = None,
+        managed_job_user_id: Optional[str] = None,
         remote_log_dir: Optional[str] = None,
     ) -> None:
         """Executes generated code on the head node."""
@@ -4290,7 +4303,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         pool=managed_job_dag.pool,
                         workspace=workspace,
                         entrypoint=entrypoint,
-                        tasks=managed_job_tasks)
+                        tasks=managed_job_tasks,
+                        user_id=managed_job_user_id)
 
                 if _is_command_length_over_limit(codegen):
                     _dump_code_to_file(codegen)
@@ -4327,7 +4341,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         managed_job_dag,
                         skypilot_config.get_active_workspace(
                             force_user_workspace=True),
-                        entrypoint=common_utils.get_current_command())
+                        entrypoint=common_utils.get_current_command(),
+                        user_hash=managed_job_user_id)
                     # Set the managed job to PENDING state to make sure that
                     # this managed job appears in the `sky jobs queue`, even
                     # if it needs to wait to be submitted.
@@ -6272,6 +6287,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         env_vars.update(self._skypilot_predefined_env_vars(handle))
         return env_vars
 
+    def _get_managed_job_user_id(self, task: task_lib.Task) -> Optional[str]:
+        """Returns the user id for the managed job."""
+        if task.managed_job_dag is not None:
+            return task.envs[constants.USER_ID_ENV_VAR]
+        return None
+
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
                                task: task_lib.Task, job_id: int,
                                remote_log_dir: str) -> None:
@@ -6310,11 +6331,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         codegen.add_epilogue()
 
-        self._exec_code_on_head(handle,
-                                codegen.build(),
-                                job_id,
-                                managed_job_dag=task.managed_job_dag,
-                                remote_log_dir=remote_log_dir)
+        self._exec_code_on_head(
+            handle,
+            codegen.build(),
+            job_id,
+            managed_job_dag=task.managed_job_dag,
+            managed_job_user_id=self._get_managed_job_user_id(task),
+            remote_log_dir=remote_log_dir)
 
     def _execute_task_n_nodes(self, handle: CloudVmRayResourceHandle,
                               task: task_lib.Task, job_id: int,
@@ -6365,8 +6388,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         codegen.add_epilogue()
         # TODO(zhanghao): Add help info for downloading logs.
-        self._exec_code_on_head(handle,
-                                codegen.build(),
-                                job_id,
-                                managed_job_dag=task.managed_job_dag,
-                                remote_log_dir=remote_log_dir)
+        self._exec_code_on_head(
+            handle,
+            codegen.build(),
+            job_id,
+            managed_job_dag=task.managed_job_dag,
+            managed_job_user_id=self._get_managed_job_user_id(task),
+            remote_log_dir=remote_log_dir)
