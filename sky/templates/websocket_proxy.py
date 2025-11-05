@@ -23,6 +23,7 @@ from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect
 
 from sky import exceptions
+from sky.client import service_account_auth
 from sky.server import constants
 from sky.server.server import KubernetesSSHMessageType
 from sky.skylet import constants as skylet_constants
@@ -61,11 +62,12 @@ def _get_cookie_header(url: str) -> Dict[str, str]:
 
 
 async def main(url: str, timestamps_supported: bool, login_url: str) -> None:
-    cookie_header = _get_cookie_header(url)
+    headers = {}
+    headers.update(_get_cookie_header(url))
+    headers.update(service_account_auth.get_service_account_headers())
     try:
-        async with connect(url,
-                           ping_interval=None,
-                           additional_headers=cookie_header) as websocket:
+        async with connect(url, ping_interval=None,
+                           additional_headers=headers) as websocket:
             await run_websocket_proxy(websocket, timestamps_supported)
     except websockets.exceptions.InvalidStatus as e:
         if e.response.status_code == 403:
