@@ -619,10 +619,15 @@ export function ClusterTable({
       const activeClusters = await dashboardCache.get(getClusters);
 
       if (showHistory) {
-        const historyClusters = await dashboardCache.get(getClusterHistory, [
-          null,
-          historyDays,
-        ]);
+        let historyClusters = [];
+        try {
+          historyClusters = await dashboardCache.get(getClusterHistory, [
+            null,
+            historyDays,
+          ]);
+        } catch (error) {
+          console.error('Error fetching cluster history:', error);
+        }
         // Mark clusters as active or historical for UI distinction
         const markedActiveClusters = activeClusters.map((cluster) => ({
           ...cluster,

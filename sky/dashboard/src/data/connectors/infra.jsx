@@ -8,7 +8,7 @@ export async function getCloudInfrastructure(forceRefresh = false) {
   const { getClusters } = await import('@/data/connectors/clusters');
   const { getManagedJobs } = await import('@/data/connectors/jobs');
   try {
-    let jobsData = {jobs: []};
+    let jobsData = { jobs: [] };
     try {
       jobsData = await dashboardCache.get(getManagedJobs, [
         { allUsers: true, skipFinished: true, fields: ['cloud', 'region'] },
@@ -286,7 +286,12 @@ export async function getWorkspaceInfrastructure() {
     const clusters = clustersData || [];
 
     // Get context stats (cluster counts)
-    const contextStats = await getContextClusters(clusters);
+    let contextStats = {};
+    try {
+      contextStats = await getContextClusters(clusters);
+    } catch (error) {
+      console.error('Error fetching context clusters:', error);
+    }
 
     // Get GPU data for all contexts (filter out any undefined contexts)
     const validContexts = [...new Set(allContextsAcrossWorkspaces)].filter(

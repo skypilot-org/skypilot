@@ -48,7 +48,10 @@ import { REFRESH_INTERVALS } from '@/lib/config';
 import cachePreloader from '@/lib/cache-preloader';
 import { apiClient } from '@/data/connectors/client';
 import { sortData } from '@/data/utils';
-import { CLOUD_CANONICALIZATIONS, CLUSTER_NOT_UP_ERROR } from '@/data/connectors/constants';
+import {
+  CLOUD_CANONICALIZATIONS,
+  CLUSTER_NOT_UP_ERROR,
+} from '@/data/connectors/constants';
 import Link from 'next/link';
 
 // Workspace-aware API functions (cacheable)

@@ -342,7 +342,7 @@ export function useClusterDetails({ cluster, job = null }) {
         if (data.length > 0) {
           setClusterData(data[0]); // Assuming getClusters returns an array
           return data[0]; // Return the data for use in fetchClusterJobData
-        }else{
+        } else {
           console.error('No cluster data found for cluster:', cluster);
           return null;
         }

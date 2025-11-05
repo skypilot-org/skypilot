@@ -29,7 +29,6 @@ import { getPoolStatus } from '@/data/connectors/jobs';
 import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { getClusters, downloadJobLogs } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
-import { getUsers } from '@/data/connectors/users';
 import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
@@ -219,7 +218,6 @@ export function ManagedJobs() {
     jobsCacheManager.invalidateCache();
     dashboardCache.invalidate(getPoolStatus, [{}]);
     dashboardCache.invalidate(getWorkspaces);
-    dashboardCache.invalidate(getUsers);
 
     // Trigger a re-fetch in both tables via their refreshDataRef
     if (jobsRefreshRef.current) {
@@ -441,15 +439,13 @@ export function ManagedJobsTable({
         const isDataLoading = jobsCacheManager.isDataLoading(params);
 
         if (includeStatus) {
-          const [jr, cd] = await Promise.all([
-            jobsCacheManager.getPaginatedJobs(params),
-            dashboardCache.get(getClusters),
-          ]);
-          jobsResponse = jr;
-          clustersData = cd;
-        } else {
-          jobsResponse = await jobsCacheManager.getPaginatedJobs(params);
+          try {
+            clustersData = await dashboardCache.get(getClusters);
+          } catch (error) {
+            console.error('Error fetching clusters:', error);
+          }
         }
+        jobsResponse = await jobsCacheManager.getPaginatedJobs(params);
 
         // Always process the response, even if it's null
         const {
