@@ -89,6 +89,11 @@ def query_instances(
 
     A None status means the instance is marked as "terminated"
     or "terminating".
+
+    Args:
+        retry_if_missing: Whether to retry the call to the cloud api if the
+          cluster is not found when querying the live status on the cloud.
+          NOTE: This is currently only used on kubernetes.
     """
     raise NotImplementedError
 
