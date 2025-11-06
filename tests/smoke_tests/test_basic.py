@@ -1714,3 +1714,24 @@ def test_kubernetes_ssh_proxy_connection():
         timeout=15 * 60,  # 15 minutes timeout
     )
     smoke_tests_utils.run_one_test(test)
+
+
+def test_no_ssh_tunnel_process_leak_after_teardown(generic_cloud: str):
+    """Test that no SSH tunnel process leaks after teardown."""
+    cluster_name = smoke_tests_utils.get_cluster_name()
+    grep_ssh_tunnel_proc = f'ps aux | grep -E "ssh|port-forward" | grep 46590 | grep "{cluster_name if generic_cloud == "kubernetes" else "$IP"}" | grep -v grep'
+
+    test = smoke_tests_utils.Test(
+        'no_ssh_tunnel_process_leak_after_teardown',
+        [
+            # TODO(kevin): remove SKYPILOT_ENABLE_GRPC=1 after it becomes the default.
+            f'SKYPILOT_ENABLE_GRPC=1 sky launch -y -c {cluster_name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} echo hi',
+            f'IP=$(sky status --ip {cluster_name}) && echo "=== Before ===" && {grep_ssh_tunnel_proc} || exit 1 && '
+            f'SKYPILOT_DEBUG=0 sky down -y {cluster_name} && '
+            # Should not find any ssh tunnel process after teardown. If found, exit with error.
+            f'echo "=== After ===" && ! {grep_ssh_tunnel_proc} && echo "No SSH tunnel process found"',
+        ],
+        f'sky down -y {cluster_name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
