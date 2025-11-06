@@ -2633,7 +2633,7 @@ def refresh_cluster_record(
         cluster_status_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS,
         include_user_info: bool = True,
         summary_response: bool = False,
-        retry_if_missing: bool = False) -> Optional[Dict[str, Any]]:
+        retry_if_missing: bool = True) -> Optional[Dict[str, Any]]:
     """Refresh the cluster, and return the possibly updated record.
 
     The function will update the cached cluster status in the global state. For
@@ -2764,7 +2764,8 @@ def refresh_cluster_status_handle(
     *,
     force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]] = None,
     cluster_lock_already_held: bool = False,
-    cluster_status_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS
+    cluster_status_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS,
+    retry_if_missing: bool = True,
 ) -> Tuple[Optional[status_lib.ClusterStatus],
            Optional[backends.ResourceHandle]]:
     """Refresh the cluster, and return the possibly updated status and handle.
@@ -2779,7 +2780,8 @@ def refresh_cluster_status_handle(
         cluster_lock_already_held=cluster_lock_already_held,
         cluster_status_lock_timeout=cluster_status_lock_timeout,
         include_user_info=False,
-        summary_response=True)
+        summary_response=True,
+        retry_if_missing=retry_if_missing)
     if record is None:
         return None, None
     return record['status'], record['handle']
