@@ -31,18 +31,14 @@ def websocket_aware(
 
         def __init__(self, app, *args, **kwargs):
             self.app = app
-            self.middleware = middleware_cls(*args, app=app, **kwargs)
+            self.middleware = middleware_cls(app, *args, **kwargs)
 
         async def __call__(self, scope, receive, send):
             scope_type = scope.get('type')
-            if scope_type == 'http':
-                await self.middleware(scope, receive, send)
-            elif scope_type == 'websocket':
+            if scope_type == 'websocket':
                 await self._handle_websocket(scope, receive, send)
-            elif scope_type == 'lifespan':
-                await self.app(scope, receive, send)
             else:
-                raise ValueError(f'Invalid scope type: {scope_type}')
+                await self.middleware(scope, receive, send)
 
         async def dispatch(self, request: fastapi.Request, call_next):
             return await self.middleware.dispatch(request, call_next)
