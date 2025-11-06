@@ -8,6 +8,8 @@ import pickle
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from sky import models
+from sky.catalog import common
 from sky.schemas.api import responses
 from sky.server import constants as server_constants
 from sky.utils import serialize_utils
@@ -15,7 +17,6 @@ from sky.utils import serialize_utils
 if typing.TYPE_CHECKING:
     from sky import backends
     from sky import clouds
-    from sky import models
     from sky.provision.kubernetes import utils as kubernetes_utils
 
 handlers: Dict[str, Any] = {}
@@ -254,11 +255,27 @@ def encode_realtime_gpu_availability(
                              List[Any]]]) -> List[Tuple[str, List[List[Any]]]]:
     # Convert RealtimeGpuAvailability namedtuples to lists
     # for JSON serialization.
-    result = []
+    encoded = []
     for context, gpu_list in return_value:
-        gpu_availability_list = []
+        converted_gpu_list = []
         for gpu in gpu_list:
-            gpu_list_item = [gpu.gpu, gpu.counts, gpu.capacity, gpu.available]
-            gpu_availability_list.append(gpu_list_item)
-        result.append((context, gpu_availability_list))
-    return result
+            assert isinstance(gpu, models.RealtimeGpuAvailability), (
+                f'Expected RealtimeGpuAvailability, got {type(gpu)}')
+            converted_gpu_list.append(list(gpu))
+        encoded.append((context, converted_gpu_list))
+    return encoded
+
+
+@register_encoder('list_accelerators')
+def encode_list_accelerators(
+        return_value: Dict[str, List[Any]]) -> Dict[str, Any]:
+    encoded: Dict[str, Any] = {}
+    for accelerator_name, instances in return_value.items():
+        # Convert InstanceTypeInfo namedtuples to lists for JSON serialization.
+        converted_instances: List[Any] = []
+        for instance in instances:
+            assert isinstance(instance, common.InstanceTypeInfo), (
+                f'Expected InstanceTypeInfo, got {type(instance)}')
+            converted_instances.append(list(instance))
+        encoded[accelerator_name] = converted_instances
+    return encoded
