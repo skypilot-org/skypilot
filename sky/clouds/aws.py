@@ -299,7 +299,9 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         unsupported_features = {}
         if resources.use_spot:
@@ -341,10 +343,15 @@ class AWS(clouds.Cloud):
     #### Regions/Zones ####
 
     @classmethod
-    def regions_with_offering(cls, instance_type: str,
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[clouds.Region]:
+    def regions_with_offering(
+        cls,
+        instance_type: str,
+        accelerators: Optional[Dict[str, int]],
+        use_spot: bool,
+        region: Optional[str],
+        zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None,
+    ) -> List[clouds.Region]:
         del accelerators  # unused
         regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'aws')
