@@ -190,7 +190,7 @@ echo "nginx ingress controller configured for NodePort $NODEPORT ✓"
 # Build the Docker image locally
 echo "Building Docker image locally..."
 echo "docker buildx build -t $DOCKER_IMAGE $BUILD_ARGS --load -f Dockerfile ."
-# docker buildx build -t $DOCKER_IMAGE $BUILD_ARGS --load -f Dockerfile .
+docker buildx build -t $DOCKER_IMAGE $BUILD_ARGS --load -f Dockerfile .
 if [ $? -ne 0 ]; then
     echo "❌ Failed to build Docker image"
     exit 1
