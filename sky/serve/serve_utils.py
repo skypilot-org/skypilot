@@ -722,7 +722,7 @@ def _get_service_status(
                                                         record['version'])
         try:
             raw_yaml_config = yaml_utils.read_yaml(latest_yaml_path)
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             # If this is a consolidation mode running without an PVC, the file
             # might lost after an API server update (restart). In such case, we
             # don't want it to crash the command. Fall back to an empty string.
