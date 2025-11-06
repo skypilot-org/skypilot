@@ -322,9 +322,10 @@ deploy_and_login() {
 
     # Fix imagePullPolicy for Docker-in-Docker environments
     # The Helm chart hardcodes imagePullPolicy: Always, but we need Never for local images
+    # Patch BOTH the main container and the logrotate sidecar
     echo "Fixing imagePullPolicy for local Docker image..."
-    kubectl patch deployment skypilot-api-server -n $NAMESPACE -p '{"spec":{"template":{"spec":{"containers":[{"name":"skypilot-api","imagePullPolicy":"Never"}]}}}}'
-    echo "✅ imagePullPolicy patched to Never"
+    kubectl patch deployment skypilot-api-server -n $NAMESPACE -p '{"spec":{"template":{"spec":{"containers":[{"name":"skypilot-api","imagePullPolicy":"Never"},{"name":"logrotate","imagePullPolicy":"Never"}]}}}}'
+    echo "✅ imagePullPolicy patched to Never for all containers"
 
     # Wait for deployment rollout to complete after patching
     # This ensures the new pod is created and the PVC is bound
@@ -480,12 +481,12 @@ deploy_and_login() {
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     LOGIN_OUTPUT=$(python3 "$SCRIPT_DIR/okta_auto_login.py" direct --endpoint "$ENDPOINT" --username "$OKTA_TEST_USERNAME" --password "$OKTA_TEST_PASSWORD" 2>&1)
     LOGIN_EXIT_CODE=$?
+    echo "Login output: $LOGIN_OUTPUT"
     if [[ $LOGIN_EXIT_CODE -eq 0 ]] && echo "$LOGIN_OUTPUT" | grep -q "SUCCESS:"; then
         echo "✅ Automated test complete for mode: $mode"
     else
         echo "❌ Error happened during automated login test for mode: $mode"
         echo "Login exit code: $LOGIN_EXIT_CODE"
-        echo "Login output: $LOGIN_OUTPUT"
         exit 1
     fi
 }
