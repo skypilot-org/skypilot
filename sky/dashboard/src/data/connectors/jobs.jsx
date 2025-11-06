@@ -160,7 +160,7 @@ export async function getManagedJobs(options = {}) {
         if (cloud) {
           infra = cloud;
           if (region) {
-            infra += `/${region}`;
+            infra += ` (${region})`;
           }
         }
 
