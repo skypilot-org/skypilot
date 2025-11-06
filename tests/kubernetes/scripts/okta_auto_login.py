@@ -8,13 +8,13 @@ successful authentication by checking for the SkyPilot dashboard.
 
 Usage:
     # Direct login method (original)
-    python3 okta_auto_login.py direct --endpoint <endpoint> --username <username> --password <password> --client-id <client_id>
+    python3 okta_auto_login.py direct --endpoint <endpoint> --username <username> --password <password>
 
     # Sky API login method (new)
     python3 okta_auto_login.py sky-api --endpoint <endpoint> --username <username> --password <password>
 
 Example:
-    python3 okta_auto_login.py direct --endpoint http://localhost:30082 --username test-user@example.com --password password123 --client-id client_id_here
+    python3 okta_auto_login.py direct --endpoint http://localhost:30082 --username test-user@example.com --password password123
     python3 okta_auto_login.py sky-api --endpoint http://localhost:30082 --username test-user@example.com --password password123
 """
 
@@ -45,12 +45,10 @@ logger = logging.getLogger(__name__)
 class OktaAutoLogin:
     """Handles automated Okta OAuth2 login flow using Selenium"""
 
-    def __init__(self, endpoint: str, username: str, password: str,
-                 client_id: str):
+    def __init__(self, endpoint: str, username: str, password: str):
         self.endpoint = endpoint.rstrip('/')
         self.username = username
         self.password = password
-        self.client_id = client_id
         self.driver = None
 
     def get_chrome_driver(self, headless: bool) -> webdriver.Chrome:
@@ -196,7 +194,7 @@ class OktaAutoLogin:
 
             # Open the URL in Selenium
             if not self.driver:
-                self.driver = self.get_chrome_driver(headless=False)
+                self.driver = self.get_chrome_driver(headless=True)
                 logger.info("✅ Chrome driver initialized")
 
             logger.info(f"Navigating to URL in Selenium browser: {url}")
@@ -290,9 +288,8 @@ def cli(ctx, verbose):
               required=True,
               help='Okta password for authentication',
               hide_input=True)
-@click.option('--client-id', '-c', required=True, help='OAuth2 client ID')
 @click.pass_context
-def direct_login(ctx, endpoint, username, password, client_id):
+def direct_login(ctx, endpoint, username, password):
     """
     Direct login method: Navigates directly to endpoint and automates Okta login.
 
@@ -300,13 +297,13 @@ def direct_login(ctx, endpoint, username, password, client_id):
     automates the full OAuth flow using Selenium.
 
     Example:
-        python3 okta_auto_login.py direct --endpoint http://localhost:30082 --username test@example.com --password password123 --client-id client_id_here
+        python3 okta_auto_login.py direct --endpoint http://localhost:30082 --username test@example.com --password password123
     """
     logger.info(f"Starting direct login for user: {username}")
     logger.info(f"Endpoint: {endpoint}")
 
     # Perform login
-    login_handler = OktaAutoLogin(endpoint, username, password, client_id)
+    login_handler = OktaAutoLogin(endpoint, username, password)
     success = login_handler.perform_login()
 
     if success:
@@ -349,8 +346,8 @@ def sky_api_login(ctx, endpoint, username, password):
     logger.info(f"Starting sky-api login for user: {username}")
     logger.info(f"Endpoint: {endpoint}")
 
-    # Perform login (client_id not needed for sky-api method)
-    login_handler = OktaAutoLogin(endpoint, username, password, client_id="")
+    # Perform login
+    login_handler = OktaAutoLogin(endpoint, username, password)
     success = login_handler.perform_sky_api_login()
 
     if success:
