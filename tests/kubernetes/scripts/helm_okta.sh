@@ -197,6 +197,14 @@ if [ $? -ne 0 ]; then
 fi
 echo "✅ Docker image built successfully"
 
+# Remove old images from kind cluster to avoid tag conflicts
+echo "Removing old $DOCKER_IMAGE images from kind cluster..."
+docker exec skypilot-control-plane crictl images | grep "$(echo $DOCKER_IMAGE | cut -d: -f1)" | awk '{print $3}' | while read img_id; do
+    echo "Removing old image: $img_id"
+    docker exec skypilot-control-plane crictl rmi "$img_id" 2>/dev/null || true
+done
+echo "✅ Old images removed from kind cluster"
+
 # Load the image into kind cluster
 echo "Loading image $DOCKER_IMAGE into kind cluster..."
 kind load docker-image $DOCKER_IMAGE --name skypilot
