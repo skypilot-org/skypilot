@@ -1,4 +1,5 @@
 """Kubernetes."""
+import concurrent.futures
 import os
 import re
 import subprocess
@@ -117,18 +118,29 @@ class Kubernetes(clouds.Cloud):
         for context in contexts:
             # Allow spot instances if supported by the cluster
             try:
-                spot_label_key, _ = kubernetes_utils.get_spot_label(context)
-                if spot_label_key is not None:
-                    unsupported_features.pop(
-                        clouds.CloudImplementationFeatures.SPOT_INSTANCE, None)
-                # Allow custom network tier if supported by the cluster
-                # (e.g., Nebius clusters with high performance networking)
-                network_type, _ = cls._detect_network_type(
-                    context, resources.network_tier)
-                if network_type.supports_high_performance_networking():
-                    unsupported_features.pop(
-                        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
-                        None)
+                # Run spot label check and network type detection concurrently
+                # as they are independent operations
+                with concurrent.futures.ThreadPoolExecutor(
+                        max_workers=2) as executor:
+                    spot_future = executor.submit(
+                        kubernetes_utils.get_spot_label, context)
+                    network_future = executor.submit(cls._detect_network_type,
+                                                     context,
+                                                     resources.network_tier)
+
+                    spot_label_key, _ = spot_future.result()
+                    if spot_label_key is not None:
+                        unsupported_features.pop(
+                            clouds.CloudImplementationFeatures.SPOT_INSTANCE,
+                            None)
+
+                    # Allow custom network tier if supported by the cluster
+                    # (e.g., Nebius clusters with high performance networking)
+                    network_type, _ = network_future.result()
+                    if network_type.supports_high_performance_networking():
+                        unsupported_features.pop(
+                            clouds.CloudImplementationFeatures.
+                            CUSTOM_NETWORK_TIER, None)
             except exceptions.KubeAPIUnreachableError as e:
                 cls._log_unreachable_context(context, str(e))
         return unsupported_features
