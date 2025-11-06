@@ -1,5 +1,4 @@
 """SDK functions for managed jobs."""
-import concurrent.futures
 import copy
 import ipaddress
 import os
@@ -367,11 +366,139 @@ def launch(
     modified_catalogs = {} if consolidation_mode_job_ids is not None else (
         service_catalog_common.get_modified_catalog_file_mounts())
 
+    # For pools with num_jobs > 1, create job IDs upfront using a single controller task
+    pre_created_job_ids: Optional[List[int]] = None
+    if (pool is not None and num_jobs > 1 and
+            consolidation_mode_job_ids is None):
+        # Get controller handle to create job IDs upfront
+        try:
+            local_handle = backend_utils.is_controller_accessible(
+                controller=controller, stopped_message='')
+            backend = backend_utils.get_backend_from_handle(local_handle)
+            assert isinstance(backend, backends.CloudVmRayBackend)
+            
+            # Create job IDs upfront for all jobs
+            # Note: State management (set_job_info, set_pending) will be done
+            # on the jobs controller, not here on the API server
+            pre_created_job_ids = []
+            resources_str = backend_utils.get_task_resources_str(
+                dag.tasks[0], is_managed_job=True)
+            for job_rank in range(num_jobs):
+                job_name = dag.name
+                job_id, _ = backend._add_job(
+                    handle=local_handle,
+                    job_name=job_name,
+                    resources_str=resources_str,
+                    metadata=dag.tasks[0].metadata_json)
+                pre_created_job_ids.append(job_id)
+            logger.info(f'Created {len(pre_created_job_ids)} job IDs upfront: '
+                       f'{pre_created_job_ids}')
+        except exceptions.ClusterNotUpError:
+            # Controller not up yet, will create job IDs during submission
+            pre_created_job_ids = None
+
     def _submit_one(
         consolidation_mode_job_id: Optional[int] = None,
         job_rank: Optional[int] = None,
         num_jobs: Optional[int] = None,
-    ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
+        pre_created_job_ids: Optional[List[int]] = None,
+    ) -> Tuple[Optional[Union[int, List[int]]], Optional[backends.ResourceHandle]]:
+        # If pre_created_job_ids is provided, we're submitting multiple jobs
+        # with a single controller task
+        if pre_created_job_ids is not None:
+            assert len(pre_created_job_ids) == num_jobs, (
+                f'pre_created_job_ids length {len(pre_created_job_ids)} '
+                f'does not match num_jobs {num_jobs}')
+            # Create a single set of YAML files (not per-rank)
+            remote_original_user_yaml_path = (
+                f'{prefix}/{dag.name}-{dag_uuid}.original_user_yaml')
+            remote_user_yaml_path = (
+                f'{prefix}/{dag.name}-{dag_uuid}.yaml')
+            remote_user_config_path = (
+                f'{prefix}/{dag.name}-{dag_uuid}.config_yaml')
+            remote_env_file_path = (
+                f'{prefix}/{dag.name}-{dag_uuid}.env')
+            
+            with tempfile.NamedTemporaryFile(
+                    prefix=f'managed-dag-{dag.name}-',
+                    mode='w',
+            ) as f, tempfile.NamedTemporaryFile(
+                    prefix=f'managed-user-dag-{dag.name}-',
+                    mode='w',
+            ) as original_user_yaml_path:
+                original_user_yaml_path.write(user_dag_str_user_specified)
+                original_user_yaml_path.flush()
+                
+                # Create a single DAG copy (rank-specific env vars will be set
+                # by the scheduler on the controller)
+                dag_copy = copy.deepcopy(dag)
+                dag_utils.dump_chain_dag_to_yaml(dag_copy, f.name)
+                
+                vars_to_fill = {
+                    'remote_original_user_yaml_path':
+                        remote_original_user_yaml_path,
+                    'original_user_dag_path': original_user_yaml_path.name,
+                    'remote_user_yaml_path': remote_user_yaml_path,
+                    'user_yaml_path': f.name,
+                    'local_to_controller_file_mounts':
+                        (local_to_controller_file_mounts),
+                    'jobs_controller': controller_name,
+                    'dag_name': dag.name,
+                    'remote_user_config_path': remote_user_config_path,
+                    'remote_env_file_path': remote_env_file_path,
+                    'modified_catalogs': modified_catalogs,
+                    'priority': priority,
+                    'consolidation_mode_job_id': None,  # Not consolidation mode
+                    'pool': pool,
+                    'job_controller_indicator_file':
+                        managed_job_constants.JOB_CONTROLLER_INDICATOR_FILE,
+                    'pre_created_job_ids': pre_created_job_ids,
+                    'num_jobs': num_jobs,
+                    **controller_utils.shared_controller_vars_to_fill(
+                        controller,
+                        remote_user_config_path=remote_user_config_path,
+                        local_user_config=mutated_user_config,
+                    ),
+                }
+                
+                yaml_path = os.path.join(
+                    managed_job_constants.JOBS_CONTROLLER_YAML_PREFIX,
+                    f'{name}-{dag_uuid}-multi.yaml'
+                )
+                common_utils.fill_template(
+                    managed_job_constants.JOBS_CONTROLLER_TEMPLATE,
+                    vars_to_fill,
+                    output_path=yaml_path)
+                controller_task = task_lib.Task.from_yaml(yaml_path)
+                controller_task.set_resources(controller_resources)
+                
+                controller_task.managed_job_dag = dag_copy
+                # pylint: disable=protected-access
+                controller_task._metadata = metadata
+                
+                logger.info(
+                    f'{colorama.Fore.YELLOW}'
+                    f'Launching {num_jobs} managed jobs {dag.name!r} '
+                    f'with IDs {pre_created_job_ids} from jobs controller...'
+                    f'{colorama.Style.RESET_ALL}')
+                
+                # Launch with the api server's user hash
+                with common.with_server_user():
+                    with skypilot_config.local_active_workspace_ctx(
+                            skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):
+                        result = execution.launch(
+                            task=controller_task,
+                            cluster_name=controller_name,
+                            stream_logs=stream_logs,
+                            retry_until_up=True,
+                            fast=True,
+                            _request_name=request_names.AdminPolicyRequestName.
+                            JOBS_LAUNCH_CONTROLLER,
+                            _disable_controller_check=True)
+                        # Return the list of job IDs and handle
+                        return pre_created_job_ids, result[1] if isinstance(result, tuple) else None
+        
+        # Original single job submission logic
         rank_suffix = '' if job_rank is None else f'-{job_rank}'
         remote_original_user_yaml_path = (
             f'{prefix}/{dag.name}-{dag_uuid}{rank_suffix}.original_user_yaml')
@@ -522,6 +649,18 @@ def launch(
     ids: List[int] = []
     all_handle: Optional[backends.ResourceHandle] = None
 
+    # If we have pre_created_job_ids, use single controller task
+    if pre_created_job_ids is not None:
+        job_ids, handle = _submit_one(
+            pre_created_job_ids=pre_created_job_ids,
+            num_jobs=num_jobs)
+        if isinstance(job_ids, list):
+            ids = job_ids
+        else:
+            ids = [job_ids] if job_ids is not None else []
+        all_handle = handle
+        return ids, all_handle
+
     if num_jobs == 1:
         job_id = (consolidation_mode_job_ids[0]
                   if consolidation_mode_job_ids is not None else None)
@@ -530,37 +669,14 @@ def launch(
         ids.append(jid)
         all_handle = handle
     else:
-        # Submit jobs in parallel using ThreadPoolExecutor
-        with concurrent.futures.ThreadPoolExecutor(
-                max_workers=min(num_jobs,
-                                os.cpu_count() or 1)) as executor:
-            # Submit jobs concurrently
-            future_to_rank = {}
-            for job_rank in range(num_jobs):
-                job_id = (consolidation_mode_job_ids[job_rank]
-                          if consolidation_mode_job_ids is not None else None)
-                future = executor.submit(_submit_one, job_id, job_rank,
-                                         num_jobs)
-                future_to_rank[future] = job_rank
-
-            # Collect results in order of job_rank to maintain consistent order.
-            results: List[Optional[Tuple[
-                int, Optional[backends.ResourceHandle]]]] = [None] * num_jobs
-            for future in concurrent.futures.as_completed(future_to_rank):
-                job_rank = future_to_rank[future]
-                try:
-                    jid, handle = future.result()
-                    assert jid is not None, (job_id, handle)
-                    results[job_rank] = (jid, handle)
-                    all_handle = handle  # Keep the last handle.
-                except Exception as e:
-                    logger.error(f'Error launching job {job_rank}: {e}')
-                    raise e
-
-            # Extract job IDs in order
-            for res in results:
-                if res is not None:
-                    ids.append(res[0])
+        # Submit jobs sequentially (one controller task per job)
+        for job_rank in range(num_jobs):
+            job_id = (consolidation_mode_job_ids[job_rank]
+                      if consolidation_mode_job_ids is not None else None)
+            jid, handle = _submit_one(job_id, job_rank, num_jobs)
+            assert jid is not None, (job_id, handle)
+            ids.append(jid)
+            all_handle = handle  # Keep the last handle.
 
     return ids, all_handle
 
