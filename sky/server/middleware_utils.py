@@ -5,6 +5,7 @@ from typing import Type
 
 import fastapi
 import starlette.middleware.base
+import starlette.types
 
 from sky import sky_logging
 
@@ -34,11 +35,13 @@ def websocket_aware(
     class WebSocketAwareMiddleware:
         """WebSocket-aware middleware wrapper."""
 
-        def __init__(self, app, *args, **kwargs):
+        def __init__(self, app: starlette.types.ASGIApp, *args, **kwargs):
             self.app = app
             self.middleware = middleware_cls(app, *args, **kwargs)
 
-        async def __call__(self, scope, receive, send):
+        async def __call__(self, scope: starlette.types.Scope,
+                           receive: starlette.types.Receive,
+                           send: starlette.types.Send):
             scope_type = scope.get('type')
             if scope_type == 'websocket':
                 await self._handle_websocket(scope, receive, send)
@@ -46,11 +49,15 @@ def websocket_aware(
                 # Delegate other scopes to the underlying HTTP middleware.
                 await self.middleware(scope, receive, send)
 
-        async def dispatch(self, request: fastapi.Request, call_next):
+        async def dispatch(
+                self, request: fastapi.Request,
+                call_next: starlette.middleware.base.RequestResponseEndpoint):
             """Implement dispatch method to keep compatibility."""
             return await self.middleware.dispatch(request, call_next)
 
-        async def _handle_websocket(self, scope, receive, send):
+        async def _handle_websocket(self, scope: starlette.types.Scope,
+                                    receive: starlette.types.Receive,
+                                    send: starlette.types.Send):
             """Handle websocket connection by delegating to HTTP middleware."""
             decision = await self._run_websocket_dispatch(scope)
             if decision == WebSocketDecision.ACCEPT:
@@ -74,7 +81,8 @@ def websocket_aware(
                     'reason': 'Internal Server Error',
                 })
 
-        async def _run_websocket_dispatch(self, scope) -> WebSocketDecision:
+        async def _run_websocket_dispatch(
+                self, scope: starlette.types.Scope) -> WebSocketDecision:
             http_scope = self._build_http_scope(scope)
             http_receive = self._http_receive_adapter()
             request = fastapi.Request(http_scope, receive=http_receive)
@@ -111,7 +119,8 @@ def websocket_aware(
             return WebSocketDecision.ERROR
 
         @staticmethod
-        def _build_http_scope(scope):
+        def _build_http_scope(
+                scope: starlette.types.Scope) -> starlette.types.Scope:
             state = scope.setdefault('state', {})
             scheme = scope.get('scheme', 'ws')
             if scheme == 'ws':
@@ -129,7 +138,7 @@ def websocket_aware(
             return http_scope
 
         @staticmethod
-        def _http_receive_adapter():
+        def _http_receive_adapter() -> starlette.types.Receive:
             """Adapter thatmimics the sequence produced by Starlette for an HTTP
             request: a single http.request event followed by a http.disconnect
             """
