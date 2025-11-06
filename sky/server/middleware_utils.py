@@ -40,8 +40,6 @@ def websocket_aware(
 
         async def __call__(self, scope, receive, send):
             scope_type = scope.get('type')
-            logger.info(f'websocket aware middleware called with {scope_type},'
-                        f'middleware: {self.middleware}')
             if scope_type == 'websocket':
                 await self._handle_websocket(scope, receive, send)
             else:
