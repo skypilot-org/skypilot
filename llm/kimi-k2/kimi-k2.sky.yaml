@@ -1,6 +1,6 @@
 # Serve Kimi-K2 with SkyPilot and vLLM.
 # Uses multi-node serving with tensor parallelism and pipeline parallelism.
-# 
+#
 # Usage:
 #   HF_TOKEN=xxx sky launch kimi-k2.yaml -c kimi-k2 --secret HF_TOKEN
 #   HF_TOKEN=xxx sky serve up kimi-k2.yaml -n kimi-k2 --secret HF_TOKEN
@@ -11,7 +11,7 @@ secrets:
   HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
 
 resources:
-  image_id: docker:vllm/vllm-openai:v0.10.0
+  image_id: docker:vllm/vllm-openai:v0.11.0
   network_tier: best
   accelerators: H100:8
   cpus: 100+
