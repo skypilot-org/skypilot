@@ -1694,3 +1694,23 @@ def test_cancel_logs_request(generic_cloud: str):
         f'sky down -y {name} || true',
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_ssh_proxy_connection():
+    """Test Kubernetes SSH proxy connection.
+    """
+    cluster_name = smoke_tests_utils.get_cluster_name()
+
+    test = smoke_tests_utils.Test(
+        'kubernetes_ssh_proxy_connection',
+        [
+            # Launch a minimal Kubernetes cluster for SSH proxy testing
+            f'sky launch -y -c {cluster_name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} echo "SSH test cluster ready"',
+            # Run an SSH command on the cluster.
+            f'ssh {cluster_name} echo "SSH command executed"',
+        ],
+        f'sky down -y {cluster_name}',
+        timeout=15 * 60,  # 15 minutes timeout
+    )
+    smoke_tests_utils.run_one_test(test)
