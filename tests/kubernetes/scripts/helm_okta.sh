@@ -86,7 +86,7 @@ cleanup() {
 }
 
 # Set up trap to call cleanup function on script exit
-# trap cleanup EXIT
+trap cleanup EXIT
 
 # Assert all required environment variables are provided
 if [[ -z "$OKTA_CLIENT_ID" ]]; then
@@ -493,38 +493,38 @@ echo "✅ Namespace $NAMESPACE deleted"
 
 deploy_and_login "new"
 
-# # Apply cookie header fix to sky/server/common.py before sky api login
-# echo "Applying cookie header fix to sky/server/common.py..."
-# SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# # Find the project root by looking for sky/server/common.py
-# COMMON_PY="$(cd "$SCRIPT_DIR/../../.." && pwd)/sky/server/common.py"
-# if [ -f "$COMMON_PY" ]; then
-#     # Use sed to replace the simple cookie assignment with the multi-line version
-#     # This fixes the requests library cookie issue with localhost:non-standard-port
-#     sed -i '/kwargs\['\''cookies'\''\] = get_api_cookie_jar()/c\
-#         cookie_jar = get_api_cookie_jar()\
-#         if cookie_jar:\
-#             # Convert cookie jar to Cookie header string to work around requests\
-#             # library edge case: cookies are not sent when using localhost with\
-#             # non-standard ports (e.g., localhost:30082), even when domain matches.\
-#             # The requests library'\''s cookie filtering logic incorrectly filters out\
-#             # valid cookies in this case. Setting the Cookie header manually\
-#             # bypasses this filtering and guarantees cookies are sent.\
-#             cookie_parts = []\
-#             for cookie in cookie_jar:\
-#                 cookie_parts.append(f'\''{cookie.name}={cookie.value}'\'')\
-#             if cookie_parts:\
-#                 if '\''Cookie'\'' not in headers:\
-#                     headers['\''Cookie'\''] = '\''; '\''.join(cookie_parts)\
-#         kwargs['\''cookies'\''] = cookie_jar' "$COMMON_PY"
-#     echo "✅ Cookie header fix applied"
-# else
-#     echo "⚠️  sky/server/common.py not found at $COMMON_PY"
-#     exit 1
-# fi
+# Apply cookie header fix to sky/server/common.py before sky api login
+echo "Applying cookie header fix to sky/server/common.py..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Find the project root by looking for sky/server/common.py
+COMMON_PY="$(cd "$SCRIPT_DIR/../../.." && pwd)/sky/server/common.py"
+if [ -f "$COMMON_PY" ]; then
+    # Use sed to replace the simple cookie assignment with the multi-line version
+    # This fixes the requests library cookie issue with localhost:non-standard-port
+    sed -i '/kwargs\['\''cookies'\''\] = get_api_cookie_jar()/c\
+        cookie_jar = get_api_cookie_jar()\
+        if cookie_jar:\
+            # Convert cookie jar to Cookie header string to work around requests\
+            # library edge case: cookies are not sent when using localhost with\
+            # non-standard ports (e.g., localhost:30082), even when domain matches.\
+            # The requests library'\''s cookie filtering logic incorrectly filters out\
+            # valid cookies in this case. Setting the Cookie header manually\
+            # bypasses this filtering and guarantees cookies are sent.\
+            cookie_parts = []\
+            for cookie in cookie_jar:\
+                cookie_parts.append(f'\''{cookie.name}={cookie.value}'\'')\
+            if cookie_parts:\
+                if '\''Cookie'\'' not in headers:\
+                    headers['\''Cookie'\''] = '\''; '\''.join(cookie_parts)\
+        kwargs['\''cookies'\''] = cookie_jar' "$COMMON_PY"
+    echo "✅ Cookie header fix applied"
+else
+    echo "⚠️  sky/server/common.py not found at $COMMON_PY"
+    exit 1
+fi
 
-# # sky api login
-# python3 "$SCRIPT_DIR/okta_auto_login.py" sky-api --endpoint "$ENDPOINT" --username "$OKTA_TEST_USERNAME" --password "$OKTA_TEST_PASSWORD" || (echo "❌ Failed: sky api login" && exit 1)
+# sky api login
+python3 "$SCRIPT_DIR/okta_auto_login.py" sky-api --endpoint "$ENDPOINT" --username "$OKTA_TEST_USERNAME" --password "$OKTA_TEST_PASSWORD" || (echo "❌ Failed: sky api login" && exit 1)
 
-# # run basic k8s ssh test
-# LOG_TO_STDOUT=1 pytest tests/smoke_tests/test_basic.py::test_kubernetes_ssh_proxy_connection --kubernetes || (echo "❌ Failed: basic k8s ssh test" && exit 1)
+# run basic k8s ssh test
+LOG_TO_STDOUT=1 pytest tests/smoke_tests/test_basic.py::test_kubernetes_ssh_proxy_connection --kubernetes || (echo "❌ Failed: basic k8s ssh test" && exit 1)
