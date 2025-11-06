@@ -2662,6 +2662,8 @@ def refresh_cluster_record(
           value is <0, do not timeout (wait for the lock indefinitely). By
           default, this is set to CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS. Warning:
           if correctness is required, you must set this to -1.
+        retry_if_missing: Whether to retry the call to the cloud api if the
+          cluster is not found when querying the live status on the cloud.
 
     Returns:
         If the cluster is terminated or does not exist, return None.
