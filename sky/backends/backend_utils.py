@@ -3353,12 +3353,12 @@ def get_clusters(
         force_refresh_statuses = None
 
     def _refresh_cluster_record(cluster_name):
-        record = _refresh_cluster(cluster_name,
-                                  force_refresh_statuses=force_refresh_statuses,
-                                  retry_if_missing=(force_refresh_statuses
-                                                    is not None),
-                                  include_user_info=True,
-                                  summary_response=summary_response)
+        record = _refresh_cluster(
+            cluster_name,
+            force_refresh_statuses=force_refresh_statuses,
+            retry_if_missing=(refresh != common.StatusRefreshMode.NONE),
+            include_user_info=True,
+            summary_response=summary_response)
         # record may be None if the cluster is deleted during refresh,
         # e.g. all the Pods of a cluster on Kubernetes have been
         # deleted before refresh.
