@@ -165,7 +165,6 @@ class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
-@middleware_utils.websocket_aware
 class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to add a request ID to each request."""
 

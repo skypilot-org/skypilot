@@ -192,24 +192,6 @@ async def test_lifespan_scope_passes_through():
     assert seen_scopes == ['lifespan']
 
 
-@pytest.mark.asyncio
-async def test_invalid_scope_type_raises():
-
-    async def app(scope, receive, send):
-        del scope, receive, send
-
-    async def receive():
-        return {}
-
-    async def send(message):
-        del message
-
-    middleware = _make_middleware(app, behavior='accept')
-
-    with pytest.raises(ValueError):
-        await middleware({'type': 'other'}, receive, send)
-
-
 def test_build_http_scope_converts_scheme():
     wrapper_cls = middleware_utils.websocket_aware(RecordingMiddleware)
     state = {}

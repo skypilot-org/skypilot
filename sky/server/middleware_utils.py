@@ -24,6 +24,11 @@ def websocket_aware(
 
     It assembles an HTTP-style request like the HTTP upgrade request during
     websocket handshake and then delegates it to the real HTTP middleware.
+    The websocket connection will be rejected if the HTTP middleware returns
+    a 4xx or 5xx status code.
+
+    Note: for websocket connection, the mutation made by the underlying HTTP
+    middleware on the request and response will be discarded.
     """
 
     class WebSocketAwareMiddleware:
@@ -35,12 +40,16 @@ def websocket_aware(
 
         async def __call__(self, scope, receive, send):
             scope_type = scope.get('type')
+            logger.info(f'websocket aware middleware called with {scope_type},'
+                        f'middleware: {self.middleware}')
             if scope_type == 'websocket':
                 await self._handle_websocket(scope, receive, send)
             else:
+                # Delegate other scopes to the underlying HTTP middleware.
                 await self.middleware(scope, receive, send)
 
         async def dispatch(self, request: fastapi.Request, call_next):
+            """Implement dispatch method to keep compatibility."""
             return await self.middleware.dispatch(request, call_next)
 
         async def _handle_websocket(self, scope, receive, send):
@@ -76,6 +85,9 @@ def websocket_aware(
 
             async def call_next(req):
                 del req
+                # Capture whether call_next() is called in the underlying
+                # HTTP middleware to determine if we can proceed with current
+                # websocket connection.
                 nonlocal call_next_called
                 call_next_called = True
                 return stub_response
@@ -120,6 +132,9 @@ def websocket_aware(
 
         @staticmethod
         def _http_receive_adapter():
+            """Adapter thatmimics the sequence produced by Starlette for an HTTP
+            request: a single http.request event followed by a http.disconnect
+            """
             sent = False
 
             async def receive():
