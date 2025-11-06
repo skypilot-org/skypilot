@@ -1023,7 +1023,7 @@ async def unzip_file(zip_file_path: pathlib.Path,
 
     def _do_unzip() -> None:
         try:
-            os.rmdir(client_file_mounts_dir)
+            shutil.rmtree(client_file_mounts_dir, ignore_errors=True)
             with zipfile.ZipFile(zip_file_path, 'r') as zipf:
                 for member in zipf.infolist():
                     # Determine the new path
