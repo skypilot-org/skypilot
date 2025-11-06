@@ -460,11 +460,13 @@ deploy_and_login() {
 
     echo "🔄 Performing automated login for mode: $mode..."
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    LOGIN_OUTPUT=$(python3 "$SCRIPT_DIR/okta_auto_login.py" direct --endpoint "$ENDPOINT" --username "$OKTA_TEST_USERNAME" --password "$OKTA_TEST_PASSWORD")
-    if [[ $? -eq 0 ]] && [[ "$LOGIN_OUTPUT" == SUCCESS* ]]; then
+    LOGIN_OUTPUT=$(python3 "$SCRIPT_DIR/okta_auto_login.py" direct --endpoint "$ENDPOINT" --username "$OKTA_TEST_USERNAME" --password "$OKTA_TEST_PASSWORD" 2>&1)
+    LOGIN_EXIT_CODE=$?
+    if [[ $LOGIN_EXIT_CODE -eq 0 ]] && echo "$LOGIN_OUTPUT" | grep -q "SUCCESS:"; then
         echo "✅ Automated test complete for mode: $mode"
     else
         echo "❌ Error happened during automated login test for mode: $mode"
+        echo "Login exit code: $LOGIN_EXIT_CODE"
         echo "Login output: $LOGIN_OUTPUT"
         exit 1
     fi
