@@ -155,11 +155,15 @@ def worker_thread(cluster: str, size_bytes: int, num: int,
 
     logger.info(f"Thread {thread_id}: Establishing SSH connection")
 
+    now = time.time()
     # Establish persistent connection
     if not ssh_client.connect():
         logger.error(f"Thread {thread_id}: Failed to connect to {cluster}")
         # Return failed results for all commands
         return [(0.0, False) for _ in range(num)]
+    duration = time.time() - now
+    # Initial connection latency
+    results.append((duration, True))
 
     logger.info(
         f"Thread {thread_id}: Starting {num} commands on persistent connection")
@@ -271,8 +275,8 @@ Examples:
         print("Error: parallelism must be positive")
         sys.exit(1)
 
-    if args.num <= 0:
-        print("Error: num must be positive")
+    if args.num < 0:
+        print("Error: num must be positive or 0")
         sys.exit(1)
 
     if args.size <= 0:
