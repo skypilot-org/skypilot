@@ -1344,23 +1344,29 @@ function UsersTable({
         if (showLoading) setIsLoading(false);
 
         // Step 2: Load clusters and jobs in background and update counts
-        const [clustersData, managedJobsResponse] = await Promise.all([
-          dashboardCache.get(getClusters),
-          dashboardCache.get(getManagedJobs, [
-            {
-              allUsers: true,
-              skipFinished: true,
-              fields: [
-                'user_hash',
-                'status',
-                'accelerators',
-                'job_name',
-                'job_id',
-                'infra',
-              ],
-            },
-          ]),
-        ]);
+        let clustersData = [];
+        let managedJobsResponse = { jobs: [] };
+        try {
+          [clustersData, managedJobsResponse] = await Promise.all([
+            dashboardCache.get(getClusters),
+            dashboardCache.get(getManagedJobs, [
+              {
+                allUsers: true,
+                skipFinished: true,
+                fields: [
+                  'user_hash',
+                  'status',
+                  'accelerators',
+                  'job_name',
+                  'job_id',
+                  'infra',
+                ],
+              },
+            ]),
+          ]);
+        } catch (error) {
+          console.error('Error fetching clusters and managed jobs:', error);
+        }
 
         const jobsData = managedJobsResponse.jobs || [];
 
@@ -2340,16 +2346,28 @@ function ServiceAccountTokensView({
       setTokens(tokensData || []);
 
       // Step 2: Fetch clusters and jobs data in parallel
-      const [clustersResponse, jobsResponse] = await Promise.all([
-        dashboardCache.get(getClusters),
-        dashboardCache.get(getManagedJobs, [
-          {
-            allUsers: true,
-            skipFinished: true,
-            fields: ['user_hash', 'status', 'accelerators', 'job_id', 'infra'],
-          },
-        ]),
-      ]);
+      let clustersResponse = [];
+      let jobsResponse = { jobs: [] };
+      try {
+        [clustersResponse, jobsResponse] = await Promise.all([
+          dashboardCache.get(getClusters),
+          dashboardCache.get(getManagedJobs, [
+            {
+              allUsers: true,
+              skipFinished: true,
+              fields: [
+                'user_hash',
+                'status',
+                'accelerators',
+                'job_id',
+                'infra',
+              ],
+            },
+          ]),
+        ]);
+      } catch (error) {
+        console.error('Error fetching clusters and managed jobs:', error);
+      }
 
       const clustersData = clustersResponse || [];
       const jobsData = jobsResponse?.jobs || [];

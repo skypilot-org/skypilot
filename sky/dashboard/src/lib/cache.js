@@ -123,7 +123,7 @@ class DashboardCache {
         // If fetch fails and we have stale data, return stale data
         if (cachedItem) {
           console.warn(
-            `Failed to fetch fresh data for ${key}, returning stale data:`,
+            `Failed to fetch fresh data for ${key}/${functionName}, returning stale data:`,
             error
           );
           return cachedItem.data;

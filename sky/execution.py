@@ -523,51 +523,6 @@ def _execute_dag(
 
 @timeline.event
 @usage_lib.entrypoint
-def cluster_launch(
-    task: Union['sky.Task', 'sky.Dag'],
-    cluster_name: Optional[str] = None,
-    retry_until_up: bool = False,
-    idle_minutes_to_autostop: Optional[int] = None,
-    dryrun: bool = False,
-    down: bool = False,
-    stream_logs: bool = True,
-    backend: Optional[backends.Backend] = None,
-    optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
-    no_setup: bool = False,
-    clone_disk_from: Optional[str] = None,
-    fast: bool = False,
-    *,  #keyword only separator
-    # Internal only:
-    # pylint: disable=invalid-name
-    _quiet_optimizer: bool = False,
-    _is_launched_by_jobs_controller: bool = False,
-    _is_launched_by_sky_serve_controller: bool = False,
-    _disable_controller_check: bool = False,
-    job_logger: logging.Logger = logger,
-) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
-    return launch(
-        task=task,
-        cluster_name=cluster_name,
-        retry_until_up=retry_until_up,
-        idle_minutes_to_autostop=idle_minutes_to_autostop,
-        dryrun=dryrun,
-        down=down,
-        stream_logs=stream_logs,
-        backend=backend,
-        optimize_target=optimize_target,
-        no_setup=no_setup,
-        clone_disk_from=clone_disk_from,
-        fast=fast,
-        _quiet_optimizer=_quiet_optimizer,
-        _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
-        _is_launched_by_sky_serve_controller=
-        _is_launched_by_sky_serve_controller,
-        _disable_controller_check=_disable_controller_check,
-        _request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
-        job_logger=job_logger,
-    )
-
-
 # A launch routine will share tempfiles between steps, so we init a tempdir
 # for the launch routine and gc the entire dir after launch.
 @tempstore.with_tempdir
@@ -591,7 +546,8 @@ def launch(
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
-    _request_name: request_names.AdminPolicyRequestName,
+    _request_name: request_names.AdminPolicyRequestName = request_names.
+    AdminPolicyRequestName.CLUSTER_LAUNCH,
     job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -760,6 +716,10 @@ def launch(
         _is_launched_by_sky_serve_controller,
         _request_name=_request_name,
         job_logger=job_logger)
+
+
+# needed for backward compatibility. Remove by v0.10.7 or v0.11.0
+cluster_launch = launch
 
 
 @usage_lib.entrypoint
