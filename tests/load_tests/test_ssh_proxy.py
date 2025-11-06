@@ -162,6 +162,7 @@ def worker_thread(cluster: str, size_bytes: int, num: int,
         # Return failed results for all commands
         return [(0.0, False) for _ in range(num)]
     duration = time.time() - now
+    logger.info(f"Thread {thread_id}: Initial connection latency: {duration:.4f}s")
     # Initial connection latency
     results.append((duration, True))
 
