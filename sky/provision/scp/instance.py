@@ -48,14 +48,40 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                                       resumed_instance_ids=[],
                                       created_instance_ids=[])
 
-    cluster_instance_names = [_head(cluster_name_on_cloud)] + [
-        f'{_worker(cluster_name_on_cloud)}-{i:02d}'
-        for i in range(1, config.count)
-    ]
-
     existing_instances = _filter_instances(cluster_name_on_cloud, None)
     stopped_instances = _filter_instances(cluster_name_on_cloud,
                                           ['STOPPED', 'STOPPING'])
+
+    def _detect_naming_version(existing_instances,
+                               cluster_name_on_cloud) -> str:
+        v2_head = _head(cluster_name_on_cloud)
+        v2_worker_prefix = _worker(cluster_name_on_cloud)
+        has_v2 = any(instance['virtualServerName'] == v2_head or
+                     instance['virtualServerName'].startswith(v2_worker_prefix)
+                     for instance in existing_instances)
+        if has_v2:
+            return 'v2'
+        has_v1 = any(instance['virtualServerName'] == cluster_name_on_cloud
+                     for instance in existing_instances)
+        if has_v1:
+            return 'v1'
+        return 'v2'
+
+    naming_version = _detect_naming_version(existing_instances,
+                                            cluster_name_on_cloud)
+
+    if naming_version == 'v2':
+        cluster_instance_names = [_head(cluster_name_on_cloud)] + [
+            f'{_worker(cluster_name_on_cloud)}-{i:02d}'
+            for i in range(1, config.count)
+        ]
+    else:
+        if config.count > 1:
+            raise RuntimeError(
+                'This cluster uses the legacy (v1) naming scheme and cannot be '
+                'scaled to multi-node automatically. '
+                'Please `sky down` and relaunch.')
+        cluster_instance_names = [cluster_name_on_cloud]
 
     existing_instance_names = [
         instance['virtualServerName'] for instance in existing_instances
@@ -280,13 +306,15 @@ def _get_vcp_subnets(zone_id):
 def _filter_instances(cluster_name_on_cloud,
                       status_filter: Optional[List[str]]):
     instances = scp_utils.SCPClient().get_instances()
-    head_instance_name = _head(cluster_name_on_cloud)
-    worker_prefix = _worker(cluster_name_on_cloud)
+    v2_head_instance_name = _head(cluster_name_on_cloud)
+    v2_worker_prefix = _worker(cluster_name_on_cloud)
+    v1_head_instance_name = cluster_name_on_cloud
 
     cluster_instances = [
         instance for instance in instances
-        if instance['virtualServerName'] == head_instance_name or
-        instance['virtualServerName'].startswith(worker_prefix)
+        if instance['virtualServerName'] == v2_head_instance_name or
+        instance['virtualServerName'].startswith(v2_worker_prefix) or
+        instance['virtualServerName'] == v1_head_instance_name
     ]
 
     if status_filter is None:
@@ -298,9 +326,11 @@ def _filter_instances(cluster_name_on_cloud,
 
 
 def _get_head_instance_id(instances):
-    for instance in instances:
-        if instance['virtualServerName'].endswith('-head'):
-            return instance['virtualServerId']
+    if len(instances) > 0:
+        for instance in instances:
+            if instance['virtualServerName'].endswith('-head'):
+                return instance['virtualServerId']
+        return instances[0]['virtualServerId']
     return None
 
 
