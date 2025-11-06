@@ -176,16 +176,15 @@ class SetMaxAutostopIdleMinutesPolicy(sky.AdminPolicy):
         """Sets max autostop idle minutes for all tasks."""
         max_idle_minutes = 10
         task = user_request.task
-        for r in task.resources:
-            disabled = (r.autostop_config is None or
-                        not r.autostop_config.enabled)
-            too_long = False
-            if not disabled:
-                assert r.autostop_config is not None
-                too_long = (r.autostop_config.idle_minutes is not None and
-                            r.autostop_config.idle_minutes > max_idle_minutes)
-            if disabled or too_long:
-                r.override_autostop_config(idle_minutes=max_idle_minutes)
+        resources = task.get_resource_config()
+        if 'autostop' not in resources:
+            # autostop is disabled
+            resources['autostop'] = {'idle_minutes': max_idle_minutes}
+        elif ('idle_minutes' not in resources['autostop'] or
+              int(resources['autostop']['idle_minutes']) > max_idle_minutes):
+            # Autostop idle minutes is too long
+            resources['autostop']['idle_minutes'] = max_idle_minutes
+        task.set_resources(resources)
 
         return sky.MutatedUserRequest(
             task=task, skypilot_config=user_request.skypilot_config)
