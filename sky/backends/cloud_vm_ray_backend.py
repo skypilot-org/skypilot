@@ -2894,9 +2894,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             if proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE:
                 logger.debug(
                     f'Terminating SSH tunnel process {tunnel_info.pid}')
-                subprocess_utils.kill_process_with_grace_period(proc,
-                                                                force=True,
-                                                                grace_period=3)
+                subprocess_utils.kill_children_processes(proc, force=True)
         except psutil.NoSuchProcess:
             pass
         except Exception as e:  # pylint: disable=broad-except
