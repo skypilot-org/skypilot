@@ -720,19 +720,27 @@ def _get_service_status(
     if record['pool']:
         latest_yaml_path = generate_task_yaml_file_name(service_name,
                                                         record['version'])
-        raw_yaml_config = yaml_utils.read_yaml(latest_yaml_path)
-        original_config = raw_yaml_config.get('_user_specified_yaml')
-        if original_config is None:
-            # Fall back to old display format.
-            original_config = raw_yaml_config
-            original_config.pop('run', None)
-            svc: Dict[str, Any] = original_config.pop('service')
-            if svc is not None:
-                svc.pop('pool', None)  # Remove pool from service config
-                original_config['pool'] = svc  # Add pool to root config
+        try:
+            raw_yaml_config = yaml_utils.read_yaml(latest_yaml_path)
+        except Exception as e:
+            # If this is a consolidation mode running without an PVC, the file
+            # might lost after an API server update (restart). In such case, we
+            # don't want it to crash the command. Fall back to an empty string.
+            logger.error(f'Failed to read YAML file {latest_yaml_path}: {e}')
+            record['pool_yaml'] = ''
         else:
-            original_config = yaml_utils.safe_load(original_config)
-        record['pool_yaml'] = yaml_utils.dump_yaml_str(original_config)
+            original_config = raw_yaml_config.get('_user_specified_yaml')
+            if original_config is None:
+                # Fall back to old display format.
+                original_config = raw_yaml_config
+                original_config.pop('run', None)
+                svc: Dict[str, Any] = original_config.pop('service')
+                if svc is not None:
+                    svc.pop('pool', None)  # Remove pool from service config
+                    original_config['pool'] = svc  # Add pool to root config
+            else:
+                original_config = yaml_utils.safe_load(original_config)
+            record['pool_yaml'] = yaml_utils.dump_yaml_str(original_config)
 
     record['target_num_replicas'] = 0
     try:
