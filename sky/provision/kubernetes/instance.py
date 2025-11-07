@@ -1768,6 +1768,11 @@ def query_instances(
     attempts = 0
     pods = list_namespaced_pod(context, namespace, cluster_name_on_cloud,
                                is_ssh, identity, label_selector)
+    # When we see no pods returned from the k8s api, we assume the pods have
+    # been terminated by the user directly and mark the cluster as terminated
+    # in the global user state.
+    # We add retry logic here as an attempt to mitigate a leak caused by the
+    # kubernetes api returning no pods despite the pods actually existing.
     while (retry_if_missing and not pods and
            attempts < _MAX_QUERY_INSTANCES_RETRIES):
         logger.debug(f'Retrying to query k8s api for {cluster_name_on_cloud} '
