@@ -3099,7 +3099,6 @@ def _get_glob_clusters(
 def _refresh_cluster(
         cluster_name: str,
         force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]],
-        retry_if_missing: bool,
         include_user_info: bool = True,
         summary_response: bool = False) -> Optional[Dict[str, Any]]:
     try:
@@ -3108,8 +3107,7 @@ def _refresh_cluster(
             force_refresh_statuses=force_refresh_statuses,
             cluster_lock_already_held=False,
             include_user_info=include_user_info,
-            summary_response=summary_response,
-            retry_if_missing=retry_if_missing)
+            summary_response=summary_response)
     except (exceptions.ClusterStatusFetchingError,
             exceptions.CloudUserIdentityError,
             exceptions.ClusterOwnerIdentityMismatchError) as e:
@@ -3158,7 +3156,6 @@ def refresh_cluster_records() -> None:
         return _refresh_cluster(cluster_name,
                                 force_refresh_statuses=set(
                                     status_lib.ClusterStatus),
-                                retry_if_missing=True,
                                 include_user_info=False,
                                 summary_response=True)
 
@@ -3359,7 +3356,6 @@ def get_clusters(
     def _refresh_cluster_record(cluster_name):
         record = _refresh_cluster(cluster_name,
                                   force_refresh_statuses=force_refresh_statuses,
-                                  retry_if_missing=True,
                                   include_user_info=True,
                                   summary_response=summary_response)
         # record may be None if the cluster is deleted during refresh,
