@@ -87,6 +87,7 @@ MULTI_WORD_TERMS = {
     # Providers/brands
     'Prime Intellect',
     'Cloudflare Zero Trust',
+    'CoreWeave Object Storage',
 }
 
 

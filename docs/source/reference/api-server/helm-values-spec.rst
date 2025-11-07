@@ -200,6 +200,7 @@ Below is the available helm value keys and the default value of each key:
   :ref:`awsCredentials <helm-values-awsCredentials>`:
     :ref:`enabled <helm-values-awsCredentials-enabled>`: false
     :ref:`awsSecretName <helm-values-awsCredentials-awsSecretName>`: aws-credentials
+    :ref:`useCredentialsFile <helm-values-awsCredentials-useCredentialsFile>`: false
     :ref:`accessKeyIdKeyName <helm-values-awsCredentials-accessKeyIdKeyName>`: aws_access_key_id
     :ref:`secretAccessKeyKeyName <helm-values-awsCredentials-secretAccessKeyKeyName>`: aws_secret_access_key
 
@@ -1748,12 +1749,38 @@ Default: ``aws-credentials``
   awsCredentials:
     awsSecretName: aws-credentials
 
+.. _helm-values-awsCredentials-useCredentialsFile:
+
+``awsCredentials.useCredentialsFile``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Set to ``true`` to mount a complete AWS credentials file with multiple profiles. This is required for using different AWS profiles with different :ref:`workspaces <workspaces>`.
+
+If set to ``true``, the secret must contain a key named ``credentials`` with the full AWS credentials file content. Create the secret with:
+
+.. code-block:: bash
+
+    kubectl create secret generic aws-credentials \
+      --namespace $NAMESPACE \
+      --from-file=credentials=$HOME/.aws/credentials
+
+If set to ``false`` (default), ``accessKeyIdKeyName`` and ``secretAccessKeyKeyName`` are used as the default profile credentials.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  awsCredentials:
+    enabled: true
+    useCredentialsFile: true
+
+
 .. _helm-values-awsCredentials-accessKeyIdKeyName:
 
 ``awsCredentials.accessKeyIdKeyName``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Key name used to set AWS_ACCESS_KEY_ID.
+Key name used to set AWS_ACCESS_KEY_ID. Only used when ``useCredentialsFile`` is ``false``.
 
 Default: ``aws_access_key_id``
 
@@ -1767,7 +1794,7 @@ Default: ``aws_access_key_id``
 ``awsCredentials.secretAccessKeyKeyName``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Key name used to set AWS_SECRET_ACCESS_KEY.
+Key name used to set AWS_SECRET_ACCESS_KEY. Only used when ``useCredentialsFile`` is ``false``.
 
 Default: ``aws_secret_access_key``
 
@@ -2113,7 +2140,7 @@ SkyPilot provides a minimal Prometheus configuration by default. If you want to 
     kube-state-metrics:
       enabled: true
       metricLabelsAllowlist:
-        - pods=[skypilot-cluster]
+        - pods=[skypilot-cluster-name]
     prometheus-node-exporter:
       enabled: false
     prometheus-pushgateway:

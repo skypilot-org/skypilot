@@ -36,6 +36,8 @@ The above is achieved by configuring the following section in the config file:
        # Use both AWS and GCP.
        gcp:
          project_id: project-id-for-team-a
+       aws:
+         profile: team-a-profile
 
      team-b:
        # Use GCP only with a different project ID.
@@ -80,6 +82,10 @@ The above is achieved by configuring the following section in the config file:
            gcp:
              disabled: false
              project_id: GCP project ID
+
+           aws:
+             disabled: false
+             profile: aws-profile-name
 
            nebius:
              disabled: false

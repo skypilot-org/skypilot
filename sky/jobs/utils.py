@@ -6,7 +6,7 @@ ManagedJobCodeGen.
 """
 import asyncio
 import collections
-import datetime
+from datetime import datetime
 import enum
 import os
 import pathlib
@@ -266,6 +266,12 @@ def is_consolidation_mode(on_api_restart: bool = False) -> bool:
 
 def ha_recovery_for_consolidation_mode():
     """Recovery logic for HA mode."""
+    # Touch the signal file here to avoid conflict with
+    # update_managed_jobs_statuses. Although we run this first and then start
+    # the deamon, this function is also called in cancel_jobs_by_id.
+    signal_file = pathlib.Path(
+        constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE).expanduser()
+    signal_file.touch()
     # No setup recovery is needed in consolidation mode, as the API server
     # already has all runtime installed. Directly start jobs recovery here.
     # Refers to sky/templates/kubernetes-ray.yml.j2 for more details.
@@ -314,6 +320,7 @@ def ha_recovery_for_consolidation_mode():
                         f'{datetime.datetime.now()}\n')
         f.write(f'HA recovery completed at {datetime.datetime.now()}\n')
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
+    signal_file.unlink()
 
 
 async def get_job_status(
@@ -458,7 +465,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         """
         managed_job_state.remove_ha_recovery_script(job_id)
         error_msg = None
-        tasks = managed_job_state.get_managed_jobs(job_id)
+        tasks = managed_job_state.get_managed_job_tasks(job_id)
         for task in tasks:
             pool = task.get('pool', None)
             if pool is None:
@@ -527,7 +534,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
 
     for job_id in job_ids:
         assert job_id is not None
-        tasks = managed_job_state.get_managed_jobs(job_id)
+        tasks = managed_job_state.get_managed_job_tasks(job_id)
         # Note: controller_pid and schedule_state are in the job_info table
         # which is joined to the spot table, so all tasks with the same job_id
         # will have the same value for these columns. This is what lets us just
@@ -547,9 +554,9 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         if schedule_state == managed_job_state.ManagedJobScheduleState.DONE:
             # There are two cases where we could get a job that is DONE.
             # 1. At query time (get_jobs_to_check_status), the job was not yet
-            #    DONE, but since then (before get_managed_jobs is called) it has
-            #    hit a terminal status, marked itself done, and exited. This is
-            #    fine.
+            #    DONE, but since then (before get_managed_job_tasks is called)
+            #    it has hit a terminal status, marked itself done, and exited.
+            #    This is fine.
             # 2. The job is DONE, but in a non-terminal status. This is
             #    unexpected. For instance, the task status is RUNNING, but the
             #    job schedule_state is DONE.
@@ -903,6 +910,14 @@ def cancel_jobs_by_pool(pool_name: str,
     return cancel_jobs_by_id(job_ids, current_workspace=current_workspace)
 
 
+def controller_log_file_for_job(job_id: int,
+                                create_if_not_exists: bool = False) -> str:
+    log_dir = os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
+    if create_if_not_exists:
+        os.makedirs(log_dir, exist_ok=True)
+    return os.path.join(log_dir, f'{job_id}.log')
+
+
 def stream_logs_by_id(job_id: int,
                       follow: bool = True,
                       tail: Optional[int] = None) -> Tuple[str, int]:
@@ -935,13 +950,20 @@ def stream_logs_by_id(job_id: int,
             if managed_job_status.is_failed():
                 job_msg = ('\nFailure reason: '
                            f'{managed_job_state.get_failure_reason(job_id)}')
-            log_file_exists = False
+            log_file_ever_existed = False
             task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
                 job_id)
             num_tasks = len(task_info)
-            for task_id, task_name, task_status, log_file in task_info:
+            for (task_id, task_name, task_status, log_file,
+                 logs_cleaned_at) in task_info:
                 if log_file:
-                    log_file_exists = True
+                    log_file_ever_existed = True
+                    if logs_cleaned_at is not None:
+                        ts_str = datetime.fromtimestamp(
+                            logs_cleaned_at).strftime('%Y-%m-%d %H:%M:%S')
+                        print(f'Task {task_name}({task_id}) log has been '
+                              f'cleaned at {ts_str}.')
+                        continue
                     task_str = (f'Task {task_name}({task_id})'
                                 if task_name else f'Task {task_id}')
                     if num_tasks > 1:
@@ -976,7 +998,7 @@ def stream_logs_by_id(job_id: int,
                                 f'{task_str} finished '
                                 f'(status: {task_status.value}).'),
                                   flush=True)
-            if log_file_exists:
+            if log_file_ever_existed:
                 # Add the "Job finished" message for terminal states
                 if managed_job_status.is_terminal():
                     print(ux_utils.finishing_message(
@@ -1228,9 +1250,7 @@ def stream_logs(job_id: Optional[int],
             job_id = managed_job_ids.pop()
         assert job_id is not None, (job_id, job_name)
 
-        controller_log_path = os.path.join(
-            os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR),
-            f'{job_id}.log')
+        controller_log_path = controller_log_file_for_job(job_id)
         job_status = None
 
         # Wait for the log file to be written
@@ -1381,9 +1401,11 @@ def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
             new_fields.append('priority')
         if 'failure_reason' not in new_fields:
             new_fields.append('failure_reason')
-    if ('user_yaml' in new_fields and
-            'original_user_yaml_path' not in new_fields):
-        new_fields.append('original_user_yaml_path')
+    if 'user_yaml' in new_fields:
+        if 'original_user_yaml_path' not in new_fields:
+            new_fields.append('original_user_yaml_path')
+        if 'original_user_yaml_content' not in new_fields:
+            new_fields.append('original_user_yaml_content')
     if cluster_handle_required:
         if 'task_name' not in new_fields:
             new_fields.append('task_name')

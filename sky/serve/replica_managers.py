@@ -27,6 +27,7 @@ from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.serve import service
 from sky.serve import spot_placer
+from sky.server.requests import request_names
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -107,6 +108,8 @@ def launch_cluster(replica_id: int,
             execution.launch(task,
                              cluster_name,
                              retry_until_up=retry_until_up,
+                             _request_name=request_names.AdminPolicyRequestName.
+                             SERVE_LAUNCH_REPLICA,
                              _is_launched_by_sky_serve_controller=True)
             logger.info(f'Replica cluster {cluster_name} launched.')
         except (exceptions.InvalidClusterNameError,

@@ -1,5 +1,6 @@
 """Example admin policy module and prebuilt policies."""
 from example_policy.client_policy import UseLocalGcpCredentialsPolicy
+from example_policy.skypilot_policy import AddLabelsConditionalPolicy
 from example_policy.skypilot_policy import AddLabelsPolicy
 from example_policy.skypilot_policy import AddVolumesPolicy
 from example_policy.skypilot_policy import DisablePublicIpPolicy

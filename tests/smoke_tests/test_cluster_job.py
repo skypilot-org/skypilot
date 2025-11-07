@@ -451,6 +451,9 @@ def test_multi_echo(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'multi_echo',
         [
+            # TODO(aylei): also test local API server after we have rate limit in local mode
+            # Use deploy mode to avoid ulimited concurrency requests exhausts the CPU
+            'sky api stop && sky api start --deploy',
             f'python examples/multi_echo.py {name} {generic_cloud} {int(use_spot)} {accelerator}',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
             'sleep 10',
@@ -481,7 +484,9 @@ def test_multi_echo(generic_cloud: str):
             # unfulfilled' error.  If process not found, grep->ssh returns 1.
             f'ssh {name} \'ps aux | grep "[/]"monitor.py\''
         ],
-        f'sky down -y {name}',
+        (f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api stop && '
+         f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api start; '
+         f'sky down -y {name}'),
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -1073,7 +1078,13 @@ def test_volume_env_mount_kubernetes():
                 f'sky volumes apply -y -n {full_pvc_name} --type k8s-pvc --size 2GB',
                 f's=$(sky jobs launch -y --infra kubernetes {f.name} --env USERNAME=user); echo "$s"; echo "$s" | grep "Job finished (status: SUCCEEDED)"',
             ],
-            f'sky jobs cancel -a || true && sleep 5 && sky volumes delete {full_pvc_name} -y && (vol=$(sky volumes ls | grep "{full_pvc_name}"); if [ -n "$vol" ]; then echo "{full_pvc_name} not deleted" && exit 1; else echo "{full_pvc_name} deleted"; fi)',
+            ' && '.join([
+                'sky jobs cancel -a -y || true', 'sleep 5',
+                f'sky volumes delete {full_pvc_name} -y',
+                f'(vol=$(sky volumes ls | grep "{full_pvc_name}"); '
+                f'if [ -n "$vol" ]; then echo "{full_pvc_name} not deleted" '
+                '&& exit 1; else echo "{full_pvc_name} deleted"; fi)'
+            ]),
         )
         smoke_tests_utils.run_one_test(test)
 

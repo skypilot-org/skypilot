@@ -23,10 +23,11 @@ import json
 import os
 import pathlib
 import subprocess
-import sys
 import tempfile
 import textwrap
+import threading
 import time
+from typing import Generator
 
 import pytest
 from smoke_tests import smoke_tests_utils
@@ -1084,6 +1085,25 @@ def test_kubernetes_show_gpus(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_kubernetes
+def test_show_gpus(generic_cloud: str):
+    # Check that output contains GPU table headers and common GPU types
+    check_cmd = ('echo "$s" && '
+                 'echo "$s" | grep "COMMON_GPU" && '
+                 'echo "$s" | grep "AVAILABLE_QUANTITIES" && '
+                 'echo "$s" | grep -E "A100|H100|H200|L4|T4|B200"')
+    test = smoke_tests_utils.Test(
+        'show_gpus',
+        [
+            (f's=$(SKYPILOT_DEBUG=0 sky show-gpus --infra {generic_cloud}) && '
+             f'{check_cmd}'),
+            (f's=$(SKYPILOT_DEBUG=0 sky show-gpus --infra {generic_cloud} --all) && '
+             f'{check_cmd}'),
+        ],
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.no_seeweb  # Seeweb fails to provision resources
 def test_launch_and_exec_async(generic_cloud: str):
     """Test if the launch and exec commands work correctly with --async."""
@@ -1587,23 +1607,67 @@ def test_loopback_access_with_basic_auth(generic_cloud: str):
 # concurrency issue in our code.
 def test_launch_and_cancel_race_condition(generic_cloud: str):
     """Test that launch and cancel race condition is handled correctly."""
-
     name = smoke_tests_utils.get_cluster_name()
-    launch_cmd = f'sky launch -y -c {name}-$i --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "sleep 120" --async'
-    extract_id = r'echo "$s" | sed -n "s/.*Submitted sky\.launch request: \([0-9a-f-]\{36\}\).*/\1/p"'
-    launch_then_cancel = f's=$({launch_cmd}) && echo $s && id=$({extract_id}) && sky api cancel $id && sky down -y {name}-$i'
+
+    threads = []
+    exceptions = []
+
+    def launch_and_cancel(idx: int):
+        try:
+            cluster_name = f'{name}-{idx}'
+
+            # Create a minimal task
+            task = sky.Task(run='sleep 120')
+            task.set_resources(
+                sky.Resources(infra=generic_cloud,
+                              **smoke_tests_utils.LOW_RESOURCE_PARAM))
+
+            # Launch async
+            request_id = sky.launch(task, cluster_name=cluster_name)
+
+            # Cancel immediately
+            cancelled_request_ids = sky.get(
+                sky.api_cancel(request_ids=[request_id]))
+            assert len(cancelled_request_ids) == 1, \
+                f'Expected to cancel 1 request, got {len(cancelled_request_ids)}'
+            assert cancelled_request_ids[0] == request_id, \
+                f'Expected to cancel request {request_id}, got {cancelled_request_ids[0]}'
+
+            # Clean up
+            sky.down(cluster_name)
+        except Exception as e:  # pylint: disable=broad-except
+            exceptions.append((idx, e))
+
+    def run_parallel_launch_and_cancel() -> Generator[str, None, None]:
+        yield 'Running 20 parallel launch and cancel operations using SDK'
+        # Run multiple launch and cancel in parallel to introduce request queuing.
+        # This can trigger race conditions more frequently.
+        for i in range(20):
+            thread = threading.Thread(target=launch_and_cancel,
+                                      args=(i,),
+                                      daemon=True)
+            threads.append(thread)
+            thread.start()
+
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+
+        # Check for exceptions
+        if exceptions:
+            raise Exception(
+                f'Exceptions occurred in {len(exceptions)} threads: {exceptions}'
+            )
+
     test = smoke_tests_utils.Test(
         'launch_and_cancel_race_condition',
         [
-            # Run multiple launch and cancel in parallel to introduce request queuing.
-            # This can trigger race conditions more frequently.
-            f'for i in {{1..20}}; do ({launch_then_cancel}) & done; wait',
+            run_parallel_launch_and_cancel,
             # Sleep shortly, so that if there is any leaked cluster it can be shown in sky status.
             'sleep 10',
-            # Verify the cluster is not created.
-            f'sky status {name} | grep "not found"',
+            # Verify the cluster(s) are not created.
+            f'sky status "{name}*" | grep "not found"',
         ],
-        # teardown=f'sky down -y {name} || true',
         timeout=smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)
@@ -1628,5 +1692,46 @@ def test_cancel_logs_request(generic_cloud: str):
             f'sleep 10; ps aux | grep "{proxy_command_pattern}"; ! pgrep -f "{proxy_command_pattern}"'
         ],
         f'sky down -y {name} || true',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_ssh_proxy_connection():
+    """Test Kubernetes SSH proxy connection.
+    """
+    cluster_name = smoke_tests_utils.get_cluster_name()
+
+    test = smoke_tests_utils.Test(
+        'kubernetes_ssh_proxy_connection',
+        [
+            # Launch a minimal Kubernetes cluster for SSH proxy testing
+            f'sky launch -y -c {cluster_name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} echo "SSH test cluster ready"',
+            # Run an SSH command on the cluster.
+            f'ssh {cluster_name} echo "SSH command executed"',
+        ],
+        f'sky down -y {cluster_name}',
+        timeout=15 * 60,  # 15 minutes timeout
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+def test_no_ssh_tunnel_process_leak_after_teardown(generic_cloud: str):
+    """Test that no SSH tunnel process leaks after teardown."""
+    cluster_name = smoke_tests_utils.get_cluster_name()
+    grep_ssh_tunnel_proc = f'ps aux | grep -E "ssh|port-forward" | grep 46590 | grep "{cluster_name if generic_cloud == "kubernetes" else "$IP"}" | grep -v grep'
+
+    test = smoke_tests_utils.Test(
+        'no_ssh_tunnel_process_leak_after_teardown',
+        [
+            # TODO(kevin): remove SKYPILOT_ENABLE_GRPC=1 after it becomes the default.
+            f'SKYPILOT_ENABLE_GRPC=1 sky launch -y -c {cluster_name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} echo hi',
+            f'IP=$(sky status --ip {cluster_name}) && echo "=== Before ===" && {grep_ssh_tunnel_proc} || exit 1 && '
+            f'SKYPILOT_DEBUG=0 sky down -y {cluster_name} && '
+            # Should not find any ssh tunnel process after teardown. If found, exit with error.
+            f'echo "=== After ===" && ! {grep_ssh_tunnel_proc} && echo "No SSH tunnel process found"',
+        ],
+        f'sky down -y {cluster_name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)

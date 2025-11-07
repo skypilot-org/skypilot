@@ -15,6 +15,7 @@ from sky.server import common as server_common
 from sky.server import rest
 from sky.server import versions
 from sky.server.requests import payloads
+from sky.server.requests import request_names
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
@@ -84,7 +85,9 @@ def launch(
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
     with admin_policy_utils.apply_and_use_config_in_current_request(
-            dag, at_client_side=True) as dag:
+            dag,
+            request_name=request_names.AdminPolicyRequestName.JOBS_LAUNCH,
+            at_client_side=True) as dag:
         sdk.validate(dag)
         if _need_confirmation:
             job_identity = 'a managed job'

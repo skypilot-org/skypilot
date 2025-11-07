@@ -736,6 +736,7 @@ def detect_gpu_label_formatter(
         for label, value in node.metadata.labels.items():
             node_labels[node.metadata.name].append((label, value))
 
+    invalid_label_values: List[Tuple[str, str, str, str]] = []
     # Check if the node labels contain any of the GPU label prefixes
     for lf in LABEL_FORMATTER_REGISTRY:
         skip = False
@@ -749,17 +750,21 @@ def detect_gpu_label_formatter(
                     if valid:
                         return lf(), node_labels
                     else:
-                        logger.warning(f'GPU label {label} matched for label '
-                                       f'formatter {lf.__class__.__name__}, '
-                                       f'but has invalid value {value}. '
-                                       f'Reason: {reason}. '
-                                       'Skipping...')
+                        invalid_label_values.append(
+                            (label, lf.__name__, value, reason))
                         skip = True
                         break
             if skip:
                 break
         if skip:
             continue
+
+    for label, lf_name, value, reason in invalid_label_values:
+        logger.warning(f'GPU label {label} matched for label '
+                       f'formatter {lf_name}, '
+                       f'but has invalid value {value}. '
+                       f'Reason: {reason}. '
+                       'Skipping...')
 
     return None, node_labels
 
@@ -3296,13 +3301,13 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
 
     try:
         pods = kubernetes.core_api(context).list_pod_for_all_namespaces(
-            label_selector='skypilot-cluster',
+            label_selector=provision_constants.TAG_SKYPILOT_CLUSTER_NAME,
             _request_timeout=kubernetes.API_TIMEOUT).items
     except kubernetes.max_retry_error():
         raise exceptions.ResourcesUnavailableError(
             'Timed out trying to get SkyPilot pods from Kubernetes cluster. '
             'Please check if the cluster is healthy and retry. To debug, run: '
-            'kubectl get pods --selector=skypilot-cluster --all-namespaces'
+            'kubectl get pods --selector=skypilot-cluster-name --all-namespaces'
         ) from None
     return pods
 
@@ -3439,7 +3444,8 @@ def process_skypilot_pods(
     serve_controllers: List[KubernetesSkyPilotClusterInfo] = []
 
     for pod in pods:
-        cluster_name_on_cloud = pod.metadata.labels.get('skypilot-cluster')
+        cluster_name_on_cloud = pod.metadata.labels.get(
+            provision_constants.TAG_SKYPILOT_CLUSTER_NAME)
         cluster_name = cluster_name_on_cloud.rsplit(
             '-', 1
         )[0]  # Remove the user hash to get cluster name (e.g., mycluster-2ea4)
