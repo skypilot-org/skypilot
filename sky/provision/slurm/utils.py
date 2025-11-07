@@ -202,3 +202,11 @@ def filter_jobs(ssh_config_dict: Dict[str, Any],
     job_ids = stdout.splitlines()
 
     return job_ids
+
+
+def check_instance_fits(cluster: str,
+                        instance_type: str) -> Tuple[bool, Optional[str]]:
+    """Check if the given instance type fits in the given cluster."""
+    fits, reason = True, "Dummy"
+
+    return fits, reason

@@ -2,7 +2,7 @@
 
 import os
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from paramiko.config import SSHConfig
 
@@ -61,29 +61,13 @@ class Slurm(clouds.Cloud):
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
-    def regions_with_offering(cls, instance_type: str,
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[clouds.Region]:
-        assert zone is None, 'Slurm does not support zones.'
-        del accelerators, zone  # unused
-        if use_spot:
-            return []
-        else:
-            regions = catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'slurm')
-
-        if region is not None:
-            regions = [r for r in regions if r.name == region]
-        return regions
-
-    @classmethod
     def get_vcpus_mem_from_instance_type(
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
-        return catalog.get_vcpus_mem_from_instance_type(instance_type,
-                                                        clouds='slurm')
+        inst = slurm_utils.SlurmInstanceType.from_instance_type(
+            instance_type)
+        return inst.cpus, inst.memory
 
     @classmethod
     def zones_provision_loop(
@@ -99,16 +83,58 @@ class Slurm(clouds.Cloud):
         # This allows handling for any region without being restricted by zone logic.
         yield None
 
+    @classmethod
+    def existing_allowed_clusters(cls) -> List[str]:
+        """Get existing allowed clusters."""
+        # TODO(jwj): Implement the logic to get the existing allowed clusters.
+        return ['localcluster']
+
+    @classmethod
+    def regions_with_offering(cls, instance_type: Optional[str],
+                              accelerators: Optional[Dict[str, int]],
+                              use_spot: bool, region: Optional[str],
+                              zone: Optional[str]) -> List[clouds.Region]:
+        del accelerators, zone, use_spot  # unused
+        existing_clusters = cls.existing_allowed_clusters()
+
+        regions = []
+        for cluster in existing_clusters:
+            regions.append(clouds.Region(cluster))
+
+        if region is not None:
+            # Filter the regions by the given region (cluster) name.
+            regions = [r for r in regions if r.name == region]
+
+        # Check if requested instance type will fit in the cluster.
+        if instance_type is None:
+            return regions
+
+        regions_to_return = []
+        for r in regions:
+            cluster = r.name
+            # try:
+            fits, reason = slurm_utils.check_instance_fits(
+                cluster, instance_type)
+            # except exceptions.KubeAPIUnreachableError as e:
+            #     cls._log_unreachable_context(cluster, str(e))
+            #     continue
+            if fits:
+                regions_to_return.append(r)
+                continue
+            logger.debug(f'Instance type {instance_type} does '
+                         'not fit in the existing Slurm cluster '
+                         'with cluster: '
+                         f'{cluster}. Reason: {reason}')
+
+        return regions_to_return
+
     def instance_type_to_hourly_cost(self,
                                      instance_type: str,
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
-        return catalog.get_hourly_cost(instance_type,
-                                       use_spot=use_spot,
-                                       region=region,
-                                       zone=zone,
-                                       clouds='slurm')
+        """For now, we assume zero cost for Slurm clusters."""
+        return 0.0
 
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
@@ -117,24 +143,13 @@ class Slurm(clouds.Cloud):
                                     zone: Optional[str] = None) -> float:
         """Returns the hourly cost of the accelerators, in dollars/hour."""
         del accelerators, use_spot, region, zone  # unused
-        ########
-        # TODO #
-        ########
-        # This function assumes accelerators are included as part of instance
-        # type. If not, you will need to change this. (However, you can do
-        # this later; `return 0.0` is a good placeholder.)
         return 0.0
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
-        ########
-        # TODO #
-        ########
-        # Change if your cloud has egress cost. (You can do this later;
-        # `return 0.0` is a good placeholder.)
         return 0.0
 
     def __repr__(self):
-        return 'Slurm'
+        return self._REPR
 
     def is_same_cloud(self, other: clouds.Cloud) -> bool:
         # Returns true if the two clouds are the same cloud type.
@@ -158,9 +173,15 @@ class Slurm(clouds.Cloud):
 
     @classmethod
     def get_accelerators_from_instance_type(
-            cls, instance_type: str) -> Optional[Dict[str, int]]:
-        return catalog.get_accelerators_from_instance_type(instance_type,
-                                                           clouds='slurm')
+            cls, 
+            instance_type: str
+    ) -> Optional[Dict[str, Union[int, float]]]:
+        inst = slurm_utils.SlurmInstanceType.from_instance_type(
+            instance_type)
+        return {
+            inst.accelerator_type: inst.accelerator_count
+        } if (inst.accelerator_count is not None and
+              inst.accelerator_type is not None) else None
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -176,11 +197,16 @@ class Slurm(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Optional[str]]:
-        del cluster_name, zones, dryrun  # Unused.
+        del cluster_name, zones, dryrun, volume_mounts  # Unused.
+        if region is not None:
+            cluster = region.name
+        else:
+            cluster = 'localcluster'
+        assert cluster is not None, 'No available Slurm cluster found.'
 
-        # Suppose 'localcluster' is our target SlurmctldHost alias
+        # cluster is our target slurmctld host.
         ssh_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
-        ssh_config_dict = ssh_config.lookup('localcluster')
+        ssh_config_dict = ssh_config.lookup(cluster)
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -219,8 +245,6 @@ class Slurm(clouds.Cloud):
         self, resources: 'resources_lib.Resources'
     ) -> 'resources_utils.FeasibleResources':
         """Returns a list of feasible resources for the given resources."""
-        if resources.use_spot:
-            return ([], [])
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
@@ -232,13 +256,7 @@ class Slurm(clouds.Cloud):
                 r = resources.copy(
                     cloud=Slurm(),
                     instance_type=instance_type,
-                    ########
-                    # TODO #
-                    ########
-                    # Set to None if don't separately bill / attach
-                    # accelerators.
                     accelerators=None,
-                    cpus=None,
                 )
                 resource_list.append(r)
             return resource_list
@@ -275,6 +293,16 @@ class Slurm(clouds.Cloud):
             chosen_instance_type = (
                 slurm_utils.SlurmInstanceType.from_resources(
                     gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name)
+
+        # Check the availability of the specified instance type in all Slurm clusters.
+        available_regions = self.regions_with_offering(
+            chosen_instance_type,
+            accelerators=None,
+            use_spot=resources.use_spot,
+            region=resources.region,
+            zone=resources.zone)
+        if not available_regions:
+            return resources_utils.FeasibleResources([], [], None)
 
         return resources_utils.FeasibleResources(_make([chosen_instance_type]),
                                                  [], None)
