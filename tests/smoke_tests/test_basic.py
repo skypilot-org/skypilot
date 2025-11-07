@@ -1716,6 +1716,9 @@ def test_kubernetes_ssh_proxy_connection():
     smoke_tests_utils.run_one_test(test)
 
 
+# Only checks for processes in local machine, so skip remote server test.
+# TODO(kevin): Add metrics for number of open SSH tunnels and refactor this test to use it.
+@pytest.mark.no_remote_server
 def test_no_ssh_tunnel_process_leak_after_teardown(generic_cloud: str):
     """Test that no SSH tunnel process leaks after teardown."""
     cluster_name = smoke_tests_utils.get_cluster_name()
