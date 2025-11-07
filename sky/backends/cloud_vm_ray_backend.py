@@ -2809,7 +2809,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             self.cluster_name,
             (tunnel.port, tunnel.pid) if tunnel is not None else None)
 
-    def close_skylet_ssh_tunnel(self, terminate: bool) -> None:
+    def close_skylet_ssh_tunnel(self) -> None:
         """Terminate the SSH tunnel process and clear its metadata."""
         tunnel = self._get_skylet_ssh_tunnel()
         if tunnel is None:
@@ -2819,10 +2819,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         try:
             self._terminate_ssh_tunnel_process(tunnel)
         finally:
-            # If terminate is True, the cluster is going to be deleted anyways
-            # from the table, so there's no need to update the tunnel metadata.
-            if not terminate:
-                self._set_skylet_ssh_tunnel(None)
+            self._set_skylet_ssh_tunnel(None)
 
     def get_grpc_channel(self) -> 'grpc.Channel':
         grpc_options = [
@@ -5143,7 +5140,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             RuntimeError: If the cluster fails to be terminated/stopped.
         """
         try:
-            handle.close_skylet_ssh_tunnel(terminate)
+            handle.close_skylet_ssh_tunnel()
         except Exception as e:  # pylint: disable=broad-except
             # Not critical to the cluster teardown, just log a warning.
             logger.warning(
