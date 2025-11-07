@@ -2809,6 +2809,18 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             self.cluster_name,
             (tunnel.port, tunnel.pid) if tunnel is not None else None)
 
+    def close_skylet_ssh_tunnel(self) -> None:
+        """Terminate the SSH tunnel process and clear its metadata."""
+        tunnel = self._get_skylet_ssh_tunnel()
+        if tunnel is None:
+            return
+        logger.debug('Closing Skylet SSH tunnel for cluster %r on port %d',
+                     self.cluster_name, tunnel.port)
+        try:
+            self._terminate_ssh_tunnel_process(tunnel)
+        finally:
+            self._set_skylet_ssh_tunnel(None)
+
     def get_grpc_channel(self) -> 'grpc.Channel':
         grpc_options = [
             # The task YAMLs can be large, so the default
@@ -2875,19 +2887,14 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 f'the lock at {lock_id}. '
                 f'{common_utils.format_exception(e)}') from e
 
-    def _cleanup_ssh_tunnel(self, tunnel_info: SSHTunnelInfo) -> None:
-        """Clean up an SSH tunnel by terminating the process."""
+    def _terminate_ssh_tunnel_process(self, tunnel_info: SSHTunnelInfo) -> None:
+        """Terminate the SSH tunnel process."""
         try:
             proc = psutil.Process(tunnel_info.pid)
             if proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE:
                 logger.debug(
                     f'Terminating SSH tunnel process {tunnel_info.pid}')
-                proc.terminate()
-                try:
-                    proc.wait(timeout=3)
-                except psutil.TimeoutExpired:
-                    proc.kill()
-                    proc.wait(timeout=1)
+                subprocess_utils.kill_children_processes(proc.pid)
         except psutil.NoSuchProcess:
             pass
         except Exception as e:  # pylint: disable=broad-except
@@ -2933,17 +2940,17 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             # Clean up existing tunnel before setting up the new one.
             old_tunnel = self._get_skylet_ssh_tunnel()
             if old_tunnel is not None:
-                self._cleanup_ssh_tunnel(old_tunnel)
+                self._terminate_ssh_tunnel_process(old_tunnel)
             self._set_skylet_ssh_tunnel(tunnel_info)
             return tunnel_info
         except grpc.FutureTimeoutError as e:
-            self._cleanup_ssh_tunnel(tunnel_info)
+            self._terminate_ssh_tunnel_process(tunnel_info)
             logger.warning(
                 f'Skylet gRPC channel for cluster {self.cluster_name} not '
                 f'ready after {constants.SKYLET_GRPC_TIMEOUT_SECONDS}s')
             raise e
         except Exception as e:
-            self._cleanup_ssh_tunnel(tunnel_info)
+            self._terminate_ssh_tunnel_process(tunnel_info)
             raise e
 
     @property
@@ -5132,6 +5139,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Raises:
             RuntimeError: If the cluster fails to be terminated/stopped.
         """
+        try:
+            handle.close_skylet_ssh_tunnel()
+        except Exception as e:  # pylint: disable=broad-except
+            # Not critical to the cluster teardown, just log a warning.
+            logger.warning(
+                'Failed to close Skylet SSH tunnel for cluster '
+                f'{handle.cluster_name}: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
+
         exclude_request_to_kill = 'sky.down' if terminate else 'sky.stop'
         # We have to kill the cluster requests again within the lock, because
         # any pending requests on the same cluster should be cancelled after
