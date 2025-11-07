@@ -1,13 +1,18 @@
 """Slurm utilities for SkyPilot."""
 import math
+import os
 import re
 from typing import Any, Dict, List, Optional, Tuple, Union
+
+from paramiko.config import SSHConfig
 
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import timeline
 
+
 # TODO(jwj): Choose commonly used default values.
+DEFAULT_SLURM_PATH = '~/.slurm/config'
 DEFAULT_CLUSTER_NAME = "localcluster"
 DEFAULT_PARTITION = "debug"
 
@@ -204,9 +209,81 @@ def filter_jobs(ssh_config_dict: Dict[str, Any],
     return job_ids
 
 
+def get_all_slurm_cluster_names() -> List[str]:
+    """Get all Slurm cluster names available in the environment.
+    
+    Returns:
+        List[str]: The list of Slurm cluster names if available,
+            an empty list otherwise.
+    """
+    try:
+        ssh_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
+    except Exception as e:
+        raise ValueError(f'Failed to load SSH configuration from {DEFAULT_SLURM_PATH}: {common_utils.format_exception(e)}')
+
+    cluster_names = list(ssh_config.get_hostnames())
+
+    return cluster_names
+
+
+
 def check_instance_fits(cluster: str,
                         instance_type: str) -> Tuple[bool, Optional[str]]:
     """Check if the given instance type fits in the given cluster."""
-    fits, reason = True, "Dummy"
+    # Get Slurm node list in the given cluster (region).
+    ssh_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
+    ssh_config_dict = ssh_config.lookup(cluster)
 
-    return fits, reason
+    runner = command_runner.SlurmCommandRunner(
+        (ssh_config_dict['hostname'], ssh_config_dict['port']),
+        ssh_config_dict['user'],
+        ssh_config_dict['identityfile'][0],
+        cluster,
+        partition=DEFAULT_PARTITION,
+        disable_control_master=True)
+    returncode, stdout, stderr = runner.run('sinfo -N -h -o "%N %t %G"',
+                                            require_outputs=True)
+    nodes = stdout.splitlines()
+
+    s = SlurmInstanceType.from_instance_type(instance_type)
+    acc_count = s.accelerator_count if s.accelerator_count else 0
+    acc_type = s.accelerator_type if s.accelerator_type else None
+    if acc_type is not None:
+        assert acc_count is not None, (acc_type, acc_count)
+        
+        gres_to_match = f'{acc_type}:{acc_count}'.lower()
+        gpu_nodes = []
+        for node in nodes:
+            node_name, node_state, gres_str = node.split()
+            gres_str = f':'.join(gres_str.split(':')[1:]).lower()
+
+            if gres_str == gres_to_match:
+                gpu_nodes.append(node)
+        if len(gpu_nodes) == 0:
+            return False, f'No GPU nodes found with {acc_type}:{acc_count} on the cluster.'
+
+        candidate_nodes = gpu_nodes
+        not_fit_reason_prefix = (
+            f'GPU nodes with {acc_type} do not have '
+            f'enough CPU (> {s.cpus} CPUs) and/or '
+            f'memory (> {s.memory} G). ')
+    else:
+        candidate_nodes = nodes
+        not_fit_reason_prefix = (
+            f'No nodes found with enough '
+            f'CPU (> {s.cpus} CPUs) and/or '
+            f'memory (> {s.memory} G). ')
+
+    # TODO(jwj): Enable CPU and memory check.
+    # fits, reason = check_cpu_mem_fits(s, candidate_nodes)
+    # if not fits:
+    #     if reason is not None:
+    #         reason = not_fit_reason_prefix + reason
+    #     return fits, reason
+    # else:
+    #     return fits, reason
+
+    if len(candidate_nodes) != 0:
+        return True, None
+    else:
+        return False, not_fit_reason_prefix

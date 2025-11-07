@@ -86,8 +86,18 @@ class Slurm(clouds.Cloud):
     @classmethod
     def existing_allowed_clusters(cls) -> List[str]:
         """Get existing allowed clusters."""
-        # TODO(jwj): Implement the logic to get the existing allowed clusters.
-        return ['localcluster']
+        all_clusters = slurm_utils.get_all_slurm_cluster_names()
+        if len(all_clusters) == 0:
+            return []
+
+        all_clusters = set(all_clusters)
+
+        # TOWO(jwj): Add conditions to filter existing allowed clusters if any.
+        existing_clusters = []
+        for cluster in all_clusters:
+            existing_clusters.append(cluster)
+
+        return existing_clusters
 
     @classmethod
     def regions_with_offering(cls, instance_type: Optional[str],
@@ -112,6 +122,9 @@ class Slurm(clouds.Cloud):
         regions_to_return = []
         for r in regions:
             cluster = r.name
+            if cluster == '*':
+                continue
+
             # try:
             fits, reason = slurm_utils.check_instance_fits(
                 cluster, instance_type)
@@ -215,13 +228,13 @@ class Slurm(clouds.Cloud):
 
         # resources.memory and cpus are none if they are not explicitly set.
         # we fetch the default values for the instance type in that case.
-        k = slurm_utils.SlurmInstanceType.from_instance_type(
+        s = slurm_utils.SlurmInstanceType.from_instance_type(
             resources.instance_type)
-        cpus = k.cpus
-        mem = k.memory
+        cpus = s.cpus
+        mem = s.memory
         # Optionally populate accelerator information.
-        acc_count = k.accelerator_count if k.accelerator_count else 0
-        acc_type = k.accelerator_type if k.accelerator_type else None
+        acc_count = s.accelerator_count if s.accelerator_count else 0
+        acc_type = s.accelerator_type if s.accelerator_type else None
 
         deploy_vars = {
             'instance_type': resources.instance_type,
