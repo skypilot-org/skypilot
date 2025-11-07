@@ -1237,25 +1237,41 @@ const FilterDropdown = ({
       }
     }
     // Obtain the values of filter to exclude from updatedValueOptions
-    const selectedValues = filters.filter(filter => filter.property === propertyLabel)
-                                  .map(filter => filter.value);
+    const selectedValues = filters
+      .filter((filter) => filter.property === propertyLabel)
+      .map((filter) => filter.value);
 
     if (valueList && typeof valueList === 'object') {
       switch (propertyValue) {
         case 'status':
-          updatedValueOptions = valueList.status.filter(value => !selectedValues.find(val => val === value)) || [];
+          updatedValueOptions =
+            valueList.status.filter(
+              (value) => !selectedValues.find((val) => val === value)
+            ) || [];
           break;
         case 'user':
-          updatedValueOptions = valueList.user.filter(value => !selectedValues.find(val => val === value)) || [];
+          updatedValueOptions =
+            valueList.user.filter(
+              (value) => !selectedValues.find((val) => val === value)
+            ) || [];
           break;
         case 'cluster':
-          updatedValueOptions = valueList.cluster.filter(value => !selectedValues.find(val => val === value)) || [];
+          updatedValueOptions =
+            valueList.cluster.filter(
+              (value) => !selectedValues.find((val) => val === value)
+            ) || [];
           break;
         case 'workspace':
-          updatedValueOptions = valueList.workspace.filter(value => !selectedValues.find(val => val === value)) || [];
+          updatedValueOptions =
+            valueList.workspace.filter(
+              (value) => !selectedValues.find((val) => val === value)
+            ) || [];
           break;
         case 'infra':
-          updatedValueOptions = valueList.infra.filter(value => !selectedValues.find(val => val === value)) || [];
+          updatedValueOptions =
+            valueList.infra.filter(
+              (value) => !selectedValues.find((val) => val === value)
+            ) || [];
           break;
         default:
           break;
