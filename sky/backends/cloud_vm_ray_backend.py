@@ -4074,19 +4074,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self._set_storage_mounts_metadata(handle.cluster_name,
                                               storage_mounts)
 
-    def _get_num_gpus(self, handle: CloudVmRayResourceHandle,
-                      task: task_lib.Task) -> int:
-        # Make sure we use the resources that actually fit the cluster. This
-        # is important for the pools case where we haven't already checked
-        # the resources fit the cluster.
-        valid_resources = self.check_resources_fit_cluster(handle,
-                                                           task,
-                                                           check_ports=True)
-
-        if (valid_resources.accelerators is not None and
-                isinstance(valid_resources.accelerators, dict)):
-            if len(valid_resources.accelerators) > 0:
-                return math.ceil(list(valid_resources.accelerators.values())[0])
+    def _get_num_gpus(self, task: task_lib.Task) -> int:
+        if task.resources is not None:
+            for resource in task.resources:
+                if (resource.accelerators is not None and
+                        isinstance(resource.accelerators, dict)):
+                    if len(resource.accelerators) > 0:
+                        return math.ceil(
+                            list(resource.accelerators.values())[0])
         return 0
 
     def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
@@ -4112,7 +4107,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_envs['SKYPILOT_SETUP_NODE_IPS'] = '\n'.join(internal_ips)
             setup_envs['SKYPILOT_SETUP_NODE_RANK'] = str(node_id)
             setup_envs[constants.SKYPILOT_SETUP_NUM_GPUS_PER_NODE] = (str(
-                self._get_num_gpus(handle, task)))
+                self._get_num_gpus(task)))
 
             runner = runners[node_id]
             setup_script = log_lib.make_task_bash_script(setup,
