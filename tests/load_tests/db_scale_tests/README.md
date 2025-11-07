@@ -246,6 +246,61 @@ python tests/load_tests/db_scale_tests/cleanup_test_managed_jobs.py --managed-jo
 
 **Note**: These scripts inject data but do not clean it up automatically, allowing you to manually test SkyPilot commands against a scaled database. Remember to run the cleanup scripts when you're done testing.
 
+## Production-Scale Data Injection
+
+For testing with production-scale data volumes, use the `inject_production_scale_data.py` script. This script injects realistic production-scale data:
+
+- **1,500 active clusters** distributed across multiple users (default: 10 users)
+- **220,000 history clusters** distributed across different time ranges (20% recent, 30% medium, 50% old)
+- **290,000 cluster events** associated with clusters
+- **12,500 managed jobs**
+
+**Note:** The clusters will inherit GPU types, regions, and other resource information from your sample clusters (created in Prerequisites). This ensures the test data matches your actual environment.
+
+### Usage
+
+```bash
+# Inject all production-scale data
+python tests/load_tests/db_scale_tests/inject_production_scale_data.py \
+  --active-cluster scale-test-active \
+  --terminated-cluster scale-test-terminated \
+  --managed-job-id 1
+
+# Inject with custom counts
+python tests/load_tests/db_scale_tests/inject_production_scale_data.py \
+  --active-cluster scale-test-active \
+  --terminated-cluster scale-test-terminated \
+  --managed-job-id 1 \
+  --active-clusters 2000 \
+  --history-clusters 300000 \
+  --cluster-events 400000 \
+  --managed-jobs 15000
+
+# Inject only specific data types
+python tests/load_tests/db_scale_tests/inject_production_scale_data.py \
+  --active-cluster scale-test-active \
+  --terminated-cluster scale-test-terminated \
+  --managed-job-id 1 \
+  --skip-history \
+  --skip-events
+```
+
+**Options:**
+- `--active-cluster NAME` - Name of active cluster template (default: `scale-test-active`)
+- `--terminated-cluster NAME` - Name of terminated cluster template (default: `scale-test-terminated`)
+- `--managed-job-id ID` - Job ID of managed job template (default: `1`)
+- `--num-users N` - Number of users to simulate (default: `10`)
+- `--active-clusters N` - Number of active clusters (default: `1500`)
+- `--history-clusters N` - Number of history clusters (default: `220000`)
+- `--cluster-events N` - Number of cluster events (default: `290000`)
+- `--managed-jobs N` - Number of managed jobs (default: `12500`)
+- `--skip-clusters` - Skip injecting active clusters
+- `--skip-history` - Skip injecting cluster history
+- `--skip-events` - Skip injecting cluster events
+- `--skip-jobs` - Skip injecting managed jobs
+
+**Note**: This script injects large amounts of data and may take significant time to complete. The data will persist in your databases until manually cleaned up or restored from backup.
+
 ## Future Enhancements
 
 - Remote PostgreSQL testing support
