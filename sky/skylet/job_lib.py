@@ -425,10 +425,8 @@ def add_job(job_name: str,
             'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?)', # pylint: disable=line-too-long
             insert_data)
     _DB.conn.commit()
-    
-    # Get all newly created job IDs
-    # Use fetchall() to ensure we get all rows, and use string formatting for LIMIT since
-    # SQLite parameter binding for LIMIT can be unreliable
+
+    # Get all newly created job IDs using fetchall() to ensure we get all rows.
     rows = _DB.cursor.execute(
         f'SELECT job_id FROM jobs WHERE run_timestamp=(?) ORDER BY job_id',
         (run_timestamp,)).fetchall()
@@ -437,10 +435,12 @@ def add_job(job_name: str,
     for row in rows:
         job_id = row[0]
         job_ids.append(job_id)
-        log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY, f'{job_id}-{job_name}')
+        log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                               f'{job_id}-{job_name}')
         set_log_dir_no_lock(job_id, log_dir)
         log_dirs.append(log_dir)
-    assert len(job_ids) == num_jobs, f'Expected {num_jobs} job IDs, got {len(job_ids)}'
+    assert len(job_ids) == num_jobs, (
+        f'Expected {num_jobs} job IDs, got {len(job_ids)}')
     return job_ids, log_dirs
 
 
@@ -1207,8 +1207,13 @@ class JobLibCodeGen:
     ]
 
     @classmethod
-    def add_job(cls, job_name: Optional[str], username: str, run_timestamp: str,
-                resources_str: str, metadata: str, num_jobs: int = 1) -> str:
+    def add_job(cls,
+                job_name: Optional[str],
+                username: str,
+                run_timestamp: str,
+                resources_str: str,
+                metadata: str,
+                num_jobs: int = 1) -> str:
         if job_name is None:
             job_name = '-'
         code = [
@@ -1242,14 +1247,14 @@ class JobLibCodeGen:
             f'metadata={metadata!r},'
             f'num_jobs={num_jobs})',
             ('\nif isinstance(result, tuple):'
-                '\n  if isinstance(result[0], list):'
-                '\n    print("Job IDs: " + ",".join(map(str, result[0])), flush=True)'
-                '\n    print("Log Dirs: " + ",".join(map(str, result[1])), flush=True)'
-                '\n  else:'
-                '\n    print("Job IDs: " + str(result[0]), flush=True)'
-                '\n    print("Log Dirs: " + str(result[1]), flush=True)'
-                '\nelse:'
-                '\n  print("Job IDs: " + str(result), flush=True)'),
+             '\n  if isinstance(result[0], list):'
+             '\n    print("Job IDs: " + ",".join(map(str, result[0])), flush=True)'
+             '\n    print("Log Dirs: " + ",".join(map(str, result[1])), flush=True)'
+             '\n  else:'
+             '\n    print("Job IDs: " + str(result[0]), flush=True)'
+             '\n    print("Log Dirs: " + str(result[1]), flush=True)'
+             '\nelse:'
+             '\n  print("Job IDs: " + str(result), flush=True)'),
         ]
         return cls._build(code)
 

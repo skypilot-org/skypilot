@@ -57,6 +57,7 @@ import filelock
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.backends import backend_utils
 from sky.client import sdk
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state
@@ -65,11 +66,6 @@ from sky.skylet import constants
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import subprocess_utils
-from sky.backends import backend_utils
-from sky.serve import serve_state
-from sky import skypilot_config
-from sky.utils import common_utils
-from sky.skylet import constants as skylet_constants
 
 if typing.TYPE_CHECKING:
     import logging
@@ -269,8 +265,12 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
         pass
 
 
-def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
-               env_file_path: str, priority: int, pool: Optional[str] = None) -> None:
+def submit_job(job_id: int,
+               dag_yaml_path: str,
+               original_user_yaml_path: str,
+               env_file_path: str,
+               priority: int,
+               pool: Optional[str] = None) -> None:
     """Submit an existing job to the scheduler.
 
     This should be called after a job is created in the `spot` table as
@@ -279,13 +279,20 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
 
     The user hash should be set (e.g. via SKYPILOT_USER_ID) before calling this.
     """
-    submit_jobs([job_id], dag_yaml_path, original_user_yaml_path,
-                env_file_path, priority, pool=pool)
+    submit_jobs([job_id],
+                dag_yaml_path,
+                original_user_yaml_path,
+                env_file_path,
+                priority,
+                pool=pool)
 
 
-def submit_jobs(job_ids: List[int], dag_yaml_path: str,
-                original_user_yaml_path: str, env_file_path: str,
-                priority: int, pool: Optional[str] = None) -> None:
+def submit_jobs(job_ids: List[int],
+                dag_yaml_path: str,
+                original_user_yaml_path: str,
+                env_file_path: str,
+                priority: int,
+                pool: Optional[str] = None) -> None:
     """Submit multiple existing jobs to the scheduler.
 
     This should be called after jobs are created in the `spot` table as
@@ -297,7 +304,7 @@ def submit_jobs(job_ids: List[int], dag_yaml_path: str,
     # Load DAG to get task information for setting job_info and pending state
     dag = dag_utils.load_chain_dag_from_yaml(dag_yaml_path)
     dag_name = dag.name or 'unnamed-job'
-    
+
     # Get workspace and entrypoint from environment or use defaults
     workspace = skypilot_config.get_active_workspace(force_user_workspace=True)
     entrypoint = common_utils.get_current_command()
@@ -305,18 +312,21 @@ def submit_jobs(job_ids: List[int], dag_yaml_path: str,
     pool_hash = None
     if pool is not None:
         pool_hash = serve_state.get_service_hash(pool)
-    
+
     for job_id in job_ids:
         controller_pid = state.get_job_controller_pid(job_id)
         if controller_pid is not None:
-            # why? TODO(cooperc): figure out why this is needed, fix it, and remove
-            if managed_job_utils.controller_process_alive(controller_pid, job_id):
-                # This can happen when HA recovery runs for some reason but the job
-                # controller is still alive.
-                logger.warning(f'Job {job_id} is still alive, skipping submission')
+            # why? TODO(cooperc): figure out why this is needed, fix it, and
+            # remove
+            if managed_job_utils.controller_process_alive(
+                    controller_pid, job_id):
+                # This can happen when HA recovery runs for some reason but the
+                # job controller is still alive.
+                logger.warning(
+                    f'Job {job_id} is still alive, skipping submission')
                 maybe_start_controllers(from_scheduler=True)
                 continue
-        
+
         # Set job_info if it doesn't exist (for pre-created job IDs)
         # Check if job_info exists by trying to get schedule state
         try:
@@ -324,22 +334,20 @@ def submit_jobs(job_ids: List[int], dag_yaml_path: str,
             # Job info exists, skip creation
         except (IndexError, TypeError):
             # Job info doesn't exist, create it
-            state.set_job_info(
-                job_id=job_id,
-                name=dag_name,
-                workspace=workspace,
-                entrypoint=entrypoint,
-                pool=pool,
-                pool_hash=pool_hash,
-                user_hash=user_hash)
-            
+            state.set_job_info(job_id=job_id,
+                               name=dag_name,
+                               workspace=workspace,
+                               entrypoint=entrypoint,
+                               pool=pool,
+                               pool_hash=pool_hash,
+                               user_hash=user_hash)
+
             # Set pending state for each task
             for task_id, task in enumerate(dag.tasks):
                 resources_str = backend_utils.get_task_resources_str(
                     task, is_managed_job=True)
-                state.set_pending(
-                    job_id, task_id, task.name, resources_str,
-                    task.metadata_json)
+                state.set_pending(job_id, task_id, task.name, resources_str,
+                                  task.metadata_json)
 
     with open(dag_yaml_path, 'r', encoding='utf-8') as dag_file:
         dag_yaml_content = dag_file.read()
@@ -348,16 +356,17 @@ def submit_jobs(job_ids: List[int], dag_yaml_path: str,
         original_user_yaml_content = original_user_yaml_file.read()
     with open(env_file_path, 'r', encoding='utf-8') as env_file:
         env_file_content = env_file.read()
-    
+
     # Submit all jobs
     for job_id in job_ids:
-        logger.debug(f'Storing job {job_id} file contents in database '
-                    f'(DAG bytes={len(dag_yaml_content)}, '
-                    f'original user yaml bytes={len(original_user_yaml_content)}, '
-                    f'env bytes={len(env_file_content)}).')
+        logger.debug(
+            f'Storing job {job_id} file contents in database '
+            f'(DAG bytes={len(dag_yaml_content)}, '
+            f'original user yaml bytes={len(original_user_yaml_content)}, '
+            f'env bytes={len(env_file_content)}).')
         state.scheduler_set_waiting(job_id, dag_yaml_content,
-                                    original_user_yaml_content, env_file_content,
-                                    priority)
+                                    original_user_yaml_content,
+                                    env_file_content, priority)
         if state.get_ha_recovery_script(job_id) is None:
             # the run command is just the command that called scheduler
             run = (f'source {env_file_path} && '
@@ -471,10 +480,11 @@ if __name__ == '__main__':
     parser.add_argument('--user-yaml-path',
                         type=str,
                         help='The path to the original user job yaml file.')
-    parser.add_argument('--job-id',
-                        type=int,
-                        nargs='+',
-                        help='Job id(s) for the controller job(s). Can specify multiple.')
+    parser.add_argument(
+        '--job-id',
+        type=int,
+        nargs='+',
+        help='Job id(s) for the controller job(s). Can specify multiple.')
     parser.add_argument('--env-file',
                         type=str,
                         help='The path to the controller env file.')
@@ -491,10 +501,18 @@ if __name__ == '__main__':
         f'Job priority ({constants.MIN_PRIORITY} to {constants.MAX_PRIORITY}).'
         f' Default: {constants.DEFAULT_PRIORITY}.')
     args = parser.parse_args()
-    
+
     if len(args.job_id) == 1:
-        submit_job(args.job_id[0], args.dag_yaml, args.user_yaml_path,
-                   args.env_file, args.priority, pool=args.pool)
+        submit_job(args.job_id[0],
+                   args.dag_yaml,
+                   args.user_yaml_path,
+                   args.env_file,
+                   args.priority,
+                   pool=args.pool)
     else:
-        submit_jobs(args.job_id, args.dag_yaml, args.user_yaml_path,
-                    args.env_file, args.priority, pool=args.pool)
+        submit_jobs(args.job_id,
+                    args.dag_yaml,
+                    args.user_yaml_path,
+                    args.env_file,
+                    args.priority,
+                    pool=args.pool)
