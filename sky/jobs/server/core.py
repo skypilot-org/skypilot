@@ -371,28 +371,29 @@ def launch(
     if (pool is not None and num_jobs > 1 and
             consolidation_mode_job_ids is None):
         with rich_utils.safe_status(
-            ux_utils.spinner_message('Creating job IDs')):
+                ux_utils.spinner_message('Creating job IDs')):
             # Get controller handle to create job IDs upfront
             try:
                 local_handle = backend_utils.is_controller_accessible(
                     controller=controller, stopped_message='')
                 backend = backend_utils.get_backend_from_handle(local_handle)
                 assert isinstance(backend, backends.CloudVmRayBackend)
-                
+
                 # Create num_jobs - 1 job IDs upfront (the controller task's ray job
                 # ID will be used as the nth job ID)
                 resources_str = backend_utils.get_task_resources_str(
                     dag.tasks[0], is_managed_job=True)
                 job_name = dag.name
-                result = backend._add_job(
-                    handle=local_handle,
-                    job_name=job_name,
-                    resources_str=resources_str,
-                    metadata=dag.tasks[0].metadata_json,
-                    num_jobs=num_jobs - 1)
+                result = backend._add_job(handle=local_handle,
+                                          job_name=job_name,
+                                          resources_str=resources_str,
+                                          metadata=dag.tasks[0].metadata_json,
+                                          num_jobs=num_jobs - 1)
                 pre_created_job_ids = result[0]
-                logger.info(f'Created {len(pre_created_job_ids) + 1} job IDs upfront: '
-                        f'{pre_created_job_ids} (will use controller task ray job ID as the {num_jobs}th job)')
+                logger.info(
+                    f'Created {len(pre_created_job_ids) + 1} job IDs upfront: '
+                    f'{pre_created_job_ids} (will use controller task ray job ID as the {num_jobs}th job)'
+                )
             except exceptions.ClusterNotUpError:
                 # Controller not up yet, will create job IDs during submission
                 pre_created_job_ids = None
@@ -402,17 +403,16 @@ def launch(
         job_rank: Optional[int] = None,
         num_jobs: Optional[int] = None,
         pre_created_job_ids: Optional[List[int]] = None,
-    ) -> Tuple[Optional[Union[int, List[int]]], Optional[backends.ResourceHandle]]:
+    ) -> Tuple[Optional[Union[int, List[int]]],
+               Optional[backends.ResourceHandle]]:
         # Create a single set of YAML files (not per-rank)
         remote_original_user_yaml_path = (
             f'{prefix}/{dag.name}-{dag_uuid}.original_user_yaml')
-        remote_user_yaml_path = (
-            f'{prefix}/{dag.name}-{dag_uuid}.yaml')
+        remote_user_yaml_path = (f'{prefix}/{dag.name}-{dag_uuid}.yaml')
         remote_user_config_path = (
             f'{prefix}/{dag.name}-{dag_uuid}.config_yaml')
-        remote_env_file_path = (
-            f'{prefix}/{dag.name}-{dag_uuid}.env')
-        
+        remote_env_file_path = (f'{prefix}/{dag.name}-{dag_uuid}.env')
+
         with tempfile.NamedTemporaryFile(
                 prefix=f'managed-dag-{dag.name}-',
                 mode='w',
@@ -422,7 +422,7 @@ def launch(
         ) as original_user_yaml_path:
             original_user_yaml_path.write(user_dag_str_user_specified)
             original_user_yaml_path.flush()
-            
+
             # Create a single DAG copy (rank-specific env vars will be set
             # by the scheduler on the controller)
             dag_copy = copy.deepcopy(dag)
@@ -433,8 +433,7 @@ def launch(
 
             logger.info(f'Dumped DAG copy to {f.name}')
             vars_to_fill = {
-                'remote_original_user_yaml_path':
-                    remote_original_user_yaml_path,
+                'remote_original_user_yaml_path': remote_original_user_yaml_path,
                 'original_user_dag_path': original_user_yaml_path.name,
                 'remote_user_yaml_path': remote_user_yaml_path,
                 'user_yaml_path': f.name,
@@ -464,37 +463,39 @@ def launch(
                 # Create job_id_to_rank dictionary by sorting job IDs and assigning ranks
                 # The last job ID (controller task's ray job ID) will be added in the template
                 sorted_job_ids = sorted(pre_created_job_ids)
-                job_id_to_rank = {str(job_id): rank for rank, job_id in enumerate(sorted_job_ids)}
+                job_id_to_rank = {
+                    str(job_id): rank
+                    for rank, job_id in enumerate(sorted_job_ids)
+                }
                 vars_to_fill['job_id_to_rank'] = job_id_to_rank
                 yaml_path = os.path.join(
-                        managed_job_constants.JOBS_CONTROLLER_YAML_PREFIX,
-                        f'{name}-{dag_uuid}-multi.yaml'
-                    )
+                    managed_job_constants.JOBS_CONTROLLER_YAML_PREFIX,
+                    f'{name}-{dag_uuid}-multi.yaml')
                 logger.info(
-                        f'{colorama.Fore.YELLOW}'
-                        f'Launching {num_jobs} managed jobs {dag.name!r} '
-                        f'with IDs {pre_created_job_ids} from jobs controller...'
-                        f'{colorama.Style.RESET_ALL}')
+                    f'{colorama.Fore.YELLOW}'
+                    f'Launching {num_jobs} managed jobs {dag.name!r} '
+                    f'with IDs {pre_created_job_ids} from jobs controller...'
+                    f'{colorama.Style.RESET_ALL}')
             else:
                 yaml_path = os.path.join(
                     managed_job_constants.JOBS_CONTROLLER_YAML_PREFIX,
-                    f'{name}-{dag_uuid}-{consolidation_mode_job_id}.yaml'
-                )
+                    f'{name}-{dag_uuid}-{consolidation_mode_job_id}.yaml')
 
                 job_identity = ''
                 if job_rank is not None:
                     job_identity = f' (rank: {job_rank})'
-                job_controller_postfix = (' from jobs controller' if
-                                        consolidation_mode_job_id is None else '')
+                job_controller_postfix = (' from jobs controller'
+                                          if consolidation_mode_job_id is None
+                                          else '')
                 logger.info(
                     f'{colorama.Fore.YELLOW}'
                     f'Launching managed job {dag.name!r}{job_identity}'
                     f'{job_controller_postfix}...{colorama.Style.RESET_ALL}')
 
             common_utils.fill_template(
-                        managed_job_constants.JOBS_CONTROLLER_TEMPLATE,
-                        vars_to_fill,
-                        output_path=yaml_path)
+                managed_job_constants.JOBS_CONTROLLER_TEMPLATE,
+                vars_to_fill,
+                output_path=yaml_path)
             logger.info(f'Filled template to {yaml_path}')
             controller_task = task_lib.Task.from_yaml(yaml_path)
             logger.info(f'Created controller task from {yaml_path}')
@@ -519,14 +520,23 @@ def launch(
                             _disable_controller_check=True)
                         if pre_created_job_ids is not None:
                             # Get the ray job ID from the controller task launch
-                            controller_ray_job_id = result[0] if isinstance(result, tuple) else None
-                            assert controller_ray_job_id is not None, "Failed to get ray job ID from controller task launch"
-                            
-                            # Append the controller task's ray job ID to complete the list
-                            all_job_ids = pre_created_job_ids + [controller_ray_job_id]
-                            
+                            controller_ray_job_id = (result[0] if isinstance(
+                                result, tuple) else None)
+                            assert controller_ray_job_id is not None, (
+                                'Failed '
+                                ' to get ray job ID from controller task launch.'
+                            )
+
+                            # Append the controller task's ray job ID since it
+                            # is one of the jobs that we are launching.
+                            all_job_ids = (pre_created_job_ids +
+                                           [controller_ray_job_id])
+
                             # Return the complete list of job IDs and handle
-                            return all_job_ids, result[1] if isinstance(result, tuple) else None  
+                            if isinstance(result, tuple):
+                                return all_job_ids, result[1]
+                            else:
+                                return all_job_ids, None
                         else:
                             return result
                     else:
@@ -543,9 +553,9 @@ def launch(
                         run_script = controller_task.run
                         assert isinstance(run_script, str)
                         # Manually add the env variables to the run script.
-                        # Originally this is done in ray jobs submission but now we
-                        # have to do it manually because there is no ray runtime on
-                        # the API server.
+                        # Originally this is done in ray jobs submission but now
+                        # we have to do it manually because there is no ray
+                        # runtime on the API server.
                         env_cmds = [
                             f'export {k}={v!r}'
                             for k, v in controller_task.envs.items()
@@ -570,9 +580,8 @@ def launch(
 
     # If we have pre_created_job_ids, use single controller task
     if pre_created_job_ids is not None:
-        job_ids, handle = _submit_one(
-            pre_created_job_ids=pre_created_job_ids,
-            num_jobs=num_jobs)
+        job_ids, handle = _submit_one(pre_created_job_ids=pre_created_job_ids,
+                                      num_jobs=num_jobs)
         if isinstance(job_ids, list):
             ids = job_ids
         else:
@@ -582,7 +591,13 @@ def launch(
     else:
         job_id = (consolidation_mode_job_ids[0]
                   if consolidation_mode_job_ids is not None else None)
-        jid, handle = _submit_one(job_id, 0, num_jobs=num_jobs)
+        jids, handle = _submit_one(job_id, 0, num_jobs=num_jobs)
+        jid = None
+        if jids is not None:
+            if isinstance(jids, list):
+                jid = jids[0]
+            else:
+                jid = jids
         assert jid is not None, (job_id, handle)
         ids.append(jid)
         all_handle = handle

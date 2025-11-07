@@ -965,24 +965,37 @@ class ControllerManager:
 
                     
                     # Set SKYPILOT_JOB_RANK from job_id_to_rank mapping if available
-                    if 'SKYPILOT_JOB_ID_TO_RANK' in env_vars and env_vars['SKYPILOT_JOB_ID_TO_RANK']:
+                    if ('SKYPILOT_JOB_ID_TO_RANK' in env_vars and
+                            env_vars['SKYPILOT_JOB_ID_TO_RANK']):
                         try:
                             import json
-                            job_id_to_rank = json.loads(env_vars['SKYPILOT_JOB_ID_TO_RANK'])
-                            logger.debug('Loaded job_id_to_rank mapping: %s', job_id_to_rank)
-                            logger.debug('Looking up rank for job_id=%s (type=%s)', job_id, type(job_id))
+                            job_id_to_rank = (json.loads(
+                                env_vars['SKYPILOT_JOB_ID_TO_RANK']))
+                            logger.debug('Loaded job_id_to_rank mapping: %s',
+                                         job_id_to_rank)
+                            logger.debug(
+                                'Looking up rank for job_id=%s (type=%s)',
+                                job_id, type(job_id))
                             job_rank = job_id_to_rank.get(str(job_id))
                             if job_rank is not None:
-                                ctx.override_envs({'SKYPILOT_JOB_RANK': str(job_rank)})
-                                logger.info('Set SKYPILOT_JOB_RANK=%s for job %s', job_rank, job_id)
+                                ctx.override_envs(
+                                    {'SKYPILOT_JOB_RANK': str(job_rank)})
+                                logger.info(
+                                    'Set SKYPILOT_JOB_RANK=%s for job %s',
+                                    job_rank, job_id)
                             else:
-                                logger.warning('Job ID %s not found in job_id_to_rank mapping. Available keys: %s', 
-                                             job_id, list(job_id_to_rank.keys()))
+                                logger.warning(
+                                    'Job ID %s not found in job_id_to_rank mapping. Available keys: %s',
+                                    job_id, list(job_id_to_rank.keys()))
                         except json.JSONDecodeError as e:
-                            logger.warning('Failed to parse SKYPILOT_JOB_ID_TO_RANK for job %s: %s', job_id, e)
+                            logger.warning(
+                                'Failed to parse SKYPILOT_JOB_ID_TO_RANK for job %s: %s',
+                                job_id, e)
                     else:
-                        logger.warning('SKYPILOT_JOB_ID_TO_RANK not found in environment variables')
-                    
+                        logger.debug(
+                            'SKYPILOT_JOB_ID_TO_RANK not found in environment variables'
+                        )
+
                     skypilot_config.reload_config()
                 else:  # pragma: no cover - defensive
                     logger.error('Context is None, cannot set environment '
