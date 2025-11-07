@@ -8,8 +8,8 @@ from unittest.mock import patch
 
 import pytest
 
-from sky import task
 from sky import resources
+from sky import task
 from sky.backends import cloud_vm_ray_backend
 from sky.backends.cloud_vm_ray_backend import CloudVmRayResourceHandle
 from sky.backends.cloud_vm_ray_backend import SSHTunnelInfo
@@ -445,7 +445,7 @@ class TestCloudVmRayBackendGetGrpcChannel:
             accelerators={'A100': 8}))
         monkeypatch.setattr(CloudVmRayResourceHandle, '__init__',
                             lambda self, *args, **kwargs: None)
-        backend = CloudVmRayBackend()
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
         assert backend._get_num_gpus(test_task) == 8
 
 
