@@ -213,8 +213,8 @@ async def log_streamer(
                             worker_provision_logs=True):
                         yield chunk
 
-            # Mark this file as streamed
-            streamed_files.add(log_file_path)
+                # Mark this file as streamed
+                streamed_files.add(log_file_path)
 
             # Sleep shortly to avoid storming the DB and CPU and allow other
             # coroutines to run.
