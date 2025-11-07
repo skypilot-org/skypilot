@@ -1104,7 +1104,7 @@ class Resources:
         regions = self.cloud.regions_with_offering(self._instance_type,
                                                    self.accelerators,
                                                    self._use_spot, self._region,
-                                                   self._zone)
+                                                   self._zone, self)
         if self._image_id is not None and None not in self._image_id:
             regions = [r for r in regions if r.name in self._image_id]
 

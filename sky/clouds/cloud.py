@@ -185,10 +185,15 @@ class Cloud:
     #### Regions/Zones ####
 
     @classmethod
-    def regions_with_offering(cls, instance_type: str,
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[Region]:
+    def regions_with_offering(
+        cls,
+        instance_type: str,
+        accelerators: Optional[Dict[str, int]],
+        use_spot: bool,
+        region: Optional[str],
+        zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None,
+    ) -> List[Region]:
         """Returns the regions that offer the specified resources.
 
         The order of the regions follow the order of the regions returned by
@@ -674,8 +679,11 @@ class Cloud:
 
     @classmethod
     def check_features_are_supported(
-            cls, resources: 'resources_lib.Resources',
-            requested_features: Set[CloudImplementationFeatures]) -> None:
+        cls,
+        resources: 'resources_lib.Resources',
+        requested_features: Set[CloudImplementationFeatures],
+        region: Optional[str] = None,
+    ) -> None:
         """Errors out if the cloud does not support all requested features.
 
         For instance, Lambda Cloud does not support stop, so
@@ -693,7 +701,7 @@ class Cloud:
             requested features.
         """
         unsupported_features2reason = cls._unsupported_features_for_resources(
-            resources)
+            resources, region)
 
         # Docker image is not compatible with ssh proxy command.
         if skypilot_config.get_effective_region_config(
@@ -723,7 +731,9 @@ class Cloud:
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[CloudImplementationFeatures, str]:
         """The features not supported based on the resources provided.
 
@@ -734,7 +744,7 @@ class Cloud:
             A dict of {feature: reason} for the features not supported by the
             cloud implementation.
         """
-        del resources
+        del resources, region
         raise NotImplementedError
 
     @classmethod
