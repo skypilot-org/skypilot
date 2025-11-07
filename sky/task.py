@@ -797,16 +797,27 @@ class Task:
             #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
             # to raise errors on duplicate keys.
             user_specified_yaml = f.read()
-            config = yaml_utils.safe_load(user_specified_yaml)
+            return Task.from_yaml_str(user_specified_yaml)
+
+    @staticmethod
+    def from_yaml_str(yaml_str: str) -> 'Task':
+        """Initializes a task from a task YAML string.
+
+        Example:
+            .. code-block:: python
+
+                task = sky.Task.from_yaml_str('yaml_str')
+        """
+        config = yaml_utils.safe_load(yaml_str)
 
         if isinstance(config, str):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('YAML loaded as str, not as dict. '
-                                 f'Is it correct? Path: {yaml_path}')
+                                 f'Is it correct? content:\n{yaml_str}')
 
         if config is None:
             config = {}
-        config['_user_specified_yaml'] = user_specified_yaml
+        config['_user_specified_yaml'] = yaml_str
         return Task.from_yaml_config(config)
 
     def resolve_and_validate_volumes(self) -> None:

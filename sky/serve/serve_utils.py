@@ -718,10 +718,17 @@ def _get_service_status(
 
     record['pool_yaml'] = ''
     if record['pool']:
-        latest_yaml_path = generate_task_yaml_file_name(service_name,
-                                                        record['version'])
         try:
-            raw_yaml_config = yaml_utils.read_yaml(latest_yaml_path)
+            version = record['version']
+            yaml_content = serve_state.get_yaml_content(service_name, version)
+            if yaml_content is None:
+                # Backward compatibility for old service records that
+                # does not dump the yaml content to version database.
+                latest_yaml_path = generate_task_yaml_file_name(
+                    service_name, version)
+                raw_yaml_config = yaml_utils.read_yaml(latest_yaml_path)
+            else:
+                raw_yaml_config = yaml_utils.read_yaml_str(yaml_content)
         except Exception as e:  # pylint: disable=broad-except
             # If this is a consolidation mode running without an PVC, the file
             # might lost after an API server update (restart). In such case, we

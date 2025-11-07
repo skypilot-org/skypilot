@@ -65,11 +65,11 @@ def _handle_signal(service_name: str) -> None:
     raise error_type(f'User signal received: {user_signal.value}')
 
 
-def cleanup_storage(task_yaml: str) -> bool:
+def cleanup_storage(yaml_content: str) -> bool:
     """Clean up the storage for the service.
 
     Args:
-        task_yaml: The task yaml file.
+        yaml_content: The yaml content of the service.
 
     Returns:
         True if the storage is cleaned up successfully, False otherwise.
@@ -77,7 +77,7 @@ def cleanup_storage(task_yaml: str) -> bool:
     failed = False
 
     try:
-        task = task_lib.Task.from_yaml(task_yaml)
+        task = task_lib.Task.from_yaml_str(yaml_content)
         backend = cloud_vm_ray_backend.CloudVmRayBackend()
         # Need to re-construct storage object in the controller process
         # because when SkyPilot API server machine sends the yaml config to the
@@ -191,14 +191,13 @@ def _cleanup(service_name: str) -> bool:
         time.sleep(3)
 
     versions = serve_state.get_service_versions(service_name)
-    serve_state.remove_service_versions(service_name)
+    serve_state.delete_all_versions(service_name)
 
     def cleanup_version_storage(version: int) -> bool:
-        task_yaml: str = serve_utils.generate_task_yaml_file_name(
-            service_name, version)
+        yaml_content = serve_state.get_yaml_content(service_name, version)
         logger.info(f'Cleaning up storage for version {version}, '
-                    f'task_yaml: {task_yaml}')
-        return cleanup_storage(task_yaml)
+                    f'yaml_content: {yaml_content}')
+        return cleanup_storage(yaml_content)
 
     if not all(map(cleanup_version_storage, versions)):
         failed = True
@@ -229,39 +228,36 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
     # are executed at the same time.
     auth_utils.get_or_generate_keys()
 
+    service = serve_state.get_service_from_name(service_name)
+    is_recovery = service is not None
+    logger.info(f'It is a {"first" if not is_recovery else "recovery"} run')
+
+    def _read_yaml_content(yaml_path: str) -> str:
+        with open(os.path.expanduser(yaml_path), 'r', encoding='utf-8') as f:
+            return f.read()
+
+    if is_recovery:
+        yaml_content = service['yaml_content']
+        # Backward compatibility for old service records that
+        # does not dump the yaml content to version database.
+        if yaml_content is None:
+            yaml_content = _read_yaml_content(tmp_task_yaml)
+    else:
+        yaml_content = _read_yaml_content(tmp_task_yaml)
+
     # Initialize database record for the service.
-    task = task_lib.Task.from_yaml(tmp_task_yaml)
+    task = task_lib.Task.from_yaml_str(yaml_content)
     # Already checked before submit to controller.
     assert task.service is not None, task
     service_spec = task.service
 
-    def is_recovery_mode(service_name: str) -> bool:
-        """Check if service exists in database to determine recovery mode.
-        """
-        service = serve_state.get_service_from_name(service_name)
-        return service is not None
-
-    is_recovery = is_recovery_mode(service_name)
-    logger.info(f'It is a {"first" if not is_recovery else "recovery"} run')
-
-    if is_recovery:
-        version = serve_state.get_latest_version(service_name)
-        if version is None:
-            raise ValueError(f'No version found for service {service_name}')
-    else:
-        version = constants.INITIAL_VERSION
-        # Add initial version information to the service state.
-        serve_state.add_or_update_version(service_name, version, service_spec)
-
     service_dir = os.path.expanduser(
         serve_utils.generate_remote_service_dir_name(service_name))
-    service_task_yaml = serve_utils.generate_task_yaml_file_name(
-        service_name, version)
 
     if not is_recovery:
         with filelock.FileLock(controller_utils.get_resources_lock_path()):
             if not controller_utils.can_start_new_process():
-                cleanup_storage(tmp_task_yaml)
+                cleanup_storage(yaml_content)
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
                         constants.MAX_NUMBER_OF_SERVICES_REACHED_ERROR)
@@ -280,21 +276,21 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
         # Directly throw an error here. See sky/serve/api.py::up
         # for more details.
         if not success:
-            cleanup_storage(tmp_task_yaml)
+            cleanup_storage(yaml_content)
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Service {service_name} already exists.')
 
         # Create the service working directory.
         os.makedirs(service_dir, exist_ok=True)
 
-        # Copy the tmp task yaml file to the final task yaml file.
-        # This is for the service name conflict case. The _execute will
-        # sync file mounts first and then realized a name conflict. We
-        # don't want the new file mounts to overwrite the old one, so we
-        # sync to a tmp file first and then copy it to the final name
-        # if there is no name conflict.
-        shutil.copy(tmp_task_yaml, service_task_yaml)
+        version = constants.INITIAL_VERSION
+        # Add initial version information to the service state.
+        serve_state.add_or_update_version(service_name, version, service_spec,
+                                          yaml_content)
     else:
+        version = serve_state.get_latest_version(service_name)
+        if version is None:
+            raise ValueError(f'No version found for service {service_name}')
         serve_state.update_service_controller_pid(service_name, os.getpid())
 
     controller_process = None
@@ -326,8 +322,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
             controller_host = _get_controller_host()
             controller_process = multiprocessing.Process(
                 target=controller.run_controller,
-                args=(service_name, service_spec, service_task_yaml,
-                      controller_host, controller_port))
+                args=(service_name, service_spec, version, controller_host,
+                      controller_port))
             controller_process.start()
 
             if not is_recovery:
