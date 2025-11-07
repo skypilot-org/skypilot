@@ -148,6 +148,48 @@ def wait_until_job_status(
     s += 'done'
     return s
 
+def wait_until_job_status_by_id(
+    job_id: int,
+    good_statuses: List[str],
+    bad_statuses: List[str] = ['CANCELLED', 'FAILED_CONTROLLER'],
+    timeout: int = 30):
+    s = 'start_time=$SECONDS; '
+    s += 'while true; do '
+    s += f'if (( $SECONDS - $start_time > {timeout} )); then '
+    s += f'  echo "Timeout after {timeout} seconds waiting for job {job_id} to succeed"; exit 1; '
+    s += 'fi; '
+    s += f's=$(sky jobs logs --controller {job_id} --no-follow); '
+    s += 'echo "$s"; '
+    for status in good_statuses:
+        s += f'if echo "$s" | grep "Job status: JobStatus.{status}"; then '
+        s += '  break; '
+        s += 'fi; '
+    for status in bad_statuses:
+        s += f'if echo "$s" | grep "Job status: JobStatus.{status}"; then '
+        s += '  exit 1; '
+        s += 'fi; '
+    s += f'echo "Waiting for job {job_id} to be in {good_statuses}..."; '
+    s += 'done'
+    return s
+
+
+def check_logs(job_id: int, expected_pattern: str):
+    """Check that job logs contain the expected pattern.
+    
+    Args:
+        job_id: The job ID to check logs for.
+        expected_pattern: The pattern to grep for in the logs.
+    """
+    return (
+        f'logs=$(sky jobs logs --controller {job_id} --no-follow 2>&1); '
+        f'echo "$logs"; '
+        f'if ! echo "$logs" | grep "{expected_pattern}"; then '
+        f'  echo "ERROR: Job {job_id} logs do not contain expected pattern: {expected_pattern}"; '
+        f'  exit 1; '
+        f'fi; '
+        f'echo "Job {job_id} logs contain expected pattern: {expected_pattern}"'
+    )
+
 
 def wait_until_job_status_by_id(
         job_id: int,
@@ -1120,16 +1162,7 @@ def test_pools_num_jobs_option(generic_cloud: str):
                     # Test parallel job launching with --num-jobs 3
                     ('s=$(sky jobs launch --pool {pool_name} {job_yaml} --num-jobs 10 -d -y); '
                      'echo "$s"; '
-                     'echo; echo; echo "$s" | grep "Job submitted, ID: 1"; '
-                     'echo "$s" | grep "Job submitted, ID: 2"; '
-                     'echo "$s" | grep "Job submitted, ID: 3"; '
-                     'echo "$s" | grep "Job submitted, ID: 4"; '
-                     'echo "$s" | grep "Job submitted, ID: 5"; '
-                     'echo "$s" | grep "Job submitted, ID: 6"; '
-                     'echo "$s" | grep "Job submitted, ID: 7"; '
-                     'echo "$s" | grep "Job submitted, ID: 8"; '
-                     'echo "$s" | grep "Job submitted, ID: 9"; '
-                     'echo "$s" | grep "Job submitted, ID: 10"; '
+                     'echo; echo; echo "$s" | grep "Jobs submitted with IDs: 2,3,4,5,6,7,8,9,10,11"; '
                      'sleep 5').format(pool_name=pool_name,
                                        job_yaml=job_yaml.name)
                 ],
@@ -1164,3 +1197,56 @@ def test_pools_setup_num_gpus(generic_cloud: str):
             timeout=timeout,
             teardown=_TEARDOWN_POOL.format(pool_name=pool_name))
         smoke_tests_utils.run_one_test(test)
+
+
+def test_pools_num_jobs_rank(generic_cloud: str):
+    """Test that SKYPILOT_JOB_RANK is correctly set for jobs launched with --num-jobs.
+    
+    Launches 10 jobs with --num-jobs 10, waits for each to succeed, and verifies
+    that each job's logs show the correct rank (which should be job_id - 1).
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+    pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
+    job_config = basic_job_conf(
+        job_name=f'{name}-job',
+        run_cmd='echo "My rank is $SKYPILOT_JOB_RANK"'
+    )
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
+            write_yaml(pool_yaml, pool_config)
+            write_yaml(job_yaml, job_config)
+            
+            # Build test commands
+            test_commands = [
+                _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                    pool_name=pool_name, pool_yaml=pool_yaml.name),
+                wait_until_pool_ready(pool_name, timeout=timeout),
+            ]
+            
+            # Launch jobs with --num-jobs 10
+            # Extract job IDs from the output (format: "Jobs submitted with IDs: 2,3,4,...")
+            launch_cmd = (
+                's=$(sky jobs launch --pool {pool_name} {job_yaml} --num-jobs 10 -d -y); '
+                'echo "$s"; '
+                'echo "$s" | grep "Jobs submitted with IDs:" | sed "s/.*IDs: \\([0-9,]*\\).*/\\1/" > /tmp/job_ids.txt; '
+                'cat /tmp/job_ids.txt'
+            ).format(pool_name=pool_name, job_yaml=job_yaml.name)
+            test_commands.append(launch_cmd)
+
+            job_ids = [i for i in range(2, 12)]
+            for job_id in job_ids:
+                test_commands.append(wait_until_job_status_by_id(job_id, ['SUCCEEDED'], ['CANCELLED', 'FAILED_CONTROLLER'], timeout=timeout))
+
+            for job_id in job_ids:
+                test_commands.append(check_logs(job_id, f'My rank is {job_id - 2}'))
+            
+            test = smoke_tests_utils.Test(
+                'test_pools_num_jobs_rank',
+                test_commands,
+                timeout=timeout * 2,  # Give extra time for multiple jobs
+                teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=10),
+            )
+            smoke_tests_utils.run_one_test(test)
