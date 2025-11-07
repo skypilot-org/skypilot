@@ -726,11 +726,11 @@ def test_high_concurrency_ssh_tunnel_opening(generic_cloud: str,
 
     def tail_log_thread(idx: int):
         try:
-            with open(log_file, 'a') as f:
-                sky.tail_logs(cluster_name=name,
-                              job_id=None,
-                              follow=False,
-                              output_stream=f)
+            context.initialize()
+            ctx = context.get()
+            origin = ctx.redirect_log(log_file)
+            sky.tail_logs(cluster_name=name, job_id=None, follow=False)
+            ctx.redirect_log(origin)
         except Exception as e:  # pylint: disable=broad-except
             errors.append(f'Error in tail log thread {idx}: {e}')
 
