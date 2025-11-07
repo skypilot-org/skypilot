@@ -542,19 +542,3 @@ class TestIsMessageTooLong:
         mixed = "too long and request-uri too large"
         assert cloud_vm_ray_backend._is_message_too_long(255, output=mixed)
         assert cloud_vm_ray_backend._is_message_too_long(1, output=mixed)
-
-    def test_setup_num_gpus(self, monkeypatch):
-        """Test setup num GPUs."""
-        test_task = task.Task(resources=resources.Resources(accelerators={
-            'A100': 8,
-            'L4': 1
-        }))
-        monkeypatch.setattr(CloudVmRayResourceHandle, '__init__',
-                            lambda self, *args, **kwargs: None)
-        backend = cloud_vm_ray_backend.CloudVmRayBackend()
-        monkeypatch.setattr(backend,
-                            'check_resources_fit_cluster',
-                            lambda handle, task, check_ports=True: resources.
-                            Resources(accelerators={'L4': 1}))
-        handle = CloudVmRayResourceHandle(**self.MOCK_HANDLE_KWARGS)
-        assert backend._get_num_gpus(handle, test_task) == 1

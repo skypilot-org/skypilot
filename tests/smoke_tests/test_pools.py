@@ -1084,51 +1084,6 @@ def test_pools_num_jobs_option(generic_cloud: str):
 
 
 @pytest.mark.gcp
-def test_pools_setup_num_gpus():
-    """Test that the number of GPUs is set correctly in the setup script."""
-
-    setup_yaml = textwrap.dedent(f"""
-    pool:
-        workers: 1
-
-    resources:
-        accelerators: {{L4:2}}
-
-    setup: |
-        if [[ "$SKYPILOT_SETUP_NUM_GPUS_PER_NODE" != "2" ]]; then
-            exit 1
-        fi
-    """)
-
-    with tempfile.NamedTemporaryFile(delete=True) as f:
-        f.write(setup_yaml.encode('utf-8'))
-        f.flush()
-        name = smoke_tests_utils.get_cluster_name()
-        pool = f'{name}-pool'
-
-        wait_until_pool_ready = (
-            'start_time=$SECONDS; '
-            'while true; do '
-            'if (( $SECONDS - $start_time > {timeout} )); then '
-            '  echo "Timeout after {timeout} seconds waiting for job to succeed"; exit 1; '
-            'fi; '
-            f's=$(sky jobs pool status {pool}); '
-            'echo "$s"; '
-            'if echo "$s" | grep "FAILED"; then '
-            '  exit 1; '
-            'fi; '
-            'if echo "$s" | grep "SHUTTING_DOWN"; then '
-            '  exit 1; '
-            'fi; '
-            'if echo "$s" | grep "READY"; then '
-            '  break; '
-            'fi; '
-            'echo "Waiting for pool to be ready..."; '
-            'sleep 5; '
-            'done')
-
-
-@pytest.mark.gcp
 def test_pools_setup_num_gpus(generic_cloud: str):
     """Test that the number of GPUs is set correctly in the setup script."""
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
