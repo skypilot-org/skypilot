@@ -30,13 +30,6 @@ _READ_CHUNK_SIZE = 256 * 1024  # 256KB chunks for file reading
 # If a SHORT request has been stuck in pending for
 # _SHORT_REQUEST_SPINNER_TIMEOUT seconds, we show the waiting spinner
 _SHORT_REQUEST_SPINNER_TIMEOUT = 2
-# This timeout is only applied to worker node provision logs to ensure that we
-# do not wait indefinitely for the cluster to be in a non-INIT state or the
-# launch request to terminate. This is important because worker provision logs
-# are split between multiple log files, so we need to stop tailing the first
-# log file in order to start streaming the following log files.
-# in order to start streaming the following log files.
-_PROVISION_LOG_TIMEOUT = 10
 
 LONG_REQUEST_POLL_INTERVAL = 1
 DEFAULT_POLL_INTERVAL = 0.1
@@ -153,13 +146,9 @@ async def log_streamer(
 
     # worker node provision logs
     if log_path is not None and log_path.is_dir():
-        # Track which log files we've already streamed
-        streamed_files = set()
-
-        # Get all *.log files in the log_path
+        # Get all *.log files in the log_path dir
         log_files = sorted(log_path.glob('*.log'))
 
-        # first, stream whatever files already exist
         for log_file_path in log_files:
             # Add header before each file (similar to tail -f behavior)
             header = f'\n==> {log_file_path} <==\n\n'
@@ -170,59 +159,6 @@ async def log_streamer(
                                                   tail, follow, cluster_name,
                                                   polling_interval):
                     yield chunk
-
-            # Mark this file as streamed
-            streamed_files.add(log_file_path)
-
-        assert cluster_name is not None, (request_id, log_path, cluster_name)
-        # then, if launch request is ongoing, keep checking for new log files
-        req_filter = requests_lib.RequestTaskFilter(
-            status=[requests_lib.RequestStatus.RUNNING],
-            cluster_names=[cluster_name],
-            include_request_names=['sky.launch'],
-            fields=['cluster_name'])
-        req_tasks = await requests_lib.get_request_tasks_async(req_filter)
-        # Slowly back off the database polling up to every 1 second, to avoid
-        # overloading the CPU and DB.
-        backoff = common_utils.Backoff(initial_backoff=polling_interval,
-                                       max_backoff_factor=10,
-                                       multiplier=1.2)
-        # keep streaming while the launch request for the cluster is ongoing
-        while follow and len(req_tasks) > 0:
-            # Get all *.log files in the log_path
-            log_files = sorted(log_path.glob('*.log'))
-
-            # Filter out already streamed files
-            new_files = [f for f in log_files if f not in streamed_files]
-
-            # first, stream whatever files already exist
-            for log_file_path in new_files:
-                # Add header before each file (similar to tail -f behavior)
-                header = f'\n==> {log_file_path} <==\n\n'
-                yield header
-
-                async with aiofiles.open(log_file_path, 'rb') as f:
-                    async for chunk in _tail_log_file(
-                            f,
-                            request_id,
-                            plain_logs,
-                            tail,
-                            follow,
-                            cluster_name,
-                            polling_interval,
-                            worker_provision_logs=True):
-                        yield chunk
-
-                # Mark this file as streamed
-                streamed_files.add(log_file_path)
-
-            # Sleep shortly to avoid storming the DB and CPU and allow other
-            # coroutines to run.
-            # TODO(aylei): we should use a better mechanism to avoid busy
-            # polling the DB, which can be a bottleneck for high-concurrency
-            # requests.
-            await asyncio.sleep(backoff.current_backoff())
-            req_tasks = await requests_lib.get_request_tasks_async(req_filter)
 
     # head node provision logs
     else:
@@ -241,8 +177,7 @@ async def _tail_log_file(
     tail: Optional[int] = None,
     follow: bool = True,
     cluster_name: Optional[str] = None,
-    polling_interval: float = DEFAULT_POLL_INTERVAL,
-    worker_provision_logs: bool = False,
+    polling_interval: float = DEFAULT_POLL_INTERVAL
 ) -> AsyncGenerator[str, None]:
     """Tail the opened log file, buffer the lines and flush in chunks."""
 
@@ -342,11 +277,6 @@ async def _tail_log_file(
             # Provision logs pass in cluster_name, check cluster status
             # periodically to see if provisioning is done.
             if cluster_name is not None:
-                # Only apply timeout for worker provision logs,
-                # not for head node provision logs.
-                if (worker_provision_logs and current_time - last_flush_time >
-                        _PROVISION_LOG_TIMEOUT):
-                    break
                 if should_check_status:
                     last_status_check_time = current_time
                     cluster_status = await (
