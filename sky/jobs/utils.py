@@ -482,8 +482,9 @@ def controller_process_alive(record: managed_job_state.ControllerPidRecord,
             # See pid_exists in psutil/_pslinux.py
             if not psutil.pid_exists(record.pid):
                 if not quiet:
-                    logger.debug(f'Controller process {record.pid} is not a valid '
-                                'process id.')
+                    logger.debug(
+                        f'Controller process {record.pid} is not a valid '
+                        'process id.')
                 return False
 
         return process.is_running()
