@@ -283,6 +283,11 @@ python tests/load_tests/db_scale_tests/inject_production_scale_data.py \
   --managed-job-id 1 \
   --skip-history \
   --skip-events
+
+# Clean up (undo) all production-scale data
+python tests/load_tests/db_scale_tests/inject_production_scale_data.py \
+  --cleanup \
+  --managed-job-id 1
 ```
 
 **Options:**
@@ -298,8 +303,16 @@ python tests/load_tests/db_scale_tests/inject_production_scale_data.py \
 - `--skip-history` - Skip injecting cluster history
 - `--skip-events` - Skip injecting cluster events
 - `--skip-jobs` - Skip injecting managed jobs
+- `--cleanup` - Clean up (undo) all production-scale data instead of injecting. Requires `--managed-job-id` to identify which jobs to delete.
 
-**Note**: This script injects large amounts of data and may take significant time to complete. The data will persist in your databases until manually cleaned up or restored from backup.
+**Cleanup/Undo:**
+The `--cleanup` flag removes all production-scale data that was injected:
+- All clusters with names matching `prod-cluster-*`
+- All cluster history entries with names matching `prod-hist-*`
+- All cluster events associated with production clusters
+- All managed jobs with `job_id > --managed-job-id`
+
+**Note**: This script injects large amounts of data and may take significant time to complete. Use `--cleanup` to remove all injected data when done testing.
 
 ## Future Enhancements
 

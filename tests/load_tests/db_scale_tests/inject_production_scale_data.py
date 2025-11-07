@@ -467,6 +467,155 @@ class ProductionScaleTest(TestScale):
             traceback.print_exc()
             return 0
 
+    def cleanup_production_data(self, managed_job_id: int):
+        """Clean up all production-scale data that was injected."""
+        print("Cleaning up production-scale data...")
+        print("=" * 80)
+
+        results = {}
+
+        try:
+            # Clean up active clusters
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # Find production clusters
+            cursor.execute(
+                "SELECT name FROM clusters WHERE name LIKE 'prod-cluster-%'")
+            cluster_names = [row[0] for row in cursor.fetchall()]
+
+            if cluster_names:
+                print(
+                    f"\n[1/4] Cleaning up {len(cluster_names)} active clusters..."
+                )
+                # Delete from cluster_yaml first
+                placeholders = ', '.join(['?' for _ in cluster_names])
+                cursor.execute(
+                    f"DELETE FROM cluster_yaml WHERE cluster_name IN ({placeholders})",
+                    cluster_names)
+                yaml_deleted = cursor.rowcount
+
+                # Delete from clusters
+                cursor.execute(
+                    f"DELETE FROM clusters WHERE name IN ({placeholders})",
+                    cluster_names)
+                clusters_deleted = cursor.rowcount
+                conn.commit()
+                results['clusters'] = clusters_deleted
+                results['yaml'] = yaml_deleted
+                print(
+                    f"  Deleted {clusters_deleted} clusters and {yaml_deleted} yaml entries"
+                )
+            else:
+                print("\n[1/4] No production clusters found to clean up")
+                results['clusters'] = 0
+
+            # Clean up cluster history
+            cursor.execute("""
+                SELECT cluster_hash, name
+                FROM cluster_history
+                WHERE name LIKE 'prod-hist-%'
+            """)
+            history_entries = cursor.fetchall()
+
+            if history_entries:
+                print(
+                    f"\n[2/4] Cleaning up {len(history_entries)} cluster history entries..."
+                )
+                cluster_hashes = [entry[0] for entry in history_entries]
+                placeholders = ', '.join(['?' for _ in cluster_hashes])
+                cursor.execute(
+                    f"DELETE FROM cluster_history WHERE cluster_hash IN ({placeholders})",
+                    cluster_hashes)
+                conn.commit()
+                results['history'] = len(history_entries)
+                print(
+                    f"  Deleted {len(history_entries)} cluster history entries")
+            else:
+                print("\n[2/4] No production cluster history found to clean up")
+                results['history'] = 0
+
+            # Clean up cluster events for production clusters
+            # Get all production cluster hashes (from both active and history)
+            cursor.execute("""
+                SELECT DISTINCT cluster_hash
+                FROM cluster_events
+                WHERE name LIKE 'prod-cluster-%' OR name LIKE 'prod-hist-%'
+            """)
+            event_cluster_hashes = [row[0] for row in cursor.fetchall()]
+
+            if event_cluster_hashes:
+                print(f"\n[3/4] Cleaning up cluster events...")
+                placeholders = ', '.join(['?' for _ in event_cluster_hashes])
+                cursor.execute(
+                    f"DELETE FROM cluster_events WHERE cluster_hash IN ({placeholders})",
+                    event_cluster_hashes)
+                events_deleted = cursor.rowcount
+                conn.commit()
+                results['events'] = events_deleted
+                print(f"  Deleted {events_deleted} cluster events")
+            else:
+                print("\n[3/4] No production cluster events found to clean up")
+                results['events'] = 0
+
+            cursor.close()
+            conn.close()
+
+            # Clean up managed jobs
+            conn = sqlite3.connect(self.jobs_db_path)
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                SELECT job_id
+                FROM spot
+                WHERE job_id > ?
+                ORDER BY job_id
+            """, (managed_job_id,))
+            job_ids = [row[0] for row in cursor.fetchall()]
+
+            if job_ids:
+                print(f"\n[4/4] Cleaning up {len(job_ids)} managed jobs...")
+                placeholders = ', '.join(['?' for _ in job_ids])
+                cursor.execute(
+                    f"DELETE FROM spot WHERE job_id IN ({placeholders})",
+                    job_ids)
+                cursor.execute(
+                    f"DELETE FROM job_info WHERE spot_job_id IN ({placeholders})",
+                    job_ids)
+                conn.commit()
+                results['jobs'] = len(job_ids)
+                print(f"  Deleted {len(job_ids)} managed jobs")
+            else:
+                print(
+                    f"\n[4/4] No managed jobs found with job_id > {managed_job_id}"
+                )
+                results['jobs'] = 0
+
+            cursor.close()
+            conn.close()
+
+            # Print summary
+            print("\n" + "=" * 80)
+            print("CLEANUP SUMMARY")
+            print("=" * 80)
+            print(f"Active clusters deleted: {results.get('clusters', 0):,}")
+            if 'yaml' in results:
+                print(f"Cluster YAML entries deleted: {results['yaml']:,}")
+            print(f"History clusters deleted: {results.get('history', 0):,}")
+            print(f"Cluster events deleted: {results.get('events', 0):,}")
+            print(f"Managed jobs deleted: {results.get('jobs', 0):,}")
+            print("=" * 80)
+            print("\nCleanup completed successfully!")
+
+            return results
+
+        except Exception as e:
+            print(f"\nCleanup failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
 
 def main():
     """Main entry point for production-scale data injection."""
@@ -527,8 +676,36 @@ def main():
     parser.add_argument('--skip-jobs',
                         action='store_true',
                         help='Skip injecting managed jobs')
+    parser.add_argument(
+        '--cleanup',
+        action='store_true',
+        help='Clean up (undo) all production-scale data instead of injecting')
 
     args = parser.parse_args()
+
+    # Handle cleanup mode
+    if args.cleanup:
+        print("=" * 80)
+        print("PRODUCTION-SCALE DATA CLEANUP")
+        print("=" * 80)
+        print(f"Template managed job ID: {args.managed_job_id}")
+        print("=" * 80)
+
+        # Create test instance (minimal init for cleanup)
+        test = ProductionScaleTest()
+        test.db_path = os.path.expanduser("~/.sky/state.db")
+        test.jobs_db_path = os.path.expanduser("~/.sky/spot_jobs.db")
+
+        try:
+            results = test.cleanup_production_data(args.managed_job_id)
+            if results is None:
+                sys.exit(1)
+        except Exception as e:
+            print(f"\nCleanup failed: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+        return
 
     print("=" * 80)
     print("PRODUCTION-SCALE DATA INJECTION")
@@ -599,7 +776,7 @@ def main():
         print("\nData injection completed successfully!")
         print("\nNote: This data will persist in your databases.")
         print(
-            "To clean up, you can run the cleanup scripts or restore from backup."
+            f"To clean up, run: python {sys.argv[0]} --cleanup --managed-job-id {args.managed_job_id}"
         )
 
     except Exception as e:
