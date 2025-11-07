@@ -929,7 +929,14 @@ def set_failed(
 
 @_init_db
 def set_pending_cancelled(job_id: int):
-    """Set the job as pending cancelled, if it is in non-terminal states."""
+    """Set the job as cancelled, if it is PENDING and WAITING/INACTIVE.
+
+    This may fail if the job is not PENDING, e.g. another process has changed
+    its state in the meantime.
+
+    Returns:
+        True if the job was cancelled, False otherwise.
+    """
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         # Subquery to get the spot_job_ids that match the joined condition
@@ -1148,7 +1155,7 @@ def get_latest_task_id_status(
 
 
 @_init_db
-def get_job_controller_pid(job_id: int) -> Optional[ControllerPidRecord]:
+def get_job_controller_process(job_id: int) -> Optional[ControllerPidRecord]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.execute(
@@ -1158,7 +1165,44 @@ def get_job_controller_pid(job_id: int) -> Optional[ControllerPidRecord]:
                     job_info_table.c.spot_job_id == job_id)).fetchone()
         if row is None or row[0] is None:
             return None
+        pid = row[0]
+        if pid < 0:
+            # Between #7051 and #7847, the controller pid was negative to
+            # indicate a controller process that can handle multiple jobs.
+            pid = -pid
         return ControllerPidRecord(pid=row[0], started_at=row[1])
+
+
+@_init_db
+def is_legacy_controller_process(job_id: int) -> bool:
+    """Check if the controller process is a legacy single-job controller process
+
+    After #7051, the controller process pid is negative to indicate a new
+    multi-job controller process.
+    After #7847, the controller process pid is changed back to positive, but
+    controller_pid_started_at will also be set.
+    """
+    # TODO(cooperc): Remove this function for 0.13.0
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.execute(
+            sqlalchemy.select(
+                job_info_table.c.controller_pid,
+                job_info_table.c.controller_pid_started_at).where(
+                    job_info_table.c.spot_job_id == job_id)).fetchone()
+        if row is None or row[0] is None:
+            raise ValueError(f'Controller process for job {job_id} not found')
+        started_at = row[1]
+        if started_at is not None:
+            # controller_pid_started_at is only set after #7847, so we know this
+            # must be a non-legacy multi-job controller process.
+            return False
+        pid = row[0]
+        if pid < 0:
+            # Between #7051 and #7847, the controller pid was negative to
+            # indicate a non-legacy multi-job controller process.
+            return False
+        return True
 
 
 def get_status(job_id: int) -> Optional[ManagedJobStatus]:

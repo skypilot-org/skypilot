@@ -294,9 +294,16 @@ def ha_recovery_for_consolidation_mode():
             # In consolidation mode, it is possible that only the API server
             # process is restarted, and the controller process is not. In such
             # case, we don't need to do anything and the controller process will
-            # just keep running.
+            # just keep running. However, in most cases, the controller process
+            # will also be stopped - either by a pod restart in k8s API server,
+            # or by `sky api stop`, which will stop controllers.
+            # TODO(cooperc): Make sure we cannot have a controller process
+            # running across API server restarts for consistency.
             if controller_pid is not None:
                 try:
+                    # Note: We provide the legacy job id to the
+                    # controller_process_alive just in case, but we shouldn't
+                    # have a running legacy job controller process at this point
                     if controller_process_alive(
                             managed_job_state.ControllerPidRecord(
                                 pid=controller_pid,
@@ -425,29 +432,66 @@ async def get_job_status(
     return None
 
 
-def controller_process_alive(record: Optional[
-    managed_job_state.ControllerPidRecord], job_id: int) -> bool:
-    """Check if the controller process is alive and matches the recorded PID."""
-    if record is None:
-        return False
+def controller_process_alive(record: managed_job_state.ControllerPidRecord,
+                             legacy_job_id: Optional[int] = None,
+                             quiet: bool = True) -> bool:
+    """Check if the controller process is alive.
 
-    actual_pid = -record.pid if record.pid < 0 else record.pid
+    If legacy_job_id is provided, this will also return True for a legacy
+    single-job controller process with that job id, based on the cmdline. This
+    is how the old check worked before #7051.
+    """
     try:
-        process = psutil.Process(actual_pid)
+        process = psutil.Process(record.pid)
 
         if record.started_at is not None:
             if process.create_time() != record.started_at:
+                if not quiet:
+                    logger.debug(f'Controller process {record.pid} has started '
+                                 f'at {record.started_at} but process has '
+                                 f'started at {process.create_time()}')
                 return False
         else:
             # If we can't check the create_time try to check the cmdline instead
             cmd_str = ' '.join(process.cmdline())
-            if ((f'--job-id {job_id}' not in cmd_str) and
-                ('controller' not in cmd_str)):
+            # pylint: disable=line-too-long
+            # Pre-#7051 cmdline: /path/to/python -u -m sky.jobs.controller <dag.yaml_path> --job-id <job_id>
+            # Post-#7051 cmdline: /path/to/python -u -msky.jobs.controller
+            # pylint: enable=line-too-long
+            if ('-m sky.jobs.controller' not in cmd_str and
+                    '-msky.jobs.controller' not in cmd_str):
+                if not quiet:
+                    logger.debug(f'Process {record.pid} is not a controller '
+                                 'process - missing "-m sky.jobs.controller" '
+                                 f'from cmdline: {cmd_str}')
+                return False
+            if (legacy_job_id is not None and '--job-id' in cmd_str and
+                    f'--job-id {legacy_job_id}' not in cmd_str):
+                if not quiet:
+                    logger.debug(f'Controller process {record.pid} has the '
+                                 f'wrong --job-id (expected {legacy_job_id}) '
+                                 f'in cmdline: {cmd_str}')
+                return False
+
+            # On linux, psutil.Process(pid) will return a valid process object
+            # even if the pid is actually a thread ID within the process. This
+            # hugely inflates the number of valid-looking pids, increasing the
+            # chance that we will falsely believe a controller is alive. The pid
+            # file should never contain thread IDs, just process IDs. We can
+            # check this with psutil.pid_exists(pid), which is false for TIDs.
+            # See pid_exists in psutil/_pslinux.py
+            if not psutil.pid_exists(record.pid):
+                if not quiet:
+                    logger.debug(f'Controller process {record.pid} is not a valid '
+                                'process id.')
                 return False
 
         return process.is_running()
+
     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess,
-            OSError):
+            OSError) as e:
+        if not quiet:
+            logger.debug(f'Controller process {record.pid} is not running: {e}')
         return False
 
 
@@ -844,7 +888,7 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
                         f'{job_status.value}. Skipped.')
             continue
         elif job_status == managed_job_state.ManagedJobStatus.PENDING:
-            # the if is a short circuit, this will be atomic.
+            # the "if PENDING" is a short circuit, this will be atomic.
             cancelled = managed_job_state.set_pending_cancelled(job_id)
             if cancelled:
                 cancelled_job_ids.append(job_id)
@@ -852,38 +896,35 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
 
         update_managed_jobs_statuses(job_id)
 
-        controller_process = managed_job_state.get_job_controller_pid(job_id)
-        if controller_process is not None and controller_process.pid < 0:
-            # This is a consolidated job controller, so we need to cancel the
-            # with the controller server API
-            try:
-                # we create a file as a signal to the controller server
-                signal_file = pathlib.Path(
-                    managed_job_constants.CONSOLIDATED_SIGNAL_PATH, f'{job_id}')
-                signal_file.touch()
-                cancelled_job_ids.append(job_id)
-            except OSError as e:
-                logger.error(f'Failed to cancel job {job_id} '
-                             f'with controller server: {e}')
-                # don't add it to the to be cancelled job ids, since we don't
-                # know for sure yet.
-                continue
-            continue
-
         job_workspace = managed_job_state.get_workspace(job_id)
         if current_workspace is not None and job_workspace != current_workspace:
             wrong_workspace_job_ids.append(job_id)
             continue
 
-        # Send the signal to the jobs controller.
-        signal_file = (pathlib.Path(
-            managed_job_constants.SIGNAL_FILE_PREFIX.format(job_id)))
-        # Filelock is needed to prevent race condition between signal
-        # check/removal and signal writing.
-        with filelock.FileLock(str(signal_file) + '.lock'):
-            with signal_file.open('w', encoding='utf-8') as f:
-                f.write(UserSignal.CANCEL.value)
-                f.flush()
+        if managed_job_state.is_legacy_controller_process(job_id):
+            # The job is running on a legacy single-job controller process.
+            # TODO(cooperc): Remove this handling for 0.13.0
+
+            # Send the signal to the jobs controller.
+            signal_file = (pathlib.Path(
+                managed_job_constants.SIGNAL_FILE_PREFIX.format(job_id)))
+            # Filelock is needed to prevent race condition between signal
+            # check/removal and signal writing.
+            with filelock.FileLock(str(signal_file) + '.lock'):
+                with signal_file.open('w', encoding='utf-8') as f:
+                    f.write(UserSignal.CANCEL.value)
+                    f.flush()
+        else:
+            # New controller process.
+            try:
+                signal_file = pathlib.Path(
+                    managed_job_constants.CONSOLIDATED_SIGNAL_PATH, f'{job_id}')
+                signal_file.touch()
+            except OSError as e:
+                logger.error(f'Failed to cancel job {job_id}: {e}')
+                # Don't add it to the to be cancelled job ids
+                continue
+
         cancelled_job_ids.append(job_id)
 
     wrong_workspace_job_str = ''

@@ -111,16 +111,8 @@ class ManagedJobEvent(SkyletEvent):
                     records = scheduler.get_controller_process_records()
                     if records is not None:
                         for record in records:
-                            try:
-                                process = psutil.Process(record.pid)
-                                if (record.started_at is not None and
-                                        process.create_time() !=
-                                        record.started_at):
-                                    continue
-                            except (psutil.NoSuchProcess, psutil.AccessDenied,
-                                    psutil.ZombieProcess):
-                                continue
-                            if process.is_running():
+                            if managed_job_utils.controller_process_alive(
+                                    record, quiet=False):
                                 subprocess_utils.kill_children_processes(
                                     parent_pids=[record.pid], force=True)
                         os.remove(

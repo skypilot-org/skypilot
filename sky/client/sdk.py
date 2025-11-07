@@ -32,6 +32,7 @@ from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import oauth as oauth_lib
 from sky.jobs import scheduler
+from sky.jobs import utils as managed_job_utils
 from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import rest
@@ -2345,15 +2346,12 @@ def api_stop() -> None:
         try:
             records = scheduler.get_controller_process_records()
             if records is not None:
-                for pid, started_at in records:
+                for record in records:
                     try:
-                        process = psutil.Process(pid)
-                        if started_at is not None and process.create_time(
-                        ) != started_at:
-                            continue
-                        if process.is_running():
+                        if managed_job_utils.controller_process_alive(
+                                record, quiet=False):
                             subprocess_utils.kill_children_processes(
-                                parent_pids=[pid], force=True)
+                                parent_pids=[record.pid], force=True)
                     except (psutil.NoSuchProcess, psutil.ZombieProcess):
                         continue
                 os.remove(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH))

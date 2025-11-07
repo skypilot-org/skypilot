@@ -119,13 +119,27 @@ def _parse_controller_pid_entry(
     entry = entry.strip()
     if not entry:
         return None
-    raw_pid, _, raw_started_at = entry.partition(',')
+    # The entry should be like <pid>,<started_at>
+    # pid is an integer, started_at is a float
+    # For backwards compatibility, we also support just <pid>
+    entry_parts = entry.split(',')
+    if len(entry_parts) == 2:
+        [raw_pid, raw_started_at] = entry_parts
+    elif len(entry_parts) == 1:
+        # Backwards compatibility, pre-#7847
+        # TODO(cooperc): Remove for 0.13.0
+        raw_pid = entry_parts[0]
+        raw_started_at = None
+    else:
+        # Unknown format
+        return None
+
     try:
         pid = int(raw_pid)
     except ValueError:
         return None
 
-    started_at: typing.Optional[float] = None
+    started_at: Optional[float] = None
     if raw_started_at:
         try:
             started_at = float(raw_started_at)
@@ -156,7 +170,10 @@ def get_controller_process_records(
 
 
 def _append_controller_pid_record(pid: int,
-                                  started_at: typing.Optional[float]) -> None:
+                                  started_at: Optional[float]) -> None:
+    # Note: started_at is a float, but converting to a string will not lose any
+    # precision. See https://docs.python.org/3/tutorial/floatingpoint.html and
+    # https://github.com/python/cpython/issues/53583
     entry = str(pid) if started_at is None else f'{pid},{started_at}'
     with open(JOB_CONTROLLER_PID_PATH, 'a', encoding='utf-8') as f:
         f.write(entry + '\n')
@@ -232,7 +249,7 @@ def start_controller() -> None:
     _append_controller_pid_record(pid, pid_started_at)
 
 
-def get_alive_controllers() -> typing.Optional[int]:
+def get_alive_controllers() -> Optional[int]:
     records = get_controller_process_records()
     if records is None:
         # If we cannot read the file reliably, avoid starting extra controllers.
@@ -242,20 +259,8 @@ def get_alive_controllers() -> typing.Optional[int]:
 
     alive = 0
     for record in records:
-        try:
-            process = psutil.Process(record.pid)
-            if record.started_at is not None:
-                if process.create_time() != record.started_at:
-                    logger.debug(f'Controller process {record.pid} has started '
-                                 f'at {record.started_at} but process has '
-                                 f'started at {process.create_time()}')
-                    continue
-            if process.is_running():
-                alive += 1
-        except (psutil.NoSuchProcess, psutil.ZombieProcess,
-                psutil.AccessDenied) as e:
-            logger.debug(f'Controller process {record.pid} is not running: {e}')
-            continue
+        if managed_job_utils.controller_process_alive(record, quiet=False):
+            alive += 1
     return alive
 
 
@@ -325,14 +330,11 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
 
     The user hash should be set (e.g. via SKYPILOT_USER_ID) before calling this.
     """
-    controller_process = state.get_job_controller_pid(job_id)
+    controller_process = state.get_job_controller_process(job_id)
     if controller_process is not None:
-        controller_pid, controller_started_at = controller_process
         # why? TODO(cooperc): figure out why this is needed, fix it, and remove
-        if managed_job_utils.controller_process_alive(
-                state.ControllerPidRecord(pid=controller_pid,
-                                          started_at=controller_started_at),
-                job_id):
+        if managed_job_utils.controller_process_alive(controller_process,
+                                                      job_id):
             # This can happen when HA recovery runs for some reason but the job
             # controller is still alive.
             logger.warning(f'Job {job_id} is still alive, skipping submission')

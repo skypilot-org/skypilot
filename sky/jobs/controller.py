@@ -937,9 +937,9 @@ class ControllerManager:
         assert ctx is not None, 'Context is not initialized'
         ctx.redirect_log(pathlib.Path(log_file))
 
-        logger.info('Starting job loop for %s', job_id)
-        logger.info('  log_file=%s', log_file)
-        logger.info('  pool=%s', pool)
+        logger.info(f'Starting job loop for {job_id}')
+        logger.info(f'  log_file={log_file}')
+        logger.info(f'  pool={pool}')
         logger.info(f'From controller {self._controller_uuid}')
         logger.info(f'  pid={self._pid}')
 
@@ -1139,7 +1139,7 @@ class ControllerManager:
             # Check if there are any jobs that are waiting to launch
             try:
                 waiting_job = await managed_job_state.get_waiting_job_async(
-                    pid=-self._pid, pid_started_at=self._pid_started_at)
+                    pid=self._pid, pid_started_at=self._pid_started_at)
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Failed to get waiting job: {e}')
                 await asyncio.sleep(5)
