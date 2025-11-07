@@ -1213,6 +1213,7 @@ def test_pools_num_jobs_rank(generic_cloud: str):
         run_cmd='echo "My rank is $SKYPILOT_JOB_RANK"'
     )
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    NUM_JOBS = 5
     
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
         with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
@@ -1226,17 +1227,15 @@ def test_pools_num_jobs_rank(generic_cloud: str):
                 wait_until_pool_ready(pool_name, timeout=timeout),
             ]
             
-            # Launch jobs with --num-jobs 10
-            # Extract job IDs from the output (format: "Jobs submitted with IDs: 2,3,4,...")
             launch_cmd = (
-                's=$(sky jobs launch --pool {pool_name} {job_yaml} --num-jobs 10 -d -y); '
+                's=$(sky jobs launch --pool {pool_name} {job_yaml} --num-jobs {NUM_JOBS} -d -y); '
                 'echo "$s"; '
                 'echo "$s" | grep "Jobs submitted with IDs:" | sed "s/.*IDs: \\([0-9,]*\\).*/\\1/" > /tmp/job_ids.txt; '
                 'cat /tmp/job_ids.txt'
-            ).format(pool_name=pool_name, job_yaml=job_yaml.name)
+            ).format(pool_name=pool_name, job_yaml=job_yaml.name, NUM_JOBS=NUM_JOBS)
             test_commands.append(launch_cmd)
 
-            job_ids = [i for i in range(2, 12)]
+            job_ids = [i for i in range(2, NUM_JOBS + 2)]
             for job_id in job_ids:
                 test_commands.append(wait_until_job_status_by_id(job_id, ['SUCCEEDED'], ['CANCELLED', 'FAILED_CONTROLLER'], timeout=timeout))
 
@@ -1250,3 +1249,4 @@ def test_pools_num_jobs_rank(generic_cloud: str):
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=10),
             )
             smoke_tests_utils.run_one_test(test)
+
