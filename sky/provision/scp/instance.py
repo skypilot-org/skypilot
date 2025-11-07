@@ -78,7 +78,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     else:
         if config.count > 1:
             raise RuntimeError(
-                'This cluster uses the legacy (v1) naming scheme and cannot be '
+                'This cluster uses the legacy naming scheme and cannot be '
                 'scaled to multi-node automatically. '
                 'Please `sky down` and relaunch.')
         cluster_instance_names = [cluster_name_on_cloud]
