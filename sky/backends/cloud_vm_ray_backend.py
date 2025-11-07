@@ -186,9 +186,7 @@ _MAX_RAY_UP_RETRY = 5
 # Number of retries for getting zones.
 _MAX_GET_ZONE_RETRY = 3
 
-_JOB_ID_PATTERN = re.compile(r'Job ID: ([0-9]+)')
 _JOB_IDS_PATTERN = re.compile(r'Job IDs: ([0-9,]+)')
-_LOG_DIR_PATTERN = re.compile(r'Log Dir: ([^ ]+)')
 _LOG_DIRS_PATTERN = re.compile(r'Log Dirs: ([^ ]+)')
 
 # Path to the monkey-patched ray up script.
@@ -4468,9 +4466,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 ux_utils.starting_message(f'Job submitted, ID: {job_id}'))
         rich_utils.stop_safe_status()
 
-    def _add_job(self, handle: CloudVmRayResourceHandle,
-                 job_name: Optional[str], resources_str: str,
-                 metadata: str, num_jobs: int = 1) -> Tuple[List[int], List[str]]:
+    def _add_job(self,
+                 handle: CloudVmRayResourceHandle,
+                 job_name: Optional[str],
+                 resources_str: str,
+                 metadata: str,
+                 num_jobs: int = 1) -> Tuple[List[int], List[str]]:
         use_legacy = not handle.is_grpc_enabled_with_flag
 
         if not use_legacy:
@@ -4521,15 +4522,22 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 job_ids_match = _JOB_IDS_PATTERN.search(result_str)
                 log_dirs_match = _LOG_DIRS_PATTERN.search(result_str)
                 if job_ids_match and log_dirs_match:
-                    job_ids = [int(x.strip()) for x in job_ids_match.group(1).split(',')]
-                    log_dirs = [x.strip() for x in log_dirs_match.group(1).split(',')]
+                    job_ids = [
+                        int(x.strip())
+                        for x in job_ids_match.group(1).split(',')
+                    ]
+                    log_dirs = [
+                        x.strip() for x in log_dirs_match.group(1).split(',')
+                    ]
                     return job_ids, log_dirs
                 else:
-                    raise ValueError(f'Failed to parse multiple job ids from: {result_str}')
+                    raise ValueError(
+                        f'Failed to parse multiple job ids from: {result_str}')
             except ValueError as e:
                 logger.error(stderr)
                 raise ValueError(f'Failed to parse job id: {result_str}; '
                                  f'Returncode: {returncode}') from e
+        return job_ids, log_dirs
 
     def _execute(
         self,
@@ -4581,7 +4589,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return None
 
         job_ids, log_dirs = self._add_job(handle, task_copy.name, resources_str,
-                                        task.metadata_json)
+                                          task.metadata_json)
         job_id = job_ids[0]
         log_dir = log_dirs[0]
 

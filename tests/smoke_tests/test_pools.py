@@ -148,11 +148,12 @@ def wait_until_job_status(
     s += 'done'
     return s
 
+
 def wait_until_job_status_by_id(
-    job_id: int,
-    good_statuses: List[str],
-    bad_statuses: List[str] = ['CANCELLED', 'FAILED_CONTROLLER'],
-    timeout: int = 30):
+        job_id: int,
+        good_statuses: List[str],
+        bad_statuses: List[str] = ['CANCELLED', 'FAILED_CONTROLLER'],
+        timeout: int = 30):
     s = 'start_time=$SECONDS; '
     s += 'while true; do '
     s += f'if (( $SECONDS - $start_time > {timeout} )); then '
@@ -1208,40 +1209,44 @@ def test_pools_num_jobs_rank(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
     pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
-    job_config = basic_job_conf(
-        job_name=f'{name}-job',
-        run_cmd='echo "My rank is $SKYPILOT_JOB_RANK"'
-    )
+    job_config = basic_job_conf(job_name=f'{name}-job',
+                                run_cmd='echo "My rank is $SKYPILOT_JOB_RANK"')
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     NUM_JOBS = 5
-    
+
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
         with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
             write_yaml(pool_yaml, pool_config)
             write_yaml(job_yaml, job_config)
-            
+
             # Build test commands
             test_commands = [
-                _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
-                    pool_name=pool_name, pool_yaml=pool_yaml.name),
+                _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
+                                                      pool_yaml=pool_yaml.name),
                 wait_until_pool_ready(pool_name, timeout=timeout),
             ]
-            
+
             launch_cmd = (
                 's=$(sky jobs launch --pool {pool_name} {job_yaml} --num-jobs {NUM_JOBS} -d -y); '
                 'echo "$s"; '
                 'echo "$s" | grep "Jobs submitted with IDs:" | sed "s/.*IDs: \\([0-9,]*\\).*/\\1/" > /tmp/job_ids.txt; '
-                'cat /tmp/job_ids.txt'
-            ).format(pool_name=pool_name, job_yaml=job_yaml.name, NUM_JOBS=NUM_JOBS)
+                'cat /tmp/job_ids.txt').format(pool_name=pool_name,
+                                               job_yaml=job_yaml.name,
+                                               NUM_JOBS=NUM_JOBS)
             test_commands.append(launch_cmd)
 
             job_ids = [i for i in range(2, NUM_JOBS + 2)]
             for job_id in job_ids:
-                test_commands.append(wait_until_job_status_by_id(job_id, ['SUCCEEDED'], ['CANCELLED', 'FAILED_CONTROLLER'], timeout=timeout))
+                test_commands.append(
+                    wait_until_job_status_by_id(
+                        job_id, ['SUCCEEDED'],
+                        ['CANCELLED', 'FAILED_CONTROLLER'],
+                        timeout=timeout))
 
             for job_id in job_ids:
-                test_commands.append(check_logs(job_id, f'My rank is {job_id - 2}'))
-            
+                test_commands.append(
+                    check_logs(job_id, f'My rank is {job_id - 2}'))
+
             test = smoke_tests_utils.Test(
                 'test_pools_num_jobs_rank',
                 test_commands,
@@ -1249,4 +1254,3 @@ def test_pools_num_jobs_rank(generic_cloud: str):
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=10),
             )
             smoke_tests_utils.run_one_test(test)
-
