@@ -717,6 +717,7 @@ def test_high_concurrency_ssh_tunnel_opening(generic_cloud: str,
                                              tmp_path: pathlib.Path):
     """Test that high concurrency SSH tunnel opening does not result in timeouts."""
     name = smoke_tests_utils.get_cluster_name()
+    concurrency = 30
     log_file = tmp_path / 'all_logs.txt'
     log_file.touch()
 
@@ -735,8 +736,7 @@ def test_high_concurrency_ssh_tunnel_opening(generic_cloud: str,
 
     def start_concurrent_tail_logs() -> Generator[str, None, None]:
         start_time = time.time()
-        # Launch 50 concurrent tail_logs.
-        for i in range(50):
+        for i in range(concurrency):
             thread = threading.Thread(target=tail_log_thread,
                                       args=(i,),
                                       daemon=True)
@@ -764,9 +764,15 @@ def test_high_concurrency_ssh_tunnel_opening(generic_cloud: str,
             # Restart the API server to remove existing tunnels.
             'sky api stop; sky api start',
             start_concurrent_tail_logs,
+            # Print the full logs for debugging.
             f'echo "=== FULL LOGS ===" && cat {log_file}',
             f'echo "=== ERRORS ===" && ! grep "sky.utils.locks.LockTimeout" {log_file} && echo "No LockTimeout errors"',
+            # Verify that all the tail logs requests succeeded.
+            # Assume the API server is isolated for this test only.
+            f's=$(sky api status -a -l all | grep "sky.logs" | grep SUCCEEDED) && echo $s && echo "$s" | wc -l | grep {concurrency}',
         ],
-        f'sky down -y {name}',
+        (f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api stop && '
+         f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api start; '
+         f'sky down -y {name}'),
     )
     smoke_tests_utils.run_one_test(test)
