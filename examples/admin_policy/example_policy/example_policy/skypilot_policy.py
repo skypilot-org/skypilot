@@ -273,7 +273,6 @@ class TokenBucketRateLimiter:
                             }))
                 session.execute(insert_or_update_stmt)
                 session.commit()
-                print(f'{tokens} tokens remaining for user {user_name}')
             return allowed
 
 
