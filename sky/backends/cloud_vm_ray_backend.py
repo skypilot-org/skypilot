@@ -187,7 +187,9 @@ _MAX_RAY_UP_RETRY = 5
 _MAX_GET_ZONE_RETRY = 3
 
 _JOB_ID_PATTERN = re.compile(r'Job ID: ([0-9]+)')
+_JOB_IDS_PATTERN = re.compile(r'Job IDs: ([0-9,]+)')
 _LOG_DIR_PATTERN = re.compile(r'Log Dir: ([^ ]+)')
+_LOG_DIRS_PATTERN = re.compile(r'Log Dirs: ([^ ]+)')
 
 # Path to the monkey-patched ray up script.
 # We don't do import then __file__ because that script needs to be filled in
@@ -4468,23 +4470,26 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _add_job(self, handle: CloudVmRayResourceHandle,
                  job_name: Optional[str], resources_str: str,
-                 metadata: str) -> Tuple[int, str]:
+                 metadata: str, num_jobs: int = 1) -> Tuple[List[int], List[str]]:
         use_legacy = not handle.is_grpc_enabled_with_flag
 
         if not use_legacy:
             try:
+                # TODO (lloyd): How can we support the old grpc version?
                 request = jobsv1_pb2.AddJobRequest(
                     job_name=job_name,
                     username=common_utils.get_user_hash(),
                     run_timestamp=self.run_timestamp,
                     resources_str=resources_str,
-                    metadata=metadata)
+                    metadata=metadata,
+                    num_jobs=num_jobs)
                 response = backend_utils.invoke_skylet_with_retries(
                     lambda: SkyletClient(handle.get_grpc_channel()).add_job(
                         request))
-                job_id = response.job_id
-                log_dir = response.log_dir
-                return job_id, log_dir
+
+                job_ids = list(response.job_ids)
+                log_dirs = list(response.log_dirs)
+                return job_ids, log_dirs
             except exceptions.SkyletMethodNotImplementedError:
                 use_legacy = True
 
@@ -4494,7 +4499,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 username=common_utils.get_user_hash(),
                 run_timestamp=self.run_timestamp,
                 resources_str=resources_str,
-                metadata=metadata)
+                metadata=metadata,
+                num_jobs=num_jobs)
             returncode, result_str, stderr = self.run_on_head(
                 handle,
                 code,
@@ -4511,23 +4517,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                'Failed to fetch job id.',
                                                stderr)
             try:
-                job_id_match = _JOB_ID_PATTERN.search(result_str)
-                if job_id_match is not None:
-                    job_id = int(job_id_match.group(1))
+                # Parse multiple job IDs and log dirs
+                job_ids_match = _JOB_IDS_PATTERN.search(result_str)
+                log_dirs_match = _LOG_DIRS_PATTERN.search(result_str)
+                if job_ids_match and log_dirs_match:
+                    job_ids = [int(x.strip()) for x in job_ids_match.group(1).split(',')]
+                    log_dirs = [x.strip() for x in log_dirs_match.group(1).split(',')]
+                    return job_ids, log_dirs
                 else:
-                    # For backward compatibility.
-                    job_id = int(result_str)
-                log_dir_match = _LOG_DIR_PATTERN.search(result_str)
-                if log_dir_match is not None:
-                    log_dir = log_dir_match.group(1).strip()
-                else:
-                    # For backward compatibility, use the same log dir as local.
-                    log_dir = self.log_dir
+                    raise ValueError(f'Failed to parse multiple job ids from: {result_str}')
             except ValueError as e:
                 logger.error(stderr)
                 raise ValueError(f'Failed to parse job id: {result_str}; '
                                  f'Returncode: {returncode}') from e
-        return job_id, log_dir
 
     def _execute(
         self,
@@ -4578,8 +4580,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.info(f'Dryrun complete. Would have run:\n{task}')
             return None
 
-        job_id, log_dir = self._add_job(handle, task_copy.name, resources_str,
+        job_ids, log_dirs = self._add_job(handle, task_copy.name, resources_str,
                                         task.metadata_json)
+        job_id = job_ids[0]
+        log_dir = log_dirs[0]
 
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods

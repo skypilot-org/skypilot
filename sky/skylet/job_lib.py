@@ -14,7 +14,7 @@ import sqlite3
 import threading
 import time
 import typing
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import colorama
 import filelock
@@ -391,24 +391,46 @@ def add_job(job_name: str,
             username: str,
             run_timestamp: str,
             resources_str: str,
-            metadata: str = '{}') -> Tuple[int, str]:
-    """Atomically reserve the next available job id for the user."""
+            metadata: str = '{}',
+            num_jobs: int = 1) -> Tuple[List[int], List[str]]:
+    """Atomically reserve the next available job id(s) for the user.
+    
+    Args:
+        num_jobs: Number of job IDs to create. Defaults to 1.
+    
+    Returns:
+        ([job_id1, job_id2, ...], [log_dir1, log_dir2, ...])
+    """
     assert _DB is not None
     job_submitted_at = time.time()
-    # job_id will autoincrement with the null value
-    _DB.cursor.execute(
+
+    # Create multiple job IDs using bulk insert        
+    # Prepare data for bulk insert - create list of tuples with same data repeated
+    insert_data = [(job_name, username, job_submitted_at, JobStatus.INIT.value,
+                    run_timestamp, None, resources_str, metadata)] * num_jobs
+    
+    # Insert all jobs at once using executemany (more efficient than individual inserts)
+    _DB.cursor.executemany(
         'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?)',
-        (job_name, username, job_submitted_at, JobStatus.INIT.value,
-         run_timestamp, None, resources_str, metadata))
+        insert_data)
     _DB.conn.commit()
-    rows = _DB.cursor.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
-                              (run_timestamp,))
+    
+    # Get all newly created job IDs
+    # Use fetchall() to ensure we get all rows, and use string formatting for LIMIT since
+    # SQLite parameter binding for LIMIT can be unreliable
+    rows = _DB.cursor.execute(
+        f'SELECT job_id FROM jobs WHERE run_timestamp=(?) ORDER BY job_id',
+        (run_timestamp,)).fetchall()
+    job_ids = []
+    log_dirs = []
     for row in rows:
         job_id = row[0]
-    assert job_id is not None
-    log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY, f'{job_id}-{job_name}')
-    set_log_dir_no_lock(job_id, log_dir)
-    return job_id, log_dir
+        job_ids.append(job_id)
+        log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY, f'{job_id}-{job_name}')
+        set_log_dir_no_lock(job_id, log_dir)
+        log_dirs.append(log_dir)
+    assert len(job_ids) == num_jobs, f'Expected {num_jobs} job IDs, got {len(job_ids)}'
+    return job_ids, log_dirs
 
 
 @init_db
@@ -1155,7 +1177,7 @@ class JobLibCodeGen:
 
     @classmethod
     def add_job(cls, job_name: Optional[str], username: str, run_timestamp: str,
-                resources_str: str, metadata: str) -> str:
+                resources_str: str, metadata: str, num_jobs: int = 1) -> str:
         if job_name is None:
             job_name = '-'
         code = [
@@ -1173,18 +1195,30 @@ class JobLibCodeGen:
             f'{username!r},'
             f'{run_timestamp!r},'
             f'{resources_str!r})',
-            '\nelse: '
+            '\nelif int(constants.SKYLET_VERSION) < 26:'
             '\n result = job_lib.add_job('
             f'{job_name!r},'
             f'{username!r},'
             f'{run_timestamp!r},'
             f'{resources_str!r},'
             f'metadata={metadata!r})',
+            '\nelse: '
+            '\n result = job_lib.add_job('
+            f'{job_name!r},'
+            f'{username!r},'
+            f'{run_timestamp!r},'
+            f'{resources_str!r},'
+            f'metadata={metadata!r},'
+            f'num_jobs={num_jobs})',
             ('\nif isinstance(result, tuple):'
-             '\n  print("Job ID: " + str(result[0]), flush=True)'
-             '\n  print("Log Dir: " + str(result[1]), flush=True)'
-             '\nelse:'
-             '\n  print("Job ID: " + str(result), flush=True)'),
+                '\n  if isinstance(result[0], list):'
+                '\n    print("Job IDs: " + ",".join(map(str, result[0])), flush=True)'
+                '\n    print("Log Dirs: " + ",".join(map(str, result[1])), flush=True)'
+                '\n  else:'
+                '\n    print("Job IDs: " + str(result[0]), flush=True)'
+                '\n    print("Log Dirs: " + str(result[1]), flush=True)'
+                '\nelse:'
+                '\n  print("Job IDs: " + str(result), flush=True)'),
         ]
         return cls._build(code)
 

@@ -46,11 +46,12 @@ message AddJobRequest {
   string run_timestamp = 3;
   string resources_str = 4;
   string metadata = 5;
+  int32 num_jobs = 6;
 }
 
 message AddJobResponse {
-  int64 job_id = 1;
-  string log_dir = 2;
+  repeated int64 job_ids = 1;
+  repeated string log_dirs = 2;
 }
 
 message QueueJobRequest {
