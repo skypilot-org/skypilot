@@ -189,6 +189,10 @@ class JobController:
             task_envs[constants.TASK_ID_ENV_VAR] = job_id_env_vars[i]
             task_envs[constants.TASK_ID_LIST_ENV_VAR] = '\n'.join(
                 job_id_env_vars)
+            # Add SKYPILOT_JOB_RANK if it's set in the context or os.environ
+            # (os.environ may be hijacked to use ContextualEnviron which includes context overrides)
+            if 'SKYPILOT_JOB_RANK' in os.environ:
+                task_envs['SKYPILOT_JOB_RANK'] = os.environ['SKYPILOT_JOB_RANK']
             task.update_envs(task_envs)
 
     def _download_log_and_stream(
@@ -959,6 +963,26 @@ class ControllerManager:
                     # Restore config file if needed
                     file_content_utils.restore_job_config_file(job_id)
 
+                    
+                    # Set SKYPILOT_JOB_RANK from job_id_to_rank mapping if available
+                    if 'SKYPILOT_JOB_ID_TO_RANK' in env_vars and env_vars['SKYPILOT_JOB_ID_TO_RANK']:
+                        try:
+                            import json
+                            job_id_to_rank = json.loads(env_vars['SKYPILOT_JOB_ID_TO_RANK'])
+                            logger.debug('Loaded job_id_to_rank mapping: %s', job_id_to_rank)
+                            logger.debug('Looking up rank for job_id=%s (type=%s)', job_id, type(job_id))
+                            job_rank = job_id_to_rank.get(str(job_id))
+                            if job_rank is not None:
+                                ctx.override_envs({'SKYPILOT_JOB_RANK': str(job_rank)})
+                                logger.info('Set SKYPILOT_JOB_RANK=%s for job %s', job_rank, job_id)
+                            else:
+                                logger.warning('Job ID %s not found in job_id_to_rank mapping. Available keys: %s', 
+                                             job_id, list(job_id_to_rank.keys()))
+                        except json.JSONDecodeError as e:
+                            logger.warning('Failed to parse SKYPILOT_JOB_ID_TO_RANK for job %s: %s', job_id, e)
+                    else:
+                        logger.warning('SKYPILOT_JOB_ID_TO_RANK not found in environment variables')
+                    
                     skypilot_config.reload_config()
                 else:  # pragma: no cover - defensive
                     logger.error('Context is None, cannot set environment '
