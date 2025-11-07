@@ -535,12 +535,12 @@ if __name__ == '__main__':
                 f'{name}: Fetched regions {fetched_regions} does not match '
                 f'requested regions {user_regions}; Diff: {diff}')
 
-    #instance_df = get_all_regions_instance_types_df(user_regions)
-    #_check_regions_integrity(instance_df, 'instance types')
+    instance_df = get_all_regions_instance_types_df(user_regions)
+    _check_regions_integrity(instance_df, 'instance types')
 
     os.makedirs('aws', exist_ok=True)
-    #instance_df.to_csv('aws/vms.csv', index=False)
-    #print('AWS Service Catalog saved to aws/vms.csv')
+    instance_df.to_csv('aws/vms.csv', index=False)
+    print('AWS Service Catalog saved to aws/vms.csv')
 
     # Disable refreshing images.csv for skypilot custom AMIs
     # refresh only the neuron based images
