@@ -2260,6 +2260,11 @@ def _update_cluster_status(
             total_nodes = handle.launched_nodes * handle.num_ips_per_node
 
             cloud_name = repr(handle.launched_resources.cloud).lower()
+            # Initialize variables in case all retries fail
+            ready_head = 0
+            ready_workers = 0
+            output = ''
+            stderr = ''
             for i in range(5):
                 try:
                     ready_head, ready_workers, output, stderr = (
