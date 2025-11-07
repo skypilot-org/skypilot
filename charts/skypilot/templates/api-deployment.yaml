@@ -174,17 +174,22 @@ spec:
             cp /var/skypilot/config/config.yaml /root/.sky/config.yaml
           fi
           {{- if .Values.apiService.sshNodePools }}
+          # ~/.kube/config is required to be persistent when sshNodePools is enabled, init it if it is empty to avoid parsing error.
+          if [ ! -s /root/.kube/config ]; then
+            echo "{}" > /root/.kube/config
+          fi
           mkdir -p /root/.sky
           # The PVC serves as the ground truth for the ssh_node_pools.yaml file, if it already exists we don't overwrite it
           if [ ! -s /root/.sky/ssh_node_pools.yaml ]; then
             echo "ssh_node_pools.yaml not found in /root/.sky, copying from ConfigMap \`skypilot-ssh-node-pools\`"
             cp /var/skypilot/ssh_node_pool/ssh_node_pools.yaml /root/.sky/ssh_node_pools.yaml
+          {{- if not .Values.storage.enabled}}
+            # For rolling-update without local storage, recover the kubeconfig of node pool automatically
+            sky ssh up || true
+            sky api stop || true
+          {{- end }}
           else
             echo "ssh_node_pools.yaml already exists in /root/.sky, skipping copy"
-          fi
-          # ~/.kube/config is required to be persistent when sshNodePools is enabled, init it if it is empty to avoid parsing error.
-          if [ ! -s /root/.kube/config ]; then
-            echo "{}" > /root/.kube/config
           fi
           {{- end }}
           # Nebius credentials mounting
