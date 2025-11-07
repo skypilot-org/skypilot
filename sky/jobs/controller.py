@@ -2,6 +2,7 @@
 """
 import asyncio
 import io
+import json
 import os
 import pathlib
 import resource
@@ -964,11 +965,11 @@ class ControllerManager:
                     file_content_utils.restore_job_config_file(job_id)
 
                     
-                    # Set SKYPILOT_JOB_RANK from job_id_to_rank mapping if available
+                    # Set SKYPILOT_JOB_RANK from job_id_to_rank mapping if 
+                    # available
                     if ('SKYPILOT_JOB_ID_TO_RANK' in env_vars and
                             env_vars['SKYPILOT_JOB_ID_TO_RANK']):
                         try:
-                            import json
                             job_id_to_rank = (json.loads(
                                 env_vars['SKYPILOT_JOB_ID_TO_RANK']))
                             logger.debug('Loaded job_id_to_rank mapping: %s',
@@ -985,16 +986,17 @@ class ControllerManager:
                                     job_rank, job_id)
                             else:
                                 logger.warning(
-                                    'Job ID %s not found in job_id_to_rank mapping. Available keys: %s',
-                                    job_id, list(job_id_to_rank.keys()))
+                                    'Job ID %s not found in job_id_to_rank '
+                                    'mapping. Available keys: %s', job_id,
+                                    list(job_id_to_rank.keys()))
                         except json.JSONDecodeError as e:
                             logger.warning(
-                                'Failed to parse SKYPILOT_JOB_ID_TO_RANK for job %s: %s',
-                                job_id, e)
+                                'Failed to parse SKYPILOT_JOB_ID_TO_RANK for '
+                                'job %s: %s', job_id, e)
                     else:
                         logger.debug(
-                            'SKYPILOT_JOB_ID_TO_RANK not found in environment variables'
-                        )
+                            'SKYPILOT_JOB_ID_TO_RANK not found in environment '
+                            'variables')
 
                     skypilot_config.reload_config()
                 else:  # pragma: no cover - defensive

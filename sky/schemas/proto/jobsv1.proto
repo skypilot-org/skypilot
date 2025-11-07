@@ -50,8 +50,10 @@ message AddJobRequest {
 }
 
 message AddJobResponse {
-  repeated int64 job_ids = 1;
-  repeated string log_dirs = 2;
+  int64 job_id = 1;
+  string log_dir = 2;
+  repeated int64 job_ids = 3;
+  repeated string log_dirs = 4;
 }
 
 message QueueJobRequest {
