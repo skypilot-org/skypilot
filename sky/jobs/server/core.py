@@ -381,17 +381,16 @@ def launch(
                 
                 # Create num_jobs - 1 job IDs upfront (the controller task's ray job
                 # ID will be used as the nth job ID)
-                pre_created_job_ids = []
                 resources_str = backend_utils.get_task_resources_str(
                     dag.tasks[0], is_managed_job=True)
-                for job_rank in range(num_jobs - 1):
-                    job_name = dag.name
-                    job_id, _ = backend._add_job(
-                        handle=local_handle,
-                        job_name=job_name,
-                        resources_str=resources_str,
-                        metadata=dag.tasks[0].metadata_json)
-                    pre_created_job_ids.append(job_id)
+                job_name = dag.name
+                result = backend._add_job(
+                    handle=local_handle,
+                    job_name=job_name,
+                    resources_str=resources_str,
+                    metadata=dag.tasks[0].metadata_json,
+                    num_jobs=num_jobs - 1)
+                pre_created_job_ids = result[0]
                 logger.info(f'Created {len(pre_created_job_ids) + 1} job IDs upfront: '
                         f'{pre_created_job_ids} (will use controller task ray job ID as the {num_jobs}th job)')
             except exceptions.ClusterNotUpError:
@@ -525,9 +524,6 @@ def launch(
                             
                             # Append the controller task's ray job ID to complete the list
                             all_job_ids = pre_created_job_ids + [controller_ray_job_id]
-                            logger.info(f'Complete job ID list: {all_job_ids} '
-                                    f'(pre-created: {pre_created_job_ids}, '
-                                    f'controller ray job ID: {controller_ray_job_id})')
                             
                             # Return the complete list of job IDs and handle
                             return all_job_ids, result[1] if isinstance(result, tuple) else None  
