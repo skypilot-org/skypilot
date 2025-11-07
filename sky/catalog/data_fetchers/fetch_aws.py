@@ -394,7 +394,6 @@ def _fetch_image_creation_date(region: str, image_id: Optional[str]) -> Optional
         print(f'{type(e)}: {e}')
         image_id = None
     else:
-        import re
         assert image is not None
         image_name = image.decode('utf-8').strip()
         match = re.search(r'(\d+)$', image_name)
