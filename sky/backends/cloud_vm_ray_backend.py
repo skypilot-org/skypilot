@@ -4076,23 +4076,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _get_num_gpus(self, handle: CloudVmRayResourceHandle,
                       task: task_lib.Task) -> int:
+        # Make sure we use the resources that actually fit the cluster. This
+        # is important for the pools case where we haven't already checked
+        # the resources fit the cluster.
         valid_resources = self.check_resources_fit_cluster(handle,
                                                            task,
                                                            check_ports=True)
-        task_copy = copy.copy(task)
-        task_copy.set_resources(valid_resources)
-        ray_resources_dict = backend_utils.get_task_demands_dict(task_copy)
-        dict_copy = copy.copy(ray_resources_dict)
-        try:
-            dict_copy.pop('CPU')
-        except KeyError:
-            pass
-        if len(dict_copy) == 0:
-            return 0
-        assert len(dict_copy) == 1, (
-            'There can only be one type of accelerator per instance. '
-            f'Found: {dict_copy}.')
-        return math.ceil(list(dict_copy.values())[0])
+
+        if (valid_resources.accelerators is not None and
+                isinstance(valid_resources.accelerators, dict)):
+            if len(valid_resources.accelerators) > 0:
+                return math.ceil(list(valid_resources.accelerators.values())[0])
+        return 0
 
     def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
                detach_setup: bool) -> None:
