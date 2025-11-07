@@ -574,6 +574,10 @@ def kill_requests_with_prefix(request_ids: Optional[List[str]] = None,
     return _kill_requests(request_ids=expanded_request_ids, user_id=user_id)
 
 
+# needed for backward compatibility. Remove by v0.10.7 or v0.11.0
+kill_requests = kill_requests_with_prefix
+
+
 def _should_kill_request(request_id: str,
                          request_record: Optional[Request]) -> bool:
     if request_record is None:
