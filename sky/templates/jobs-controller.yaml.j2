@@ -54,21 +54,38 @@ run: |
   echo "export {{env_name}}='{{env_value}}'" >> {{remote_env_file_path}}
   {%- endfor %}
 
+  {%- if job_id_to_rank is defined and job_id_to_rank is not none %}
+  # Add the controller task's ray job ID to the job_id_to_rank dictionary
+  # and write it to the env file so the controller can look up ranks
+  # The last rank is num_jobs - 1
+  if [ -n "$SKYPILOT_INTERNAL_JOB_ID" ]; then
+    export _TMP_JOB_ID_TO_RANK='{{job_id_to_rank | tojson}}'
+    python3 -c "import json, os, sys; d=json.loads(os.environ['_TMP_JOB_ID_TO_RANK']); d[str(os.environ['SKYPILOT_INTERNAL_JOB_ID'])]={{num_jobs - 1}}; sys.stdout.write('export SKYPILOT_JOB_ID_TO_RANK='); json.dump(d, sys.stdout); sys.stdout.write('\n')" >> {{remote_env_file_path}} 2>&1
+    unset _TMP_JOB_ID_TO_RANK
+  else
+    echo "Warning: SKYPILOT_INTERNAL_JOB_ID not set, cannot add to job_id_to_rank" >> {{remote_env_file_path}} 2>&1
+  fi
+  {%- endif %}
+
   # Submit the job(s) to the scheduler.
   # Note: The job is already in the `spot` table, marked as PENDING.
   # CloudVmRayBackend._exec_code_on_head() calls
   # managed_job_codegen.set_pending() before we get here.
   {%- if pre_created_job_ids is defined and pre_created_job_ids is not none %}
-  # Submit multiple jobs with pre-created job IDs in a single call
-  python \
-    -u -m sky.jobs.scheduler {{remote_user_yaml_path}} \
-    --user-yaml-path {{remote_original_user_yaml_path}} \
-    --job-id {% for job_id in pre_created_job_ids %}{{job_id}} {% endfor %} \
-    --env-file {{remote_env_file_path}} \
-    {%- if pool is not none %}
-    --pool {{pool}} \
-    {%- endif %}
-    --priority {{priority}}
+  # Batch submission: loop through pre-created job IDs and append the controller
+  # task's ray job ID ($SKYPILOT_INTERNAL_JOB_ID) as the last job ID
+  job_ids_array=({% for job_id in pre_created_job_ids %}{{job_id}} {% endfor %}$SKYPILOT_INTERNAL_JOB_ID)
+  for job_id in "${job_ids_array[@]}"; do
+    python \
+      -u -m sky.jobs.scheduler {{remote_user_yaml_path}} \
+      --user-yaml-path {{remote_original_user_yaml_path}} \
+      --job-id $job_id \
+      --env-file {{remote_env_file_path}} \
+      {%- if pool is not none %}
+      --pool {{pool}} \
+      {%- endif %}
+      --priority {{priority}}
+  done
   {%- elif consolidation_mode_job_id is not none %}
   {{sky_python_cmd}} \
     -u -m sky.jobs.scheduler {{remote_user_yaml_path}} \
