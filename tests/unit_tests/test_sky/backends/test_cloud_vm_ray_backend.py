@@ -441,9 +441,8 @@ class TestCloudVmRayBackendGetGrpcChannel:
 
     def test_setup_num_gpus(self, monkeypatch):
         """Test setup num GPUs."""
-        test_task = task.Task(resources=resources.Resources(accelerators={
-            'A100': 8
-        }))
+        test_task = task.Task(resources=resources.Resources(
+            accelerators={'A100': 8}))
         monkeypatch.setattr(CloudVmRayResourceHandle, '__init__',
                             lambda self, *args, **kwargs: None)
         backend = CloudVmRayBackend()
