@@ -221,7 +221,7 @@ def test_get_clusters_launch_refresh(monkeypatch):
         return []
 
     def refresh_cluster(cluster_name, force_refresh_statuses, include_user_info,
-                        summary_response, retry_if_missing):
+                        summary_response):
         if cluster_name == 'up-cluster':
             return _mock_cluster(False)
         elif cluster_name == 'launch-cluster':
