@@ -442,18 +442,12 @@ class TestCloudVmRayBackendGetGrpcChannel:
     def test_setup_num_gpus(self, monkeypatch):
         """Test setup num GPUs."""
         test_task = task.Task(resources=resources.Resources(accelerators={
-            'A100': 8,
-            'L4': 1
+            'A100': 8
         }))
         monkeypatch.setattr(CloudVmRayResourceHandle, '__init__',
                             lambda self, *args, **kwargs: None)
         backend = CloudVmRayBackend()
-        monkeypatch.setattr(backend,
-                            'check_resources_fit_cluster',
-                            lambda handle, task, check_ports=True: resources.
-                            Resources(accelerators={'L4': 1}))
-        handle = CloudVmRayResourceHandle(**self.MOCK_HANDLE_KWARGS)
-        assert backend._get_num_gpus(handle, test_task) == 1
+        assert backend._get_num_gpus(test_task) == 8
 
 
 class TestIsMessageTooLong:
