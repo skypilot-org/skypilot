@@ -279,7 +279,7 @@ class TokenBucketRateLimiter:
 
 class RateLimitLaunchPolicy(sky.AdminPolicy):
     """Example policy: rate limit cluster launch requests."""
-    _RATE_LIMITER = TokenBucketRateLimiter(capacity=1, fill_rate=0)
+    _RATE_LIMITER = TokenBucketRateLimiter(capacity=10, fill_rate=1)
 
     @classmethod
     def validate_and_mutate(
