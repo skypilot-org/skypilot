@@ -366,7 +366,7 @@ def launch(
     modified_catalogs = {} if consolidation_mode_job_ids is not None else (
         service_catalog_common.get_modified_catalog_file_mounts())
 
-    # For pools with num_jobs > 1, create job IDs upfront using a single controller task
+    # For pools with num_jobs > 1, create job IDs upfront with one task.
     pre_created_job_ids: Optional[List[int]] = None
     if (pool is not None and num_jobs > 1 and
             consolidation_mode_job_ids is None):
@@ -379,21 +379,21 @@ def launch(
                 backend = backend_utils.get_backend_from_handle(local_handle)
                 assert isinstance(backend, backends.CloudVmRayBackend)
 
-                # Create num_jobs - 1 job IDs upfront (the controller task's ray job
-                # ID will be used as the nth job ID)
+                # Create num_jobs - 1 job IDs upfront (the controller task's ray
+                # job ID will be used as the nth job ID)
                 resources_str = backend_utils.get_task_resources_str(
                     dag.tasks[0], is_managed_job=True)
                 job_name = dag.name
-                result = backend._add_job(handle=local_handle,
-                                          job_name=job_name,
-                                          resources_str=resources_str,
-                                          metadata=dag.tasks[0].metadata_json,
-                                          num_jobs=num_jobs - 1)
+                result = backend.add_job(handle=local_handle,
+                                         job_name=job_name,
+                                         resources_str=resources_str,
+                                         metadata=dag.tasks[0].metadata_json,
+                                         num_jobs=num_jobs - 1)
                 pre_created_job_ids = result[0]
-                logger.info(
+                logger.debug(
                     f'Created {len(pre_created_job_ids) + 1} job IDs upfront: '
-                    f'{pre_created_job_ids} (will use controller task ray job ID as the {num_jobs}th job)'
-                )
+                    f'{pre_created_job_ids} (will use controller task ray job '
+                    f'ID as the {num_jobs}th job).')
             except exceptions.ClusterNotUpError:
                 # Controller not up yet, will create job IDs during submission
                 pre_created_job_ids = None
@@ -406,7 +406,7 @@ def launch(
     ) -> Tuple[Optional[Union[int, List[int]]],
                Optional[backends.ResourceHandle]]:
         # Create a single set of YAML files (not per-rank)
-        remote_original_user_yaml_path = (
+        remote_orig_user_yaml_path = (
             f'{prefix}/{dag.name}-{dag_uuid}.original_user_yaml')
         remote_user_yaml_path = (f'{prefix}/{dag.name}-{dag_uuid}.yaml')
         remote_user_config_path = (
@@ -431,9 +431,8 @@ def launch(
                     task_.update_envs({'SKYPILOT_NUM_JOBS': str(num_jobs)})
             dag_utils.dump_chain_dag_to_yaml(dag_copy, f.name)
 
-            logger.info(f'Dumped DAG copy to {f.name}')
             vars_to_fill = {
-                'remote_original_user_yaml_path': remote_original_user_yaml_path,
+                'remote_original_user_yaml_path': remote_orig_user_yaml_path,
                 'original_user_dag_path': original_user_yaml_path.name,
                 'remote_user_yaml_path': remote_user_yaml_path,
                 'user_yaml_path': f.name,
@@ -460,8 +459,9 @@ def launch(
 
             if pre_created_job_ids is not None:
                 vars_to_fill['pre_created_job_ids'] = pre_created_job_ids
-                # Create job_id_to_rank dictionary by sorting job IDs and assigning ranks
-                # The last job ID (controller task's ray job ID) will be added in the template
+                # Create job_id_to_rank dictionary by sorting job IDs and
+                # assigning ranks. The last job ID (controller task's ray
+                # job ID) will be added in the template
                 sorted_job_ids = sorted(pre_created_job_ids)
                 job_id_to_rank = {
                     str(job_id): rank
@@ -496,11 +496,8 @@ def launch(
                 managed_job_constants.JOBS_CONTROLLER_TEMPLATE,
                 vars_to_fill,
                 output_path=yaml_path)
-            logger.info(f'Filled template to {yaml_path}')
             controller_task = task_lib.Task.from_yaml(yaml_path)
-            logger.info(f'Created controller task from {yaml_path}')
             controller_task.set_resources(controller_resources)
-            logger.info(f'Set resources to controller task')
             controller_task.managed_job_dag = dag_copy
             # pylint: disable=protected-access
             controller_task._metadata = metadata
@@ -524,7 +521,7 @@ def launch(
                                 result, tuple) else None)
                             assert controller_ray_job_id is not None, (
                                 'Failed '
-                                ' to get ray job ID from controller task launch.'
+                                'to get ray job ID from controller task launch.'
                             )
 
                             # Append the controller task's ray job ID since it

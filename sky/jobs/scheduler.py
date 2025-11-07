@@ -65,7 +65,6 @@ from sky.jobs import utils as managed_job_utils
 from sky.serve import serve_state
 from sky.server import config as server_config
 from sky.skylet import constants
-from sky.skylet import constants as skylet_constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import controller_utils

@@ -4466,12 +4466,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 ux_utils.starting_message(f'Job submitted, ID: {job_id}'))
         rich_utils.stop_safe_status()
 
-    def _add_job(self,
-                 handle: CloudVmRayResourceHandle,
-                 job_name: Optional[str],
-                 resources_str: str,
-                 metadata: str,
-                 num_jobs: int = 1) -> Tuple[List[int], List[str]]:
+    def add_job(self,
+                handle: CloudVmRayResourceHandle,
+                job_name: Optional[str],
+                resources_str: str,
+                metadata: str,
+                num_jobs: int = 1) -> Tuple[List[int], List[str]]:
         use_legacy = not handle.is_grpc_enabled_with_flag
 
         if not use_legacy:
@@ -4488,9 +4488,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     lambda: SkyletClient(handle.get_grpc_channel()).add_job(
                         request))
 
-                job_ids = list(response.job_ids)
-                log_dirs = list(response.log_dirs)
-                return job_ids, log_dirs
+                if response.HasField('job_ids'):
+                    job_ids = list(response.job_ids)
+                    log_dirs = list(response.log_dirs)
+                    return job_ids, log_dirs
+                else:
+                    # Old server version.
+                    job_ids = [response.job_id]
+                    log_dirs = [response.log_dir]
+                    # Now we need to do this (num_jobs - 1) times to get the
+                    # rest of the job_ids and log_dirs.
+                    for _ in range(num_jobs - 1):
+                        response = backend_utils.invoke_skylet_with_retries(
+                            lambda: SkyletClient(handle.get_grpc_channel()
+                                                ).add_job(request))
+                        job_ids.append(response.job_id)
+                        log_dirs.append(response.log_dir)
+                    return job_ids, log_dirs
             except exceptions.SkyletMethodNotImplementedError:
                 use_legacy = True
 
@@ -4588,8 +4602,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.info(f'Dryrun complete. Would have run:\n{task}')
             return None
 
-        job_ids, log_dirs = self._add_job(handle, task_copy.name, resources_str,
-                                          task.metadata_json)
+        job_ids, log_dirs = self.add_job(handle, task_copy.name, resources_str,
+                                         task.metadata_json)
         job_id = job_ids[0]
         log_dir = log_dirs[0]
 

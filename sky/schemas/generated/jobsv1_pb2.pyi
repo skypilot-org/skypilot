@@ -30,26 +30,32 @@ JOB_STATUS_FAILED_SETUP: JobStatus
 JOB_STATUS_CANCELLED: JobStatus
 
 class AddJobRequest(_message.Message):
-    __slots__ = ("job_name", "username", "run_timestamp", "resources_str", "metadata")
+    __slots__ = ("job_name", "username", "run_timestamp", "resources_str", "metadata", "num_jobs")
     JOB_NAME_FIELD_NUMBER: _ClassVar[int]
     USERNAME_FIELD_NUMBER: _ClassVar[int]
     RUN_TIMESTAMP_FIELD_NUMBER: _ClassVar[int]
     RESOURCES_STR_FIELD_NUMBER: _ClassVar[int]
     METADATA_FIELD_NUMBER: _ClassVar[int]
+    NUM_JOBS_FIELD_NUMBER: _ClassVar[int]
     job_name: str
     username: str
     run_timestamp: str
     resources_str: str
     metadata: str
-    def __init__(self, job_name: _Optional[str] = ..., username: _Optional[str] = ..., run_timestamp: _Optional[str] = ..., resources_str: _Optional[str] = ..., metadata: _Optional[str] = ...) -> None: ...
+    num_jobs: int
+    def __init__(self, job_name: _Optional[str] = ..., username: _Optional[str] = ..., run_timestamp: _Optional[str] = ..., resources_str: _Optional[str] = ..., metadata: _Optional[str] = ..., num_jobs: _Optional[int] = ...) -> None: ...
 
 class AddJobResponse(_message.Message):
-    __slots__ = ("job_id", "log_dir")
+    __slots__ = ("job_id", "log_dir", "job_ids", "log_dirs")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     LOG_DIR_FIELD_NUMBER: _ClassVar[int]
+    JOB_IDS_FIELD_NUMBER: _ClassVar[int]
+    LOG_DIRS_FIELD_NUMBER: _ClassVar[int]
     job_id: int
     log_dir: str
-    def __init__(self, job_id: _Optional[int] = ..., log_dir: _Optional[str] = ...) -> None: ...
+    job_ids: _containers.RepeatedScalarFieldContainer[int]
+    log_dirs: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, job_id: _Optional[int] = ..., log_dir: _Optional[str] = ..., job_ids: _Optional[_Iterable[int]] = ..., log_dirs: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class QueueJobRequest(_message.Message):
     __slots__ = ("job_id", "codegen", "script_path", "remote_log_dir", "managed_job")

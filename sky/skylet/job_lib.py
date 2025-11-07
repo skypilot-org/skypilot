@@ -14,7 +14,7 @@ import sqlite3
 import threading
 import time
 import typing
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import colorama
 import filelock
@@ -394,10 +394,10 @@ def add_job(job_name: str,
             metadata: str = '{}',
             num_jobs: int = 1) -> Tuple[List[int], List[str]]:
     """Atomically reserve the next available job id(s) for the user.
-    
+
     Args:
         num_jobs: Number of job IDs to create. Defaults to 1.
-    
+
     Returns:
         ([job_id1, job_id2, ...], [log_dir1, log_dir2, ...])
     """
@@ -413,8 +413,8 @@ def add_job(job_name: str,
 
     # Get all newly created job IDs using fetchall() to ensure we get all rows.
     rows = _DB.cursor.execute(
-        f'SELECT job_id FROM jobs WHERE run_timestamp=(?) ORDER BY job_id',
-        (run_timestamp,)).fetchall()
+        f'SELECT job_id FROM jobs WHERE run_timestamp=(?) ORDER BY job_id '
+        f'LIMIT {num_jobs}', (run_timestamp,)).fetchall()
     job_ids = []
     log_dirs = []
     for row in rows:
@@ -1190,19 +1190,27 @@ class JobLibCodeGen:
             'raise RuntimeError("SkyPilot runtime is too old, which does not '
             'support submitting jobs.")',
             '\nresult = None',
+            '\njob_ids = []',
+            '\nlog_dirs = None',
             '\nif int(constants.SKYLET_VERSION) < 15: '
-            '\n result = job_lib.add_job('
+            '\n for _ in range(num_jobs):'
+            '\n  result = job_lib.add_job('
             f'{job_name!r},'
             f'{username!r},'
             f'{run_timestamp!r},'
-            f'{resources_str!r})',
+            f'{resources_str!r})'
+            '\n  job_ids.append(result[0])',
             '\nelif int(constants.SKYLET_VERSION) < 26:'
-            '\n result = job_lib.add_job('
+            '\n log_dirs = []'
+            '\n for _ in range(num_jobs):'
+            '\n  result = job_lib.add_job('
             f'{job_name!r},'
             f'{username!r},'
             f'{run_timestamp!r},'
             f'{resources_str!r},'
-            f'metadata={metadata!r})',
+            f'metadata={metadata!r})'
+            '\n  job_ids.append(result[0])',
+            '\n  log_dirs.append(result[1])',
             '\nelse: '
             '\n result = job_lib.add_job('
             f'{job_name!r},'
@@ -1210,16 +1218,13 @@ class JobLibCodeGen:
             f'{run_timestamp!r},'
             f'{resources_str!r},'
             f'metadata={metadata!r},'
-            f'num_jobs={num_jobs})',
-            ('\nif isinstance(result, tuple):'
-             '\n  if isinstance(result[0], list):'
-             '\n    print("Job IDs: " + ",".join(map(str, result[0])), flush=True)'
-             '\n    print("Log Dirs: " + ",".join(map(str, result[1])), flush=True)'
-             '\n  else:'
-             '\n    print("Job IDs: " + str(result[0]), flush=True)'
-             '\n    print("Log Dirs: " + str(result[1]), flush=True)'
-             '\nelse:'
-             '\n  print("Job IDs: " + str(result), flush=True)'),
+            f'num_jobs={num_jobs})'
+            '\n job_ids = result[0]'
+            '\n log_dirs = result[1]',
+            ('\nprint("Job IDs: " + ",".join(map(str, job_ids)), flush=True)'
+             '\nif log_dirs:'
+             '\n print("Log Dirs: " + ",".join(map(str, log_dirs)), flush=True)'
+            ),
         ]
         return cls._build(code)
 
