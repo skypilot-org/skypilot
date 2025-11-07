@@ -19,7 +19,16 @@ The tests will add many entries to these tables during execution but will clean 
 
 ## Prerequisites
 
-Before running scale tests, you **must** create sample entries in your local database that will be used as templates for generating test data. This ensures all generated data matches your environment's specific database schema and constraints.
+Before running scale tests, you **must**:
+
+1. **Enable consolidation mode**: The server must be running under consolidation mode. Ensure your `~/.sky/config.yaml` has:
+   ```yaml
+   jobs:
+     controller:
+       consolidation_mode: true
+   ```
+
+2. **Create sample entries**: Create sample entries in your local database that will be used as templates for generating test data. This ensures all generated data matches your environment's specific database schema and constraints.
 
 ### Required Sample Data Setup
 
@@ -132,19 +141,19 @@ The `run_scale_test.py` script supports several command-line arguments to custom
 
 ```bash
 # Test only active clusters with a smaller dataset
-python tests/scale_tests/run_scale_test.py \
+python tests/load_tests/db_scale_tests/run_scale_test.py \
   --test clusters \
   --cluster-count 500
 
 # Test cluster history with custom template and larger dataset
-python tests/scale_tests/run_scale_test.py \
+python tests/load_tests/db_scale_tests/run_scale_test.py \
   --test history \
   --terminated-cluster scale-test-terminated \
   --history-recent 5000 \
   --history-old 15000
 
 # Test managed jobs with custom job template
-python tests/scale_tests/run_scale_test.py \
+python tests/load_tests/db_scale_tests/run_scale_test.py \
   --test jobs \
   --managed-job-id 5 \
   --job-count 20000
