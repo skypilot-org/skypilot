@@ -57,17 +57,41 @@ _TERMINATE_INSTANCE = (
 
 _TEARDOWN_POOL = ('sky jobs pool down {pool_name} -y')
 
-_CANCEL_POOL_JOBS = ('sky jobs cancel --pool {pool_name} -y')
+# Fail if "nonterminal jobs:" is found in the output otherwise pass.
+_CANCEL_POOL_JOBS = (
+    'r=$(sky jobs cancel --pool {pool_name} -y 2>&1); '
+    'echo "$r"; '
+    'if echo "$r" | grep -q "nonterminal jobs:"; then '
+    '  echo "ERROR: Found nonterminal jobs after cancellation"; '
+    '  exit 1; '
+    'fi'
+)
 
 
 def cancel_job(job_name: str):
     return f'sky jobs cancel -n {job_name} -y'
 
 
-def cancel_jobs_and_teardown_pool(pool_name: str, timeout: int = 3):
-    return f'{_CANCEL_POOL_JOBS.format(pool_name=pool_name)} || true && ' \
-           f'sleep {timeout} && ' \
-           f'{_TEARDOWN_POOL.format(pool_name=pool_name)}'
+def cancel_jobs_and_teardown_pool(pool_name: str, timeout: int = 3, max_retries: int = 1):
+    """Cancel jobs and teardown pool, retrying up to 10 times on failure."""
+    return (
+        'for i in {1..{max_retries}}; do '
+        '  echo "Attempt $i/10: Cancelling jobs and tearing down pool..."; '
+        f'  if {_CANCEL_POOL_JOBS.format(pool_name=pool_name)} && '
+        f'     sleep {timeout} && '
+        f'     {_TEARDOWN_POOL.format(pool_name=pool_name)}; then '
+        '    echo "Successfully cancelled jobs and tore down pool"; '
+        '    break; '
+        '  else '
+        '    echo "Attempt $i failed, retrying..."; '
+        '    if [ $i -eq {max_retries} ]; then '
+        '      echo "All {max_retries} attempts failed, continuing anyway"; '
+        '      break; '
+        '    fi; '
+        '    sleep 2; '
+        '  fi; '
+        'done'
+    )
 
 
 def wait_until_pool_ready(pool_name: str,
@@ -1252,5 +1276,44 @@ def test_pools_num_jobs_rank(generic_cloud: str):
                 test_commands,
                 timeout=timeout * 2,  # Give extra time for multiple jobs
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=10),
+            )
+            smoke_tests_utils.run_one_test(test)
+
+def test_pools_num_jobs_speed(generic_cloud: str):
+    """Test that we can launch a large number of jobs quickly.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+    pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
+    job_config = basic_job_conf(job_name=f'{name}-job',
+                                run_cmd='echo "My rank is $SKYPILOT_JOB_RANK"')
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    NUM_JOBS = 10
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
+            write_yaml(pool_yaml, pool_config)
+            write_yaml(job_yaml, job_config)
+
+            # Build test commands
+            test_commands = [
+                _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
+                                                      pool_yaml=pool_yaml.name),
+                wait_until_pool_ready(pool_name, timeout=timeout),
+            ]
+            launch_timeout = 70
+            launch_cmd = (
+                'timeout {launch_timeout} bash -c "sky jobs launch --pool {pool_name} {job_yaml} --num-jobs {NUM_JOBS} -d -y"'
+            ).format(pool_name=pool_name,
+                             job_yaml=job_yaml.name,
+                             NUM_JOBS=NUM_JOBS,
+                             launch_timeout=launch_timeout)
+            test_commands.append(launch_cmd)
+
+            test = smoke_tests_utils.Test(
+                'test_pools_num_jobs_rank',
+                test_commands,
+                timeout=timeout * 2,  # Give extra time for multiple jobs
+                teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=10, max_retries=10),
             )
             smoke_tests_utils.run_one_test(test)
