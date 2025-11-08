@@ -304,11 +304,15 @@ class PostgresLock(DistributedLock):
                 ('SELECT pid FROM pg_locks WHERE locktype = \'advisory\' '
                  'AND ((classid::bigint << 32) | objid::bigint) = %s'),
                 (self._lock_key,))
-            row = cursor.fetchone()
-            if row:
-                # The lock is still held by another routine, force unlock it
-                # by killing the PG connection of that routine.
-                cursor.execute('SELECT pg_terminate_backend(%s)', (row[0],))
+            rows = cursor.fetchall()
+            if rows:
+                # There can be multiple PIDs holding the lock, it is not enough
+                # to only kill some of them. For example, if pid 1 is holding a
+                # shared lock, and pid 2 is waiting to grab an exclusive lock,
+                # killing pid 1 will transfer the lock to pid 2, so the lock
+                # will still not be released.
+                for row in rows:
+                    cursor.execute('SELECT pg_terminate_backend(%s)', (row[0],))
                 self._connection.commit()
                 return
         except Exception as e:
