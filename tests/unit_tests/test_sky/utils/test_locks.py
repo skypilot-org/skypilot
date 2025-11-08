@@ -618,8 +618,8 @@ class TestGetLock:
         assert isinstance(lock, locks.PostgresLock)
         assert lock._shared_lock
 
-    def test_get_lock_filelock_ignores_shared_mode(self):
-        """Test FileLock ignores shared mode (degrades to exclusive)."""
+    def test_get_lock_filelock_with_shared_mode(self):
+        """Test FileLock with shared mode (no effect)."""
         lock = locks.get_lock('test_lock',
                               lock_type='filelock',
                               shared_lock=True)
