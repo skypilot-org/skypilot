@@ -1081,3 +1081,30 @@ def test_pools_num_jobs_option(generic_cloud: str):
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
             )
             smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.gcp
+def test_pools_setup_num_gpus(generic_cloud: str):
+    """Test that the number of GPUs is set correctly in the setup script."""
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+    setup_cmd = 'if [[ "$SKYPILOT_SETUP_NUM_GPUS_PER_NODE" != "2" ]]; then exit 1; fi'
+    pool_config = basic_pool_conf(num_workers=1,
+                                  infra=generic_cloud,
+                                  resource_string='{L4:2}',
+                                  setup_cmd=setup_cmd)
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        write_yaml(pool_yaml, pool_config)
+        test = smoke_tests_utils.Test(
+            'test_pools_setup_num_gpus',
+            [
+                _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
+                                                      pool_yaml=pool_yaml.name),
+                # Wait for the pool to be created.
+                wait_until_pool_ready(pool_name, timeout=timeout),
+            ],
+            timeout=timeout,
+            teardown=_TEARDOWN_POOL.format(pool_name=pool_name))
+        smoke_tests_utils.run_one_test(test)
