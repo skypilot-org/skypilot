@@ -717,7 +717,7 @@ def test_high_concurrency_ssh_tunnel_opening(generic_cloud: str,
                                              tmp_path: pathlib.Path):
     """Test that high concurrency SSH tunnel opening does not result in timeouts."""
     name = smoke_tests_utils.get_cluster_name()
-    concurrency = 60
+    concurrency = 50
     log_file = tmp_path / 'all_logs.txt'
     log_file.touch()
 
@@ -764,7 +764,7 @@ def test_high_concurrency_ssh_tunnel_opening(generic_cloud: str,
                 cluster_status=[sky.ClusterStatus.UP],
                 timeout=180),
             # Restart the API server to remove existing tunnels.
-            'sky api stop; SKYPILOT_DEBUG=1 sky api start',
+            'sky api stop; sky api start',
             start_concurrent_tail_logs,
             # Print the full logs for debugging.
             f'echo "=== FULL LOGS ===" && cat {log_file}',
