@@ -2400,7 +2400,8 @@ def _is_tunnel_healthy(tunnel: SSHTunnelInfo) -> bool:
         return True
     except socket.error as e:
         logger.warning(
-            f'Failed to connect to tunnel on port {tunnel.port}: {common_utils.format_exception(e)}'
+            f'Failed to connect to tunnel on port {tunnel.port}: '
+            f'{common_utils.format_exception(e)}'
         )
         return False
 
