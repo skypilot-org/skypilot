@@ -2999,6 +2999,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 f'Skylet gRPC channel for cluster {self.cluster_name} not '
                 f'ready after {constants.SKYLET_GRPC_TIMEOUT_SECONDS}s')
             raise e
+        except Exception as e:
+            self._terminate_ssh_tunnel_process(tunnel_info)
+            raise e
 
     @property
     def cluster_yaml(self) -> Optional[str]:
