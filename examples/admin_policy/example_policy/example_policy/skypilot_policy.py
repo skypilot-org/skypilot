@@ -191,7 +191,15 @@ class SetMaxAutostopIdleMinutesPolicy(sky.AdminPolicy):
 
 
 class TokenBucketRateLimiter:
-    """Token bucket rate limiter."""
+    """Token bucket rate limiter.
+
+    This rate limiter allows a user to make requests up to
+    fill_rate requests per second.
+
+    Args:
+        capacity: The maximum number of requests allowed in the bucket.
+        fill_rate: The rate at which the bucket is filled with requests.
+    """
 
     def __init__(self, capacity, fill_rate):
         # import the modules here so users importing this module
@@ -231,6 +239,14 @@ class TokenBucketRateLimiter:
             init_session.commit()
 
     def allow_request(self, user_name):
+        """Determines if a request is allowed for a given user.
+
+        Args:
+            user_name: The name of the user.
+
+        Returns:
+            True if the request is allowed, False otherwise.
+        """
         # import the modules here so users importing this module
         # to use other policies do not need to import these modules.
         # pylint: disable=import-outside-toplevel

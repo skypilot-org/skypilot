@@ -482,13 +482,17 @@ Rate limit cluster launch requests
 
 .. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
     :language: python
-    :pyobject: TokenBucketRateLimiter
-    :caption: `TokenBucketRateLimiter <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
-
-.. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
-    :language: python
     :pyobject: RateLimitLaunchPolicy
     :caption: `RateLimitLaunchPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
+
+The ``RateLimitLaunchPolicy`` uses ``TokenBucketRateLimiter`` class to rate limit cluster launch requests.
+
+.. dropdown:: TokenBucketRateLimiter Class
+
+    .. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
+        :language: python
+        :pyobject: TokenBucketRateLimiter
+        :caption: `TokenBucketRateLimiter <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
 
 .. literalinclude:: ../../../examples/admin_policy/rate_limit_launch.yaml
     :language: yaml
