@@ -727,10 +727,10 @@ def test_high_concurrency_ssh_tunnel_opening(generic_cloud: str,
     def tail_log_thread(idx: int):
         try:
             context.initialize()
-            ctx = context.get()
-            origin = ctx.redirect_log(log_file)
             os.environ = context.ContextualEnviron(os.environ)
-            os.environ['SKYPILOT_DEBUG'] = '1'
+            ctx = context.get()
+            ctx.override_envs({'SKYPILOT_DEBUG': '1'})
+            origin = ctx.redirect_log(log_file)
             sky.tail_logs(cluster_name=name, job_id=None, follow=False)
             ctx.redirect_log(origin)
         except Exception as e:  # pylint: disable=broad-except
