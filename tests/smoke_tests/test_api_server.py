@@ -717,7 +717,7 @@ def test_high_concurrency_ssh_tunnel_opening(generic_cloud: str,
                                              tmp_path: pathlib.Path):
     """Test that high concurrency SSH tunnel opening does not result in timeouts."""
     name = smoke_tests_utils.get_cluster_name()
-    concurrency = 30
+    concurrency = 60
     log_file = tmp_path / 'all_logs.txt'
     log_file.touch()
 
@@ -729,6 +729,8 @@ def test_high_concurrency_ssh_tunnel_opening(generic_cloud: str,
             context.initialize()
             ctx = context.get()
             origin = ctx.redirect_log(log_file)
+            os.environ = context.ContextualEnviron(os.environ)
+            os.environ['SKYPILOT_DEBUG'] = '1'
             sky.tail_logs(cluster_name=name, job_id=None, follow=False)
             ctx.redirect_log(origin)
         except Exception as e:  # pylint: disable=broad-except
