@@ -2955,14 +2955,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         """Opens an SSH tunnel to the Skylet on the head node,
         updates the cluster handle, and persists it to the database."""
         max_attempts = 3
-        overall_start = time.perf_counter()
         # There could be a race condition here, as multiple processes may
         # attempt to open the same port at the same time.
         for attempt in range(max_attempts):
             runners = self.get_command_runners()
             head_runner = runners[0]
             local_port = random.randint(10000, 65535)
-            attempt_start = time.perf_counter()
             try:
                 ssh_tunnel_proc = backend_utils.open_ssh_tunnel(
                     head_runner, (local_port, constants.SKYLET_GRPC_PORT))
@@ -2976,24 +2974,16 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                      backend_utils.K8S_PODS_NOT_FOUND_PATTERN.search(
                          e.detailed_reason) or attempt == max_attempts - 1)):
                     raise e
-                attempt_elapsed = time.perf_counter() - attempt_start
                 logger.warning(
                     f'Failed to open SSH tunnel on port {local_port} '
-                    f'({attempt + 1}/{max_attempts}) after '
-                    f'{attempt_elapsed:.2f}s. '
+                    f'({attempt + 1}/{max_attempts}). '
                     f'{e.error_msg}\n{e.detailed_reason}')
                 continue
-            attempt_elapsed = time.perf_counter() - attempt_start
-            logger.debug(
-                'Opened SSH tunnel on port %d for cluster %s in %.2fs '
-                '(attempt %d/%d).', local_port, self.cluster_name,
-                attempt_elapsed, attempt + 1, max_attempts)
             tunnel_info = SSHTunnelInfo(port=local_port,
                                         pid=ssh_tunnel_proc.pid)
             break
 
         try:
-            ready_start = time.perf_counter()
             grpc.channel_ready_future(
                 grpc.insecure_channel(f'localhost:{tunnel_info.port}')).result(
                     timeout=constants.SKYLET_GRPC_TIMEOUT_SECONDS)
@@ -3002,21 +2992,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             if old_tunnel is not None:
                 self._terminate_ssh_tunnel_process(old_tunnel)
             self._set_skylet_ssh_tunnel(tunnel_info)
-            ready_elapsed = time.perf_counter() - ready_start
-            total_elapsed = time.perf_counter() - overall_start
-            logger.debug(
-                'Skylet SSH tunnel for cluster %s ready in %.2fs '
-                '(gRPC ready %.2fs, local port %d).', self.cluster_name,
-                total_elapsed, ready_elapsed, tunnel_info.port)
             return tunnel_info
         except grpc.FutureTimeoutError as e:
-            total_elapsed = time.perf_counter() - overall_start
             self._terminate_ssh_tunnel_process(tunnel_info)
             logger.warning(
                 f'Skylet gRPC channel for cluster {self.cluster_name} not '
-                f'ready after {constants.SKYLET_GRPC_TIMEOUT_SECONDS}s '
-                f'(elapsed {total_elapsed:.2f}s, local port '
-                f'{tunnel_info.port})')
+                f'ready after {constants.SKYLET_GRPC_TIMEOUT_SECONDS}s')
             raise e
 
     @property
