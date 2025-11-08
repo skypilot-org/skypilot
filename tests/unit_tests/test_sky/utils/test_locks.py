@@ -382,10 +382,9 @@ class TestPostgresLock:
 
         # First unlock call fails (returns False)
         # Second call finds a PID to terminate
-        cursor.fetchone.side_effect = [
-            [False],  # pg_advisory_unlock fails
-            [12345]  # pg_locks query returns PID
-        ]
+        cursor.fetchone.return_value = [False]  # pg_advisory_unlock fails
+        cursor.fetchall.return_value = [[12345], [67890]
+                                       ]  # pg_locks query returns multiple PIDs
 
         lock = locks.PostgresLock('test_lock')
         lock.force_unlock()
@@ -396,7 +395,8 @@ class TestPostgresLock:
             mock.call(('SELECT pid FROM pg_locks WHERE locktype = \'advisory\' '
                        'AND ((classid::bigint << 32) | objid::bigint) = %s'),
                       (mock.ANY,)),
-            mock.call('SELECT pg_terminate_backend(%s)', (12345,))
+            mock.call('SELECT pg_terminate_backend(%s)', (12345,)),
+            mock.call('SELECT pg_terminate_backend(%s)', (67890,))
         ]
         cursor.execute.assert_has_calls(expected_calls)
         connection.commit.assert_called_once()
@@ -411,10 +411,8 @@ class TestPostgresLock:
 
         # First unlock call fails (returns False)
         # Second call finds no lock in pg_locks
-        cursor.fetchone.side_effect = [
-            [False],  # pg_advisory_unlock fails
-            None  # pg_locks query returns no results
-        ]
+        cursor.fetchone.return_value = [False]  # pg_advisory_unlock fails
+        cursor.fetchall.return_value = []  # pg_locks query returns no results
 
         lock = locks.PostgresLock('test_lock')
         lock.force_unlock()
