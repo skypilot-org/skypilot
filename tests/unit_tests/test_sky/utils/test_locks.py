@@ -205,6 +205,7 @@ class TestPostgresLock:
         assert lock.poll_interval == 1
         assert not lock._acquired
         assert lock._connection is None
+        assert not lock._shared_lock
 
     def test_postgres_lock_string_to_lock_key(self):
         """Test string to lock key conversion is deterministic across processes."""
@@ -252,7 +253,8 @@ class TestPostgresLock:
         assert isinstance(proxy, locks.AcquireReturnProxy)
         assert lock._acquired
         assert lock._connection is connection
-        cursor.execute.assert_called_once()
+        cursor.execute.assert_called_once_with(
+            'SELECT pg_try_advisory_lock(%s)', (mock.ANY,))
 
     @mock.patch.object(locks.PostgresLock, '_get_connection')
     def test_postgres_lock_acquire_already_acquired(self, mock_get_connection,
@@ -459,6 +461,96 @@ class TestPostgresLock:
         assert "PostgresLock requires PostgreSQL database" in str(
             exc_info.value)
 
+    def test_postgres_lock_initialization_shared_mode(self):
+        """Test PostgresLock initialization with shared mode."""
+        lock = locks.PostgresLock('test_lock', shared_lock=True)
+
+        assert lock._shared_lock
+        assert lock.lock_id == 'test_lock'
+        assert not lock._acquired
+
+    @mock.patch.object(locks.PostgresLock, '_get_connection')
+    def test_postgres_lock_acquire_shared_success(self, mock_get_connection,
+                                                  mock_connection):
+        """Test successful shared lock acquisition."""
+        connection, cursor = mock_connection
+        mock_get_connection.return_value = connection
+        cursor.fetchone.return_value = [True]
+
+        lock = locks.PostgresLock('test_lock', shared_lock=True)
+        proxy = lock.acquire()
+
+        assert isinstance(proxy, locks.AcquireReturnProxy)
+        assert lock._acquired
+        cursor.execute.assert_called_once_with(
+            'SELECT pg_try_advisory_lock_shared(%s)', (mock.ANY,))
+
+    @mock.patch.object(locks.PostgresLock, '_get_connection')
+    def test_postgres_lock_release_shared(self, mock_get_connection,
+                                          mock_connection):
+        """Test shared lock release."""
+        connection, cursor = mock_connection
+        lock = locks.PostgresLock('test_lock', shared_lock=True)
+        lock._acquired = True
+        lock._connection = connection
+
+        lock.release()
+
+        cursor.execute.assert_called_once_with(
+            'SELECT pg_advisory_unlock_shared(%s)', (mock.ANY,))
+        connection.commit.assert_called_once()
+        connection.close.assert_called_once()
+        assert not lock._acquired
+        assert lock._connection is None
+
+    @mock.patch.object(locks.PostgresLock, '_get_connection')
+    def test_postgres_lock_force_unlock_shared(self, mock_get_connection,
+                                               mock_connection):
+        """Test force unlock for shared locks."""
+        connection, cursor = mock_connection
+        mock_get_connection.return_value = connection
+        cursor.fetchone.return_value = [True]
+
+        lock = locks.PostgresLock('test_lock', shared_lock=True)
+        lock.force_unlock()
+
+        cursor.execute.assert_called_once_with(
+            'SELECT pg_advisory_unlock_shared(%s)', (mock.ANY,))
+        connection.commit.assert_called_once()
+        connection.close.assert_called_once()
+
+    @mock.patch.object(locks.PostgresLock, '_get_connection')
+    def test_postgres_lock_shared_timeout(self, mock_get_connection,
+                                          mock_connection):
+        """Test shared lock acquisition timeout."""
+        connection, cursor = mock_connection
+        mock_get_connection.return_value = connection
+        cursor.fetchone.return_value = [False]
+
+        lock = locks.PostgresLock('test_lock', shared_lock=True, timeout=0.1)
+
+        with pytest.raises(locks.LockTimeout) as exc_info:
+            lock.acquire()
+
+        assert 'shared' in str(exc_info.value).lower()
+
+    @mock.patch.object(locks.PostgresLock, '_get_connection')
+    def test_postgres_lock_shared_non_blocking(self, mock_get_connection,
+                                               mock_connection):
+        """Test shared lock non-blocking acquisition fails immediately."""
+        connection, cursor = mock_connection
+        mock_get_connection.return_value = connection
+        cursor.fetchone.return_value = [False]
+
+        lock = locks.PostgresLock('test_lock', shared_lock=True)
+
+        with pytest.raises(locks.LockTimeout) as exc_info:
+            lock.acquire(blocking=False)
+
+        error_msg = str(exc_info.value).lower()
+        assert 'immediately' in error_msg
+        assert 'shared' in error_msg
+
 
 class TestGetLock:
     """Test get_lock factory function."""
@@ -516,6 +608,23 @@ class TestGetLock:
             locks.get_lock('test_lock', lock_type='invalid')
 
         assert "Unknown lock type: invalid" in str(exc_info.value)
+
+    def test_get_lock_postgres_with_shared_mode(self):
+        """Test get_lock factory with shared mode for postgres."""
+        lock = locks.get_lock('test_lock',
+                              lock_type='postgres',
+                              shared_lock=True)
+
+        assert isinstance(lock, locks.PostgresLock)
+        assert lock._shared_lock
+
+    def test_get_lock_filelock_ignores_shared_mode(self):
+        """Test FileLock ignores shared mode (degrades to exclusive)."""
+        lock = locks.get_lock('test_lock',
+                              lock_type='filelock',
+                              shared_lock=True)
+
+        assert isinstance(lock, locks.FileLock)
 
 
 class TestDetectLockType:
