@@ -728,7 +728,6 @@ def test_high_concurrency_ssh_tunnel_opening(generic_cloud: str,
         try:
             context.initialize()
             ctx = context.get()
-            ctx.override_envs({'SKYPILOT_DEBUG': '1'})
             origin = ctx.redirect_log(log_file)
             sky.tail_logs(cluster_name=name, job_id=None, follow=False)
             ctx.redirect_log(origin)
@@ -763,7 +762,7 @@ def test_high_concurrency_ssh_tunnel_opening(generic_cloud: str,
                 cluster_status=[sky.ClusterStatus.UP],
                 timeout=180),
             # Restart the API server to remove existing tunnels.
-            'sky api stop; sky api start',
+            'sky api stop; SKYPILOT_DEBUG=1 sky api start',
             start_concurrent_tail_logs,
             # Print the full logs for debugging.
             f'echo "=== FULL LOGS ===" && cat {log_file}',
