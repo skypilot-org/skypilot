@@ -55,43 +55,47 @@ _TERMINATE_INSTANCE = (
     '--instance-ids $id && '
     'echo "Instance terminated"')
 
-_TEARDOWN_POOL = ('sky jobs pool down {pool_name} -y')
+_TEARDOWN_POOL = ('r=$(sky jobs pool down {pool_name} -y 2>&1); '
+                  'exit_code=$?; '
+                  'echo "$r"; '
+                  'if echo "$r" | grep -q "nonterminal jobs:"; then '
+                  '  echo "WARNING: Found nonterminal jobs during teardown"; '
+                  '  exit_code=1; '
+                  'fi; '
+                  '(exit $exit_code)')
 
-# Fail if "nonterminal jobs:" is found in the output otherwise pass.
-_CANCEL_POOL_JOBS = (
-    'r=$(sky jobs cancel --pool {pool_name} -y 2>&1); '
-    'echo "$r"; '
-    'if echo "$r" | grep -q "nonterminal jobs:"; then '
-    '  echo "ERROR: Found nonterminal jobs after cancellation"; '
-    '  exit 1; '
-    'fi'
-)
+_CANCEL_POOL_JOBS = ('sky jobs cancel --pool {pool_name} -y')
 
 
 def cancel_job(job_name: str):
     return f'sky jobs cancel -n {job_name} -y'
 
 
-def cancel_jobs_and_teardown_pool(pool_name: str, timeout: int = 3, max_retries: int = 1):
-    """Cancel jobs and teardown pool, retrying up to 10 times on failure."""
+def cancel_jobs_and_teardown_pool(pool_name: str,
+                                  timeout: int = 3,
+                                  max_retries: int = 1):
+    """Cancel jobs and teardown pool, retrying up to max_retries times on failure."""
     return (
-        'for i in {1..{max_retries}}; do '
-        '  echo "Attempt $i/10: Cancelling jobs and tearing down pool..."; '
-        f'  if {_CANCEL_POOL_JOBS.format(pool_name=pool_name)} && '
-        f'     sleep {timeout} && '
-        f'     {_TEARDOWN_POOL.format(pool_name=pool_name)}; then '
-        '    echo "Successfully cancelled jobs and tore down pool"; '
+        f'for i in {{1..{max_retries}}}; do '
+        f'  echo "Attempt $i/{max_retries}: Cancelling jobs and tearing down pool..."; '
+        f'  {_CANCEL_POOL_JOBS.format(pool_name=pool_name)} || true; '
+        f'  echo "Waiting {timeout} seconds for jobs to be cancelled..."; '
+        f'  sleep {timeout}; '
+        f'  {_TEARDOWN_POOL.format(pool_name=pool_name)}; '
+        f'  teardown_exit=$?; '
+        f'  if [ $teardown_exit -eq 0 ]; then '
+        '    echo "Successfully tore down pool"; '
         '    break; '
         '  else '
-        '    echo "Attempt $i failed, retrying..."; '
-        '    if [ $i -eq {max_retries} ]; then '
-        '      echo "All {max_retries} attempts failed, continuing anyway"; '
+        f'    echo "Attempt $i failed with exit code $teardown_exit"; '
+        f'    if [ $i -eq {max_retries} ]; then '
+        '      echo "Max retries reached, continuing anyway (teardown may have partially succeeded)"; '
         '      break; '
         '    fi; '
+        '    echo "Retrying after 2 seconds..."; '
         '    sleep 2; '
         '  fi; '
-        'done'
-    )
+        'done')
 
 
 def wait_until_pool_ready(pool_name: str,
@@ -1279,6 +1283,7 @@ def test_pools_num_jobs_rank(generic_cloud: str):
             )
             smoke_tests_utils.run_one_test(test)
 
+
 def test_pools_num_jobs_speed(generic_cloud: str):
     """Test that we can launch a large number of jobs quickly.
     """
@@ -1305,15 +1310,19 @@ def test_pools_num_jobs_speed(generic_cloud: str):
             launch_cmd = (
                 'timeout {launch_timeout} bash -c "sky jobs launch --pool {pool_name} {job_yaml} --num-jobs {NUM_JOBS} -d -y"'
             ).format(pool_name=pool_name,
-                             job_yaml=job_yaml.name,
-                             NUM_JOBS=NUM_JOBS,
-                             launch_timeout=launch_timeout)
+                     job_yaml=job_yaml.name,
+                     NUM_JOBS=NUM_JOBS,
+                     launch_timeout=launch_timeout)
             test_commands.append(launch_cmd)
 
             test = smoke_tests_utils.Test(
                 'test_pools_num_jobs_rank',
                 test_commands,
                 timeout=timeout * 2,  # Give extra time for multiple jobs
-                teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=10, max_retries=10),
+                # Try to tear down multiple times since jobs may take a while
+                # to get to pending.
+                teardown=cancel_jobs_and_teardown_pool(pool_name,
+                                                       timeout=10,
+                                                       max_retries=10),
             )
             smoke_tests_utils.run_one_test(test)
