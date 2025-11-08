@@ -232,17 +232,18 @@ class PostgresLock(DistributedLock):
                     self._acquired = True
                     return AcquireReturnProxy(self)
 
-                mode_str = 'shared' if self._shared_lock else 'exclusive'
+                mode_str = ('shared' if self._shared_lock else 'exclusive')
                 if not blocking:
                     raise LockTimeout(
-                        f'Failed to immediately acquire {mode_str} postgres lock '
-                        f'{self.lock_id}')
+                        f'Failed to immediately acquire {mode_str} '
+                        f'postgres lock {self.lock_id}')
 
                 if (self.timeout is not None and
                         time.time() - start_time > self.timeout):
                     raise LockTimeout(
-                        f'Failed to acquire {mode_str} postgres lock {self.lock_id} '
-                        f'within {self.timeout} seconds')
+                        f'Failed to acquire {mode_str} postgres lock '
+                        f'{self.lock_id} within {self.timeout} '
+                        f'seconds')
 
                 time.sleep(self.poll_interval)
 
