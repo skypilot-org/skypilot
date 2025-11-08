@@ -399,7 +399,7 @@ def launch(
                 pre_created_job_ids = None
 
     def _submit_one(
-        consolidation_mode_job_id: Optional[int] = None,
+        consolidation_mode_job_ids: Optional[List[int]] = None,
         job_rank: Optional[int] = None,
         num_jobs: Optional[int] = None,
         pre_created_job_ids: Optional[List[int]] = None,
@@ -444,7 +444,7 @@ def launch(
                 'remote_env_file_path': remote_env_file_path,
                 'modified_catalogs': modified_catalogs,
                 'priority': priority,
-                'consolidation_mode_job_id': consolidation_mode_job_id,
+                'consolidation_mode_job_ids': consolidation_mode_job_ids,
                 'pool': pool,
                 'job_controller_indicator_file':
                     managed_job_constants.JOB_CONTROLLER_INDICATOR_FILE,
@@ -477,15 +477,22 @@ def launch(
                     f'with IDs {pre_created_job_ids} from jobs controller...'
                     f'{colorama.Style.RESET_ALL}')
             else:
+                if consolidation_mode_job_ids is not None:
+                    sorted_job_ids = sorted(consolidation_mode_job_ids)
+                    job_id_to_rank = {
+                        str(job_id): rank
+                        for rank, job_id in enumerate(sorted_job_ids)
+                    }
+                    vars_to_fill['job_id_to_rank'] = job_id_to_rank
                 yaml_path = os.path.join(
                     managed_job_constants.JOBS_CONTROLLER_YAML_PREFIX,
-                    f'{name}-{dag_uuid}-{consolidation_mode_job_id}.yaml')
+                    f'{name}-{dag_uuid}.yaml')
 
                 job_identity = ''
                 if job_rank is not None:
                     job_identity = f' (rank: {job_rank})'
                 job_controller_postfix = (' from jobs controller'
-                                          if consolidation_mode_job_id is None
+                                          if consolidation_mode_job_ids is None
                                           else '')
                 logger.info(
                     f'{colorama.Fore.YELLOW}'
@@ -505,7 +512,7 @@ def launch(
             with common.with_server_user():
                 with skypilot_config.local_active_workspace_ctx(
                         skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):
-                    if consolidation_mode_job_id is None:
+                    if consolidation_mode_job_ids is None:
                         result = execution.launch(
                             task=controller_task,
                             cluster_name=controller_name,
@@ -559,46 +566,33 @@ def launch(
                         ]
                         run_script = '\n'.join(env_cmds + [run_script])
                         # Dump script for high availability recovery.
-                        managed_job_state.set_ha_recovery_script(
-                            consolidation_mode_job_id, run_script)
+                        for job_id in consolidation_mode_job_ids:
+                            managed_job_state.set_ha_recovery_script(
+                                job_id, run_script)
                         backend.run_on_head(local_handle, run_script)
                         ux_utils.starting_message(
-                            f'Job submitted, ID: {consolidation_mode_job_id}')
-                        return consolidation_mode_job_id, local_handle
+                            f'Job submitted, ID: {consolidation_mode_job_ids}')
+                        return consolidation_mode_job_ids, local_handle
 
     if pool is None:
         if consolidation_mode_job_ids is None:
             return _submit_one()
         assert len(consolidation_mode_job_ids) == 1
-        return _submit_one(consolidation_mode_job_ids[0])
+        return _submit_one(consolidation_mode_job_ids)
 
     ids: List[int] = []
     all_handle: Optional[backends.ResourceHandle] = None
 
     # If we have pre_created_job_ids, use single controller task
-    if pre_created_job_ids is not None:
-        job_ids, handle = _submit_one(pre_created_job_ids=pre_created_job_ids,
-                                      num_jobs=num_jobs)
-        if isinstance(job_ids, list):
-            ids = job_ids
-        else:
-            ids = [job_ids] if job_ids is not None else []
-        all_handle = handle
-        return ids, all_handle
+    job_ids, handle = _submit_one(
+        consolidation_mode_job_ids=consolidation_mode_job_ids,
+        num_jobs=num_jobs,
+        pre_created_job_ids=pre_created_job_ids)
+    if isinstance(job_ids, list):
+        ids = job_ids
     else:
-        job_id = (consolidation_mode_job_ids[0]
-                  if consolidation_mode_job_ids is not None else None)
-        jids, handle = _submit_one(job_id, 0, num_jobs=num_jobs)
-        jid = None
-        if jids is not None:
-            if isinstance(jids, list):
-                jid = jids[0]
-            else:
-                jid = jids
-        assert jid is not None, (job_id, handle)
-        ids.append(jid)
-        all_handle = handle
-
+        ids = [job_ids] if job_ids is not None else []
+    all_handle = handle
     return ids, all_handle
 
 
