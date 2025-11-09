@@ -6,6 +6,9 @@ on:
   pull_request:
     types: [closed]
 
+env:
+  PROJECT_SLUG: skypilot
+
 jobs:
   trigger-rtd-build:
     # Only run if:
@@ -70,11 +73,11 @@ jobs:
         env:
           READTHEDOCS_TOKEN: ${{ secrets.READTHEDOCS_TOKEN }}
           BRANCH_NAME: ${{ steps.get-branch.outputs.result }}
+          PROJECT_SLUG: ${{ env.PROJECT_SLUG }}
         run: |
           # Trigger a build for the PR branch on ReadTheDocs
           # The branch needs to exist as a version on ReadTheDocs
 
-          PROJECT_SLUG="skypilot"
           VERSION_SLUG="${BRANCH_NAME}"
 
           echo "Triggering ReadTheDocs build for project: ${PROJECT_SLUG}, version: ${VERSION_SLUG}"
@@ -112,10 +115,13 @@ jobs:
 
       - name: Add label and comment on PR
         if: success()
+        env:
+          PROJECT_SLUG: ${{ env.PROJECT_SLUG }}
         uses: actions/github-script@v7
         with:
           script: |
             const branch = '${{ steps.get-branch.outputs.result }}';
+            const projectSlug = process.env.PROJECT_SLUG;
 
             // Add label to track that a preview was built
             try {
@@ -134,16 +140,18 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `✅ ReadTheDocs build triggered for branch \`${branch}\`\n\nThe documentation will be available at: https://skypilot.readthedocs.io/en/${branch}/`
+              body: `✅ ReadTheDocs build triggered for branch \`${branch}\`\n\nThe documentation will be available at: https://docs.skypilot.co/en/${branch}/`
             })
 
       - name: Comment on failure
         if: failure()
+        env:
+          BRANCH_NAME: ${{ steps.get-branch.outputs.result || 'unknown' }}
         uses: actions/github-script@v7
         with:
           script: |
-            const branch = '${{ steps.get-branch.outputs.result }}';
-            github.rest.issues.createComment({
+            const branch = process.env.BRANCH_NAME;
+            await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -162,8 +170,8 @@ jobs:
         env:
           READTHEDOCS_TOKEN: ${{ secrets.READTHEDOCS_TOKEN }}
           BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
+          PROJECT_SLUG: ${{ env.PROJECT_SLUG }}
         run: |
-          PROJECT_SLUG="skypilot"
           VERSION_SLUG="${BRANCH_NAME}"
 
           echo "Deactivating ReadTheDocs preview for branch: ${VERSION_SLUG}"
