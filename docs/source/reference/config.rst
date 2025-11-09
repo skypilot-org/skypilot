@@ -98,6 +98,19 @@ Below is the configuration syntax and some example values. See detailed explanat
         remote_identity: my-k8s-service-account
 
   :ref:`ssh <config-yaml-ssh>`:
+    # See :ref:`kubernetes.pod_config <config-yaml-kubernetes-pod-config>` for more details.
+    pod_config: ...
+    # See :ref:`kubernetes.provision_timeout <config-yaml-kubernetes-provision-timeout>` for more details.
+    provision_timeout: ...
+    # Specifying above fields but for a specific context.
+    context_configs:
+      node-pool-1:
+        pod_config:
+          metadata:
+            labels:
+              my-label: my-value
+      node-pool-2:
+        provision_timeout: 3600
     :ref:`allowed_node_pools <config-yaml-ssh-allowed-node-pools>`:
       - node-pool-1
       - node-pool-2

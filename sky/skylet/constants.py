@@ -393,6 +393,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('docker', 'run_options'),
     ('nvidia_gpus', 'disable_ecc'),
     ('ssh', 'pod_config'),
+    ('ssh', 'provision_timeout'),
     ('kubernetes', 'custom_metadata'),
     ('kubernetes', 'pod_config'),
     ('kubernetes', 'provision_timeout'),
