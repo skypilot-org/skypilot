@@ -3,6 +3,8 @@ name: Manual ReadTheDocs Build on PR
 on:
   issue_comment:
     types: [created]
+  pull_request:
+    types: [closed]
 
 jobs:
   trigger-rtd-build:
@@ -133,3 +135,42 @@ jobs:
               repo: context.repo.repo,
               body: `❌ Failed to trigger ReadTheDocs build for branch \`${branch}\`. Please check the [workflow logs](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) for details.`
             })
+
+  cleanup-rtd-preview:
+    # Only run when a pull request is closed
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deactivate ReadTheDocs preview
+        env:
+          READTHEDOCS_TOKEN: ${{ secrets.READTHEDOCS_TOKEN }}
+          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
+        run: |
+          PROJECT_SLUG="skypilot"
+          VERSION_SLUG="${BRANCH_NAME}"
+
+          echo "Deactivating ReadTheDocs preview for branch: ${VERSION_SLUG}"
+
+          # Deactivate the version (set active to false)
+          RESPONSE=$(curl -X PATCH \
+            "https://readthedocs.org/api/v3/projects/${PROJECT_SLUG}/versions/${VERSION_SLUG}/" \
+            -H "Authorization: Token ${READTHEDOCS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "active": false
+            }' \
+            -w "\n%{http_code}")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n-1)
+
+          if [ "$HTTP_CODE" -eq 200 ] || [ "$HTTP_CODE" -eq 204 ]; then
+            echo "✅ ReadTheDocs preview deactivated successfully for branch: ${VERSION_SLUG}"
+            echo "$BODY"
+          elif [ "$HTTP_CODE" -eq 404 ]; then
+            echo "ℹ️ No ReadTheDocs preview found for branch: ${VERSION_SLUG} (this is normal if no preview was created)"
+          else
+            echo "⚠️ Failed to deactivate ReadTheDocs preview. HTTP status: $HTTP_CODE"
+            echo "$BODY"
+            # Don't fail the workflow - this is just cleanup
+          fi
