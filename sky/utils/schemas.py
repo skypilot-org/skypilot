@@ -1117,16 +1117,6 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             type.value for type in kubernetes_enums.KubernetesAutoscalerType
         ],
     },
-    'kueue': {
-        'type': 'object',
-        'required': [],
-        'additionalProperties': False,
-        'properties': {
-            'local_queue_name': {
-                'type': 'string',
-            },
-        },
-    },
     'high_availability': {
         'type': 'object',
         'required': [],
@@ -1135,6 +1125,16 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             'storage_class_name': {
                 'type': 'string',
             }
+        },
+    },
+    'kueue': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'local_queue_name': {
+                'type': 'string',
+            },
         },
     },
     'dws': {
