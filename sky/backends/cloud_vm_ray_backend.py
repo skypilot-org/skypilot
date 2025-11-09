@@ -1554,7 +1554,6 @@ class RetryingVmProvisioner(object):
                     keep_launch_fields_in_existing_config=cluster_exists,
                     volume_mounts=volume_mounts,
                 )
-                # logger.critical(f'config_dict: {config_dict}')
             except exceptions.ResourcesUnavailableError as e:
                 # Failed due to catalog issue, e.g. image not found, or
                 # GPUs are requested in a Kubernetes cluster but the cluster
@@ -4067,9 +4066,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     skip_num_lines=3)
                 return returncode
 
-            logger.critical(f"Setup cmd: {f'{create_script_code} && {setup_cmd}'}")
             returncode = _run_setup(f'{create_script_code} && {setup_cmd}',)
-            logger.critical(f"Setup returncode: {returncode}")
 
             def _load_setup_log_and_match(match_str: str) -> bool:
                 try:
@@ -4467,31 +4464,26 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         job_id, log_dir = self._add_job(handle, task_copy.name, resources_str,
                                         task.metadata_json)
 
-        is_slurm = str(valid_resource.cloud).lower() == 'slurm'
-        if is_slurm:
+        if isinstance(valid_resource.cloud, clouds.slurm.Slurm):
+            # For Slurm, we use srun to run the user command on the Slurm virtual instance,
+            # instead of launching a Ray task.
             cmd = task_copy.run
             if isinstance(cmd, list):
                 cmd = ' '.join(cmd)
             runner = handle.get_command_runners()[0]
-
-            # In this context, the cluster name means SkyPilot cluster name
-            # e.g., sky-3790-abaowei
-            # logger.debug(f"====={handle.get_cluster_name()}=====")
-
             provisioned_job_id = handle.cached_cluster_info.head_instance_id
             rc, stdout, stderr = runner.run(f'srun --jobid={provisioned_job_id} bash -c \'{cmd}\'', require_outputs=True)
-
-            return job_id
-
-        num_actual_nodes = task.num_nodes * handle.num_ips_per_node
-        # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
-        if num_actual_nodes > 1:
-            self._execute_task_n_nodes(handle, task_copy, job_id, detach_run,
-                                       log_dir)
         else:
-            # Case: task_lib.Task(run, num_nodes=1)
-            self._execute_task_one_node(handle, task_copy, job_id, detach_run,
+            # For other clouds, we launch a Ray task to run the user command.
+            num_actual_nodes = task.num_nodes * handle.num_ips_per_node
+            # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
+            if num_actual_nodes > 1:
+                self._execute_task_n_nodes(handle, task_copy, job_id, detach_run,
                                         log_dir)
+            else:
+                # Case: task_lib.Task(run, num_nodes=1)
+                self._execute_task_one_node(handle, task_copy, job_id, detach_run,
+                                            log_dir)
 
         return job_id
 
