@@ -474,13 +474,7 @@ def test_get_cloud_config_value_from_dict_ssh_with_context():
         keys=('pod_config',),
         default_value={})
 
-    expected = {
-        'metadata': {
-            'labels': {
-                'cluster': 'my-cluster'
-            }
-        }
-    }
+    expected = {'metadata': {'labels': {'cluster': 'my-cluster'}}}
     assert result == expected
 
     # Get context-specific provision_timeout
@@ -525,13 +519,7 @@ def test_get_cloud_config_value_from_dict_ssh_without_context():
         keys=('pod_config',),
         default_value={})
 
-    expected = {
-        'metadata': {
-            'labels': {
-                'default': 'true'
-            }
-        }
-    }
+    expected = {'metadata': {'labels': {'default': 'true'}}}
     assert result == expected
 
     # Get top-level provision_timeout (no context)

@@ -362,7 +362,10 @@ class TestSSHMakeDeployResourcesVariables(unittest.TestCase):
         # Track calls to get_effective_region_config
         config_calls = []
 
-        def config_side_effect(cloud, keys, region, default_value=None,
+        def config_side_effect(cloud,
+                               keys,
+                               region,
+                               default_value=None,
                                override_configs=None):
             config_calls.append({
                 'cloud': cloud,
@@ -413,8 +416,7 @@ class TestSSHMakeDeployResourcesVariables(unittest.TestCase):
         self.assertEqual(len(provision_timeout_calls), 1)
         self.assertEqual(provision_timeout_calls[0]['cloud'], 'ssh')
         # The region should be the context name (with 'ssh-' prefix)
-        self.assertEqual(provision_timeout_calls[0]['region'],
-                         'ssh-my-cluster')
+        self.assertEqual(provision_timeout_calls[0]['region'], 'ssh-my-cluster')
 
         # Verify the timeout value is set in deploy vars
         self.assertIn('timeout', deploy_vars)
@@ -451,7 +453,10 @@ class TestSSHMakeDeployResourcesVariables(unittest.TestCase):
         mock_is_exec_auth.return_value = (False, None)
 
         # Simulate context-specific config
-        def config_side_effect(cloud, keys, region, default_value=None,
+        def config_side_effect(cloud,
+                               keys,
+                               region,
+                               default_value=None,
                                override_configs=None):
             if cloud == 'ssh' and keys == ('provision_timeout',):
                 if region == 'ssh-prod-cluster':
@@ -484,8 +489,7 @@ class TestSSHMakeDeployResourcesVariables(unittest.TestCase):
         prod_resources.zone = None
         prod_resources.cluster_config_overrides = {}
         prod_resources.image_id = None
-        setattr(prod_resources, 'assert_launchable',
-                lambda: prod_resources)
+        setattr(prod_resources, 'assert_launchable', lambda: prod_resources)
 
         from sky.utils import resources_utils
         prod_resources.network_tier = resources_utils.NetworkTier.BEST
