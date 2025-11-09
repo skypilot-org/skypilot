@@ -1389,10 +1389,4 @@ def test_ssh_cloud_context_stripping():
         region=expected_config_key,
         keys=('pod_config',),
         default_value={})
-    assert pod_config == {
-        'metadata': {
-            'labels': {
-                'team': 'ml'
-            }
-        }
-    }
+    assert pod_config == {'metadata': {'labels': {'team': 'ml'}}}
