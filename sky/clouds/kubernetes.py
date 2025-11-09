@@ -595,6 +595,7 @@ class Kubernetes(clouds.Cloud):
         port_mode = network_utils.get_port_mode(None, context)
 
         remote_identity = skypilot_config.get_effective_region_config(
+            # TODO(kyuds): Support SSH node pools as well.
             cloud='kubernetes',
             region=context,
             keys=('remote_identity',),
@@ -669,6 +670,7 @@ class Kubernetes(clouds.Cloud):
 
         k8s_kueue_local_queue_name = (
             skypilot_config.get_effective_region_config(
+                # TODO(kyuds): Support SSH node pools as well.
                 cloud='kubernetes',
                 region=context,
                 keys=('kueue', 'local_queue_name'),
@@ -683,6 +685,7 @@ class Kubernetes(clouds.Cloud):
         if enable_flex_start_queued_provisioning or enable_flex_start:
             # DWS is only supported in GKE, check the autoscaler type.
             autoscaler_type = skypilot_config.get_effective_region_config(
+                # TODO(kyuds): Support SSH node pools as well.
                 cloud='kubernetes',
                 region=context,
                 keys=('autoscaler',),
@@ -706,8 +709,9 @@ class Kubernetes(clouds.Cloud):
         timeout = self._calculate_provision_timeout(
             num_nodes, volume_mounts, enable_flex_start or
             enable_flex_start_queued_provisioning)
+        cloud_config_str = self._REPR.lower()
         timeout = skypilot_config.get_effective_region_config(
-            cloud='kubernetes',
+            cloud=cloud_config_str,
             region=context,
             keys=('provision_timeout',),
             default_value=timeout,

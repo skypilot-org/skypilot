@@ -1043,7 +1043,7 @@ class RemoteIdentityOptions(enum.Enum):
 
 def get_default_remote_identity(cloud: str) -> str:
     """Get the default remote identity for the specified cloud."""
-    if cloud == 'kubernetes':
+    if cloud in ['kubernetes', 'ssh']:
         return RemoteIdentityOptions.SERVICE_ACCOUNT.value
     return RemoteIdentityOptions.LOCAL_CREDENTIALS.value
 
@@ -1094,16 +1094,6 @@ _CONTEXT_CONFIG_SCHEMA_MINIMAL = {
     'provision_timeout': {
         'type': 'integer',
     },
-    'kueue': {
-        'type': 'object',
-        'required': [],
-        'additionalProperties': False,
-        'properties': {
-            'local_queue_name': {
-                'type': 'string',
-            },
-        },
-    },
 }
 
 _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
@@ -1126,6 +1116,16 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         'case_insensitive_enum': [
             type.value for type in kubernetes_enums.KubernetesAutoscalerType
         ],
+    },
+    'kueue': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'local_queue_name': {
+                'type': 'string',
+            },
+        },
     },
     'high_availability': {
         'type': 'object',
