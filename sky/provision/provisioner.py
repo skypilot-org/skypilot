@@ -617,10 +617,14 @@ def _post_provision_setup(
         status.update(
             runtime_preparation_str.format(step=3, step_name='runtime'))
 
+        skip_ray_setup = False
         ray_port = constants.SKY_REMOTE_RAY_PORT
         head_ray_needs_restart = True
         ray_cluster_healthy = False
-        if (not provision_record.is_instance_just_booted(
+        if cloud_name.lower() == 'slurm':
+            skip_ray_setup = True
+            logger.debug('Skip Ray cluster setup for the Slurm cluster.')
+        elif (not provision_record.is_instance_just_booted(
                 head_instance.instance_id)):
             # Check if head node Ray is alive
             (ray_port, ray_cluster_healthy,
@@ -645,8 +649,9 @@ def _post_provision_setup(
                              'async setup to complete...')
                 time.sleep(1)
 
-        not_slurm = cloud_name.lower() != 'slurm'
-        if head_ray_needs_restart and not_slurm:
+        if skip_ray_setup:
+            logger.debug('Skip Ray cluster setup on the head node.')
+        elif head_ray_needs_restart:
             logger.debug('Starting Ray on the entire cluster.')
             instance_setup.start_ray_on_head_node(
                 cluster_name.name_on_cloud,
@@ -669,7 +674,9 @@ def _post_provision_setup(
         # We don't need to restart ray on worker nodes if the ray cluster is
         # already healthy, i.e. the head node has expected number of nodes
         # connected to the ray cluster.
-        if cluster_info.num_instances > 1 and not ray_cluster_healthy and not_slurm:
+        if skip_ray_setup:
+            logger.debug('Skip Ray cluster setup on the worker nodes.')
+        elif cluster_info.num_instances > 1 and not ray_cluster_healthy:
             instance_setup.start_ray_on_worker_nodes(
                 cluster_name.name_on_cloud,
                 no_restart=not head_ray_needs_restart,
