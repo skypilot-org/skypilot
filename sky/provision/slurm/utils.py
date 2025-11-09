@@ -221,10 +221,14 @@ def get_all_slurm_cluster_names() -> List[str]:
     except Exception as e:
         raise ValueError(f'Failed to load SSH configuration from {DEFAULT_SLURM_PATH}: {common_utils.format_exception(e)}')
 
-    cluster_names = list(ssh_config.get_hostnames())
+    cluster_names = []
+    for cluster in ssh_config.get_hostnames():
+        if cluster == "*":
+            continue
+
+        cluster_names.append(cluster)
 
     return cluster_names
-
 
 
 def check_instance_fits(cluster: str,
@@ -256,6 +260,10 @@ def check_instance_fits(cluster: str,
         for node in nodes:
             node_name, node_state, gres_str = node.split()
             gres_str = f':'.join(gres_str.split(':')[1:]).lower()
+
+
+            # TODO(jwj): Handle status check.
+
 
             if gres_str == gres_to_match:
                 gpu_nodes.append(node)

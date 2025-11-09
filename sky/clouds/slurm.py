@@ -122,9 +122,6 @@ class Slurm(clouds.Cloud):
         regions_to_return = []
         for r in regions:
             cluster = r.name
-            if cluster == '*':
-                continue
-
             # try:
             fits, reason = slurm_utils.check_instance_fits(
                 cluster, instance_type)
@@ -323,12 +320,8 @@ class Slurm(clouds.Cloud):
     @classmethod
     def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to the Slurm cluster."""
-        # We can use ssh_config.get_hostnames to get a set of SlurmctldHost name aliases.
-        # For now, we use a single-node Slurm cluster for demo.
         ssh_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
-        # existing_allowed_clusters = list(ssh_config.get_hostnames())
-        existing_allowed_clusters = ['localcluster']
-        partition = 'debug'
+        existing_allowed_clusters = cls.existing_allowed_clusters()
 
         for cluster in existing_allowed_clusters:
             # Retrieve the config options for a given SlurmctldHost name alias.
@@ -340,7 +333,7 @@ class Slurm(clouds.Cloud):
                     ssh_config_dict['user'],
                     ssh_config_dict['identityfile'][0],
                     cluster,
-                    partition=partition,
+                    partition=slurm_utils.DEFAULT_PARTITION,
                     disable_control_master=True)
                 returncode, stdout, stderr = runner.run('sinfo',
                                                         require_outputs=True)
