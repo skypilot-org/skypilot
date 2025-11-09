@@ -709,6 +709,9 @@ class Kubernetes(clouds.Cloud):
         timeout = self._calculate_provision_timeout(
             num_nodes, volume_mounts, enable_flex_start or
             enable_flex_start_queued_provisioning)
+
+        # Use _REPR, instead of directly using 'kubernetes' as the config key,
+        # because it could be SSH node pool as well.
         cloud_config_str = self._REPR.lower()
         timeout = skypilot_config.get_effective_region_config(
             cloud=cloud_config_str,
