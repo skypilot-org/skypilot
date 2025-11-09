@@ -78,38 +78,75 @@ jobs:
           # Trigger a build for the PR branch on ReadTheDocs
           # The branch needs to exist as a version on ReadTheDocs
 
-          VERSION_SLUG="${BRANCH_NAME}"
+          # URL-encode the branch name (replace / with %2F, etc.)
+          VERSION_SLUG=$(echo "${BRANCH_NAME}" | jq -sRr @uri)
 
-          echo "Triggering ReadTheDocs build for project: ${PROJECT_SLUG}, version: ${VERSION_SLUG}"
+          echo "Triggering ReadTheDocs build for project: ${PROJECT_SLUG}, branch: ${BRANCH_NAME}"
 
-          # First, ensure the version exists and is configured correctly
+          # Check if version exists first
+          echo "Checking if version exists..."
+          CHECK_RESPONSE=$(curl -s -w "\n%{http_code}" \
+            "https://readthedocs.com/api/v3/projects/${PROJECT_SLUG}/versions/${VERSION_SLUG}/" \
+            -H "Authorization: Token ${READTHEDOCS_TOKEN}")
+
+          CHECK_HTTP_CODE=$(echo "$CHECK_RESPONSE" | tail -n1)
+          CHECK_BODY=$(echo "$CHECK_RESPONSE" | head -n-1)
+
+          if [ "$CHECK_HTTP_CODE" -eq 404 ]; then
+            echo "⚠️  Version '${BRANCH_NAME}' not found in ReadTheDocs."
+            echo "ReadTheDocs needs to discover this branch first. This happens automatically when:"
+            echo "  1. The branch is pushed to the repository"
+            echo "  2. ReadTheDocs webhook is triggered (may take a few minutes)"
+            echo ""
+            echo "Possible solutions:"
+            echo "  - Wait a few minutes for ReadTheDocs to auto-discover the branch"
+            echo "  - Trigger a manual sync in ReadTheDocs project settings"
+            echo "  - Make a new commit to the branch to trigger the webhook"
+            exit 1
+          elif [ "$CHECK_HTTP_CODE" -ne 200 ]; then
+            echo "❌ Failed to check version status. HTTP status: $CHECK_HTTP_CODE"
+            echo "$CHECK_BODY"
+            exit 1
+          fi
+
+          echo "✅ Version found in ReadTheDocs"
+
           # Update version settings to be hidden, active, and public
-          curl -X PATCH \
-            "https://readthedocs.org/api/v3/projects/${PROJECT_SLUG}/versions/${VERSION_SLUG}/" \
+          echo "Configuring version settings..."
+          CONFIG_RESPONSE=$(curl -s -w "\n%{http_code}" -X PATCH \
+            "https://readthedocs.com/api/v3/projects/${PROJECT_SLUG}/versions/${VERSION_SLUG}/" \
             -H "Authorization: Token ${READTHEDOCS_TOKEN}" \
             -H "Content-Type: application/json" \
             -d '{
               "active": true,
               "hidden": true,
               "privacy_level": "public"
-            }' || echo "Version may not exist yet or update failed"
+            }')
+
+          CONFIG_HTTP_CODE=$(echo "$CONFIG_RESPONSE" | tail -n1)
+
+          if [ "$CONFIG_HTTP_CODE" -ne 200 ] && [ "$CONFIG_HTTP_CODE" -ne 204 ]; then
+            echo "⚠️  Warning: Failed to update version settings (HTTP $CONFIG_HTTP_CODE), but continuing..."
+          else
+            echo "✅ Version configured successfully"
+          fi
 
           # Trigger the build
-          RESPONSE=$(curl -X POST \
-            "https://readthedocs.org/api/v3/projects/${PROJECT_SLUG}/versions/${VERSION_SLUG}/builds/" \
+          echo "Triggering build..."
+          BUILD_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "https://readthedocs.com/api/v3/projects/${PROJECT_SLUG}/versions/${VERSION_SLUG}/builds/" \
             -H "Authorization: Token ${READTHEDOCS_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -w "\n%{http_code}")
+            -H "Content-Type: application/json")
 
-          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-          BODY=$(echo "$RESPONSE" | head -n-1)
+          BUILD_HTTP_CODE=$(echo "$BUILD_RESPONSE" | tail -n1)
+          BUILD_BODY=$(echo "$BUILD_RESPONSE" | head -n-1)
 
-          if [ "$HTTP_CODE" -eq 202 ] || [ "$HTTP_CODE" -eq 201 ]; then
+          if [ "$BUILD_HTTP_CODE" -eq 202 ] || [ "$BUILD_HTTP_CODE" -eq 201 ]; then
             echo "✅ ReadTheDocs build triggered successfully!"
-            echo "$BODY"
+            echo "$BUILD_BODY"
           else
-            echo "❌ Failed to trigger ReadTheDocs build. HTTP status: $HTTP_CODE"
-            echo "$BODY"
+            echo "❌ Failed to trigger ReadTheDocs build. HTTP status: $BUILD_HTTP_CODE"
+            echo "$BUILD_BODY"
             exit 1
           fi
 
@@ -122,6 +159,9 @@ jobs:
           script: |
             const branch = '${{ steps.get-branch.outputs.result }}';
             const projectSlug = process.env.PROJECT_SLUG;
+
+            // URL-encode the branch name for the documentation URL
+            const encodedBranch = encodeURIComponent(branch);
 
             // Add label to track that a preview was built
             try {
@@ -140,7 +180,7 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `✅ ReadTheDocs build triggered for branch \`${branch}\`\n\nThe documentation will be available at: https://docs.skypilot.co/en/${branch}/`
+              body: `✅ ReadTheDocs build triggered for branch \`${branch}\`\n\nThe documentation will be available at: https://docs.skypilot.co/en/${encodedBranch}/`
             })
 
       - name: Comment on failure
@@ -172,28 +212,28 @@ jobs:
           BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
           PROJECT_SLUG: ${{ env.PROJECT_SLUG }}
         run: |
-          VERSION_SLUG="${BRANCH_NAME}"
+          # URL-encode the branch name (replace / with %2F, etc.)
+          VERSION_SLUG=$(echo "${BRANCH_NAME}" | jq -sRr @uri)
 
-          echo "Deactivating ReadTheDocs preview for branch: ${VERSION_SLUG}"
+          echo "Deactivating ReadTheDocs preview for branch: ${BRANCH_NAME}"
 
           # Deactivate the version (set active to false)
-          RESPONSE=$(curl -X PATCH \
-            "https://readthedocs.org/api/v3/projects/${PROJECT_SLUG}/versions/${VERSION_SLUG}/" \
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X PATCH \
+            "https://readthedocs.com/api/v3/projects/${PROJECT_SLUG}/versions/${VERSION_SLUG}/" \
             -H "Authorization: Token ${READTHEDOCS_TOKEN}" \
             -H "Content-Type: application/json" \
             -d '{
               "active": false
-            }' \
-            -w "\n%{http_code}")
+            }')
 
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
           BODY=$(echo "$RESPONSE" | head -n-1)
 
           if [ "$HTTP_CODE" -eq 200 ] || [ "$HTTP_CODE" -eq 204 ]; then
-            echo "✅ ReadTheDocs preview deactivated successfully for branch: ${VERSION_SLUG}"
+            echo "✅ ReadTheDocs preview deactivated successfully for branch: ${BRANCH_NAME}"
             echo "$BODY"
           elif [ "$HTTP_CODE" -eq 404 ]; then
-            echo "ℹ️ No ReadTheDocs preview found for branch: ${VERSION_SLUG} (this is normal if no preview was created)"
+            echo "ℹ️ No ReadTheDocs preview found for branch: ${BRANCH_NAME} (this is normal if no preview was created)"
           else
             echo "⚠️ Failed to deactivate ReadTheDocs preview. HTTP status: $HTTP_CODE"
             echo "$BODY"
