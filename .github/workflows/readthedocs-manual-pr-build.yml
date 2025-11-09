@@ -110,13 +110,27 @@ jobs:
             exit 1
           fi
 
-      - name: Comment on PR
+      - name: Add label and comment on PR
         if: success()
         uses: actions/github-script@v7
         with:
           script: |
             const branch = '${{ steps.get-branch.outputs.result }}';
-            github.rest.issues.createComment({
+
+            // Add label to track that a preview was built
+            try {
+              await github.rest.issues.addLabels({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                labels: ['rtd-preview']
+              });
+            } catch (error) {
+              console.log('Label may not exist or could not be added:', error.message);
+            }
+
+            // Comment on PR
+            await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -137,8 +151,11 @@ jobs:
             })
 
   cleanup-rtd-preview:
-    # Only run when a pull request is closed
-    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    # Only run when a pull request is closed AND has the rtd-preview label
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.action == 'closed' &&
+      contains(github.event.pull_request.labels.*.name, 'rtd-preview')
     runs-on: ubuntu-latest
     steps:
       - name: Deactivate ReadTheDocs preview
