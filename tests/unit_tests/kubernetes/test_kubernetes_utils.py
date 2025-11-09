@@ -1361,8 +1361,12 @@ def test_ssh_cloud_context_stripping():
             'context_configs': {
                 'my-cluster': {  # Config uses name without 'ssh-' prefix
                     'provision_timeout': 9000,
-                    'custom_metadata': {
-                        'team': 'ml'
+                    'pod_config': {
+                        'metadata': {
+                            'labels': {
+                                'team': 'ml'
+                            }
+                        }
                     }
                 }
             }
@@ -1379,10 +1383,16 @@ def test_ssh_cloud_context_stripping():
         default_value=600)
     assert timeout == 9000
 
-    custom_metadata = config_utils.get_cloud_config_value_from_dict(
+    pod_config = config_utils.get_cloud_config_value_from_dict(
         dict_config=config_dict,
         cloud='ssh',
         region=expected_config_key,
-        keys=('custom_metadata',),
+        keys=('pod_config',),
         default_value={})
-    assert custom_metadata == {'team': 'ml'}
+    assert pod_config == {
+        'metadata': {
+            'labels': {
+                'team': 'ml'
+            }
+        }
+    }

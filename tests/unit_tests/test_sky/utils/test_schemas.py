@@ -466,19 +466,6 @@ class TestSSHSchema(unittest.TestCase):
         }
         jsonschema.validate(instance=valid_config, schema=self.ssh_schema)
 
-    def test_ssh_context_configs_with_custom_metadata(self):
-        """Test that SSH context_configs allows custom_metadata."""
-        valid_config = {
-            'context_configs': {
-                'my-cluster': {
-                    'custom_metadata': {
-                        'skypilot-user': 'test-user'
-                    }
-                }
-            }
-        }
-        jsonschema.validate(instance=valid_config, schema=self.ssh_schema)
-
     def test_ssh_context_configs_with_provision_timeout(self):
         """Test that SSH context_configs allows provision_timeout."""
         valid_config = {
@@ -501,9 +488,6 @@ class TestSSHSchema(unittest.TestCase):
                                 'env': 'prod'
                             }
                         }
-                    },
-                    'custom_metadata': {
-                        'skypilot-user': 'test-user'
                     },
                     'provision_timeout': 1800
                 }
@@ -571,7 +555,7 @@ class TestSSHSchema(unittest.TestCase):
                 jsonschema.validate(instance=config, schema=self.ssh_schema)
 
     def test_ssh_top_level_fields(self):
-        """Test that SSH schema allows top-level pod_config, custom_metadata, and provision_timeout."""
+        """Test that SSH schema allows top-level pod_config and provision_timeout."""
         valid_configs = [
             {
                 'pod_config': {
@@ -580,11 +564,6 @@ class TestSSHSchema(unittest.TestCase):
                             'gpu': 'true'
                         }
                     }
-                }
-            },
-            {
-                'custom_metadata': {
-                    'skypilot-user': 'test-user'
                 }
             },
             {
@@ -597,9 +576,6 @@ class TestSSHSchema(unittest.TestCase):
                             'env': 'test'
                         }
                     }
-                },
-                'custom_metadata': {
-                    'skypilot-user': 'test-user'
                 },
                 'provision_timeout': 3600
             },

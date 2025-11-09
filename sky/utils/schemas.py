@@ -1077,20 +1077,6 @@ _CONTEXT_CONFIG_SCHEMA_MINIMAL = {
         # Allow arbitrary keys since validating pod spec is hard
         'additionalProperties': True,
     },
-    'custom_metadata': {
-        'type': 'object',
-        'required': [],
-        # Allow arbitrary keys since validating metadata is hard
-        'additionalProperties': True,
-        # Disallow 'name' and 'namespace' keys in this dict
-        'not': {
-            'anyOf': [{
-                'required': ['name']
-            }, {
-                'required': ['namespace']
-            }]
-        },
-    },
     'provision_timeout': {
         'type': 'integer',
     },
@@ -1111,6 +1097,20 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         ],
     },
     **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
+    'custom_metadata': {
+        'type': 'object',
+        'required': [],
+        # Allow arbitrary keys since validating metadata is hard
+        'additionalProperties': True,
+        # Disallow 'name' and 'namespace' keys in this dict
+        'not': {
+            'anyOf': [{
+                'required': ['name']
+            }, {
+                'required': ['namespace']
+            }]
+        },
+    },
     'autoscaler': {
         'type': 'string',
         'case_insensitive_enum': [
