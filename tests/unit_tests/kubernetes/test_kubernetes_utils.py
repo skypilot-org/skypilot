@@ -1273,3 +1273,116 @@ def test_combine_pod_config_fields_kubernetes_cloud():
             'node_config']
         assert 'nodeSelector' in node_config['spec']
         assert node_config['spec']['nodeSelector']['gpu'] == 'true'
+
+
+def test_ssh_cloud_uses_ssh_config_for_provision_timeout():
+    """Test that SSH cloud uses 'ssh' cloud name for provision_timeout config lookup."""
+    from sky import clouds
+    from sky.utils import config_utils
+
+    # Create SSH and Kubernetes cloud instances
+    ssh_cloud = clouds.SSH()
+    k8s_cloud = clouds.Kubernetes()
+
+    # Verify that _REPR is set correctly
+    assert ssh_cloud._REPR == 'SSH'
+    assert k8s_cloud._REPR == 'Kubernetes'
+
+    # Create a config dictionary with both ssh and kubernetes provision_timeout
+    config_dict = {
+        'ssh': {
+            'provision_timeout': 7200,
+            'context_configs': {
+                'my-cluster': {
+                    'provision_timeout': 9000
+                }
+            }
+        },
+        'kubernetes': {
+            'provision_timeout': 3600,
+            'context_configs': {
+                'k8s-cluster': {
+                    'provision_timeout': 5400
+                }
+            }
+        }
+    }
+
+    # Test SSH cloud retrieves from 'ssh' config
+    ssh_timeout = config_utils.get_cloud_config_value_from_dict(
+        dict_config=config_dict,
+        cloud='ssh',
+        region=None,
+        keys=('provision_timeout',),
+        default_value=600)
+    assert ssh_timeout == 7200
+
+    # Test SSH cloud retrieves context-specific timeout
+    ssh_context_timeout = config_utils.get_cloud_config_value_from_dict(
+        dict_config=config_dict,
+        cloud='ssh',
+        region='my-cluster',
+        keys=('provision_timeout',),
+        default_value=600)
+    assert ssh_context_timeout == 9000
+
+    # Test Kubernetes cloud retrieves from 'kubernetes' config
+    k8s_timeout = config_utils.get_cloud_config_value_from_dict(
+        dict_config=config_dict,
+        cloud='kubernetes',
+        region=None,
+        keys=('provision_timeout',),
+        default_value=600)
+    assert k8s_timeout == 3600
+
+    # Test Kubernetes cloud retrieves context-specific timeout
+    k8s_context_timeout = config_utils.get_cloud_config_value_from_dict(
+        dict_config=config_dict,
+        cloud='kubernetes',
+        region='k8s-cluster',
+        keys=('provision_timeout',),
+        default_value=600)
+    assert k8s_context_timeout == 5400
+
+
+def test_ssh_cloud_context_stripping():
+    """Test that SSH cloud contexts have 'ssh-' prefix stripped when looking up config."""
+    from sky import clouds
+    from sky.utils import config_utils
+
+    ssh_cloud = clouds.SSH()
+
+    # SSH contexts are prefixed with 'ssh-', but the config uses the name without prefix
+    ssh_context = 'ssh-my-cluster'
+    expected_config_key = 'my-cluster'
+
+    config_dict = {
+        'ssh': {
+            'context_configs': {
+                'my-cluster': {  # Config uses name without 'ssh-' prefix
+                    'provision_timeout': 9000,
+                    'custom_metadata': {
+                        'team': 'ml'
+                    }
+                }
+            }
+        }
+    }
+
+    # When combine_pod_config_fields receives 'ssh-my-cluster' context,
+    # it should strip the 'ssh-' prefix and look up 'my-cluster' in the config
+    timeout = config_utils.get_cloud_config_value_from_dict(
+        dict_config=config_dict,
+        cloud='ssh',
+        region=expected_config_key,  # Uses stripped name
+        keys=('provision_timeout',),
+        default_value=600)
+    assert timeout == 9000
+
+    custom_metadata = config_utils.get_cloud_config_value_from_dict(
+        dict_config=config_dict,
+        cloud='ssh',
+        region=expected_config_key,
+        keys=('custom_metadata',),
+        default_value={})
+    assert custom_metadata == {'team': 'ml'}
