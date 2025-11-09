@@ -37,6 +37,7 @@ from sky.server import common as server_common
 from sky.server import rest
 from sky.server import versions
 from sky.server.requests import payloads
+from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -603,7 +604,10 @@ def launch(
         down=down,
         dryrun=dryrun)
     with admin_policy_utils.apply_and_use_config_in_current_request(
-            dag, request_options=request_options, at_client_side=True) as dag:
+            dag,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            request_options=request_options,
+            at_client_side=True) as dag:
         return _launch(
             dag,
             cluster_name,
@@ -2099,16 +2103,16 @@ def stream_and_get(
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None),
         stream=True)
+    if response.status_code in [404, 400]:
+        detail = response.json().get('detail')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClientError(f'Failed to stream logs: {detail}')
     stream_request_id: Optional[server_common.RequestId[
         T]] = server_common.get_stream_request_id(response)
     if request_id is not None and stream_request_id is not None:
         assert request_id == stream_request_id
     if request_id is None:
         request_id = stream_request_id
-    if response.status_code in [404, 400]:
-        detail = response.json().get('detail')
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClientError(f'Failed to stream logs: {detail}')
     elif response.status_code != 200:
         # TODO(syang): handle the case where the requestID is not provided
         # see https://github.com/skypilot-org/skypilot/issues/6549

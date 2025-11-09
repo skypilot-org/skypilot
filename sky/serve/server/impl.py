@@ -26,6 +26,7 @@ from sky.serve import constants as serve_constants
 from sky.serve import serve_rpc_utils
 from sky.serve import serve_state
 from sky.serve import serve_utils
+from sky.server.requests import request_names
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import admin_policy_utils
@@ -152,7 +153,8 @@ def up(
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
-    dag, mutated_user_config = admin_policy_utils.apply(dag)
+    dag, mutated_user_config = admin_policy_utils.apply(
+        dag, request_name=request_names.AdminPolicyRequestName.SERVE_UP)
     dag.resolve_and_validate_volumes()
     dag.pre_mount_volumes()
     task = dag.tasks[0]
@@ -277,6 +279,8 @@ def up(
                         task=controller_task,
                         cluster_name=controller_name,
                         retry_until_up=True,
+                        _request_name=request_names.AdminPolicyRequestName.
+                        SERVE_LAUNCH_CONTROLLER,
                         _disable_controller_check=True,
                     )
         else:
@@ -541,7 +545,8 @@ def update(
     # and get the mutated config.
     # TODO(cblmemo,zhwu): If a user sets a new skypilot_config, the update
     # will not apply the config.
-    dag, _ = admin_policy_utils.apply(task)
+    dag, _ = admin_policy_utils.apply(
+        task, request_name=request_names.AdminPolicyRequestName.SERVE_UPDATE)
     task = dag.tasks[0]
     if pool:
         if task.run is not None:

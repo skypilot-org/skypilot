@@ -319,6 +319,8 @@ class StatusBody(RequestBody):
     # Only return fields that are needed for the
     # dashboard / CLI summary response
     summary_response: bool = False
+    # Include the cluster handle in the response
+    include_handle: bool = True
 
 
 class StartBody(RequestBody):
@@ -542,6 +544,9 @@ class JobsQueueV2Body(RequestBody):
     page: Optional[int] = None
     limit: Optional[int] = None
     statuses: Optional[List[str]] = None
+    # The fields to return in the response.
+    # Refer to the fields in the `class ManagedJobRecord` in `response.py`
+    fields: Optional[List[str]] = None
 
 
 class JobsCancelBody(RequestBody):

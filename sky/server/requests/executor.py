@@ -47,6 +47,7 @@ from sky.server import metrics as metrics_lib
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
+from sky.server.requests import request_names
 from sky.server.requests import requests as api_requests
 from sky.server.requests import threads
 from sky.server.requests.queues import local_queue
@@ -329,10 +330,7 @@ def override_request_env_and_config(
         # through the execution.
         user = models.User(id=request_body.env_vars[constants.USER_ID_ENV_VAR],
                            name=request_body.env_vars[constants.USER_ENV_VAR])
-        global_user_state.add_or_update_user(user)
-        # Refetch the user to get the latest user info, including the created_at
-        # field.
-        user = global_user_state.get_user(user.id)
+        _, user = global_user_state.add_or_update_user(user, return_user=True)
 
         # Force color to be enabled.
         os.environ['CLICOLOR_FORCE'] = '1'
@@ -398,7 +396,10 @@ def _request_execution_wrapper(request_id: str,
     rss_begin = proc.memory_info().rss
     db_utils.set_max_connections(num_db_connections_per_worker)
     # Handle the SIGTERM signal to abort the request processing gracefully.
-    signal.signal(signal.SIGTERM, _sigterm_handler)
+    # Only set up signal handlers in the main thread, as signal.signal() raises
+    # ValueError if called from a non-main thread (e.g., in tests).
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGTERM, _sigterm_handler)
 
     logger.info(f'Running request {request_id} with pid {pid}')
 
@@ -622,8 +623,8 @@ async def _execute_request_coroutine(request: api_requests.Request):
     logger.info(f'Executing request {request.request_id} in coroutine')
     func = request.entrypoint
     request_body = request.request_body
-    with api_requests.update_request(request.request_id) as request_task:
-        request_task.status = api_requests.RequestStatus.RUNNING
+    await api_requests.update_status_async(request.request_id,
+                                           api_requests.RequestStatus.RUNNING)
     # Redirect stdout and stderr to the request log path.
     original_output = ctx.redirect_log(request.log_path)
     try:
@@ -633,7 +634,7 @@ async def _execute_request_coroutine(request: api_requests.Request):
             **request_body.to_kwargs())
     except Exception as e:  # pylint: disable=broad-except
         ctx.redirect_log(original_output)
-        api_requests.set_request_failed(request.request_id, e)
+        await api_requests.set_request_failed_async(request.request_id, e)
         logger.error(f'Failed to run request {request.request_id} due to '
                      f'{common_utils.format_exception(e)}')
         return
@@ -650,14 +651,15 @@ async def _execute_request_coroutine(request: api_requests.Request):
         if fut.done():
             try:
                 result = await fut
-                api_requests.set_request_succeeded(request_id, result)
+                await api_requests.set_request_succeeded_async(
+                    request_id, result)
             except asyncio.CancelledError:
                 # The task is cancelled by ctx.cancel(), where the status
                 # should already be set to CANCELLED.
                 pass
             except Exception as e:  # pylint: disable=broad-except
                 ctx.redirect_log(original_output)
-                api_requests.set_request_failed(request_id, e)
+                await api_requests.set_request_failed_async(request_id, e)
                 logger.error(f'Request {request_id} failed due to '
                              f'{common_utils.format_exception(e)}')
             return True
@@ -672,13 +674,13 @@ async def _execute_request_coroutine(request: api_requests.Request):
     except asyncio.CancelledError:
         # Current coroutine is cancelled due to client disconnect, set the
         # request status for consistency.
-        api_requests.set_request_cancelled(request.request_id)
+        await api_requests.set_request_cancelled_async(request.request_id)
         pass
     # pylint: disable=broad-except
     except (Exception, KeyboardInterrupt, SystemExit) as e:
         # Handle any other error
         ctx.redirect_log(original_output)
-        api_requests.set_request_failed(request.request_id, e)
+        await api_requests.set_request_failed_async(request.request_id, e)
         logger.error(f'Request {request.request_id} interrupted due to '
                      f'unhandled exception: {common_utils.format_exception(e)}')
         raise
@@ -688,9 +690,9 @@ async def _execute_request_coroutine(request: api_requests.Request):
         ctx.cancel()
 
 
-def prepare_request(
+async def prepare_request_async(
     request_id: str,
-    request_name: str,
+    request_name: request_names.RequestName,
     request_body: payloads.RequestBody,
     func: Callable[P, Any],
     request_cluster_name: Optional[str] = None,
@@ -714,7 +716,7 @@ def prepare_request(
                                    user_id=user_id,
                                    cluster_name=request_cluster_name)
 
-    if not api_requests.create_if_not_exists(request):
+    if not await api_requests.create_if_not_exists_async(request):
         raise exceptions.RequestAlreadyExistsError(
             f'Request {request_id} already exists.')
 
@@ -722,17 +724,18 @@ def prepare_request(
     return request
 
 
-def schedule_request(request_id: str,
-                     request_name: str,
-                     request_body: payloads.RequestBody,
-                     func: Callable[P, Any],
-                     request_cluster_name: Optional[str] = None,
-                     ignore_return_value: bool = False,
-                     schedule_type: api_requests.ScheduleType = (
-                         api_requests.ScheduleType.LONG),
-                     is_skypilot_system: bool = False,
-                     precondition: Optional[preconditions.Precondition] = None,
-                     retryable: bool = False) -> None:
+async def schedule_request_async(request_id: str,
+                                 request_name: request_names.RequestName,
+                                 request_body: payloads.RequestBody,
+                                 func: Callable[P, Any],
+                                 request_cluster_name: Optional[str] = None,
+                                 ignore_return_value: bool = False,
+                                 schedule_type: api_requests.ScheduleType = (
+                                     api_requests.ScheduleType.LONG),
+                                 is_skypilot_system: bool = False,
+                                 precondition: Optional[
+                                     preconditions.Precondition] = None,
+                                 retryable: bool = False) -> None:
     """Enqueue a request to the request queue.
 
     Args:
@@ -753,9 +756,11 @@ def schedule_request(request_id: str,
             The precondition is waited asynchronously and does not block the
             caller.
     """
-    request_task = prepare_request(request_id, request_name, request_body, func,
-                                   request_cluster_name, schedule_type,
-                                   is_skypilot_system)
+    request_task = await prepare_request_async(request_id, request_name,
+                                               request_body, func,
+                                               request_cluster_name,
+                                               schedule_type,
+                                               is_skypilot_system)
     schedule_prepared_request(request_task, ignore_return_value, precondition,
                               retryable)
 

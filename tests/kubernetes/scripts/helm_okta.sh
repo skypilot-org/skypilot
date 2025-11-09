@@ -53,6 +53,35 @@ cleanup() {
     else
         echo "Namespace $NAMESPACE does not exist, skipping deletion"
     fi
+
+    # Restore sky/server/common.py to original state
+    echo "Restoring sky/server/common.py..."
+    if git checkout sky/server/common.py 2>/dev/null; then
+        echo "✅ sky/server/common.py restored"
+    else
+        echo "⚠️  Could not restore sky/server/common.py (file may not be tracked or changes may not exist)"
+    fi
+
+    # Remove api_server section from ~/.sky/config.yaml if it exists
+    local config_file="$HOME/.sky/config.yaml"
+    if [ -f "$config_file" ] && grep -q "^api_server:" "$config_file"; then
+        echo "Removing api_server section from $config_file..."
+        sed -i '/^api_server:/,/^[[:space:]]*endpoint:/d' "$config_file"
+        echo "✅ api_server section removed from config.yaml"
+    else
+        echo "⚠️  $config_file does not exist or does not contain api_server section"
+    fi
+
+    # Remove ~/.sky/cookies.txt if it exists
+    local cookies_file="$HOME/.sky/cookies.txt"
+    if [ -f "$cookies_file" ]; then
+        echo "Removing $cookies_file..."
+        rm -f "$cookies_file"
+        echo "✅ cookies.txt removed"
+    else
+        echo "⚠️  $cookies_file does not exist"
+    fi
+
     echo "🧹 Cleanup complete"
 }
 
@@ -167,6 +196,14 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 echo "✅ Docker image built successfully"
+
+# Remove old images from kind cluster to avoid tag conflicts
+echo "Removing old $DOCKER_IMAGE images from kind cluster..."
+docker exec skypilot-control-plane crictl images | grep "$(echo $DOCKER_IMAGE | cut -d: -f1)" | awk '{print $3}' | while read img_id; do
+    echo "Removing old image: $img_id"
+    docker exec skypilot-control-plane crictl rmi "$img_id" 2>/dev/null || true
+done
+echo "✅ Old images removed from kind cluster"
 
 # Load the image into kind cluster
 echo "Loading image $DOCKER_IMAGE into kind cluster..."
@@ -285,9 +322,20 @@ deploy_and_login() {
 
     # Fix imagePullPolicy for Docker-in-Docker environments
     # The Helm chart hardcodes imagePullPolicy: Always, but we need Never for local images
+    # Patch BOTH the main container and the logrotate sidecar
     echo "Fixing imagePullPolicy for local Docker image..."
-    kubectl patch deployment skypilot-api-server -n $NAMESPACE -p '{"spec":{"template":{"spec":{"containers":[{"name":"skypilot-api","imagePullPolicy":"Never"}]}}}}'
-    echo "✅ imagePullPolicy patched to Never"
+    kubectl patch deployment skypilot-api-server -n $NAMESPACE -p '{"spec":{"template":{"spec":{"containers":[{"name":"skypilot-api","imagePullPolicy":"Never"},{"name":"logrotate","imagePullPolicy":"Never"}]}}}}'
+    echo "✅ imagePullPolicy patched to Never for all containers"
+
+    # Wait for deployment rollout to complete after patching
+    # This ensures the new pod is created and the PVC is bound
+    echo "Waiting for deployment rollout to complete..."
+    if ! kubectl rollout status deployment/skypilot-api-server -n $NAMESPACE --timeout=600s; then
+        echo "Warning: Deployment rollout check failed. Checking deployment status..."
+        kubectl describe deployment skypilot-api-server -n $NAMESPACE
+        exit 1
+    fi
+    echo "✅ Deployment rollout completed"
 
     # Wait for pods to be ready
     echo "Waiting for pods to be ready..."
@@ -431,12 +479,14 @@ deploy_and_login() {
 
     echo "🔄 Performing automated login for mode: $mode..."
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    LOGIN_OUTPUT=$(python3 "$SCRIPT_DIR/okta_auto_login.py" --endpoint "$ENDPOINT" --username "$OKTA_TEST_USERNAME" --password "$OKTA_TEST_PASSWORD" --client-id "$OKTA_CLIENT_ID")
-    if [[ $? -eq 0 ]] && [[ "$LOGIN_OUTPUT" == SUCCESS* ]]; then
+    LOGIN_OUTPUT=$(python3 "$SCRIPT_DIR/okta_auto_login.py" direct --endpoint "$ENDPOINT" --username "$OKTA_TEST_USERNAME" --password "$OKTA_TEST_PASSWORD" 2>&1)
+    LOGIN_EXIT_CODE=$?
+    echo "Login output: $LOGIN_OUTPUT"
+    if [[ $LOGIN_EXIT_CODE -eq 0 ]] && echo "$LOGIN_OUTPUT" | grep -q "SUCCESS:"; then
         echo "✅ Automated test complete for mode: $mode"
     else
         echo "❌ Error happened during automated login test for mode: $mode"
-        echo "Login output: $LOGIN_OUTPUT"
+        echo "Login exit code: $LOGIN_EXIT_CODE"
         exit 1
     fi
 }
@@ -451,3 +501,39 @@ kubectl delete namespace $NAMESPACE --ignore-not-found=true
 echo "✅ Namespace $NAMESPACE deleted"
 
 deploy_and_login "new"
+
+# Apply cookie header fix to sky/server/common.py before sky api login
+echo "Applying cookie header fix to sky/server/common.py..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Find the project root by looking for sky/server/common.py
+COMMON_PY="$(cd "$SCRIPT_DIR/../../.." && pwd)/sky/server/common.py"
+if [ -f "$COMMON_PY" ]; then
+    # Use sed to replace the simple cookie assignment with the multi-line version
+    # This fixes the requests library cookie issue with localhost:non-standard-port
+    sed -i '/kwargs\['\''cookies'\''\] = get_api_cookie_jar()/c\
+        cookie_jar = get_api_cookie_jar()\
+        if cookie_jar:\
+            # Convert cookie jar to Cookie header string to work around requests\
+            # library edge case: cookies are not sent when using localhost with\
+            # non-standard ports (e.g., localhost:30082), even when domain matches.\
+            # The requests library'\''s cookie filtering logic incorrectly filters out\
+            # valid cookies in this case. Setting the Cookie header manually\
+            # bypasses this filtering and guarantees cookies are sent.\
+            cookie_parts = []\
+            for cookie in cookie_jar:\
+                cookie_parts.append(f'\''{cookie.name}={cookie.value}'\'')\
+            if cookie_parts:\
+                if '\''Cookie'\'' not in headers:\
+                    headers['\''Cookie'\''] = '\''; '\''.join(cookie_parts)\
+        kwargs['\''cookies'\''] = cookie_jar' "$COMMON_PY"
+    echo "✅ Cookie header fix applied"
+else
+    echo "⚠️  sky/server/common.py not found at $COMMON_PY"
+    exit 1
+fi
+
+# sky api login
+python3 "$SCRIPT_DIR/okta_auto_login.py" sky-api --endpoint "$ENDPOINT" --username "$OKTA_TEST_USERNAME" --password "$OKTA_TEST_PASSWORD" || (echo "❌ Failed: sky api login" && exit 1)
+
+# run basic k8s ssh test
+pytest tests/smoke_tests/test_basic.py::test_kubernetes_ssh_proxy_connection --kubernetes || (echo "❌ Failed: basic k8s ssh test" && exit 1)

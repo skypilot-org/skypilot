@@ -29,6 +29,12 @@ _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME = (
     'echo; echo; echo "$s" | grep "Job submitted"; '
     'sleep 5')
 
+_LAUNCH_JOB_AND_CHECK_OUTPUT = (
+    's=$(sky jobs launch --pool {pool_name} {job_yaml} -d -y); '
+    'echo "$s"; '
+    'echo; echo; echo "$s" | grep "Job submitted"; echo "$s" | grep "{output}"; '
+    'sleep 5')
+
 _POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS = (
     's=$(sky jobs pool apply -p {pool_name} --workers {num_workers} -y); '
     'echo "$s"; '
@@ -704,7 +710,6 @@ def test_pool_job_cancel_recovery(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.skip('Skipping until job controller bug resolved.')
 def test_pool_job_cancel_running_multiple(generic_cloud: str):
     num_jobs = 4
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
@@ -761,7 +766,6 @@ def test_pool_job_cancel_running_multiple(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.skip('Skipping until job controller bug resolved.')
 def test_pool_job_cancel_running_multiple_simultaneous(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     num_jobs = 4
@@ -976,4 +980,131 @@ def test_heterogeneous_pool_counts(generic_cloud: str):
             ],
             timeout=smoke_tests_utils.get_timeout(generic_cloud),
         )
+        smoke_tests_utils.run_one_test(test)
+
+
+def test_pools_num_jobs(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+    pool_config = basic_pool_conf(num_workers=3, infra=generic_cloud)
+    job_config = basic_job_conf(
+        job_name=f'{name}-job',
+        run_cmd='echo "Running with $SKYPILOT_NUM_JOBS jobs"')
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
+            write_yaml(pool_yaml, pool_config)
+            write_yaml(job_yaml, job_config)
+            test = smoke_tests_utils.Test(
+                'test_pools_num_jobs',
+                [
+                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, pool_yaml=pool_yaml.name),
+                    _LAUNCH_JOB_AND_CHECK_OUTPUT.format(
+                        pool_name=pool_name,
+                        job_yaml=job_yaml.name,
+                        output='Running with 3 jobs')
+                ],
+                timeout=smoke_tests_utils.get_timeout(generic_cloud),
+                teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
+            )
+            smoke_tests_utils.run_one_test(test)
+
+
+def test_pool_worker_assignment_in_queue(generic_cloud: str):
+    """Test that sky jobs queue shows the worker assignment for running jobs."""
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
+
+    job_name = f'{smoke_tests_utils.get_cluster_name()}-job'
+    job_config = basic_job_conf(
+        job_name=job_name,
+        run_cmd='echo "Hello, world!"; sleep infinity',
+    )
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
+            write_yaml(pool_yaml, pool_config)
+            write_yaml(job_yaml, job_config)
+
+            name = smoke_tests_utils.get_cluster_name()
+            pool_name = f'{name}-pool'
+
+            test = smoke_tests_utils.Test(
+                'test_pool_worker_assignment_in_queue',
+                [
+                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, pool_yaml=pool_yaml.name),
+                    wait_until_pool_ready(pool_name, timeout=timeout),
+                    _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, job_yaml=job_yaml.name),
+                    wait_until_job_status(job_name, ['RUNNING'],
+                                          timeout=timeout),
+                    # Check that the worker assignment is shown in the queue output
+                    f's=$(sky jobs queue); echo "$s"; echo; echo; echo "$s" | grep "{job_name}" | grep "{pool_name} (worker=1)"',
+                ],
+                timeout=timeout,
+                teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
+            )
+            smoke_tests_utils.run_one_test(test)
+
+
+def test_pools_num_jobs_option(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+    pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
+    job_config = basic_job_conf(job_name=f'{name}-job',)
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
+            write_yaml(pool_yaml, pool_config)
+            write_yaml(job_yaml, job_config)
+            test = smoke_tests_utils.Test(
+                'test_pools_num_jobs',
+                [
+                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, pool_yaml=pool_yaml.name),
+                    # Test parallel job launching with --num-jobs 3
+                    ('s=$(sky jobs launch --pool {pool_name} {job_yaml} --num-jobs 10 -d -y); '
+                     'echo "$s"; '
+                     'echo; echo; echo "$s" | grep "Job submitted, ID: 1"; '
+                     'echo "$s" | grep "Job submitted, ID: 2"; '
+                     'echo "$s" | grep "Job submitted, ID: 3"; '
+                     'echo "$s" | grep "Job submitted, ID: 4"; '
+                     'echo "$s" | grep "Job submitted, ID: 5"; '
+                     'echo "$s" | grep "Job submitted, ID: 6"; '
+                     'echo "$s" | grep "Job submitted, ID: 7"; '
+                     'echo "$s" | grep "Job submitted, ID: 8"; '
+                     'echo "$s" | grep "Job submitted, ID: 9"; '
+                     'echo "$s" | grep "Job submitted, ID: 10"; '
+                     'sleep 5').format(pool_name=pool_name,
+                                       job_yaml=job_yaml.name)
+                ],
+                timeout=smoke_tests_utils.get_timeout(generic_cloud),
+                teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
+            )
+            smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.gcp
+def test_pools_setup_num_gpus(generic_cloud: str):
+    """Test that the number of GPUs is set correctly in the setup script."""
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+    setup_cmd = 'if [[ "$SKYPILOT_SETUP_NUM_GPUS_PER_NODE" != "2" ]]; then exit 1; fi'
+    pool_config = basic_pool_conf(num_workers=1,
+                                  infra=generic_cloud,
+                                  resource_string='{L4:2}',
+                                  setup_cmd=setup_cmd)
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        write_yaml(pool_yaml, pool_config)
+        test = smoke_tests_utils.Test(
+            'test_pools_setup_num_gpus',
+            [
+                _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
+                                                      pool_yaml=pool_yaml.name),
+                # Wait for the pool to be created.
+                wait_until_pool_ready(pool_name, timeout=timeout),
+            ],
+            timeout=timeout,
+            teardown=_TEARDOWN_POOL.format(pool_name=pool_name))
         smoke_tests_utils.run_one_test(test)

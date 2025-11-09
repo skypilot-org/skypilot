@@ -44,10 +44,12 @@ class SSH(kubernetes.Kubernetes):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[kubernetes.clouds.CloudImplementationFeatures, str]:
         # Inherit all Kubernetes unsupported features
-        return super()._unsupported_features_for_resources(resources)
+        return super()._unsupported_features_for_resources(resources, region)
 
     @classmethod
     def get_ssh_node_pool_contexts(cls) -> List[str]:

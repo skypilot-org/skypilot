@@ -371,6 +371,76 @@ def test_detect_gpu_label_formatter_invalid_label_skip():
         lf, _ = utils.detect_gpu_label_formatter('whatever')
         assert lf is not None
         assert isinstance(lf, utils.CoreWeaveLabelFormatter)
+        utils.detect_gpu_label_formatter.cache_clear()
+
+
+def test_detect_gpu_label_formatter_suppresses_warning_for_coreweave_format():
+    """Tests that warnings are not logged when GKE label keys have
+    CoreWeave-formatted values (e.g., cloud.google.com/gke-accelerator=H100_NVLINK_80GB).
+    This happens on CoreWeave clusters where NFD sets GKE labels but with CoreWeave values.
+    """
+    warning_calls = []
+
+    def mock_warning(*args, **kwargs):
+        warning_calls.append(args[0] if args else '')
+
+    mock_node = mock.MagicMock()
+    mock_node.metadata.name = 'node'
+    mock_node.metadata.labels = {
+        # CoreWeave clusters may have cloud.google.com/gke-accelerator labels set by Node Feature
+        # Discovery (NFD), but with CoreWeave formatted values, causing confusion.
+        'cloud.google.com/gke-accelerator': 'H100_NVLINK_80GB',
+        'gpu.nvidia.com/class': 'H100_NVLINK_80GB',
+    }
+
+    with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                    return_value=[mock_node]), \
+         mock.patch('sky.provision.kubernetes.utils.logger.warning', side_effect=mock_warning):
+        lf, _ = utils.detect_gpu_label_formatter('whatever')
+
+        # Should detect CoreWeaveLabelFormatter
+        assert lf is not None
+        assert isinstance(lf, utils.CoreWeaveLabelFormatter)
+
+        assert len(warning_calls) == 0, (
+            f'Expected no warnings about GKE label with CoreWeave format, '
+            f'but got: {warning_calls}')
+        utils.detect_gpu_label_formatter.cache_clear()
+
+
+def test_detect_gpu_label_formatter_logs_warning_with_no_valid_labels():
+    """Tests that warnings ARE logged when there are no valid labels."""
+    warning_calls = []
+
+    def mock_warning(*args, **kwargs):
+        warning_calls.append(args[0] if args else '')
+
+    mock_node = mock.MagicMock()
+    mock_node.metadata.name = 'node'
+    mock_node.metadata.labels = {
+        # Label with invalid value for GKE formatter
+        'cloud.google.com/gke-accelerator': 'H200',
+    }
+
+    with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                    return_value=[mock_node]), \
+         mock.patch('sky.provision.kubernetes.utils.logger.warning', side_effect=mock_warning):
+        utils.detect_gpu_label_formatter.cache_clear()
+        lf, _ = utils.detect_gpu_label_formatter('whatever')
+
+        # Should not detect any formatter
+        assert lf is None
+
+        # SHOULD log warning about invalid GKE label value since no valid formatter found
+        expected_warning = (
+            'GPU label cloud.google.com/gke-accelerator matched for label '
+            'formatter GKELabelFormatter, '
+            'but has invalid value H200. '
+            'Reason: Invalid accelerator name in GKE cluster: H200. '
+            'Skipping...')
+        assert expected_warning in warning_calls, (
+            f'Expected warning not found. Expected: {expected_warning!r}\n'
+            f'Got warnings: {warning_calls}')
 
 
 def test_detect_gpu_label_formatter_ignores_empty_labels():
@@ -410,6 +480,7 @@ def test_detect_gpu_label_formatter_ignores_empty_labels():
         lf, _ = utils.detect_gpu_label_formatter('test-context')
         assert lf is not None
         assert isinstance(lf, utils.CoreWeaveLabelFormatter)
+        utils.detect_gpu_label_formatter.cache_clear()
 
     # Test empty string variations
     mock_cpu_node_whitespace = mock.MagicMock()
@@ -426,6 +497,7 @@ def test_detect_gpu_label_formatter_ignores_empty_labels():
         lf, _ = utils.detect_gpu_label_formatter('test-context')
         assert lf is not None
         assert isinstance(lf, utils.CoreWeaveLabelFormatter)
+        utils.detect_gpu_label_formatter.cache_clear()
 
 
 # pylint: disable=line-too-long
