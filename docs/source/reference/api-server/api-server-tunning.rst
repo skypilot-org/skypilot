@@ -75,19 +75,19 @@ The following table shows the maximum concurrency for different resource configu
      - Max concurrency
    * - 4
      - 8Gi
-     - 8 Long requests, 11 Short requests
+     - 8 Long requests, 9 Short requests
    * - 16
      - 32Gi
-     - 32 Long requests, 60 Short requests
+     - 32 Long requests, 57 Short requests
    * - 32
      - 64Gi
-     - 64 Long requests, 145 Short requests
+     - 64 Long requests, 121 Short requests
    * - 64
      - 128Gi
-     - 128 Long requests, 299 Short requests
+     - 128 Long requests, 249 Short requests
    * - 128
      - 256Gi
-     - 256 Long requests, 589 Short requests
+     - 256 Long requests, 505 Short requests
 
 Use asynchronous requests to avoid blocking
 -------------------------------------------

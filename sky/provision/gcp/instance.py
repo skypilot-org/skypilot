@@ -62,9 +62,10 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
+    retry_if_missing: bool = False,
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
-    del cluster_name  # unused
+    del cluster_name, retry_if_missing  # unused
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
@@ -360,9 +361,10 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
                                   created_instance_ids=created_instance_ids)
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
+    del cluster_name  # unused
     try:
         return _run_instances(region, cluster_name_on_cloud, config)
     except gcp.http_error_exception() as e:

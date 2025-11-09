@@ -13,9 +13,9 @@ from sky.utils import status_lib
 logger = logging.getLogger(__name__)
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
-
+    del cluster_name  # unused
     zone_id = config.node_config['zone_id']
     running_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
     head_instance_id = _get_head_instance_id(running_instances)
@@ -431,8 +431,9 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
+    retry_if_missing: bool = False,
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
-    del cluster_name  # unused
+    del cluster_name, retry_if_missing  # unused
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     instances = _filter_instances(cluster_name_on_cloud, None)
 

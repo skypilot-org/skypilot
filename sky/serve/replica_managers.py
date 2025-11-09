@@ -22,12 +22,12 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
-from sky.jobs import scheduler as jobs_scheduler
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.serve import service
 from sky.serve import spot_placer
+from sky.server.requests import request_names
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -37,6 +37,7 @@ from sky.utils import env_options
 from sky.utils import resources_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     from sky.serve import service_spec
@@ -79,7 +80,7 @@ def launch_cluster(replica_id: int,
                     f'{cluster_name} with resources override: '
                     f'{resources_override}')
     try:
-        config = common_utils.read_yaml(
+        config = yaml_utils.read_yaml(
             os.path.expanduser(service_task_yaml_path))
         task = task_lib.Task.from_yaml_config(config)
         if resources_override is not None:
@@ -107,6 +108,8 @@ def launch_cluster(replica_id: int,
             execution.launch(task,
                              cluster_name,
                              retry_until_up=retry_until_up,
+                             _request_name=request_names.AdminPolicyRequestName.
+                             SERVE_LAUNCH_REPLICA,
                              _is_launched_by_sky_serve_controller=True)
             logger.info(f'Replica cluster {cluster_name} launched.')
         except (exceptions.InvalidClusterNameError,
@@ -422,11 +425,12 @@ class ReplicaInfo:
                 based on the cluster name.
         """
         if cluster_record is None:
-            cluster_record = global_user_state.get_cluster_from_name(
+            handle = global_user_state.get_handle_from_cluster_name(
                 self.cluster_name)
-        if cluster_record is None:
+        else:
+            handle = cluster_record['handle']
+        if handle is None:
             return None
-        handle = cluster_record['handle']
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
         return handle
 
@@ -442,6 +446,12 @@ class ReplicaInfo:
     def url(self) -> Optional[str]:
         handle = self.handle()
         if handle is None:
+            return None
+        if self.replica_port == '-':
+            # This is a pool replica so there is no endpoint and it's filled
+            # with this dummy value. We return None here so that we can
+            # get the active ready replicas and perform autoscaling. Otherwise,
+            # would error out when trying to get the endpoint.
             return None
         replica_port_int = int(self.replica_port)
         try:
@@ -470,7 +480,7 @@ class ReplicaInfo:
                      with_handle: bool,
                      with_url: bool = True) -> Dict[str, Any]:
         cluster_record = global_user_state.get_cluster_from_name(
-            self.cluster_name)
+            self.cluster_name, include_user_info=False, summary_response=True)
         info_dict = {
             'replica_id': self.replica_id,
             'name': self.cluster_name,
@@ -488,8 +498,8 @@ class ReplicaInfo:
                 info_dict['cloud'] = repr(handle.launched_resources.cloud)
                 info_dict['region'] = handle.launched_resources.region
                 info_dict['resources_str'] = (
-                    resources_utils.get_readable_resources_repr(handle,
-                                                                simplify=True))
+                    resources_utils.get_readable_resources_repr(
+                        handle, simplified_only=True)[0])
         return info_dict
 
     def __repr__(self) -> str:
@@ -956,7 +966,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         # provision) or the cluster is preempted and cleaned up by the status
         # refresh. In this case, we skip spawning a new down process to save
         # controller resources.
-        if global_user_state.get_cluster_from_name(info.cluster_name) is None:
+        if not global_user_state.cluster_with_name_exists(info.cluster_name):
             self._handle_sky_down_finish(info, exitcode=0)
             return
 
@@ -1051,7 +1061,6 @@ class SkyPilotReplicaManager(ReplicaManager):
                     self._service_name, replica_id)
                 assert info is not None, replica_id
                 error_in_sky_launch = False
-                schedule_next_jobs = False
                 if info.status == serve_state.ReplicaStatus.PENDING:
                     # sky.launch not started yet
                     if controller_utils.can_provision():
@@ -1079,7 +1088,6 @@ class SkyPilotReplicaManager(ReplicaManager):
                     else:
                         info.status_property.sky_launch_status = (
                             common_utils.ProcessStatus.SUCCEEDED)
-                        schedule_next_jobs = True
                     if self._spot_placer is not None and info.is_spot:
                         # TODO(tian): Currently, we set the location to
                         # preemptive if the launch process failed. This is
@@ -1099,16 +1107,12 @@ class SkyPilotReplicaManager(ReplicaManager):
                             self._spot_placer.set_active(location)
                 serve_state.add_or_update_replica(self._service_name,
                                                   replica_id, info)
-                if schedule_next_jobs and self._is_pool:
-                    jobs_scheduler.maybe_schedule_next_jobs()
                 if error_in_sky_launch:
                     # Teardown after update replica info since
                     # _terminate_replica will update the replica info too.
                     self._terminate_replica(replica_id,
                                             sync_down_logs=True,
                                             replica_drain_delay_seconds=0)
-            # Try schedule next job after acquiring the lock.
-            jobs_scheduler.maybe_schedule_next_jobs()
         down_process_pool_snapshot = list(self._down_process_pool.items())
         for replica_id, p in down_process_pool_snapshot:
             if p.is_alive():
@@ -1397,7 +1401,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         # the latest version. This can significantly improve the speed
         # for updating an existing service with only config changes to the
         # service specs, e.g. scale down the service.
-        new_config = common_utils.read_yaml(
+        new_config = yaml_utils.read_yaml(
             os.path.expanduser(service_task_yaml_path))
         # Always create new replicas and scale down old ones when file_mounts
         # are not empty.
@@ -1414,7 +1418,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 old_service_task_yaml_path = (
                     serve_utils.generate_task_yaml_file_name(
                         self._service_name, info.version))
-                old_config = common_utils.read_yaml(
+                old_config = yaml_utils.read_yaml(
                     os.path.expanduser(old_service_task_yaml_path))
                 for key in ['service', 'pool', '_user_specified_yaml']:
                     old_config.pop(key, None)

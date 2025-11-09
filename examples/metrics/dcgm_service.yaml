@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: dcgm-exporter
+  labels:
+    app: dcgm-exporter
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9400"
+    prometheus.io/path: "/metrics"
+spec:
+  selector:
+    app.kubernetes.io/name: dcgm-exporter
+  ports:
+  - name: metrics
+    port: 9400
+    targetPort: 9400
+    protocol: TCP
+  type: ClusterIP

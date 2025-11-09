@@ -57,7 +57,9 @@ class DO(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         """The features not supported based on the resources provided.
 
@@ -83,6 +85,7 @@ class DO(clouds.Cloud):
         use_spot: bool,
         region: Optional[str],
         zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None,
     ) -> List[clouds.Region]:
         assert zone is None, 'DO does not support zones.'
         del accelerators, zone  # unused
@@ -283,17 +286,16 @@ class DO(clouds.Cloud):
         """Verify that the user has valid credentials for
         DO's compute service."""
 
-        try:
-            do.exceptions()
-        except ImportError as err:
-            return False, str(err)
+        installed, err_msg = do.check_exceptions_dependencies_installed()
+        if not installed:
+            return False, err_msg
 
         try:
             # attempt to make a CURL request for listing instances
             do_utils.client().droplets.list()
-        except do.exceptions().HttpResponseError as err:
-            return False, str(err)
         except do_utils.DigitalOceanError as err:
+            return False, str(err)
+        except do.exceptions().HttpResponseError as err:
             return False, str(err)
 
         return True, None

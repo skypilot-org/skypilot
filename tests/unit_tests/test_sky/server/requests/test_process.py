@@ -22,32 +22,27 @@ def failing_task():
     raise ValueError('Task failed')
 
 
-def wait_for_workers_cleanup(executor, timeout=5):
-    """Wait for workers to be cleaned up.
-    
+def verify_workers_cleanup(executor):
+    """Verify workers to be cleaned up.
+
     Args:
         executor: The DisposableExecutor instance
-        timeout: Maximum time to wait in seconds
-    
+
     Returns:
         bool: True if workers are cleaned up, False if timeout
     """
-    start_time = time.time()
-    while time.time() - start_time < timeout:
-        with executor._lock:
-            if len(executor.workers) == 0:
-                return True
-        time.sleep(0.1)
-    return False
+    with executor._lock:
+        if len(executor.workers) == 0:
+            return True
 
 
-def wait_for_futures(futures, timeout=5):
+def wait_for_futures(futures, timeout=20):
     """Wait for futures to complete.
-    
+
     Args:
         futures: List of futures to wait for
         timeout: Maximum time to wait in seconds
-    
+
     Returns:
         bool: True if all futures completed, False if timeout
     """
@@ -95,21 +90,23 @@ def test_disposable_executor():
     """Test DisposableExecutor functionality."""
     executor = DisposableExecutor(max_workers=2)
     try:
+        futs = []
         # Test submit and has_idle_workers
         assert executor.has_idle_workers()
-        assert executor.submit(dummy_task)
+        futs.append(executor.submit(dummy_task))
 
         # Test multiple tasks
-        assert executor.submit(dummy_task)
+        futs.append(executor.submit(dummy_task))
         assert not executor.has_idle_workers()  # No idle workers when full
 
-        # Wait for tasks to complete and workers to be cleaned up
-        assert wait_for_workers_cleanup(executor), "Workers not cleaned up"
+        concurrent.futures.wait(futs)
+        assert verify_workers_cleanup(executor), "Workers not cleaned up"
         assert executor.has_idle_workers()  # Should have idle workers now
 
         # Test with failing task
-        assert executor.submit(failing_task)
-        assert wait_for_workers_cleanup(
+        failed_fut = executor.submit(failing_task)
+        concurrent.futures.wait([failed_fut])
+        assert verify_workers_cleanup(
             executor), "Failed task worker not cleaned up"
         assert executor.has_idle_workers()  # Worker should be cleaned up
     finally:

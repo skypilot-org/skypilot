@@ -39,6 +39,26 @@ run: |
     main.py
 ```
 
+```yaml
+run: |
+   cd examples/mingpt
+   MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+   torchrun \
+   --nnodes=$SKYPILOT_NUM_NODES \
+   --nproc_per_node=$SKYPILOT_NUM_GPUS_PER_NODE \
+   --master_addr=$MASTER_ADDR \
+   --master_port=8008 \
+   --node_rank=${SKYPILOT_NODE_RANK} \
+   main.py
+```
+
+Or, run the equivalent code using python SDK:
+```bash
+python sdk_scripts/train.py
+```
+```
+python sdk_scripts/train.py
+```
 
 
 ### Using `rdzv` backend
@@ -66,6 +86,10 @@ run: |
     main.py
 ```
 
+To run the equivalent code using python SDK, run
+```
+python sdk_scripts/train_rdzv.py
+```
 
 ## Scale up
 

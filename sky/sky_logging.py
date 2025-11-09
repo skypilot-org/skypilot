@@ -19,6 +19,9 @@ _FORMAT = '%(levelname).1s %(asctime)s %(filename)s:%(lineno)d] %(message)s'
 _DATE_FORMAT = '%m-%d %H:%M:%S'
 _SENSITIVE_LOGGER = ['sky.provisioner', 'sky.optimizer']
 
+_DEBUG_LOG_DIR = os.path.expanduser(
+    os.path.join(constants.SKY_LOGS_DIRECTORY, 'request_debug'))
+
 DEBUG = logging.DEBUG
 INFO = logging.INFO
 WARNING = logging.WARNING
@@ -106,7 +109,6 @@ def _setup_logger():
     global _default_handler
     if _default_handler is None:
         _default_handler = EnvAwareHandler(sys.stdout)
-        _default_handler.flush = sys.stdout.flush  # type: ignore
         if env_options.Options.SHOW_DEBUG_INFO.get():
             _default_handler.setLevel(logging.DEBUG)
         else:
@@ -126,7 +128,6 @@ def _setup_logger():
         for logger_name in _SENSITIVE_LOGGER:
             logger = logging.getLogger(logger_name)
             handler_to_logger = EnvAwareHandler(sys.stdout, sensitive=True)
-            handler_to_logger.flush = sys.stdout.flush  # type: ignore
             logger.addHandler(handler_to_logger)
             logger.setLevel(logging.INFO)
             if _show_logging_prefix():
@@ -254,3 +255,28 @@ def generate_tmp_logging_file_path(file_name: str) -> str:
     log_path = os.path.expanduser(os.path.join(log_dir, file_name))
 
     return log_path
+
+
+@contextlib.contextmanager
+def add_debug_log_handler(request_id: str):
+    if os.getenv(constants.ENV_VAR_ENABLE_REQUEST_DEBUG_LOGGING) != 'true':
+        yield
+        return
+
+    os.makedirs(_DEBUG_LOG_DIR, exist_ok=True)
+    log_path = os.path.join(_DEBUG_LOG_DIR, f'{request_id}.log')
+    try:
+        debug_log_handler = logging.FileHandler(log_path)
+        debug_log_handler.setFormatter(FORMATTER)
+        debug_log_handler.setLevel(logging.DEBUG)
+        _root_logger.addHandler(debug_log_handler)
+        # sky.provision sets up its own logger/handler with propogate=False,
+        # so add it there too.
+        provision_logger = logging.getLogger('sky.provision')
+        provision_logger.addHandler(debug_log_handler)
+        provision_logger.setLevel(logging.DEBUG)
+        yield
+    finally:
+        _root_logger.removeHandler(debug_log_handler)
+        provision_logger.removeHandler(debug_log_handler)
+        debug_log_handler.close()

@@ -1104,7 +1104,7 @@ class Resources:
         regions = self.cloud.regions_with_offering(self._instance_type,
                                                    self.accelerators,
                                                    self._use_spot, self._region,
-                                                   self._zone)
+                                                   self._zone, self)
         if self._image_id is not None and None not in self._image_id:
             regions = [r for r in regions if r.name in self._image_id]
 
@@ -1331,10 +1331,18 @@ class Resources:
                     clouds.CloudImplementationFeatures.IMAGE_ID
                 })
         except exceptions.NotSupportedError as e:
+            # Provide a more helpful error message for Lambda cloud
+            if self.cloud.is_same_cloud(clouds.Lambda()):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Lambda cloud only supports Docker images. '
+                        'Please prefix your image with "docker:" '
+                        '(e.g., image_id: docker:your-image-name).') from e
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'image_id is only supported for AWS/GCP/Azure/IBM/OCI/'
-                    'Kubernetes, please explicitly specify the cloud.') from e
+                    'Kubernetes. For Lambda cloud, use "docker:" prefix for '
+                    'Docker images.') from e
 
         if self._region is not None:
             # If the image_id has None as key (region-agnostic),

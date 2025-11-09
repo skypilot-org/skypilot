@@ -79,6 +79,10 @@ spec:
         - name: ENABLE_SERVICE_ACCOUNTS
           value: "true"
         {{- end }}
+        {{- if include "skypilot.ingressBasicAuthEnabled" . | trim | eq "true" }}
+        - name: SKYPILOT_INGRESS_BASIC_AUTH_ENABLED
+          value: "true"
+        {{- end }}
         {{- if .Values.gcpCredentials.enabled }}
         - name: GOOGLE_APPLICATION_CREDENTIALS
           value: /root/gcp-cred.json
@@ -126,6 +130,16 @@ spec:
         - name: SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL
           value: {{ include "skypilot.oauth2ProxyURL" . }}
         {{- end }}
+        - name: SKYPILOT_POD_CPU_CORE_LIMIT
+          valueFrom:
+            resourceFieldRef:
+              containerName: skypilot-api
+              resource: requests.cpu
+        - name: SKYPILOT_POD_MEMORY_BYTES_LIMIT
+          valueFrom:
+            resourceFieldRef:
+              containerName: skypilot-api
+              resource: requests.memory
         # Use tini as the init process
         command: ["tini", "--"]
         # Start API server in foreground (if supported) to:
@@ -203,7 +217,8 @@ spec:
           {{- end }}
 
           if sky api start -h | grep -q -- "--foreground"; then
-            exec sky api start {{ include "skypilot.apiArgs" . }} --foreground
+            mkdir -p /root/.sky/api_server
+            exec sky api start {{ include "skypilot.apiArgs" . }} --foreground  2>&1 | tee -a /root/.sky/api_server/server.log
           else
             # For backward compatibility, run in background if --foreground is not supported.
             # TODO(aylei): this will be dropped in 0.11.0.
@@ -239,10 +254,10 @@ spec:
           periodSeconds: 5
           initialDelaySeconds: 5
         volumeMounts:
-        {{- if .Values.storage.enabled }}
         - name: state-volume
           mountPath: /root/.sky
           subPath: .sky
+        {{- if .Values.storage.enabled }}
         - name: state-volume
           mountPath: /root/.ssh # To preserve the SSH keys for the user when using the API server
           subPath: .ssh
@@ -258,8 +273,22 @@ spec:
           mountPath: /var/skypilot/ssh_keys
         {{- end }}
         {{- if .Values.awsCredentials.enabled }}
+        {{- if .Values.awsCredentials.useCredentialsFile }}
+        # Mount the credentials file directly from secret
+        - name: aws-credentials-file
+          mountPath: /root/.aws/credentials
+          subPath: credentials
+          readOnly: true
+        {{- else }}
+        # Mount emptyDir that will be populated by initContainer
         - name: aws-config
           mountPath: /root/.aws
+          readOnly: true
+        {{- end }}
+        {{- end }}
+        {{- if .Values.r2Credentials.enabled }}
+        - name: r2-config
+          mountPath: /root/.cloudflare
           readOnly: true
         {{- end }}
         {{- if .Values.gcpCredentials.enabled }}
@@ -302,15 +331,43 @@ spec:
         - name: nebius-credentials
           mountPath: /root/.nebius_credentials
         {{- end }}
-        {{- if .Values.r2Credentials.enabled }}
-        - name: r2-credentials
-          mountPath: /root/.cloudflare
-        {{- end }}
         {{- if .Values.apiService.extraVolumeMounts }}
         {{- toYaml .Values.apiService.extraVolumeMounts | nindent 8 }}
         {{- end }}
+      {{- if .Values.apiService.logs.retention.enabled }}
+      - name: logrotate
+        image: {{ .Values.apiService.image }}
+        command: ["/bin/sh", "-c"]
+        # Warn if logrotate is missing in the image and keep the sidecar running
+        args:
+        - |
+          if ! command -v logrotate >/dev/null 2>&1; then
+            echo "warning: logrotate not found; skipping log retention" >&2
+            while true; do
+              sleep 3600
+            done
+          fi
+          set -x
+          cat > /etc/logrotate.conf <<EOF
+          /root/.sky/api_server/server.log {
+              size {{ .Values.apiService.logs.retention.size }}
+              rotate 1
+              missingok
+              notifempty
+              copytruncate
+          }
+          EOF
+          while true; do
+            logrotate -s /var/lib/logrotate/status /etc/logrotate.conf
+            sleep 60;
+          done
+        volumeMounts:
+        - name: state-volume
+          mountPath: /root/.sky
+          subPath: .sky
+      {{- end }}
       initContainers:
-      {{- if .Values.awsCredentials.enabled }}
+      {{- if and .Values.awsCredentials.enabled (not .Values.awsCredentials.useCredentialsFile) }}
       - name: create-aws-credentials
         {{- with .Values.securityContext }}
         securityContext:
@@ -344,6 +401,53 @@ spec:
         volumeMounts:
         - name: aws-config
           mountPath: /root/.aws
+      {{- end }}
+      {{- if .Values.r2Credentials.enabled }}
+      - name: setup-r2-credentials
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        image: {{ .Values.apiService.image }}
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -e
+          echo "Setting up R2 credentials..."
+          mkdir -p /root/.cloudflare
+
+          # Direct echo of environment variables (no quotes around EOF)
+          cat > /root/.cloudflare/r2.credentials <<EOF
+          $R2_CREDENTIALS
+          EOF
+
+          cat > /root/.cloudflare/accountid <<EOF
+          $R2_ACCOUNT_ID
+          EOF
+
+          chmod 600 /root/.cloudflare/r2.credentials
+          chmod 600 /root/.cloudflare/accountid
+
+          echo "R2 credentials setup complete:"
+          ls -la /root/.cloudflare/
+          echo "First line of r2.credentials:"
+          head -n 1 /root/.cloudflare/r2.credentials
+          echo "Account ID:"
+          cat /root/.cloudflare/accountid
+        env:
+        - name: R2_CREDENTIALS
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.r2Credentials.r2SecretName }}
+              key: r2.credentials
+        - name: R2_ACCOUNT_ID
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.r2Credentials.r2SecretName }}
+              key: accountid
+        volumeMounts:
+        - name: r2-config
+          mountPath: /root/.cloudflare
       {{- end }}
       {{- if .Values.gcpCredentials.enabled }}
       - name: setup-gcp-credentials
@@ -469,8 +573,16 @@ spec:
         emptyDir: {}
       {{- end }}
       {{- if .Values.awsCredentials.enabled }}
+      {{- if .Values.awsCredentials.useCredentialsFile }}
+      # Mount the credentials file directly from secret
+      - name: aws-credentials-file
+        secret:
+          secretName: {{ .Values.awsCredentials.awsSecretName }}
+      {{- else }}
+      # Mount emptyDir that will be populated by initContainer
       - name: aws-config
         emptyDir: {}
+      {{- end }}
       {{- end }}
       {{- if .Values.gcpCredentials.enabled }}
       - name: gcp-credentials
@@ -496,11 +608,6 @@ spec:
         secret:
           secretName: {{ .Values.nebiusCredentials.nebiusSecretName }}
       {{- end }}
-      {{- if .Values.r2Credentials.enabled }}
-      - name: r2-credentials
-        secret:
-          secretName: {{ .Values.r2Credentials.r2SecretName }}
-      {{- end }}
       {{- if .Values.kubernetesCredentials.useKubeconfig }}
       - name: kube-config
         secret:
@@ -518,8 +625,12 @@ spec:
       - name: skypilot-ssh-identity
         secret:
           secretName: {{ .Values.apiService.sshKeySecret }}
-          defaultMode: 0600 
+          defaultMode: 0600
       {{- end }}
       {{- if .Values.apiService.extraVolumes }}
       {{- toYaml .Values.apiService.extraVolumes | nindent 6 }}
+      {{- end }}
+      {{- if .Values.r2Credentials.enabled }}
+      - name: r2-config
+        emptyDir: {}
       {{- end }}

@@ -42,6 +42,27 @@ class AddLabelsPolicy(sky.AdminPolicy):
         return sky.MutatedUserRequest(user_request.task, config)
 
 
+class AddLabelsConditionalPolicy(sky.AdminPolicy):
+    """Example policy: adds a kubernetes label for skypilot_config
+    if the request is a cluster launch request."""
+
+    @classmethod
+    def validate_and_mutate(
+            cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+        if user_request.request_name in [
+                sky.AdminPolicyRequestName.VALIDATE,
+                sky.AdminPolicyRequestName.OPTIMIZE
+        ]:
+            return sky.MutatedUserRequest(user_request.task,
+                                          user_request.skypilot_config)
+        config = user_request.skypilot_config
+        labels = config.get_nested(('kubernetes', 'custom_metadata', 'labels'),
+                                   {})
+        labels['app'] = 'skypilot'
+        config.set_nested(('kubernetes', 'custom_metadata', 'labels'), labels)
+        return sky.MutatedUserRequest(user_request.task, config)
+
+
 class DisablePublicIpPolicy(sky.AdminPolicy):
     """Example policy: disables public IP for all AWS tasks."""
 
@@ -94,15 +115,17 @@ class EnforceAutostopPolicy(sky.AdminPolicy):
         policy is applied, we should expect a few seconds latency when a user
         run a request.
         """
-        request_options = user_request.request_options
-
-        # Request options is None when a task is executed with `jobs launch` or
-        # `sky serve up`.
-        if request_options is None:
+        if user_request.request_name not in [
+                sky.AdminPolicyRequestName.CLUSTER_LAUNCH,
+                sky.AdminPolicyRequestName.CLUSTER_EXEC,
+        ]:
             return sky.MutatedUserRequest(
                 task=user_request.task,
                 skypilot_config=user_request.skypilot_config)
 
+        request_options = user_request.request_options
+        # Request options is not None when a task is executed with `sky launch`.
+        assert request_options is not None
         # Get the cluster record to operate on.
         cluster_name = request_options.cluster_name
         cluster_records: List[responses.StatusResponse] = []
@@ -153,19 +176,129 @@ class SetMaxAutostopIdleMinutesPolicy(sky.AdminPolicy):
         """Sets max autostop idle minutes for all tasks."""
         max_idle_minutes = 10
         task = user_request.task
-        for r in task.resources:
-            disabled = (r.autostop_config is None or
-                        not r.autostop_config.enabled)
-            too_long = False
-            if not disabled:
-                assert r.autostop_config is not None
-                too_long = (r.autostop_config.idle_minutes is not None and
-                            r.autostop_config.idle_minutes > max_idle_minutes)
-            if disabled or too_long:
-                r.override_autostop_config(idle_minutes=max_idle_minutes)
+        resources = task.get_resource_config()
+        if 'autostop' not in resources:
+            # autostop is disabled
+            resources['autostop'] = {'idle_minutes': max_idle_minutes}
+        elif ('idle_minutes' not in resources['autostop'] or
+              int(resources['autostop']['idle_minutes']) > max_idle_minutes):
+            # Autostop idle minutes is too long
+            resources['autostop']['idle_minutes'] = max_idle_minutes
+        task.set_resources(resources)
 
         return sky.MutatedUserRequest(
             task=task, skypilot_config=user_request.skypilot_config)
+
+
+class TokenBucketRateLimiter:
+    """Token bucket rate limiter."""
+
+    def __init__(self, capacity, fill_rate):
+        # import the modules here so users importing this module
+        # to use other policies do not need to import these modules.
+        # pylint: disable=import-outside-toplevel
+        import threading
+
+        import sqlalchemy
+        from sqlalchemy import orm
+        from sqlalchemy.dialects import postgresql
+        from sqlalchemy.dialects import sqlite
+
+        self.capacity = float(capacity)
+        self.fill_rate = float(fill_rate)  # tokens per second
+        self.lock = threading.Lock()
+        # Tip: you can swap out the connection string
+        # to use a postgres database.
+        self._db_engine = sqlalchemy.create_engine('sqlite:///rate_limit.db')
+        if self._db_engine.dialect.name == 'sqlite':
+            self.insert_func = sqlite.insert
+        elif self._db_engine.dialect.name == 'postgresql':
+            self.insert_func = postgresql.insert
+
+        self.rate_limit_table = sqlalchemy.Table(
+            'rate_limit',
+            orm.declarative_base().metadata,
+            sqlalchemy.Column('user_name', sqlalchemy.Text, primary_key=True),
+            sqlalchemy.Column('tokens', sqlalchemy.REAL),
+            sqlalchemy.Column('last_refill_time', sqlalchemy.REAL),
+        )
+
+        with orm.Session(self._db_engine) as init_session:
+            init_session.execute(
+                sqlalchemy.text('CREATE TABLE IF NOT EXISTS rate_limit '
+                                '(user_name TEXT PRIMARY KEY, tokens REAL, '
+                                'last_refill_time REAL)'))
+            init_session.commit()
+
+    def allow_request(self, user_name):
+        # import the modules here so users importing this module
+        # to use other policies do not need to import these modules.
+        # pylint: disable=import-outside-toplevel
+        import time
+
+        from sqlalchemy import orm
+
+        with self.lock:
+            now = time.time()
+            with orm.Session(self._db_engine) as session:
+                # with_for_update() locks the row until commit() or rollback()
+                # is called, or until the code escapes the with block.
+                result = session.query(self.rate_limit_table).filter(
+                    self.rate_limit_table.c.user_name ==
+                    user_name).with_for_update().first()
+                if result:
+                    tokens = result.tokens
+                    last_refill_time = result.last_refill_time
+                else:
+                    tokens = self.capacity
+                    last_refill_time = now
+                time_elapsed = now - last_refill_time
+                tokens = min(self.capacity,
+                             tokens + time_elapsed * self.fill_rate)
+                if tokens >= 1:
+                    tokens -= 1
+                    allowed = True
+                else:
+                    allowed = False
+                # insert or replace
+                insert_or_update_stmt = (self.insert_func(
+                    self.rate_limit_table).values(
+                        user_name=user_name,
+                        tokens=tokens,
+                        last_refill_time=now).on_conflict_do_update(
+                            index_elements=[self.rate_limit_table.c.user_name],
+                            set_={
+                                self.rate_limit_table.c.tokens: tokens,
+                                self.rate_limit_table.c.last_refill_time: now
+                            }))
+                session.execute(insert_or_update_stmt)
+                session.commit()
+            return allowed
+
+
+class RateLimitLaunchPolicy(sky.AdminPolicy):
+    """Example policy: rate limit cluster launch requests."""
+    _RATE_LIMITER = TokenBucketRateLimiter(capacity=10, fill_rate=1)
+
+    @classmethod
+    def validate_and_mutate(
+            cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+        """Rate limit cluster launch requests."""
+        if (user_request.at_client_side or user_request.request_name !=
+                sky.AdminPolicyRequestName.CLUSTER_LAUNCH):
+            return sky.MutatedUserRequest(
+                task=user_request.task,
+                skypilot_config=user_request.skypilot_config)
+
+        # user is not None when the policy is applied at the server-side
+        assert user_request.user is not None
+        user_name = user_request.user.name
+        if not cls._RATE_LIMITER.allow_request(user_name):
+            raise RuntimeError(f'Rate limit exceeded for user {user_name}')
+
+        return sky.MutatedUserRequest(
+            task=user_request.task,
+            skypilot_config=user_request.skypilot_config)
 
 
 def update_current_kubernetes_clusters_from_registry():

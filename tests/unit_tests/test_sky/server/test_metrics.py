@@ -12,6 +12,7 @@ from prometheus_client import CONTENT_TYPE_LATEST
 from prometheus_client import generate_latest
 import pytest
 
+from sky.metrics import utils as metrics_utils
 from sky.server import metrics
 
 
@@ -57,7 +58,7 @@ async def test_metrics_endpoint_without_multiprocess():
         with patch('sky.server.metrics.generate_latest') as mock_gen:
             mock_gen.return_value = b"# HELP test_metric Test metric\n"
 
-            response = await metrics.metrics()
+            response = metrics.metrics()
 
             assert isinstance(response, fastapi.Response)
             assert response.media_type == CONTENT_TYPE_LATEST
@@ -80,7 +81,7 @@ async def test_metrics_endpoint_with_multiprocess():
             mock_registry.return_value = mock_registry_instance
             mock_gen.return_value = b"# HELP multiproc_metric Test\n"
 
-            response = await metrics.metrics()
+            response = metrics.metrics()
 
             assert isinstance(response, fastapi.Response)
             mock_registry.assert_called_once()
@@ -94,8 +95,8 @@ def prometheus_middleware():
     middleware = metrics.PrometheusMiddleware(app=MagicMock())
 
     # Clear metric values before each test
-    metrics.sky_apiserver_requests_total.clear()
-    metrics.sky_apiserver_request_duration_seconds.clear()
+    metrics_utils.SKY_APISERVER_REQUESTS_TOTAL.clear()
+    metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS.clear()
 
     return middleware
 
@@ -104,8 +105,8 @@ def _get_metric_value_from_registry(metric_name, labels=None):
     """Helper function to get metric value from the prometheus registry."""
     registry = CollectorRegistry()
     # Register the actual metrics to the test registry
-    registry.register(metrics.sky_apiserver_requests_total)
-    registry.register(metrics.sky_apiserver_request_duration_seconds)
+    registry.register(metrics_utils.SKY_APISERVER_REQUESTS_TOTAL)
+    registry.register(metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS)
 
     # Generate the metrics output
     output = generate_latest(registry).decode('utf-8')
@@ -273,5 +274,5 @@ def cleanup_metrics():
     """Clean up metrics after each test to avoid interference."""
     yield
     # Clear all metrics after each test
-    metrics.sky_apiserver_requests_total.clear()
-    metrics.sky_apiserver_request_duration_seconds.clear()
+    metrics_utils.SKY_APISERVER_REQUESTS_TOTAL.clear()
+    metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS.clear()

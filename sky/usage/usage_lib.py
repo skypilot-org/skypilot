@@ -14,11 +14,13 @@ from typing_extensions import ParamSpec
 
 import sky
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.usage import constants
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     import inspect
@@ -166,6 +168,7 @@ class UsageMessageToReport(MessageToReport):
         self.runtimes: Dict[str, float] = {}  # update_runtime
         self.exception: Optional[str] = None  # entrypoint_context
         self.stacktrace: Optional[str] = None  # entrypoint_context
+        self.skypilot_config: Optional[Dict[str, Any]] = None
 
         # Whether API server is deployed remotely.
         self.using_remote_api_server: bool = (
@@ -176,6 +179,7 @@ class UsageMessageToReport(MessageToReport):
             self.client_entrypoint = common_utils.get_current_client_entrypoint(
                 msg)
         self.entrypoint = msg
+        self.skypilot_config = dict(skypilot_config.to_dict())
 
     def set_internal(self):
         self.internal = True
@@ -402,7 +406,7 @@ def _clean_yaml(yaml_info: Dict[str, Optional[str]]):
                     contents = inspect.getsource(contents)
 
                 if type(contents) in constants.USAGE_MESSAGE_REDACT_TYPES:
-                    lines = common_utils.dump_yaml_str({
+                    lines = yaml_utils.dump_yaml_str({
                         redact_type: contents
                     }).strip().split('\n')
                     message = (f'{len(lines)} lines {redact_type.upper()}'
@@ -431,7 +435,7 @@ def prepare_json_from_yaml_config(
         with open(yaml_config_or_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
             comment_lines = [line for line in lines if line.startswith('#')]
-        yaml_info = common_utils.read_yaml_all(yaml_config_or_path)
+        yaml_info = yaml_utils.read_yaml_all(yaml_config_or_path)
 
     for i in range(len(yaml_info)):
         if yaml_info[i] is None:

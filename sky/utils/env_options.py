@@ -27,6 +27,10 @@ class Options(enum.Enum):
     # Internal: This is used for testing to enable grpc for communication
     # between the API server and the Skylet.
     ENABLE_GRPC = ('SKYPILOT_ENABLE_GRPC', False)
+    # Allow all contexts for Kubernetes if allowed_contexts is not set in
+    # config.
+    ALLOW_ALL_KUBERNETES_CONTEXTS = ('SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS',
+                                     False)
 
     def __init__(self, env_var: str, default: bool) -> None:
         super().__init__()

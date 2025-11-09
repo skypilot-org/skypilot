@@ -1,0 +1,9 @@
+User-agent: Googlebot
+Allow: /
+
+User-agent: *
+Allow: /*/latest/
+Allow: /en/latest/   # Fallback for bots that don't understand wildcards
+Allow: /*/stable/
+Allow: /en/stable/   # Fallback for bots that don't understand wildcards
+Disallow: /

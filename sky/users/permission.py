@@ -14,6 +14,7 @@ from sky import models
 from sky import sky_logging
 from sky.skylet import constants
 from sky.users import rbac
+from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils.db import db_utils
 
@@ -42,7 +43,6 @@ class PermissionService:
         with _policy_lock():
             global _enforcer_instance
             if _enforcer_instance is None:
-                _enforcer_instance = self
                 engine = global_user_state.initialize_and_get_db()
                 db_utils.add_all_tables_to_db_sqlalchemy(
                     sqlalchemy_adapter.Base.metadata, engine)
@@ -52,6 +52,10 @@ class PermissionService:
                                           'model.conf')
                 enforcer = casbin.Enforcer(model_path, adapter)
                 self.enforcer = enforcer
+                # Only set the enforcer instance once the enforcer
+                # is successfully initialized, if we change it and then fail
+                # we will set it to None and all subsequent calls will fail.
+                _enforcer_instance = self
                 self._maybe_initialize_policies()
                 self._maybe_initialize_basic_auth_user()
             else:
@@ -226,6 +230,12 @@ class PermissionService:
         self._load_policy_no_lock()
         return self.enforcer.get_roles_for_user(user_id)
 
+    def get_users_for_role(self, role: str) -> List[str]:
+        """Get all users for a role."""
+        self._lazy_initialize()
+        self._load_policy_no_lock()
+        return self.enforcer.get_users_for_role(role)
+
     def check_endpoint_permission(self, user_id: str, path: str,
                                   method: str) -> bool:
         """Check permission."""
@@ -248,6 +258,9 @@ class PermissionService:
         with _policy_lock():
             self._load_policy_no_lock()
 
+    # Right now, not a lot of users are using multiple workspaces,
+    # so 5 should be more than enough.
+    @annotations.lru_cache(scope='request', maxsize=5)
     def check_workspace_permission(self, user_id: str,
                                    workspace_name: str) -> bool:
         """Check workspace permission.

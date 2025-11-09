@@ -37,6 +37,7 @@ import {
   TableCell,
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
+import { buildFilterUrl } from '@/components/shared/FilterSystem';
 
 export default function PoolDetailPage() {
   const router = useRouter();
@@ -356,10 +357,18 @@ export default function PoolDetailPage() {
                       Jobs
                     </div>
                     <div className="text-base mt-1">
-                      <JobStatusBadges
-                        jobCounts={getJobStatusCounts(poolData)}
-                        getStatusStyle={getStatusStyle}
-                      />
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <JobStatusBadges
+                          jobCounts={getJobStatusCounts(poolData)}
+                          getStatusStyle={getStatusStyle}
+                        />
+                        <Link
+                          href={buildFilterUrl('/jobs', 'pool', ':', poolName)}
+                          className="text-blue-600 hover:text-blue-800 text-xs"
+                        >
+                          See all jobs
+                        </Link>
+                      </div>
                     </div>
                   </div>
 
@@ -556,6 +565,12 @@ export default function PoolDetailPage() {
                     </TableHead>
                     <TableHead
                       className="sortable whitespace-nowrap"
+                      onClick={() => requestSort('version')}
+                    >
+                      Pool Version{getSortDirection('version')}
+                    </TableHead>
+                    <TableHead
+                      className="sortable whitespace-nowrap"
                       onClick={() => requestSort('used_by')}
                     >
                       Used By{getSortDirection('used_by')}
@@ -679,6 +694,7 @@ export default function PoolDetailPage() {
                         <TableCell>
                           <StatusBadge status={worker.status} />
                         </TableCell>
+                        <TableCell>{worker.version || '-'}</TableCell>
                         <TableCell>
                           {worker.used_by ? (
                             <Link
@@ -696,7 +712,7 @@ export default function PoolDetailPage() {
                   ) : (
                     <TableRow>
                       <TableCell
-                        colSpan={6}
+                        colSpan={7}
                         className="text-center py-8 text-gray-500"
                       >
                         {showFailedWorkers

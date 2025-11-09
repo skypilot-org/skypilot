@@ -5,6 +5,8 @@ import time
 import typing
 from typing import Any, Dict, List, Set, Tuple
 
+from typing_extensions import TypedDict
+
 from sky.adaptors import gcp
 from sky.clouds.utils import gcp_utils
 from sky.provision import common
@@ -415,6 +417,9 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam) -> dict:
     return iam_role
 
 
+AllowedList = TypedDict('AllowedList', {'IPProtocol': str, 'ports': List[str]})
+
+
 def _check_firewall_rules(cluster_name: str, vpc_name: str, project_id: str,
                           compute):
     """Check if the firewall rules in the VPC are sufficient."""
@@ -466,7 +471,7 @@ def _check_firewall_rules(cluster_name: str, vpc_name: str, project_id: str,
             }
         """
         source2rules: Dict[Tuple[str, str], Dict[str, Set[int]]] = {}
-        source2allowed_list: Dict[Tuple[str, str], List[Dict[str, str]]] = {}
+        source2allowed_list: Dict[Tuple[str, str], List[AllowedList]] = {}
         for rule in rules:
             # Rules applied to specific VM (targetTags) may not work for the
             # current VM, so should be skipped.

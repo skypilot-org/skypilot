@@ -64,8 +64,9 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
     return next(iter(instances.keys()))
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
+    del cluster_name  # unused
     logger.info(f'Starting run_instances with region={region}, '
                 f'cluster={cluster_name_on_cloud}')
     logger.debug(f'Config: {config}')
@@ -308,9 +309,10 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[dict] = None,
     non_terminated_only: bool = True,
+    retry_if_missing: bool = False,
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """Returns the status of the specified instances for Hyperbolic."""
-    del cluster_name, provider_config  # unused
+    del cluster_name, provider_config, retry_if_missing  # unused
     # Fetch all instances for this cluster
     instances = utils.list_instances(
         metadata={'skypilot': {
