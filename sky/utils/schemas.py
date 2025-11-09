@@ -1384,7 +1384,8 @@ def get_config_schema():
                     'type': 'object',
                     'required': [],
                     'properties': {},
-                    # Properties are kubernetes context names.
+                    # Properties are ssh cluster names, which are the
+                    # kubernetes context names without `ssh-` prefix.
                     'additionalProperties': {
                         'type': 'object',
                         'required': [],
