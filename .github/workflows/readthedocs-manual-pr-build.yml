@@ -6,8 +6,7 @@ on:
   pull_request:
     types: [closed]
 
-env:
-  PROJECT_SLUG: skypilot
+# No global env variables needed - using secrets
 
 jobs:
   trigger-rtd-build:
@@ -72,8 +71,8 @@ jobs:
       - name: Trigger ReadTheDocs build
         env:
           READTHEDOCS_TOKEN: ${{ secrets.READTHEDOCS_TOKEN }}
+          READTHEDOCS_PROJECT: ${{ secrets.READTHEDOCS_PROJECT }}
           BRANCH_NAME: ${{ steps.get-branch.outputs.result }}
-          PROJECT_SLUG: ${{ env.PROJECT_SLUG }}
         run: |
           # Trigger a build for the PR branch on ReadTheDocs
           # The branch needs to exist as a version on ReadTheDocs
@@ -81,12 +80,12 @@ jobs:
           # URL-encode the branch name (replace / with %2F, etc.)
           VERSION_SLUG=$(echo "${BRANCH_NAME}" | jq -sRr @uri)
 
-          echo "Triggering ReadTheDocs build for project: ${PROJECT_SLUG}, branch: ${BRANCH_NAME}"
+          echo "Triggering ReadTheDocs build for project: ${READTHEDOCS_PROJECT}, branch: ${BRANCH_NAME}"
 
           # Activate and configure the version (works for both existing and inactive versions)
           echo "Activating and configuring version for branch: ${BRANCH_NAME}"
           CONFIG_RESPONSE=$(curl -s -w "\n%{http_code}" -X PATCH \
-            "https://readthedocs.com/api/v3/projects/${PROJECT_SLUG}/versions/${VERSION_SLUG}/" \
+            "https://readthedocs.com/api/v3/projects/${READTHEDOCS_PROJECT}/versions/${VERSION_SLUG}/" \
             -H "Authorization: Token ${READTHEDOCS_TOKEN}" \
             -H "Content-Type: application/json" \
             -d '{
@@ -106,7 +105,7 @@ jobs:
             echo "Please try one of these options:"
             echo "  1. Wait 1-2 minutes and run /build-docs again"
             echo "  2. Make a new commit to trigger the ReadTheDocs webhook"
-            echo "  3. Manually sync branches: https://readthedocs.com/projects/${PROJECT_SLUG}/versions/"
+            echo "  3. Manually sync branches: https://readthedocs.com/projects/${READTHEDOCS_PROJECT}/versions/"
             echo ""
             echo "Response: $CONFIG_BODY"
             exit 1
@@ -121,7 +120,7 @@ jobs:
           # Trigger the build
           echo "Triggering build..."
           BUILD_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
-            "https://readthedocs.com/api/v3/projects/${PROJECT_SLUG}/versions/${VERSION_SLUG}/builds/" \
+            "https://readthedocs.com/api/v3/projects/${READTHEDOCS_PROJECT}/versions/${VERSION_SLUG}/builds/" \
             -H "Authorization: Token ${READTHEDOCS_TOKEN}" \
             -H "Content-Type: application/json")
 
@@ -140,12 +139,12 @@ jobs:
       - name: Add label and comment on PR
         if: success()
         env:
-          PROJECT_SLUG: ${{ env.PROJECT_SLUG }}
+          READTHEDOCS_PROJECT: ${{ secrets.READTHEDOCS_PROJECT }}
         uses: actions/github-script@v7
         with:
           script: |
             const branch = '${{ steps.get-branch.outputs.result }}';
-            const projectSlug = process.env.PROJECT_SLUG;
+            const projectSlug = process.env.READTHEDOCS_PROJECT;
 
             // URL-encode the branch name for the documentation URL
             const encodedBranch = encodeURIComponent(branch);
@@ -196,8 +195,8 @@ jobs:
       - name: Deactivate ReadTheDocs preview
         env:
           READTHEDOCS_TOKEN: ${{ secrets.READTHEDOCS_TOKEN }}
+          READTHEDOCS_PROJECT: ${{ secrets.READTHEDOCS_PROJECT }}
           BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
-          PROJECT_SLUG: ${{ env.PROJECT_SLUG }}
         run: |
           # URL-encode the branch name (replace / with %2F, etc.)
           VERSION_SLUG=$(echo "${BRANCH_NAME}" | jq -sRr @uri)
@@ -206,7 +205,7 @@ jobs:
 
           # Deactivate the version (set active to false)
           RESPONSE=$(curl -s -w "\n%{http_code}" -X PATCH \
-            "https://readthedocs.com/api/v3/projects/${PROJECT_SLUG}/versions/${VERSION_SLUG}/" \
+            "https://readthedocs.com/api/v3/projects/${READTHEDOCS_PROJECT}/versions/${VERSION_SLUG}/" \
             -H "Authorization: Token ${READTHEDOCS_TOKEN}" \
             -H "Content-Type: application/json" \
             -d '{
