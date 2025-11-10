@@ -224,6 +224,7 @@ cloud_dependencies: Dict[str, List[str]] = {
         PROTOBUF,
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
+    'mithril': [],  # No dependencies needed for mithril
     'seeweb': ['ecsapi>=0.2.0'],
     'shadeform': [],  # No dependencies needed for shadeform
 }
