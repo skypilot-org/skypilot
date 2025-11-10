@@ -597,7 +597,7 @@ If you want to want to use SkyPilot with a different Cudo Compute account or pro
 Shadeform |community-badge|
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-`Shadeform <https://www.shadeform.ai/>`_ is a cloud GPU marketplace that offers GPUs across a variety of cloud providers. To configure Shadeform access, go to the `API Keys <https://platform.shadeform.ai/settings/api>` page within your Shadeform account to generate a key and then add it to :code:`~/.shadeform/api_key`:
+`Shadeform <https://www.shadeform.ai/>`_ is a cloud GPU marketplace that offers GPUs across a variety of cloud providers. To configure Shadeform access, go to the `API Keys <https://platform.shadeform.ai/settings/api>`_ page within your Shadeform account to generate a key and then add it to :code:`~/.shadeform/api_key`:
 
 .. code-block:: shell
 
