@@ -198,7 +198,7 @@ class AzureBlobCloudStorage(CloudStorage):
     _GET_AZCOPY = [
         'azcopy --version > /dev/null 2>&1 || '
         '(mkdir -p /usr/local/bin; '
-        'curl -L https://aka.ms/downloadazcopy-v10-linux -o azcopy.tar.gz; '
+        'curl -L https://github.com/Azure/azure-storage-azcopy/releases/download/v10.30.1/azcopy_linux_amd64_10.30.1.tar.gz -o azcopy.tar.gz; '
         'sudo tar -xvzf azcopy.tar.gz --strip-components=1 -C /usr/local/bin --exclude=*.txt; '  # pylint: disable=line-too-long
         'sudo chmod +x /usr/local/bin/azcopy; '
         'rm azcopy.tar.gz)'
