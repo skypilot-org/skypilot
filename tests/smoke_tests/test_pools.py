@@ -1062,7 +1062,7 @@ def test_pools_num_jobs_basic(generic_cloud: str):
                 ],
                 timeout=timeout,
                 teardown=cancel_jobs_and_teardown_pool(pool_name,
-                                                       timeout=timeout),
+                                                       timeout=5),
             )
             smoke_tests_utils.run_one_test(test)
 
