@@ -2917,9 +2917,10 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     f'manually remove the lock at {lock_id}. '
                     f'{common_utils.format_exception(e)}') from e
 
-            # TODO(kevin):
-            # We can consider adding a small jitter here to smoothen the
-            # side effects of many readers waking up simultaneously.
+            # Add small jitter before probing to smoothen the effects
+            # of many readers waking up simultaneously.
+            jitter = random.uniform(0.01, 0.05)
+            time.sleep(jitter)
 
             # Re-read the tunnel metadata and verify it's healthy.
             tunnel = self._get_skylet_ssh_tunnel()
