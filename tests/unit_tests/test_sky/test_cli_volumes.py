@@ -714,6 +714,178 @@ class TestVolumeCommands:
                                          'Invalid volumes config: ')
             mock_validate.assert_called_once()
 
+    def test_volumes_apply_api_not_supported_fallback(self, monkeypatch):
+        """Test `sky volumes apply` with APINotSupportedError fallback (lines 4364-4366)."""
+        from sky import exceptions
+        cli_runner = cli_testing.CliRunner()
+
+        # Mock the YAML check function
+        mock_yaml_config = {
+            'name': 'test-volume',
+            'infra': 'k8s',
+            'type': 'k8s-pvc',
+            'size': '100Gi'
+        }
+        monkeypatch.setattr('sky.client.cli.command._check_yaml_only', lambda x:
+                            (True, mock_yaml_config, True, ''))
+
+        # Mock Volume.from_yaml_config
+        mock_volume = mock.MagicMock()
+        mock_volume.name = 'test-volume'
+        mock_volume.to_yaml_config.return_value = mock_yaml_config
+        mock_volume.validate = mock.MagicMock()
+        monkeypatch.setattr('sky.volumes.volume.Volume.from_yaml_config',
+                            lambda config: mock_volume)
+
+        # Mock volumes_sdk.validate to raise APINotSupportedError
+        mock_validate = mock.MagicMock(
+            side_effect=exceptions.APINotSupportedError('API not supported'))
+        monkeypatch.setattr('sky.volumes.client.sdk.validate', mock_validate)
+
+        # Mock volumes_sdk.apply
+        mock_apply = mock.MagicMock(return_value='request-id')
+        monkeypatch.setattr('sky.volumes.client.sdk.apply', mock_apply)
+
+        # Mock click.confirm to avoid interactive prompts
+        monkeypatch.setattr('click.confirm', lambda *args, **kwargs: True)
+
+        # Mock the async call function
+        mock_async_call = mock.MagicMock()
+        monkeypatch.setattr('sky.client.cli.command._async_call_or_wait',
+                            mock_async_call)
+
+        # Test with YAML file
+        result = cli_runner.invoke(command.volumes_apply, ['volume.yaml'])
+        assert not result.exit_code
+
+        # Verify that validate was called and client-side validation was used
+        mock_validate.assert_called_once()
+        mock_volume.validate.assert_called_once_with(
+            skip_cloud_compatibility=True)
+
+    def test_volumes_apply_runtime_error(self, monkeypatch):
+        """Test `sky volumes apply` with RuntimeError during apply (lines 4378-4379)."""
+        cli_runner = cli_testing.CliRunner()
+
+        # Mock the YAML check function
+        mock_yaml_config = {
+            'name': 'test-volume',
+            'infra': 'k8s',
+            'type': 'k8s-pvc',
+            'size': '100Gi'
+        }
+        monkeypatch.setattr('sky.client.cli.command._check_yaml_only', lambda x:
+                            (True, mock_yaml_config, True, ''))
+
+        # Mock Volume.from_yaml_config
+        mock_volume = mock.MagicMock()
+        mock_volume.name = 'test-volume'
+        mock_volume.to_yaml_config.return_value = mock_yaml_config
+        monkeypatch.setattr('sky.volumes.volume.Volume.from_yaml_config',
+                            lambda config: mock_volume)
+
+        # Mock volumes_sdk.validate
+        mock_validate = mock.MagicMock()
+        monkeypatch.setattr('sky.volumes.client.sdk.validate', mock_validate)
+
+        # Mock volumes_sdk.apply to raise RuntimeError
+        mock_apply = mock.MagicMock(
+            side_effect=RuntimeError('Failed to apply volume'))
+        monkeypatch.setattr('sky.volumes.client.sdk.apply', mock_apply)
+
+        # Mock click.confirm to avoid interactive prompts
+        monkeypatch.setattr('click.confirm', lambda *args, **kwargs: True)
+
+        # Test with YAML file
+        result = cli_runner.invoke(command.volumes_apply, ['volume.yaml'])
+        # The command should not crash but handle the error gracefully
+        assert not result.exit_code
+        mock_apply.assert_called_once()
+
+    def test_volumes_apply_with_use_existing(self, monkeypatch):
+        """Test `sky volumes apply` with --use-existing option (line 4402)."""
+        cli_runner = cli_testing.CliRunner()
+
+        # Mock the YAML check function to return no YAML
+        monkeypatch.setattr('sky.client.cli.command._check_yaml_only', lambda x:
+                            (False, None, False, ''))
+
+        # Mock Volume.from_yaml_config to capture the config
+        captured_config = {}
+
+        def capture_config(config):
+            captured_config.update(config)
+            mock_volume = mock.MagicMock()
+            mock_volume.name = 'test-volume'
+            mock_volume.to_yaml_config.return_value = config
+            return mock_volume
+
+        monkeypatch.setattr('sky.volumes.volume.Volume.from_yaml_config',
+                            capture_config)
+
+        # Mock volumes_sdk
+        mock_validate = mock.MagicMock()
+        mock_apply = mock.MagicMock(return_value='request-id')
+        monkeypatch.setattr('sky.volumes.client.sdk.validate', mock_validate)
+        monkeypatch.setattr('sky.volumes.client.sdk.apply', mock_apply)
+
+        # Mock click.confirm to avoid interactive prompts
+        monkeypatch.setattr('click.confirm', lambda *args, **kwargs: True)
+
+        # Mock the async call function
+        mock_async_call = mock.MagicMock()
+        monkeypatch.setattr('sky.client.cli.command._async_call_or_wait',
+                            mock_async_call)
+
+        # Test with --use-existing flag
+        result = cli_runner.invoke(command.volumes_apply, [
+            '--name', 'test-volume', '--infra', 'k8s', '--type', 'k8s-pvc',
+            '--size', '100Gi', '--use-existing'
+        ])
+        assert not result.exit_code
+        # Verify that use_existing was included in the config
+        assert 'use_existing' in captured_config
+        assert captured_config['use_existing'] is True
+
+        # Test with --no-use-existing flag
+        captured_config.clear()
+        result = cli_runner.invoke(command.volumes_apply, [
+            '--name', 'test-volume', '--infra', 'k8s', '--type', 'k8s-pvc',
+            '--size', '100Gi', '--no-use-existing'
+        ])
+        assert not result.exit_code
+        # Verify that use_existing was included in the config
+        assert 'use_existing' in captured_config
+        assert captured_config['use_existing'] is False
+
+    def test_volumes_delete_exception_handling(self, monkeypatch):
+        """Test `sky volumes delete` with exception during deletion (lines 4488-4489)."""
+        cli_runner = cli_testing.CliRunner()
+
+        # Mock volumes data
+        mock_volumes = [{'name': 'volume1'}, {'name': 'volume2'}]
+
+        # Mock the volumes SDK
+        mock_ls = mock.MagicMock(return_value='request-id')
+        monkeypatch.setattr('sky.volumes.client.sdk.ls', mock_ls)
+
+        # Mock the SDK get
+        mock_get = mock.MagicMock(return_value=mock_volumes)
+        monkeypatch.setattr('sky.client.sdk.get', mock_get)
+
+        # Mock click.confirm to avoid interactive prompts
+        monkeypatch.setattr('click.confirm', lambda *args, **kwargs: True)
+
+        # Mock volumes_sdk.delete to raise an exception
+        mock_delete = mock.MagicMock(side_effect=Exception('Network error'))
+        monkeypatch.setattr('sky.volumes.client.sdk.delete', mock_delete)
+
+        # Test deleting volumes with exception
+        result = cli_runner.invoke(command.volumes_delete, ['volume1'])
+        # The command should not crash but handle the error gracefully
+        assert not result.exit_code
+        mock_delete.assert_called_once()
+
 
 class TestPVCVolumeTable:
     """Test cases for PVCVolumeTable."""
