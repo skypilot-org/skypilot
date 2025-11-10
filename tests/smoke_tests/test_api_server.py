@@ -713,6 +713,7 @@ def test_high_logs_concurrency_not_blocking_operations(generic_cloud: str,
 
 
 @pytest.mark.no_remote_server  # Requires restarting the API server to remove existing tunnels.
+@pytest.mark.no_dependency  # We can't restart the api server in the dependency test.
 def test_high_concurrency_ssh_tunnel_opening(generic_cloud: str,
                                              tmp_path: pathlib.Path):
     """Test that high concurrency SSH tunnel opening does not result in timeouts."""
