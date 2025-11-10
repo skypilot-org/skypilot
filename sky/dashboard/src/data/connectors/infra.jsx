@@ -7,6 +7,8 @@ export async function getCloudInfrastructure(forceRefresh = false) {
   const dashboardCache = (await import('@/lib/cache')).default;
   const { getClusters } = await import('@/data/connectors/clusters');
   const { getManagedJobs } = await import('@/data/connectors/jobs');
+  const { getWorkspaces, getEnabledClouds } = await import('@/data/connectors/workspaces');
+
   try {
     let jobsData = { jobs: [] };
     try {
@@ -24,7 +26,8 @@ export async function getCloudInfrastructure(forceRefresh = false) {
       console.error('Error fetching clusters:', error);
     }
     const clusters = clustersData || [];
-    // Get enabled clouds
+
+    // Get enabled clouds by aggregating across all workspaces
     let enabledCloudsList = [];
     try {
       // If forceRefresh is true, first run sky check to refresh cloud status
@@ -60,28 +63,37 @@ export async function getCloudInfrastructure(forceRefresh = false) {
         }
       }
 
-      const enabledCloudsResponse = await apiClient.get(`/enabled_clouds`);
-      if (!enabledCloudsResponse.ok) {
-        const msg = `Failed to get enabled clouds with status ${enabledCloudsResponse.status}`;
-        throw new Error(msg);
+      // Get all accessible workspaces
+      const workspacesData = await dashboardCache.get(getWorkspaces);
+      const workspaceNames = Object.keys(workspacesData || {});
+
+      if (workspaceNames.length === 0) {
+        console.warn('No accessible workspaces found');
+        enabledCloudsList = [];
+      } else {
+        // Fetch enabled clouds for each workspace and aggregate
+        const enabledCloudsSet = new Set();
+
+        await Promise.all(
+          workspaceNames.map(async (workspaceName) => {
+            try {
+              const workspaceClouds = await dashboardCache.get(getEnabledClouds, [workspaceName, false]);
+              if (Array.isArray(workspaceClouds)) {
+                workspaceClouds.forEach(cloud => {
+                  if (cloud) {
+                    enabledCloudsSet.add(cloud.toLowerCase());
+                  }
+                });
+              }
+            } catch (error) {
+              console.error(`Error fetching enabled clouds for workspace ${workspaceName}:`, error);
+            }
+          })
+        );
+
+        enabledCloudsList = Array.from(enabledCloudsSet);
+        console.log('Aggregated enabled clouds across all workspaces:', enabledCloudsList);
       }
-      const id =
-        enabledCloudsResponse.headers.get('X-Skypilot-Request-ID') ||
-        enabledCloudsResponse.headers.get('X-Request-ID');
-      if (!id) {
-        const msg = 'No request ID received from server for enabled clouds';
-        throw new Error(msg);
-      }
-      const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
-      if (!fetchedData.ok) {
-        const msg = `Failed to get enabled clouds result with status ${fetchedData.status}`;
-        throw new Error(msg);
-      }
-      const data = await fetchedData.json();
-      enabledCloudsList = data.return_value
-        ? JSON.parse(data.return_value)
-        : [];
-      console.log('Enabled clouds:', enabledCloudsList);
     } catch (error) {
       console.error('Error fetching enabled clouds:', error);
       // If there's an error, we'll use clusters and jobs to determine enabled clouds
