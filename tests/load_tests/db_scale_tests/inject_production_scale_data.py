@@ -479,9 +479,9 @@ class ProductionScaleTest(TestScale):
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
 
-            # Find production clusters
+            # Find production clusters (TestScale.inject_clusters creates test-cluster-*)
             cursor.execute(
-                "SELECT name FROM clusters WHERE name LIKE 'prod-cluster-%'")
+                "SELECT name FROM clusters WHERE name LIKE 'test-cluster-%'")
             cluster_names = [row[0] for row in cursor.fetchall()]
 
             if cluster_names:
@@ -510,11 +510,11 @@ class ProductionScaleTest(TestScale):
                 print("\n[1/4] No production clusters found to clean up")
                 results['clusters'] = 0
 
-            # Clean up cluster history
+            # Clean up cluster history (TestScale.inject_cluster_history creates test-cluster-recent-* and test-cluster-old-*)
             cursor.execute("""
                 SELECT cluster_hash, name
                 FROM cluster_history
-                WHERE name LIKE 'prod-hist-%'
+                WHERE name LIKE 'test-cluster-recent-%' OR name LIKE 'test-cluster-old-%'
             """)
             history_entries = cursor.fetchall()
 
@@ -540,7 +540,7 @@ class ProductionScaleTest(TestScale):
             cursor.execute("""
                 SELECT DISTINCT cluster_hash
                 FROM cluster_events
-                WHERE name LIKE 'prod-cluster-%' OR name LIKE 'prod-hist-%'
+                WHERE name LIKE 'test-cluster-%'
             """)
             event_cluster_hashes = [row[0] for row in cursor.fetchall()]
 
