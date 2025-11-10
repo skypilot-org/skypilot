@@ -56,6 +56,12 @@ Then, set the :ref:`admin_policy <config-yaml-admin-policy>` field in :ref:`the 
 
     admin_policy: example_policy.DoNothingPolicy
 
+
+.. tip::
+
+   You can replace ``DoNothingPolicy`` with any of the :ref:`example policies <example-policies>`.
+
+
 Then, run a task:
 
 .. code-block:: bash
@@ -71,6 +77,9 @@ You should see the admin policy is applied to the task.
     Applying client admin policy: DoNothingPolicy
     Applying server admin policy: DoNothingPolicy
     ...
+
+
+You can also deploy an admin policy as a :ref:`RESTful server <host-admin-policy-as-server>`.
 
 Deploy an admin policy
 ----------------------
@@ -330,6 +339,8 @@ to set the modified resource configuration back to the task.
 Useful for:
 
 - Enforcing resource constraints (e.g. use spot instances for all GPU tasks, enforce autostop for all tasks).
+
+.. _example-policies:
 
 Example policies
 ----------------
