@@ -818,12 +818,21 @@ class Cloud:
             if acc_from_instance_type is None:
                 return False
 
-            for acc in acc_requested:
-                if acc not in acc_from_instance_type:
+            for requested_acc in acc_requested:
+                for instance_acc in acc_from_instance_type:
+                    # The requested accelerator can be canonicalized based on
+                    # the accelerator registry, which may not has the same case
+                    # as the cloud's catalog, e.g., 'RTXPro6000' in Shadeform
+                    # catalog, and 'RTXPRO6000' in RunPod catalog.
+                    if requested_acc.lower() == instance_acc.lower():
+                        # Found the requested accelerator in the instance type.
+                        break
+                else:
+                    # Requested accelerator not found in instance type.
                     return False
                 # Avoid float point precision issue.
-                if not math.isclose(acc_requested[acc],
-                                    acc_from_instance_type[acc]):
+                if not math.isclose(acc_requested[requested_acc],
+                                    acc_from_instance_type[instance_acc]):
                     return False
             return True
 
