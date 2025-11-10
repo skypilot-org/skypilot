@@ -289,7 +289,8 @@ class RequestWorker:
                 initializer=executor_initializer,
                 initargs=(proc_group,))
             # Increment the appropriate gauge for the number of executors
-            total_executors = self.garanteed_parallelism + self.burstable_parallelism
+            total_executors = 
+                self.garanteed_parallelism + self.burstable_parallelism
             if metrics_utils.METRICS_ENABLED:
                 if self.schedule_type == api_requests.ScheduleType.LONG:
                     metrics_utils.SKY_APISERVER_LONG_EXECUTORS.inc(total_executors)
