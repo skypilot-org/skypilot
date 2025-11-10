@@ -98,17 +98,57 @@ jobs:
           CONFIG_BODY=$(echo "$CONFIG_RESPONSE" | head -n-1)
 
           if [ "$CONFIG_HTTP_CODE" -eq 404 ]; then
-            echo "❌ Branch '${BRANCH_NAME}' not found in ReadTheDocs."
-            echo ""
-            echo "ReadTheDocs hasn't discovered this branch yet. This usually happens within 1-2 minutes of pushing a branch."
-            echo ""
-            echo "Please try one of these options:"
-            echo "  1. Wait 1-2 minutes and run /build-docs again"
-            echo "  2. Make a new commit to trigger the ReadTheDocs webhook"
-            echo "  3. Manually sync branches: https://readthedocs.com/projects/${READTHEDOCS_PROJECT}/versions/"
-            echo ""
-            echo "Response: $CONFIG_BODY"
-            exit 1
+            echo "⚠️  Branch '${BRANCH_NAME}' not found in ReadTheDocs."
+            echo "Triggering version sync from GitHub..."
+
+            # Trigger ReadTheDocs to sync versions from GitHub
+            SYNC_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+              "https://readthedocs.com/api/v3/projects/${READTHEDOCS_PROJECT}/sync-versions/" \
+              -H "Authorization: Token ${READTHEDOCS_TOKEN}" \
+              -H "Content-Type: application/json")
+
+            SYNC_HTTP_CODE=$(echo "$SYNC_RESPONSE" | tail -n1)
+            SYNC_BODY=$(echo "$SYNC_RESPONSE" | head -n-1)
+
+            if [ "$SYNC_HTTP_CODE" -eq 202 ] || [ "$SYNC_HTTP_CODE" -eq 200 ]; then
+              echo "✅ Version sync triggered successfully"
+              echo "Waiting 10 seconds for sync to complete..."
+              sleep 10
+
+              # Retry activating the version
+              echo "Retrying activation..."
+              CONFIG_RESPONSE=$(curl -s -w "\n%{http_code}" -X PATCH \
+                "https://readthedocs.com/api/v3/projects/${READTHEDOCS_PROJECT}/versions/${VERSION_SLUG}/" \
+                -H "Authorization: Token ${READTHEDOCS_TOKEN}" \
+                -H "Content-Type: application/json" \
+                -d '{
+                  "active": true,
+                  "hidden": true,
+                  "privacy_level": "public"
+                }')
+
+              CONFIG_HTTP_CODE=$(echo "$CONFIG_RESPONSE" | tail -n1)
+              CONFIG_BODY=$(echo "$CONFIG_RESPONSE" | head -n-1)
+
+              if [ "$CONFIG_HTTP_CODE" -eq 404 ]; then
+                echo "❌ Branch still not found after sync."
+                echo "The branch might not exist in GitHub, or the sync is taking longer than expected."
+                echo "Please verify the branch exists and try /build-docs again in a minute."
+                echo ""
+                echo "Response: $CONFIG_BODY"
+                exit 1
+              elif [ "$CONFIG_HTTP_CODE" -ne 200 ] && [ "$CONFIG_HTTP_CODE" -ne 204 ]; then
+                echo "❌ Failed to activate version after sync. HTTP status: $CONFIG_HTTP_CODE"
+                echo "$CONFIG_BODY"
+                exit 1
+              fi
+
+              echo "✅ Version activated and configured successfully after sync"
+            else
+              echo "❌ Failed to trigger version sync. HTTP status: $SYNC_HTTP_CODE"
+              echo "$SYNC_BODY"
+              exit 1
+            fi
           elif [ "$CONFIG_HTTP_CODE" -ne 200 ] && [ "$CONFIG_HTTP_CODE" -ne 204 ]; then
             echo "❌ Failed to activate version. HTTP status: $CONFIG_HTTP_CODE"
             echo "$CONFIG_BODY"
