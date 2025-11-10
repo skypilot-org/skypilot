@@ -202,7 +202,7 @@ class AzureBlobCloudStorage(CloudStorage):
         'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
         '  ARCH="arm64"; '
         'fi && '
-        'curl -L https://github.com/Azure/azure-storage-azcopy/releases/download/v10.30.1/azcopy_linux_${ARCH}_10.30.1.tar.gz -o azcopy.tar.gz; ' # pylint: disable=line-too-long
+        'curl -L https://github.com/Azure/azure-storage-azcopy/releases/download/v10.30.1/azcopy_linux_${ARCH}_10.30.1.tar.gz -o azcopy.tar.gz; '  # pylint: disable=line-too-long
         'sudo tar -xvzf azcopy.tar.gz --strip-components=1 -C /usr/local/bin --exclude=*.txt; '  # pylint: disable=line-too-long
         'sudo chmod +x /usr/local/bin/azcopy; '
         'rm azcopy.tar.gz)'
