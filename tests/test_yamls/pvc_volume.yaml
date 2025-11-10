@@ -3,7 +3,7 @@ resources:
   cpus: 0.1+
 volumes:
   /mnt/data0: pvc0
-  /mnt/data1: existing
+  /mnt/data1: existing0
 setup: |
   echo "running setup"
 

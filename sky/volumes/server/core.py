@@ -245,6 +245,7 @@ def volume_apply(
             config = provision.apply_volume(cloud, config)
             global_user_state.add_volume(name, config,
                                          status_lib.VolumeStatus.READY)
+        logger.info(f'Created volume {name} on cloud {cloud}')
 
 
 @contextlib.contextmanager
