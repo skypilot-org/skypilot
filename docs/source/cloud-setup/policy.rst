@@ -493,3 +493,26 @@ Rate limit cluster launch requests
 .. literalinclude:: ../../../examples/admin_policy/rate_limit_launch.yaml
     :language: yaml
     :caption: `Config YAML for using RateLimitLaunchPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/rate_limit_launch.yaml>`_
+
+.. _gpu-static-quota-policy:
+
+Enforce a static GPU quota for each user on cluster launch requests
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. note::
+
+    This policy calls sky.status() to get the total number 
+    of GPUs currently used by the user and therefore adds a 
+    few seconds of latency to every cluster launch request.
+
+    This policy should be considered an educational example and not a
+    production-ready policy.
+
+.. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
+    :language: python
+    :pyobject: GPUStaticQuotaPolicy
+    :caption: `GPUStaticQuotaPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
+
+.. literalinclude:: ../../../examples/admin_policy/gpu_static_quota.yaml
+    :language: yaml
+    :caption: `Config YAML for using GPUStaticQuotaPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/gpu_static_quota.yaml>`_

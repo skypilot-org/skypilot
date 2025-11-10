@@ -1,6 +1,6 @@
 """Example prebuilt admin policies."""
 import subprocess
-from typing import List
+from typing import Dict, List
 
 import sky
 from sky.schemas.api import responses
@@ -361,3 +361,91 @@ class AddVolumesPolicy(sky.AdminPolicy):
         # instead of overwriting.
         task.set_volumes({'/mnt/data0': 'pvc0'})
         return sky.MutatedUserRequest(task, user_request.skypilot_config)
+
+
+class GPUStaticQuotaPolicy(sky.AdminPolicy):
+    """Example policy: Enforce a static GPU quota
+    for each user for cluster launch requests."""
+
+    # GPU quota allotted for each user.
+    GPU_QUOTA_PER_USER = {
+        'H100': 2,
+        'L40S': 10,
+    }
+
+    @classmethod
+    def validate_and_mutate(
+            cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+        """Enforce a static GPU quota for each user for cluster launch requests.
+
+        This policy is does not enforce a quota for jobs launch requests.
+
+        Note: This policy calls sky.status() to get the total number
+        of GPUs currently used by the user and therefore adds a
+        few seconds of latency for every cluster launch request.
+
+        Raises:
+            RuntimeError: If the user has exceeded the GPU quota for any
+            accelerator type.
+        """
+        # Import ast here so users importing this module
+        # to use other policies do not need to import this module.
+        # pylint: disable=import-outside-toplevel
+        import ast
+
+        # If the request is at client side or not a cluster launch request,
+        # do not enforce GPU quota.
+        if (user_request.at_client_side or user_request.request_name !=
+                sky.AdminPolicyRequestName.CLUSTER_LAUNCH):
+            return sky.MutatedUserRequest(
+                task=user_request.task,
+                skypilot_config=user_request.skypilot_config)
+
+        assert user_request.user is not None, (
+            'Failed to get user initiating the request.')
+        user_name = user_request.user.name
+        assert user_name is not None, (
+            'Failed to get user name initiating the request.')
+
+        # Get the total number of GPUs currently used by the user.
+        try:
+            cluster_records = sky.get(
+                sky.status(refresh=common.StatusRefreshMode.NONE,
+                           all_users=True,
+                           _summary_response=True))
+        except Exception as e:
+            raise RuntimeError('Failed to get cluster records for '
+                               f'all users: {e}') from None
+        accelerators_used: Dict[str, int] = {}
+        cluster_records_for_user = [
+            record for record in cluster_records
+            if record.user_name == user_name
+        ]
+        for record in cluster_records_for_user:
+            if not record.accelerators:
+                continue
+            accelerators = ast.literal_eval(record.accelerators)
+            for accelerator, count in accelerators.items():
+                accelerators_used[accelerator] = accelerators_used.get(
+                    accelerator, 0) + (count * record.nodes)
+        # At this point, accelerators_used is a dictionary of the
+        # GPUs currently used by the user in the format of
+        # {accelerator_type: count}.
+
+        # Now, check if any resource request exceeds the GPU quota.
+        for resource in user_request.task.resources:
+            if resource.accelerators:
+                for accelerator, count in resource.accelerators.items():
+                    count *= user_request.task.num_nodes
+                    quota = cls.GPU_QUOTA_PER_USER.get(accelerator, 0)
+                    if accelerators_used.get(accelerator, 0) + count > quota:
+                        raise RuntimeError(
+                            f'User {user_name} has exceeded the'
+                            f'GPU quota for {accelerator}. '
+                            f'In use: {accelerators_used.get(accelerator, 0)}, '
+                            f'Requested: {count}, '
+                            f'Quota: {quota}')
+
+        return sky.MutatedUserRequest(
+            task=user_request.task,
+            skypilot_config=user_request.skypilot_config)
