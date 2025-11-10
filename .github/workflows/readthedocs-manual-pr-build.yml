@@ -78,7 +78,7 @@ jobs:
           # The branch needs to exist as a version on ReadTheDocs
 
           # URL-encode the branch name (replace / with %2F, etc.)
-          VERSION_SLUG=$(echo "${BRANCH_NAME}" | jq -sRr @uri)
+          VERSION_SLUG=$(echo -n "${BRANCH_NAME}" | jq -sRr @uri)
 
           echo "Triggering ReadTheDocs build for project: ${READTHEDOCS_PROJECT}, branch: ${BRANCH_NAME}"
 
@@ -239,7 +239,7 @@ jobs:
           BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
         run: |
           # URL-encode the branch name (replace / with %2F, etc.)
-          VERSION_SLUG=$(echo "${BRANCH_NAME}" | jq -sRr @uri)
+          VERSION_SLUG=$(echo -n "${BRANCH_NAME}" | jq -sRr @uri)
 
           echo "Deactivating ReadTheDocs preview for branch: ${BRANCH_NAME}"
 
