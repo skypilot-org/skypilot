@@ -83,36 +83,8 @@ jobs:
 
           echo "Triggering ReadTheDocs build for project: ${PROJECT_SLUG}, branch: ${BRANCH_NAME}"
 
-          # Check if version exists first
-          echo "Checking if version exists..."
-          CHECK_RESPONSE=$(curl -s -w "\n%{http_code}" \
-            "https://readthedocs.com/api/v3/projects/${PROJECT_SLUG}/versions/${VERSION_SLUG}/" \
-            -H "Authorization: Token ${READTHEDOCS_TOKEN}")
-
-          CHECK_HTTP_CODE=$(echo "$CHECK_RESPONSE" | tail -n1)
-          CHECK_BODY=$(echo "$CHECK_RESPONSE" | head -n-1)
-
-          if [ "$CHECK_HTTP_CODE" -eq 404 ]; then
-            echo "⚠️  Version '${BRANCH_NAME}' not found in ReadTheDocs."
-            echo "ReadTheDocs needs to discover this branch first. This happens automatically when:"
-            echo "  1. The branch is pushed to the repository"
-            echo "  2. ReadTheDocs webhook is triggered (may take a few minutes)"
-            echo ""
-            echo "Possible solutions:"
-            echo "  - Wait a few minutes for ReadTheDocs to auto-discover the branch"
-            echo "  - Trigger a manual sync in ReadTheDocs project settings"
-            echo "  - Make a new commit to the branch to trigger the webhook"
-            exit 1
-          elif [ "$CHECK_HTTP_CODE" -ne 200 ]; then
-            echo "❌ Failed to check version status. HTTP status: $CHECK_HTTP_CODE"
-            echo "$CHECK_BODY"
-            exit 1
-          fi
-
-          echo "✅ Version found in ReadTheDocs"
-
-          # Update version settings to be hidden, active, and public
-          echo "Configuring version settings..."
+          # Activate and configure the version (works for both existing and inactive versions)
+          echo "Activating and configuring version for branch: ${BRANCH_NAME}"
           CONFIG_RESPONSE=$(curl -s -w "\n%{http_code}" -X PATCH \
             "https://readthedocs.com/api/v3/projects/${PROJECT_SLUG}/versions/${VERSION_SLUG}/" \
             -H "Authorization: Token ${READTHEDOCS_TOKEN}" \
@@ -124,11 +96,26 @@ jobs:
             }')
 
           CONFIG_HTTP_CODE=$(echo "$CONFIG_RESPONSE" | tail -n1)
+          CONFIG_BODY=$(echo "$CONFIG_RESPONSE" | head -n-1)
 
-          if [ "$CONFIG_HTTP_CODE" -ne 200 ] && [ "$CONFIG_HTTP_CODE" -ne 204 ]; then
-            echo "⚠️  Warning: Failed to update version settings (HTTP $CONFIG_HTTP_CODE), but continuing..."
+          if [ "$CONFIG_HTTP_CODE" -eq 404 ]; then
+            echo "❌ Branch '${BRANCH_NAME}' not found in ReadTheDocs."
+            echo ""
+            echo "ReadTheDocs hasn't discovered this branch yet. This usually happens within 1-2 minutes of pushing a branch."
+            echo ""
+            echo "Please try one of these options:"
+            echo "  1. Wait 1-2 minutes and run /build-docs again"
+            echo "  2. Make a new commit to trigger the ReadTheDocs webhook"
+            echo "  3. Manually sync branches: https://readthedocs.com/projects/${PROJECT_SLUG}/versions/"
+            echo ""
+            echo "Response: $CONFIG_BODY"
+            exit 1
+          elif [ "$CONFIG_HTTP_CODE" -ne 200 ] && [ "$CONFIG_HTTP_CODE" -ne 204 ]; then
+            echo "❌ Failed to activate version. HTTP status: $CONFIG_HTTP_CODE"
+            echo "$CONFIG_BODY"
+            exit 1
           else
-            echo "✅ Version configured successfully"
+            echo "✅ Version activated and configured successfully"
           fi
 
           # Trigger the build
