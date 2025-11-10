@@ -570,6 +570,11 @@ prometheus:
 # @schema skipProperties:true
 grafana:
   enabled: false
+  # Use Recreate strategy to avoid PVC mount conflicts during upgrades
+  # Since Grafana uses ReadWriteOnce PVC, RollingUpdate would fail when
+  # trying to mount the same PVC on two pods simultaneously
+  deploymentStrategy:
+    type: Recreate
   persistence:
     enabled: true
     size: 10Gi
