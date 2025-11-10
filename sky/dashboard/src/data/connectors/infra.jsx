@@ -7,7 +7,9 @@ export async function getCloudInfrastructure(forceRefresh = false) {
   const dashboardCache = (await import('@/lib/cache')).default;
   const { getClusters } = await import('@/data/connectors/clusters');
   const { getManagedJobs } = await import('@/data/connectors/jobs');
-  const { getWorkspaces, getEnabledClouds } = await import('@/data/connectors/workspaces');
+  const { getWorkspaces, getEnabledClouds } = await import(
+    '@/data/connectors/workspaces'
+  );
 
   try {
     let jobsData = { jobs: [] };
@@ -77,22 +79,31 @@ export async function getCloudInfrastructure(forceRefresh = false) {
         await Promise.all(
           workspaceNames.map(async (workspaceName) => {
             try {
-              const workspaceClouds = await dashboardCache.get(getEnabledClouds, [workspaceName, false]);
+              const workspaceClouds = await dashboardCache.get(
+                getEnabledClouds,
+                [workspaceName, false]
+              );
               if (Array.isArray(workspaceClouds)) {
-                workspaceClouds.forEach(cloud => {
+                workspaceClouds.forEach((cloud) => {
                   if (cloud) {
                     enabledCloudsSet.add(cloud.toLowerCase());
                   }
                 });
               }
             } catch (error) {
-              console.error(`Error fetching enabled clouds for workspace ${workspaceName}:`, error);
+              console.error(
+                `Error fetching enabled clouds for workspace ${workspaceName}:`,
+                error
+              );
             }
           })
         );
 
         enabledCloudsList = Array.from(enabledCloudsSet);
-        console.log('Aggregated enabled clouds across all workspaces:', enabledCloudsList);
+        console.log(
+          'Aggregated enabled clouds across all workspaces:',
+          enabledCloudsList
+        );
       }
     } catch (error) {
       console.error('Error fetching enabled clouds:', error);
