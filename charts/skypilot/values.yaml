@@ -570,6 +570,9 @@ prometheus:
 # @schema skipProperties:true
 grafana:
   enabled: false
+  deploymentStrategy:
+    # Default to recreate to use RWO persistent volume for grafana data.
+    type: Recreate
   persistence:
     enabled: true
     size: 10Gi
