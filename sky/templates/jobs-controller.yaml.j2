@@ -82,20 +82,11 @@ run: |
   # Batch submission: loop through pre-created job IDs and append the controller
   # task's ray job ID ($SKYPILOT_INTERNAL_JOB_ID) as the last job ID
   job_ids_array=({% for job_id in pre_created_job_ids %}{{job_id}} {% endfor %}$SKYPILOT_INTERNAL_JOB_ID)
-  for job_id in "${job_ids_array[@]}"; do
-    python \
-      -u -m sky.jobs.scheduler {{remote_user_yaml_path}} \
-      --user-yaml-path {{remote_original_user_yaml_path}} \
-      --job-id $job_id \
-      --env-file {{remote_env_file_path}} \
-      {%- if pool is not none %}
-      --pool {{pool}} \
-      {%- endif %}
-      --priority {{priority}}
-  done
   {%- elif consolidation_mode_job_ids is defined and consolidation_mode_job_ids is not none %}
   # Consolidation mode batch submission: loop through all consolidation mode job IDs
   job_ids_array=({% for job_id in consolidation_mode_job_ids %}{{job_id}} {% endfor %})
+  {%- endif %}
+  {%- if (pre_created_job_ids is defined and pre_created_job_ids is not none) or (consolidation_mode_job_ids is defined and consolidation_mode_job_ids is not none) %}
   for job_id in "${job_ids_array[@]}"; do
     python \
       -u -m sky.jobs.scheduler {{remote_user_yaml_path}} \
@@ -107,16 +98,6 @@ run: |
       {%- endif %}
       --priority {{priority}}
   done
-  {%- elif consolidation_mode_job_id is not none %}
-  {{sky_python_cmd}} \
-    -u -m sky.jobs.scheduler {{remote_user_yaml_path}} \
-    --user-yaml-path {{remote_original_user_yaml_path}} \
-    --job-id {{consolidation_mode_job_id}} \
-    --env-file {{remote_env_file_path}} \
-    {%- if pool is not none %}
-    --pool {{pool}} \
-    {%- endif %}
-    --priority {{priority}}
   {%- else %}
   python \
     -u -m sky.jobs.scheduler {{remote_user_yaml_path}} \

@@ -206,6 +206,8 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                 # JOB_CMD_IDENTIFIER is used for identifying the process
                 # retrieved with pid is the same driver process.
                 f'{job_lib.JOB_CMD_IDENTIFIER.format(job_id)} && '
+                # Guarantee internal job ID is set for scheduling.
+                f'export SKYPILOT_INTERNAL_JOB_ID={job_id} && '
                 f'{cd} && {constants.SKY_PYTHON_CMD} -u {script_path}'
                 # Do not use &>, which is not POSIX and may not work.
                 # Note that the order of ">filename 2>&1" matters.
