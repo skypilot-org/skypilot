@@ -824,7 +824,8 @@ class Cloud:
                     # the accelerator registry, which may not has the same case
                     # as the cloud's catalog, e.g., 'RTXPro6000' in Shadeform
                     # catalog, and 'RTXPRO6000' in RunPod catalog.
-                    if requested_acc.upper() == instance_acc.upper():
+                    if requested_acc.lower() == instance_acc.lower():
+                        # Found the requested accelerator in the instance type.
                         break
                 else:
                     # Requested accelerator not found in instance type.
