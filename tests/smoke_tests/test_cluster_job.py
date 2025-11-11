@@ -1062,8 +1062,8 @@ def test_volumes_on_kubernetes():
             f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "existing0"); if [ -n "$vol" ]; then echo "existing0 not deleted" && exit 1; else echo "existing0 deleted"; fi',
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                f'pvcs=$(kubectl get pvc) && echo "$pvcs" && pvc=$(echo "$pvcs" | grep "pvc0"); if [ -n "$pvc" ]; then echo "pvc0 not deleted" && exit 1; else echo "pvc0 deleted"; fi',
-                f'pvcs=$(kubectl get pvc) && echo "$pvcs" && pvc=$(echo "$pvcs" | grep "existing0"); if [ -n "$pvc" ]; then echo "existing0 not deleted" && exit 1; else echo "existing0 deleted"; fi',
+                'pvcs=$(kubectl get pvc) && echo "$pvcs" && pvc=$(echo "$pvcs" | grep "pvc0"); if [ -n "$pvc" ]; then echo "pvc0 not deleted" && exit 1; else echo "pvc0 deleted"; fi && '
+                'pvc=$(echo "$pvcs" | grep "existing0"); if [ -n "$pvc" ]; then echo "existing0 not deleted" && exit 1; else echo "existing0 deleted"; fi',
             ),
         ],
         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
