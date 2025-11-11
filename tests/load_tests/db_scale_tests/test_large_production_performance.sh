@@ -23,6 +23,21 @@ cleanup() {
     sky jobs cancel -y -n sky-cmd || true
     sky down "$ACTIVE_CLUSTER_NAME" -y || true
     sky down "$TERMINATED_CLUSTER_NAME" -y || true
+
+    # Wait for all managed jobs to terminate
+    echo "Waiting for managed jobs to terminate..."
+    while true; do
+        STATUS_OUTPUT=$(sky status 2>/dev/null || echo "")
+        # Check if there are any managed jobs by looking for job ID pattern (number at start of line)
+        if echo "$STATUS_OUTPUT" | grep -qE "^[0-9]+\s+"; then
+            echo "$STATUS_OUTPUT"
+            echo "Waiting for termination..."
+            sleep 2
+        else
+            # No job IDs found, exit the loop
+            break
+        fi
+    done
 }
 
 # Set trap to cleanup on exit
