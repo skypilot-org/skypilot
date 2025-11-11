@@ -191,9 +191,36 @@ class SetMaxAutostopIdleMinutesPolicy(sky.AdminPolicy):
 
 
 class TokenBucketRateLimiter:
-    """Token bucket rate limiter."""
+    """Token bucket rate limiter.
+
+    This rate limiter allows a user to make requests up to
+    fill_rate requests per second.
+
+    Args:
+        capacity: The maximum number of requests allowed in the bucket.
+        fill_rate: The rate at which the bucket is filled with requests.
+
+    Example:
+        .. code-block:: python
+
+            rate_limiter = TokenBucketRateLimiter(capacity=2, fill_rate=1)
+            # The first two calls use up the two tokens in the bucket.
+            assert rate_limiter.allow_request('user1') is True
+            assert rate_limiter.allow_request('user1') is True
+            # The third call is denied as the bucket is empty.
+            assert rate_limiter.allow_request('user1') is False
+            # Wait for 1 second, the bucket is refilled with 1 token.
+            time.sleep(1)
+            assert rate_limiter.allow_request('user1') is True
+    """
 
     def __init__(self, capacity, fill_rate):
+        """Initializes the token bucket rate limiter.
+
+        Args:
+            capacity: The maximum number of requests allowed in the bucket.
+            fill_rate: The rate at which the bucket is filled with requests.
+        """
         # import the modules here so users importing this module
         # to use other policies do not need to import these modules.
         # pylint: disable=import-outside-toplevel
@@ -231,6 +258,14 @@ class TokenBucketRateLimiter:
             init_session.commit()
 
     def allow_request(self, user_name):
+        """Determines if a request is allowed for a given user.
+
+        Args:
+            user_name: The name of the user.
+
+        Returns:
+            True if the request is allowed, False otherwise.
+        """
         # import the modules here so users importing this module
         # to use other policies do not need to import these modules.
         # pylint: disable=import-outside-toplevel
@@ -253,14 +288,17 @@ class TokenBucketRateLimiter:
                     tokens = self.capacity
                     last_refill_time = now
                 time_elapsed = now - last_refill_time
+                # Refill the bucket based on the fill rate and the time elapsed
+                # since the last refill.
                 tokens = min(self.capacity,
                              tokens + time_elapsed * self.fill_rate)
+                # Check if the request is allowed.
                 if tokens >= 1:
                     tokens -= 1
                     allowed = True
                 else:
                     allowed = False
-                # insert or replace
+                # update the bucket in the database.
                 insert_or_update_stmt = (self.insert_func(
                     self.rate_limit_table).values(
                         user_name=user_name,
