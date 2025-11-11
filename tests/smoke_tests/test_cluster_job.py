@@ -1050,14 +1050,14 @@ def test_volumes_on_kubernetes():
             smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                f'kubectl create -f tests/test_yamls/test_pvc.yaml && kubectl get pvc existing',
+                f'kubectl create -f tests/test_yamls/test_pvc.yaml && kubectl get pvc existing0',
             ),
             f'sky volumes apply -y -n pvc0 --type k8s-pvc --size 2GB',
             f'sky volumes apply -y -n existing0 --type k8s-pvc --size 2GB --use-existing',
             f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep "pvc0" && echo "$vols" | grep "existing0"',
             f'sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky down -y {name} && sky volumes ls && sky volumes delete pvc0 existing -y',
+            f'sky down -y {name} && sky volumes ls && sky volumes delete pvc0 existing0 -y',
             f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "pvc0"); if [ -n "$vol" ]; then echo "pvc0 not deleted" && exit 1; else echo "pvc0 deleted"; fi',
             f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "existing0"); if [ -n "$vol" ]; then echo "existing0 not deleted" && exit 1; else echo "existing0 deleted"; fi',
             smoke_tests_utils.run_cloud_cmd_on_cluster(
