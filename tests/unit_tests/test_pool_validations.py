@@ -27,8 +27,7 @@ def test_pool_creation_with_run_section():
             readiness_timeout_seconds=30,  # Required but not used for pools
             min_replicas=1,
             pool=True,
-        )
-    )
+        ))
     task.validate()
     serve_utils.validate_service_task(task, pool=True)
 
@@ -44,7 +43,9 @@ def test_pool_creation_with_run_section():
          mock.patch('sky.serve.server.impl._rewrite_tls_credential_paths_and_get_tls_env_vars', return_value={}):
         # This should raise ValueError during the validation check in up()
         # at line 167 of sky/serve/server/impl.py
-        with pytest.raises(ValueError, match='Pool creation does not support the `run` section'):
+        with pytest.raises(
+                ValueError,
+                match='Pool creation does not support the `run` section'):
             serve_impl.up(task, service_name='test-pool', pool=True)
 
 
@@ -63,8 +64,7 @@ def test_pool_update_with_run_section():
             readiness_timeout_seconds=30,  # Required but not used for pools
             min_replicas=1,
             pool=True,
-        )
-    )
+        ))
     task.validate()
     serve_utils.validate_service_task(task, pool=True)
 
@@ -89,7 +89,9 @@ def test_pool_update_with_run_section():
          mock.patch('sky.utils.yaml_utils.read_yaml', return_value={'pool': {'workers': 1}}):
         # This should raise ValueError during the validation check in update()
         # at line 561 of sky/serve/server/impl.py
-        with pytest.raises(ValueError, match='Pool update does not support the `run` section'):
+        with pytest.raises(
+                ValueError,
+                match='Pool update does not support the `run` section'):
             serve_impl.update(task, service_name='test-pool', pool=True)
 
 
@@ -111,7 +113,8 @@ def test_pool_job_launch_with_setup_section():
 
     # Call the actual validation function
     pool = 'test-pool'
-    with pytest.raises(click.UsageError, match='Pool jobs are not allowed to modify'):
+    with pytest.raises(click.UsageError,
+                       match='Pool jobs are not allowed to modify'):
         jobs_utils.validate_pool_job(dag, pool)
 
 
@@ -125,7 +128,8 @@ def test_pool_job_launch_with_file_mounts_section():
     task = sky.Task(
         name='test-job',
         run='python script.py',
-        file_mounts={'/remote/data': './local_data'},  # This should cause an error
+        file_mounts={'/remote/data': './local_data'
+                    },  # This should cause an error
     )
 
     # Convert to DAG
@@ -133,6 +137,6 @@ def test_pool_job_launch_with_file_mounts_section():
 
     # Call the actual validation function
     pool = 'test-pool'
-    with pytest.raises(click.UsageError, match='Pool jobs are not allowed to modify'):
+    with pytest.raises(click.UsageError,
+                       match='Pool jobs are not allowed to modify'):
         jobs_utils.validate_pool_job(dag, pool)
-

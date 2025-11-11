@@ -347,10 +347,10 @@ def validate_pool_job(dag: 'dag_lib.Dag', pool: str) -> None:
             raise click.UsageError(
                 'Pool jobs are not allowed to modify '
                 'the configuration of workers in order to maintain a '
-                'consistent environment. Setup, file mounts, and storage '
-                'mounts must not be specified. To update a pool, modify '
-                f'the workers directly using `sky jobs pool apply -p {pool}'
-                ' new-pool.yaml`.')
+                'consistent environment. The `setup` section, file mounts, '
+                'and storage mounts must not be specified. To update a pool, '
+                'modify the workers directly using `sky jobs pool apply -p '
+                f'{pool} new-pool.yaml`.')
 
 
 async def get_job_status(
