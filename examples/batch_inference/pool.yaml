@@ -4,6 +4,19 @@
 envs:
   MODEL_NAME: openai/gpt-oss-20b
 
+workdir: .
+
+envs:
+  # These will be set automatically by SkyPilot when using --num-jobs
+  # SKYPILOT_JOB_RANK: 0
+  # SKYPILOT_NUM_JOBS: 10
+  BUCKET_NAME: sky-batch-inference-results
+
+file_mounts:
+  /results:
+    name: ${BUCKET_NAME}
+    mode: MOUNT
+
 resources:
   accelerators: H200:1
   infra: k8s
@@ -13,6 +26,10 @@ setup: |
   # Install vLLM and dependencies
   uv pip install vllm==0.11.0
   pip install transformers==4.48.1
+  
+  # Install dependencies for the classification script
+  uv pip install datasets==2.18.0
+  uv pip install tqdm==4.66.1
   
   # Download the model to cache it for all jobs
   echo "Downloading model ${MODEL_NAME}..."

@@ -3,24 +3,6 @@
 
 name: batch-classify
 
-workdir: .
-
-envs:
-  # These will be set automatically by SkyPilot when using --num-jobs
-  # SKYPILOT_JOB_RANK: 0
-  # SKYPILOT_NUM_JOBS: 10
-  BUCKET_NAME: sky-batch-inference-results
-
-file_mounts:
-  /results:
-    name: ${BUCKET_NAME}
-    mode: MOUNT
-
-setup: |
-  # Install dependencies for the classification script
-  uv pip install datasets==2.18.0
-  uv pip install tqdm==4.66.1
-
 run: |
   echo "Starting classification job (rank ${SKYPILOT_JOB_RANK} of ${SKYPILOT_NUM_JOBS})"
   
