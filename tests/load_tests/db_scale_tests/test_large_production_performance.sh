@@ -20,7 +20,7 @@ cleanup() {
         python "$INJECT_SCRIPT" --cleanup --managed-job-id "$JOB_ID" || true
         rm -f "$JOB_ID_FILE"
     fi
-    sky jobs cancel -y -n sky-cmd || true
+    sky jobs cancel -y -n || true
     sky down "$ACTIVE_CLUSTER_NAME" -y || true
     sky down "$TERMINATED_CLUSTER_NAME" -y || true
 
@@ -32,9 +32,11 @@ cleanup() {
         if echo "$STATUS_OUTPUT" | grep -qE "^[0-9]+\s+"; then
             echo "$STATUS_OUTPUT"
             echo "Waiting for termination..."
-            sleep 2
+            sleep 10
         else
             # No job IDs found, exit the loop
+            echo "$STATUS_OUTPUT"
+            echo "All managed jobs have terminated successfully."
             break
         fi
     done
