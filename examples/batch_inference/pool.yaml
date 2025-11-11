@@ -1,0 +1,26 @@
+# Pool configuration for batch text classification
+# This creates a pool of workers with openai/gpt-oss-20b pre-downloaded
+
+envs:
+  MODEL_NAME: openai/gpt-oss-20b
+
+resources:
+  accelerators: H200:1
+  infra: k8s
+  disk_size: 100
+
+setup: |
+  # Install vLLM and dependencies
+  uv pip install vllm==0.11.0
+  pip install transformers==4.48.1
+  
+  # Download the model to cache it for all jobs
+  echo "Downloading model ${MODEL_NAME}..."
+  huggingface-cli download --local-dir /tmp/model ${MODEL_NAME}
+  
+  echo "Pool worker setup complete!"
+
+pool:
+  # Number of workers in the pool
+  workers: 2
+
