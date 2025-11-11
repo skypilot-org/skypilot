@@ -1050,7 +1050,18 @@ def test_volumes_on_kubernetes():
             smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                f'kubectl create -f tests/test_yamls/test_pvc.yaml && kubectl get pvc existing0',
+                f'kubectl create -f - <<EOF\n'
+                f'apiVersion: v1\n'
+                f'kind: PersistentVolumeClaim\n'
+                f'metadata:\n'
+                f'  name: existing0\n'
+                f'spec:\n'
+                f'  accessModes:\n'
+                f'    - ReadWriteOnce\n'
+                f'  resources:\n'
+                f'    requests:\n'
+                f'      storage: 1Gi\n'
+                f'EOF',
             ),
             f'sky volumes apply -y -n pvc0 --type k8s-pvc --size 2GB',
             f'sky volumes apply -y -n existing0 --type k8s-pvc --size 2GB --use-existing',
