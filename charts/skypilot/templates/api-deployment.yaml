@@ -325,6 +325,11 @@ spec:
           mountPath: /root/.runpod
           readOnly: true
         {{- end }}
+        {{- if .Values.digitaloceanCredentials.enabled }}
+        - name: digitalocean-config
+          mountPath: /root/.config/doctl
+          readOnly: true
+        {{- end }}        
         {{- if .Values.lambdaCredentials.enabled }}
         - name: lambda-config
           mountPath: /root/.lambda_cloud
@@ -544,6 +549,37 @@ spec:
         - name: runpod-config
           mountPath: /root/.runpod
       {{- end }}
+      {{- if .Values.digitaloceanCredentials.enabled }}
+      - name: create-digitalocean-credentials
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        image: {{ .Values.apiService.image }}
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "Setting up DIGITALOCEAN credentials..."
+          if [ -n "$DIGITALOCEAN_CREDENTIALS" ]; then
+            echo "DIGITALOCEAN credentials found in environment variable."
+            mkdir -p /.config/doctl
+            cat > /.config/doctl/config.yaml <<EOF
+          access-token: $DIGITALOCEAN_CREDENTIALS
+          EOF
+          else
+            echo "DIGITALOCEAN credentials not found in environment variables. Skipping credentials setup."
+            sleep 600
+          fi
+        env:
+        - name: DIGITALOCEAN_CREDENTIALS
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.digitaloceanCredentials.digitaloceanSecretName }}
+              key: api_key
+        volumeMounts:
+        - name: digitalocean-config
+          mountPath: /.config/doctl
+      {{- end }}
       {{- if .Values.lambdaCredentials.enabled }}
       - name: create-lambda-credentials
         {{- with .Values.securityContext }}
@@ -649,6 +685,10 @@ spec:
       {{- end }}
       {{- if .Values.runpodCredentials.enabled }}
       - name: runpod-config
+        emptyDir: {}
+      {{- end }}
+      {{- if .Values.digitaloceanCredentials.enabled }}
+      - name: digitalocean-config
         emptyDir: {}
       {{- end }}
       {{- if .Values.lambdaCredentials.enabled }}
