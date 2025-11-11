@@ -413,6 +413,19 @@ Enforce autostop for all tasks
     :caption: `Config YAML for using EnforceAutostopPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/enforce_autostop.yaml>`_
 
 
+Set max autostop idle minutes for all tasks
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
+    :language: python
+    :pyobject: SetMaxAutostopIdleMinutesPolicy
+    :caption: `SetMaxAutostopIdleMinutesPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
+
+.. literalinclude:: ../../../examples/admin_policy/set_max_autostop_idle_minutes.yaml
+    :language: yaml
+    :caption: `Config YAML for using SetMaxAutostopIdleMinutesPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/set_max_autostop_idle_minutes.yaml>`_
+
+
 .. _dynamic-kubernetes-contexts-update-policy:
 
 Dynamically update Kubernetes contexts to use
@@ -461,3 +474,22 @@ Add volumes to all tasks
     :language: yaml
     :caption: `Config YAML for using AddVolumesPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/add_volumes.yaml>`_
 
+
+.. _rate-limit-launch-policy:
+
+Rate limit cluster launch requests
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
+    :language: python
+    :pyobject: TokenBucketRateLimiter
+    :caption: `TokenBucketRateLimiter <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
+
+.. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
+    :language: python
+    :pyobject: RateLimitLaunchPolicy
+    :caption: `RateLimitLaunchPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
+
+.. literalinclude:: ../../../examples/admin_policy/rate_limit_launch.yaml
+    :language: yaml
+    :caption: `Config YAML for using RateLimitLaunchPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/rate_limit_launch.yaml>`_

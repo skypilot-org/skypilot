@@ -1716,6 +1716,9 @@ def test_kubernetes_ssh_proxy_connection():
     smoke_tests_utils.run_one_test(test)
 
 
+# Only checks for processes in local machine, so skip remote server test.
+# TODO(kevin): Add metrics for number of open SSH tunnels and refactor this test to use it.
+@pytest.mark.no_remote_server
 def test_no_ssh_tunnel_process_leak_after_teardown(generic_cloud: str):
     """Test that no SSH tunnel process leaks after teardown."""
     cluster_name = smoke_tests_utils.get_cluster_name()
@@ -1735,3 +1738,36 @@ def test_no_ssh_tunnel_process_leak_after_teardown(generic_cloud: str):
         timeout=smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.gcp
+def test_cluster_setup_num_gpus():
+    """Test that the number of GPUs is set correctly in the setup script."""
+
+    setup_yaml = textwrap.dedent(f"""
+    resources:
+        accelerators: {{L4:2}}
+
+    setup: |
+        if [[ "$SKYPILOT_SETUP_NUM_GPUS_PER_NODE" != "2" ]]; then
+            exit 1
+        fi
+
+    run: |
+        echo "Done."
+    """)
+
+    with tempfile.NamedTemporaryFile(delete=True) as f:
+        f.write(setup_yaml.encode('utf-8'))
+        f.flush()
+        name = smoke_tests_utils.get_cluster_name()
+
+        test = smoke_tests_utils.Test(
+            'test_cluster_setup_num_gpus',
+            [
+                f's=$(sky launch -y -c {name} {f.name} -y); echo "$s"; echo; echo; echo "$s" | grep "Job finished (status: SUCCEEDED)"',
+            ],
+            timeout=smoke_tests_utils.get_timeout('gcp'),
+            teardown=f'sky down -y {name}',
+        )
+        smoke_tests_utils.run_one_test(test)
