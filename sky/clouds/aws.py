@@ -493,12 +493,18 @@ class AWS(clouds.Cloud):
             image_size = image_info[0]['BlockDeviceMappings'][0]['Ebs'][
                 'VolumeSize']
         except (aws.botocore_exceptions().NoCredentialsError,
-                aws.botocore_exceptions().ProfileNotFound):
+                aws.botocore_exceptions().ProfileNotFound) as e:
+            logger.debug(
+                f'Failed to get image size for {image_id} in region {region}: {e}'
+            )
             # Fallback to default image size if no credentials are available.
             # The credentials issue will be caught when actually provisioning
             # the instance and appropriate errors will be raised there.
             return DEFAULT_AMI_GB
-        except aws.botocore_exceptions().ClientError:
+        except aws.botocore_exceptions().ClientError as e:
+            logger.debug(
+                f'Failed to get image size for {image_id} in region {region}: {e}'
+            )
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(image_not_found_message) from None
         return image_size
@@ -524,21 +530,24 @@ class AWS(clouds.Cloud):
                     raise ValueError(image_not_found_message)
             image = image_info[0]
             if 'RootDeviceName' not in image:
-                logger.warning(f'Image {image_id!r} does not have a root '
-                               f'device name. '
-                               f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
+                logger.debug(f'Image {image_id!r} does not have a root '
+                             f'device name. '
+                             f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
                 return DEFAULT_ROOT_DEVICE_NAME
             return image['RootDeviceName']
         except (aws.botocore_exceptions().NoCredentialsError,
-                aws.botocore_exceptions().ProfileNotFound):
+                aws.botocore_exceptions().ProfileNotFound) as e:
             # Fallback to default root device name if no credentials are
             # available.
             # The credentials issue will be caught when actually provisioning
             # the instance and appropriate errors will be raised there.
-            logger.warning(f'No credentials available for region {region}. '
-                           f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
+            logger.debug(f'Failed to get image root device name for '
+                         f'{image_id} in region {region}: {e}. '
+                         f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
             return DEFAULT_ROOT_DEVICE_NAME
-        except aws.botocore_exceptions().ClientError:
+        except aws.botocore_exceptions().ClientError as e:
+            logger.debug(f'Failed to get image root device name for '
+                         f'{image_id} in region {region}: {e}.')
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(image_not_found_message) from None
 
@@ -1051,7 +1060,8 @@ class AWS(clouds.Cloud):
                     f'Invalid AWS configuration.\n'
                     f'  Reason: {common_utils.format_exception(e, use_bracket=True)}.'
                 ) from None
-        except aws.botocore_exceptions().TokenRetrievalError:
+        except aws.botocore_exceptions().TokenRetrievalError as e:
+            logger.debug(f'Failed to get AWS caller identity: {e}.')
             # This is raised when the access token is expired, which mainly
             # happens when the user is using temporary credentials or SSO
             # login.
