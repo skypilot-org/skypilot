@@ -142,7 +142,7 @@ _CLUSTER_STATUS_CACHE_DURATION_SECONDS = 2
 
 CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS = 10
 WORKSPACE_LOCK_TIMEOUT_SECONDS = 10
-CLUSTER_TUNNEL_LOCK_TIMEOUT_SECONDS = 10
+CLUSTER_TUNNEL_LOCK_TIMEOUT_SECONDS = 10.0
 
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
@@ -2260,6 +2260,11 @@ def _update_cluster_status(
             total_nodes = handle.launched_nodes * handle.num_ips_per_node
 
             cloud_name = repr(handle.launched_resources.cloud).lower()
+            # Initialize variables in case all retries fail
+            ready_head = 0
+            ready_workers = 0
+            output = ''
+            stderr = ''
             for i in range(5):
                 try:
                     ready_head, ready_workers, output, stderr = (

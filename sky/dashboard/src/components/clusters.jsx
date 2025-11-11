@@ -455,6 +455,7 @@ export function Clusters() {
             setFilters={setFilters}
             updateURLParams={updateURLParams}
             placeholder="Filter clusters"
+            filters={filters}
           />
         </div>
         <div className="flex items-center gap-2 ml-auto">
@@ -1194,6 +1195,7 @@ const FilterDropdown = ({
   setFilters,
   updateURLParams,
   placeholder = 'Filter clusters',
+  filters = [],
 }) => {
   const inputRef = useRef(null);
   const dropdownRef = useRef(null);
@@ -1225,22 +1227,51 @@ const FilterDropdown = ({
   useEffect(() => {
     let updatedValueOptions = [];
 
+    // Obtain propertyLabel (filter.property value)
+    let propertyLabel = propertyValue || '';
+    if (propertyLabel.length > 1) {
+      propertyLabel = propertyValue[0].toUpperCase();
+
+      for (let index = 1; index < propertyValue.length; index++) {
+        propertyLabel += propertyValue[index];
+      }
+    }
+    // Obtain the values of filter to exclude from updatedValueOptions
+    const selectedValues = filters
+      .filter((filter) => filter.property === propertyLabel)
+      .map((filter) => filter.value);
+
     if (valueList && typeof valueList === 'object') {
       switch (propertyValue) {
         case 'status':
-          updatedValueOptions = valueList.status || [];
+          updatedValueOptions =
+            valueList.status.filter(
+              (value) => !selectedValues.find((val) => val === value)
+            ) || [];
           break;
         case 'user':
-          updatedValueOptions = valueList.user || [];
+          updatedValueOptions =
+            valueList.user.filter(
+              (value) => !selectedValues.find((val) => val === value)
+            ) || [];
           break;
         case 'cluster':
-          updatedValueOptions = valueList.cluster || [];
+          updatedValueOptions =
+            valueList.cluster.filter(
+              (value) => !selectedValues.find((val) => val === value)
+            ) || [];
           break;
         case 'workspace':
-          updatedValueOptions = valueList.workspace || [];
+          updatedValueOptions =
+            valueList.workspace.filter(
+              (value) => !selectedValues.find((val) => val === value)
+            ) || [];
           break;
         case 'infra':
-          updatedValueOptions = valueList.infra || [];
+          updatedValueOptions =
+            valueList.infra.filter(
+              (value) => !selectedValues.find((val) => val === value)
+            ) || [];
           break;
         default:
           break;
@@ -1256,7 +1287,7 @@ const FilterDropdown = ({
     }
 
     setValueOptions(updatedValueOptions);
-  }, [propertyValue, valueList, value]);
+  }, [propertyValue, valueList, value, filters]);
 
   // Helper function to get the capitalized label for a property value
   const getPropertyLabel = (propertyValue) => {

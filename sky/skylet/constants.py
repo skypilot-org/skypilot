@@ -372,6 +372,8 @@ SERVICE_ACCOUNT_TOKEN_ENV_VAR = (
 # SkyPilot environment variables
 SKYPILOT_NUM_NODES = f'{SKYPILOT_ENV_VAR_PREFIX}NUM_NODES'
 SKYPILOT_NODE_IPS = f'{SKYPILOT_ENV_VAR_PREFIX}NODE_IPS'
+SKYPILOT_SETUP_NUM_GPUS_PER_NODE = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}SETUP_NUM_GPUS_PER_NODE')
 SKYPILOT_NUM_GPUS_PER_NODE = f'{SKYPILOT_ENV_VAR_PREFIX}NUM_GPUS_PER_NODE'
 SKYPILOT_NODE_RANK = f'{SKYPILOT_ENV_VAR_PREFIX}NODE_RANK'
 
@@ -391,6 +393,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('docker', 'run_options'),
     ('nvidia_gpus', 'disable_ecc'),
     ('ssh', 'pod_config'),
+    ('ssh', 'provision_timeout'),
     ('kubernetes', 'custom_metadata'),
     ('kubernetes', 'pod_config'),
     ('kubernetes', 'provision_timeout'),

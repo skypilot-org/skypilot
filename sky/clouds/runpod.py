@@ -200,7 +200,7 @@ class RunPod(clouds.Cloud):
             acc_dict)
 
         if resources.image_id is None:
-            image_id: Optional[str] = 'runpod/base:0.0.2'
+            image_id: Optional[str] = 'runpod/base:1.0.2-ubuntu2204'
         elif resources.extract_docker_image() is not None:
             image_id = resources.extract_docker_image()
         else:
