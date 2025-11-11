@@ -479,28 +479,23 @@ class ProductionScaleTest(TestScale):
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
 
-            # Find production clusters (inject_production_clusters creates prod-cluster-*)
+            # Clean up production clusters (inject_production_clusters creates prod-cluster-*)
+            # Delete from cluster_yaml first
             cursor.execute(
-                "SELECT name FROM clusters WHERE name LIKE 'prod-cluster-%'")
-            cluster_names = [row[0] for row in cursor.fetchall()]
+                "DELETE FROM cluster_yaml WHERE cluster_name LIKE 'prod-cluster-%'"
+            )
+            yaml_deleted = cursor.rowcount
 
-            if cluster_names:
+            # Delete from clusters
+            cursor.execute(
+                "DELETE FROM clusters WHERE name LIKE 'prod-cluster-%'")
+            clusters_deleted = cursor.rowcount
+            conn.commit()
+
+            if clusters_deleted > 0:
                 print(
-                    f"\n[1/4] Cleaning up {len(cluster_names)} active clusters..."
+                    f"\n[1/4] Cleaning up {clusters_deleted} active clusters..."
                 )
-                # Delete from cluster_yaml first
-                placeholders = ', '.join(['?' for _ in cluster_names])
-                cursor.execute(
-                    f"DELETE FROM cluster_yaml WHERE cluster_name IN ({placeholders})",
-                    cluster_names)
-                yaml_deleted = cursor.rowcount
-
-                # Delete from clusters
-                cursor.execute(
-                    f"DELETE FROM clusters WHERE name IN ({placeholders})",
-                    cluster_names)
-                clusters_deleted = cursor.rowcount
-                conn.commit()
                 results['clusters'] = clusters_deleted
                 results['yaml'] = yaml_deleted
                 print(
@@ -511,47 +506,31 @@ class ProductionScaleTest(TestScale):
                 results['clusters'] = 0
 
             # Clean up cluster history (inject_production_cluster_history creates prod-hist-*)
-            cursor.execute("""
-                SELECT cluster_hash, name
-                FROM cluster_history
-                WHERE name LIKE 'prod-hist-%'
-            """)
-            history_entries = cursor.fetchall()
+            cursor.execute(
+                "DELETE FROM cluster_history WHERE name LIKE 'prod-hist-%'")
+            history_deleted = cursor.rowcount
+            conn.commit()
 
-            if history_entries:
+            if history_deleted > 0:
                 print(
-                    f"\n[2/4] Cleaning up {len(history_entries)} cluster history entries..."
+                    f"\n[2/4] Cleaning up {history_deleted} cluster history entries..."
                 )
-                cluster_hashes = [entry[0] for entry in history_entries]
-                placeholders = ', '.join(['?' for _ in cluster_hashes])
-                cursor.execute(
-                    f"DELETE FROM cluster_history WHERE cluster_hash IN ({placeholders})",
-                    cluster_hashes)
-                conn.commit()
-                results['history'] = len(history_entries)
-                print(
-                    f"  Deleted {len(history_entries)} cluster history entries")
+                results['history'] = history_deleted
+                print(f"  Deleted {history_deleted} cluster history entries")
             else:
                 print("\n[2/4] No production cluster history found to clean up")
                 results['history'] = 0
 
             # Clean up cluster events for production clusters
-            # Get all production cluster hashes (from both active and history)
             cursor.execute("""
-                SELECT DISTINCT cluster_hash
-                FROM cluster_events
+                DELETE FROM cluster_events
                 WHERE name LIKE 'prod-cluster-%' OR name LIKE 'prod-hist-%'
             """)
-            event_cluster_hashes = [row[0] for row in cursor.fetchall()]
+            events_deleted = cursor.rowcount
+            conn.commit()
 
-            if event_cluster_hashes:
+            if events_deleted > 0:
                 print(f"\n[3/4] Cleaning up cluster events...")
-                placeholders = ', '.join(['?' for _ in event_cluster_hashes])
-                cursor.execute(
-                    f"DELETE FROM cluster_events WHERE cluster_hash IN ({placeholders})",
-                    event_cluster_hashes)
-                events_deleted = cursor.rowcount
-                conn.commit()
                 results['events'] = events_deleted
                 print(f"  Deleted {events_deleted} cluster events")
             else:
@@ -565,27 +544,27 @@ class ProductionScaleTest(TestScale):
             conn = sqlite3.connect(self.jobs_db_path)
             cursor = conn.cursor()
 
+            # Delete from job_info first (to handle foreign key constraints if any)
             cursor.execute(
                 """
-                SELECT job_id
-                FROM spot
-                WHERE job_id > ?
-                ORDER BY job_id
+                DELETE FROM job_info
+                WHERE spot_job_id > ?
             """, (managed_job_id,))
-            job_ids = [row[0] for row in cursor.fetchall()]
+            job_info_deleted = cursor.rowcount
 
-            if job_ids:
-                print(f"\n[4/4] Cleaning up {len(job_ids)} managed jobs...")
-                placeholders = ', '.join(['?' for _ in job_ids])
-                cursor.execute(
-                    f"DELETE FROM spot WHERE job_id IN ({placeholders})",
-                    job_ids)
-                cursor.execute(
-                    f"DELETE FROM job_info WHERE spot_job_id IN ({placeholders})",
-                    job_ids)
-                conn.commit()
-                results['jobs'] = len(job_ids)
-                print(f"  Deleted {len(job_ids)} managed jobs")
+            # Delete from spot
+            cursor.execute(
+                """
+                DELETE FROM spot
+                WHERE job_id > ?
+            """, (managed_job_id,))
+            jobs_deleted = cursor.rowcount
+            conn.commit()
+
+            if jobs_deleted > 0:
+                print(f"\n[4/4] Cleaning up {jobs_deleted} managed jobs...")
+                results['jobs'] = jobs_deleted
+                print(f"  Deleted {jobs_deleted} managed jobs")
             else:
                 print(
                     f"\n[4/4] No managed jobs found with job_id > {managed_job_id}"

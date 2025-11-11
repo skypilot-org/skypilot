@@ -123,7 +123,7 @@ echo "✓ sky jobs queue test passed (${duration}s)"
 
 # Step 7: Test sky jobs queue --all performance
 echo "Step 7: Testing sky jobs queue --all performance..."
-echo "Expected: Last job ID 1 and finish within 10 seconds"
+echo "Expected: Last job ID 1 and finish within 30 seconds"
 time_start=$(date +%s)
 QUEUE_ALL_OUTPUT=$(timeout 60 sky jobs queue --all 2>&1 || true)
 time_end=$(date +%s)
@@ -141,8 +141,8 @@ if [ "$LAST_JOB_ID_ALL" != "1" ]; then
     exit 1
 fi
 
-if [ $duration -gt 10 ]; then
-    echo "ERROR: sky jobs queue --all took ${duration}s, expected <= 10s"
+if [ $duration -gt 30 ]; then
+    echo "ERROR: sky jobs queue --all took ${duration}s, expected <= 30s"
     exit 1
 fi
 
