@@ -576,8 +576,8 @@ prometheus:
           regex: (.+)
         - source_labels: [__meta_kubernetes_pod_annotation_skypilot_co_port, __meta_kubernetes_pod_ip]
           action: replace
-          regex: (\d+);(([A-Fa-f0-9]{1,4}::?){1,7}[A-Fa-f0-9]{1,4})
-          replacement: '[$2]:$1'
+          regex: (\d+);((([0-9]+?)(\.|$)){4})
+          replacement: $2:$1
           target_label: __address__
         - action: labelmap
           regex: __meta_kubernetes_pod_label_(.+)
