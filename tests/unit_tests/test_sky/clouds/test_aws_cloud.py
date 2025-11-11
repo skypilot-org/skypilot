@@ -41,7 +41,7 @@ class TestGetImageRootDeviceName:
 
     @mock.patch.object(aws_mod, 'logger')
     @mock.patch.object(aws_mod, 'aws')
-    def test_missing_root_device_name_warns_and_returns_default(
+    def test_missing_root_device_name_debugs_and_returns_default(
             self, mock_aws, mock_logger):
         client = mock.Mock()
         mock_aws.client.return_value = client
@@ -54,7 +54,7 @@ class TestGetImageRootDeviceName:
         result = aws_mod.AWS.get_image_root_device_name('ami-0123456789abcdef1',
                                                         'us-west-2')
         assert result == aws_mod.DEFAULT_ROOT_DEVICE_NAME
-        assert mock_logger.warning.called
+        assert mock_logger.debug.called
 
     @mock.patch.object(aws_mod, 'logger')
     @mock.patch.object(aws_mod, 'aws')
@@ -85,12 +85,12 @@ class TestGetImageRootDeviceName:
         result = aws_mod.AWS.get_image_root_device_name('ami-0123456789abcdef2',
                                                         'eu-central-1')
         assert result == aws_mod.DEFAULT_ROOT_DEVICE_NAME
-        assert mock_logger.warning.called
-        # Verify the warning log message contains expected content
-        warning_call_args = mock_logger.warning.call_args[0][0]
-        assert 'Failed to get image root device name' in warning_call_args
-        assert 'ami-0123456789abcdef2' in warning_call_args
-        assert 'eu-central-1' in warning_call_args
+        assert mock_logger.debug.called
+        # Verify the debug log message contains expected content
+        debug_call_args = mock_logger.debug.call_args[0][0]
+        assert 'Failed to get image root device name' in debug_call_args
+        assert 'ami-0123456789abcdef2' in debug_call_args
+        assert 'eu-central-1' in debug_call_args
 
     @mock.patch.object(aws_mod, 'logger')
     @mock.patch.object(aws_mod, 'aws')

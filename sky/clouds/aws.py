@@ -530,9 +530,9 @@ class AWS(clouds.Cloud):
                     raise ValueError(image_not_found_message)
             image = image_info[0]
             if 'RootDeviceName' not in image:
-                logger.warning(f'Image {image_id!r} does not have a root '
-                               f'device name. '
-                               f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
+                logger.debug(f'Image {image_id!r} does not have a root '
+                             f'device name. '
+                             f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
                 return DEFAULT_ROOT_DEVICE_NAME
             return image['RootDeviceName']
         except (aws.botocore_exceptions().NoCredentialsError,
@@ -541,9 +541,9 @@ class AWS(clouds.Cloud):
             # available.
             # The credentials issue will be caught when actually provisioning
             # the instance and appropriate errors will be raised there.
-            logger.warning(f'Failed to get image root device name for '
-                           f'{image_id} in region {region}: {e}. '
-                           f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
+            logger.debug(f'Failed to get image root device name for '
+                         f'{image_id} in region {region}: {e}. '
+                         f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
             return DEFAULT_ROOT_DEVICE_NAME
         except aws.botocore_exceptions().ClientError as e:
             logger.debug(f'Failed to get image root device name for '
