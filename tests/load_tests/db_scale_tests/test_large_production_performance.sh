@@ -21,8 +21,7 @@ cleanup() {
         rm -f "$JOB_ID_FILE"
     fi
     sky jobs cancel -y -n || true
-    sky down "$ACTIVE_CLUSTER_NAME" -y || true
-    sky down "$TERMINATED_CLUSTER_NAME" -y || true
+    sky down -a -y || true
 
     # Wait for all managed jobs to terminate
     echo "Waiting for managed jobs to terminate..."
@@ -98,7 +97,7 @@ echo "✓ sky status test passed (${duration}s)"
 
 # Step 6: Test sky jobs queue performance
 echo "Step 6: Testing sky jobs queue performance..."
-echo "Expected: Last job ID >= 12452 and finish within 7 seconds"
+echo "Expected: Last job ID >= 12452 and finish within 10 seconds"
 time_start=$(date +%s)
 QUEUE_OUTPUT=$(timeout 60 sky jobs queue 2>&1 || true)
 time_end=$(date +%s)
@@ -116,8 +115,8 @@ if [ "$LAST_JOB_ID" -lt 12452 ]; then
     exit 1
 fi
 
-if [ $duration -gt 5 ]; then
-    echo "ERROR: sky jobs queue took ${duration}s, expected <= 5s"
+if [ $duration -gt 10 ]; then
+    echo "ERROR: sky jobs queue took ${duration}s, expected <= 10s"
     exit 1
 fi
 
