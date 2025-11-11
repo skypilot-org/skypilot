@@ -4331,6 +4331,10 @@ def volumes_apply(
         \b
         # Apply a volume from a command.
         sky volumes apply --name pvc1 --infra k8s --type k8s-pvc --size 100Gi
+        \b
+        # Apply a volume with existing PVC `pvc2` from a command.
+        sky volumes apply --name pvc2 --infra k8s --type k8s-pvc --size 100Gi
+        --use-existing
     """
     # pylint: disable=import-outside-toplevel
     from sky.volumes import volume as volume_lib
