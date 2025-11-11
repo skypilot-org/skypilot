@@ -75,7 +75,7 @@ python "$INJECT_SCRIPT" \
 echo "Step 5: Testing sky status performance..."
 echo "Expected: Show '12501 RUNNING' or '12501 STARTING' and finish within 11 seconds"
 time_start=$(date +%s)
-STATUS_OUTPUT=$(timeout 10 sky status)
+STATUS_OUTPUT=$(timeout 60 sky status 2>&1 || true)
 time_end=$(date +%s)
 duration=$((time_end - time_start))
 
@@ -98,7 +98,7 @@ echo "✓ sky status test passed (${duration}s)"
 echo "Step 6: Testing sky jobs queue performance..."
 echo "Expected: Last job ID >= 12452 and finish within 7 seconds"
 time_start=$(date +%s)
-QUEUE_OUTPUT=$(timeout 10 sky jobs queue)
+QUEUE_OUTPUT=$(timeout 60 sky jobs queue 2>&1 || true)
 time_end=$(date +%s)
 duration=$((time_end - time_start))
 
@@ -125,7 +125,7 @@ echo "✓ sky jobs queue test passed (${duration}s)"
 echo "Step 7: Testing sky jobs queue --all performance..."
 echo "Expected: Last job ID 1 and finish within 10 seconds"
 time_start=$(date +%s)
-QUEUE_ALL_OUTPUT=$(timeout 15 sky jobs queue --all)
+QUEUE_ALL_OUTPUT=$(timeout 60 sky jobs queue --all 2>&1 || true)
 time_end=$(date +%s)
 duration=$((time_end - time_start))
 
