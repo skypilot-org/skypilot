@@ -160,10 +160,15 @@ def up(
     task = dag.tasks[0]
     assert task.service is not None
     if pool:
+        # Prevent pool creation from having a run section. Allowing this would
+        # not cause any issues, but we want to provide a consistent experience
+        # to the user by making it clear that 'setup' runs during creation
+        # and 'run' runs during job submission.
         if task.run is not None:
-            logger.warning(
-                f'{colorama.Fore.YELLOW}The `run` section will be ignored when '
-                f'creating the pool.{colorama.Style.RESET_ALL}')
+            raise ValueError(
+                'Pool creation does not support the `run` section. '
+                'During creation the goal is to setup the '
+                'environment the jobs will run in.')
         # Use dummy run script for cluster pool.
         task.run = serve_constants.POOL_DUMMY_RUN_COMMAND
 
@@ -550,10 +555,14 @@ def update(
         task, request_name=request_names.AdminPolicyRequestName.SERVE_UPDATE)
     task = dag.tasks[0]
     if pool:
+        # Prevent pool creation from having a run section. Allowing this would
+        # not cause any issues, but we want to provide a consistent experience
+        # to the user by making it clear that 'setup' runs during creation
+        # and 'run' runs during job submission.
         if task.run is not None:
-            logger.warning(
-                f'{colorama.Fore.YELLOW}The `run` section will be ignored when '
-                f'creating the pool.{colorama.Style.RESET_ALL}')
+            raise ValueError('Pool update does not support the `run` section. '
+                             'During update the goal is to setup the '
+                             'environment the jobs will run in.')
         # Use dummy run script for cluster pool.
         task.run = serve_constants.POOL_DUMMY_RUN_COMMAND
 

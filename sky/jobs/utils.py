@@ -19,6 +19,7 @@ import typing
 from typing import (Any, Deque, Dict, Iterable, List, Literal, Optional, Set,
                     TextIO, Tuple, Union)
 
+import click
 import colorama
 import filelock
 
@@ -321,6 +322,35 @@ def ha_recovery_for_consolidation_mode():
         f.write(f'HA recovery completed at {datetime.datetime.now()}\n')
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
     signal_file.unlink()
+
+
+def validate_pool_job(dag: 'dag_lib.Dag', pool: str) -> None:
+    """Validate that a job being launched to a pool doesn't modify worker.
+
+    Pool jobs are not allowed to modify the configuration of workers in order to
+    maintain a consistent environment. Setup, file mounts, and storage mounts
+    should be performed at pool apply time. Not doing this would require complex
+    logic to reset the worker to the original state after the job is finished.
+    Furthermore, supporting multiple jobs running concurrently on the same
+    worker would be complex.
+
+    Args:
+        dag: The DAG containing tasks to validate
+        pool: The name of the pool the job is being launched to
+
+    Raises:
+        click.UsageError: If any task has setup, file_mounts, or storage_mounts
+    """
+    for task_ in dag.tasks:
+        if (task_.setup is not None or task_.file_mounts or
+                task_.storage_mounts):
+            raise click.UsageError(
+                'Pool jobs are not allowed to modify '
+                'the configuration of workers in order to maintain a '
+                'consistent environment. Setup, file mounts, and storage '
+                'mounts must not be specified. To update a pool, modify '
+                f'the workers directly using `sky jobs pool apply -p {pool}'
+                ' new-pool.yaml`.')
 
 
 async def get_job_status(
