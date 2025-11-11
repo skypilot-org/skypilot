@@ -7,6 +7,7 @@ import '@/app/globals.css';
 import { useEffect } from 'react';
 import { BASE_PATH } from '@/data/connectors/constants';
 import { TourProvider } from '@/hooks/useTour';
+import { PluginProvider } from '@/plugins/PluginProvider';
 
 const Layout = dynamic(
   () => import('@/components/elements/layout').then((mod) => mod.Layout),
@@ -22,11 +23,13 @@ function App({ Component, pageProps }) {
   }, []);
 
   return (
-    <TourProvider>
-      <Layout highlighted={pageProps.highlighted}>
-        <Component {...pageProps} />
-      </Layout>
-    </TourProvider>
+    <PluginProvider>
+      <TourProvider>
+        <Layout highlighted={pageProps.highlighted}>
+          <Component {...pageProps} />
+        </Layout>
+      </TourProvider>
+    </PluginProvider>
   );
 }
 

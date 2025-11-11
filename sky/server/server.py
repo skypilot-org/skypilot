@@ -20,7 +20,7 @@ import struct
 import sys
 import threading
 import traceback
-from typing import Dict, List, Literal, Optional, Set, Tuple
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 import uuid
 import zipfile
 
@@ -55,6 +55,7 @@ from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.server import metrics
+from sky.server import plugins
 from sky.server import state
 from sky.server import stream_utils
 from sky.server import versions
@@ -646,6 +647,10 @@ app.add_middleware(BearerTokenMiddleware)
 # middleware above.
 app.add_middleware(InitializeRequestAuthUserMiddleware)
 app.add_middleware(RequestIDMiddleware)
+
+logger.info(f'PID {os.getpid()}: Loading plugins...')
+plugins.load_plugins(plugins.ExtensionPoints(app=app))
+
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
 app.include_router(users_rest.router, prefix='/users', tags=['users'])
@@ -1748,6 +1753,17 @@ async def api_status(
             for request_task in request_tasks:
                 encoded_request_tasks.append(request_task.readable_encode())
         return encoded_request_tasks
+
+
+@app.get('/api/plugins',
+         response_class=fastapi_responses.ORJSONResponse)
+async def list_plugins() -> Dict[str, List[Dict[str, Any]]]:
+    """Return metadata about loaded backend plugins."""
+    plugin_info = [{
+        'name': plugin.name,
+        'js_path': plugin.js_path,
+    } for plugin in plugins.get_plugins()]
+    return {'plugins': plugin_info}
 
 
 @app.get(

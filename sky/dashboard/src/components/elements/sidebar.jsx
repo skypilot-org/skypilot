@@ -26,6 +26,7 @@ import { Settings, User } from 'lucide-react';
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
+import { useTopNavLinks } from '@/plugins/PluginProvider';
 
 // Create a context for sidebar state management
 const SidebarContext = createContext(null);
@@ -161,6 +162,7 @@ export function TopBar() {
   const { userEmail, userRole, isMobileSidebarOpen, toggleMobileSidebar } =
     useSidebar();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const pluginNavLinks = useTopNavLinks();
 
   const dropdownRef = useRef(null);
   const mobileNavRef = useRef(null);
@@ -224,6 +226,107 @@ export function TopBar() {
     return `inline-flex items-center border-b-2 ${baseClasses} ${
       isMobile ? 'px-2 py-1' : 'px-1 pt-1 space-x-2'
     }`;
+  };
+
+  const getMobileLinkClasses = (path, forceInactive = false) => {
+    const isActive = !forceInactive && isActivePath(path);
+    return `flex items-center px-4 py-3 text-sm font-medium rounded-md transition-colors ${
+      isActive
+        ? 'bg-blue-50 text-blue-600'
+        : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
+    }`;
+  };
+
+  const renderNavLabel = (link) => (
+    <>
+      {link.icon && (
+        <span className="text-base leading-none mr-1" aria-hidden="true">
+          {link.icon}
+        </span>
+      )}
+      <span className="inline-flex items-center gap-1">
+        <span>{link.label}</span>
+        {link.badge && (
+          <span className="text-[10px] uppercase tracking-wide bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">
+            {link.badge}
+          </span>
+        )}
+      </span>
+    </>
+  );
+
+  const renderDesktopPluginNavLink = (link) => {
+    if (link.external) {
+      return (
+        <a
+          key={link.id}
+          href={link.href}
+          target={link.target}
+          rel={link.rel}
+          className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 space-x-2 text-gray-700 hover:text-blue-600"
+        >
+          {renderNavLabel(link)}
+        </a>
+      );
+    }
+
+    return (
+      <Link
+        key={link.id}
+        href={link.href}
+        className={getLinkClasses(link.href)}
+        prefetch={false}
+      >
+        {renderNavLabel(link)}
+      </Link>
+    );
+  };
+
+  const renderMobilePluginNavLink = (link) => {
+    const content = (
+      <>
+        {link.icon && (
+          <span className="text-base leading-none mr-2" aria-hidden="true">
+            {link.icon}
+          </span>
+        )}
+        <span className="flex items-center gap-2">
+          <span>{link.label}</span>
+          {link.badge && (
+            <span className="text-[10px] uppercase tracking-wide bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">
+              {link.badge}
+            </span>
+          )}
+        </span>
+      </>
+    );
+
+    if (link.external) {
+      return (
+        <a
+          key={link.id}
+          href={link.href}
+          target={link.target}
+          rel={link.rel}
+          className={getMobileLinkClasses(link.href, true)}
+          onClick={toggleMobileSidebar}
+        >
+          {content}
+        </a>
+      );
+    }
+
+    return (
+      <Link
+        key={link.id}
+        href={link.href}
+        className={getMobileLinkClasses(link.href)}
+        onClick={toggleMobileSidebar}
+        prefetch={false}
+      >
+        {content}
+      </Link>
+    );
   };
 
   return (
@@ -335,6 +438,8 @@ export function TopBar() {
                 <UsersIcon className="w-4 h-4" />
                 <span>Users</span>
               </Link>
+
+              {pluginNavLinks.map((link) => renderDesktopPluginNavLink(link))}
             </div>
           )}
 
@@ -600,6 +705,15 @@ export function TopBar() {
                   <UsersIcon className="w-5 h-5 mr-3" />
                   Users
                 </Link>
+
+                {pluginNavLinks.length > 0 && (
+                  <>
+                    <div className="border-t border-gray-200 my-4"></div>
+                    {pluginNavLinks.map((link) =>
+                      renderMobilePluginNavLink(link)
+                    )}
+                  </>
+                )}
 
                 <div className="border-t border-gray-200 my-4"></div>
 
