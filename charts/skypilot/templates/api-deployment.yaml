@@ -29,10 +29,16 @@ spec:
     metadata:
       annotations:
         {{- if .Values.apiService.metrics.enabled }}
+        {{- if .Values.prometheus.useDedicatedScrapeConfig }}
+        skypilot.co/scrape: "true"
+        skypilot.co/path: "/metrics"
+        skypilot.co/port: {{ .Values.apiService.metrics.port | quote }}
+        {{- else}}
         # Well-known annotations for Prometheus to scrape the metrics.
         prometheus.io/scrape: "true"
         prometheus.io/path: "/metrics"
         prometheus.io/port: {{ .Values.apiService.metrics.port | quote }}
+        {{- end }}
         {{- end }}
         {{- if .Values.apiService.annotations }}
         {{- toYaml .Values.apiService.annotations | nindent 8 }}

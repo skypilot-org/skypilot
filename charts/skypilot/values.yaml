@@ -528,6 +528,11 @@ runtimeClassName:
 # Refer to https://github.com/prometheus-community/helm-charts/blob/main/charts/prometheus/values.yaml for available values.
 # @schema skipProperties:true
 prometheus:
+  # By default, the API server will be annotated with well-known annotations (prometheus.io/*) to be discovered by prometheus.
+  # Set this to true will remove the well-known annotations and use a dedicated scrape config instead, which can be helpful when
+  # you do not want the API server to be discovered by other prometheus instances.
+  # @schema type: [boolean, null]
+  useDedicatedScrapeConfig: false
   enabled: false
   # Keep the installation minimal by default. If you want to monitor more resources other than the API server,
   # it is recommended to install and manage prometheus separately.
@@ -553,6 +558,42 @@ prometheus:
         regex: ;(.+)
         target_label: node
         replacement: $1
+    {{ if .Values.useDedicatedScrapeConfig }}
+    - job_name: 'skypilot-api-server-metrics'
+      honor_labels: true
+      kubernetes_sd_configs:
+        - role: pod
+          namespaces:
+            names:
+            - '{{ .Release.Namespace }}'
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_annotation_skypilot_co_scrape]
+          action: keep
+          regex: true
+        - source_labels: [__meta_kubernetes_pod_annotation_skypilot_co_path]
+          action: replace
+          target_label: __metrics_path__
+          regex: (.+)
+        - source_labels: [__meta_kubernetes_pod_annotation_skypilot_co_port, __meta_kubernetes_pod_ip]
+          action: replace
+          regex: (\d+);(([A-Fa-f0-9]{1,4}::?){1,7}[A-Fa-f0-9]{1,4})
+          replacement: '[$2]:$1'
+          target_label: __address__
+        - action: labelmap
+          regex: __meta_kubernetes_pod_label_(.+)
+        - source_labels: [__meta_kubernetes_namespace]
+          action: replace
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          action: replace
+          target_label: pod
+        - source_labels: [__meta_kubernetes_pod_phase]
+          regex: Pending|Succeeded|Failed|Completed
+          action: drop
+        - source_labels: [__meta_kubernetes_pod_node_name]
+          action: replace
+          target_label: node
+    {{ end}}
   kube-state-metrics:
     enabled: true
     # TODO (kyuds): remove skypilot-cluster label in v0.11.0; deprecated in favor of skypilot-cluster-name.
