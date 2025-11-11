@@ -542,6 +542,12 @@ def update(
                                    f'existing {noun} {service_name!r}')
         task.set_service(task.service.copy(min_replicas=workers))
 
+        # Clear the run section for pools before validation, since pool updates
+        # should only update the number of workers, not the run command. But
+        # the run command will have bee set to a dummy command during creation.
+        if pool:
+            task.run = None
+
     task.validate()
     serve_utils.validate_service_task(task, pool=pool)
 
