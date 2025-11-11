@@ -380,7 +380,8 @@ _GPU_DESC_UBUNTU_DATE = [
 ]
 
 
-def _fetch_image_creation_date(region: str, image_id: Optional[str]) -> Optional[str]:
+def _fetch_image_creation_date(region: str,
+                               image_id: Optional[str]) -> Optional[str]:
     if image_id is None:
         return None
     try:
@@ -401,8 +402,11 @@ def _fetch_image_creation_date(region: str, image_id: Optional[str]) -> Optional
             return match.group(1)
     return None
 
-def _fetch_image_id_from_ssm_param(region: str, ssm_prefix: str,
-                                   ubuntu_version: str = '22.04') -> Optional[str]:
+
+def _fetch_image_id_from_ssm_param(
+        region: str,
+        ssm_prefix: str,
+        ubuntu_version: str = '22.04') -> Optional[str]:
     try:
         image = subprocess.check_output(f"""\
             aws ssm get-parameter --region {region} --name "{ssm_prefix}/ubuntu-{ubuntu_version}/latest/image_id" \\
@@ -410,7 +414,9 @@ def _fetch_image_id_from_ssm_param(region: str, ssm_prefix: str,
             """,
                                         shell=True)
     except subprocess.CalledProcessError as e:
-        print(f'Failed to fetch image ID from SSM parameter for {region}, {ssm_prefix}, {ubuntu_version}')
+        print(
+            f'Failed to fetch image ID from SSM parameter for {region}, {ssm_prefix}, {ubuntu_version}'
+        )
         print(f'{type(e)}: {e}')
         return None
     else:
@@ -418,9 +424,16 @@ def _fetch_image_id_from_ssm_param(region: str, ssm_prefix: str,
         image_id = image.decode('utf-8').strip()
     return image_id
 
-def _get_image_row(region: str, gpu: str, ssm_prefix: str, ubuntu_version: str = '22.04') -> Tuple[str, str, str, str, Optional[str], Optional[str]]:
+
+def _get_image_row(
+    region: str,
+    gpu: str,
+    ssm_prefix: str,
+    ubuntu_version: str = '22.04'
+) -> Tuple[str, str, str, str, Optional[str], Optional[str]]:
     print(f'Getting image for {region}, {ssm_prefix}, {ubuntu_version}, {gpu}')
-    image_id = _fetch_image_id_from_ssm_param(region, ssm_prefix, ubuntu_version)
+    image_id = _fetch_image_id_from_ssm_param(region, ssm_prefix,
+                                              ubuntu_version)
     if image_id is not None:
         creation_date = _fetch_image_creation_date(region, image_id)
     else:
@@ -554,7 +567,8 @@ if __name__ == '__main__':
         # load the data from aws/images.csv
         existing_image_df = pd.read_csv('aws/images.csv')
         # filter out the neuron based images
-        existing_image_df = existing_image_df[~existing_image_df['Tag'].eq('skypilot:neuron-ubuntu-2204')]
+        existing_image_df = existing_image_df[~existing_image_df['Tag'].
+                                              eq('skypilot:neuron-ubuntu-2204')]
         # concat the new neuron based images with the existing images
         image_df = pd.concat([existing_image_df, image_df])
 
