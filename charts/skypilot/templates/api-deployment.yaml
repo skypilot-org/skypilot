@@ -461,7 +461,7 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: google/cloud-sdk:latest
+        image: {{ .Values.gcpCredentials.image | default "google/cloud-sdk:latest" | quote }}
         command: ["/bin/sh", "-c"]
         env:
         - name: GOOGLE_APPLICATION_CREDENTIALS

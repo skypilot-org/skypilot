@@ -473,6 +473,8 @@ gcpCredentials:
   projectId: null
   # Name of the secret containing the gcp credentials. Only used if enabled is true.
   gcpSecretName: gcp-credentials
+  # Image used to parse GCP credentials and set up application default credentials.
+  image: "google/cloud-sdk:latest"
 
 # Populate RunPod credentials from the secret with key `api_key`
 runpodCredentials:
