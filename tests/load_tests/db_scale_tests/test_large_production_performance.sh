@@ -20,7 +20,7 @@ cleanup() {
         python "$INJECT_SCRIPT" --cleanup --managed-job-id "$JOB_ID" || true
         rm -f "$JOB_ID_FILE"
     fi
-    sky jobs cancel -y -n || true
+    sky jobs cancel -a -y || true
     sky down -a -y || true
 
     # Wait for all managed jobs to terminate
