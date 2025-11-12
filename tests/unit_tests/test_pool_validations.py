@@ -140,3 +140,24 @@ def test_pool_job_launch_with_file_mounts_section():
     with pytest.raises(click.UsageError,
                        match='Pool jobs are not allowed to modify'):
         jobs_utils.validate_pool_job(dag, pool)
+
+
+def test_sdk_launch_pool_job_with_setup_section():
+    """Test that SDK launch rejects pool jobs with setup section."""
+    import click
+
+    from sky.jobs.client import sdk as jobs_sdk
+
+    # Create a task with a setup section
+    task = sky.Task(
+        name='test-job',
+        setup='pip install numpy',  # This should cause an error
+        run='python script.py',
+    )
+
+    # Try to launch to a pool - should error before making any API calls
+    pool = 'test-pool'
+    with pytest.raises(click.UsageError,
+                       match='Pool jobs are not allowed to modify'):
+        # The validation happens early in launch() before API calls
+        jobs_sdk.launch(task, pool=pool)
