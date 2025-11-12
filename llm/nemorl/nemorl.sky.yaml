@@ -37,20 +37,31 @@ run: |
   set -e
   sudo chmod 777 -R /var/tmp
   cd nemo-rl
-  head_ip=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+
+  # Check if start_cluster.sh script exists, use it with uv run prefix
+  if [ -f ~/skypilot_templates/ray/start_cluster.sh ]; then
+    export RAY_CMD_PREFIX="uv run"
+    ~/skypilot_templates/ray/start_cluster.sh
+  else
+    # Fallback to manual ray start
+    head_ip=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+    if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
+      ps aux | grep ray | grep 6379 &> /dev/null || uv run ray start --head --disable-usage-stats --port 6379
+      sleep 5
+    else
+      sleep 5
+      ps aux | grep ray | grep 6379 &> /dev/null || uv run ray start --address $head_ip:6379 --disable-usage-stats
+      # Add sleep to after `ray start` to give ray enough time to daemonize
+      sleep 5
+    fi
+  fi
+
   num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
   if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
-    ps aux | grep ray | grep 6379 &> /dev/null || uv run ray start --head --disable-usage-stats --port 6379
-    sleep 5
     uv run ray status
     uv run python examples/run_dpo.py  \
       cluster.gpus_per_node=${SKYPILOT_NUM_GPUS_PER_NODE} \
       cluster.num_nodes=${SKYPILOT_NUM_NODES} \
       dpo.val_global_batch_size=32 \
       checkpointing.checkpoint_dir='results/dpo_llama81'
-  else
-    sleep 5
-    ps aux | grep ray | grep 6379 &> /dev/null || uv run ray start --address $head_ip:6379 --disable-usage-stats
-    # Add sleep to after `ray start` to give ray enough time to daemonize
-    sleep 5
   fi

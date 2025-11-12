@@ -12,7 +12,7 @@ num_nodes: 2
 workdir: .
 
 run: |
-  ~/skypilot_scripts/start_ray_cluster.sh
+  ~/skypilot_templates/ray/start_cluster.sh
 
   if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
     python main.py

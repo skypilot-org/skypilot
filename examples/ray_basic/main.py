@@ -9,6 +9,6 @@ def square(x):
 
 
 results = ray.get([square.remote(i) for i in range(100)])
-print(f"Sum of squares: {sum(results)}")
+print(f'Sum of squares: {sum(results)}')
 
 ray.shutdown()
