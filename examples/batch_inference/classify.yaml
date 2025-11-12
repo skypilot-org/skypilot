@@ -4,6 +4,10 @@
 # Usage:
 #   sky jobs launch -p text-classify --num-jobs 10 classify.yaml
 
+
+resources:
+  accelerators: H200:1
+
 name: batch-classify
 
 run: |
