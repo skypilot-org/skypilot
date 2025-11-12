@@ -159,6 +159,53 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
+    def StreamReplicaLogs(  # type: ignore[return]
+            self, request: servev1_pb2.StreamReplicaLogsRequest,
+            context: grpc.ServicerContext):
+        """Stream replica logs"""
+        buffer = log_lib.LogBuffer()
+        try:
+            service_name = request.service_name
+            replica_id = request.replica_id
+            follow = request.follow
+            tail = request.tail if request.HasField('tail') else None
+            pool = request.pool
+
+            for log_line in log_lib.buffered_iter_with_timeout(
+                    buffer,
+                    serve_utils.stream_replica_logs_iter(
+                        service_name, replica_id, follow, tail, pool),
+                    DEFAULT_LOG_CHUNK_FLUSH_INTERVAL):
+                yield servev1_pb2.StreamReplicaLogsResponse(log_line=log_line)
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+        finally:
+            buffer.close()
+
+    def StreamServeProcessLogs(  # type: ignore[return]
+            self, request: servev1_pb2.StreamServeProcessLogsRequest,
+            context: grpc.ServicerContext):
+        """Stream serve process logs"""
+        buffer = log_lib.LogBuffer()
+        try:
+            service_name = request.service_name
+            stream_controller = request.stream_controller
+            follow = request.follow
+            tail = request.tail if request.HasField('tail') else None
+            pool = request.pool
+
+            for log_line in log_lib.buffered_iter_with_timeout(
+                    buffer,
+                    serve_utils.stream_serve_process_logs_iter(
+                        service_name, stream_controller, follow, tail, pool),
+                    DEFAULT_LOG_CHUNK_FLUSH_INTERVAL):
+                yield servev1_pb2.StreamServeProcessLogsResponse(
+                    log_line=log_line)
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+        finally:
+            buffer.close()
+
 
 class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
     """Implementation of the JobsService gRPC service."""
