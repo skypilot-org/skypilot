@@ -1,5 +1,8 @@
 # Job configuration for batch text classification
 # This runs on the pool workers to classify a partition of the dataset
+#
+# Usage:
+#   sky jobs launch -p text-classify --num-jobs 10 classify.yaml
 
 name: batch-classify
 

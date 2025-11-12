@@ -1,5 +1,8 @@
 # Pool configuration for batch text classification
 # This creates a pool of workers with openai/gpt-oss-20b pre-downloaded
+# 
+# Usage:
+#   sky jobs pool apply -p text-classify pool.yaml
 
 workdir: .
 

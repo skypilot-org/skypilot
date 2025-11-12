@@ -80,7 +80,6 @@ def main():
     print("=" * 80)
     print(f"Model Path: {args.model_path}")
     print(f"Output Directory: {args.output_dir}")
-    print(f"Total Dataset Size: {args.dataset_size}")
     print(f"Batch Size: {args.batch_size}")
     print()
     
@@ -94,9 +93,11 @@ def main():
         sys.exit(1)
     
     # Calculate partition for this job
-    total_items = min(args.dataset_size, len(dataset))
+    total_items = len(dataset)
     start_idx, end_idx = calculate_partition(total_items, args.job_rank, args.num_jobs)
     partition_size = end_idx - start_idx
+
+    print(f"Total Dataset Size: {total_items}")
     
     print(f"\nProcessing partition: {start_idx} to {end_idx} ({partition_size} reviews)")
     print()
