@@ -325,10 +325,6 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
             axis='columns')
         if 'GpuInfo' not in df.columns:
             df['GpuInfo'] = np.nan
-        if 'NeuronInfo' in df.columns:
-            df['GpuInfo'] = df['GpuInfo'].fillna(df['NeuronInfo'])
-        if 'InferenceAcceleratorInfo' in df.columns:
-            df['GpuInfo'] = df['GpuInfo'].fillna(df['InferenceAcceleratorInfo'])
         df = df[USEFUL_COLUMNS]
     except Exception as e:  # pylint: disable=broad-except
         print(traceback.format_exc())
