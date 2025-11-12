@@ -623,10 +623,12 @@ def list_accelerators_impl(
         gpu_info_df = df['GpuInfo'].apply(ast.literal_eval)
         df['DeviceMemoryGiB'] = gpu_info_df.apply(
             lambda row: row['Gpus'][0]['MemoryInfo']['SizeInMiB']) / 1024.0
-    except (ValueError, SyntaxError):
+    except (ValueError, SyntaxError, KeyError):
         # TODO(zongheng,woosuk): GCP/Azure catalogs do not have well-formed
         # GpuInfo fields. So the above will throw:
         #  ValueError: malformed node or string: <_ast.Name object at ..>
+        # TODO(aylei): AWS catalog also has bad GpuInfo row that might miss
+        # the Gpus field.
         df['DeviceMemoryGiB'] = None
 
     df = df[[
