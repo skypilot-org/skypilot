@@ -1,8 +1,8 @@
-# Batch Text Classification with SkyPilot Jobs Pools
+# Batch Text Classification with SkyPilot Pools
 
-This example demonstrates how to use SkyPilot's **Jobs Pools** for efficient offline batch inference. We'll classify sentiment from movie reviews using gpt-oss-20b running on vLLM.
+This example demonstrates how to use SkyPilot's **Pools** for efficient offline batch inference. We'll classify sentiment from movie reviews using gpt-oss-20b running on vLLM.
 
-## What is a Jobs Pool?
+## What is a Pool?
 
 A **pool** is a collection of pre-configured workers that can process multiple jobs without cold starts. Key benefits:
 
