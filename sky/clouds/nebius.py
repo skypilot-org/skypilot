@@ -7,7 +7,6 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 from sky import catalog
 from sky import clouds
 from sky import exceptions
-from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import nebius
 from sky.provision.nebius import constants as nebius_constants
@@ -20,8 +19,6 @@ if typing.TYPE_CHECKING:
     from sky.utils import volume as volume_lib
 
 _INDENT_PREFIX = '    '
-
-logger = sky_logging.init_logger(__name__)
 
 
 def nebius_profile_in_aws_cred_and_config() -> bool:
@@ -457,20 +454,15 @@ class Nebius(clouds.Cloud):
         # different workspace configs are used.
         del workspace_config  # Unused
         sdk = nebius.sdk()
-        logger.debug(f'ROHANDEBUG: Getting profile client: {sdk}')
         profile_client = nebius.iam().ProfileServiceClient(sdk)
-        logger.debug(f'ROHANDEBUG: Getting profile: {profile_client}')
         try:
             profile = nebius.sync_call(
                 profile_client.get(nebius.iam().GetProfileRequest(),
                                    timeout=nebius.READ_TIMEOUT))
         except Exception as e:
-            logger.debug(f'ROHANDEBUG: Error getting profile: {e}')
-            raise
-        logger.debug(f'ROHANDEBUG: got profile: {profile}')
+            raise exceptions.CloudUserIdentityError(
+                f'Error getting Nebius profile: {e}')
         if profile.user_profile is not None:
-            logger.debug(
-                f'ROHANDEBUG: got user profile: {profile.user_profile}')
             if profile.user_profile.attributes is None:
                 raise exceptions.CloudUserIdentityError(
                     'Nebius profile is a UserProfile, but has no attributes: '
@@ -481,8 +473,6 @@ class Nebius(clouds.Cloud):
                     f'{profile.user_profile}')
             return [[profile.user_profile.attributes.email]]
         if profile.service_account_profile is not None:
-            logger.debug(f'ROHANDEBUG: got service account profile: '
-                         f'{profile.service_account_profile}')
             if profile.service_account_profile.info is None:
                 raise exceptions.CloudUserIdentityError(
                     'Nebius profile is a ServiceAccountProfile, but has no '

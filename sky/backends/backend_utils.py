@@ -1881,16 +1881,7 @@ def _check_owner_identity_with_record(cluster_name: str,
 
     launched_resources = handle.launched_resources.assert_launchable()
     cloud = launched_resources.cloud
-    logger.debug(
-        f'ROHANDEBUG: Checking owner identity for {cluster_name} with cloud {cloud}'
-    )
-    try:
-        user_identities = cloud.get_user_identities()
-    except Exception as e:
-        logger.debug(
-            f'ROHANDEBUG: Error getting user identities for {cluster_name} with cloud {cloud}: {e}'
-        )
-        raise
+    user_identities = cloud.get_user_identities()
     owner_identity = record['owner']
     if user_identities is None:
         # Skip the check if the cloud does not support user identity.
