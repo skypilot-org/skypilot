@@ -429,7 +429,8 @@ class AWS(clouds.Cloud):
             if acc_name == 'K80':
                 image_id = catalog.get_image_id_from_tag(
                     _DEFAULT_GPU_K80_IMAGE_ID, region_name, clouds='aws')
-            if acc_name in ['Trainium', 'Inferentia']:
+            if acc_name.startswith('Trainium') or acc_name.startswith(
+                    'Inferentia'):
                 image_id = catalog.get_image_id_from_tag(
                     _DEFAULT_NEURON_IMAGE_ID, region_name, clouds='aws')
         if image_id is not None:
