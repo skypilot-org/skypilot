@@ -1,6 +1,6 @@
-# Batch Text Classification with SkyPilot Pools
+# Batch Text Classification with SkyPilot Jobs Pools
 
-This example demonstrates how to use SkyPilot's **Pools** feature for efficient offline batch inference. We'll classify sentiment from movie reviews using gpt-oss-20b running on vLLM.
+This example demonstrates how to use SkyPilot's **Jobs Pools** for efficient offline batch inference. We'll classify sentiment from movie reviews using gpt-oss-20b running on vLLM.
 
 ## What is a Jobs Pool?
 
@@ -8,21 +8,21 @@ A **pool** is a collection of pre-configured workers that can process multiple j
 
 - **Fast job execution**: Workers are pre-provisioned with models loaded
 - **No setup overhead**: Each job starts immediately without reinstalling dependencies or downloading models
-- **Simple parallelism**: Submit multiple jobs with a single command using `--num-jobs`, limit concurrency to the number of workers in the pool (queueing is handled by SkyPilot).
+- **Simple parallelism**: Submit multiple jobs with a single command using `--num-jobs`, limit concurrency to the number of workers in the pool (queueing is handled by SkyPilot)
 
 ## Using Pools for Batch Inference
 
 This example:
-1. Creates a pool of workers with gpt-oss-20b pre-downloaded
+1. Creates a pool of workers with environments pre-configured for batch inference
 2. Submits 10 classification jobs that process the IMDB movie reviews dataset in parallel
 3. Each job uses vLLM's Python SDK to classify reviews in batches
-4. Results are saved to a cloud storage bucket with predictions, ground truth labels, and accuracy metrics
+4. Results are saved to a cloud storage bucket
 
 Files in this example:
 
-- `pool.yaml`: Pool configuration with vLLM setup
-- `classify.yaml`: Job definition that runs on pool workers
-- `classify.py`: Python script that performs the classification using vLLM's Python SDK
+- [`pool.yaml`](pool.yaml): Pool configuration with vLLM setup
+- [`classify.yaml`](classify.yaml): Job definition that runs on pool workers
+- [`classify.py`](classify.py): Python script that performs the classification using vLLM's Python SDK
 
 ### Step 1: Create the worker pool
 
@@ -119,7 +119,7 @@ sky dashboard
 
 
 <p align="center">
-  <img src="https://i.imgur.com/N4mQfbG.png" width="500" alt="Batch Inference Dashboard" />
+  <img src="https://i.imgur.com/N4mQfbG.png" width="800" alt="Batch Inference Dashboard" />
 </p>
 
 ### Step 4: View Results
