@@ -265,28 +265,6 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
         pass
 
 
-def submit_job(job_id: int,
-               dag_yaml_path: str,
-               original_user_yaml_path: str,
-               env_file_path: str,
-               priority: int,
-               pool: Optional[str] = None) -> None:
-    """Submit an existing job to the scheduler.
-
-    This should be called after a job is created in the `spot` table as
-    PENDING. It will tell the scheduler to try and start the job controller, if
-    there are resources available.
-
-    The user hash should be set (e.g. via SKYPILOT_USER_ID) before calling this.
-    """
-    submit_jobs([job_id],
-                dag_yaml_path,
-                original_user_yaml_path,
-                env_file_path,
-                priority,
-                pool=pool)
-
-
 def submit_jobs(job_ids: List[int],
                 dag_yaml_path: str,
                 original_user_yaml_path: str,
@@ -358,15 +336,15 @@ def submit_jobs(job_ids: List[int],
         env_file_content = env_file.read()
 
     # Submit all jobs
+    state.scheduler_set_waiting(job_ids, dag_yaml_content,
+                                original_user_yaml_content, env_file_content,
+                                priority)
     for job_id in job_ids:
         logger.debug(
             f'Storing job {job_id} file contents in database '
             f'(DAG bytes={len(dag_yaml_content)}, '
             f'original user yaml bytes={len(original_user_yaml_content)}, '
             f'env bytes={len(env_file_content)}).')
-        state.scheduler_set_waiting(job_id, dag_yaml_content,
-                                    original_user_yaml_content,
-                                    env_file_content, priority)
         if state.get_ha_recovery_script(job_id) is None:
             # the run command is just the command that called scheduler
             run = (f'source {env_file_path} && '
@@ -502,17 +480,11 @@ if __name__ == '__main__':
         f' Default: {constants.DEFAULT_PRIORITY}.')
     args = parser.parse_args()
 
-    if len(args.job_id) == 1:
-        submit_job(args.job_id[0],
-                   args.dag_yaml,
-                   args.user_yaml_path,
-                   args.env_file,
-                   args.priority,
-                   pool=args.pool)
-    else:
-        submit_jobs(args.job_id,
-                    args.dag_yaml,
-                    args.user_yaml_path,
-                    args.env_file,
-                    args.priority,
-                    pool=args.pool)
+    job_ids = [args.job_id] if isinstance(args.job_id, int) else args.job_id
+
+    submit_jobs(job_ids,
+                args.dag_yaml,
+                args.user_yaml_path,
+                args.env_file,
+                args.priority,
+                pool=args.pool)
