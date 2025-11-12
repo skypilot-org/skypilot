@@ -382,7 +382,7 @@ def make_job_command_with_user_switching(username: str,
 
 
 @init_db
-def add_job(job_name: str,
+def add_jobs(job_name: str,
             username: str,
             run_timestamp: str,
             resources_str: str,
@@ -1207,7 +1207,7 @@ class JobLibCodeGen:
     ]
 
     @classmethod
-    def add_job(cls,
+    def add_jobs(cls,
                 job_name: Optional[str],
                 username: str,
                 run_timestamp: str,
@@ -1229,7 +1229,7 @@ class JobLibCodeGen:
             '\nlog_dirs = None',
             '\nif int(constants.SKYLET_VERSION) < 15: '
             '\n for _ in range(num_jobs):'
-            '\n  result = job_lib.add_job('
+            '\n  result = job_lib.add_jobs('
             f'{job_name!r},'
             f'{username!r},'
             f'{run_timestamp!r},'
@@ -1238,16 +1238,22 @@ class JobLibCodeGen:
             '\nelif int(constants.SKYLET_VERSION) < 26:'
             '\n log_dirs = []'
             '\n for _ in range(num_jobs):'
-            '\n  result = job_lib.add_job('
+            '\n  result = job_lib.add_jobs('
             f'{job_name!r},'
             f'{username!r},'
             f'{run_timestamp!r},'
             f'{resources_str!r},'
             f'metadata={metadata!r})'
+            '\n  if isinstance(result, tuple):'
+            '\n    job_ids = result[0]'
+            '\n    log_dirs = result[1]'
+            '\n  else:'
+            '\n    job_ids = [result]'
+            '\n',
             '\n  job_ids.append(result[0])',
             '\n  log_dirs.append(result[1])',
             '\nelse: '
-            '\n result = job_lib.add_job('
+            '\n result = job_lib.add_jobs('
             f'{job_name!r},'
             f'{username!r},'
             f'{run_timestamp!r},'
