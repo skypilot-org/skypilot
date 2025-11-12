@@ -110,7 +110,7 @@ on:
 
 The workflow checks out the GitHub repo to a specified commit, generates a unique job name, and launches a custom action located at ``.github/actions/launch-skypilot-job/action.yaml``.
 
-The ``Launch SkyPilot Job`` action in term uses a custom action located at ``.github/actions/setup-environment/action.yaml`` to install necessary dependencies (including ``skypilot``), and calls ``launch_sky.py`` to launch the actual job.
+The ``Launch SkyPilot Job`` action in turn uses a custom action located at ``.github/actions/setup-environment/action.yaml`` to install necessary dependencies (including ``skypilot``), and calls ``launch_sky.py`` to launch the actual job.
 
 Once the job is successfully launched, ``sky-job.yaml`` then parses out the job ID of the submitted job. A slack message is then sent to the configured slack channel. An example message is provided below:
 ```
