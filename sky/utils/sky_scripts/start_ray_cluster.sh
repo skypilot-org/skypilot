@@ -22,7 +22,7 @@ echo -e "${GREEN}Starting Ray cluster...${NC}"
 # Check if Ray is installed
 if ! command -v ray &> /dev/null; then
     echo -e "${YELLOW}Ray is not installed. Installing...${NC}"
-    uv pip install --system ray
+    uv pip install --system "ray[default]"
     if ! command -v ray &> /dev/null; then
         echo -e "${RED}Error: Failed to install Ray.${NC}"
         exit 1
@@ -50,7 +50,8 @@ if [ "$SKYPILOT_NODE_RANK" -eq 0 ]; then
 
     ray start --head \
         --port=6379 \
-        --disable-usage-stats
+        --disable-usage-stats \
+        --include-dashboard=True
 
 
     start_time=$(date +%s)
@@ -74,7 +75,7 @@ if [ "$SKYPILOT_NODE_RANK" -eq 0 ]; then
                 echo -e "${RED}Error: Timeout waiting for nodes.${NC}" >&2
                 exit 1
             fi
-            ready_nodes=$(ray list nodes --address="${RAY_ADDRESS}" --format=json | python3 -c "import sys, json; print(len(json.load(sys.stdin)))")
+            ready_nodes=$(ray list nodes --format=json | python3 -c "import sys, json; print(len(json.load(sys.stdin)))")
             if [ "$ready_nodes" -ge "$SKYPILOT_NUM_NODES" ]; then
                 break
             fi
