@@ -139,6 +139,11 @@ def client():
                 servers = data.get('server', [])
                 for s in servers:
                     s.pop('last_restored_snapshot', None)
+                    group = s.get('group')
+                    if isinstance(group, dict):
+                        group_name = group.get('name')
+                        s['group'] = group_name if isinstance(
+                            group_name, str) else str(group_name)
             except (KeyError, TypeError, ValueError):
                 pass
             server_list_response_cls = ecsapi._server._ServerListResponse
