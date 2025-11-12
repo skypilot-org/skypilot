@@ -123,7 +123,7 @@ SkyPilot Job Name: gh-actions.pr19.017451b.20251111_235537
 
 ## Frequently Asked Questions
 
-#### What if my target branch is named something other than ``main`` (e.g. ``master``)?
+### What if my target branch is named something other than ``main`` (e.g. ``master``)?
 
 You can modify `sky-jobs.yaml` to specify a different target branch:
 ```diff
@@ -134,7 +134,7 @@ on:
 +   branches: [master]
 ```
 
-#### What if my SkyPilot API server is using Basic Auth instead of OAuth?
+### What if my SkyPilot API server is using Basic Auth instead of OAuth?
 
 If SkyPilot API server is using basic auth, there is no need for a service account token. In this case, ``Configure SkyPilot API server`` step of ``launch-skypilot-job/action.yaml`` should be changed to not pass in a token:
 
