@@ -1,3 +1,4 @@
+import configparser
 import contextlib
 import enum
 import functools
@@ -631,13 +632,28 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
             test.echo(msg)
             write(msg)
 
+        if proc.returncode and not is_remote_server_test():
+            test.echo('=== Sky API Server Log (last 100 lines) ===')
+            # Read the log file directly and echo it
+            log_path = os.path.expanduser('~/.sky/api_server/server.log')
+            if os.path.exists(log_path):
+                with open(log_path, 'r') as f:
+                    lines = f.readlines()
+                    # Get last 100 lines
+                    last_lines = lines[-100:] if len(lines) > 100 else lines
+                    for line in last_lines:
+                        test.echo(line.rstrip())
+            else:
+                test.echo(f'Server log file not found: {log_path}')
+            test.echo('=== End of Sky API Server Log ===')
+
         if (proc.returncode == 0 or
                 pytest.terminate_on_failure) and test.teardown is not None:
             subprocess_utils.run(
                 test.teardown,
                 stdout=subprocess_out,
                 stderr=subprocess.STDOUT,
-                timeout=10 * 60,  # 10 mins
+                timeout=20 * 60,  # 20 mins
                 shell=True,
                 env=env_dict,
             )
@@ -730,6 +746,8 @@ VALIDATE_LAUNCH_OUTPUT = (
     # ├── To submit a job:            sky exec test yaml_file
     # ├── To stop the cluster:        sky stop test
     # └── To teardown the cluster:    sky down test
+    # Reset s to remove any line with FutureWarning
+    's=$(echo "$s" | grep -v "FutureWarning") && '
     'echo "$s" && echo "==Validating launching==" && '
     'echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
     'echo "$s" && echo "==Validating setup output==" && '
@@ -833,6 +851,39 @@ def down_cluster_for_cloud_cmd(test_cluster_name: str,
         return 'true'
     else:
         return f'sky down -y {cluster_name}'
+
+
+def extract_default_aws_credentials():
+    """Extract default AWS credentials from credentials file or environment variables.
+
+    Returns:
+        Tuple of (access_key_id, secret_access_key) or (None, None) if not found.
+    """
+    # Try environment variables first
+    access_key = os.environ.get('AWS_ACCESS_KEY_ID')
+    secret_key = os.environ.get('AWS_SECRET_ACCESS_KEY')
+    if access_key and secret_key:
+        return access_key, secret_key
+
+    # Try credentials file
+    credentials_path = os.path.expanduser('~/.aws/credentials')
+    if os.path.exists(credentials_path):
+        parser = configparser.ConfigParser()
+        try:
+            parser.read(credentials_path)
+            if 'default' in parser.sections():
+                access_key = parser.get('default',
+                                        'aws_access_key_id',
+                                        fallback=None)
+                secret_key = parser.get('default',
+                                        'aws_secret_access_key',
+                                        fallback=None)
+                if access_key and secret_key:
+                    return access_key.strip(), secret_key.strip()
+        except configparser.Error:
+            pass
+
+    return None, None
 
 
 def _increase_initial_delay_seconds(original_cmd: str,

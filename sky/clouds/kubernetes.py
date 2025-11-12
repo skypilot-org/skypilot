@@ -1,4 +1,5 @@
 """Kubernetes."""
+import concurrent.futures
 import os
 import re
 import subprocess
@@ -98,34 +99,50 @@ class Kubernetes(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         # TODO(aylei): features need to be regional (per context) to make
         # multi-kubernetes selection/failover work.
         unsupported_features = cls._CLOUD_UNSUPPORTED_FEATURES.copy()
-        context = resources.region
+        context = region if region is not None else resources.region
         if context is None:
-            context = kubernetes_utils.get_current_kube_config_context_name()
+            contexts = cls.existing_allowed_contexts()
+        else:
+            contexts = [context]
         unsupported_features[clouds.CloudImplementationFeatures.STOP] = (
             'Stopping clusters is not supported on Kubernetes.')
         unsupported_features[clouds.CloudImplementationFeatures.AUTOSTOP] = (
             'Auto-stop is not supported on Kubernetes.')
-        # Allow spot instances if supported by the cluster
-        try:
-            spot_label_key, _ = kubernetes_utils.get_spot_label(context)
-            if spot_label_key is not None:
-                unsupported_features.pop(
-                    clouds.CloudImplementationFeatures.SPOT_INSTANCE, None)
-            # Allow custom network tier if supported by the cluster
-            # (e.g., Nebius clusters with high performance networking)
-            network_type, _ = cls._detect_network_type(context,
-                                                       resources.network_tier)
-            if network_type.supports_high_performance_networking():
-                unsupported_features.pop(
-                    clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
-                    None)
-        except exceptions.KubeAPIUnreachableError as e:
-            cls._log_unreachable_context(context, str(e))
+        for context in contexts:
+            # Allow spot instances if supported by the cluster
+            try:
+                # Run spot label check and network type detection concurrently
+                # as they are independent operations
+                with concurrent.futures.ThreadPoolExecutor(
+                        max_workers=2) as executor:
+                    spot_future = executor.submit(
+                        kubernetes_utils.get_spot_label, context)
+                    network_future = executor.submit(cls._detect_network_type,
+                                                     context,
+                                                     resources.network_tier)
+
+                    spot_label_key, _ = spot_future.result()
+                    if spot_label_key is not None:
+                        unsupported_features.pop(
+                            clouds.CloudImplementationFeatures.SPOT_INSTANCE,
+                            None)
+
+                    # Allow custom network tier if supported by the cluster
+                    # (e.g., Nebius clusters with high performance networking)
+                    network_type, _ = network_future.result()
+                    if network_type.supports_high_performance_networking():
+                        unsupported_features.pop(
+                            clouds.CloudImplementationFeatures.
+                            CUSTOM_NETWORK_TIER, None)
+            except exceptions.KubeAPIUnreachableError as e:
+                cls._log_unreachable_context(context, str(e))
         return unsupported_features
 
     @classmethod
@@ -241,10 +258,15 @@ class Kubernetes(clouds.Cloud):
                 'refresh Kubernetes availability if permanent.')
 
     @classmethod
-    def regions_with_offering(cls, instance_type: Optional[str],
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[clouds.Region]:
+    def regions_with_offering(
+        cls,
+        instance_type: Optional[str],
+        accelerators: Optional[Dict[str, int]],
+        use_spot: bool,
+        region: Optional[str],
+        zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None,
+    ) -> List[clouds.Region]:
         del accelerators, zone, use_spot  # unused
         existing_contexts = cls.existing_allowed_contexts()
 
@@ -254,6 +276,19 @@ class Kubernetes(clouds.Cloud):
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
+        if resources is not None:
+            filtered_regions = []
+            resources_required_features = resources.get_required_cloud_features(
+            )
+            for r in regions:
+                try:
+                    cls.check_features_are_supported(
+                        resources, resources_required_features, r.name)
+                    filtered_regions.append(r)
+                except exceptions.NotSupportedError as e:
+                    logger.info(f'Filter out context: {r.name}, reason: {e}')
+                    continue
+            regions = filtered_regions
 
         # Check if requested instance type will fit in the cluster.
         # TODO(zhwu,romilb): autoscaler type needs to be regional (per
@@ -560,6 +595,7 @@ class Kubernetes(clouds.Cloud):
         port_mode = network_utils.get_port_mode(None, context)
 
         remote_identity = skypilot_config.get_effective_region_config(
+            # TODO(kyuds): Support SSH node pools as well.
             cloud='kubernetes',
             region=context,
             keys=('remote_identity',),
@@ -634,6 +670,7 @@ class Kubernetes(clouds.Cloud):
 
         k8s_kueue_local_queue_name = (
             skypilot_config.get_effective_region_config(
+                # TODO(kyuds): Support SSH node pools as well.
                 cloud='kubernetes',
                 region=context,
                 keys=('kueue', 'local_queue_name'),
@@ -648,6 +685,7 @@ class Kubernetes(clouds.Cloud):
         if enable_flex_start_queued_provisioning or enable_flex_start:
             # DWS is only supported in GKE, check the autoscaler type.
             autoscaler_type = skypilot_config.get_effective_region_config(
+                # TODO(kyuds): Support SSH node pools as well.
                 cloud='kubernetes',
                 region=context,
                 keys=('autoscaler',),
@@ -671,8 +709,12 @@ class Kubernetes(clouds.Cloud):
         timeout = self._calculate_provision_timeout(
             num_nodes, volume_mounts, enable_flex_start or
             enable_flex_start_queued_provisioning)
+
+        # Use _REPR, instead of directly using 'kubernetes' as the config key,
+        # because it could be SSH node pool as well.
+        cloud_config_str = self._REPR.lower()
         timeout = skypilot_config.get_effective_region_config(
-            cloud='kubernetes',
+            cloud=cloud_config_str,
             region=context,
             keys=('provision_timeout',),
             default_value=timeout,
@@ -785,7 +827,8 @@ class Kubernetes(clouds.Cloud):
                 accelerators=resources.accelerators,
                 use_spot=resources.use_spot,
                 region=resources.region,
-                zone=resources.zone)
+                zone=resources.zone,
+                resources=resources)
             if not regions:
                 return resources_utils.FeasibleResources([], [], None)
             resources = resources.copy(accelerators=None)
@@ -845,7 +888,8 @@ class Kubernetes(clouds.Cloud):
             accelerators=None,
             use_spot=resources.use_spot,
             region=resources.region,
-            zone=resources.zone)
+            zone=resources.zone,
+            resources=resources)
         if not available_regions:
             return resources_utils.FeasibleResources([], [], None)
         # No fuzzy lists for Kubernetes

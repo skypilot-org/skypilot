@@ -47,6 +47,7 @@ from sky.server import metrics as metrics_lib
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
+from sky.server.requests import request_names
 from sky.server.requests import requests as api_requests
 from sky.server.requests import threads
 from sky.server.requests.queues import local_queue
@@ -395,7 +396,10 @@ def _request_execution_wrapper(request_id: str,
     rss_begin = proc.memory_info().rss
     db_utils.set_max_connections(num_db_connections_per_worker)
     # Handle the SIGTERM signal to abort the request processing gracefully.
-    signal.signal(signal.SIGTERM, _sigterm_handler)
+    # Only set up signal handlers in the main thread, as signal.signal() raises
+    # ValueError if called from a non-main thread (e.g., in tests).
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGTERM, _sigterm_handler)
 
     logger.info(f'Running request {request_id} with pid {pid}')
 
@@ -688,7 +692,7 @@ async def _execute_request_coroutine(request: api_requests.Request):
 
 async def prepare_request_async(
     request_id: str,
-    request_name: str,
+    request_name: request_names.RequestName,
     request_body: payloads.RequestBody,
     func: Callable[P, Any],
     request_cluster_name: Optional[str] = None,
@@ -721,7 +725,7 @@ async def prepare_request_async(
 
 
 async def schedule_request_async(request_id: str,
-                                 request_name: str,
+                                 request_name: request_names.RequestName,
                                  request_body: payloads.RequestBody,
                                  func: Callable[P, Any],
                                  request_cluster_name: Optional[str] = None,

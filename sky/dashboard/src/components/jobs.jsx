@@ -29,7 +29,6 @@ import { getPoolStatus } from '@/data/connectors/jobs';
 import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { getClusters, downloadJobLogs } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
-import { getUsers } from '@/data/connectors/users';
 import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
@@ -57,6 +56,7 @@ import {
   Filters,
   updateURLParams as sharedUpdateURLParams,
   updateFiltersByURLParams as sharedUpdateFiltersByURLParams,
+  buildFilterUrl,
 } from '@/components/shared/FilterSystem';
 
 // Define status groups for active and finished jobs
@@ -178,6 +178,12 @@ export function ManagedJobs() {
   const poolsRefreshRef = React.useRef(null);
   const [poolsData, setPoolsData] = useState([]);
   const [filters, setFilters] = useState([]);
+  const [valueList, setValueList] = useState({
+    name: [],
+    user: [],
+    workspace: [],
+    pool: [],
+  });
 
   const fetchData = React.useCallback(
     async (isRefreshButton = false) => {
@@ -213,7 +219,6 @@ export function ManagedJobs() {
     jobsCacheManager.invalidateCache();
     dashboardCache.invalidate(getPoolStatus, [{}]);
     dashboardCache.invalidate(getWorkspaces);
-    dashboardCache.invalidate(getUsers);
 
     // Trigger a re-fetch in both tables via their refreshDataRef
     if (jobsRefreshRef.current) {
@@ -264,7 +269,7 @@ export function ManagedJobs() {
         <div className="w-full sm:w-auto">
           <FilterDropdown
             propertyList={PROPERTY_OPTIONS}
-            valueList={{}}
+            valueList={valueList}
             setFilters={setFilters}
             updateURLParams={updateURLParams}
             placeholder="Filter jobs"
@@ -286,6 +291,7 @@ export function ManagedJobs() {
         onRefresh={handleRefresh}
         poolsData={poolsData}
         poolsLoading={poolsLoading}
+        setValueList={setValueList}
       />
 
       {/* Pools table - always visible */}
@@ -308,6 +314,7 @@ export function ManagedJobsTable({
   onRefresh,
   poolsData,
   poolsLoading,
+  setValueList,
 }) {
   const [data, setData] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -433,15 +440,13 @@ export function ManagedJobsTable({
         const isDataLoading = jobsCacheManager.isDataLoading(params);
 
         if (includeStatus) {
-          const [jr, cd] = await Promise.all([
-            jobsCacheManager.getPaginatedJobs(params),
-            dashboardCache.get(getClusters),
-          ]);
-          jobsResponse = jr;
-          clustersData = cd;
-        } else {
-          jobsResponse = await jobsCacheManager.getPaginatedJobs(params);
+          try {
+            clustersData = await dashboardCache.get(getClusters);
+          } catch (error) {
+            console.error('Error fetching clusters:', error);
+          }
         }
+        jobsResponse = await jobsCacheManager.getPaginatedJobs(params);
 
         // Always process the response, even if it's null
         const {
@@ -601,6 +606,60 @@ export function ManagedJobsTable({
     setSelectedStatuses([]);
     setShowAllMode(true); // Default to show all mode when changing tabs
   }, [activeTab]);
+
+  // Populate valueList for filter dropdown
+  useEffect(() => {
+    if (!setValueList) {
+      return;
+    }
+
+    const names = new Set();
+    const users = new Set();
+    const workspaces = new Set();
+    const pools = new Set();
+
+    data.forEach((job) => {
+      if (job.name) names.add(job.name);
+      if (job.user) users.add(job.user);
+      if (job.workspace) workspaces.add(job.workspace);
+      if (job.pool) pools.add(job.pool);
+    });
+
+    // Extract pool names from poolsData, but only include pools that:
+    // 1. Have running jobs (non-terminal status jobs), OR
+    // 2. Were created in the last day (based on uptime)
+    if (poolsData && Array.isArray(poolsData)) {
+      const oneDayInSeconds = 24 * 60 * 60; // 24 hours in seconds
+
+      poolsData.forEach((pool) => {
+        if (!pool.name) return;
+
+        // Check if pool has running jobs (non-terminal status)
+        const hasRunningJobs =
+          pool.jobCounts && Object.keys(pool.jobCounts).length > 0;
+
+        // Check if pool was created in the last day
+        // uptime is seconds since pool was created
+        // If uptime is null/undefined, we can't determine creation time
+        const createdInLastDay =
+          pool.uptime !== null &&
+          pool.uptime !== undefined &&
+          pool.uptime > 0 &&
+          pool.uptime < oneDayInSeconds;
+
+        if (hasRunningJobs || createdInLastDay) {
+          pools.add(pool.name);
+        }
+      });
+    }
+
+    setValueList({
+      name: Array.from(names).sort(),
+      user: Array.from(users).sort(),
+      workspace: Array.from(workspaces).sort(),
+      pool: Array.from(pools).sort(),
+    });
+  }, [data, poolsData, setValueList]);
 
   const requestSort = (key) => {
     let direction = 'ascending';
@@ -1981,7 +2040,15 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                     </Link>
                   </TableCell>
                   <TableCell>
-                    <JobStatusBadges jobCounts={pool.jobCounts} />
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <JobStatusBadges jobCounts={pool.jobCounts} />
+                      <Link
+                        href={buildFilterUrl('/jobs', 'pool', ':', pool.name)}
+                        className="text-blue-600 hover:text-blue-800 text-xs"
+                      >
+                        See all jobs
+                      </Link>
+                    </div>
                   </TableCell>
                   <TableCell>{getWorkersCount(pool)}</TableCell>
                   <TableCell>

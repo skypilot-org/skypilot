@@ -7,6 +7,7 @@ import fastapi
 from sky import core as sky_core
 from sky.server.requests import executor
 from sky.server.requests import payloads
+from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.ssh_node_pools import core as ssh_node_pools_core
 from sky.utils import common_utils
@@ -101,7 +102,7 @@ async def deploy_ssh_node_pool(request: fastapi.Request,
         ssh_up_body = payloads.SSHUpBody(infra=pool_name, cleanup=False)
         await executor.schedule_request_async(
             request_id=request.state.request_id,
-            request_name='ssh_up',
+            request_name=request_names.RequestName.SSH_NODE_POOLS_UP,
             request_body=ssh_up_body,
             func=sky_core.ssh_up,
             schedule_type=requests_lib.ScheduleType.LONG,
@@ -126,7 +127,7 @@ async def deploy_ssh_node_pool_general(
     try:
         await executor.schedule_request_async(
             request_id=request.state.request_id,
-            request_name='ssh_up',
+            request_name=request_names.RequestName.SSH_NODE_POOLS_UP,
             request_body=ssh_up_body,
             func=sky_core.ssh_up,
             schedule_type=requests_lib.ScheduleType.LONG,
@@ -152,7 +153,7 @@ async def down_ssh_node_pool(request: fastapi.Request,
         ssh_up_body = payloads.SSHUpBody(infra=pool_name, cleanup=True)
         await executor.schedule_request_async(
             request_id=request.state.request_id,
-            request_name='ssh_down',
+            request_name=request_names.RequestName.SSH_NODE_POOLS_DOWN,
             request_body=ssh_up_body,
             func=sky_core.ssh_up,  # Reuse ssh_up function with cleanup=True
             schedule_type=requests_lib.ScheduleType.LONG,
@@ -180,7 +181,7 @@ async def down_ssh_node_pool_general(
         ssh_up_body.cleanup = True
         await executor.schedule_request_async(
             request_id=request.state.request_id,
-            request_name='ssh_down',
+            request_name=request_names.RequestName.SSH_NODE_POOLS_DOWN,
             request_body=ssh_up_body,
             func=sky_core.ssh_up,  # Reuse ssh_up function with cleanup=True
             schedule_type=requests_lib.ScheduleType.LONG,
