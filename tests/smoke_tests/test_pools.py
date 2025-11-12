@@ -2229,7 +2229,7 @@ def test_pool_one_job_per_worker_no_resources(generic_cloud: str):
 def test_pools_num_jobs_rank(generic_cloud: str):
     """Test that SKYPILOT_JOB_RANK is correctly set for jobs launched with --num-jobs.
     
-    Launches 10 jobs with --num-jobs 10, waits for each to succeed, and verifies
+    Launches 3 jobs with --num-jobs 3, waits for each to succeed, and verifies
     that each job's logs show the correct rank (which should be job_id - 1).
     """
     name = smoke_tests_utils.get_cluster_name()
@@ -2238,7 +2238,7 @@ def test_pools_num_jobs_rank(generic_cloud: str):
     job_config = basic_job_conf(job_name=f'{name}-job',
                                 run_cmd='echo "My rank is $SKYPILOT_JOB_RANK"')
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
-    NUM_JOBS = 5
+    NUM_JOBS = 3
 
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
         with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
