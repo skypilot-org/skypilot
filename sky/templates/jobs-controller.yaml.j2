@@ -63,8 +63,6 @@ run: |
     export _TMP_JOB_ID_TO_RANK='{{job_id_to_rank | tojson}}'
     python3 -c "import json, os, sys; d=json.loads(os.environ['_TMP_JOB_ID_TO_RANK']); d[str(os.environ['SKYPILOT_INTERNAL_JOB_ID'])]={{num_jobs - 1}}; sys.stdout.write('export SKYPILOT_JOB_ID_TO_RANK='); json.dump(d, sys.stdout); sys.stdout.write('\n')" >> {{remote_env_file_path}} 2>&1
     unset _TMP_JOB_ID_TO_RANK
-  else
-    echo "Warning: SKYPILOT_INTERNAL_JOB_ID not set, cannot add to job_id_to_rank" >> {{remote_env_file_path}} 2>&1
   fi
   {%- endif %}
   {%- endif %}

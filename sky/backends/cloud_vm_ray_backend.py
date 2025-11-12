@@ -4471,11 +4471,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         rich_utils.stop_safe_status()
 
     def add_jobs(self,
-                handle: CloudVmRayResourceHandle,
-                job_name: Optional[str],
-                resources_str: str,
-                metadata: str,
-                num_jobs: int = 1) -> Tuple[List[int], List[str]]:
+                 handle: CloudVmRayResourceHandle,
+                 job_name: Optional[str],
+                 resources_str: str,
+                 metadata: str,
+                 num_jobs: int = 1) -> Tuple[List[int], List[str]]:
         use_legacy = not handle.is_grpc_enabled_with_flag
 
         if not use_legacy:
@@ -4607,7 +4607,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return None
 
         job_ids, log_dirs = self.add_jobs(handle, task_copy.name, resources_str,
-                                         task.metadata_json)
+                                          task.metadata_json)
         job_id = job_ids[0]
         log_dir = log_dirs[0]
 

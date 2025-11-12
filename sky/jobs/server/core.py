@@ -353,13 +353,15 @@ def launch(
         controller=controller,
         task_resources=sum([list(t.resources) for t in dag.tasks], []))
 
+    if num_jobs and pool is None:
+        raise ValueError('Cannot specify num_jobs without pool.')
+
     num_jobs = num_jobs if num_jobs is not None else 1
     # We do this assignment after applying the admin policy, so that we don't
     # need to serialize the pool name in the dag. The dag object will be
     # preserved. See sky/admin_policy.py::MutatedUserRequest::decode.
     dag.pool = pool
-    job_ids = _maybe_submit_job_locally(
-        prefix, dag, num_jobs)
+    job_ids = _maybe_submit_job_locally(prefix, dag, num_jobs)
     is_consolidation_mode = job_ids is not None
 
     # This is only needed for non-consolidation mode. For consolidation
@@ -383,15 +385,14 @@ def launch(
                     dag.tasks[0], is_managed_job=True)
                 job_name = dag.name
                 result = backend.add_jobs(handle=local_handle,
-                                         job_name=job_name,
-                                         resources_str=resources_str,
-                                         metadata=dag.tasks[0].metadata_json,
-                                         num_jobs=num_jobs - 1)
+                                          job_name=job_name,
+                                          resources_str=resources_str,
+                                          metadata=dag.tasks[0].metadata_json,
+                                          num_jobs=num_jobs - 1)
                 job_ids = result[0]
-                logger.debug(
-                    f'Created {len(job_ids) + 1} job IDs upfront: '
-                    f'{job_ids} (will use controller task ray job '
-                    f'ID as the {num_jobs}th job).')
+                logger.debug(f'Created {len(job_ids) + 1} job IDs upfront: '
+                             f'{job_ids} (will use controller task ray job '
+                             f'ID as the {num_jobs}th job).')
             except exceptions.ClusterNotUpError:
                 # Controller not up yet, will create job IDs during submission
                 pre_created_job_ids = None
@@ -399,7 +400,7 @@ def launch(
     def _job_ids_to_str(job_ids: Optional[List[int]]) -> str:
         if not job_ids:
             return ""
-        
+
         if len(job_ids) == 1:
             return str(job_ids[0])
 
@@ -418,13 +419,11 @@ def launch(
         ranges.append(f"{start}-{prev}" if start != prev else str(start))
         return ",".join(ranges)
 
-
     def _submit_many(
         job_ids: Optional[List[int]] = None,
         num_jobs: Optional[int] = None,
         is_consolidation_mode: bool = False,
-    ) -> Tuple[Optional[List[int]],
-               Optional[backends.ResourceHandle]]:
+    ) -> Tuple[Optional[List[int]], Optional[backends.ResourceHandle]]:
         # Create a single set of YAML files (not per-rank)
         remote_orig_user_yaml_path = (
             f'{prefix}/{dag.name}-{dag_uuid}.original_user_yaml')
@@ -450,7 +449,7 @@ def launch(
                     task_.update_envs({'SKYPILOT_NUM_JOBS': str(num_jobs)})
             dag_utils.dump_chain_dag_to_yaml(dag, f.name)
 
-            vars_to_fill = {
+            vars_to_fill: Dict[str, Any] = {
                 'remote_original_user_yaml_path': remote_orig_user_yaml_path,
                 'original_user_dag_path': original_user_yaml_path.name,
                 'remote_user_yaml_path': remote_user_yaml_path,
@@ -482,10 +481,11 @@ def launch(
                 managed_job_constants.JOBS_CONTROLLER_YAML_PREFIX,
                 f'{name}-{dag_uuid}.yaml')
             job_controller_postfix = (' from jobs controller'
-                                          if not is_consolidation_mode
-                                          else '')
+                                      if not is_consolidation_mode else '')
             managed_jobs_str = f"managed job"
+            job_ids_str = ''
             if job_ids is not None:
+                job_ids_str = _job_ids_to_str(job_ids)
                 vars_to_fill['job_ids'] = job_ids
                 # Create job_id_to_rank dictionary by sorting job IDs and
                 # assigning ranks. The last job ID (controller task's ray
@@ -496,10 +496,9 @@ def launch(
                     for rank, job_id in enumerate(sorted_job_ids)
                 }
                 vars_to_fill['job_id_to_rank'] = job_id_to_rank
-                if num_jobs > 1:
+                if num_jobs is not None and num_jobs > 1:
                     managed_jobs_str = (
-                        f"{num_jobs} managed jobs {_job_ids_to_str(job_ids)}"
-                    )
+                        f"{num_jobs} managed jobs {job_ids_str}")
             logger.info(
                 f'{colorama.Fore.YELLOW}'
                 f'Launching {managed_jobs_str} {dag.name!r}'
@@ -550,12 +549,14 @@ def launch(
                         ]
                         run_script = '\n'.join(env_cmds + [run_script])
                         # Dump script for high availability recovery.
+                        assert job_ids is not None, 'job_ids must be set in consolidation mode'
                         for job_id in job_ids:
                             managed_job_state.set_ha_recovery_script(
                                 job_id, run_script)
                         backend.run_on_head(local_handle, run_script)
+                        job_ids_str_for_msg = _job_ids_to_str(job_ids)
                         ux_utils.starting_message(
-                            f'Job submitted, ID: {job_ids}')
+                            f'Job submitted, ID: {job_ids_str_for_msg}')
                         return job_ids, local_handle
                     result = execution.launch(
                         task=controller_task,
@@ -571,48 +572,25 @@ def launch(
                         controller_ray_job_id = result[0]
                         assert controller_ray_job_id is not None, (
                             'Failed '
-                            'to get ray job ID from controller task launch.'
-                        )
+                            'to get ray job ID from controller task launch.')
 
                         # Append the controller task's ray job ID since it
                         # is one of the jobs that we are launching.
-                        all_job_ids = (job_ids +
-                                        [controller_ray_job_id])
+                        all_job_ids = (job_ids + [controller_ray_job_id])
 
                         # Return the complete list of job IDs and handle
                         return all_job_ids, result[1]
                     else:
                         return [result[0]], result[1]
 
-    # Determine job_ids to pass to _submit_many
-    job_ids_to_submit: Optional[List[int]] = None
-    if is_consolidation_mode:
-        job_ids_to_submit = consolidation_mode_job_ids
-    elif pre_created_job_ids is not None:
-        job_ids_to_submit = pre_created_job_ids
+    # Make sure we are not submitting multiple jobs unless it's a pools request.
+    if pool is None and num_jobs > 1:
+        raise ValueError(
+            'Cannot submit multiple jobs unless it\'s a pools request.')
 
-    if pool is None:
-        if not is_consolidation_mode:
-            return _submit_many()
-        assert job_ids_to_submit is not None
-        assert len(job_ids_to_submit) == 1
-        return _submit_many(job_ids=job_ids_to_submit,
-                           is_consolidation_mode=is_consolidation_mode)
-
-    ids: List[int] = []
-    all_handle: Optional[backends.ResourceHandle] = None
-
-    # If we have job_ids, use single controller task
-    job_ids, handle = _submit_many(
-        job_ids=job_ids_to_submit,
-        num_jobs=num_jobs,
-        is_consolidation_mode=is_consolidation_mode)
-    if isinstance(job_ids, list):
-        ids = job_ids
-    else:
-        ids = [job_ids] if job_ids is not None else []
-    all_handle = handle
-    return ids, all_handle
+    return _submit_many(job_ids=job_ids,
+                        num_jobs=num_jobs,
+                        is_consolidation_mode=is_consolidation_mode)
 
 
 def queue_from_kubernetes_pod(

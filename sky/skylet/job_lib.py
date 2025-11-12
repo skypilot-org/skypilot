@@ -379,11 +379,11 @@ def make_job_command_with_user_switching(username: str,
 
 @init_db
 def add_jobs(job_name: str,
-            username: str,
-            run_timestamp: str,
-            resources_str: str,
-            metadata: str = '{}',
-            num_jobs: int = 1) -> Tuple[List[int], List[str]]:
+             username: str,
+             run_timestamp: str,
+             resources_str: str,
+             metadata: str = '{}',
+             num_jobs: int = 1) -> Tuple[List[int], List[str]]:
     """Atomically reserve the next available job id(s) for the user.
 
     Args:
@@ -1125,12 +1125,12 @@ class JobLibCodeGen:
 
     @classmethod
     def add_jobs(cls,
-                job_name: Optional[str],
-                username: str,
-                run_timestamp: str,
-                resources_str: str,
-                metadata: str,
-                num_jobs: int = 1) -> str:
+                 job_name: Optional[str],
+                 username: str,
+                 run_timestamp: str,
+                 resources_str: str,
+                 metadata: str,
+                 num_jobs: int = 1) -> str:
         if job_name is None:
             job_name = '-'
         code = [
@@ -1162,13 +1162,10 @@ class JobLibCodeGen:
             f'{resources_str!r},'
             f'metadata={metadata!r})'
             '\n  if isinstance(result, tuple):'
-            '\n    job_ids = result[0]'
-            '\n    log_dirs = result[1]'
+            '\n    job_ids.append(result[0])'
+            '\n    log_dirs.append(result[1])'
             '\n  else:'
-            '\n    job_ids = [result]'
-            '\n',
-            '\n  job_ids.append(result[0])',
-            '\n  log_dirs.append(result[1])',
+            '\n    job_ids.append(result)'
             '\nelse: '
             '\n result = job_lib.add_jobs('
             f'{job_name!r},'

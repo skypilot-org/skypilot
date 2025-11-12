@@ -1605,7 +1605,7 @@ def get_task_specs(job_id: int, task_id: int) -> Dict[str, Any]:
 
 
 @_init_db
-def scheduler_set_waiting(job_id: int, dag_yaml_content: str,
+def scheduler_set_waiting(job_ids: List[int], dag_yaml_content: str,
                           original_user_yaml_content: str,
                           env_file_content: str,
                           config_file_content: Optional[str],
@@ -1613,18 +1613,18 @@ def scheduler_set_waiting(job_id: int, dag_yaml_content: str,
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         updated_count = session.query(job_info_table).filter(
-            sqlalchemy.and_(job_info_table.c.spot_job_id == job_id,)).update({
-                job_info_table.c.schedule_state:
-                    ManagedJobScheduleState.WAITING.value,
-                job_info_table.c.dag_yaml_content: dag_yaml_content,
-                job_info_table.c.original_user_yaml_content:
-                    (original_user_yaml_content),
-                job_info_table.c.env_file_content: env_file_content,
-                job_info_table.c.config_file_content: config_file_content,
-                job_info_table.c.priority: priority,
-            })
+            sqlalchemy.and_(job_info_table.c.spot_job_id.in_(job_ids),)).update(
+                {
+                    job_info_table.c.schedule_state:
+                        ManagedJobScheduleState.WAITING.value,
+                    job_info_table.c.dag_yaml_content: dag_yaml_content,
+                    job_info_table.c.original_user_yaml_content:
+                        (original_user_yaml_content),
+                    job_info_table.c.env_file_content: env_file_content,
+                    job_info_table.c.priority: priority,
+                })
         session.commit()
-        assert updated_count <= 1, (job_id, updated_count)
+        assert updated_count <= len(job_ids), (job_ids, updated_count)
 
 
 @_init_db
