@@ -456,6 +456,7 @@ def test_image_no_conda():
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 @pytest.mark.no_nebius  # Nebius does not support autodown
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support autodown
+@pytest.mark.no_shadeform  # Shadeform does not support stopping instances
 @pytest.mark.no_seeweb  # Seeweb does not support autodown
 def test_custom_default_conda_env(generic_cloud: str):
     timeout = 80
@@ -610,6 +611,7 @@ def private_docker_registry_setup(request):
 
 @pytest.mark.no_azure
 @pytest.mark.no_kubernetes
+@pytest.mark.no_shadeform
 @pytest.mark.parametrize(
     'private_docker_registry_setup,cloud_provider',
     [
@@ -710,7 +712,7 @@ def test_helm_deploy_eks(request):
             f'bash tests/kubernetes/scripts/helm_upgrade.sh {package_name} {helm_version} aws',
         ],
         # EKS termination requires longer timeout.
-        timeout=50 * 60)
+        timeout=90 * 60)
     smoke_tests_utils.run_one_test(test)
 
 
@@ -719,6 +721,6 @@ def test_helm_deploy_eks(request):
 @pytest.mark.no_dependency  # This test is not related to dependency
 def test_helm_deploy_okta():
     test = smoke_tests_utils.Test('helm_deploy_okta', [
-        f'output=$(bash tests/kubernetes/scripts/helm_okta.sh 2>&1); exit_code=$?; echo "$output"; exit $exit_code',
+        f'bash tests/kubernetes/scripts/helm_okta.sh',
     ])
     smoke_tests_utils.run_one_test(test)

@@ -61,7 +61,6 @@ from sky.jobs import constants as managed_job_constants
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants
-from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import subprocess_utils
 
@@ -94,11 +93,12 @@ def start_controller() -> None:
     logs_dir = os.path.expanduser(
         managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
     os.makedirs(logs_dir, exist_ok=True)
-    log_path = os.path.join(logs_dir, f'controller_{uuid.uuid4()}.log')
+    controller_uuid = str(uuid.uuid4())
+    log_path = os.path.join(logs_dir, f'controller_{controller_uuid}.log')
 
     activate_python_env_cmd = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
     run_controller_cmd = (f'{sys.executable} -u -m'
-                          'sky.jobs.controller')
+                          f'sky.jobs.controller {controller_uuid}')
 
     run_cmd = (f'{activate_python_env_cmd}'
                f'{run_controller_cmd}')
@@ -189,6 +189,7 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
 
             if started > 0:
                 logger.info(f'Started {started} controllers')
+
     except filelock.Timeout:
         # If we can't get the lock, just exit. The process holding the lock
         # should launch any pending jobs.
@@ -215,9 +216,20 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
             maybe_start_controllers(from_scheduler=True)
             return
 
-    state.scheduler_set_waiting(job_id, dag_yaml_path,
-                                original_user_yaml_path, env_file_path,
-                                common_utils.get_user_hash(), priority)
+    with open(dag_yaml_path, 'r', encoding='utf-8') as dag_file:
+        dag_yaml_content = dag_file.read()
+    with open(original_user_yaml_path, 'r',
+              encoding='utf-8') as original_user_yaml_file:
+        original_user_yaml_content = original_user_yaml_file.read()
+    with open(env_file_path, 'r', encoding='utf-8') as env_file:
+        env_file_content = env_file.read()
+    logger.debug(f'Storing job {job_id} file contents in database '
+                 f'(DAG bytes={len(dag_yaml_content)}, '
+                 f'original user yaml bytes={len(original_user_yaml_content)}, '
+                 f'env bytes={len(env_file_content)}).')
+    state.scheduler_set_waiting(job_id, dag_yaml_content,
+                                original_user_yaml_content, env_file_content,
+                                priority)
     if state.get_ha_recovery_script(job_id) is None:
         # the run command is just the command that called scheduler
         run = (f'source {env_file_path} && '
@@ -235,7 +247,6 @@ async def scheduled_launch(
     starting: Set[int],
     starting_lock: asyncio.Lock,
     starting_signal: asyncio.Condition,
-    job_logger: 'logging.Logger',
 ):
     """Launch as part of an ongoing job.
 
@@ -273,10 +284,10 @@ async def scheduled_launch(
             starting_count = len(starting)
             if starting_count < controller_utils.LAUNCHES_PER_WORKER:
                 break
-            job_logger.info('Too many jobs starting, waiting for a slot')
+            logger.info('Too many jobs starting, waiting for a slot')
             await starting_signal.wait()
 
-    job_logger.info(f'Starting job {job_id}')
+    logger.info(f'Starting job {job_id}')
 
     async with starting_lock:
         starting.add(job_id)

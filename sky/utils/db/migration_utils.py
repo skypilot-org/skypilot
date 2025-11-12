@@ -19,15 +19,19 @@ DB_INIT_LOCK_TIMEOUT_SECONDS = 10
 
 GLOBAL_USER_STATE_DB_NAME = 'state_db'
 GLOBAL_USER_STATE_VERSION = '010'
-GLOBAL_USER_STATE_LOCK_PATH = '~/.sky/locks/.state_db.lock'
+GLOBAL_USER_STATE_LOCK_PATH = f'~/.sky/locks/.{GLOBAL_USER_STATE_DB_NAME}.lock'
 
 SPOT_JOBS_DB_NAME = 'spot_jobs_db'
-SPOT_JOBS_VERSION = '003'
-SPOT_JOBS_LOCK_PATH = '~/.sky/locks/.spot_jobs_db.lock'
+SPOT_JOBS_VERSION = '005'
+SPOT_JOBS_LOCK_PATH = f'~/.sky/locks/.{SPOT_JOBS_DB_NAME}.lock'
 
 SERVE_DB_NAME = 'serve_db'
 SERVE_VERSION = '001'
-SERVE_LOCK_PATH = '~/.sky/locks/.serve_db.lock'
+SERVE_LOCK_PATH = f'~/.sky/locks/.{SERVE_DB_NAME}.lock'
+
+SKYPILOT_CONFIG_DB_NAME = 'sky_config_db'
+SKYPILOT_CONFIG_VERSION = '001'
+SKYPILOT_CONFIG_LOCK_PATH = f'~/.sky/locks/.{SKYPILOT_CONFIG_DB_NAME}.lock'
 
 
 @contextlib.contextmanager

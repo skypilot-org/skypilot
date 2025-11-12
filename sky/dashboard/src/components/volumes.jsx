@@ -222,7 +222,7 @@ function VolumesTable({
     fetchData();
 
     const interval = setInterval(() => {
-      if (isCurrent) {
+      if (isCurrent && window.document.visibilityState === 'visible') {
         fetchData();
       }
     }, refreshInterval);

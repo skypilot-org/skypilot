@@ -7,6 +7,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky.server.requests import executor
 from sky.server.requests import payloads
+from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.utils import registry
 from sky.utils import volume as volume_utils
@@ -25,9 +26,9 @@ async def volume_list(request: fastapi.Request) -> None:
         'env_vars': auth_user.to_env_vars()
     } if auth_user else {}
     request_body = payloads.RequestBody(**auth_user_env_vars_kwargs)
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='volume_list',
+        request_name=request_names.RequestName.VOLUME_LIST,
         request_body=request_body,
         func=core.volume_list,
         schedule_type=requests_lib.ScheduleType.SHORT,
@@ -38,9 +39,9 @@ async def volume_list(request: fastapi.Request) -> None:
 async def volume_delete(request: fastapi.Request,
                         volume_delete_body: payloads.VolumeDeleteBody) -> None:
     """Deletes a volume."""
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='volume_delete',
+        request_name=request_names.RequestName.VOLUME_DELETE,
         request_body=volume_delete_body,
         func=core.volume_delete,
         schedule_type=requests_lib.ScheduleType.LONG,
@@ -112,9 +113,9 @@ async def volume_apply(request: fastapi.Request,
             raise fastapi.HTTPException(
                 status_code=400,
                 detail='Runpod network volume is only supported on Runpod')
-    executor.schedule_request(
+    await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='volume_apply',
+        request_name=request_names.RequestName.VOLUME_APPLY,
         request_body=volume_apply_body,
         func=core.volume_apply,
         schedule_type=requests_lib.ScheduleType.LONG,

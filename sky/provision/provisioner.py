@@ -442,6 +442,14 @@ def _post_provision_setup(
                                               cluster_name.name_on_cloud,
                                               provider_config=provider_config)
 
+    # Update cluster info in handle so cluster instance ids are set. This
+    # allows us to expose provision logs to debug nodes that failed during post
+    # provision setup.
+    handle = global_user_state.get_handle_from_cluster_name(
+        cluster_name.display_name)
+    handle.cached_cluster_info = cluster_info
+    global_user_state.update_cluster_handle(cluster_name.display_name, handle)
+
     if cluster_info.num_instances > 1:
         # Only worker nodes have logs in the per-instance log directory. Head
         # node's log will be redirected to the main log file.
@@ -477,12 +485,13 @@ def _post_provision_setup(
         # ready by the provisioner, and we use kubectl instead of SSH to run the
         # commands and rsync on the pods. SSH will still be ready after a while
         # for the users to SSH into the pod.
-        if cloud_name.lower() != 'kubernetes':
+        is_k8s_cloud = cloud_name.lower() in ['kubernetes', 'ssh']
+        if not is_k8s_cloud:
             logger.debug(
                 f'\nWaiting for SSH to be available for {cluster_name!r} ...')
             wait_for_ssh(cluster_info, ssh_credentials)
             logger.debug(f'SSH Connection ready for {cluster_name!r}')
-        vm_str = 'Instance' if cloud_name.lower() != 'kubernetes' else 'Pod'
+        vm_str = 'Instance' if not is_k8s_cloud else 'Pod'
         plural = '' if len(cluster_info.instances) == 1 else 's'
         verb = 'is' if len(cluster_info.instances) == 1 else 'are'
         indent_str = (ux_utils.INDENT_SYMBOL

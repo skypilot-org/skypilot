@@ -238,6 +238,40 @@ def normalize_tpu_accelerator_name(accelerator: str) -> Tuple[str, int]:
     return accelerator, 1
 
 
+def _is_cloudflare_403_error(exception: Exception) -> bool:
+    """Check if an exception is a transient CloudFlare 403 error.
+
+    CloudFlare proxy 403 errors with CF-specific headers are transient and
+    should be retried, unlike real RBAC 403 errors.
+
+    Args:
+        exception: The exception to check
+
+    Returns:
+        True if this is a CloudFlare 403 error that should be retried
+    """
+    if not isinstance(exception, kubernetes.api_exception()):
+        return False
+
+    # Only check for 403 errors
+    if exception.status != 403:
+        return False
+
+    # Check for CloudFlare-specific headers
+    headers = exception.headers if hasattr(exception, 'headers') else {}
+    if not headers:
+        return False
+
+    # CloudFlare errors have CF-RAY header and/or Server: cloudflare
+    for k, v in headers.items():
+        if 'cf-ray' in k.lower():
+            return True
+        if 'server' in k.lower() and 'cloudflare' in str(v).lower():
+            return True
+
+    return False
+
+
 def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                     retry_interval=DEFAULT_RETRY_INTERVAL_SECONDS,
                     resource_type: Optional[str] = None):
@@ -272,19 +306,25 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                         kubernetes.api_exception(),
                         kubernetes.config_exception()) as e:
                     last_exception = e
+
+                    # Check if this is a CloudFlare transient 403 error
+                    is_cloudflare_403 = _is_cloudflare_403_error(e)
+
                     # Don't retry on permanent errors like 401 (Unauthorized)
-                    # or 403 (Forbidden)
+                    # or 403 (Forbidden), unless it's a CloudFlare transient 403
                     if (isinstance(e, kubernetes.api_exception()) and
-                            e.status in (401, 403)):
+                            e.status in (401, 403) and not is_cloudflare_403):
                         # Raise KubeAPIUnreachableError exception so that the
                         # optimizer/provisioner can failover to other clouds.
                         raise exceptions.KubeAPIUnreachableError(
                             f'Kubernetes API error: {str(e)}') from e
                     if attempt < max_retries - 1:
                         sleep_time = backoff.current_backoff()
-                        logger.debug(f'Kubernetes API call {func.__name__} '
-                                     f'failed with {str(e)}. Retrying in '
-                                     f'{sleep_time:.1f}s...')
+                        error_type = 'CloudFlare 403' if is_cloudflare_403 else 'error'
+                        logger.debug(
+                            f'Kubernetes API call {func.__name__} '
+                            f'failed with {error_type} {str(e)}. Retrying in '
+                            f'{sleep_time:.1f}s...')
                         time.sleep(sleep_time)
                         continue
 
@@ -696,6 +736,7 @@ def detect_gpu_label_formatter(
         for label, value in node.metadata.labels.items():
             node_labels[node.metadata.name].append((label, value))
 
+    invalid_label_values: List[Tuple[str, str, str, str]] = []
     # Check if the node labels contain any of the GPU label prefixes
     for lf in LABEL_FORMATTER_REGISTRY:
         skip = False
@@ -709,17 +750,21 @@ def detect_gpu_label_formatter(
                     if valid:
                         return lf(), node_labels
                     else:
-                        logger.warning(f'GPU label {label} matched for label '
-                                       f'formatter {lf.__class__.__name__}, '
-                                       f'but has invalid value {value}. '
-                                       f'Reason: {reason}. '
-                                       'Skipping...')
+                        invalid_label_values.append(
+                            (label, lf.__name__, value, reason))
                         skip = True
                         break
             if skip:
                 break
         if skip:
             continue
+
+    for label, lf_name, value, reason in invalid_label_values:
+        logger.warning(f'GPU label {label} matched for label '
+                       f'formatter {lf_name}, '
+                       f'but has invalid value {value}. '
+                       f'Reason: {reason}. '
+                       'Skipping...')
 
     return None, node_labels
 
@@ -1259,29 +1304,51 @@ class V1Pod:
 
 
 @_retry_on_error(resource_type='pod')
-def get_all_pods_in_kubernetes_cluster(*,
-                                       context: Optional[str] = None
-                                      ) -> List[V1Pod]:
-    """Gets pods in all namespaces in kubernetes cluster indicated by context.
-
-    Used for computing cluster resource usage.
+def get_allocated_gpu_qty_by_node(
+    *,
+    context: Optional[str] = None,
+) -> Dict[str, int]:
+    """Gets allocated GPU quantity by each node by fetching pods in
+    all namespaces in kubernetes cluster indicated by context.
     """
     if context is None:
         context = get_current_kube_config_context_name()
+    non_included_pod_statuses = POD_STATUSES.copy()
+    status_filters = ['Running', 'Pending']
+    if status_filters is not None:
+        non_included_pod_statuses -= set(status_filters)
+        field_selector = ','.join(
+            [f'status.phase!={status}' for status in non_included_pod_statuses])
 
     # Return raw urllib3.HTTPResponse object so that we can parse the json
     # more efficiently.
     response = kubernetes.core_api(context).list_pod_for_all_namespaces(
-        _request_timeout=kubernetes.API_TIMEOUT, _preload_content=False)
+        _request_timeout=kubernetes.API_TIMEOUT,
+        _preload_content=False,
+        field_selector=field_selector)
     try:
-        pods = [
-            V1Pod.from_dict(item_dict) for item_dict in ijson.items(
-                response, 'items.item', buf_size=IJSON_BUFFER_SIZE)
-        ]
+        allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
+        for item_dict in ijson.items(response,
+                                     'items.item',
+                                     buf_size=IJSON_BUFFER_SIZE):
+            pod = V1Pod.from_dict(item_dict)
+            if should_exclude_pod_from_gpu_allocation(pod):
+                logger.debug(
+                    f'Excluding pod {pod.metadata.name} from GPU count '
+                    f'calculations on node {pod.spec.node_name}')
+                continue
+            # Iterate over all the containers in the pod and sum the
+            # GPU requests
+            pod_allocated_qty = 0
+            for container in pod.spec.containers:
+                if container.resources.requests:
+                    pod_allocated_qty += get_node_accelerator_count(
+                        context, container.resources.requests)
+            if pod_allocated_qty > 0 and pod.spec.node_name:
+                allocated_qty_by_node[pod.spec.node_name] += pod_allocated_qty
+        return allocated_qty_by_node
     finally:
         response.release_conn()
-
-    return pods
 
 
 def check_instance_fits(context: Optional[str],
@@ -2179,6 +2246,15 @@ def get_kube_config_context_namespace(
         return DEFAULT_NAMESPACE
 
 
+def parse_cpu_or_gpu_resource_to_float(resource_str: str) -> float:
+    if not resource_str:
+        return 0.0
+    if resource_str[-1] == 'm':
+        return float(resource_str[:-1]) / 1000
+    else:
+        return float(resource_str)
+
+
 def parse_cpu_or_gpu_resource(resource_qty_str: str) -> Union[int, float]:
     resource_str = str(resource_qty_str)
     if resource_str[-1] == 'm':
@@ -2611,26 +2687,22 @@ def combine_pod_config_fields(
     merged_cluster_yaml_obj = copy.deepcopy(cluster_yaml_obj)
     # We don't use override_configs in `get_effective_region_config`, as merging
     # the pod config requires special handling.
-    if isinstance(cloud, clouds.SSH):
-        kubernetes_config = skypilot_config.get_effective_region_config(
-            cloud='ssh', region=None, keys=('pod_config',), default_value={})
-        override_pod_config = config_utils.get_cloud_config_value_from_dict(
-            dict_config=cluster_config_overrides,
-            cloud='ssh',
-            keys=('pod_config',),
-            default_value={})
-    else:
-        kubernetes_config = skypilot_config.get_effective_region_config(
-            cloud='kubernetes',
-            region=context,
-            keys=('pod_config',),
-            default_value={})
-        override_pod_config = config_utils.get_cloud_config_value_from_dict(
-            dict_config=cluster_config_overrides,
-            cloud='kubernetes',
-            region=context,
-            keys=('pod_config',),
-            default_value={})
+    cloud_str = 'ssh' if isinstance(cloud, clouds.SSH) else 'kubernetes'
+    context_str = context
+    if isinstance(cloud, clouds.SSH) and context is not None:
+        assert context.startswith('ssh-'), 'SSH context must start with "ssh-"'
+        context_str = context[len('ssh-'):]
+    kubernetes_config = skypilot_config.get_effective_region_config(
+        cloud=cloud_str,
+        region=context_str,
+        keys=('pod_config',),
+        default_value={})
+    override_pod_config = config_utils.get_cloud_config_value_from_dict(
+        dict_config=cluster_config_overrides,
+        cloud=cloud_str,
+        region=context_str,
+        keys=('pod_config',),
+        default_value={})
     config_utils.merge_k8s_configs(kubernetes_config, override_pod_config)
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.
@@ -2738,7 +2810,8 @@ def merge_custom_metadata(
     config_utils.merge_k8s_configs(original_metadata, custom_metadata)
 
 
-def check_nvidia_runtime_class(context: Optional[str] = None) -> bool:
+@_retry_on_error(resource_type='runtimeclass')
+def check_nvidia_runtime_class(*, context: Optional[str] = None) -> bool:
     """Checks if the 'nvidia' RuntimeClass exists in the cluster"""
     # Fetch the list of available RuntimeClasses
     runtime_classes = kubernetes.node_api(context).list_runtime_class()
@@ -2965,41 +3038,24 @@ def get_kubernetes_node_info(
         label_keys = lf.get_label_keys()
 
     # Check if all nodes have no accelerators to avoid fetching pods
-    any_node_has_accelerators = False
+    has_accelerator_nodes = False
     for node in nodes:
         accelerator_count = get_node_accelerator_count(context,
                                                        node.status.allocatable)
         if accelerator_count > 0:
-            any_node_has_accelerators = True
+            has_accelerator_nodes = True
             break
 
-    # Get the pods to get the real-time resource usage
-    pods = None
+    # Get the allocated GPU quantity by each node
     allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
-    if any_node_has_accelerators:
+    error_on_get_allocated_gpu_qty_by_node = False
+    if has_accelerator_nodes:
         try:
-            pods = get_all_pods_in_kubernetes_cluster(context=context)
-            # Pre-compute allocated accelerator count per node
-            for pod in pods:
-                if pod.status.phase in ['Running', 'Pending']:
-                    # Skip pods that should not count against GPU count
-                    if should_exclude_pod_from_gpu_allocation(pod):
-                        logger.debug(f'Excluding low priority pod '
-                                     f'{pod.metadata.name} from GPU allocation '
-                                     f'calculations')
-                        continue
-                    # Iterate over all the containers in the pod and sum the
-                    # GPU requests
-                    pod_allocated_qty = 0
-                    for container in pod.spec.containers:
-                        if container.resources.requests:
-                            pod_allocated_qty += get_node_accelerator_count(
-                                context, container.resources.requests)
-                    if pod_allocated_qty > 0:
-                        allocated_qty_by_node[
-                            pod.spec.node_name] += pod_allocated_qty
+            allocated_qty_by_node = get_allocated_gpu_qty_by_node(
+                context=context)
         except kubernetes.api_exception() as e:
             if e.status == 403:
+                error_on_get_allocated_gpu_qty_by_node = True
                 pass
             else:
                 raise
@@ -3044,7 +3100,7 @@ def get_kubernetes_node_info(
                 ip_address=node_ip)
             continue
 
-        if pods is None:
+        if not has_accelerator_nodes or error_on_get_allocated_gpu_qty_by_node:
             accelerators_available = -1
         else:
             allocated_qty = allocated_qty_by_node[node.metadata.name]
@@ -3241,13 +3297,13 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
 
     try:
         pods = kubernetes.core_api(context).list_pod_for_all_namespaces(
-            label_selector='skypilot-cluster',
+            label_selector=provision_constants.TAG_SKYPILOT_CLUSTER_NAME,
             _request_timeout=kubernetes.API_TIMEOUT).items
     except kubernetes.max_retry_error():
         raise exceptions.ResourcesUnavailableError(
             'Timed out trying to get SkyPilot pods from Kubernetes cluster. '
             'Please check if the cluster is healthy and retry. To debug, run: '
-            'kubectl get pods --selector=skypilot-cluster --all-namespaces'
+            'kubectl get pods --selector=skypilot-cluster-name --all-namespaces'
         ) from None
     return pods
 
@@ -3384,7 +3440,8 @@ def process_skypilot_pods(
     serve_controllers: List[KubernetesSkyPilotClusterInfo] = []
 
     for pod in pods:
-        cluster_name_on_cloud = pod.metadata.labels.get('skypilot-cluster')
+        cluster_name_on_cloud = pod.metadata.labels.get(
+            provision_constants.TAG_SKYPILOT_CLUSTER_NAME)
         cluster_name = cluster_name_on_cloud.rsplit(
             '-', 1
         )[0]  # Remove the user hash to get cluster name (e.g., mycluster-2ea4)

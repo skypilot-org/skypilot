@@ -100,7 +100,7 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '22'
+SKYLET_VERSION = '25'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -226,7 +226,9 @@ RAY_INSTALLATION_COMMANDS = (
     f'{SKY_UV_PIP_CMD} list | grep "ray " | '
     f'grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
     f'|| {RAY_STATUS} || '
-    f'{SKY_UV_PIP_CMD} install -U ray[default]=={SKY_REMOTE_RAY_VERSION}; '  # pylint: disable=line-too-long
+    # The pydantic-core==2.41.3 for arm seems corrupted
+    # so we need to avoid that specific version.
+    f'{SKY_UV_PIP_CMD} install -U "ray[default]=={SKY_REMOTE_RAY_VERSION}" "pydantic-core==2.41.1"; '  # pylint: disable=line-too-long
     # In some envs, e.g. pip does not have permission to write under /opt/conda
     # ray package will be installed under ~/.local/bin. If the user's PATH does
     # not include ~/.local/bin (the pip install will have the output: `WARNING:
@@ -370,6 +372,8 @@ SERVICE_ACCOUNT_TOKEN_ENV_VAR = (
 # SkyPilot environment variables
 SKYPILOT_NUM_NODES = f'{SKYPILOT_ENV_VAR_PREFIX}NUM_NODES'
 SKYPILOT_NODE_IPS = f'{SKYPILOT_ENV_VAR_PREFIX}NODE_IPS'
+SKYPILOT_SETUP_NUM_GPUS_PER_NODE = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}SETUP_NUM_GPUS_PER_NODE')
 SKYPILOT_NUM_GPUS_PER_NODE = f'{SKYPILOT_ENV_VAR_PREFIX}NUM_GPUS_PER_NODE'
 SKYPILOT_NODE_RANK = f'{SKYPILOT_ENV_VAR_PREFIX}NODE_RANK'
 
@@ -389,6 +393,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('docker', 'run_options'),
     ('nvidia_gpus', 'disable_ecc'),
     ('ssh', 'pod_config'),
+    ('ssh', 'provision_timeout'),
     ('kubernetes', 'custom_metadata'),
     ('kubernetes', 'pod_config'),
     ('kubernetes', 'provision_timeout'),
@@ -402,10 +407,27 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
 ]
 # When overriding the SkyPilot configs on the API server with the client one,
 # we skip the following keys because they are meant to be client-side configs.
-SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [('api_server',),
-                                                       ('allowed_clouds',),
-                                                       ('workspaces',), ('db',),
-                                                       ('daemons',)]
+# Also, we skip the consolidation mode config as those should be only set on
+# the API server side.
+SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
+    ('api_server',),
+    ('allowed_clouds',),
+    ('workspaces',),
+    ('db',),
+    ('daemons',),
+    # TODO(kevin,tian): Override the whole controller config once our test
+    # infrastructure supports setting dynamic server side configs.
+    # Tests that are affected:
+    # - test_managed_jobs_ha_kill_starting
+    # - test_managed_jobs_ha_kill_running
+    # - all tests that use LOW_CONTROLLER_RESOURCE_ENV or
+    #   LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG (won't cause test failure,
+    #   but the configs won't be applied)
+    ('jobs', 'controller', 'consolidation_mode'),
+    ('serve', 'controller', 'consolidation_mode'),
+    ('jobs', 'controller', 'controller_logs_gc_retention_hours'),
+    ('jobs', 'controller', 'task_logs_gc_retention_hours'),
+]
 
 # Constants for Azure blob storage
 WAIT_FOR_STORAGE_ACCOUNT_CREATION = 60
@@ -456,6 +478,7 @@ ENV_VAR_DB_CONNECTION_URI = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_CONNECTION_URI')
 # authentication is enabled in the API server.
 ENV_VAR_ENABLE_BASIC_AUTH = 'ENABLE_BASIC_AUTH'
 SKYPILOT_INITIAL_BASIC_AUTH = 'SKYPILOT_INITIAL_BASIC_AUTH'
+SKYPILOT_INGRESS_BASIC_AUTH_ENABLED = 'SKYPILOT_INGRESS_BASIC_AUTH_ENABLED'
 ENV_VAR_ENABLE_SERVICE_ACCOUNTS = 'ENABLE_SERVICE_ACCOUNTS'
 
 # Enable debug logging for requests.
@@ -472,7 +495,7 @@ CATALOG_DIR = '~/.sky/catalogs'
 ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
               'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
               'paperspace', 'primeintellect', 'do', 'nebius', 'ssh',
-              'hyperbolic', 'seeweb')
+              'hyperbolic', 'seeweb', 'shadeform')
 # END constants used for service catalog.
 
 # The user ID of the SkyPilot system.
@@ -532,3 +555,6 @@ ENV_VAR_LOOP_LAG_THRESHOLD_MS = (SKYPILOT_ENV_VAR_PREFIX +
 
 ARM64_ARCH = 'arm64'
 X86_64_ARCH = 'x86_64'
+
+SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}SSH_DISABLE_LATENCY_MEASUREMENT')

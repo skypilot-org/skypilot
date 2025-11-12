@@ -649,7 +649,14 @@ class VolumeTopologyConflictError(Exception):
 
 class ServerTemporarilyUnavailableError(Exception):
     """Raised when the server is temporarily unavailable."""
-    pass
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+    def __str__(self):
+        return ('SkyPilot API server is temporarily unavailable: '
+                f'{self.message}. Please try again later.')
 
 
 class RestfulPolicyError(Exception):
@@ -685,4 +692,9 @@ class ClientError(Exception):
 
     If a request encounters a ClientError, it will not be retried to the server.
     """
+    pass
+
+
+class ConcurrentWorkerExhaustedError(Exception):
+    """Raised when the concurrent worker is exhausted."""
     pass

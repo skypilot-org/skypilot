@@ -28,6 +28,7 @@ from sky.provision import primeintellect
 from sky.provision import runpod
 from sky.provision import scp
 from sky.provision import seeweb
+from sky.provision import shadeform
 from sky.provision import ssh
 from sky.provision import vast
 from sky.provision import vsphere
@@ -79,6 +80,7 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
+    retry_if_missing: bool = False,
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """Query instances.
 
@@ -87,6 +89,11 @@ def query_instances(
 
     A None status means the instance is marked as "terminated"
     or "terminating".
+
+    Args:
+        retry_if_missing: Whether to retry the call to the cloud api if the
+          cluster is not found when querying the live status on the cloud.
+          NOTE: This is currently only used on kubernetes.
     """
     raise NotImplementedError
 

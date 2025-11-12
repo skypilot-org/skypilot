@@ -109,7 +109,6 @@ def _setup_logger():
     global _default_handler
     if _default_handler is None:
         _default_handler = EnvAwareHandler(sys.stdout)
-        _default_handler.flush = sys.stdout.flush  # type: ignore
         if env_options.Options.SHOW_DEBUG_INFO.get():
             _default_handler.setLevel(logging.DEBUG)
         else:
@@ -129,7 +128,6 @@ def _setup_logger():
         for logger_name in _SENSITIVE_LOGGER:
             logger = logging.getLogger(logger_name)
             handler_to_logger = EnvAwareHandler(sys.stdout, sensitive=True)
-            handler_to_logger.flush = sys.stdout.flush  # type: ignore
             logger.addHandler(handler_to_logger)
             logger.setLevel(logging.INFO)
             if _show_logging_prefix():
