@@ -1,14 +1,14 @@
-# Batch Text Classification with SkyPilot Managed Jobs Pool
+# Batch Text Classification with SkyPilot Pools
 
-This example demonstrates how to use SkyPilot's **Managed Jobs Pool** feature for efficient offline batch inference. We'll classify sentiment from movie reviews using gpt-oss-20b running on vLLM.
+This example demonstrates how to use SkyPilot's **Pools** feature for efficient offline batch inference. We'll classify sentiment from movie reviews using gpt-oss-20b running on vLLM.
 
-## What is a Managed Jobs Pool?
+## What is a Jobs Pool?
 
 A **pool** is a collection of pre-configured workers that can process multiple jobs without cold starts. Key benefits:
 
 - **Fast job execution**: Workers are pre-provisioned with models loaded
 - **No setup overhead**: Each job starts immediately without reinstalling dependencies or downloading models
-- **Simple parallelism**: Submit multiple jobs with a single command using `--num-jobs`, limit concurrency to the number of workers in the pool (queueing is handled by SkyPilot)
+- **Simple parallelism**: Submit multiple jobs with a single command using `--num-jobs`, limit concurrency to the number of workers in the pool (queueing is handled by SkyPilot).
 
 ## Using Pools for Batch Inference
 
@@ -18,7 +18,13 @@ This example:
 3. Each job uses vLLM's Python SDK to classify reviews in batches
 4. Results are saved to a cloud storage bucket with predictions, ground truth labels, and accuracy metrics
 
-### Step 1: Create the Pool
+Files in this example:
+
+- `pool.yaml`: Pool configuration with vLLM setup
+- `classify.yaml`: Job definition that runs on pool workers
+- `classify.py`: Python script that performs the classification using vLLM's Python SDK
+
+### Step 1: Create the worker pool
 
 Create a pool named `text-classify` with 2 workers:
 
@@ -32,14 +38,32 @@ This will:
 - Mount the S3 bucket `sky-batch-inference-results` at `/results`
 - Download and cache gpt-oss-20b
 
-Check pool status:
+Check pool status with:
 ```bash
 sky jobs pool status text-classify
 ```
 
-### Step 2: Submit Classification Jobs
+<details>
+<summary>Example output</summary>
 
-Submit 10 parallel jobs to process 5,000 reviews:
+<pre>
+Pools
+NAME           VERSION  UPTIME  STATUS  WORKERS
+text-classify  1        5m 39s  READY   2/2
+
+Pool Workers
+POOL_NAME      ID  VERSION  LAUNCHED    INFRA       RESOURCES                             STATUS  USED_BY
+text-classify  1   1        6 mins ago  Kubernetes  1x(gpus=H200:1, cpus=4, mem=16, ...)  READY   -
+text-classify  2   1        6 mins ago  Kubernetes  1x(gpus=H200:1, cpus=4, mem=16, ...)  READY   -
+</pre>
+
+</details>
+
+
+
+### Step 2: Submit text classification jobs
+
+Submit 10 parallel jobs to process the IMDB movie reviews dataset:
 
 ```bash
 sky jobs launch -p text-classify --num-jobs 10 classify.yaml
@@ -48,27 +72,55 @@ sky jobs launch -p text-classify --num-jobs 10 classify.yaml
 This command:
 - Submits 10 jobs to the pool
 - Each job gets a unique `$SKYPILOT_JOB_RANK` (0-9)
-- Each job processes ~500 reviews (1/10th of the dataset)
+- Each job processes a partition of the dataset based on the job rank
 - Results are saved to the `sky-batch-inference-results` bucket
 
 **Note**: You can adjust the number of jobs with `--num-jobs N`. More jobs = more parallelism (up to the number of workers).
 
-### Step 3: Monitor Progress
+### Step 3: Monitor progress
 
 View all jobs:
 ```bash
 sky jobs queue
 ```
+<details>
+<summary>Example output</summary>
+
+<pre>
+Fetching managed job statuses...
+Managed jobs
+In progress tasks: 4 PENDING, 2 RUNNING
+ID  TASK  NAME            REQUESTED   SUBMITTED   TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS     POOL
+10  -     batch-classify  1x[H200:1]  2 mins ago  2m 35s         -             0            PENDING    text-classify
+9   -     batch-classify  1x[H200:1]  2 mins ago  2m 35s         -             0            PENDING    text-classify
+8   -     batch-classify  1x[H200:1]  2 mins ago  2m 37s         -             0            PENDING    text-classify
+7   -     batch-classify  1x[H200:1]  2 mins ago  2m 10s         49s           0            SUCCEEDED  text-classify
+6   -     batch-classify  1x[H200:1]  2 mins ago  2m 37s         17s           0            RUNNING    text-classify (worker=1)
+5   -     batch-classify  1x[H200:1]  2 mins ago  2m 42s         14s           0            RUNNING    text-classify (worker=2)
+4   -     batch-classify  1x[H200:1]  2 mins ago  2m 17s         49s           0            SUCCEEDED  text-classify
+3   -     batch-classify  1x[H200:1]  2 mins ago  2m 45s         -             0            PENDING    text-classify
+2   -     batch-classify  1x[H200:1]  2 mins ago  1m 19s         1m 18s        0            SUCCEEDED  text-classify
+1   -     batch-classify  1x[H200:1]  2 mins ago  1m 20s         1m 19s        0            SUCCEEDED  text-classify
+</pre>
+
+</details>
+
+
 
 Stream logs from a specific job:
 ```bash
 sky jobs logs <job-id>
 ```
 
-Or monitor all jobs at once:
+Or use the SkyPilot dashboard to view the progress of the jobs:
 ```bash
-watch -n 5 'sky jobs queue'
+sky dashboard
 ```
+
+
+<p align="center">
+  <img src="https://i.imgur.com/N4mQfbG.png" width="500" alt="Batch Inference Dashboard" />
+</p>
 
 ### Step 4: View Results
 
@@ -78,24 +130,14 @@ Once jobs complete, results are in the cloud storage bucket. Each job creates tw
 
 View results using cloud CLI:
 ```bash
+BUCKET_NAME=sky-batch-inference-results
 # AWS
-aws s3 ls s3://sky-batch-inference-results/
-aws s3 cp s3://sky-batch-inference-results/summary_rank_0.json -
+aws s3 ls s3://${BUCKET_NAME}/
+aws s3 cp s3://${BUCKET_NAME}/summary_rank_0.json -
 
 # GCP
-gsutil ls gs://sky-batch-inference-results/
-gsutil cat gs://sky-batch-inference-results/summary_rank_0.json
-```
-
-Or access them directly from a SkyPilot cluster:
-```bash
-sky launch -c results-viewer --cloud aws -y -- \
-  "aws s3 sync s3://sky-batch-inference-results/ ./results/ && \
-   cat results/summary_rank_*.json | jq -s '{
-     total_processed: map(.total_processed) | add,
-     total_correct: map(.correct_predictions) | add,
-     avg_accuracy: (map(.accuracy) | add / length)
-   }'"
+gsutil ls gs://${BUCKET_NAME}/
+gsutil cat gs://${BUCKET_NAME}/summary_rank_0.json
 ```
 
 ### Step 5: Clean Up
@@ -106,126 +148,9 @@ When done, terminate the pool to stop incurring costs:
 sky jobs pool down text-classify
 ```
 
-This will:
-- Stop all workers in the pool
-- Clean up all cloud resources
-- Preserve results in the storage bucket
-
-## File Overview
-
-- **`pool.yaml`**: Pool configuration with vLLM setup
-- **`classify.yaml`**: Job definition that runs on pool workers
-- **`classify.py`**: Python script that performs the classification
-
-## How It Works
-
-### Pool Setup (`pool.yaml`)
-
-The pool YAML defines:
-1. **Resources**: L4 GPUs (cost-effective for inference)
-2. **Setup commands**: Install vLLM and download the model to `/tmp/model`
-3. **Worker count**: 3 workers (processes up to 3 jobs simultaneously)
-
-The model is downloaded once during pool setup and cached, so all jobs can use it immediately.
-
-### Job Execution (`classify.yaml`)
-
-Each job:
-1. Installs lightweight dependencies (datasets, tqdm)
-2. Mounts the results bucket
-3. Runs `classify.py` with job rank, total jobs, and model path
-
-Environment variables automatically set by SkyPilot:
-- `$SKYPILOT_JOB_RANK`: Job number (0, 1, 2, ...)
-- `$SKYPILOT_NUM_JOBS`: Total number of jobs (e.g., 10)
-
-### Classification Logic (`classify.py`)
-
-The script:
-1. Loads the IMDB dataset from HuggingFace
-2. Calculates which partition to process based on job rank
-3. Initializes vLLM with the pre-downloaded model using `LLM` class
-4. Prepares all prompts and runs batch inference with `llm.generate()`
-5. Compares predictions to ground truth labels
-6. Saves results and accuracy metrics
-
-The script uses vLLM's Python SDK directly for efficient batch processing, which is simpler and faster than using the API server.
-
-## Performance and Cost
-
-### With Pool (this example)
-- **Setup time**: ~5-10 min (one-time, shared across all jobs)
-- **Per-job time**: ~1-2 min (500 reviews)
-- **Total time**: ~10-15 min (including setup)
-- **Cost**: ~$0.50-$1.00 (3 workers × L4 spot @ ~$0.25/hr)
-
-### Without Pool (traditional managed jobs)
-- **Setup time**: ~5-10 min **per job**
-- **Per-job time**: ~6-12 min (setup + inference)
-- **Total time**: ~60-120 min for 10 jobs
-- **Cost**: Similar, but much slower
-
-**Key advantage**: Pools shine when running **many short jobs** that share the same environment.
-
-## Customization
-
-### Using a Different Model
-
-Edit `pool.yaml` to use a different model:
-```yaml
-envs:
-  MODEL_NAME: Qwen/Qwen2-7B-Instruct  # Or any HuggingFace model
-```
-
-### Processing More/Fewer Reviews
-
-Edit the dataset size in `classify.yaml`:
-```bash
-python classify.py --dataset-size 10000 ...  # Process 10K reviews
-```
-
-### Using Different GPUs
-
-Edit `resources` in `pool.yaml`:
-```yaml
-resources:
-  accelerators: {T4: 1, L4: 1, A10G: 1}  # Flexible GPU selection
-```
-
-### Adjusting Pool Size
-
-Edit `pool.workers` in `pool.yaml`:
-```yaml
-pool:
-  workers: 5  # More workers = more parallelism
-```
-
-## Troubleshooting
-
-### Pool workers not starting
-- Check GPU quota: `sky check`
-- Try different regions: Add `region: us-west-2` to resources
-- Use on-demand instead of spot: Remove `use_spot: true`
-
-### Jobs stuck in PENDING
-- Check pool status: `sky jobs pool status text-classify`
-- View controller logs: `sky jobs logs --controller <job-id>`
-
-### vLLM initialization errors
-- Verify model downloaded: `ls -lh /tmp/model/`
-- Check job logs for detailed error: `sky jobs logs <job-id>`
-
-### Out of memory errors
-- Reduce max-model-len in `pool.yaml`: `--max-model-len 1024`
-- Use a smaller model: `MODEL_NAME: Qwen/Qwen2-1.5B-Instruct`
+This will stop all workers in the pool and clean up all cloud resources. Results are preserved in the storage bucket.
 
 ## Learn More
 
 - [SkyPilot Managed Jobs Pool Documentation](https://docs.skypilot.co/en/latest/examples/managed-jobs.html#pool)
-- [vLLM Documentation](https://docs.vllm.ai/)
-- [IMDB Dataset](https://huggingface.co/datasets/imdb)
-
-## Feedback
-
-Found an issue or have suggestions? Please [open an issue](https://github.com/skypilot-org/skypilot/issues/new) or join our [Slack community](http://slack.skypilot.co).
 
