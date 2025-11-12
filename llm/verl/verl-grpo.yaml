@@ -84,6 +84,8 @@ run: |
 
   source .venv/bin/activate
 
+  python3 -c "import wandb; wandb.login(relogin=True, key='$WANDB_API_KEY')"
+
   if [ -f ~/skypilot_templates/ray/start_cluster.sh ]; then
     export RAY_DASHBOARD_HOST=0.0.0.0
     ~/skypilot_templates/ray/start_cluster.sh
