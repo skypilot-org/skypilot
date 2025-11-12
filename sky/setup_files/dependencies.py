@@ -148,6 +148,14 @@ aws_dependencies = [
     'colorama < 0.4.5',
 ]
 
+# Kubernetes 32.0.0 has an authentication bug:
+# https://github.com/kubernetes-client/python/issues/2333
+kubernetes_dependencies = [
+    'kubernetes>=20.0.0,!=32.0.0',
+    'websockets',
+    'python-dateutil',
+]
+
 # azure-cli cannot be installed normally by uv, so we need to work around it in
 # a few places.
 AZURE_CLI = 'azure-cli>=2.65.0'
@@ -188,14 +196,11 @@ cloud_dependencies: Dict[str, List[str]] = {
     'docker': ['docker'] + local_ray,
     'lambda': [],  # No dependencies needed for lambda
     'cloudflare': aws_dependencies,
-    'coreweave': aws_dependencies,
+    'coreweave': aws_dependencies + kubernetes_dependencies,
     'scp': local_ray,
     'oci': ['oci'],
-    # Kubernetes 32.0.0 has an authentication bug: https://github.com/kubernetes-client/python/issues/2333 # pylint: disable=line-too-long
-    'kubernetes': [
-        'kubernetes>=20.0.0,!=32.0.0', 'websockets', 'python-dateutil'
-    ],
-    'ssh': ['kubernetes>=20.0.0,!=32.0.0', 'websockets', 'python-dateutil'],
+    'kubernetes': kubernetes_dependencies,
+    'ssh': kubernetes_dependencies,
     # For the container registry auth api. Reference:
     # https://github.com/runpod/runpod-python/releases/tag/1.6.1
     # RunPod needs a TOML parser to read ~/.runpod/config.toml. On Python 3.11+

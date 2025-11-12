@@ -26,6 +26,7 @@ from sky.serve import constants as serve_constants
 from sky.serve import serve_rpc_utils
 from sky.serve import serve_state
 from sky.serve import serve_utils
+from sky.server.requests import request_names
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import admin_policy_utils
@@ -152,15 +153,22 @@ def up(
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
-    dag, mutated_user_config = admin_policy_utils.apply(dag)
+    dag, mutated_user_config = admin_policy_utils.apply(
+        dag, request_name=request_names.AdminPolicyRequestName.SERVE_UP)
     dag.resolve_and_validate_volumes()
     dag.pre_mount_volumes()
     task = dag.tasks[0]
     assert task.service is not None
     if pool:
+        # Prevent pool creation from having a run section. Allowing this would
+        # not cause any issues, but we want to provide a consistent experience
+        # to the user by making it clear that 'setup' runs during creation
+        # and 'run' runs during job submission.
         if task.run is not None:
-            logger.warning(f'{colorama.Fore.YELLOW}The `run` section will be '
-                           f'ignored for pool.{colorama.Style.RESET_ALL}')
+            raise ValueError(
+                'Pool creation does not support the `run` section. '
+                'During creation the goal is to setup the '
+                'environment the jobs will run in.')
         # Use dummy run script for cluster pool.
         task.run = serve_constants.POOL_DUMMY_RUN_COMMAND
 
@@ -277,6 +285,8 @@ def up(
                         task=controller_task,
                         cluster_name=controller_name,
                         retry_until_up=True,
+                        _request_name=request_names.AdminPolicyRequestName.
+                        SERVE_LAUNCH_CONTROLLER,
                         _disable_controller_check=True,
                     )
         else:
@@ -532,6 +542,12 @@ def update(
                                    f'existing {noun} {service_name!r}')
         task.set_service(task.service.copy(min_replicas=workers))
 
+        # Clear the run section for pools before validation, since pool updates
+        # should only update the number of workers, not the run command. But
+        # the run command will have bee set to a dummy command during creation.
+        if pool:
+            task.run = None
+
     task.validate()
     serve_utils.validate_service_task(task, pool=pool)
 
@@ -541,12 +557,18 @@ def update(
     # and get the mutated config.
     # TODO(cblmemo,zhwu): If a user sets a new skypilot_config, the update
     # will not apply the config.
-    dag, _ = admin_policy_utils.apply(task)
+    dag, _ = admin_policy_utils.apply(
+        task, request_name=request_names.AdminPolicyRequestName.SERVE_UPDATE)
     task = dag.tasks[0]
     if pool:
+        # Prevent pool creation from having a run section. Allowing this would
+        # not cause any issues, but we want to provide a consistent experience
+        # to the user by making it clear that 'setup' runs during creation
+        # and 'run' runs during job submission.
         if task.run is not None:
-            logger.warning(f'{colorama.Fore.YELLOW}The `run` section will be '
-                           f'ignored for pool.{colorama.Style.RESET_ALL}')
+            raise ValueError('Pool update does not support the `run` section. '
+                             'During update the goal is to setup the '
+                             'environment the jobs will run in.')
         # Use dummy run script for cluster pool.
         task.run = serve_constants.POOL_DUMMY_RUN_COMMAND
 

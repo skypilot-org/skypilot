@@ -223,8 +223,8 @@ export function InfrastructureSection({
                       // Get workspace information for this context
                       const workspaces = contextWorkspaceMap[context] || [];
                       const workspaceDisplay =
-                        workspaces.length > 0
-                          ? ` (${workspaces.join(', ')})`
+                        workspaces.length > 1
+                          ? ` (workspaces: ${workspaces.join(', ')})`
                           : '';
 
                       return (
@@ -2004,6 +2004,51 @@ export function GPUs() {
     [selectedWorkspace, contextWorkspaceMap]
   );
 
+  // Get enabled clouds for the selected workspace
+  const workspaceEnabledClouds = React.useMemo(() => {
+    if (selectedWorkspace === 'all') {
+      // Return all unique clouds across all workspaces
+      const allCloudsSet = new Set();
+      Object.values(workspaceInfrastructure).forEach((wsData) => {
+        if (wsData.clouds && Array.isArray(wsData.clouds)) {
+          wsData.clouds.forEach((cloud) => {
+            // Extract base cloud name (e.g., 'aws' from 'aws', 'kubernetes' from 'kubernetes/context')
+            const baseCloud = cloud.toLowerCase().split('/')[0];
+            allCloudsSet.add(baseCloud);
+          });
+        }
+      });
+      return Array.from(allCloudsSet);
+    } else {
+      // Return clouds for the selected workspace only
+      const wsData = workspaceInfrastructure[selectedWorkspace];
+      if (!wsData || !wsData.clouds || !Array.isArray(wsData.clouds)) {
+        return [];
+      }
+      const cloudsSet = new Set();
+      wsData.clouds.forEach((cloud) => {
+        const baseCloud = cloud.toLowerCase().split('/')[0];
+        cloudsSet.add(baseCloud);
+      });
+      return Array.from(cloudsSet);
+    }
+  }, [selectedWorkspace, workspaceInfrastructure]);
+
+  // Filter cloud infrastructure data based on selected workspace
+  const filteredCloudInfraData = React.useMemo(() => {
+    if (!cloudInfraData || cloudInfraData.length === 0) {
+      return [];
+    }
+    return cloudInfraData.filter((cloud) => {
+      return workspaceEnabledClouds.includes(cloud.name.toLowerCase());
+    });
+  }, [cloudInfraData, workspaceEnabledClouds]);
+
+  // Calculate enabled clouds count for the selected workspace
+  const filteredEnabledCloudsCount = React.useMemo(() => {
+    return filteredCloudInfraData.length;
+  }, [filteredCloudInfraData]);
+
   // Separate SSH contexts from Kubernetes contexts using allKubeContextNames
   const sshContexts = React.useMemo(() => {
     if (!allKubeContextNames || !Array.isArray(allKubeContextNames)) {
@@ -2165,12 +2210,14 @@ export function GPUs() {
           <div className="flex items-center mb-4">
             <h3 className="text-lg font-semibold">Cloud</h3>
             <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
-              {enabledClouds} of {totalClouds} enabled
+              {filteredEnabledCloudsCount} of {totalClouds} enabled
             </span>
           </div>
-          {!cloudInfraData || cloudInfraData.length === 0 ? (
+          {!filteredCloudInfraData || filteredCloudInfraData.length === 0 ? (
             <p className="text-sm text-gray-500">
-              No enabled clouds available.
+              {selectedWorkspace === 'all'
+                ? 'No enabled clouds available.'
+                : `No enabled clouds for workspace "${selectedWorkspace}".`}
             </p>
           ) : (
             <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
@@ -2189,7 +2236,7 @@ export function GPUs() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {cloudInfraData.map((cloud) => {
+                  {filteredCloudInfraData.map((cloud) => {
                     // Check if cloud data is complete
                     const hasCompleteData =
                       cloudDataLoaded &&

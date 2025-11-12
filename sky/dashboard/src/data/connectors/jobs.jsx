@@ -73,7 +73,16 @@ export async function getManagedJobs(options = {}) {
     }
 
     const response = await apiClient.post(`/jobs/queue/v2`, body);
+    if (!response.ok) {
+      const msg = `Failed to get managed jobs with status ${response.status}`;
+      throw new Error(msg);
+    }
     const id = response.headers.get('X-Skypilot-Request-ID');
+    // Handle empty request ID
+    if (!id) {
+      const msg = 'No request ID received from server for managed jobs';
+      throw new Error(msg);
+    }
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
     if (fetchedData.status === 500) {
       try {
@@ -92,13 +101,11 @@ export async function getManagedJobs(options = {}) {
       } catch (parseError) {
         console.error('Error parsing JSON:', parseError);
       }
-      // For non-CLUSTER_NOT_UP 500 errors, signal cache to skip update
-      return {
-        __skipCache: true,
-        jobs: [],
-        total: 0,
-        controllerStopped: false,
-      };
+    }
+    // Handle all error status codes (4xx, 5xx, etc.)
+    if (!fetchedData.ok) {
+      const msg = `API request to get managed jobs result failed with status ${fetchedData.status}`;
+      throw new Error(msg);
     }
     // print out the response for debugging
     const data = await fetchedData.json();
@@ -153,7 +160,7 @@ export async function getManagedJobs(options = {}) {
         if (cloud) {
           infra = cloud;
           if (region) {
-            infra += `/${region}`;
+            infra += ` (${region})`;
           }
         }
 
@@ -215,14 +222,7 @@ export async function getManagedJobs(options = {}) {
   } catch (error) {
     console.error('Error fetching managed job data:', error);
     // Signal to the cache to not overwrite previously cached data
-    return {
-      __skipCache: true,
-      jobs: [],
-      total: 0,
-      totalNoFilter: 0,
-      controllerStopped: false,
-      statusCounts: {},
-    };
+    throw error;
   }
 }
 
@@ -301,8 +301,7 @@ export async function getManagedJobsWithClientPagination(options) {
       'Error fetching managed job data with client pagination:',
       error
     );
-    // Signal to the cache to not overwrite previously cached data
-    return { __skipCache: true, jobs: [], controllerStopped: false, total: 0 };
+    throw error;
   }
 }
 
@@ -311,7 +310,15 @@ export async function getPoolStatus() {
     const response = await apiClient.post(`/jobs/pool_status`, {
       pool_names: null, // null means get all pools
     });
+    if (!response.ok) {
+      const msg = `Initial API request to get pool status failed with status ${response.status}`;
+      throw new Error(msg);
+    }
     const id = response.headers.get('X-Skypilot-Request-ID');
+    if (!id) {
+      const msg = 'No request ID received from server for getting pool status';
+      throw new Error(msg);
+    }
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
 
     if (fetchedData.status === 500) {
@@ -330,7 +337,11 @@ export async function getPoolStatus() {
       } catch (dataError) {
         console.error('Failed to parse response JSON:', dataError);
       }
-      throw new Error('Server error');
+    }
+
+    if (!fetchedData.ok) {
+      const msg = `API request to get pool status result failed with status ${fetchedData.status}`;
+      throw new Error(msg);
     }
 
     // Parse the pools data from the response
@@ -575,7 +586,12 @@ export async function handleJobAction(action, jobId, cluster) {
       logStarter = 'Restarting';
       logMiddle = 'restarted';
       apiPath = 'jobs/queue/v2';
-      requestBody = { all_users: true, refresh: true };
+      requestBody = {
+        all_users: true,
+        refresh: true,
+        skip_finished: true,
+        fields: ['status'],
+      };
       jobId = 'controller';
       break;
     default:
@@ -597,8 +613,26 @@ export async function handleJobAction(action, jobId, cluster) {
         },
         body: JSON.stringify(requestBody),
       });
+      if (!response.ok) {
+        console.error(
+          `Initial API request ${apiPath} failed with status ${response.status}`
+        );
+        showToast(
+          `${logStarter} job ${jobId} failed with status ${response.status}.`,
+          'error'
+        );
+        return;
+      }
 
       const id = response.headers.get('X-Skypilot-Request-ID');
+      if (!id) {
+        console.error(`No request ID received from server for ${apiPath}`);
+        showToast(
+          `${logStarter} job ${jobId} failed with no request ID.`,
+          'error'
+        );
+        return;
+      }
       const finalResponse = await fetch(
         `${fullEndpoint}/api/get?request_id=${id}`
       );

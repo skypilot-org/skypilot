@@ -121,6 +121,17 @@ export const updateFiltersByURLParams = (router, propertyMap) => {
   return filters;
 };
 
+// Helper function to build a URL with a filter for a specific property
+export const buildFilterUrl = (basePath, property, operator, value) => {
+  if (!value) return basePath;
+  const params = new URLSearchParams({
+    property: property.toLowerCase(),
+    operator: operator,
+    value: value,
+  });
+  return `${basePath}?${params.toString()}`;
+};
+
 export const FilterDropdown = ({
   propertyList = [],
   valueList,

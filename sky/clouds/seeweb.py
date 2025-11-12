@@ -84,7 +84,9 @@ class Seeweb(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
@@ -108,6 +110,7 @@ class Seeweb(clouds.Cloud):
         use_spot: bool,
         region: Optional[str],
         zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None,
     ) -> List[clouds.Region]:
         assert zone is None, 'Seeweb does not support zones.'
         del zone

@@ -712,7 +712,7 @@ def test_helm_deploy_eks(request):
             f'bash tests/kubernetes/scripts/helm_upgrade.sh {package_name} {helm_version} aws',
         ],
         # EKS termination requires longer timeout.
-        timeout=50 * 60)
+        timeout=90 * 60)
     smoke_tests_utils.run_one_test(test)
 
 
