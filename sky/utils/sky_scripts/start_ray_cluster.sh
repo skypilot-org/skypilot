@@ -6,7 +6,24 @@
 # This allows users to run their own Ray applications independently of
 # SkyPilot's internal Ray cluster.
 #
+# Environment Variables:
+#   RAY_HEAD_PORT=6379                     - Ray head node port
+#   RAY_DASHBOARD_PORT=8265                - Ray dashboard port
+#   RAY_DASHBOARD_HOST=127.0.0.1           - Dashboard host (set to 0.0.0.0 to expose externally)
+#   RAY_DASHBOARD_AGENT_LISTEN_PORT=       - (Optional) Dashboard agent listen port
+#   RAY_NODE_IP_ADDRESS=                   - (Optional) Node IP address
+#   RAY_CMD_PREFIX=                        - (Optional) Command prefix (e.g., "uv run")
+#
 # Usage:
+#   ~/skypilot_scripts/start_ray_cluster.sh
+#
+#   # With custom configurations
+#   export RAY_DASHBOARD_HOST=0.0.0.0
+#   export RAY_DASHBOARD_PORT=8280
+#   ~/skypilot_scripts/start_ray_cluster.sh
+#
+#   # With uv
+#   export RAY_CMD_PREFIX="uv run"
 #   ~/skypilot_scripts/start_ray_cluster.sh
 
 set -e
@@ -16,6 +33,13 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
+
+RAY_HEAD_PORT=${RAY_HEAD_PORT:-6379}
+RAY_DASHBOARD_PORT=${RAY_DASHBOARD_PORT:-8265}
+RAY_DASHBOARD_HOST=${RAY_DASHBOARD_HOST:-127.0.0.1}
+RAY_DASHBOARD_AGENT_LISTEN_PORT=${RAY_DASHBOARD_AGENT_LISTEN_PORT:-}
+RAY_NODE_IP_ADDRESS=${RAY_NODE_IP_ADDRESS:-}
+RAY_CMD_PREFIX=${RAY_CMD_PREFIX:-}  # Optional command prefix (e.g., "uv run")
 
 echo -e "${GREEN}Starting Ray cluster...${NC}"
 
@@ -30,16 +54,16 @@ if ! command -v ray &> /dev/null; then
     echo -e "${GREEN}Ray $(ray --version | cut -d' ' -f3) installed successfully.${NC}"
 fi
 
-RAY_ADDRESS="127.0.0.1:6379"
+RAY_ADDRESS="127.0.0.1:${RAY_HEAD_PORT}"
 if [ "$SKYPILOT_NODE_RANK" -ne 0 ]; then
     HEAD_IP=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
-    RAY_ADDRESS="${HEAD_IP}:6379"
+    RAY_ADDRESS="${HEAD_IP}:${RAY_HEAD_PORT}"
 fi
 
-# Check if user-space Ray is already running (port 6379)
-if ray status --address="${RAY_ADDRESS}" &> /dev/null; then
+# Check if user-space Ray is already running
+if ${RAY_CMD_PREFIX} ray status --address="${RAY_ADDRESS}" &> /dev/null; then
     echo -e "${YELLOW}Ray cluster is already running.${NC}"
-    ray status --address="${RAY_ADDRESS}"
+    ${RAY_CMD_PREFIX} ray status --address="${RAY_ADDRESS}"
     exit 0
 fi
 
@@ -48,14 +72,29 @@ TIMEOUT=300
 if [ "$SKYPILOT_NODE_RANK" -eq 0 ]; then
     echo -e "${GREEN}Starting Ray head node...${NC}"
 
-    ray start --head \
-        --port=6379 \
+    RAY_START_CMD="ray start --head \
+        --port=${RAY_HEAD_PORT} \
+        --dashboard-port=${RAY_DASHBOARD_PORT} \
+        --dashboard-host=${RAY_DASHBOARD_HOST} \
+        --num-gpus=${SKYPILOT_NUM_GPUS_PER_NODE} \
         --disable-usage-stats \
-        --include-dashboard=True
+        --include-dashboard=True"
+
+    # Add optional dashboard agent listen port if specified
+    if [ -n "$RAY_DASHBOARD_AGENT_LISTEN_PORT" ]; then
+        RAY_START_CMD="$RAY_START_CMD --dashboard-agent-listen-port=${RAY_DASHBOARD_AGENT_LISTEN_PORT}"
+    fi
+
+    # Add optional node IP address if specified
+    if [ -n "$RAY_NODE_IP_ADDRESS" ]; then
+        RAY_START_CMD="$RAY_START_CMD --node-ip-address=${RAY_NODE_IP_ADDRESS}"
+    fi
+
+    ${RAY_CMD_PREFIX} eval "$RAY_START_CMD"
 
 
     start_time=$(date +%s)
-    while ! ray health-check --address="${RAY_ADDRESS}" &>/dev/null; do
+    while ! ${RAY_CMD_PREFIX} ray health-check --address="${RAY_ADDRESS}" &>/dev/null; do
         if [ "$(( $(date +%s) - start_time ))" -ge "$TIMEOUT" ]; then
             echo -e "${RED}Timed out waiting for head node. Exiting.${NC}" >&2
             exit 1
@@ -75,7 +114,7 @@ if [ "$SKYPILOT_NODE_RANK" -eq 0 ]; then
                 echo -e "${RED}Error: Timeout waiting for nodes.${NC}" >&2
                 exit 1
             fi
-            ready_nodes=$(ray list nodes --format=json | python3 -c "import sys, json; print(len(json.load(sys.stdin)))")
+            ready_nodes=$(${RAY_CMD_PREFIX} ray list nodes --format=json | python3 -c "import sys, json; print(len(json.load(sys.stdin)))")
             if [ "$ready_nodes" -ge "$SKYPILOT_NUM_NODES" ]; then
                 break
             fi
@@ -92,7 +131,7 @@ else
 
     echo "Waiting for head node at ${RAY_ADDRESS}..."
     start_time=$(date +%s)
-    while ! ray health-check --address="${RAY_ADDRESS}" &>/dev/null; do
+    while ! ${RAY_CMD_PREFIX} ray health-check --address="${RAY_ADDRESS}" &>/dev/null; do
         if [ "$(( $(date +%s) - start_time ))" -ge "$TIMEOUT" ]; then
             echo -e "${RED}Timed out waiting for head node. Exiting.${NC}" >&2
             exit 1
@@ -102,8 +141,9 @@ else
     done
 
     echo -e "${GREEN}Head node is healthy. Starting worker node...${NC}"
-    ray start \
+    ${RAY_CMD_PREFIX} ray start \
         --address="${RAY_ADDRESS}" \
+        --num-gpus=${SKYPILOT_NUM_GPUS_PER_NODE} \
         --disable-usage-stats
 
     echo -e "${GREEN}Worker node started successfully.${NC}"
