@@ -1,6 +1,6 @@
 # Batch Text Classification with SkyPilot Managed Jobs Pool
 
-This example demonstrates how to use SkyPilot's **Managed Jobs Pool** feature for efficient offline batch inference. We'll classify sentiment from movie reviews using a pre-loaded LLM (Llama-3.1-8B-Instruct) running on vLLM.
+This example demonstrates how to use SkyPilot's **Managed Jobs Pool** feature for efficient offline batch inference. We'll classify sentiment from movie reviews using gpt-oss-20b running on vLLM.
 
 ## What is a Managed Jobs Pool?
 
@@ -8,61 +8,33 @@ A **pool** is a collection of pre-configured workers that can process multiple j
 
 - **Fast job execution**: Workers are pre-provisioned with models loaded
 - **No setup overhead**: Each job starts immediately without reinstalling dependencies or downloading models
-- **Cost-effective**: Reuse expensive GPU resources across many small jobs
-- **Simple parallelism**: Submit multiple jobs with a single command using `--num-jobs`
+- **Simple parallelism**: Submit multiple jobs with a single command using `--num-jobs`, limit concurrency to the number of workers in the pool (queueing is handled by SkyPilot)
 
-## Example Overview
+## Using Pools for Batch Inference
 
 This example:
-1. Creates a pool of 3 workers with Llama-3.1-8B-Instruct pre-downloaded
-2. Submits 10 classification jobs that process 5,000 IMDB movie reviews in parallel
-3. Each job uses vLLM's Python SDK to classify ~500 reviews in batches
+1. Creates a pool of workers with gpt-oss-20b pre-downloaded
+2. Submits 10 classification jobs that process the IMDB movie reviews dataset in parallel
+3. Each job uses vLLM's Python SDK to classify reviews in batches
 4. Results are saved to a cloud storage bucket with predictions, ground truth labels, and accuracy metrics
-
-**Expected time**: ~10-15 minutes (including pool setup)  
-**Expected cost**: ~$0.50-$1.00 (using spot L4 instances)
-
-## Prerequisites
-
-1. **Install SkyPilot nightly** (pools are in alpha):
-   ```bash
-   pip install -U skypilot-nightly[aws]  # or [gcp], [azure], etc.
-   ```
-
-2. **Configure cloud credentials**:
-   ```bash
-   sky check
-   ```
-
-3. **Verify GPU access**: Ensure you have quota for L4 GPUs (or modify `pool.yaml` to use T4/A10G)
-
-## Quick Start
 
 ### Step 1: Create the Pool
 
-Create a pool named `text-classify` with 3 workers:
+Create a pool named `text-classify` with 2 workers:
 
 ```bash
 sky jobs pool apply -p text-classify pool.yaml
 ```
 
 This will:
-- Launch 3 workers with L4 GPUs
+- Launch 2 workers with H200 GPUs
 - Install vLLM and dependencies on each worker
-- Download and cache Llama-3.1-8B-Instruct (~16GB)
-
-**Note**: Pool creation takes ~5-10 minutes. You can submit jobs immediately - they'll wait in PENDING state until workers are ready.
+- Mount the S3 bucket `sky-batch-inference-results` at `/results`
+- Download and cache gpt-oss-20b
 
 Check pool status:
 ```bash
 sky jobs pool status text-classify
-```
-
-Expected output:
-```
-Pool: text-classify
-Workers: 3/3 ready
-Status: RUNNING
 ```
 
 ### Step 2: Submit Classification Jobs

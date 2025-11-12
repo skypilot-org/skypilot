@@ -16,8 +16,7 @@ file_mounts:
     mode: MOUNT
 
 resources:
-  accelerators: H200:1
-  infra: k8s
+  accelerators: H100:1
   disk_size: 100
 
 setup: |
