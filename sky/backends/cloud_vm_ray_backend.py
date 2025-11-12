@@ -3224,7 +3224,7 @@ class SkyletClient:
     ) -> 'autostopv1_pb2.IsAutostoppingResponse':
         return self._autostop_stub.IsAutostopping(request, timeout=timeout)
 
-    def add_job(
+    def add_jobs(
         self,
         request: 'jobsv1_pb2.AddJobRequest',
         timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
@@ -4470,7 +4470,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 ux_utils.starting_message(f'Job submitted, ID: {job_id}'))
         rich_utils.stop_safe_status()
 
-    def add_job(self,
+    def add_jobs(self,
                 handle: CloudVmRayResourceHandle,
                 job_name: Optional[str],
                 resources_str: str,
@@ -4480,7 +4480,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         if not use_legacy:
             try:
-                # TODO (lloyd): How can we support the old grpc version?
                 request = jobsv1_pb2.AddJobRequest(
                     job_name=job_name,
                     username=common_utils.get_user_hash(),
@@ -4489,7 +4488,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     metadata=metadata,
                     num_jobs=num_jobs)
                 response = backend_utils.invoke_skylet_with_retries(
-                    lambda: SkyletClient(handle.get_grpc_channel()).add_job(
+                    lambda: SkyletClient(handle.get_grpc_channel()).add_jobs(
                         request))
 
                 if response.HasField('job_ids'):
@@ -4498,6 +4497,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     return job_ids, log_dirs
                 else:
                     # Old server version.
+                    # TODO(lloyd): Remove in version 0.13.0.
                     job_ids = [response.job_id]
                     log_dirs = [response.log_dir]
                     # Now we need to do this (num_jobs - 1) times to get the
@@ -4505,7 +4505,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     for _ in range(num_jobs - 1):
                         response = backend_utils.invoke_skylet_with_retries(
                             lambda: SkyletClient(handle.get_grpc_channel()
-                                                ).add_job(request))
+                                                ).add_jobs(request))
                         job_ids.append(response.job_id)
                         log_dirs.append(response.log_dir)
                     return job_ids, log_dirs
@@ -4513,7 +4513,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 use_legacy = True
 
         if use_legacy:
-            code = job_lib.JobLibCodeGen.add_job(
+            code = job_lib.JobLibCodeGen.add_jobs(
                 job_name=job_name,
                 username=common_utils.get_user_hash(),
                 run_timestamp=self.run_timestamp,
@@ -4606,7 +4606,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.info(f'Dryrun complete. Would have run:\n{task}')
             return None
 
-        job_ids, log_dirs = self.add_job(handle, task_copy.name, resources_str,
+        job_ids, log_dirs = self.add_jobs(handle, task_copy.name, resources_str,
                                          task.metadata_json)
         job_id = job_ids[0]
         log_dir = log_dirs[0]

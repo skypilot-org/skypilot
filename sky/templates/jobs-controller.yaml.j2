@@ -3,13 +3,8 @@
 name: {{dag_name}}
 
 file_mounts:
-  {%- if pre_created_job_ids is defined and pre_created_job_ids is not none %}
   {{remote_original_user_yaml_path}}: {{original_user_dag_path}}
   {{remote_user_yaml_path}}: {{user_yaml_path}}
-  {%- else %}
-  {{remote_original_user_yaml_path}}: {{original_user_dag_path}}
-  {{remote_user_yaml_path}}: {{user_yaml_path}}
-  {%- endif %}
   {%- if local_user_config_path is not none %}
   {{remote_user_config_path}}: {{local_user_config_path}}
   {%- endif %}
@@ -45,7 +40,7 @@ setup: |
   touch {{job_controller_indicator_file}}
 
 run: |
-  {%- if consolidation_mode_job_ids is none %}
+  {%- if not is_consolidation_mode %}
   {{ sky_activate_python_env }}
   {%- endif %}
 
@@ -56,13 +51,13 @@ run: |
 
   {%- if job_id_to_rank is defined and job_id_to_rank is not none %}
   # Write job_id_to_rank mapping to env file for rank lookup
-  {%- if consolidation_mode_job_ids is defined and consolidation_mode_job_ids is not none %}
+  {%- if is_consolidation_mode %}
   # For consolidation mode, job_id_to_rank is already fully set with all job IDs
   export _TMP_JOB_ID_TO_RANK='{{job_id_to_rank | tojson}}'
   python3 -c "import json, os, sys; d=json.loads(os.environ['_TMP_JOB_ID_TO_RANK']); sys.stdout.write('export SKYPILOT_JOB_ID_TO_RANK='); json.dump(d, sys.stdout); sys.stdout.write('\n')" >> {{remote_env_file_path}} 2>&1
   unset _TMP_JOB_ID_TO_RANK
   {%- else %}
-  # For pre_created_job_ids mode, add the controller task's ray job ID to the
+  # For non-consolidation mode with pre-created job IDs, add the controller task's ray job ID to the
   # job_id_to_rank dictionary. The last rank is num_jobs - 1
   if [ -n "$SKYPILOT_INTERNAL_JOB_ID" ]; then
     export _TMP_JOB_ID_TO_RANK='{{job_id_to_rank | tojson}}'
@@ -78,15 +73,15 @@ run: |
   # Note: The job is already in the `spot` table, marked as PENDING.
   # CloudVmRayBackend._exec_code_on_head() calls
   # managed_job_codegen.set_pending() before we get here.
-  {%- if pre_created_job_ids is defined and pre_created_job_ids is not none %}
-  # Batch submission: loop through pre-created job IDs and append the controller
-  # task's ray job ID ($SKYPILOT_INTERNAL_JOB_ID) as the last job ID
-  job_ids_array=({% for job_id in pre_created_job_ids %}{{job_id}} {% endfor %}$SKYPILOT_INTERNAL_JOB_ID)
-  {%- elif consolidation_mode_job_ids is defined and consolidation_mode_job_ids is not none %}
-  # Consolidation mode batch submission: loop through all consolidation mode job IDs
-  job_ids_array=({% for job_id in consolidation_mode_job_ids %}{{job_id}} {% endfor %})
+  {%- if job_ids is defined and job_ids is not none %}
+  # Batch submission: loop through job IDs
+  {%- if is_consolidation_mode %}
+  # For consolidation mode, use all job IDs directly
+  job_ids_array=({% for job_id in job_ids %}{{job_id}} {% endfor %})
+  {%- else %}
+  # For non-consolidation mode, append the controller task's ray job ID ($SKYPILOT_INTERNAL_JOB_ID) as the last job ID
+  job_ids_array=({% for job_id in job_ids %}{{job_id}} {% endfor %}$SKYPILOT_INTERNAL_JOB_ID)
   {%- endif %}
-  {%- if (pre_created_job_ids is defined and pre_created_job_ids is not none) or (consolidation_mode_job_ids is defined and consolidation_mode_job_ids is not none) %}
   for job_id in "${job_ids_array[@]}"; do
     python \
       -u -m sky.jobs.scheduler {{remote_user_yaml_path}} \

@@ -358,18 +358,16 @@ def launch(
     # need to serialize the pool name in the dag. The dag object will be
     # preserved. See sky/admin_policy.py::MutatedUserRequest::decode.
     dag.pool = pool
-    consolidation_mode_job_ids = _maybe_submit_job_locally(
+    job_ids = _maybe_submit_job_locally(
         prefix, dag, num_jobs)
+    is_consolidation_mode = job_ids is not None
 
     # This is only needed for non-consolidation mode. For consolidation
     # mode, the controller uses the same catalog as API server.
-    modified_catalogs = {} if consolidation_mode_job_ids is not None else (
+    modified_catalogs = {} if is_consolidation_mode else (
         service_catalog_common.get_modified_catalog_file_mounts())
 
-    # For pools with num_jobs > 1, create job IDs upfront with one task.
-    pre_created_job_ids: Optional[List[int]] = None
-    if (pool is not None and num_jobs > 1 and
-            consolidation_mode_job_ids is None):
+    if (pool is not None and num_jobs > 1 and not is_consolidation_mode):
         with rich_utils.safe_status(
                 ux_utils.spinner_message('Creating job IDs')):
             # Get controller handle to create job IDs upfront
@@ -384,26 +382,48 @@ def launch(
                 resources_str = backend_utils.get_task_resources_str(
                     dag.tasks[0], is_managed_job=True)
                 job_name = dag.name
-                result = backend.add_job(handle=local_handle,
+                result = backend.add_jobs(handle=local_handle,
                                          job_name=job_name,
                                          resources_str=resources_str,
                                          metadata=dag.tasks[0].metadata_json,
                                          num_jobs=num_jobs - 1)
-                pre_created_job_ids = result[0]
+                job_ids = result[0]
                 logger.debug(
-                    f'Created {len(pre_created_job_ids) + 1} job IDs upfront: '
-                    f'{pre_created_job_ids} (will use controller task ray job '
+                    f'Created {len(job_ids) + 1} job IDs upfront: '
+                    f'{job_ids} (will use controller task ray job '
                     f'ID as the {num_jobs}th job).')
             except exceptions.ClusterNotUpError:
                 # Controller not up yet, will create job IDs during submission
                 pre_created_job_ids = None
 
-    def _submit_one(
-        consolidation_mode_job_ids: Optional[List[int]] = None,
-        job_rank: Optional[int] = None,
+    def _job_ids_to_str(job_ids: Optional[List[int]]) -> str:
+        if not job_ids:
+            return ""
+        
+        if len(job_ids) == 1:
+            return str(job_ids[0])
+
+        job_ids = sorted(job_ids)
+        ranges = []
+        start = prev = job_ids[0]
+
+        for n in job_ids[1:]:
+            if n == prev + 1:
+                prev = n
+                continue
+            ranges.append(f"{start}-{prev}" if start != prev else str(start))
+            start = prev = n
+
+        # append last range
+        ranges.append(f"{start}-{prev}" if start != prev else str(start))
+        return ",".join(ranges)
+
+
+    def _submit_many(
+        job_ids: Optional[List[int]] = None,
         num_jobs: Optional[int] = None,
-        pre_created_job_ids: Optional[List[int]] = None,
-    ) -> Tuple[Optional[Union[int, List[int]]],
+        is_consolidation_mode: bool = False,
+    ) -> Tuple[Optional[List[int]],
                Optional[backends.ResourceHandle]]:
         # Create a single set of YAML files (not per-rank)
         remote_orig_user_yaml_path = (
@@ -425,11 +445,10 @@ def launch(
 
             # Create a single DAG copy (rank-specific env vars will be set
             # by the scheduler on the controller)
-            dag_copy = copy.deepcopy(dag)
             if num_jobs:
-                for task_ in dag_copy.tasks:
+                for task_ in dag.tasks:
                     task_.update_envs({'SKYPILOT_NUM_JOBS': str(num_jobs)})
-            dag_utils.dump_chain_dag_to_yaml(dag_copy, f.name)
+            dag_utils.dump_chain_dag_to_yaml(dag, f.name)
 
             vars_to_fill = {
                 'remote_original_user_yaml_path': remote_orig_user_yaml_path,
@@ -444,60 +463,47 @@ def launch(
                 'remote_env_file_path': remote_env_file_path,
                 'modified_catalogs': modified_catalogs,
                 'priority': priority,
-                'consolidation_mode_job_ids': consolidation_mode_job_ids,
+                'is_consolidation_mode': is_consolidation_mode,
                 'pool': pool,
                 'job_controller_indicator_file':
                     managed_job_constants.JOB_CONTROLLER_INDICATOR_FILE,
-                'pre_created_job_ids': pre_created_job_ids,
                 'num_jobs': num_jobs,
                 **controller_utils.shared_controller_vars_to_fill(
                     controller,
                     remote_user_config_path=remote_user_config_path,
+                    # TODO(aylei): the mutated config will not be updated
+                    # afterwards without recreate the controller. Need to
+                    # revisit this.
                     local_user_config=mutated_user_config,
                 ),
             }
 
-            if pre_created_job_ids is not None:
-                vars_to_fill['pre_created_job_ids'] = pre_created_job_ids
+            yaml_path = os.path.join(
+                managed_job_constants.JOBS_CONTROLLER_YAML_PREFIX,
+                f'{name}-{dag_uuid}.yaml')
+            job_controller_postfix = (' from jobs controller'
+                                          if not is_consolidation_mode
+                                          else '')
+            managed_jobs_str = f"managed job"
+            if job_ids is not None:
+                vars_to_fill['job_ids'] = job_ids
                 # Create job_id_to_rank dictionary by sorting job IDs and
                 # assigning ranks. The last job ID (controller task's ray
-                # job ID) will be added in the template
-                sorted_job_ids = sorted(pre_created_job_ids)
+                # job ID) will be added in the template for non-consolidation mode
+                sorted_job_ids = sorted(job_ids)
                 job_id_to_rank = {
                     str(job_id): rank
                     for rank, job_id in enumerate(sorted_job_ids)
                 }
                 vars_to_fill['job_id_to_rank'] = job_id_to_rank
-                yaml_path = os.path.join(
-                    managed_job_constants.JOBS_CONTROLLER_YAML_PREFIX,
-                    f'{name}-{dag_uuid}-multi.yaml')
-                logger.info(
-                    f'{colorama.Fore.YELLOW}'
-                    f'Launching {num_jobs} managed jobs {dag.name!r} '
-                    f'with IDs {pre_created_job_ids} from jobs controller...'
-                    f'{colorama.Style.RESET_ALL}')
-            else:
-                if consolidation_mode_job_ids is not None:
-                    sorted_job_ids = sorted(consolidation_mode_job_ids)
-                    job_id_to_rank = {
-                        str(job_id): rank
-                        for rank, job_id in enumerate(sorted_job_ids)
-                    }
-                    vars_to_fill['job_id_to_rank'] = job_id_to_rank
-                yaml_path = os.path.join(
-                    managed_job_constants.JOBS_CONTROLLER_YAML_PREFIX,
-                    f'{name}-{dag_uuid}.yaml')
-
-                job_identity = ''
-                if job_rank is not None:
-                    job_identity = f' (rank: {job_rank})'
-                job_controller_postfix = (' from jobs controller'
-                                          if consolidation_mode_job_ids is None
-                                          else '')
-                logger.info(
-                    f'{colorama.Fore.YELLOW}'
-                    f'Launching managed job {dag.name!r}{job_identity}'
-                    f'{job_controller_postfix}...{colorama.Style.RESET_ALL}')
+                if num_jobs > 1:
+                    managed_jobs_str = (
+                        f"{num_jobs} managed jobs {_job_ids_to_str(job_ids)}"
+                    )
+            logger.info(
+                f'{colorama.Fore.YELLOW}'
+                f'Launching {managed_jobs_str} {dag.name!r}'
+                f'{job_controller_postfix}...{colorama.Style.RESET_ALL}')
 
             common_utils.fill_template(
                 managed_job_constants.JOBS_CONTROLLER_TEMPLATE,
@@ -505,45 +511,23 @@ def launch(
                 output_path=yaml_path)
             controller_task = task_lib.Task.from_yaml(yaml_path)
             controller_task.set_resources(controller_resources)
-            controller_task.managed_job_dag = dag_copy
+            controller_task.managed_job_dag = dag
             # pylint: disable=protected-access
             controller_task._metadata = metadata
 
+            # Launch with the api server's user hash, so that sky status does
+            # not show the owner of the controller as whatever user launched
+            # it first.
             with common.with_server_user():
+                # Always launch the controller in the default workspace.
                 with skypilot_config.local_active_workspace_ctx(
                         skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):
-                    if consolidation_mode_job_ids is None:
-                        result = execution.launch(
-                            task=controller_task,
-                            cluster_name=controller_name,
-                            stream_logs=stream_logs,
-                            retry_until_up=True,
-                            fast=True,
-                            _request_name=request_names.AdminPolicyRequestName.
-                            JOBS_LAUNCH_CONTROLLER,
-                            _disable_controller_check=True)
-                        if pre_created_job_ids is not None:
-                            # Get the ray job ID from the controller task launch
-                            controller_ray_job_id = (result[0] if isinstance(
-                                result, tuple) else None)
-                            assert controller_ray_job_id is not None, (
-                                'Failed '
-                                'to get ray job ID from controller task launch.'
-                            )
-
-                            # Append the controller task's ray job ID since it
-                            # is one of the jobs that we are launching.
-                            all_job_ids = (pre_created_job_ids +
-                                           [controller_ray_job_id])
-
-                            # Return the complete list of job IDs and handle
-                            if isinstance(result, tuple):
-                                return all_job_ids, result[1]
-                            else:
-                                return all_job_ids, None
-                        else:
-                            return result
-                    else:
+                    # TODO(zhwu): the buckets need to be correctly handled for
+                    # a specific workspace. For example, if a job is launched in
+                    # workspace A, but the controller is in workspace B, the
+                    # intermediate bucket and newly created bucket should be in
+                    # workspace A.
+                    if is_consolidation_mode:
                         local_handle = backend_utils.is_controller_accessible(
                             controller=controller, stopped_message='')
                         backend = backend_utils.get_backend_from_handle(
@@ -566,28 +550,63 @@ def launch(
                         ]
                         run_script = '\n'.join(env_cmds + [run_script])
                         # Dump script for high availability recovery.
-                        for job_id in consolidation_mode_job_ids:
+                        for job_id in job_ids:
                             managed_job_state.set_ha_recovery_script(
                                 job_id, run_script)
                         backend.run_on_head(local_handle, run_script)
                         ux_utils.starting_message(
-                            f'Job submitted, ID: {consolidation_mode_job_ids}')
-                        return consolidation_mode_job_ids, local_handle
+                            f'Job submitted, ID: {job_ids}')
+                        return job_ids, local_handle
+                    result = execution.launch(
+                        task=controller_task,
+                        cluster_name=controller_name,
+                        stream_logs=stream_logs,
+                        retry_until_up=True,
+                        fast=True,
+                        _request_name=request_names.AdminPolicyRequestName.
+                        JOBS_LAUNCH_CONTROLLER,
+                        _disable_controller_check=True)
+                    if job_ids is not None:
+                        # Get the ray job ID from the controller task launch
+                        controller_ray_job_id = result[0]
+                        assert controller_ray_job_id is not None, (
+                            'Failed '
+                            'to get ray job ID from controller task launch.'
+                        )
+
+                        # Append the controller task's ray job ID since it
+                        # is one of the jobs that we are launching.
+                        all_job_ids = (job_ids +
+                                        [controller_ray_job_id])
+
+                        # Return the complete list of job IDs and handle
+                        return all_job_ids, result[1]
+                    else:
+                        return [result[0]], result[1]
+
+    # Determine job_ids to pass to _submit_many
+    job_ids_to_submit: Optional[List[int]] = None
+    if is_consolidation_mode:
+        job_ids_to_submit = consolidation_mode_job_ids
+    elif pre_created_job_ids is not None:
+        job_ids_to_submit = pre_created_job_ids
 
     if pool is None:
-        if consolidation_mode_job_ids is None:
-            return _submit_one()
-        assert len(consolidation_mode_job_ids) == 1
-        return _submit_one(consolidation_mode_job_ids)
+        if not is_consolidation_mode:
+            return _submit_many()
+        assert job_ids_to_submit is not None
+        assert len(job_ids_to_submit) == 1
+        return _submit_many(job_ids=job_ids_to_submit,
+                           is_consolidation_mode=is_consolidation_mode)
 
     ids: List[int] = []
     all_handle: Optional[backends.ResourceHandle] = None
 
-    # If we have pre_created_job_ids, use single controller task
-    job_ids, handle = _submit_one(
-        consolidation_mode_job_ids=consolidation_mode_job_ids,
+    # If we have job_ids, use single controller task
+    job_ids, handle = _submit_many(
+        job_ids=job_ids_to_submit,
         num_jobs=num_jobs,
-        pre_created_job_ids=pre_created_job_ids)
+        is_consolidation_mode=is_consolidation_mode)
     if isinstance(job_ids, list):
         ids = job_ids
     else:
