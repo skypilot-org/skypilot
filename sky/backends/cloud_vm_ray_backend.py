@@ -4622,6 +4622,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 user identity.
             RuntimeError: If the cluster fails to be terminated/stopped.
         """
+        logger.debug(f'ROHANDEBUG: Teardown for {handle.cluster_name}')
         cluster_name = handle.cluster_name
         # Check if the cluster is owned by the current user. Raise
         # exceptions.ClusterOwnerIdentityMismatchError
@@ -4643,6 +4644,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 is_identity_mismatch_and_purge = True
             else:
                 raise
+        finally:
+            if e is not None:
+                logger.debug(
+                    f'ROHANDEBUG: CHECKED OWNER IDENTITY FINISHED WITH ERROR: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}')
+            else:
+                logger.debug(
+                    'ROHANDEBUG: CHECKED OWNER IDENTITY FINISHED WITHOUT ERROR')
+            logger.debug('ROHANDEBUG: CHECKED OWNER IDENTITY FINISHED')
         lock_id = backend_utils.cluster_status_lock_id(cluster_name)
         lock = locks.get_lock(lock_id, timeout=1)
         # Retry in case new cluster operation comes in and holds the lock
@@ -5203,6 +5213,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Raises:
             RuntimeError: If the cluster fails to be terminated/stopped.
         """
+        logger.debug(f'ROHANDEBUG: Teardown no lock for {handle.cluster_name}')
         try:
             handle.close_skylet_ssh_tunnel()
         except Exception as e:  # pylint: disable=broad-except
@@ -5234,6 +5245,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster_status_fetched = False
         if refresh_cluster_status:
             try:
+                logger.debug(f'ROHANDEBUG: Refreshing cluster'
+                             f'status for {handle.cluster_name}')
                 prev_cluster_status, _ = (
                     backend_utils.refresh_cluster_status_handle(
                         handle.cluster_name,
