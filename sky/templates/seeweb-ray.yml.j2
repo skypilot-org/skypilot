@@ -50,6 +50,7 @@ setup_commands:
     sudo apt update && sudo apt install -y patch || sudo yum install -y patch || true;
     {{ conda_installation_commands }}
     {{ ray_skypilot_installation_commands }}
+    {{ copy_skypilot_templates_commands }}
 
 head_start_ray_commands:
   - |

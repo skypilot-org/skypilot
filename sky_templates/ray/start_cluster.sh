@@ -15,16 +15,16 @@
 #   RAY_CMD_PREFIX=                        - (Optional) Command prefix (e.g., "uv run")
 #
 # Usage:
-#   ~/skypilot_scripts/start_ray_cluster.sh
+#   ~/skypilot_templates/ray/start_cluster.sh
 #
 #   # With custom configurations
 #   export RAY_DASHBOARD_HOST=0.0.0.0
 #   export RAY_DASHBOARD_PORT=8280
-#   ~/skypilot_scripts/start_ray_cluster.sh
+#   ~/skypilot_templates/ray/start_cluster.sh
 #
 #   # With uv
 #   export RAY_CMD_PREFIX="uv run"
-#   ~/skypilot_scripts/start_ray_cluster.sh
+#   ~/skypilot_templates/ray/start_cluster.sh
 
 set -e
 
@@ -76,9 +76,13 @@ if [ "$SKYPILOT_NODE_RANK" -eq 0 ]; then
         --port=${RAY_HEAD_PORT} \
         --dashboard-port=${RAY_DASHBOARD_PORT} \
         --dashboard-host=${RAY_DASHBOARD_HOST} \
-        --num-gpus=${SKYPILOT_NUM_GPUS_PER_NODE} \
         --disable-usage-stats \
         --include-dashboard=True"
+
+    # Add --num-gpus only if > 0
+    if [ "${SKYPILOT_NUM_GPUS_PER_NODE}" -gt 0 ]; then
+        RAY_START_CMD="$RAY_START_CMD --num-gpus=${SKYPILOT_NUM_GPUS_PER_NODE}"
+    fi
 
     # Add optional dashboard agent listen port if specified
     if [ -n "$RAY_DASHBOARD_AGENT_LISTEN_PORT" ]; then
@@ -141,10 +145,14 @@ else
     done
 
     echo -e "${GREEN}Head node is healthy. Starting worker node...${NC}"
-    ${RAY_CMD_PREFIX} ray start \
-        --address="${RAY_ADDRESS}" \
-        --num-gpus=${SKYPILOT_NUM_GPUS_PER_NODE} \
-        --disable-usage-stats
+    WORKER_CMD="ray start --address=${RAY_ADDRESS} --disable-usage-stats"
+
+    # Add --num-gpus only if > 0
+    if [ "${SKYPILOT_NUM_GPUS_PER_NODE}" -gt 0 ]; then
+        WORKER_CMD="$WORKER_CMD --num-gpus=${SKYPILOT_NUM_GPUS_PER_NODE}"
+    fi
+
+    ${RAY_CMD_PREFIX} eval "$WORKER_CMD"
 
     echo -e "${GREEN}Worker node started successfully.${NC}"
 

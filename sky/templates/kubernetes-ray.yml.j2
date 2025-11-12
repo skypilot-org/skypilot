@@ -449,6 +449,8 @@ available_node_types:
         - name: dshm
           emptyDir:
             medium: Memory
+        - name: skypilot-overlay
+          emptyDir: {}
         {% if k8s_fuse_device_required %}
         - name: fusermount-shared-dir
           hostPath:
@@ -814,7 +816,7 @@ available_node_types:
                   # e.g. fuse3 is not available on some distributions.
                   echo "Installing missing packages individually: $MISSING_PACKAGES";
                   for pkg in $MISSING_PACKAGES; do
-                    DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" $pkg || echo "Optional package $pkg installation failed, skip.";
+                    apt_update_install_with_retries $pkg || echo "Optional package $pkg installation failed, skip.";
                   done
                 fi;
 
@@ -1113,6 +1115,8 @@ available_node_types:
           volumeMounts:
           - mountPath: /dev/shm
             name: dshm
+          - mountPath: /mnt/overlay
+            name: skypilot-overlay
           {% if k8s_enable_gpudirect_tcpx %}
           - name: tcpx-socket
             mountPath: /tmp
@@ -1358,6 +1362,7 @@ setup_commands:
     echo "=== Ray and skypilot dependencies installation completed in $(($end_epoch - $start_epoch)) secs ===";
     start_epoch=$(date +%s);
     {{ skypilot_wheel_installation_commands }}
+    {{ copy_skypilot_templates_commands }}
     end_epoch=$(date +%s);
     echo "=== Skypilot wheel installation completed in $(($end_epoch - $start_epoch)) secs ===";
     start_epoch=$(date +%s);

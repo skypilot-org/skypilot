@@ -629,11 +629,6 @@ def _post_provision_setup(
         status.update(
             runtime_preparation_str.format(step=3, step_name='runtime'))
 
-        skypilot_script_urls = skypilot_config.get_nested(('script_urls',), [])
-        instance_setup.mount_skypilot_scripts(cloud, cluster_name.name_on_cloud,
-                                              skypilot_script_urls,
-                                              cluster_info, ssh_credentials)
-
         ray_port = constants.SKY_REMOTE_RAY_PORT
         head_ray_needs_restart = True
         ray_cluster_healthy = False

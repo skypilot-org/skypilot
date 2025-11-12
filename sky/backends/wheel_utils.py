@@ -100,6 +100,13 @@ def _build_sky_wheel() -> pathlib.Path:
                 # modify the commit hash in the file later.
                 # Symlink other files/folders.
                 target.symlink_to(item, target_is_directory=item.is_dir())
+
+        # Symlink sky_templates directory from repo root
+        sky_templates_src = SKY_PACKAGE_PATH.parent / 'sky_templates'
+        if sky_templates_src.exists():
+            sky_templates_target = tmp_dir / 'sky_templates'
+            sky_templates_target.symlink_to(sky_templates_src,
+                                            target_is_directory=True)
         setup_files_dir = SKY_PACKAGE_PATH / 'setup_files'
 
         setup_content = (setup_files_dir / 'setup.py').read_text()

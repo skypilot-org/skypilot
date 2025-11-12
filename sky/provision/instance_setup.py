@@ -5,8 +5,7 @@ import hashlib
 import json
 import os
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
-import uuid
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sky import exceptions
 from sky import logs
@@ -28,9 +27,6 @@ from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
-
-if TYPE_CHECKING:
-    from sky import clouds
 
 logger = sky_logging.init_logger(__name__)
 
@@ -607,152 +603,6 @@ def internal_file_mounts(cluster_name: str, common_file_mounts: Dict[str, str],
         ssh_credentials=ssh_credentials,
         max_workers=subprocess_utils.get_max_workers_for_file_mounts(
             common_file_mounts, cluster_info.provider_name))
-
-
-def _get_merge_dirs_cmd(cloud: 'clouds.Cloud', lowerdirs: List[str],
-                        upperdir: str) -> str:
-    """Generate command to merge multiple directories into a single directory.
-
-    Creates an overlay mount combining multiple source directories into a
-    single target directory. On non-Kubernetes clouds, we use [overlayfs]
-    (https://www.kernel.org/doc/html/latest/filesystems/overlayfs.html),
-    which is provided by the Linux kernel. This allows us to lazily read
-    the scripts from the cloud buckets only when they are requested.
-
-    On Kubernetes, we can't use overlayfs as it requires the Pod to be
-    privileged. Instead, we just copy the files from the lower directories
-    to the upper directory. This is not optimal for performance, because we
-    will eagarly read all objects from the cloud buckets, but is fine for
-    now until we find a way to make it work with overlayfs. We tried using
-    [fuse-overlayfs](https://github.com/containers/fuse-overlayfs), which
-    is a userspace implementation of overlayfs, together with our
-    fusermount-wrapper, but it does not seem to work with directories
-    mounted by goofys from S3.
-
-    Args:
-        cloud: The cloud provider instance.
-        lowerdirs: List of paths for lower layers (in increasing priority).
-        upperdir: Path where merged directory will be mounted.
-    """
-    # Avoid circular import.
-    # pylint: disable=import-outside-toplevel
-    from sky import clouds
-
-    is_k8s = isinstance(cloud, clouds.Kubernetes)
-
-    merge_cmd = (
-        # Cleanup existing mount from previous runs.
-        f'if findmnt -rn -T {upperdir} >/dev/null 2>&1; then '
-        f'  sudo umount {upperdir} && rm -rf {upperdir}; '
-        f'fi && '
-        f'mkdir -p {upperdir} && ')
-    if is_k8s:
-        dirs_str = ' '.join(lowerdirs)
-        merge_cmd += (
-            f'echo "Copying scripts from {lowerdirs} to {upperdir}..." && '
-            f'for dir in {dirs_str}; '
-            f'do cp -r "$dir"/* {upperdir}/; done && ')
-    else:
-        # For overlayfs, the rightmost has lowest priority, so reverse ordering.
-        lowerdir = ':'.join(reversed(lowerdirs))
-        # pylint: disable=line-too-long
-        merge_cmd += (
-            # Detect whether /dev/shm exists and is writable
-            'if [ -d /dev/shm ] && [ -w /dev/shm ]; then '
-            '   OVL_BASE="/dev/shm/ovl"; '
-            'else '
-            '   echo "[WARN] /dev/shm not available or not writable; using /tmp instead."; '
-            '   OVL_BASE="/tmp/ovl"; '
-            'fi && '
-            'sudo rm -rf "$OVL_BASE" 2>/dev/null || true && '
-            'mkdir -p "$OVL_BASE"/{upper,work} && '
-            f'echo "Mounting overlayfs with lowerdir={lowerdir}, upperdir=$OVL_BASE/upper, workdir=$OVL_BASE/work to {upperdir}..." && '
-            'sudo mount -t overlay overlay '
-            f'-o rw,exec,lowerdir={lowerdir},upperdir="$OVL_BASE"/upper,workdir="$OVL_BASE"/work '
-            f'{upperdir} && ')
-
-    # Make scripts executable (cloud buckets do not retain permissions)
-    merge_cmd += (
-        f'find {upperdir} -name "*.sh" -type f -exec chmod +x {{}} \\; || '
-        'true')
-
-    return merge_cmd
-
-
-@_auto_retry()
-def _mount_skypilot_scripts(cloud: 'clouds.Cloud',
-                            skypilot_script_urls: List[str],
-                            runner: command_runner.CommandRunner,
-                            log_path: str) -> None:
-    """Mount script buckets and merge them into a single directory."""
-    # Avoid circular import.
-    # pylint: disable=import-outside-toplevel
-    from sky.data import storage as storage_lib
-
-    if not skypilot_script_urls:
-        return
-
-    ordered_mount_points = []
-    for source in skypilot_script_urls:
-        storage_obj = storage_lib.Storage(source=source,
-                                          mode=storage_lib.StorageMode.COPY)
-        storage_obj.construct()
-        if not storage_obj.stores:
-            logger.warning(
-                f'The scripts bucket {storage_obj.name!r} could not be '
-                f'mounted. Please verify that the bucket exists.')
-        # Get the first store and use it to mount
-        store = list(storage_obj.stores.values())[0]
-        assert store is not None, storage_obj
-
-        mount_point = f'/tmp/{str(uuid.uuid4())}'
-        ordered_mount_points.append(mount_point)
-
-        mount_cmd = store.mount_command(mount_point)
-        rc, stdout, stderr = runner.run(mount_cmd,
-                                        log_path=log_path,
-                                        stream_logs=False,
-                                        require_outputs=True)
-        subprocess_utils.handle_returncode(rc,
-                                           mount_cmd,
-                                           ('Failed to mount scripts bucket '
-                                            f'{storage_obj.source!r}.'),
-                                           stderr=stdout + stderr)
-
-    merge_dirs_cmd = _get_merge_dirs_cmd(cloud, ordered_mount_points,
-                                         '$HOME/skypilot_scripts')
-    rc, stdout, stderr = runner.run(merge_dirs_cmd,
-                                    log_path=log_path,
-                                    stream_logs=False,
-                                    require_outputs=True)
-    subprocess_utils.handle_returncode(rc,
-                                       merge_dirs_cmd,
-                                       ('Failed to merge scripts buckets.'),
-                                       stderr=stdout + stderr)
-
-
-@common.log_function_start_end
-@timeline.event
-def mount_skypilot_scripts(cloud: 'clouds.Cloud', cluster_name: str,
-                           skypilot_script_urls: List[str],
-                           cluster_info: common.ClusterInfo,
-                           ssh_credentials: Dict[str, str]) -> None:
-    """Mount SkyPilot scripts from cloud storage buckets."""
-    _hint_worker_log_path(cluster_name, cluster_info, 'mount_skypilot_scripts')
-    logger.debug(f'Mounting scripts from: {skypilot_script_urls}')
-
-    def _setup_node(runner: command_runner.CommandRunner, log_path: str):
-        _mount_skypilot_scripts(cloud, skypilot_script_urls, runner, log_path)
-
-    _parallel_ssh_with_cache(
-        _setup_node,
-        cluster_name,
-        stage_name='mount_skypilot_scripts',
-        # Do not cache script mounts, as they need to be
-        # re-mounted every time.
-        digest=None,
-        cluster_info=cluster_info,
-        ssh_credentials=ssh_credentials)
 
 
 @common.log_function_start_end
