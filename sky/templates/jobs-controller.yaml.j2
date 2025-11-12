@@ -54,14 +54,14 @@ run: |
   {%- if is_consolidation_mode %}
   # For consolidation mode, job_id_to_rank is already fully set with all job IDs
   export _TMP_JOB_ID_TO_RANK='{{job_id_to_rank | tojson}}'
-  python3 -c "import json, os, sys; d=json.loads(os.environ['_TMP_JOB_ID_TO_RANK']); sys.stdout.write('export SKYPILOT_JOB_ID_TO_RANK='); json.dump(d, sys.stdout); sys.stdout.write('\n')" >> {{remote_env_file_path}} 2>&1
+  python3 -c "import json, os, shlex; d=json.loads(os.environ['_TMP_JOB_ID_TO_RANK']); print('export SKYPILOT_JOB_ID_TO_RANK=' + shlex.quote(json.dumps(d)))" 2>&1 >> {{remote_env_file_path}}
   unset _TMP_JOB_ID_TO_RANK
   {%- else %}
   # For non-consolidation mode with pre-created job IDs, add the controller task's ray job ID to the
   # job_id_to_rank dictionary. The last rank is num_jobs - 1
   if [ -n "$SKYPILOT_INTERNAL_JOB_ID" ]; then
     export _TMP_JOB_ID_TO_RANK='{{job_id_to_rank | tojson}}'
-    python3 -c "import json, os, sys; d=json.loads(os.environ['_TMP_JOB_ID_TO_RANK']); d[str(os.environ['SKYPILOT_INTERNAL_JOB_ID'])]={{num_jobs - 1}}; sys.stdout.write('export SKYPILOT_JOB_ID_TO_RANK='); json.dump(d, sys.stdout); sys.stdout.write('\n')" >> {{remote_env_file_path}} 2>&1
+    python3 -c "import json, os, shlex; d=json.loads(os.environ['_TMP_JOB_ID_TO_RANK']); d[str(os.environ['SKYPILOT_INTERNAL_JOB_ID'])]={{num_jobs - 1}}; print('export SKYPILOT_JOB_ID_TO_RANK=' + shlex.quote(json.dumps(d)))" 2>&1 >> {{remote_env_file_path}}
     unset _TMP_JOB_ID_TO_RANK
   fi
   {%- endif %}

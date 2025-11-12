@@ -1,5 +1,4 @@
 """SDK functions for managed jobs."""
-import copy
 import ipaddress
 import os
 import pathlib
@@ -395,11 +394,11 @@ def launch(
                              f'ID as the {num_jobs}th job).')
             except exceptions.ClusterNotUpError:
                 # Controller not up yet, will create job IDs during submission
-                pre_created_job_ids = None
+                pass
 
     def _job_ids_to_str(job_ids: Optional[List[int]]) -> str:
         if not job_ids:
-            return ""
+            return ''
 
         if len(job_ids) == 1:
             return str(job_ids[0])
@@ -412,12 +411,12 @@ def launch(
             if n == prev + 1:
                 prev = n
                 continue
-            ranges.append(f"{start}-{prev}" if start != prev else str(start))
+            ranges.append(f'{start}-{prev}' if start != prev else str(start))
             start = prev = n
 
         # append last range
-        ranges.append(f"{start}-{prev}" if start != prev else str(start))
-        return ",".join(ranges)
+        ranges.append(f'{start}-{prev}' if start != prev else str(start))
+        return ','.join(ranges)
 
     def _submit_many(
         job_ids: Optional[List[int]] = None,
@@ -482,14 +481,14 @@ def launch(
                 f'{name}-{dag_uuid}.yaml')
             job_controller_postfix = (' from jobs controller'
                                       if not is_consolidation_mode else '')
-            managed_jobs_str = f"managed job"
+            managed_jobs_str = 'managed job'
             job_ids_str = ''
             if job_ids is not None:
                 job_ids_str = _job_ids_to_str(job_ids)
                 vars_to_fill['job_ids'] = job_ids
                 # Create job_id_to_rank dictionary by sorting job IDs and
                 # assigning ranks. The last job ID (controller task's ray
-                # job ID) will be added in the template for non-consolidation mode
+                # job ID) will be added in template for non-consolidation mode.
                 sorted_job_ids = sorted(job_ids)
                 job_id_to_rank = {
                     str(job_id): rank
@@ -498,7 +497,7 @@ def launch(
                 vars_to_fill['job_id_to_rank'] = job_id_to_rank
                 if num_jobs is not None and num_jobs > 1:
                     managed_jobs_str = (
-                        f"{num_jobs} managed jobs {job_ids_str}")
+                        f'{num_jobs} managed jobs {job_ids_str}')
             logger.info(
                 f'{colorama.Fore.YELLOW}'
                 f'Launching {managed_jobs_str} {dag.name!r}'
@@ -549,7 +548,7 @@ def launch(
                         ]
                         run_script = '\n'.join(env_cmds + [run_script])
                         # Dump script for high availability recovery.
-                        assert job_ids is not None, 'job_ids must be set in consolidation mode'
+                        assert job_ids is not None, 'job_ids not set'
                         for job_id in job_ids:
                             managed_job_state.set_ha_recovery_script(
                                 job_id, run_script)

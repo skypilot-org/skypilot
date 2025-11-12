@@ -973,11 +973,7 @@ class ControllerManager:
                             job_id_to_rank = (json.loads(
                                 env_vars['SKYPILOT_JOB_ID_TO_RANK']))
                             logger.debug(
-                                f'Loaded job_id_to_rank mapping: {job_id_to_rank}'
-                            )
-                            logger.debug(
-                                f'Looking up rank for job_id={job_id} (type={type(job_id)})'
-                            )
+                                f'Loaded job_id_to_rank map: {job_id_to_rank}')
                             job_rank = job_id_to_rank.get(str(job_id))
                             if job_rank is not None:
                                 ctx.override_envs(

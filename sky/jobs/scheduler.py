@@ -480,9 +480,9 @@ if __name__ == '__main__':
         f' Default: {constants.DEFAULT_PRIORITY}.')
     args = parser.parse_args()
 
-    job_ids = [args.job_id] if isinstance(args.job_id, int) else args.job_id
+    all_job_ids = [args.job_id] if isinstance(args.job_id, int) else args.job_id
 
-    submit_jobs(job_ids,
+    submit_jobs(all_job_ids,
                 args.dag_yaml,
                 args.user_yaml_path,
                 args.env_file,
