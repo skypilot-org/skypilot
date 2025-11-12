@@ -5,16 +5,14 @@ import hashlib
 import json
 import os
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 import uuid
 
-from sky import clouds
 from sky import exceptions
 from sky import logs
 from sky import provision
 from sky import resources as resources_lib
 from sky import sky_logging
-from sky.data import storage as storage_lib
 from sky.provision import common
 from sky.provision import docker_utils
 from sky.provision import logging as provision_logging
@@ -30,6 +28,9 @@ from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+
+if TYPE_CHECKING:
+    from sky import clouds
 
 logger = sky_logging.init_logger(__name__)
 
@@ -608,7 +609,7 @@ def internal_file_mounts(cluster_name: str, common_file_mounts: Dict[str, str],
             common_file_mounts, cluster_info.provider_name))
 
 
-def _get_merge_dirs_cmd(cloud: clouds.Cloud, lowerdirs: List[str],
+def _get_merge_dirs_cmd(cloud: 'clouds.Cloud', lowerdirs: List[str],
                         upperdir: str) -> str:
     """Generate command to merge multiple directories into a single directory.
 
@@ -633,6 +634,10 @@ def _get_merge_dirs_cmd(cloud: clouds.Cloud, lowerdirs: List[str],
         lowerdirs: List of paths for lower layers (in increasing priority).
         upperdir: Path where merged directory will be mounted.
     """
+    # Avoid circular import.
+    # pylint: disable=import-outside-toplevel
+    from sky import clouds
+
     is_k8s = isinstance(cloud, clouds.Kubernetes)
 
     merge_cmd = (
@@ -675,11 +680,15 @@ def _get_merge_dirs_cmd(cloud: clouds.Cloud, lowerdirs: List[str],
 
 
 @_auto_retry()
-def _mount_skypilot_scripts(cloud: clouds.Cloud,
+def _mount_skypilot_scripts(cloud: 'clouds.Cloud',
                             skypilot_script_urls: List[str],
                             runner: command_runner.CommandRunner,
                             log_path: str) -> None:
     """Mount script buckets and merge them into a single directory."""
+    # Avoid circular import.
+    # pylint: disable=import-outside-toplevel
+    from sky.data import storage as storage_lib
+
     if not skypilot_script_urls:
         return
 
@@ -724,7 +733,7 @@ def _mount_skypilot_scripts(cloud: clouds.Cloud,
 
 @common.log_function_start_end
 @timeline.event
-def mount_skypilot_scripts(cloud: clouds.Cloud, cluster_name: str,
+def mount_skypilot_scripts(cloud: 'clouds.Cloud', cluster_name: str,
                            skypilot_script_urls: List[str],
                            cluster_info: common.ClusterInfo,
                            ssh_credentials: Dict[str, str]) -> None:
