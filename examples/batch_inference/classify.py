@@ -104,7 +104,7 @@ def main():
     try:
         dataset = load_dataset('imdb', split='test')
         print(f'✓ Loaded {len(dataset)} reviews from IMDB dataset')
-    except Exception as e: # pylint: disable=broad-exception-caught
+    except Exception as e:  # pylint: disable=broad-except
         print(f'✗ Failed to load dataset: {e}')
         sys.exit(1)
 
@@ -135,7 +135,7 @@ def main():
             max_model_len=2048,
         )
         print('✓ vLLM initialized successfully')
-    except (RuntimeError, ValueError, OSError) as e:
+    except Exception as e:  # pylint: disable=broad-except
         print(f'✗ Failed to initialize vLLM: {e}')
         sys.exit(1)
 
@@ -194,7 +194,7 @@ def main():
             }
             all_results.append(result)
 
-    except Exception as e: # pylint: disable=broad-exception-caught
+    except Exception as e:  # pylint: disable=broad-except
         print(f'✗ Error during inference: {e}')
         sys.exit(1)
 
