@@ -624,7 +624,9 @@ class Kubernetes(clouds.Cloud):
             k8s_service_account_name = (
                 kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME)
 
-        fuse_device_required = bool(resources.requires_fuse)
+        fuse_device_required = bool(
+            resources.requires_fuse) or skypilot_config.get_nested(
+                ('script_urls',), [])
 
         # Configure spot labels, if requested and supported
         spot_label_key, spot_label_value = None, None

@@ -436,7 +436,8 @@ def _post_provision_setup(
     config_from_yaml = global_user_state.get_cluster_yaml_dict(
         handle_cluster_yaml)
     provider_config = config_from_yaml.get('provider')
-    cloud_name = repr(launched_resources.cloud)
+    cloud = launched_resources.cloud
+    cloud_name = repr(cloud)
     cluster_info = provision.get_cluster_info(cloud_name,
                                               provision_record.region,
                                               cluster_name.name_on_cloud,
@@ -627,6 +628,11 @@ def _post_provision_setup(
 
         status.update(
             runtime_preparation_str.format(step=3, step_name='runtime'))
+
+        skypilot_script_urls = skypilot_config.get_nested(('script_urls',), [])
+        instance_setup.mount_skypilot_scripts(cloud, cluster_name.name_on_cloud,
+                                              skypilot_script_urls,
+                                              cluster_info, ssh_credentials)
 
         ray_port = constants.SKY_REMOTE_RAY_PORT
         head_ray_needs_restart = True

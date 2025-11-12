@@ -1527,6 +1527,18 @@ def get_config_schema():
         }
     }
 
+    script_urls_schema = {
+        'type': 'array',
+        'items': {
+            'type': 'string',
+        },
+        'default': [
+            # TODO(kevin): Add official scripts from SkyPilot team once
+            # the feature is released.
+            # 's3://skypilot-scripts'
+        ]
+    }
+
     daemon_config = {
         'type': 'object',
         'required': [],
@@ -1820,6 +1832,7 @@ def get_config_schema():
             'provision': provision_configs,
             'rbac': rbac_schema,
             'logs': logs_schema,
+            'script_urls': script_urls_schema,
             'daemons': daemon_schema,
             **cloud_configs,
         },
