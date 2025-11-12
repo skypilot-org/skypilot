@@ -58,7 +58,7 @@ Here is a simple example of creating a pool:
 
 Notice that the :code:`pool` section is the only difference from a normal SkyPilot YAML.
 To specify the number of workers in the pool, use the :code:`workers` field under :code:`pool`.
-When creating a pool, the :code:`run` section is ignored because at this point we are only interested in provisioning the workers.
+When creating a pool, you are **not allowed to specify a :code:`run` section** because the only goal is provisioning the workers.
 
 The setup commands **must not be blocking**. If a long-running server is required, it should be launched in the background. The :code:`setsid` command ensures that setup processes are not terminated when the shell exits. An example using vLLM server is shown below:
 
@@ -113,15 +113,20 @@ To submit jobs to the pool, create a job YAML file:
   # job.yaml
   name: simple-workload
 
-  # Specify the resources requirements for the job.
-  # This should be the same as the resources configuration in the pool YAML.
+  # Always specify the resources requirements for the job. Without this 
+  # specification this job will not be able to use a GPU.
   resources:
     accelerators: {H100:1, H200:1}
 
   run: |
     nvidia-smi
 
-This indicates that the job (1) requires the specified :code:`resources` to run, and (2) executes the given :code:`run` command when dispatched to a worker. Then, use :code:`sky jobs launch -p <pool-name>` to submit jobs to the pool:
+.. warning::
+
+   You **may not** specify a :code:`setup` section, workdir, file mounts, or storage mounts in the job YAML. This is to ensure that worker environment remains consistent across jobs.
+   Also make sure to specify the resources requirements for the job. Without this specification this job will not be able to use a GPU.
+
+This yaml file indicates that the job (1) requires the specified :code:`resources` to run, and (2) executes the given :code:`run` command when dispatched to a worker. Then, use :code:`sky jobs launch -p <pool-name>` to submit jobs to the pool:
 
 .. code-block:: console
 
