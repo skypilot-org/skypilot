@@ -15,6 +15,7 @@ from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import volume as volume_lib
+from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -240,10 +241,12 @@ class Slurm(clouds.Cloud):
             'memory': str(mem),
             'accelerator_count': str(acc_count),
             'accelerator_type': acc_type,
+            'partition': slurm_utils.DEFAULT_PARTITION,
             # TODO(jwj): Pass SSH config in a smarter way
             'ssh_hostname': ssh_config_dict['hostname'],
-            'ssh_port': ssh_config_dict['port'],
+            'ssh_port': ssh_config_dict.get('port', 22),
             'ssh_user': ssh_config_dict['user'],
+            'slurm_proxy_command': ssh_config_dict.get('proxycommand', None),
             # TODO(jwj): Solve naming collision with 'ssh_private_key'.
             # Please refer to slurm-ray.yml.j2 'ssh' and 'auth' sections.
             'slurm_private_key': ssh_config_dict['identityfile'][0],
@@ -329,20 +332,17 @@ class Slurm(clouds.Cloud):
 
             try:
                 runner = command_runner.SlurmCommandRunner(
-                    (ssh_config_dict['hostname'], ssh_config_dict['port']),
-                    ssh_config_dict['user'],
-                    ssh_config_dict['identityfile'][0],
-                    cluster,
+                    (ssh_config_dict['hostname'], ssh_config_dict.get('port', 22)),
+                    ssh_user=ssh_config_dict['user'],
+                    ssh_private_key=ssh_config_dict['identityfile'][0],
+                    cluster_name=cluster,
                     partition=slurm_utils.DEFAULT_PARTITION,
-                    disable_control_master=True)
+                    disable_control_master=True,
+                    ssh_proxy_command=ssh_config_dict.get('proxycommand', None))
                 returncode, stdout, stderr = runner.run('sinfo',
                                                         require_outputs=True)
-                if returncode == 0:
-                    logger.info(stdout)
-                    return (True, '')
-                raise RuntimeError(
-                    f'sinfo command failed with return code {returncode}:\n{stderr}'
-                )
+                subprocess_utils.handle_returncode(returncode, 'sinfo', stdout, stderr)
+                return (True, '')
             except Exception as e:  # pylint: disable=broad-except
                 return (False, f'Credential check failed for {cluster}: '
                         f'{common_utils.format_exception(e)}')

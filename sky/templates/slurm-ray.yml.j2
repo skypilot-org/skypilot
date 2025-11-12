@@ -12,19 +12,23 @@ provider:
   module: sky.provision.slurm
 
   cluster_name: localcluster
-  partition: debug
+  partition: {{partition}}
 
   ssh:
     hostname: {{ssh_hostname}}
     port: {{ssh_port}}
     user: {{ssh_user}}
     private_key: {{slurm_private_key}}
+{% if slurm_proxy_command is not none %}
+    proxycommand: {{slurm_proxy_command | tojson }}
+{% endif %}
 
 auth:
   ssh_user: {{ssh_user}}
   # TODO(jwj): Modify this tmp workaround.
   # ssh_private_key: {{ssh_private_key}}
   ssh_private_key: {{slurm_private_key}}
+  ssh_proxy_command: {{slurm_proxy_command | tojson }}
 
 available_node_types:
   ray_head_default:

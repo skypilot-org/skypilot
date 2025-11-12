@@ -844,6 +844,7 @@ class SSHCommandRunner(CommandRunner):
             else:
                 command += [f'> {log_path}']
             executable = '/bin/bash'
+        # logger.debug(f'Running command: {" ".join(command)}', stack_info=True)
         return log_lib.run_with_log(' '.join(command),
                                     log_path,
                                     require_outputs=require_outputs,
@@ -1262,6 +1263,7 @@ class SlurmCommandRunner(SSHCommandRunner):
         cluster_name: str,
         partition: str,
         job_id: Optional[str] = None,
+        ssh_proxy_command: Optional[str] = None,
         **kwargs,
     ):
         """Initialize SlurmCommandRunner.
@@ -1282,7 +1284,7 @@ class SlurmCommandRunner(SSHCommandRunner):
             partition: The logical set of grouped compute nodes.
             job_id: The provisioned long-running job ID.
         """
-        super().__init__(node, ssh_user, ssh_private_key, **kwargs)
+        super().__init__(node, ssh_user, ssh_private_key, ssh_proxy_command=ssh_proxy_command, **kwargs)
         self.cluster_name = cluster_name
         self.partition = partition
         self.job_id = job_id

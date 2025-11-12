@@ -176,12 +176,14 @@ def _create_jobs(region: str, cluster_name_on_cloud: str,
         ssh_port = ssh_config_dict['port']
         ssh_user = ssh_config_dict['user']
         ssh_key = ssh_config_dict['private_key']
+        ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
         runner = command_runner.SlurmCommandRunner((ssh_host, ssh_port),
                                                    ssh_user,
                                                    ssh_key,
                                                    cluster_name,
                                                    partition,
-                                                   disable_control_master=True)
+                                                   disable_control_master=True,
+                                                   ssh_proxy_command=ssh_proxy_command)
 
         # TODO(jwj): Support accelerator_type.
         # Requested resources of the Slurm virtual instance.
@@ -320,12 +322,14 @@ def terminate_instances(
     ssh_port = ssh_config_dict['port']
     ssh_user = ssh_config_dict['user']
     ssh_key = ssh_config_dict['private_key']
+    ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
     runner = command_runner.SlurmCommandRunner((ssh_host, ssh_port),
                                                 ssh_user,
                                                 ssh_key,
                                                 cluster_name,
                                                 partition,
-                                                disable_control_master=True)
+                                                disable_control_master=True,
+                                                ssh_proxy_command=ssh_proxy_command)
 
     errs = []
     for job_id in jobs:

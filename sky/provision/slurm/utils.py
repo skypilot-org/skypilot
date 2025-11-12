@@ -197,7 +197,8 @@ def filter_jobs(ssh_config_dict: Dict[str, Any],
         ssh_config_dict['private_key'],
         cluster_name,
         partition,
-        disable_control_master=True)
+        disable_control_master=True,
+        ssh_proxy_command=ssh_config_dict.get('proxycommand', None))
 
     # TODO(jwj): Keep or remove ssh_user?
     rc, stdout, stderr = runner.run(
@@ -230,7 +231,6 @@ def get_all_slurm_cluster_names() -> List[str]:
 
     return cluster_names
 
-
 def check_instance_fits(cluster: str,
                         instance_type: str) -> Tuple[bool, Optional[str]]:
     """Check if the given instance type fits in the given cluster."""
@@ -239,12 +239,13 @@ def check_instance_fits(cluster: str,
     ssh_config_dict = ssh_config.lookup(cluster)
 
     runner = command_runner.SlurmCommandRunner(
-        (ssh_config_dict['hostname'], ssh_config_dict['port']),
+        (ssh_config_dict['hostname'], ssh_config_dict.get('port', 22)),
         ssh_config_dict['user'],
         ssh_config_dict['identityfile'][0],
         cluster,
         partition=DEFAULT_PARTITION,
-        disable_control_master=True)
+        disable_control_master=True,
+        ssh_proxy_command=ssh_config_dict.get('proxycommand', None))
     returncode, stdout, stderr = runner.run('sinfo -N -h -o "%N %t %G"',
                                             require_outputs=True)
     nodes = stdout.splitlines()
@@ -259,8 +260,9 @@ def check_instance_fits(cluster: str,
         gpu_nodes = []
         for node in nodes:
             node_name, node_state, gres_str = node.split()
-            gres_str = f':'.join(gres_str.split(':')[1:]).lower()
-
+            # gres_str is like 'gpu:acc_type:acc_count'
+            gres_list = gres_str.split(':')
+            gres_str = ':'.join(gres_list[1:]).lower()
 
             # TODO(jwj): Handle status check.
 
