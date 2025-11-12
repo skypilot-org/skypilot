@@ -167,7 +167,7 @@ def test_sdk_launch_pool_job_with_setup_section():
     # Try to launch to a pool - should error before making any API calls
     pool = 'test-pool'
     with mock.patch.object(admin_policy_utils, 'apply', side_effect=lambda x, **kwargs: x), \
-         mock.patch('sky.jobs.client.sdk.check_server_healthy_or_start_fn', return_value=None):
+         mock.patch('sky.server.common.check_server_healthy_or_start_fn', return_value=None):
         with pytest.raises(click.UsageError,
                            match='Pool jobs are not allowed to modify'):
             # The validation happens early in launch() before API calls
