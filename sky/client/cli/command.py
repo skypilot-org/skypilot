@@ -60,6 +60,7 @@ from sky.adaptors import common as adaptors_common
 from sky.client import sdk
 from sky.client.cli import flags
 from sky.client.cli import table_utils
+from sky.jobs import utils as jobs_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
@@ -4633,18 +4634,7 @@ def jobs_launch(
         click.secho(f'Submitting to pool {colorama.Fore.CYAN}{pool!r}'
                     f'{colorama.Style.RESET_ALL} with {colorama.Fore.CYAN}'
                     f'{num_job_int}{colorama.Style.RESET_ALL} job{plural}.')
-        print_setup_fm_warning = False
-        for task_ in dag.tasks:
-            if (task_.setup is not None or task_.file_mounts or
-                    task_.storage_mounts):
-                print_setup_fm_warning = True
-                break
-        if print_setup_fm_warning:
-            click.secho(
-                f'{colorama.Fore.YELLOW}setup/file_mounts/storage_mounts'
-                ' will be ignored when submit jobs to pool. To update a pool, '
-                f'please use `sky jobs pool apply {pool} new-pool.yaml`. '
-                f'{colorama.Style.RESET_ALL}')
+        jobs_utils.validate_pool_job(dag, pool)
 
     # Optimize info is only show if _need_confirmation.
     if not yes:

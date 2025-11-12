@@ -2687,26 +2687,22 @@ def combine_pod_config_fields(
     merged_cluster_yaml_obj = copy.deepcopy(cluster_yaml_obj)
     # We don't use override_configs in `get_effective_region_config`, as merging
     # the pod config requires special handling.
-    if isinstance(cloud, clouds.SSH):
-        kubernetes_config = skypilot_config.get_effective_region_config(
-            cloud='ssh', region=None, keys=('pod_config',), default_value={})
-        override_pod_config = config_utils.get_cloud_config_value_from_dict(
-            dict_config=cluster_config_overrides,
-            cloud='ssh',
-            keys=('pod_config',),
-            default_value={})
-    else:
-        kubernetes_config = skypilot_config.get_effective_region_config(
-            cloud='kubernetes',
-            region=context,
-            keys=('pod_config',),
-            default_value={})
-        override_pod_config = config_utils.get_cloud_config_value_from_dict(
-            dict_config=cluster_config_overrides,
-            cloud='kubernetes',
-            region=context,
-            keys=('pod_config',),
-            default_value={})
+    cloud_str = 'ssh' if isinstance(cloud, clouds.SSH) else 'kubernetes'
+    context_str = context
+    if isinstance(cloud, clouds.SSH) and context is not None:
+        assert context.startswith('ssh-'), 'SSH context must start with "ssh-"'
+        context_str = context[len('ssh-'):]
+    kubernetes_config = skypilot_config.get_effective_region_config(
+        cloud=cloud_str,
+        region=context_str,
+        keys=('pod_config',),
+        default_value={})
+    override_pod_config = config_utils.get_cloud_config_value_from_dict(
+        dict_config=cluster_config_overrides,
+        cloud=cloud_str,
+        region=context_str,
+        keys=('pod_config',),
+        default_value={})
     config_utils.merge_k8s_configs(kubernetes_config, override_pod_config)
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.

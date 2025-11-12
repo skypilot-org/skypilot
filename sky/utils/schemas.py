@@ -1043,7 +1043,7 @@ class RemoteIdentityOptions(enum.Enum):
 
 def get_default_remote_identity(cloud: str) -> str:
     """Get the default remote identity for the specified cloud."""
-    if cloud == 'kubernetes':
+    if cloud in ('kubernetes', 'ssh'):
         return RemoteIdentityOptions.SERVICE_ACCOUNT.value
     return RemoteIdentityOptions.LOCAL_CREDENTIALS.value
 
@@ -1070,6 +1070,18 @@ _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
     },
 }
 
+_CONTEXT_CONFIG_SCHEMA_MINIMAL = {
+    'pod_config': {
+        'type': 'object',
+        'required': [],
+        # Allow arbitrary keys since validating pod spec is hard
+        'additionalProperties': True,
+    },
+    'provision_timeout': {
+        'type': 'integer',
+    },
+}
+
 _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
     # TODO(kevin): Remove 'networking' in v0.13.0.
     'networking': {
@@ -1084,12 +1096,7 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             type.value for type in kubernetes_enums.KubernetesPortMode
         ],
     },
-    'pod_config': {
-        'type': 'object',
-        'required': [],
-        # Allow arbitrary keys since validating pod spec is hard
-        'additionalProperties': True,
-    },
+    **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
     'custom_metadata': {
         'type': 'object',
         'required': [],
@@ -1103,9 +1110,6 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
                 'required': ['namespace']
             }]
         },
-    },
-    'provision_timeout': {
-        'type': 'integer',
     },
     'autoscaler': {
         'type': 'string',
@@ -1376,12 +1380,22 @@ def get_config_schema():
                         'type': 'string',
                     },
                 },
-                'pod_config': {
+                'context_configs': {
                     'type': 'object',
                     'required': [],
-                    # Allow arbitrary keys since validating pod spec is hard
-                    'additionalProperties': True,
+                    'properties': {},
+                    # Properties are ssh cluster names, which are the
+                    # kubernetes context names without `ssh-` prefix.
+                    'additionalProperties': {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
+                        },
+                    },
                 },
+                **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
             }
         },
         'oci': {

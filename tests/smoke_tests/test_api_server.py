@@ -710,3 +710,72 @@ def test_high_logs_concurrency_not_blocking_operations(generic_cloud: str,
          f'sky jobs cancel -n {name}-job -y || true;'),
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server  # Requires restarting the API server to remove existing tunnels.
+@pytest.mark.no_dependency  # We can't restart the api server in the dependency test.
+def test_high_concurrency_ssh_tunnel_opening(generic_cloud: str,
+                                             tmp_path: pathlib.Path):
+    """Test that high concurrency SSH tunnel opening does not result in timeouts."""
+    name = smoke_tests_utils.get_cluster_name()
+    concurrency = 50
+    log_file = tmp_path / 'all_logs.txt'
+    log_file.touch()
+
+    tail_log_threads: List[threading.Thread] = []
+    errors: List[str] = []
+
+    def tail_log_thread(idx: int):
+        try:
+            context.initialize()
+            os.environ = context.ContextualEnviron(os.environ)
+            ctx = context.get()
+            ctx.override_envs({'SKYPILOT_DEBUG': '1'})
+            origin = ctx.redirect_log(log_file)
+            sky.tail_logs(cluster_name=name, job_id=None, follow=False)
+            ctx.redirect_log(origin)
+        except Exception as e:  # pylint: disable=broad-except
+            errors.append(f'Error in tail log thread {idx}: {e}')
+
+    def start_concurrent_tail_logs() -> Generator[str, None, None]:
+        start_time = time.time()
+        for i in range(concurrency):
+            thread = threading.Thread(target=tail_log_thread,
+                                      args=(i,),
+                                      daemon=True)
+            tail_log_threads.append(thread)
+            thread.start()
+
+        # Wait for all threads to complete
+        for thread in tail_log_threads:
+            thread.join(timeout=60)
+
+        elapsed = time.time() - start_time
+        yield f'All {len(tail_log_threads)} concurrent tail_logs completed in {elapsed:.2f}s'
+
+        if errors:
+            raise Exception(f'Errors in tail log threads: {errors}')
+
+    test = smoke_tests_utils.Test(
+        'test_concurrent_tunnel_opening',
+        [
+            f'sky launch -c {name} --infra {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=180),
+            # Restart the API server to remove existing tunnels.
+            'sky api stop; sky api start',
+            start_concurrent_tail_logs,
+            # Print the full logs for debugging.
+            f'echo "=== FULL LOGS ===" && cat {log_file}',
+            f'echo "=== ERRORS ===" && ! grep "sky.utils.locks.LockTimeout" {log_file} && echo "No LockTimeout errors"',
+            # Verify that all the tail logs requests succeeded.
+            # Assume the API server is isolated for this test only.
+            f's=$(sky api status -a -l all | grep "sky.logs" | grep SUCCEEDED) && echo $s && echo "$s" | wc -l | grep {concurrency}',
+        ],
+        (f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api stop && '
+         f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api start; '
+         f'sky down -y {name}'),
+    )
+    smoke_tests_utils.run_one_test(test)
