@@ -436,8 +436,7 @@ def _post_provision_setup(
     config_from_yaml = global_user_state.get_cluster_yaml_dict(
         handle_cluster_yaml)
     provider_config = config_from_yaml.get('provider')
-    cloud = launched_resources.cloud
-    cloud_name = repr(cloud)
+    cloud_name = repr(launched_resources.cloud)
     cluster_info = provision.get_cluster_info(cloud_name,
                                               provision_record.region,
                                               cluster_name.name_on_cloud,
