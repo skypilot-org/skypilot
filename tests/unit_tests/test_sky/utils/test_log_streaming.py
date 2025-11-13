@@ -3,6 +3,7 @@
 import os
 import subprocess
 import tempfile
+import threading
 import time
 import unittest
 
@@ -48,8 +49,6 @@ class TestLogStreaming(unittest.TestCase):
                                         stderr=subprocess.PIPE)
 
                 # Start handler
-                import threading
-
                 def run_handler():
                     context_utils.pipe_and_wait_process(
                         ctx, proc, stdout_stream_handler=custom_handler)
@@ -83,16 +82,16 @@ class TestLogStreaming(unittest.TestCase):
                 output = f.read()
             self.assertIn('Server started', output)
 
-            # Key assertion: Log should appear within ~2s, not at the end (3s+)
-            # With proper flushing: appears within 1s
+            # Key assertion: Log should appear within ~1s, not at the end (3s+)
+            # With proper flushing: appears within 0.5-1s (flush interval is 0.5s)
             # Without flushing: appears only when process ends (~3s)
             self.assertTrue(
                 log_appeared,
                 'Log should appear in output file while task is still running')
             self.assertLess(
-                elapsed_until_log, 2.0,
+                elapsed_until_log, 1.0,
                 f'Log took {elapsed_until_log:.2f}s to appear. Expected prompt flush '
-                f'within ~1s, but log didn\'t appear until near process completion (3s).'
+                f'within ~0.5-1s, but log didn\'t appear until near process completion (3s).'
             )
 
         finally:
