@@ -26,6 +26,8 @@ Pools is great for large-scale data processing tasks, that require launching man
 #. **Batch inference**: Run batch inference jobs on a pool of workers, such as generating embeddings or backfilling data.
 #. **Hyperparameter tuning**: Evaluate multiple hyperparameters in parallel on a pool of workers.
 
+Example: :doc:`Batch Text Classification with Pools </examples/applications/pools_batch_inference>` demonstrates using pools to run parallel text classification on movie reviews with vLLM.
+
 .. warning::
 
   Pools is a beta feature. Some features are not yet supported, but are on the roadmap:
