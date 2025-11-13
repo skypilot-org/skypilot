@@ -908,7 +908,6 @@ available_node_types:
                 # set UV_SYSTEM_PYTHON to false in case the user provided docker image set it to true.
                 # unset PYTHONPATH in case the user provided docker image set it.
                 VIRTUAL_ENV=~/skypilot-runtime UV_SYSTEM_PYTHON=false env -u PYTHONPATH ~/.local/bin/uv pip install skypilot[kubernetes,remote]
-                {{ copy_skypilot_templates_commands }}
                 # Wait for `patch` package to be installed before applying ray patches
                 until dpkg -l | grep -q "^ii  patch "; do
                   sleep 0.1
@@ -1359,6 +1358,7 @@ setup_commands:
     echo "=== Ray and skypilot dependencies installation completed in $(($end_epoch - $start_epoch)) secs ===";
     start_epoch=$(date +%s);
     {{ skypilot_wheel_installation_commands }}
+    {{ copy_skypilot_templates_commands }}
     end_epoch=$(date +%s);
     echo "=== Skypilot wheel installation completed in $(($end_epoch - $start_epoch)) secs ===";
     start_epoch=$(date +%s);
