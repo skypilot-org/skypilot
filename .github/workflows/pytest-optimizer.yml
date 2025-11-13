@@ -21,11 +21,14 @@ jobs:
           # Group them based on running time to save CI time and resources
           - "tests/test_optimizer_dryruns.py -k \"partial\""
           - "tests/test_optimizer_dryruns.py -k \"not partial\""
+          - tests/test_optimizer_random_dag.py
         include:
           - test-path: "tests/test_optimizer_dryruns.py -k \"partial\""
             test-name: "Optimizer Dryruns Part 1"
           - test-path: "tests/test_optimizer_dryruns.py -k \"not partial\""
             test-name: "Optimizer Dryruns Part 2"
+          - test-path: tests/test_optimizer_random_dag.py
+            test-name: "Optimizer Random DAG Tests"
     runs-on: ubuntu-latest
     name: "Python Tests - ${{ matrix.test-name }}"
     steps:
