@@ -55,6 +55,7 @@ from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.server import metrics
+from sky.server import middleware_utils
 from sky.server import state
 from sky.server import stream_utils
 from sky.server import versions
@@ -138,6 +139,7 @@ def _try_set_basic_auth_user(request: fastapi.Request):
             break
 
 
+@middleware_utils.websocket_aware
 class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle RBAC."""
 
@@ -187,6 +189,7 @@ def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
     return models.User(id=user_hash, name=user_name)
 
 
+@middleware_utils.websocket_aware
 class InitializeRequestAuthUserMiddleware(
         starlette.middleware.base.BaseHTTPMiddleware):
 
@@ -197,6 +200,7 @@ class InitializeRequestAuthUserMiddleware(
         return await call_next(request)
 
 
+@middleware_utils.websocket_aware
 class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle HTTP Basic Auth."""
 
@@ -248,6 +252,7 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+@middleware_utils.websocket_aware
 class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle Bearer Token Auth (Service Accounts)."""
 
@@ -375,6 +380,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+@middleware_utils.websocket_aware
 class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle auth proxy."""
 
@@ -549,6 +555,7 @@ class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+@middleware_utils.websocket_aware
 class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to control requests when server is shutting down."""
 
@@ -568,6 +575,7 @@ class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+@middleware_utils.websocket_aware
 class APIVersionMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to add API version to the request."""
 
