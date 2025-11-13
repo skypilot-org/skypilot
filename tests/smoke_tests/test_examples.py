@@ -155,7 +155,10 @@ def test_ray_basic(generic_cloud: str) -> None:
             [
                 f'sky launch -y -c {name} --infra {generic_cloud} {yaml_file_path}',
                 f'sky logs {name} 1 --status',
-                f'outputs=$(sky logs {name} 1); echo "$outputs" && echo "$outputs" | grep "Sum of squares:"',
+                f'outputs=$(sky logs {name} 1); echo "$outputs" && '
+                f'echo "$outputs" | grep "Sum of squares:" && '
+                f'echo "$outputs" | grep "All 2 nodes have joined" && '
+                f'echo "$outputs" | grep "SUCCEEDED"',
             ],
             f'sky down -y {name}; rm {yaml_file_path}',
             timeout=10 * 60,

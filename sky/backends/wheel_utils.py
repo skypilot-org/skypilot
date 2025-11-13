@@ -251,6 +251,17 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
         # protocol. "compare, update and clone" has to be atomic to avoid
         # race conditions.
         last_modification_time = _get_latest_modification_time(SKY_PACKAGE_PATH)
+        # Also check sky_templates directory modification time
+        sky_templates_path = SKY_PACKAGE_PATH.parent / 'sky_templates'
+        if sky_templates_path.exists():
+            sky_templates_mtime = _get_latest_modification_time(
+                sky_templates_path)
+            if (last_modification_time is not None and
+                    sky_templates_mtime is not None):
+                last_modification_time = max(last_modification_time,
+                                             sky_templates_mtime)
+            elif sky_templates_mtime is not None:
+                last_modification_time = sky_templates_mtime
         last_wheel_modification_time = _get_latest_modification_time(WHEEL_DIR)
 
         # Only build wheels if the wheel is outdated, wheel does not exist

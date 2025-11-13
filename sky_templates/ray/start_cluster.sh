@@ -44,21 +44,21 @@ RAY_CMD_PREFIX=${RAY_CMD_PREFIX:-}  # Optional command prefix (e.g., "uv run")
 echo -e "${GREEN}Starting Ray cluster...${NC}"
 
 # Check if Ray is installed
-if ! command -v ray &> /dev/null; then
+if ! ${RAY_CMD_PREFIX} ray --version &> /dev/null 2>&1; then
     echo -e "${YELLOW}Ray is not installed. Installing ray[default]...${NC}"
-    uv pip install --system "ray[default]"
-    if ! command -v ray &> /dev/null; then
+    uv pip install "ray[default]" || uv pip install --system "ray[default]"
+    if ! ${RAY_CMD_PREFIX} ray --version &> /dev/null 2>&1; then
         echo -e "${RED}Error: Failed to install Ray.${NC}"
         exit 1
     fi
-    echo -e "${GREEN}Ray $(ray --version | cut -d' ' -f3) installed successfully.${NC}"
+    echo -e "${GREEN}Ray $(${RAY_CMD_PREFIX} ray --version | cut -d' ' -f3) installed successfully.${NC}"
 else
     # Ray is installed, but check if ray[default] is installed
     # (needed for ray list nodes)
-    if ! python -c "import ray.dashboard" &> /dev/null; then
-        RAY_VERSION=$(ray --version | cut -d' ' -f3)
+    if ! ${RAY_CMD_PREFIX} python -c "import ray.dashboard" &> /dev/null; then
+        RAY_VERSION=$(${RAY_CMD_PREFIX} ray --version | cut -d' ' -f3)
         echo -e "${YELLOW}Ray is installed but ray[default] extras are missing. Installing ray[default]==${RAY_VERSION}...${NC}"
-        uv pip install --system "ray[default]==${RAY_VERSION}"
+        uv pip install "ray[default]==${RAY_VERSION}" || uv pip install --system "ray[default]==${RAY_VERSION}"
     fi
 fi
 
