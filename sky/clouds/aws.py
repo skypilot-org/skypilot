@@ -492,31 +492,40 @@ class AWS(clouds.Cloud):
             f'Image {image_id!r} not found in AWS region {region}.\n'
             f'\nTo find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
             'Example: ami-0729d913a335efca7')
-        try:
-            client = aws.client('ec2', region_name=region)
-            image_info = client.describe_images(ImageIds=[image_id]).get(
-                'Images', [])
-            if not image_info:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(image_not_found_message)
-            image_size = image_info[0]['BlockDeviceMappings'][0]['Ebs'][
-                'VolumeSize']
-        except (aws.botocore_exceptions().NoCredentialsError,
-                aws.botocore_exceptions().ProfileNotFound) as e:
-            logger.debug(
-                f'Failed to get image size for {image_id} in region {region}: {e}'
-            )
-            # Fallback to default image size if no credentials are available.
-            # The credentials issue will be caught when actually provisioning
-            # the instance and appropriate errors will be raised there.
-            return DEFAULT_AMI_GB
-        except aws.botocore_exceptions().ClientError as e:
-            logger.debug(
-                f'Failed to get image size for {image_id} in region {region}: {e}'
-            )
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(image_not_found_message) from None
-        # cache the result for a day
+        max_retries = 3
+        for iteration in range(1, max_retries + 1):
+            try:
+                client = aws.client('ec2', region_name=region)
+                image_info = client.describe_images(ImageIds=[image_id]).get(
+                    'Images', [])
+                if not image_info:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(image_not_found_message)
+                image_size = image_info[0]['BlockDeviceMappings'][0]['Ebs'][
+                    'VolumeSize']
+                break
+            except (aws.botocore_exceptions().NoCredentialsError,
+                    aws.botocore_exceptions().ProfileNotFound) as e:
+                logger.debug(
+                    f'Failed to get image size for {image_id} in region {region}: {e}'
+                )
+                # Fallback to default image size if no credentials are available.
+                # The credentials issue will be caught when actually provisioning
+                # the instance and appropriate errors will be raised there.
+                return DEFAULT_AMI_GB
+            except aws.botocore_exceptions().ClientError as e:
+                logger.debug(
+                    f'Failed to get image size for {image_id} in region {region}: {e}'
+                )
+                if iteration == max_retries:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(image_not_found_message) from None
+            # linear backoff starting from 0.5 seconds
+            time.sleep(iteration * 0.5)
+        # cache the result for a day.
+        # AMIs are immutable, so we can cache the result for a long time.
+        # While AMIs can be deleted, if the AMI is deleted before cache expiration,
+        # the actual VM launch still fails.
         day_in_seconds = 60 * 60 * 24  # 1 day, 60s * 60m * 24h
         kv_cache.add_or_update_cache_entry(kv_cache_key, str(image_size),
                                            time.time() + day_in_seconds)
@@ -540,36 +549,45 @@ class AWS(clouds.Cloud):
             f'Image {image_id!r} not found in AWS region {region}.\n'
             f'To find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
             'Example: ami-0729d913a335efca7')
-        try:
-            client = aws.client('ec2', region_name=region)
-            image_info = client.describe_images(ImageIds=[image_id]).get(
-                'Images', [])
-            if not image_info:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(image_not_found_message)
-            image = image_info[0]
-            if 'RootDeviceName' not in image:
-                logger.debug(f'Image {image_id!r} does not have a root '
-                             f'device name. '
+        max_retries = 3
+        for iteration in range(1, max_retries + 1):
+            try:
+                client = aws.client('ec2', region_name=region)
+                image_info = client.describe_images(ImageIds=[image_id]).get(
+                    'Images', [])
+                if not image_info:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(image_not_found_message)
+                image = image_info[0]
+                if 'RootDeviceName' not in image:
+                    logger.debug(f'Image {image_id!r} does not have a root '
+                                 f'device name. '
+                                 f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
+                    return DEFAULT_ROOT_DEVICE_NAME
+                root_device_name = image['RootDeviceName']
+                break
+            except (aws.botocore_exceptions().NoCredentialsError,
+                    aws.botocore_exceptions().ProfileNotFound) as e:
+                # Fallback to default root device name if no credentials are
+                # available.
+                # The credentials issue will be caught when actually provisioning
+                # the instance and appropriate errors will be raised there.
+                logger.debug(f'Failed to get image root device name for '
+                             f'{image_id} in region {region}: {e}. '
                              f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
                 return DEFAULT_ROOT_DEVICE_NAME
-            root_device_name = image['RootDeviceName']
-        except (aws.botocore_exceptions().NoCredentialsError,
-                aws.botocore_exceptions().ProfileNotFound) as e:
-            # Fallback to default root device name if no credentials are
-            # available.
-            # The credentials issue will be caught when actually provisioning
-            # the instance and appropriate errors will be raised there.
-            logger.debug(f'Failed to get image root device name for '
-                         f'{image_id} in region {region}: {e}. '
-                         f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
-            return DEFAULT_ROOT_DEVICE_NAME
-        except aws.botocore_exceptions().ClientError as e:
-            logger.debug(f'Failed to get image root device name for '
-                         f'{image_id} in region {region}: {e}.')
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(image_not_found_message) from None
-        # cache the result for a day
+            except aws.botocore_exceptions().ClientError as e:
+                logger.debug(f'Failed to get image root device name for '
+                             f'{image_id} in region {region}: {e}.')
+                if iteration == max_retries:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(image_not_found_message) from None
+            # linear backoff starting from 0.5 seconds
+            time.sleep(iteration * 0.5)
+        # cache the result for a day.
+        # Root device names are immutable, so we can cache the result for a long time.
+        # While AMIs can be deleted, if the AMI is deleted before cache expiration,
+        # the actual VM launch still fails.
         day_in_seconds = 60 * 60 * 24  # 1 day, 60s * 60m * 24h
         kv_cache.add_or_update_cache_entry(kv_cache_key, root_device_name,
                                            time.time() + day_in_seconds)
