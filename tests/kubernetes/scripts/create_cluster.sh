@@ -53,6 +53,23 @@ case "$PROVIDER" in
     echo "Node Count: $NODE_COUNT"
     echo "Instance Type: $INSTANCE_TYPE"
 
+    # Check if cluster exists and delete it if present
+    echo "Checking if EKS cluster '$CLUSTER_NAME' exists..."
+    set +e
+    aws eks describe-cluster --region "$REGION" --name "$CLUSTER_NAME" > /dev/null 2>&1
+    cluster_exists=$?
+    set -e
+
+    if [ $cluster_exists -eq 0 ]; then
+        echo "Found existing EKS cluster '$CLUSTER_NAME'. Deleting it first..."
+        # Get the directory where this script is located to find delete_cluster.sh
+        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        "$SCRIPT_DIR/delete_cluster.sh" aws "$CLUSTER_NAME" "$REGION"
+        echo "Waiting for cluster deletion to complete before creating new cluster..."
+    else
+        echo "No existing EKS cluster found"
+    fi
+
     RESOLVED_CONFIG="/tmp/${CLUSTER_NAME}-eks-cluster-config.yaml"
     cat > "$RESOLVED_CONFIG" <<EOF
 apiVersion: eksctl.io/v1alpha5

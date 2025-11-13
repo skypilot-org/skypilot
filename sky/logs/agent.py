@@ -38,7 +38,7 @@ class FluentbitAgent(LoggingAgent):
             'if ! command -v fluent-bit >/dev/null 2>&1 && [ ! -f /opt/fluent-bit/bin/fluent-bit ]; then '
             'sudo apt-get update; sudo apt-get install -y gnupg; '
             # pylint: disable=line-too-long
-            'sudo sh -c \'curl https://packages.fluentbit.io/fluentbit.key | gpg --dearmor > /usr/share/keyrings/fluentbit-keyring.gpg\'; '
+            'sudo sh -c \'curl -L https://packages.fluentbit.io/fluentbit.key | gpg --dearmor > /usr/share/keyrings/fluentbit-keyring.gpg\'; '
             # pylint: disable=line-too-long
             'os_id=$(grep -oP \'(?<=^ID=).*\' /etc/os-release 2>/dev/null || lsb_release -is 2>/dev/null | tr \'[:upper:]\' \'[:lower:]\'); '
             # pylint: disable=line-too-long

@@ -55,6 +55,7 @@ from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.server import metrics
+from sky.server import middleware_utils
 from sky.server import state
 from sky.server import stream_utils
 from sky.server import versions
@@ -138,6 +139,7 @@ def _try_set_basic_auth_user(request: fastapi.Request):
             break
 
 
+@middleware_utils.websocket_aware
 class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle RBAC."""
 
@@ -187,6 +189,7 @@ def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
     return models.User(id=user_hash, name=user_name)
 
 
+@middleware_utils.websocket_aware
 class InitializeRequestAuthUserMiddleware(
         starlette.middleware.base.BaseHTTPMiddleware):
 
@@ -197,6 +200,7 @@ class InitializeRequestAuthUserMiddleware(
         return await call_next(request)
 
 
+@middleware_utils.websocket_aware
 class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle HTTP Basic Auth."""
 
@@ -248,6 +252,7 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+@middleware_utils.websocket_aware
 class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle Bearer Token Auth (Service Accounts)."""
 
@@ -375,6 +380,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+@middleware_utils.websocket_aware
 class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle auth proxy."""
 
@@ -549,6 +555,7 @@ class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+@middleware_utils.websocket_aware
 class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to control requests when server is shutting down."""
 
@@ -568,6 +575,7 @@ class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+@middleware_utils.websocket_aware
 class APIVersionMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to add API version to the request."""
 
@@ -856,6 +864,7 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
         # server thread.
         with admin_policy_utils.apply_and_use_config_in_current_request(
                 dag,
+                request_name=request_names.AdminPolicyRequestName.VALIDATE,
                 request_options=validate_body.get_request_options()) as dag:
             dag.resolve_and_validate_volumes()
             # Skip validating workdir and file_mounts, as those need to be
@@ -1805,12 +1814,18 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         version=sky.__version__,
         version_on_disk=common.get_skypilot_version_on_disk(),
         commit=sky.__commit__,
+        # Whether basic auth on api server is enabled
         basic_auth_enabled=os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH,
                                           'false').lower() == 'true',
         user=user if user is not None else None,
+        # Whether service account token is enabled
         service_account_token_enabled=(os.environ.get(
             constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS,
             'false').lower() == 'true'),
+        # Whether basic auth on ingress is enabled
+        ingress_basic_auth_enabled=os.environ.get(
+            constants.SKYPILOT_INGRESS_BASIC_AUTH_ENABLED,
+            'false').lower() == 'true',
     )
 
 

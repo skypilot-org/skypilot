@@ -29,10 +29,16 @@ spec:
     metadata:
       annotations:
         {{- if .Values.apiService.metrics.enabled }}
+        {{- if .Values.prometheus.useDedicatedScrapeConfig }}
+        skypilot.co/scrape: "true"
+        skypilot.co/path: "/metrics"
+        skypilot.co/port: {{ .Values.apiService.metrics.port | quote }}
+        {{- else}}
         # Well-known annotations for Prometheus to scrape the metrics.
         prometheus.io/scrape: "true"
         prometheus.io/path: "/metrics"
         prometheus.io/port: {{ .Values.apiService.metrics.port | quote }}
+        {{- end }}
         {{- end }}
         {{- if .Values.apiService.annotations }}
         {{- toYaml .Values.apiService.annotations | nindent 8 }}
@@ -50,10 +56,14 @@ spec:
       {{- end }}
       runtimeClassName: {{ .Values.runtimeClassName }}
       terminationGracePeriodSeconds: {{ .Values.apiService.terminationGracePeriodSeconds }}
+      {{- with .Values.apiService.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
       - name: skypilot-api
         image: {{ .Values.apiService.image }}
-        imagePullPolicy: Always
+        imagePullPolicy: {{ .Values.apiService.imagePullPolicy }}
         {{- with .Values.securityContext }}
         securityContext:
           {{- toYaml . | nindent 10 }}
@@ -77,6 +87,10 @@ spec:
         {{- end }}
         {{- if include "skypilot.serviceAccountAuthEnabled" . | trim | eq "true" }}
         - name: ENABLE_SERVICE_ACCOUNTS
+          value: "true"
+        {{- end }}
+        {{- if include "skypilot.ingressBasicAuthEnabled" . | trim | eq "true" }}
+        - name: SKYPILOT_INGRESS_BASIC_AUTH_ENABLED
           value: "true"
         {{- end }}
         {{- if .Values.gcpCredentials.enabled }}

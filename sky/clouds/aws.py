@@ -299,7 +299,9 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         unsupported_features = {}
         if resources.use_spot:
@@ -341,10 +343,15 @@ class AWS(clouds.Cloud):
     #### Regions/Zones ####
 
     @classmethod
-    def regions_with_offering(cls, instance_type: str,
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[clouds.Region]:
+    def regions_with_offering(
+        cls,
+        instance_type: str,
+        accelerators: Optional[Dict[str, int]],
+        use_spot: bool,
+        region: Optional[str],
+        zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None,
+    ) -> List[clouds.Region]:
         del accelerators  # unused
         regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'aws')
@@ -422,7 +429,8 @@ class AWS(clouds.Cloud):
             if acc_name == 'K80':
                 image_id = catalog.get_image_id_from_tag(
                     _DEFAULT_GPU_K80_IMAGE_ID, region_name, clouds='aws')
-            if acc_name in ['Trainium', 'Inferentia']:
+            if acc_name.startswith('Trainium') or acc_name.startswith(
+                    'Inferentia'):
                 image_id = catalog.get_image_id_from_tag(
                     _DEFAULT_NEURON_IMAGE_ID, region_name, clouds='aws')
         if image_id is not None:
@@ -486,12 +494,18 @@ class AWS(clouds.Cloud):
             image_size = image_info[0]['BlockDeviceMappings'][0]['Ebs'][
                 'VolumeSize']
         except (aws.botocore_exceptions().NoCredentialsError,
-                aws.botocore_exceptions().ProfileNotFound):
+                aws.botocore_exceptions().ProfileNotFound) as e:
+            logger.debug(
+                f'Failed to get image size for {image_id} in region {region}: {e}'
+            )
             # Fallback to default image size if no credentials are available.
             # The credentials issue will be caught when actually provisioning
             # the instance and appropriate errors will be raised there.
             return DEFAULT_AMI_GB
-        except aws.botocore_exceptions().ClientError:
+        except aws.botocore_exceptions().ClientError as e:
+            logger.debug(
+                f'Failed to get image size for {image_id} in region {region}: {e}'
+            )
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(image_not_found_message) from None
         return image_size
@@ -517,21 +531,24 @@ class AWS(clouds.Cloud):
                     raise ValueError(image_not_found_message)
             image = image_info[0]
             if 'RootDeviceName' not in image:
-                logger.warning(f'Image {image_id!r} does not have a root '
-                               f'device name. '
-                               f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
+                logger.debug(f'Image {image_id!r} does not have a root '
+                             f'device name. '
+                             f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
                 return DEFAULT_ROOT_DEVICE_NAME
             return image['RootDeviceName']
         except (aws.botocore_exceptions().NoCredentialsError,
-                aws.botocore_exceptions().ProfileNotFound):
+                aws.botocore_exceptions().ProfileNotFound) as e:
             # Fallback to default root device name if no credentials are
             # available.
             # The credentials issue will be caught when actually provisioning
             # the instance and appropriate errors will be raised there.
-            logger.warning(f'No credentials available for region {region}. '
-                           f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
+            logger.debug(f'Failed to get image root device name for '
+                         f'{image_id} in region {region}: {e}. '
+                         f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
             return DEFAULT_ROOT_DEVICE_NAME
-        except aws.botocore_exceptions().ClientError:
+        except aws.botocore_exceptions().ClientError as e:
+            logger.debug(f'Failed to get image root device name for '
+                         f'{image_id} in region {region}: {e}.')
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(image_not_found_message) from None
 
@@ -1044,7 +1061,8 @@ class AWS(clouds.Cloud):
                     f'Invalid AWS configuration.\n'
                     f'  Reason: {common_utils.format_exception(e, use_bracket=True)}.'
                 ) from None
-        except aws.botocore_exceptions().TokenRetrievalError:
+        except aws.botocore_exceptions().TokenRetrievalError as e:
+            logger.debug(f'Failed to get AWS caller identity: {e}.')
             # This is raised when the access token is expired, which mainly
             # happens when the user is using temporary credentials or SSO
             # login.

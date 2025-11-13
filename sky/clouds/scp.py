@@ -74,7 +74,9 @@ class SCP(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         features = cls._CLOUD_UNSUPPORTED_FEATURES
         if resources.use_spot:
@@ -92,10 +94,15 @@ class SCP(clouds.Cloud):
         return catalog.regions(clouds='scp')
 
     @classmethod
-    def regions_with_offering(cls, instance_type: Optional[str],
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[clouds.Region]:
+    def regions_with_offering(
+        cls,
+        instance_type: Optional[str],
+        accelerators: Optional[Dict[str, int]],
+        use_spot: bool,
+        region: Optional[str],
+        zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None,
+    ) -> List[clouds.Region]:
 
         del accelerators, zone  # unused
         if use_spot:

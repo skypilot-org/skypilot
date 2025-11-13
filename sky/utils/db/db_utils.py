@@ -185,7 +185,7 @@ def add_column_to_table_sqlalchemy(
             pass
         else:
             raise
-    #postgressql
+    #postgresql
     except sqlalchemy_exc.ProgrammingError as e:
         if 'already exists' in str(e):
             pass
@@ -444,17 +444,15 @@ def get_engine(
                     _postgres_engine_cache[conn_string] = (
                         sqlalchemy.create_engine(
                             conn_string, poolclass=sqlalchemy.pool.NullPool))
-                elif _max_connections == 1:
-                    _postgres_engine_cache[conn_string] = (
-                        sqlalchemy.create_engine(
-                            conn_string, poolclass=sqlalchemy.pool.StaticPool))
                 else:
                     _postgres_engine_cache[conn_string] = (
                         sqlalchemy.create_engine(
                             conn_string,
                             poolclass=sqlalchemy.pool.QueuePool,
-                            size=_max_connections,
-                            max_overflow=0))
+                            pool_size=_max_connections,
+                            max_overflow=max(0, 5 - _max_connections),
+                            pool_pre_ping=True,
+                            pool_recycle=1800))
             engine = _postgres_engine_cache[conn_string]
     else:
         assert db_name is not None, 'db_name must be provided for SQLite'

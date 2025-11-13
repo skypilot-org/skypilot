@@ -77,6 +77,8 @@ Below is the available helm value keys and the default value of each key:
       :ref:`retention <helm-values-apiService-logs-retention>`:
         :ref:`enabled <helm-values-apiService-logs-retention-enabled>`: false
         :ref:`size <helm-values-apiService-logs-retention-size>`: 10M
+    :ref:`imagePullSecrets <helm-values-apiService-imagePullSecrets>`: null
+    :ref:`imagePullPolicy <helm-values-apiService-imagePullPolicy>`: Always
 
   :ref:`auth <helm-values-auth>`:
     :ref:`oauth <helm-values-auth-oauth>`:
@@ -282,6 +284,35 @@ To use a nightly build, find the desired nightly version on `pypi <https://pypi.
   apiService:
     # Replace 1.0.0.devYYYYMMDD with the desired nightly version
     image: berkeleyskypilot/skypilot-nightly:1.0.0.devYYYYMMDD
+
+.. _helm-values-apiService-imagePullSecrets:
+
+``apiService.imagePullSecrets``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+List of Kubernetes ``imagePullSecrets`` objects to attach to the API server pods. Set this when the API server image is hosted in a private registry so the pods can authenticate during pulls.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    imagePullSecrets:
+      - name: my-registry-credentials
+
+.. _helm-values-apiService-imagePullPolicy:
+
+``apiService.imagePullPolicy``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Image pull policy applied to the API server containers. Accepts the standard Kubernetes values (``Always``, ``IfNotPresent``, ``Never``). Use ``IfNotPresent`` when caching images locally is preferred.
+
+Default: ``"Always"``
+
+.. code-block:: yaml
+
+  apiService:
+    imagePullPolicy: Always
 
 .. _helm-values-apiService-upgradeStrategy:
 
@@ -2140,7 +2171,7 @@ SkyPilot provides a minimal Prometheus configuration by default. If you want to 
     kube-state-metrics:
       enabled: true
       metricLabelsAllowlist:
-        - pods=[skypilot-cluster]
+        - pods=[skypilot-cluster-name]
     prometheus-node-exporter:
       enabled: false
     prometheus-pushgateway:
