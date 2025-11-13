@@ -158,6 +158,13 @@ def test_ray_basic(generic_cloud: str) -> None:
                 f'echo "$outputs" | grep "Sum of squares:" && '
                 f'echo "$outputs" | grep "All 2 nodes have joined" && '
                 f'echo "$outputs" | grep "SUCCEEDED"',
+                f'sky exec {name} {yaml_file_path}',
+                f'sky logs {name} 2 --status',
+                f'outputs=$(sky logs {name} 2); echo "$outputs" && '
+                f'echo "$outputs" | grep "Ray cluster successfully stopped" && '
+                f'echo "$outputs" | grep "Sum of squares:" && '
+                f'echo "$outputs" | grep "All 2 nodes have joined" && '
+                f'echo "$outputs" | grep "SUCCEEDED"',
             ],
             f'sky down -y {name}; rm {yaml_file_path}',
             timeout=10 * 60,
