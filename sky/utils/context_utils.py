@@ -8,7 +8,6 @@ import multiprocessing
 import os
 import subprocess
 import sys
-import time
 import typing
 from typing import Any, Callable, IO, Optional, Tuple, TypeVar
 
@@ -54,6 +53,8 @@ def passthrough_stream_handler(in_stream: IO[Any], out_stream: IO[Any]) -> str:
                                errors='replace',
                                write_through=True)
     while True:
+        # can take a while to return
+        # if the task emits logs infrequently.
         line = wrapped.readline()
         if line:
             out_stream.write(line)
