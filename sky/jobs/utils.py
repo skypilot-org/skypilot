@@ -282,7 +282,7 @@ def ha_recovery_for_consolidation_mode():
               'w',
               encoding='utf-8') as f:
         start = time.time()
-        f.write(f'Starting HA recovery at {datetime.datetime.now()}\n')
+        f.write(f'Starting HA recovery at {datetime.now()}\n')
         jobs, _ = managed_job_state.get_managed_jobs_with_filters(
             fields=['job_id', 'controller_pid', 'schedule_state', 'status'])
         for job in jobs:
@@ -318,8 +318,8 @@ def ha_recovery_for_consolidation_mode():
                     continue
                 runner.run(script)
                 f.write(f'Job {job_id} completed recovery at '
-                        f'{datetime.datetime.now()}\n')
-        f.write(f'HA recovery completed at {datetime.datetime.now()}\n')
+                        f'{datetime.now()}\n')
+        f.write(f'HA recovery completed at {datetime.now()}\n')
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
     signal_file.unlink()
 
