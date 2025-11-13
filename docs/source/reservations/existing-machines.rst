@@ -92,6 +92,10 @@ Equivalently, use ``resources.infra: ssh/<node_pool_name>`` in a task YAML:
 
 See more customization options and details about SSH Node Pools in the rest of this guide.
 
+.. tip::
+
+    When working with VMs with GPUs, the VMs must have `nvidia-smi` installed.
+
 .. _defining-ssh-node-pools:
 
 Defining SSH Node Pools
