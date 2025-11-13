@@ -21,14 +21,10 @@ Pools benefits
 Use cases
 ----------
 
-Pools is great for large-scale data processing tasks, that require launching many jobs whose cumulative resource requirements are too large to spawn at once.
+Pools is great for large-scale data processing tasks, that require launching many jobs whose cumulative resource requirements are too large to spawn at once. This is generally useful for any application that is easily parallelized, but some common use cases are:
 
-With pools, you can queue up a large number of jobs on a comparatively small number of workers. The pool will automatically assign jobs to workers as they become available.
-
-Pools is generally useful for any application that is easily parallelized, but some common use cases are:
-
-#. Batch inference
-#. Hyperparameter tuning
+#. **Batch inference**: Run batch inference jobs on a pool of workers, such as generating embeddings or backfilling data.
+#. **Hyperparameter tuning**: Evaluate multiple hyperparameters in parallel on a pool of workers.
 
 .. warning::
 
@@ -42,7 +38,7 @@ Pools is generally useful for any application that is easily parallelized, but s
 Creating a pool
 ---------------
 
-Here is a simple example of creating a pool:
+To create a pool, specify the number pool workers in a SkyPilot YAML:
 
 .. code-block:: yaml
   :emphasize-lines: 2-4
@@ -66,7 +62,6 @@ Here is a simple example of creating a pool:
     echo "Setup complete!"
 
 Notice that the :code:`pool` section is the only difference from a normal SkyPilot YAML.
-To specify the number of workers in the pool, use the :code:`workers` field under :code:`pool`.
 
 .. warning::
 
@@ -181,12 +176,13 @@ The job will be launched on one of the available workers in the pool.
 
 .. note::
 
-  Currently, each worker is **exclusively occupied** by a single managed job at a time, so the :code:`resources` specified in the job YAML should match those used in the pool YAML. Support for running multiple jobs concurrently on the same worker will be added in the future.
+  Currently, each worker is **exclusively occupied** by a single job at a time, so the :code:`resources` specified in the job YAML should match those used in the pool YAML. Support for running multiple jobs concurrently on the same worker will be added in the future.
 
-Submit multiple jobs at once
+Scale out with multiple jobs
 ----------------------------
 
-Pools support a :code:`--num-jobs` flag to conveniently submit multiple jobs at once.
+Pools support a :code:`--num-jobs` flag to conveniently submit multiple jobs at once. This is useful for scaling out a workload that can be parallelized.
+
 Each job will be assigned a unique environment variable :code:`$SKYPILOT_JOB_RANK`, which can be used to partition the total work across each job.
 Additionally, the :code:`$SKYPILOT_NUM_JOBS` environment variable will be set to the total number of jobs submitted.
 
@@ -266,16 +262,17 @@ The **Worker Details** section displays the current resource summary of the pool
 
   You can use :code:`sky jobs cancel -p gpu-pool` to cancel all jobs currently running or pending on the pool.
 
-Update a pool
--------------
+Scaling and updating a pool
+---------------------------
 
 You can update the pool configuration with the following command:
 
 .. code-block:: yaml
-  :emphasize-lines: 3
+  :emphasize-lines: 3-4
 
   # new-pool.yaml
   pool:
+    # Update the number of workers in the pool to 10
     workers: 10
 
   resources:
@@ -291,11 +288,11 @@ You can update the pool configuration with the following command:
     echo "Setup complete!"
 
 .. code-block:: console
-
+  # Apply the new pool configuration
   $ sky jobs pool apply -p gpu-pool new-pool.yaml
 
-The :code:`sky jobs pool apply` command can be used to update the configuration of an existing pool with the same name.
-In this example, it updates the number of workers in the pool to 10.
+The :code:`sky jobs pool apply` command can be used to update the configuration of an existing pool with the same name. In this example, it scales out the pool to 10 workers.
+
 If no such pool exists, it will create a new one; this is equivalent to the behavior demonstrated in the previous example.
 
 Pools will automatically detect changes in the worker configuration. If only the pool configuration (e.g. number of workers) is changed, the pool will be updated in place to reuse the previous workers; otherwise, if the setup, file mounts, workdir, or resources configuration is changed, new worker clusters will be created and the old ones will be terminated gradually.
