@@ -1,16 +1,52 @@
 #!/bin/bash
 # Test script for large production-scale performance testing
 # This script sets up production-scale data and verifies performance metrics
+#
+# Usage:
+#   ./test_large_production_performance.sh [--postgres] [--restart-api-server]
+#
+# Options:
+#   --postgres              Create AWS RDS PostgreSQL database and restart sky api with DB connection
+#   --restart-api-server    Restart sky api server with consolidation mode config
 
 set -e  # Exit on error
 set -o pipefail  # Exit on pipe failure
+
+# Parse command line arguments
+USE_POSTGRES=false
+RESTART_API_SERVER=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --postgres)
+            USE_POSTGRES=true
+            shift
+            ;;
+        --restart-api-server)
+            RESTART_API_SERVER=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            echo "Usage: $0 [--postgres] [--restart-api-server]" >&2
+            exit 1
+            ;;
+    esac
+done
 
 # Configuration
 ACTIVE_CLUSTER_NAME="scale-test-active"
 TERMINATED_CLUSTER_NAME="scale-test-terminated"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INJECT_SCRIPT="${SCRIPT_DIR}/inject_production_scale_data.py"
+CREATE_DB_SCRIPT="${SCRIPT_DIR}/create_aws_postgres_db.sh"
 JOB_ID_FILE="/tmp/prod_test_job_id_$$"
+
+# RDS configuration (instance name related to test case)
+RDS_INSTANCE_ID="skypilot-large-production-test-db"
+RDS_REGION="${AWS_REGION:-us-east-2}"
+DB_SUBNET_GROUP_NAME="skypilot-test-subnet-group-${RDS_INSTANCE_ID}"
+SKYPILOT_DB_CONNECTION_URI=""
 
 # Cleanup function
 cleanup() {
@@ -39,6 +75,34 @@ cleanup() {
             break
         fi
     done
+
+    # Stop API server if it was restarted
+    if [ "$RESTART_API_SERVER" = "true" ]; then
+        echo "Stopping sky api server..."
+        sky api stop || true
+    fi
+
+    # Cleanup RDS instance if it was created
+    if [ "$USE_POSTGRES" = "true" ]; then
+        echo "Cleaning up RDS instance..."
+        if aws rds describe-db-instances --region "$RDS_REGION" --db-instance-identifier "$RDS_INSTANCE_ID" >/dev/null 2>&1; then
+            echo "Deleting RDS instance: $RDS_INSTANCE_ID"
+            aws rds delete-db-instance \
+                --region "$RDS_REGION" \
+                --db-instance-identifier "$RDS_INSTANCE_ID" \
+                --skip-final-snapshot \
+                2>/dev/null || true
+        fi
+
+        # Cleanup DB subnet group
+        if [ -n "$DB_SUBNET_GROUP_NAME" ]; then
+            echo "Cleaning up DB subnet group: $DB_SUBNET_GROUP_NAME"
+            aws rds delete-db-subnet-group \
+                --region "$RDS_REGION" \
+                --db-subnet-group-name "$DB_SUBNET_GROUP_NAME" \
+                2>/dev/null || true
+        fi
+    fi
 }
 
 # Set trap to cleanup on exit
@@ -47,6 +111,48 @@ trap cleanup EXIT
 echo "=========================================="
 echo "Large Production Performance Test"
 echo "=========================================="
+
+# Step 0: Create PostgreSQL database and/or restart API server if requested
+# If USE_POSTGRES is true, automatically set RESTART_API_SERVER to true
+if [ "$USE_POSTGRES" = "true" ]; then
+    RESTART_API_SERVER=true
+fi
+
+if [ "$RESTART_API_SERVER" = "true" ]; then
+    echo "Step 0: Setting up API server..."
+
+    # Create PostgreSQL database if requested
+    if [ "$USE_POSTGRES" = "true" ]; then
+        echo "Creating AWS RDS PostgreSQL database..."
+        if [ ! -f "$CREATE_DB_SCRIPT" ]; then
+            echo "ERROR: Database creation script not found: $CREATE_DB_SCRIPT" >&2
+            exit 1
+        fi
+
+        # Create the database and get connection URI
+        export RDS_INSTANCE_ID
+        SKYPILOT_DB_CONNECTION_URI=$(bash "$CREATE_DB_SCRIPT")
+        export SKYPILOT_DB_CONNECTION_URI
+        echo "✓ RDS database created"
+    fi
+
+    # Set config for consolidation mode
+    export SKYPILOT_GLOBAL_CONFIG=tests/test_yamls/consolidation_mode_config.yaml
+    echo "✓ Config set for consolidation mode"
+
+    # Restart API server with appropriate environment variables
+    echo "Restarting sky api..."
+    sky api stop || true
+
+    # Build the command with environment variables
+    if [ -n "$SKYPILOT_DB_CONNECTION_URI" ]; then
+        SKYPILOT_DB_CONNECTION_URI="$SKYPILOT_DB_CONNECTION_URI" sky api start
+        echo "✓ Sky api restarted with database connection and consolidation mode config"
+    else
+        sky api start
+        echo "✓ Sky api restarted with consolidation mode config"
+    fi
+fi
 
 # Step 1: Create sample terminated cluster
 echo "Step 1: Creating sample terminated cluster..."
