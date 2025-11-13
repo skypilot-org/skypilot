@@ -1590,7 +1590,11 @@ def _get_pod_pending_reason(context: Optional[str], namespace: str,
         return None
 
     for event in pod_events:
-        if event.reason != 'Scheduled':
+        # Omit common events that does not indicate a pending reason.
+        # We could also filter by event type 'Warning' or 'Error',
+        # but there might be useful 'Normal' events such as pulling
+        # image that we want to surface to the user.
+        if event.reason not in ('Scheduled', 'Created', 'Started', 'Failed'):
             reason = event.reason or 'Unknown'
             message = event.message or ''
             return reason, message
