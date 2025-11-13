@@ -38,6 +38,10 @@ _MAX_QUERY_INSTANCES_RETRIES = 5
 _QUERY_INSTANCES_RETRY_INTERVAL = .5
 _NUM_THREADS = subprocess_utils.get_parallel_threads('kubernetes')
 
+COMMON_NON_PENDING_EVENT_REASONS = {
+    'Scheduled', 'Created', 'Started', 'Failed', 'Pulled'
+}
+
 # Pattern to extract SSH user from command output, handling MOTD contamination
 _SSH_USER_PATTERN = re.compile(r'SKYPILOT_SSH_USER: ([^\s\n]+)')
 
@@ -1594,7 +1598,7 @@ def _get_pod_pending_reason(context: Optional[str], namespace: str,
         # We could also filter by event type 'Warning' or 'Error',
         # but there might be useful 'Normal' events such as pulling
         # image that we want to surface to the user.
-        if event.reason not in ('Scheduled', 'Created', 'Started', 'Failed'):
+        if event.reason not in COMMON_NON_PENDING_EVENT_REASONS:
             reason = event.reason or 'Unknown'
             message = event.message or ''
             return reason, message
