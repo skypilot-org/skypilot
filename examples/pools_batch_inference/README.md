@@ -24,7 +24,7 @@ Files in this example:
 - `classify.yaml`: Job definition that runs on pool workers
 - `classify.py`: Python script that performs the classification using vLLM's Python SDK
 
-### Step 1: Create the worker pool
+### Step 1: Create the pool
 
 Create a pool named `text-classify` with 2 workers:
 

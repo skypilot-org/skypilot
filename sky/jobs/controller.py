@@ -89,7 +89,7 @@ class JobController:
     - Loading the DAG and preparing per-task environment variables so each task
       has a stable global job identifier across recoveries.
     - Launching the task on the configured backend (``CloudVmRayBackend``),
-      optionally via a cluster pool.
+      optionally via a pool.
     - Persisting state transitions to the managed jobs state store
       (e.g., STARTING → RUNNING → SUCCEEDED/FAILED/CANCELLED).
     - Monitoring execution, downloading/streaming logs, detecting failures or
@@ -108,7 +108,7 @@ class JobController:
     - ``_dag`` / ``_dag_name``: The job definition and metadata loaded from the
       database-backed job YAML.
     - ``_backend``: Backend used to launch and manage clusters.
-    - ``_pool``: Optional pool name if using a cluster pool.
+    - ``_pool``: Optional pool name if using a pool.
     - ``starting`` / ``starting_lock`` / ``starting_signal``: Shared scheduler
       coordination primitives. ``starting_lock`` must be used for accessing
       ``starting_signal`` and ``starting``
@@ -134,7 +134,7 @@ class JobController:
                 scheduler state (e.g., the ``starting`` set).
             starting_signal: ``asyncio.Condition`` used to notify when a job
                 exits STARTING so more jobs can be admitted.
-            pool: Optional cluster pool name. When provided, the job is
+            pool: Optional pool name. When provided, the job is
                 submitted to the pool rather than launching a dedicated
                 cluster.
         """
@@ -362,7 +362,7 @@ class JobController:
         if self._pool is None:
             job_id_on_pool_cluster = None
         else:
-            # Update the cluster name when using cluster pool.
+            # Update the cluster name when using pool.
             cluster_name, job_id_on_pool_cluster = (
                 await
                 managed_job_state.get_pool_submit_info_async(self._job_id))

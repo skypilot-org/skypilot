@@ -188,7 +188,7 @@ class SkyServiceSpec:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Cannot specify `replica_policy` for cluster '
                                  'pool. Only `workers: <num>` is supported '
-                                 'for cluster pool now.')
+                                 'for pool now.')
 
         simplified_policy_section = config.get('replicas', None)
         workers_config = config.get('workers', None)
@@ -198,7 +198,7 @@ class SkyServiceSpec:
                                  ' Please use one of them.')
         if simplified_policy_section is not None and pool_config:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('Cannot specify `replicas` for cluster pool. '
+                raise ValueError('Cannot specify `replicas` for pool. '
                                  'Please use `workers` instead.')
         if simplified_policy_section is None:
             simplified_policy_section = workers_config

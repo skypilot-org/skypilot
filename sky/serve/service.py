@@ -348,8 +348,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
             # TODO(tian): Probably we could enable multiple ports specified in
             # service spec and we could start multiple load balancers.
             # After that, we will have a mapping from replica port to endpoint.
-            # NOTE(tian): We don't need the load balancer for cluster pool.
-            # Skip the load balancer process for cluster pool.
+            # NOTE(tian): We don't need the load balancer for pool.
+            # Skip the load balancer process for pool.
             if not service_spec.pool:
                 load_balancer_process = multiprocessing.Process(
                     target=ux_utils.RedirectOutputForProcess(
