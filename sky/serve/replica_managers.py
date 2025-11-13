@@ -65,6 +65,18 @@ _DEFAULT_DRAIN_SECONDS = 120
 # for more details.
 ProcessStatus = common_utils.ProcessStatus
 
+def get_enabled_clouds():
+    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+        sky_cloud.CloudCapability.COMPUTE,
+        raise_if_no_cloud_access=False)
+    final_enabled_clouds = []
+    for cloud_name in zonghengs_clouds:
+        for cloud in enabled_clouds:
+            if cloud.canonical_name() == cloud_name:
+                final_enabled_clouds.append(cloud)
+    assert len(final_enabled_clouds) == len(zonghengs_clouds), f"Enabled clouds: {final_enabled_clouds}, Chosen clouds: {zonghengs_clouds}"
+    return final_enabled_clouds
+
 
 # TODO(tian): Combine this with
 # sky/spot/recovery_strategy.py::StrategyExecutor::launch
@@ -743,10 +755,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             serve_state.get_replicas_at_status(
                 self._service_name, serve_state.ReplicaStatus.PENDING))
 
-        enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
-            sky_cloud.CloudCapability.COMPUTE,
-            raise_if_no_cloud_access=False)
-        enabled_clouds = [cloud for cloud in enabled_clouds if cloud.canonical_name() in zonghengs_clouds]
+        enabled_clouds = get_enabled_clouds()
         logger.info(f'Enabled clouds: {enabled_clouds}')
         cloud_index = 0
         for replica_info in to_up_replicas:
@@ -844,12 +853,9 @@ class SkyPilotReplicaManager(ReplicaManager):
     @with_lock
     def scale_up(self,
                  resources_override: Optional[Dict[str, Any]] = None) -> None:
-        enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
-            sky_cloud.CloudCapability.COMPUTE,
-            raise_if_no_cloud_access=False)
-        enabled_clouds = [cloud for cloud in enabled_clouds if cloud.canonical_name() in zonghengs_clouds]
+        enabled_clouds = get_enabled_clouds()
         logger.info(f'Enabled clouds: {enabled_clouds}')
-        self._launch_replica(self._next_replica_id, resources_override, enabled_clouds[self._next_replica_id % len(enabled_clouds)])
+        self._launch_replica(self._next_replica_id, resources_override, enabled_clouds[(self._next_replica_id - 1) % len(enabled_clouds)])
         self._next_replica_id += 1
 
     def _handle_sky_down_finish(self, info: ReplicaInfo, exitcode: int) -> None:
