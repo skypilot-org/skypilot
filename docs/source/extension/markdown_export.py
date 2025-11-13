@@ -67,6 +67,23 @@ def process_source_file(source_path, md_path):
             for rst_emoji, unicode_emoji in emoji_map.items():
                 content = content.replace(rst_emoji, unicode_emoji)
 
+            # Fix malformed references that pandoc might misinterpret
+            # Pandoc can misinterpret "set" as a reference when it appears after
+            # code blocks (backticks). This pattern fixes cases where double
+            # backticks are followed by "to set" on the next line.
+            # Use DOTALL to handle newlines properly
+            content = re.sub(
+                r'``([^`]+)``\s*\n\s*to set\s',
+                r'``\1``\nto apply ',
+                content,
+                flags=re.IGNORECASE | re.MULTILINE | re.DOTALL)
+
+            # Add a dummy reference definition for 'set' to prevent pandoc warnings
+            # Pandoc may interpret standalone "set" as a reference in certain contexts,
+            # so we provide a dummy definition that it can resolve to suppress the warning.
+            # This is added at the beginning so pandoc can resolve any :ref:`set` it encounters.
+            content = '.. _set: set\n\n' + content
+
             # Convert via pandoc
             temp_rst = md_path.with_suffix('.temp.rst')
             temp_rst.write_text(content, encoding='utf-8')
