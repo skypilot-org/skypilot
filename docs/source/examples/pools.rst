@@ -1,33 +1,42 @@
 .. _pool:
 
-Using a Pool of Workers (experimental)
-======================================
+Using a Pool of Workers
+=======================
 
 SkyPilot supports spawning a **pool** that launches a set of **workers** with identical environments. Jobs can be scheduled on this pool and will be assigned to workers as they become available.
+
+.. image:: ../images/pools-architecture.jpg
+  :width: 70%
+  :align: center
+
 
 Pools benefits
 ---------------
 
-#. **Reduced Cold-start Time**: Workers in the pool are **reused** across job submissions, avoiding repeated setup and saving time that would otherwise be spent provisioning and configuring instances.
-#. **Consistent Environment**: All workers in the pool are provisioned with the same configuration and setup, ensuring consistency across jobs.
-#. **Stable Resource Usage**: Many jobs can be assigned to the pool at once, without worrying about the total provisioning requirements for the workload.
+#. **Faster cold-starts**: Workers in the pool are **reused** across job submissions, avoiding repeated setup and saving time that would otherwise be spent provisioning and configuring instances.
+#. **Consistent environments**: All workers in the pool are provisioned with the same configuration and setup, ensuring consistency across jobs.
+#. **Stable resource usage**: Many jobs can be assigned to the pool at once, without worrying about the total provisioning requirements for the workload.
+
 
 Use cases
 ----------
 
-Pools is great for large-scale data processing tasks, that require launching many jobs whose cumulative resource requirements are too large to spawn at once. With pools, you can queue up a large number of jobs on a comparatively small number of workers. The pool will automatically assign jobs to workers as they become available.
+Pools is great for large-scale data processing tasks, that require launching many jobs whose cumulative resource requirements are too large to spawn at once.
+
+With pools, you can queue up a large number of jobs on a comparatively small number of workers. The pool will automatically assign jobs to workers as they become available.
 
 Pools is generally useful for any application that is easily parallelized, but some common use cases are:
+
 #. Batch inference
 #. Hyperparameter tuning
 
 .. warning::
 
-  Pools are currently in alpha so some features are not currently supported:
+  Pools is a beta feature. Some features are not yet supported, but are on the roadmap:
 
-  - Pools does not currently support heterogeneous clusters (e.g., mixed H100 and H200 workers)
-  - Pools does not currently support fractional GPUs (e.g. a job requesting 0.5 GPUs)
-  - Pools does not currently support multiple jobs running concurrently on the same worker
+  - Heterogeneous clusters (e.g., mixed H100 and H200 workers)
+  - Fractional GPUs (e.g. a job requesting 0.5 GPUs)
+  - Multiple jobs running concurrently on the same worker
 
 
 Creating a pool
