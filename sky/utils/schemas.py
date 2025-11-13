@@ -460,8 +460,8 @@ def get_volume_schema():
                 'type': 'string',
                 'pattern': constants.MEMORY_SIZE_PATTERN,
             },
-            'resource_name': {
-                'type': 'string',
+            'use_existing': {
+                'type': 'boolean',
             },
             'config': {
                 'type': 'object',

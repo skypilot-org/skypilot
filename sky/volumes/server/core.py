@@ -195,6 +195,7 @@ def volume_apply(
     size: Optional[str],
     config: Dict[str, Any],
     labels: Optional[Dict[str, str]] = None,
+    use_existing: Optional[bool] = None,
 ) -> None:
     """Creates or registers a volume.
 
@@ -207,6 +208,7 @@ def volume_apply(
         size: The size of the volume.
         config: The configuration of the volume.
         labels: The labels of the volume.
+        use_existing: Whether to use an existing volume.
 
     """
     with rich_utils.safe_status(ux_utils.spinner_message('Creating volume')):
@@ -215,10 +217,13 @@ def volume_apply(
         cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud)
         assert cloud_obj is not None
         region, zone = cloud_obj.validate_region_zone(region, zone)
-        name_uuid = str(uuid.uuid4())[:6]
-        name_on_cloud = common_utils.make_cluster_name_on_cloud(
-            name, max_length=cloud_obj.max_cluster_name_length())
-        name_on_cloud += '-' + name_uuid
+        if use_existing:
+            name_on_cloud = name
+        else:
+            name_uuid = str(uuid.uuid4())[:6]
+            name_on_cloud = common_utils.make_cluster_name_on_cloud(
+                name, max_length=cloud_obj.max_cluster_name_length())
+            name_on_cloud += '-' + name_uuid
         config = models.VolumeConfig(
             name=name,
             type=volume_type,
@@ -240,6 +245,7 @@ def volume_apply(
             config = provision.apply_volume(cloud, config)
             global_user_state.add_volume(name, config,
                                          status_lib.VolumeStatus.READY)
+        logger.info(f'Created volume {name} on cloud {cloud}')
 
 
 @contextlib.contextmanager

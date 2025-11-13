@@ -56,6 +56,12 @@ Then, set the :ref:`admin_policy <config-yaml-admin-policy>` field in :ref:`the 
 
     admin_policy: example_policy.DoNothingPolicy
 
+
+.. tip::
+
+   You can replace ``DoNothingPolicy`` with any of the :ref:`example policies <example-policies>`.
+
+
 Then, run a task:
 
 .. code-block:: bash
@@ -71,6 +77,9 @@ You should see the admin policy is applied to the task.
     Applying client admin policy: DoNothingPolicy
     Applying server admin policy: DoNothingPolicy
     ...
+
+
+You can also deploy an admin policy as a :ref:`RESTful server <host-admin-policy-as-server>`.
 
 Deploy an admin policy
 ----------------------
@@ -331,6 +340,8 @@ Useful for:
 
 - Enforcing resource constraints (e.g. use spot instances for all GPU tasks, enforce autostop for all tasks).
 
+.. _example-policies:
+
 Example policies
 ----------------
 
@@ -482,14 +493,41 @@ Rate limit cluster launch requests
 
 .. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
     :language: python
-    :pyobject: TokenBucketRateLimiter
-    :caption: `TokenBucketRateLimiter <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
-
-.. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
-    :language: python
     :pyobject: RateLimitLaunchPolicy
     :caption: `RateLimitLaunchPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
+
+The ``RateLimitLaunchPolicy`` uses ``TokenBucketRateLimiter`` class to rate limit cluster launch requests.
+
+.. dropdown:: TokenBucketRateLimiter Class
+
+    .. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
+        :language: python
+        :pyobject: TokenBucketRateLimiter
+        :caption: `TokenBucketRateLimiter <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
 
 .. literalinclude:: ../../../examples/admin_policy/rate_limit_launch.yaml
     :language: yaml
     :caption: `Config YAML for using RateLimitLaunchPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/rate_limit_launch.yaml>`_
+
+.. _gpu-static-quota-policy:
+
+Enforce a static GPU quota for each user on cluster launch requests
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. note::
+
+    This policy calls sky.status() to get the total number 
+    of GPUs currently used by the user and therefore adds a 
+    few seconds of latency to every cluster launch request.
+
+    This policy should be considered an educational example and not a
+    production-ready policy.
+
+.. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
+    :language: python
+    :pyobject: GPUStaticQuotaPolicy
+    :caption: `GPUStaticQuotaPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
+
+.. literalinclude:: ../../../examples/admin_policy/gpu_static_quota.yaml
+    :language: yaml
+    :caption: `Config YAML for using GPUStaticQuotaPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/gpu_static_quota.yaml>`_
