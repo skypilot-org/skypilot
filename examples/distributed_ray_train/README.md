@@ -34,7 +34,7 @@ Customize the Ray cluster by setting environment variables before calling `start
 | `RAY_DASHBOARD_PORT` | `8265` | Ray dashboard port (must differ from SkyPilot's 8266) |
 | `RAY_DASHBOARD_HOST` | `127.0.0.1` | Dashboard host (set to `0.0.0.0` to expose externally) |
 | `RAY_DASHBOARD_AGENT_LISTEN_PORT` | `null` | Optional dashboard agent listen port |
-| `RAY_HEAD_IP_ADDRESS` | `null` | Optional node IP address override |
+| `RAY_HEAD_IP_ADDRESS` | `null` | Optional head node IP address override |
 | `RAY_CMD_PREFIX` | `null` | Optional command prefix (e.g., `uv run`) |
 
 ## Managing the Ray Cluster
