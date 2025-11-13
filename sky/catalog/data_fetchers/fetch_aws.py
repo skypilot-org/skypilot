@@ -305,7 +305,8 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
                 # See also Standard_NV{vcpu}ads_A10_v5 support on Azure.
                 assert len(row['GpuInfo']['Gpus']) == 1
                 assert row['GpuInfo']['Gpus'][0]['Name'] == 'L4'
-                fraction = row['GpuInfo']['Gpus'][0]['MemoryInfo']['SizeInMiB'] / L4_GPU_MEMORY
+                fraction = row['GpuInfo']['Gpus'][0]['MemoryInfo'][
+                    'SizeInMiB'] / L4_GPU_MEMORY
                 acc_count = round(fraction, 3)
             if row['InstanceType'] == 'p5.4xlarge':
                 acc_count = 1
