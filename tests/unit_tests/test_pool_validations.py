@@ -51,6 +51,7 @@ def test_pool_creation_with_run_section():
                 match='Pool creation does not support the `run` section'):
             serve_impl.up(task, service_name='test-pool', pool=True)
 
+
 @pytest.mark.skip(reason='CI does not seem to like sdk calls right now.')
 def test_pool_update_with_run_section():
     """Test that pool update errors out when using a run section."""
