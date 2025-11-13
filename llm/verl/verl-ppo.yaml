@@ -91,7 +91,7 @@ run: |
   # If you are using an older version, you can copy and paste the script from:
   # https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster.sh
   export RAY_DASHBOARD_HOST=0.0.0.0
-  ~/skypilot_templates/ray/start_cluster.sh
+  ~/sky_templates/ray/start_cluster.sh
 
   # Head node: wait for workers and run training
   if [ "$SKYPILOT_NODE_RANK" == "0" ]; then

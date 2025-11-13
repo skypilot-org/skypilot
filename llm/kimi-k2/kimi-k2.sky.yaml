@@ -31,7 +31,7 @@ run: |
   # This script is only available on skypilot-nightly>=1.0.0.dev20251113
   # If you are using an older version, you can copy and paste the script from:
   # https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster.sh
-  ~/skypilot_templates/ray/start_cluster.sh
+  ~/sky_templates/ray/start_cluster.sh
 
   echo 'Starting vllm api server...'
 

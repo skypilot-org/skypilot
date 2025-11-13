@@ -243,19 +243,19 @@ RAY_INSTALLATION_COMMANDS = (
     f'{{ {SKY_UV_RUN_CMD} '
     f'which ray > {SKY_RAY_PATH_FILE} || exit 1; }}; ')
 
-# Copy SkyPilot templates from the installed wheel to ~/skypilot_templates.
+# Copy SkyPilot templates from the installed wheel to ~/sky_templates.
 # This must run after the skypilot wheel is installed.
 COPY_SKYPILOT_TEMPLATES_COMMANDS = (
     f'{ACTIVATE_SKY_REMOTE_PYTHON_ENV}; '
     f'{SKY_PYTHON_CMD} -c \''
     'import sky_templates, shutil, os; '
     'src = os.path.dirname(sky_templates.__file__); '
-    'dst = os.path.expanduser(\"~/skypilot_templates\"); '
+    'dst = os.path.expanduser(\"~/sky_templates\"); '
     'print(f\"Copying templates from {src} to {dst}...\"); '
     'shutil.copytree(src, dst, dirs_exist_ok=True); '
     'print(f\"Templates copied successfully\")\'; '
     # Make scripts executable.
-    'find ~/skypilot_templates -name "*.sh" -type f -exec chmod +x {} \\; ')
+    'find ~/sky_templates -name "*.sh" -type f -exec chmod +x {} \\; ')
 
 SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     f'{SKY_UV_INSTALL_CMD};'

@@ -13,15 +13,15 @@
 #
 # Usage:
 #   # Stop default Ray cluster (port 6379)
-#   ~/skypilot_templates/ray/stop_ray_cluster.sh
+#   ~/sky_templates/ray/stop_ray_cluster.sh
 #
 #   # Stop Ray cluster on custom port
 #   export RAY_HEAD_PORT=6385
-#   ~/skypilot_templates/ray/stop_ray_cluster.sh
+#   ~/sky_templates/ray/stop_ray_cluster.sh
 #
 #   # With uv
 #   export RAY_CMD_PREFIX="uv run"
-#   ~/skypilot_templates/ray/stop_ray_cluster.sh
+#   ~/sky_templates/ray/stop_ray_cluster.sh
 
 set -e
 

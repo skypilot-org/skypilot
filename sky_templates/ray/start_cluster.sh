@@ -15,16 +15,16 @@
 #   RAY_CMD_PREFIX=                        - (Optional) Command prefix (e.g., "uv run")
 #
 # Usage:
-#   ~/skypilot_templates/ray/start_cluster.sh
+#   ~/sky_templates/ray/start_cluster.sh
 #
 #   # With custom configurations
 #   export RAY_DASHBOARD_HOST=0.0.0.0
 #   export RAY_DASHBOARD_PORT=8280
-#   ~/skypilot_templates/ray/start_cluster.sh
+#   ~/sky_templates/ray/start_cluster.sh
 #
 #   # With uv
 #   export RAY_CMD_PREFIX="uv run"
-#   ~/skypilot_templates/ray/start_cluster.sh
+#   ~/sky_templates/ray/start_cluster.sh
 
 set -e
 

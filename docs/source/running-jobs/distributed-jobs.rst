@@ -152,12 +152,12 @@ Executing a distributed Ray program
 
    **Best practices for Ray on SkyPilot:**
 
-   - **Do:** Use SkyPilot's ``~/skypilot_templates/ray/start_cluster.sh`` script to automatically set up your Ray cluster
+   - **Do:** Use SkyPilot's ``~/sky_templates/ray/start_cluster.sh`` script to automatically set up your Ray cluster
    - **Do:** Use ``ray.init()`` or ``ray.init(address="localhost:6379")`` for explicit connection
    - **Avoid:** ``ray.init(address="auto")`` - While it typically connects to your user cluster when available, the behavior can be unpredictable
    - **Never:** Call ``ray stop`` - It may interfere with SkyPilot operations
 
-   **To stop your Ray cluster**, use ``~/skypilot_templates/ray/stop_cluster.sh`` or kill the Ray processes directly:
+   **To stop your Ray cluster**, use ``~/sky_templates/ray/stop_cluster.sh`` or kill the Ray processes directly:
 
    .. code-block:: bash
 
@@ -203,7 +203,7 @@ To execute a distributed Ray program on many nodes, download the `training scrip
       # This script is only available on skypilot-nightly>=1.0.0.dev20251113
       # If you are using an older version, you can copy and paste the script from:
       # https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster.sh
-      ~/skypilot_templates/ray/start_cluster.sh
+      ~/sky_templates/ray/start_cluster.sh
 
       num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
       if [ "$SKYPILOT_NODE_RANK" == "0" ]; then

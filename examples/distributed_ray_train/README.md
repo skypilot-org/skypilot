@@ -13,7 +13,7 @@ SkyPilot’s internal cluster, causing resource conflicts.
 SkyPilot provides a [start_cluster.sh](https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster.sh) script that sets up a Ray cluster for your workloads. Simply call it in your task's `run` commands:
 
 ```bash
-~/skypilot_templates/ray/start_cluster.sh
+~/sky_templates/ray/start_cluster.sh
 ```
 
 Under the hood, this script automatically:
@@ -42,7 +42,7 @@ Customize the Ray cluster by setting environment variables before calling `start
 Stop your Ray cluster with:
 
 ```bash
-~/skypilot_templates/ray/stop_cluster.sh
+~/sky_templates/ray/stop_cluster.sh
 ```
 
 Do not use `ray stop` directly, as it may interfere with SkyPilot's cluster management.

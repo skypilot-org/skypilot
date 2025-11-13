@@ -123,7 +123,7 @@ run: |
   export RAY_DASHBOARD_HOST=0.0.0.0
   export RAY_DASHBOARD_AGENT_LISTEN_PORT=52366
   export RAY_HEAD_IP_ADDRESS="$head_ip"
-  ~/skypilot_templates/ray/start_cluster.sh
+  ~/sky_templates/ray/start_cluster.sh
 
   # Head node: submit training job
   if [ "$SKYPILOT_NODE_RANK" == "0" ]; then

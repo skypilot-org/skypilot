@@ -42,7 +42,7 @@ run: |
   # If you are using an older version, you can copy and paste the script from:
   # https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster.sh
   export RAY_CMD_PREFIX="uv run"
-  ~/skypilot_templates/ray/start_cluster.sh
+  ~/sky_templates/ray/start_cluster.sh
 
 
   num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
