@@ -1589,9 +1589,8 @@ def _get_pod_pending_reason(context: Optional[str], namespace: str,
     if not pod_events:
         return None
 
-    # Look for warning/error events that indicate why pod is pendings
     for event in pod_events:
-        if event.type in ('Warning', 'Error'):
+        if event.reason != 'Scheduled':
             reason = event.reason or 'Unknown'
             message = event.message or ''
             return reason, message

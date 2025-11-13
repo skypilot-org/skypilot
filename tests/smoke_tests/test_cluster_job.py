@@ -1799,6 +1799,24 @@ def test_kubernetes_pod_pending_reason():
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.kubernetes
+def test_kubernetes_pod_long_image_pull():
+    """Ensure kubelet image pulling events are surfaced in provision logs."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'kubernetes_pod_long_image_pull',
+        [
+            # Use a large image, for example CUDA runtime.
+            f'sky launch -y -c {name} --infra kubernetes --image-id docker:nvidia/cuda:13.0.1-runtime-ubuntu24.04',
+            f's=$(sky logs --provision {name} --no-follow 2>&1); echo "$s"; echo; '
+            f'echo "$s" | grep "is pending: Pulling: Pulling image"'
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.azure
 def test_azure_start_stop_two_nodes():
     name = smoke_tests_utils.get_cluster_name()
