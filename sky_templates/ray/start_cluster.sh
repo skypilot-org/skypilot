@@ -105,7 +105,6 @@ if [ "${SKYPILOT_NODE_RANK}" -eq 0 ]; then
 
     eval "${RAY_CMD_PREFIX} ${RAY_START_CMD}"
 
-
     start_time=$(date +%s)
     while ! ${RAY_CMD_PREFIX} ray health-check --address="${RAY_ADDRESS}" &>/dev/null; do
         if [ "$(( $(date +%s) - start_time ))" -ge "$TIMEOUT" ]; then
