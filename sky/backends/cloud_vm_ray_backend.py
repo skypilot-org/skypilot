@@ -4656,7 +4656,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         is_identity_mismatch_and_purge = False
         try:
             backend_utils.check_owner_identity(cluster_name)
-        except exceptions.ClusterOwnerIdentityMismatchError as e:
+        except (exceptions.ClusterOwnerIdentityMismatchError,
+                exceptions.CloudUserIdentityError) as e:
             if purge:
                 logger.error(e)
                 verbed = 'terminated' if terminate else 'stopped'
