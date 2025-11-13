@@ -6,6 +6,7 @@ AI Applications
 
    DeepSeek-R1 for RAG <rag>
    Large-Scale Batch Inference <batch_inference>
+   Batch Inference with vLLM <pools_batch_inference>
    Image Vector Database <vector_database>
    RedisVL Vector Search <redisvl-vector-search>
    Tabby: Coding Assistant <tabby>
