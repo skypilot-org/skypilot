@@ -1,6 +1,8 @@
 # Distributed Ray Training with SkyPilot
 
-This example demonstrates how to run distributed Ray workloads on SkyPilot clusters.
+This example shows how to launch distributed Ray jobs with SkyPilot.
+
+## Important: Ray Runtime Best Practices
 
 SkyPilot uses Ray internally on port 6380 for cluster management. So when running your own Ray applications, you need to start a separate Ray
 cluster on a different port (e.g. 6379 is the default) to avoid conflicts. Do not use `ray.init(address="auto")` as it would connect to
