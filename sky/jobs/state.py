@@ -1190,8 +1190,12 @@ def is_legacy_controller_process(job_id: int) -> bool:
                 job_info_table.c.controller_pid,
                 job_info_table.c.controller_pid_started_at).where(
                     job_info_table.c.spot_job_id == job_id)).fetchone()
-        if row is None or row[0] is None:
-            raise ValueError(f'Controller process for job {job_id} not found')
+        if row is None:
+            raise ValueError(f"Job {job_id} not found")
+        if row[0] is None:
+            # Job is from before #4485, so controller_pid is not set
+            # This is a legacy single-job controller process (running in ray!)
+            return True
         started_at = row[1]
         if started_at is not None:
             # controller_pid_started_at is only set after #7847, so we know this
