@@ -7,6 +7,8 @@ from typing import Optional
 import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy import orm
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.dialects import sqlite
 from sqlalchemy.ext import declarative
 
 from sky import sky_logging
@@ -22,7 +24,7 @@ _SQLALCHEMY_ENGINE_LOCK = threading.Lock()
 
 Base = declarative.declarative_base()
 
-config_table = sqlalchemy.Table(
+kv_cache_table = sqlalchemy.Table(
     'kv_cache',
     Base.metadata,
     sqlalchemy.Column('key', sqlalchemy.Text, primary_key=True),
@@ -106,11 +108,27 @@ def add_or_update_cache_entry(
         expires_at: The timestamp when the cache entry expires.
     """
     assert _SQLALCHEMY_ENGINE is not None
+    if (_SQLALCHEMY_ENGINE.dialect.name ==
+            db_utils.SQLAlchemyDialect.SQLITE.value):
+        insert_func = sqlite.insert
+    elif (_SQLALCHEMY_ENGINE.dialect.name ==
+          db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+        insert_func = postgresql.insert
+    else:
+        raise ValueError('Unsupported database dialect')
+
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.execute(
-            sqlalchemy.insert(config_table).values(key=key,
-                                                   value=value,
-                                                   expires_at=expires_at))
+        insert_stmt = insert_func(kv_cache_table).values(key=key,
+                                                         value=value,
+                                                         expires_at=expires_at)
+        do_update_stmt = insert_stmt.on_conflict_do_update(
+            index_elements=[kv_cache_table.c.key],
+            set_={
+                kv_cache_table.c.value: value,
+                kv_cache_table.c.expires_at: expires_at
+            })
+        session.execute(do_update_stmt)
+
         session.commit()
 
 
@@ -125,7 +143,7 @@ def get_cache_entry(key: str) -> Optional[str]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         result = session.execute(
-            sqlalchemy.select(config_table.c.value).where(
-                config_table.c.key == key and
-                config_table.c.expires_at > time.time()))
+            sqlalchemy.select(kv_cache_table.c.value).where(
+                kv_cache_table.c.key == key).where(
+                    kv_cache_table.c.expires_at > time.time()))
         return result.scalar()
