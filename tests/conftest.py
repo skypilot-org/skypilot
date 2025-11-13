@@ -35,6 +35,8 @@ from common_test_fixtures import mock_controller_accessible
 from common_test_fixtures import mock_execute_in_coroutine
 from common_test_fixtures import mock_job_table_no_job
 from common_test_fixtures import mock_job_table_one_job
+from common_test_fixtures import mock_jobs_no_job_grpc
+from common_test_fixtures import mock_jobs_one_job_grpc
 from common_test_fixtures import mock_queue
 from common_test_fixtures import mock_redirect_log_file
 from common_test_fixtures import mock_services_no_service
