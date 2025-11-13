@@ -25,12 +25,10 @@ resources:
 
 setup: |
   # Install vLLM and dependencies
-  uv pip install vllm==0.11.0
-  uv pip install transformers==4.57.1
+  uv pip install --system vllm==0.11.0 transformers==4.57.1
   
   # Install dependencies for the classification script
-  uv pip install datasets==2.18.0
-  uv pip install tqdm==4.66.1
+  uv pip install --system datasets==2.18.0 tqdm==4.66.1
   
   # Download the model to cache it for all jobs
   echo "Downloading model ${MODEL_NAME}..."
