@@ -593,7 +593,17 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                 continue
 
             all_pods_running = False
+            pending_reasons_count = {}
             if pod.status.phase == 'Pending':
+                pending_reason = _get_pod_pending_reason(
+                    context, namespace, pod.metadata.name)
+                if pending_reason is not None:
+                    reason, message = pending_reason
+                    logger.debug(f'Pod {pod.metadata.name} is pending: '
+                                 f'{reason}: {message}')
+                    pending_reasons_count[reason] = pending_reasons_count.get(
+                        reason, 0) + 1
+
                 # Iterate over each container in pod to check their status
                 for container_status in pod.status.container_statuses:
                     # If the container wasn't in 'ContainerCreating'
@@ -617,6 +627,15 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
 
         if all_pods_running:
             break
+
+        if pending_reasons_count:
+            msg = ', '.join([
+                f'{count} pod(s) in pending state due to {reason}'
+                for reason, count in pending_reasons_count.items()
+            ])
+            rich_utils.force_update_status(
+                ux_utils.spinner_message(f'Launching ({msg})',
+                                         cluster_name=cluster_name))
         time.sleep(1)
 
 
@@ -1204,8 +1223,8 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         ux_utils.spinner_message('Launching', cluster_name=cluster_name))
     # Wait until the pods and their containers are up and running, and
     # fail early if there is an error
-    logger.debug(f'run_instances: waiting for pods to be running (pulling '
-                 f'images): {[pod.metadata.name for pod in pods]}')
+    logger.debug(f'run_instances: waiting for pods to be running: '
+                 f'{[pod.metadata.name for pod in pods]}')
     _wait_for_pods_to_run(namespace, context, cluster_name, pods)
     logger.debug(f'run_instances: all pods are scheduled and running: '
                  f'{[pod.metadata.name for pod in pods]}')
@@ -1538,21 +1557,53 @@ def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
     return pod_reason
 
 
-def _get_pod_missing_reason(context: Optional[str], namespace: str,
-                            cluster_name: str, pod_name: str) -> Optional[str]:
-    """Get events for missing pod and write to cluster events."""
-    logger.debug(f'Analyzing events for pod {pod_name}')
+def _get_pod_events(context: Optional[str], namespace: str,
+                    pod_name: str) -> List[Any]:
+    """Get the events for a pod, sorted by timestamp, most recent first."""
     pod_field_selector = (
         f'involvedObject.kind=Pod,involvedObject.name={pod_name}')
     pod_events = kubernetes.core_api(context).list_namespaced_event(
         namespace,
         field_selector=pod_field_selector,
         _request_timeout=kubernetes.API_TIMEOUT).items
-    pod_events = sorted(
+    return sorted(
         pod_events,
         key=lambda event: event.metadata.creation_timestamp,
         # latest event appears first
         reverse=True)
+
+
+def _get_pod_pending_reason(context: Optional[str], namespace: str,
+                            pod_name: str) -> Optional[Tuple[str, str]]:
+    """Get the reason why a pod is pending from its events.
+
+    Returns a (reason, message) tuple about why the pod is pending (e.g.,
+    ("FailedMount", "hostPath type check failed")) or None if no reason found.
+    """
+    try:
+        pod_events = _get_pod_events(context, namespace, pod_name)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to get events for pod {pod_name}: {e}')
+        return None
+
+    if not pod_events:
+        return None
+
+    # Look for warning/error events that indicate why pod is pendings
+    for event in pod_events:
+        if event.type in ('Warning', 'Error'):
+            reason = event.reason or 'Unknown'
+            message = event.message or ''
+            return reason, message
+
+    return None
+
+
+def _get_pod_missing_reason(context: Optional[str], namespace: str,
+                            cluster_name: str, pod_name: str) -> Optional[str]:
+    """Get events for missing pod and write to cluster events."""
+    logger.debug(f'Analyzing events for pod {pod_name}')
+    pod_events = _get_pod_events(context, namespace, pod_name)
     last_scheduled_node = None
     insert_new_pod_event = True
     new_event_inserted = False
