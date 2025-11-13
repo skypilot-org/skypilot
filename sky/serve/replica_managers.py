@@ -1,4 +1,9 @@
 """ReplicaManager: handles the creation and deletion of endpoint replicas."""
+
+## Modify your clouds here.
+zonghengs_clouds=["aws", "gcp", "azure"]
+
+
 import dataclasses
 import functools
 import multiprocessing
@@ -15,6 +20,9 @@ import filelock
 import requests
 
 from sky import backends
+from sky import check as sky_check
+from sky.clouds import cloud as sky_cloud
+from sky.clouds.cloud import Cloud
 from sky import core
 from sky import exceptions
 from sky import execution
@@ -34,6 +42,7 @@ from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import env_options
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
@@ -734,6 +743,12 @@ class SkyPilotReplicaManager(ReplicaManager):
             serve_state.get_replicas_at_status(
                 self._service_name, serve_state.ReplicaStatus.PENDING))
 
+        enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+            sky_cloud.CloudCapability.COMPUTE,
+            raise_if_no_cloud_access=False)
+        enabled_clouds = [cloud for cloud in enabled_clouds if cloud.canonical_name() in zonghengs_clouds]
+        logger.info(f'Enabled clouds: {enabled_clouds}')
+        cloud_index = 0
         for replica_info in to_up_replicas:
             # It should be robust enough for `execution.launch` to handle cases
             # where the provisioning is partially done.
@@ -741,7 +756,9 @@ class SkyPilotReplicaManager(ReplicaManager):
             # including SkyServeController._run_autoscaler.
             self._launch_replica(
                 replica_info.replica_id,
-                resources_override=replica_info.resources_override)
+                resources_override=replica_info.resources_override,
+                cloud=enabled_clouds[cloud_index % len(enabled_clouds)])
+            cloud_index = (cloud_index + 1) % len(enabled_clouds)
 
         for replica_info in serve_state.get_replicas_at_status(
                 self._service_name, serve_state.ReplicaStatus.SHUTTING_DOWN):
@@ -762,6 +779,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         self,
         replica_id: int,
         resources_override: Optional[Dict[str, Any]] = None,
+        cloud: Optional[Cloud] = None,
     ) -> None:
         if replica_id in self._launch_process_pool:
             logger.warning(f'Launch process for replica {replica_id} '
@@ -776,6 +794,16 @@ class SkyPilotReplicaManager(ReplicaManager):
                                     resources_override)
         retry_until_up = True
         location = None
+        
+        # Use the passed-in cloud if provided, otherwise use spot placer or default behavior
+        # Only set cloud override if spot placer is not being used (spot placer handles cloud selection)
+        logger.info(f'Cloud: {cloud}')
+        if cloud is not None:
+            if resources_override is None:
+                resources_override = {}
+            resources_override['cloud'] = cloud
+            logger.info(f'Distributing replica {replica_id} to cloud {cloud}')
+        
         if use_spot and self._spot_placer is not None:
             # For spot placer, we don't retry until up so any launch failed
             # due to availability issue will be handled by the placer.
@@ -816,7 +844,12 @@ class SkyPilotReplicaManager(ReplicaManager):
     @with_lock
     def scale_up(self,
                  resources_override: Optional[Dict[str, Any]] = None) -> None:
-        self._launch_replica(self._next_replica_id, resources_override)
+        enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+            sky_cloud.CloudCapability.COMPUTE,
+            raise_if_no_cloud_access=False)
+        enabled_clouds = [cloud for cloud in enabled_clouds if cloud.canonical_name() in zonghengs_clouds]
+        logger.info(f'Enabled clouds: {enabled_clouds}')
+        self._launch_replica(self._next_replica_id, resources_override, enabled_clouds[self._next_replica_id % len(enabled_clouds)])
         self._next_replica_id += 1
 
     def _handle_sky_down_finish(self, info: ReplicaInfo, exitcode: int) -> None:
