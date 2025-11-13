@@ -24,11 +24,15 @@ resources:
   disk_size: 100
 
 setup: |
+  # Set up virtual env
+  uv venv --python 3.10 --seed
+  source .venv/bin/activate
+  
   # Install vLLM and dependencies
-  uv pip install --system vllm==0.11.0 transformers==4.57.1
+  uv pip install vllm==0.11.0 transformers==4.57.1
   
   # Install dependencies for the classification script
-  uv pip install --system datasets==2.18.0 tqdm==4.66.1
+  uv pip install datasets==2.18.0 tqdm==4.66.1
   
   # Download the model to cache it for all jobs
   echo "Downloading model ${MODEL_NAME}..."
