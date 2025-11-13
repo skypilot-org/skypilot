@@ -904,6 +904,7 @@ available_node_types:
                 done
                 {{ conda_installation_commands }}
                 {{ ray_installation_commands }}
+                {{ copy_skypilot_templates_commands }}
 
                 # set UV_SYSTEM_PYTHON to false in case the user provided docker image set it to true.
                 # unset PYTHONPATH in case the user provided docker image set it.
