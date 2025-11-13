@@ -904,11 +904,11 @@ available_node_types:
                 done
                 {{ conda_installation_commands }}
                 {{ ray_installation_commands }}
-                {{ copy_skypilot_templates_commands }}
 
                 # set UV_SYSTEM_PYTHON to false in case the user provided docker image set it to true.
                 # unset PYTHONPATH in case the user provided docker image set it.
                 VIRTUAL_ENV=~/skypilot-runtime UV_SYSTEM_PYTHON=false env -u PYTHONPATH ~/.local/bin/uv pip install skypilot[kubernetes,remote]
+                {{ copy_skypilot_templates_commands }}
                 # Wait for `patch` package to be installed before applying ray patches
                 until dpkg -l | grep -q "^ii  patch "; do
                   sleep 0.1
