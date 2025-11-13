@@ -1047,12 +1047,37 @@ def test_volumes_on_kubernetes():
     test = smoke_tests_utils.Test(
         'volumes_on_kubernetes',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'kubectl create -f - <<EOF\n'
+                f'apiVersion: v1\n'
+                f'kind: PersistentVolumeClaim\n'
+                f'metadata:\n'
+                f'  name: existing0\n'
+                f'spec:\n'
+                f'  accessModes:\n'
+                f'    - ReadWriteOnce\n'
+                f'  resources:\n'
+                f'    requests:\n'
+                f'      storage: 1Gi\n'
+                f'EOF',
+            ),
             f'sky volumes apply -y -n pvc0 --type k8s-pvc --size 2GB',
-            f'sky volumes ls | grep "pvc0"',
+            f'sky volumes apply -y -n existing0 --type k8s-pvc --size 2GB --use-existing',
+            f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep "pvc0" && echo "$vols" | grep "existing0"',
             f'sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky down -y {name} && sky volumes ls && sky volumes delete pvc0 existing0 -y',
+            f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "pvc0"); if [ -n "$vol" ]; then echo "pvc0 not deleted" && exit 1; else echo "pvc0 deleted"; fi',
+            f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "existing0"); if [ -n "$vol" ]; then echo "existing0 not deleted" && exit 1; else echo "existing0 deleted"; fi',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                'pvcs=$(kubectl get pvc) && echo "$pvcs" && pvc=$(echo "$pvcs" | grep "pvc0"); if [ -n "$pvc" ]; then echo "pvc0 not deleted" && exit 1; else echo "pvc0 deleted"; fi && '
+                'pvc=$(echo "$pvcs" | grep "existing0"); if [ -n "$pvc" ]; then echo "existing0 not deleted" && exit 1; else echo "existing0 deleted"; fi',
+            ),
         ],
-        f'sky down -y {name} && sky volumes delete pvc0 -y && (vol=$(sky volumes ls | grep "pvc0"); if [ -n "$vol" ]; then echo "pvc0 not deleted" && exit 1; else echo "pvc0 deleted"; fi)',
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
     )
     smoke_tests_utils.run_one_test(test)
 
