@@ -24,7 +24,6 @@ from sky.adaptors import aws
 from sky.adaptors import common
 from sky.catalog import common as catalog_common
 from sky.clouds.utils import aws_utils
-from sky.utils.db import kv_cache
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
@@ -33,6 +32,7 @@ from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils.db import kv_cache
 
 if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables

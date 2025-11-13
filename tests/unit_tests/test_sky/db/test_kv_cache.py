@@ -3,7 +3,7 @@ import time
 import pytest
 import sqlalchemy
 
-from sky.db import kv_cache
+from sky.utils.db import kv_cache
 
 
 @pytest.fixture()

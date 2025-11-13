@@ -8,8 +8,8 @@ Create Date: 2025-11-13 12:00:00.000000
 # pylint: disable=invalid-name
 from alembic import op
 
-from sky.db.kv_cache import Base
 from sky.utils.db import db_utils
+from sky.utils.db.kv_cache import Base
 
 # revision identifiers, used by Alembic.
 revision = '001'
