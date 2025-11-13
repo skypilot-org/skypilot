@@ -151,7 +151,7 @@ def test_pool_job_launch_with_file_mounts_section():
             jobs_utils.validate_pool_job(dag, pool)
 
 
-@pytest.skip(reason='CI does not seem to like sdk calls right now.')
+@pytest.mark.skip(reason='CI does not seem to like sdk calls right now.')
 def test_sdk_launch_pool_job_with_setup_section():
     """Test that SDK launch rejects pool jobs with setup section."""
     import click
