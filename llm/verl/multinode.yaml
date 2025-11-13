@@ -115,52 +115,15 @@ run: |
     python3 -c "import transformers; transformers.pipeline('text-generation', model='Qwen/Qwen2.5-0.5B-Instruct')"
   fi
 
-  if [ -f ~/skypilot_templates/ray/start_cluster.sh ]; then
-    export RAY_HEAD_PORT=$HEAD_PORT
-    export RAY_DASHBOARD_PORT=$DASH_PORT
-    export RAY_DASHBOARD_HOST=0.0.0.0
-    export RAY_DASHBOARD_AGENT_LISTEN_PORT=52366
-    export RAY_NODE_IP_ADDRESS="$head_ip"
-    ~/skypilot_templates/ray/start_cluster.sh
-  else
-    # Fallback to manual ray start
-    is_ray_alive () {
-      ray status --address="$1:$HEAD_PORT" >/dev/null 2>&1
-    }
-
-    if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
-      # Head node
-      if ! is_ray_alive "$head_ip"; then
-        echo "Starting Ray head node..."
-        ray start --head --node-ip-address="$head_ip" \
-            --port $HEAD_PORT --dashboard-port $DASH_PORT \
-            --dashboard-host=0.0.0.0 \
-            --dashboard-agent-listen-port=52366 \
-            --disable-usage-stats \
-            --num-gpus=$SKYPILOT_NUM_GPUS_PER_NODE
-        sleep 10
-      else
-        echo "Ray is already running at $head_ip:$HEAD_PORT, reusing existing instance"
-        ray status --address="$head_ip:$HEAD_PORT"
-      fi
-    else
-      # Worker nodes
-      echo "Setting up worker node..."
-      worker_ip=$(hostname -I | awk '{print $1}')
-
-      if ray list nodes --address=$head_ip:$HEAD_PORT 2>/dev/null | grep -q "$worker_ip"; then
-        echo "Worker $worker_ip already connected to Ray cluster"
-        ray status --address=$head_ip:$HEAD_PORT
-      else
-        echo "Worker not connected, waiting for head node to start"
-        sleep 20
-        echo "Starting Ray worker"
-        ray start --address $head_ip:$HEAD_PORT --disable-usage-stats --num-gpus=$SKYPILOT_NUM_GPUS_PER_NODE
-        sleep 5
-        ray status --address=$head_ip:$HEAD_PORT
-      fi
-    fi
-  fi
+  # This script is only available on skypilot-nightly>=1.0.0.dev20251113
+  # If you are using an older version, you can copy and paste the script from:
+  # https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster.sh
+  export RAY_HEAD_PORT=$HEAD_PORT
+  export RAY_DASHBOARD_PORT=$DASH_PORT
+  export RAY_DASHBOARD_HOST=0.0.0.0
+  export RAY_DASHBOARD_AGENT_LISTEN_PORT=52366
+  export RAY_HEAD_IP_ADDRESS="$head_ip"
+  ~/skypilot_templates/ray/start_cluster.sh
 
   # Head node: submit training job
   if [ "$SKYPILOT_NODE_RANK" == "0" ]; then

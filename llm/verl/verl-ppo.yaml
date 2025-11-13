@@ -87,24 +87,11 @@ run: |
 
   python3 -c "import wandb; wandb.login(relogin=True, key='$WANDB_API_KEY')"
 
-  if [ -f ~/skypilot_templates/ray/start_cluster.sh ]; then
-    export RAY_DASHBOARD_HOST=0.0.0.0
-    ~/skypilot_templates/ray/start_cluster.sh
-  else
-    # Fallback to manual ray start
-    if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
-      echo "Starting Ray head node..."
-      ps aux | grep ray | grep 6379 &> /dev/null ||  ray start --head --disable-usage-stats \
-            --port=6379 \
-            --dashboard-host=0.0.0.0 \
-            --dashboard-port=8265
-    else
-      sleep 15
-      echo "Starting Ray worker node..."
-      ps aux | grep ray | grep $HEAD_IP:6379 &> /dev/null || ray start --address $HEAD_IP:6379 --disable-usage-stats
-      sleep 10
-    fi
-  fi
+  # This script is only available on skypilot-nightly>=1.0.0.dev20251113
+  # If you are using an older version, you can copy and paste the script from:
+  # https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster.sh
+  export RAY_DASHBOARD_HOST=0.0.0.0
+  ~/skypilot_templates/ray/start_cluster.sh
 
   # Head node: wait for workers and run training
   if [ "$SKYPILOT_NODE_RANK" == "0" ]; then

@@ -11,7 +11,7 @@
 #   RAY_DASHBOARD_PORT=8265                - Ray dashboard port
 #   RAY_DASHBOARD_HOST=127.0.0.1           - Dashboard host (set to 0.0.0.0 to expose externally)
 #   RAY_DASHBOARD_AGENT_LISTEN_PORT=       - (Optional) Dashboard agent listen port
-#   RAY_NODE_IP_ADDRESS=                   - (Optional) Node IP address
+#   RAY_HEAD_IP_ADDRESS=                   - (Optional) Node IP address
 #   RAY_CMD_PREFIX=                        - (Optional) Command prefix (e.g., "uv run")
 #
 # Usage:
@@ -38,7 +38,7 @@ RAY_HEAD_PORT=${RAY_HEAD_PORT:-6379}
 RAY_DASHBOARD_PORT=${RAY_DASHBOARD_PORT:-8265}
 RAY_DASHBOARD_HOST=${RAY_DASHBOARD_HOST:-127.0.0.1}
 RAY_DASHBOARD_AGENT_LISTEN_PORT=${RAY_DASHBOARD_AGENT_LISTEN_PORT:-}
-RAY_NODE_IP_ADDRESS=${RAY_NODE_IP_ADDRESS:-}
+RAY_HEAD_IP_ADDRESS=${RAY_HEAD_IP_ADDRESS:-}
 RAY_CMD_PREFIX=${RAY_CMD_PREFIX:-}  # Optional command prefix (e.g., "uv run")
 
 echo -e "${GREEN}Starting Ray cluster...${NC}"
@@ -99,8 +99,8 @@ if [ "${SKYPILOT_NODE_RANK}" -eq 0 ]; then
     fi
 
     # Add optional node IP address if specified
-    if [ -n "${RAY_NODE_IP_ADDRESS}" ]; then
-        RAY_START_CMD="${RAY_START_CMD} --node-ip-address=${RAY_NODE_IP_ADDRESS}"
+    if [ -n "${RAY_HEAD_IP_ADDRESS}" ]; then
+        RAY_START_CMD="${RAY_START_CMD} --node-ip-address=${RAY_HEAD_IP_ADDRESS}"
     fi
 
     eval "${RAY_CMD_PREFIX} ${RAY_START_CMD}"

@@ -260,7 +260,7 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
                     sky_templates_mtime is not None):
                 last_modification_time = max(last_modification_time,
                                              sky_templates_mtime)
-            elif sky_templates_mtime is not None:
+            elif last_modification_time is None:
                 last_modification_time = sky_templates_mtime
         last_wheel_modification_time = _get_latest_modification_time(WHEEL_DIR)
 
