@@ -64,32 +64,31 @@ def passthrough_stream_handler(in_stream: IO[Any], out_stream: IO[Any]) -> str:
     # Timeout in milliseconds for poll()
     poll_timeout_ms = int(PASSTHROUGH_FLUSH_INTERVAL_SECONDS * 1000)
 
-    try:
-        while True:
-            # Poll with timeout - returns when data available or timeout
-            events = poller.poll(poll_timeout_ms)
+    while True:
+        # Poll with timeout - returns when data available or timeout
+        events = poller.poll(poll_timeout_ms)
 
-            current_time = time.time()
+        current_time = time.time()
 
-            if events:
-                # Data is available, read a chunk
-                chunk = os.read(fd, 4096)  # Read up to 4KB
-                if not chunk:
-                    break  # EOF
-                out_stream.write(chunk.decode('utf-8', errors='replace'))
-                has_unflushed_content = True
+        if events:
+            # Data is available, read a chunk
+            chunk = os.read(fd, 4096)  # Read up to 4KB
+            if not chunk:
+                break  # EOF
+            out_stream.write(chunk.decode('utf-8', errors='replace'))
+            has_unflushed_content = True
 
-            # Flush only if we have unflushed content and timeout reached
-            if (has_unflushed_content and current_time - last_flush_time >=
-                    PASSTHROUGH_FLUSH_INTERVAL_SECONDS):
-                out_stream.flush()
-                last_flush_time = current_time
-                has_unflushed_content = False
-    finally:
-        poller.unregister(fd)
-        # Final flush to ensure all data is written
-        if has_unflushed_content:
+        # Flush only if we have unflushed content and timeout reached
+        if (has_unflushed_content and current_time - last_flush_time >=
+                PASSTHROUGH_FLUSH_INTERVAL_SECONDS):
             out_stream.flush()
+            last_flush_time = current_time
+            has_unflushed_content = False
+
+    poller.unregister(fd)
+    # Final flush to ensure all data is written
+    if has_unflushed_content:
+        out_stream.flush()
 
     return ''
 
