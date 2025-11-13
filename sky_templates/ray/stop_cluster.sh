@@ -52,7 +52,7 @@ fi
 # This prevents interfering with SkyPilot's internal Ray cluster (port 6380)
 echo -e "${YELLOW}Killing Ray processes on port ${RAY_HEAD_PORT}...${NC}"
 
-pkill -f "(raylet|ray).*:${RAY_HEAD_PORT}|gcs_server_port=${RAY_HEAD_PORT}" || true
+pkill -f "ray.*:${RAY_HEAD_PORT}|gcs_server_port=${RAY_HEAD_PORT}" || true
 
 echo -e "${GREEN}Ray processes killed.${NC}"
 # Wait a moment for processes to terminate
@@ -61,7 +61,7 @@ sleep 5
 # Verify Ray is stopped
 if ${RAY_CMD_PREFIX} ray status --address="${RAY_ADDRESS}" &> /dev/null; then
     echo -e "${RED}Warning: Ray cluster may still be running. Try manually:${NC}"
-    echo -e "${RED}  pkill -9 -f '(raylet|ray).*:${RAY_HEAD_PORT}|gcs_server_port=${RAY_HEAD_PORT}'${NC}"
+    echo -e "${RED}  pkill -9 -f 'ray.*:${RAY_HEAD_PORT}|gcs_server_port=${RAY_HEAD_PORT}'${NC}"
     exit 1
 else
     echo -e "${GREEN}Ray cluster successfully stopped.${NC}"

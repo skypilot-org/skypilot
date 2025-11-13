@@ -88,6 +88,6 @@ SkyPilot starts its Ray cluster when provisioning nodes:
   .. code-block:: bash
 
      # Kill all Ray processes on port 6379 (user's Ray cluster)
-     pkill -f "(raylet|ray).*:6379|gcs_server_port=6379"
+     pkill -f "ray.*:6379|gcs_server_port=6379"
 
 For running Ray workloads on SkyPilot, refer to the :ref:`distributed jobs documentation <dist-jobs>`.
