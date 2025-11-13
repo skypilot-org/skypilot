@@ -10,6 +10,10 @@ envs:
   MODEL_NAME: openai/gpt-oss-20b
   BUCKET_NAME: sky-batch-inference-results
 
+# Cloud storage bucket for results (optional)
+# If you don't have access to cloud storage buckets:
+#   1. Comment out this entire file_mounts section
+#   2. Update --output-dir in classify.yaml to use local storage (e.g., ~/sky_workdir)
 file_mounts:
   /results:
     name: ${BUCKET_NAME}

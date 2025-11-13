@@ -150,6 +150,13 @@ sky jobs pool down text-classify
 
 This will stop all workers in the pool and clean up all cloud resources. Results are preserved in the storage bucket.
 
+### Appendix: Running Without Cloud Buckets
+
+**Don't have access to cloud storage buckets?** You can use local worker storage instead.
+
+1. In `pool.yaml`, comment out the entire `file_mounts` section
+2. In `classify.yaml`, change the `--output-dir` from `/results` to `~/sky_workdir`
+
 ## Learn More
 
 - [SkyPilot Managed Jobs Pool Documentation](https://docs.skypilot.co/en/latest/examples/managed-jobs.html#pool)
