@@ -290,6 +290,7 @@ You can update the pool configuration with the following command:
     echo "Setup complete!"
 
 .. code-block:: console
+
   # Apply the new pool configuration
   $ sky jobs pool apply -p gpu-pool new-pool.yaml
 
