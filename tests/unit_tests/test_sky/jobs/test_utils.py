@@ -686,8 +686,7 @@ class TestControllerProcessAlive:
         monkeypatch.setattr(jobs_utils.psutil, 'Process', _FakeProcess)
         record = managed_job_state.ControllerPidRecord(
             pid=expected_pid, started_at=expected_start)
-        assert jobs_utils.controller_process_alive(record,
-                                                   legacy_job_id=42)
+        assert jobs_utils.controller_process_alive(record, legacy_job_id=42)
 
     def test_controller_process_alive_mismatched_start_time(self, monkeypatch):
         """Process considered dead when start time does not match."""
@@ -712,8 +711,8 @@ class TestControllerProcessAlive:
         monkeypatch.setattr(jobs_utils.psutil, 'Process', _FakeProcess)
         record = managed_job_state.ControllerPidRecord(
             pid=expected_pid, started_at=recorded_start)
-        assert (jobs_utils.controller_process_alive(record,
-                                                    legacy_job_id=42) is False)
+        assert (jobs_utils.controller_process_alive(record, legacy_job_id=42) is
+                False)
 
     def test_controller_process_alive_fallback_requires_keyword(
             self, monkeypatch):
@@ -739,8 +738,8 @@ class TestControllerProcessAlive:
         monkeypatch.setattr(jobs_utils.psutil, 'Process', _KeywordProcess)
         record = managed_job_state.ControllerPidRecord(pid=expected_pid,
                                                        started_at=None)
-        assert (jobs_utils.controller_process_alive(record,
-                                                    legacy_job_id=42) is True)
+        assert (jobs_utils.controller_process_alive(record, legacy_job_id=42) is
+                True)
 
         class _NoKeywordProcess(_KeywordProcess):
 
@@ -748,5 +747,5 @@ class TestControllerProcessAlive:
                 return ['python', '-m', 'some.other.module']
 
         monkeypatch.setattr(jobs_utils.psutil, 'Process', _NoKeywordProcess)
-        assert (jobs_utils.controller_process_alive(record,
-                                                    legacy_job_id=42) is False)
+        assert (jobs_utils.controller_process_alive(record, legacy_job_id=42) is
+                False)
