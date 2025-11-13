@@ -162,7 +162,7 @@ Executing a distributed Ray program
    .. code-block:: bash
 
       # Kill all Ray processes on port 6379 (user's Ray cluster)
-      pkill -f "ray.*:6379|gcs_server_port=6379"
+      pkill -f "ray.*[=:]6379"
 
    See :doc:`Ray training example </examples/training/ray>` for more details.
 
