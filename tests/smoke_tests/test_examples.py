@@ -126,7 +126,6 @@ def test_ray_train(generic_cloud: str, accelerator: Dict[str, str]) -> None:
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
-@pytest.mark.resource_heavy
 def test_ray_basic(generic_cloud: str) -> None:
     name = smoke_tests_utils.get_cluster_name()
 
