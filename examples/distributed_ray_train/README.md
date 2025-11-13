@@ -1,15 +1,53 @@
 # Distributed Ray Training with SkyPilot
 
-This example shows how to launch distributed Ray jobs with SkyPilot.
+This example demonstrates how to run distributed Ray workloads on SkyPilot clusters.
 
-## Important: Ray Runtime Best Practices
+SkyPilot uses Ray internally on port 6380 for cluster management. So when running your own Ray applications, you need to start a separate Ray
+cluster on a different port (e.g. 6379 is the default) to avoid conflicts. Do not use ray.init(address="auto") as it would connect to
+SkyPilot’s internal cluster, causing resource conflicts.
 
-SkyPilot uses Ray internally on port 6380 for cluster management, so always start your own Ray cluster on a different port (e.g. 6379 is the default) when running Ray workloads on SkyPilot. Don't use `ray.init(address="auto")` as it would connect to SkyPilot's internal cluster, causing resource conflicts.
+## Setting Up Your Ray Cluster
 
-The example in `ray_train.yaml` demonstrates the correct approach:
-1. Start Ray head node on rank 0
-2. Start Ray workers on other ranks
-3. Connect to your own Ray cluster, not SkyPilot's internal one
+SkyPilot provides a `start_cluster.sh` script that sets up a Ray cluster for your workloads. Simply call it in your task's `run` commands:
+
+```bash
+~/skypilot_templates/ray/start_cluster.sh
+```
+
+Under the hood, this script automatically:
+- Installs `ray` if not already present
+- Starts the head node (rank 0) and workers on all other nodes
+- Waits for the head node to be healthy before starting workers
+- Ensures all nodes have joined before proceeding
+
+> **Note**: The `start_cluster.sh` script is only available on `skypilot-nightly>=1.0.0.dev20251113`. For older versions, copy the script from [GitHub](https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster.sh).
+
+> **Tip**: The script uses SkyPilot's environment variables (`SKYPILOT_NODE_RANK`, `SKYPILOT_NODE_IPS`, `SKYPILOT_NUM_NODES`, `SKYPILOT_NUM_GPUS_PER_NODE`) to coordinate the distributed setup. See [Distributed Multi-Node Jobs](https://docs.skypilot.co/en/latest/running-jobs/distributed-jobs.html) for more details.
+
+## Customizing the Ray Cluster
+
+Customize the Ray cluster by setting environment variables before calling `start_cluster.sh`:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RAY_HEAD_PORT` | `6379` | Ray head node port (must differ from SkyPilot's 6380) |
+| `RAY_DASHBOARD_PORT` | `8265` | Ray dashboard port (must differ from SkyPilot's 8266) |
+| `RAY_DASHBOARD_HOST` | `127.0.0.1` | Dashboard host (set to `0.0.0.0` to expose externally) |
+| `RAY_DASHBOARD_AGENT_LISTEN_PORT` | `null` | Optional dashboard agent listen port |
+| `RAY_HEAD_IP_ADDRESS` | `null` | Optional node IP address override |
+| `RAY_CMD_PREFIX` | `null` | Optional command prefix (e.g., `uv run`) |
+
+## Managing the Ray Cluster
+
+Stop your Ray cluster with:
+
+```bash
+~/skypilot_templates/ray/stop_cluster.sh
+```
+
+Do not use `ray stop` directly, as it may interfere with SkyPilot's cluster management.
+
+To restart, simply run `start_cluster.sh` again. The script detects if Ray is already running and skips startup if the cluster is healthy.
 
 ## Running the Example
 
@@ -19,5 +57,4 @@ wget https://raw.githubusercontent.com/skypilot-org/skypilot/master/examples/dis
 
 # Launch on a cluster
 sky launch -c ray-train ray_train.yaml
-
 ```

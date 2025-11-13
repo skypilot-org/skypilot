@@ -20,3 +20,5 @@ run: |
   if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
     python main.py
   fi
+
+  ~/skypilot_templates/ray/stop_cluster.sh

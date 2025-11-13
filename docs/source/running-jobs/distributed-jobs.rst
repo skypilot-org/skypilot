@@ -149,22 +149,24 @@ Executing a distributed Ray program
 .. note::
 
    **Important**: Always start your own Ray cluster for user workloads. SkyPilot uses Ray internally on port 6380 for cluster management. The example below starts a separate Ray cluster on port 6379.
-   
+
    **Best practices for Ray on SkyPilot:**
-   
-   - **Do:** Run ``ray start`` with explicit port (e.g., ``--port 6379``)
-   - **Do:** Use ``ray.init(address="localhost:6379")`` for explicit connection
+
+   - **Do:** Use SkyPilot's ``~/skypilot_templates/ray/start_cluster.sh`` script to automatically set up your Ray cluster
+   - **Do:** Use ``ray.init()`` or ``ray.init(address="localhost:6379")`` for explicit connection
    - **Avoid:** ``ray.init(address="auto")`` - While it typically connects to your user cluster when available, the behavior can be unpredictable
    - **Never:** Call ``ray stop`` - It may interfere with SkyPilot operations
-   
-   **To kill your Ray cluster**, use `ray.shutdown() <https://docs.ray.io/en/latest/ray-core/api/doc/ray.shutdown.html>`_ in Python or kill the Ray processes directly:
-   
+
+   **To stop your Ray cluster**, use ``~/skypilot_templates/ray/stop_cluster.sh`` or kill the Ray processes directly:
+
    .. code-block:: bash
 
       # Kill specific Ray head process started on port 6379 (user's Ray cluster)
       pkill -f "ray start --head --port 6379"
 
-To execute a distributed Ray program on many nodes, you can download the `training script <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/train.py>`_ and launch the `job yaml <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/ray_train.yaml>`_:
+   See :doc:`Ray training example </examples/training/ray>` for more details.
+
+To execute a distributed Ray program on many nodes, download the `training script <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/train.py>`_ and launch the `job yaml <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/ray_train.yaml>`_:
 
 .. code-block:: console
 
@@ -187,31 +189,23 @@ To execute a distributed Ray program on many nodes, you can download the `traini
     workdir: .
 
     setup: |
-      conda activate ray
-      if [ $? -ne 0 ]; then
-        conda create -n ray python=3.10 -y
-        conda activate ray
-      fi
+      uv venv --python 3.10 --seed
+      source .venv/bin/activate
 
-      pip install "ray[train]"
-      pip install tqdm
-      pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+      uv pip install "ray[train]" "click<8.2.0"
+      uv pip install tqdm
+      uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 
     run: |
       sudo chmod 777 -R /var/tmp
-      HEAD_IP=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+      source .venv/bin/activate
+
+      # This script is only available on skypilot-nightly>=1.0.0.dev20251113
+      # If you are using an older version, you can copy and paste the script from:
+      # https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster.sh
+      ~/skypilot_templates/ray/start_cluster.sh
+
+      num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
       if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
-        ps aux | grep ray | grep 6379 &> /dev/null || ray start --head  --disable-usage-stats --port 6379
-        sleep 5
-        python train.py --num-workers $SKYPILOT_NUM_NODES
-      else
-        sleep 5
-        ps aux | grep ray | grep 6379 &> /dev/null || ray start --address $HEAD_IP:6379 --disable-usage-stats
-        # Add sleep to after `ray start` to give ray enough time to daemonize
-        sleep 5
+        python train.py --num-workers $num_nodes
       fi
-
-.. warning::
-
-  When using Ray, avoid calling ``ray stop`` as that will also cause the SkyPilot runtime to be stopped.
-
