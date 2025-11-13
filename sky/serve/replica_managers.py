@@ -1,7 +1,7 @@
 """ReplicaManager: handles the creation and deletion of endpoint replicas."""
 
 ## Modify your clouds here.
-zonghengs_clouds=["aws", "gcp", "azure"]
+zonghengs_clouds=["aws", "gcp"]
 
 
 import dataclasses
@@ -74,7 +74,7 @@ def get_enabled_clouds():
         for cloud in enabled_clouds:
             if cloud.canonical_name() == cloud_name:
                 final_enabled_clouds.append(cloud)
-    assert len(final_enabled_clouds) == len(zonghengs_clouds), f"Enabled clouds: {final_enabled_clouds}, Chosen clouds: {zonghengs_clouds}"
+    # assert len(final_enabled_clouds) == len(zonghengs_clouds), f"Enabled clouds: {final_enabled_clouds}, Chosen clouds: {zonghengs_clouds}"
     return final_enabled_clouds
 
 
