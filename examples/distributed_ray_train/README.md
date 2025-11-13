@@ -8,7 +8,7 @@ SkyPilot’s internal cluster, causing resource conflicts.
 
 ## Setting Up Your Ray Cluster
 
-SkyPilot provides a `start_cluster.sh` script that sets up a Ray cluster for your workloads. Simply call it in your task's `run` commands:
+SkyPilot provides a [start_cluster.sh](https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster.sh) script that sets up a Ray cluster for your workloads. Simply call it in your task's `run` commands:
 
 ```bash
 ~/skypilot_templates/ray/start_cluster.sh
@@ -19,8 +19,6 @@ Under the hood, this script automatically:
 - Starts the head node (rank 0) and workers on all other nodes
 - Waits for the head node to be healthy before starting workers
 - Ensures all nodes have joined before proceeding
-
-> **Note**: The `start_cluster.sh` script is only available on `skypilot-nightly>=1.0.0.dev20251113`. For older versions, copy the script from [GitHub](https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster.sh).
 
 > **Tip**: The script uses SkyPilot's environment variables (`SKYPILOT_NODE_RANK`, `SKYPILOT_NODE_IPS`, `SKYPILOT_NUM_NODES`, `SKYPILOT_NUM_GPUS_PER_NODE`) to coordinate the distributed setup. See [Distributed Multi-Node Jobs](https://docs.skypilot.co/en/latest/running-jobs/distributed-jobs.html) for more details.
 
