@@ -8,7 +8,7 @@ workdir: .
 
 envs:
   MODEL_NAME: openai/gpt-oss-20b
-  BUCKET_NAME: sky-batch-inference-results
+  BUCKET_NAME:  # Set your unique bucket name (must be globally unique)
 
 # Cloud storage bucket for results (optional)
 # If you don't have access to cloud storage buckets:

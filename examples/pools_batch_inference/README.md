@@ -20,22 +20,25 @@ This example:
 
 Files in this example:
 
-- [`pool.yaml`](pool.yaml): Pool configuration with vLLM setup
-- [`classify.yaml`](classify.yaml): Job definition that runs on pool workers
-- [`classify.py`](classify.py): Python script that performs the classification using vLLM's Python SDK
+- `pool.yaml`: Pool configuration with vLLM setup
+- `classify.yaml`: Job definition that runs on pool workers
+- `classify.py`: Python script that performs the classification using vLLM's Python SDK
 
 ### Step 1: Create the worker pool
 
 Create a pool named `text-classify` with 2 workers:
 
 ```bash
-sky jobs pool apply -p text-classify pool.yaml
+# Set your unique bucket name for the results (must be globally unique)
+export BUCKET_NAME=batch-inference-results-${USER}
+# Create the pool
+sky jobs pool apply --env BUCKET_NAME -p text-classify pool.yaml
 ```
 
 This will:
-- Launch 2 workers with H200 GPUs
+- Launch 2 workers with H100 GPUs
 - Install vLLM and dependencies on each worker
-- Mount the S3 bucket `sky-batch-inference-results` at `/results`
+- Mount your cloud storage bucket at `/results`
 - Download and cache gpt-oss-20b
 
 Check pool status with:
@@ -73,7 +76,7 @@ This command:
 - Submits 10 jobs to the pool
 - Each job gets a unique `$SKYPILOT_JOB_RANK` (0-9)
 - Each job processes a partition of the dataset based on the job rank
-- Results are saved to the `sky-batch-inference-results` bucket
+- Results are saved to your configured cloud storage bucket
 
 **Note**: You can adjust the number of jobs with `--num-jobs N`. More jobs = more parallelism (up to the number of workers).
 
@@ -128,9 +131,9 @@ Once jobs complete, results are in the cloud storage bucket. Each job creates tw
 - `results_rank_N.jsonl`: Detailed predictions for each review
 - `summary_rank_N.json`: Accuracy and performance metrics
 
-View results using cloud CLI:
+View results using cloud CLI (replace `BUCKET_NAME` with your bucket name):
 ```bash
-BUCKET_NAME=sky-batch-inference-results
+BUCKET_NAME=batch-inference-results-${USER}  # Replace with your bucket name
 # AWS
 aws s3 ls s3://${BUCKET_NAME}/
 aws s3 cp s3://${BUCKET_NAME}/summary_rank_0.json -
