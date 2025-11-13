@@ -356,6 +356,10 @@ Scaling to many jobs
 
 You can easily manage dozens, hundreds, or thousands of managed jobs at once. This is a great fit for batch jobs such as **data processing**, **batch inference**, or **hyperparameter sweeps**. To see an example launching many jobs in parallel, see :ref:`many-jobs`.
 
+.. tip::
+
+  For workloads that can reuse the same environment across many jobs, consider using :ref:`Pools <pool>`. Pools provide faster cold-starts by maintaining a set of pre-provisioned workers that can be reused across job submissions.
+
 .. TODO(cooperc): code block or dashboard showcasing UX of many jobs (thousand-scale)
 
 To increase the maximum number of jobs that can run at once, see :ref:`jobs-controller-sizing`.
