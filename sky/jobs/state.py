@@ -1170,7 +1170,7 @@ def get_job_controller_process(job_id: int) -> Optional[ControllerPidRecord]:
             # Between #7051 and #7847, the controller pid was negative to
             # indicate a controller process that can handle multiple jobs.
             pid = -pid
-        return ControllerPidRecord(pid=row[0], started_at=row[1])
+        return ControllerPidRecord(pid=pid, started_at=row[1])
 
 
 @_init_db
