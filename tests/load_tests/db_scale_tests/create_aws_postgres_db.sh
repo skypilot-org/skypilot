@@ -78,15 +78,17 @@ if [ -n "$EKS_VPC_CONFIG" ]; then
                 USE_EKS_VPC=false
             else
                 # Verify subnets are in different availability zones
-                SUBNET_AZS=$(aws ec2 describe-subnets --region "$RDS_REGION" --subnet-ids "${SUBNET_ARRAY[@]}" --query 'Subnets[*].AvailabilityZone' --output text 2>/dev/null)
-                UNIQUE_AZS=$(echo "$SUBNET_AZS" | tr ' ' '\n' | sort -u | wc -l)
+                # Get availability zones for the first 2 subnets (RDS requires at least 2 in different AZs)
+                SUBNET_AZS=$(aws ec2 describe-subnets --region "$RDS_REGION" --subnet-ids "${SUBNET_ARRAY[0]}" "${SUBNET_ARRAY[1]}" --query 'Subnets[*].AvailabilityZone' --output text 2>/dev/null)
+                # Count unique availability zones (handle both space and tab separated)
+                UNIQUE_AZS=$(echo "$SUBNET_AZS" | tr '\t' ' ' | tr ' ' '\n' | grep -v '^$' | sort -u | wc -l)
 
                 if [ "$UNIQUE_AZS" -lt 2 ]; then
-                    echo "WARNING: EKS VPC subnets are not in different availability zones, falling back to default VPC" >&2
+                    echo "WARNING: EKS VPC subnets are not in different availability zones (found $UNIQUE_AZS unique AZs: $SUBNET_AZS), falling back to default VPC" >&2
                     USE_EKS_VPC=false
                 else
                     USE_EKS_VPC=true
-                    echo "Using EKS VPC: $VPC_ID with ${#SUBNET_ARRAY[@]} subnets in region $RDS_REGION" >&2
+                    echo "Using EKS VPC: $VPC_ID with ${#SUBNET_ARRAY[@]} subnets in region $RDS_REGION (AZs: $SUBNET_AZS)" >&2
                 fi
             fi
         fi
@@ -154,7 +156,7 @@ aws rds create-db-instance \
     --db-instance-identifier "$RDS_INSTANCE_ID" \
     --db-instance-class "$RDS_INSTANCE_CLASS" \
     --engine postgres \
-    --engine-version "15.4" \
+    --engine-version "14.9" \
     --master-username "$RDS_USERNAME" \
     --master-user-password "$RDS_PASSWORD" \
     --allocated-storage 20 \
