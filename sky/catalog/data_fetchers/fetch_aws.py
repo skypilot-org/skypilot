@@ -287,10 +287,15 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
             if (row['InstanceType'].startswith('g6f') or
                     row['InstanceType'].startswith('gr6f')):
                 # These instance actually have only fractional GPUs, but the API
-                # returns Count: 1 under GpuInfo. We need to check the GPU
-                # memory to get the actual fraction of the GPU.
+                # returns Count: 1 or Count: 0 under GpuInfo. We need to
+                # directly check the GPU memory to get the actual fraction of
+                # the GPU. Note that TotalGpuMemoryInMiB seems unreliable here -
+                # sometimes it is unexpectedly 0.
                 # See also Standard_NV{vcpu}ads_A10_v5 support on Azure.
-                fraction = row['GpuInfo']['TotalGpuMemoryInMiB'] / L4_GPU_MEMORY
+                assert len(row['GpuInfo']['Gpus']) == 1
+                assert row['GpuInfo']['Gpus'][0]['Name'] == 'L4'
+                fraction = row['GpuInfo']['Gpus'][0]['MemoryInfo'][
+                    'SizeInMiB'] / L4_GPU_MEMORY
                 acc_count = round(fraction, 3)
             if row['InstanceType'] == 'p5.4xlarge':
                 acc_count = 1
