@@ -2392,6 +2392,18 @@ class SSHTunnelInfo:
     pid: int
 
 
+def _is_tunnel_healthy(tunnel: SSHTunnelInfo) -> bool:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            s.connect(('localhost', tunnel.port))
+        return True
+    except socket.error as e:
+        logger.warning(f'Failed to connect to tunnel on port {tunnel.port}: '
+                       f'{common_utils.format_exception(e)}')
+        return False
+
+
 class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     """A pickle-able handle to a cluster created by CloudVmRayBackend.
 
@@ -2838,54 +2850,93 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         # and get the new tunnel.
         tunnel = self._get_skylet_ssh_tunnel()
         if tunnel is not None:
-            try:
-                # Check if the tunnel is open.
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.settimeout(0.5)
-                    s.connect(('localhost', tunnel.port))
+            if _is_tunnel_healthy(tunnel):
                 return grpc.insecure_channel(f'localhost:{tunnel.port}',
                                              options=grpc_options)
-            except socket.error as e:
-                logger.debug(
-                    'Failed to connect to SSH tunnel for cluster '
-                    f'{self.cluster_name!r} on port {tunnel.port} ({e}), '
-                    'acquiring lock')
-                pass
+            logger.debug('Failed to connect to SSH tunnel for cluster '
+                         f'{self.cluster_name!r} on port {tunnel.port}')
+
         lock_id = backend_utils.cluster_tunnel_lock_id(self.cluster_name)
-        lock_timeout = backend_utils.CLUSTER_TUNNEL_LOCK_TIMEOUT_SECONDS
-        lock = locks.get_lock(lock_id, lock_timeout)
-        try:
-            with lock.acquire(blocking=True):
-                # Re-read the tunnel from the DB.
-                tunnel = self._get_skylet_ssh_tunnel()
-                if tunnel is None:
-                    logger.debug('No SSH tunnel found for cluster '
-                                 f'{self.cluster_name!r}, '
-                                 'opening the tunnel')
-                    tunnel = self._open_and_update_skylet_tunnel()
-                    return grpc.insecure_channel(f'localhost:{tunnel.port}',
-                                                 options=grpc_options)
-                try:
-                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                        s.settimeout(0.5)
-                        s.connect(('localhost', tunnel.port))
+        remaining_timeout = backend_utils.CLUSTER_TUNNEL_LOCK_TIMEOUT_SECONDS
+        start_time = time.perf_counter()
+        attempt = 1
+
+        def _get_remaining_timeout() -> float:
+            return max(0.0,
+                       remaining_timeout - (time.perf_counter() - start_time))
+
+        while remaining_timeout > 0:
+            logger.debug(
+                'Attempting to acquire exclusive lock for %s (attempt %d)',
+                lock_id, attempt)
+            exclusive_lock = locks.get_lock(lock_id, remaining_timeout)
+            try:
+                with exclusive_lock.acquire(blocking=False):
+                    wait_elapsed = time.perf_counter() - start_time
+                    logger.debug(f'Acquired exclusive lock for {lock_id} after '
+                                 f'{wait_elapsed:.2f}s')
+                    try:
+                        tunnel = self._open_and_update_skylet_tunnel()
                         return grpc.insecure_channel(f'localhost:{tunnel.port}',
                                                      options=grpc_options)
-                except socket.error as e:
-                    logger.debug(
-                        'Failed to connect to SSH tunnel for cluster '
-                        f'{self.cluster_name!r} on port {tunnel.port} ({e}), '
-                        'opening new tunnel')
-                    tunnel = self._open_and_update_skylet_tunnel()
+                    except Exception as e:  # pylint: disable=broad-except
+                        # Failed to open tunnel, release the lock and retry.
+                        logger.warning(f'Failed to open tunnel for cluster '
+                                       f'{self.cluster_name!r}: '
+                                       f'{common_utils.format_exception(e)}')
+                        remaining_timeout = _get_remaining_timeout()
+                        attempt += 1
+                        continue
+            except locks.LockTimeout:
+                pass
+
+            remaining_timeout = _get_remaining_timeout()
+            logger.debug(f'Could not acquire exclusive lock for {lock_id}, '
+                         f'waiting on shared lock (attempt {attempt})')
+            try:
+                # Use shared lock so that concurrent readers can
+                # proceed in parallel.
+                shared_lock = locks.get_lock(lock_id,
+                                             remaining_timeout,
+                                             shared_lock=True)
+                # Wait for the exclusive lock to be released.
+                shared_lock.acquire(blocking=True)
+                # We only need the lock for signalling that the new tunnel has
+                # been opened, not for checking the tunnel health.
+                # Same reasoning as why we don't need to grab the lock in
+                # the fast path at the start of this function.
+                shared_lock.release()
+                wait_elapsed = time.perf_counter() - start_time
+                logger.debug(f'Acquired shared lock for {lock_id} after '
+                             f'{wait_elapsed:.2f}s')
+            except locks.LockTimeout as e:
+                raise RuntimeError(
+                    f'Failed to get gRPC channel for cluster '
+                    f'{self.cluster_name!r} due to a timeout when waiting '
+                    'for the SSH tunnel to be opened. Please try again or '
+                    f'manually remove the lock at {lock_id}. '
+                    f'{common_utils.format_exception(e)}') from e
+
+            # Add small jitter before probing to smoothen the effects
+            # of many readers waking up simultaneously.
+            jitter = random.uniform(0.01, 0.05)
+            time.sleep(jitter)
+
+            # Re-read the tunnel metadata and verify it's healthy.
+            tunnel = self._get_skylet_ssh_tunnel()
+            if tunnel is not None:
+                if _is_tunnel_healthy(tunnel):
                     return grpc.insecure_channel(f'localhost:{tunnel.port}',
                                                  options=grpc_options)
-        except locks.LockTimeout as e:
-            raise RuntimeError(
-                'Failed to get gRPC channel for cluster '
-                f'{self.cluster_name!r} due to a timeout when waiting for the '
-                'SSH tunnel to be opened. Please try again or manually remove '
-                f'the lock at {lock_id}. '
-                f'{common_utils.format_exception(e)}') from e
+                logger.debug('Failed to connect to SSH tunnel for cluster '
+                             f'{self.cluster_name!r} on port {tunnel.port}')
+            # Tunnel is still unhealthy or missing, try again with updated
+            # timeout. This could happen in the case where the thread who
+            # held the exclusive lock to open the tunnel crashed.
+            remaining_timeout = _get_remaining_timeout()
+            attempt += 1
+        raise RuntimeError('Timeout waiting for gRPC channel for cluster '
+                           f'{self.cluster_name!r} to be ready.')
 
     def _terminate_ssh_tunnel_process(self, tunnel_info: SSHTunnelInfo) -> None:
         """Terminate the SSH tunnel process."""
@@ -4579,7 +4630,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         is_identity_mismatch_and_purge = False
         try:
             backend_utils.check_owner_identity(cluster_name)
-        except exceptions.ClusterOwnerIdentityMismatchError as e:
+        except (exceptions.ClusterOwnerIdentityMismatchError,
+                exceptions.CloudUserIdentityError) as e:
             if purge:
                 logger.error(e)
                 verbed = 'terminated' if terminate else 'stopped'
