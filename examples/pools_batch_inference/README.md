@@ -1,4 +1,4 @@
-# Batch Text Classification with SkyPilot Pools
+# Batch Text Classification with vLLM and SkyPilot Pools
 
 This example demonstrates how to use SkyPilot's **Pools** for efficient offline batch inference. We'll classify sentiment from movie reviews using gpt-oss-20b running on vLLM.
 
