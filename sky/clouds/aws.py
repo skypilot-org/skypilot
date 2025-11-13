@@ -24,6 +24,7 @@ from sky.adaptors import aws
 from sky.adaptors import common
 from sky.catalog import common as catalog_common
 from sky.clouds.utils import aws_utils
+from sky.db import kv_cache
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
@@ -480,6 +481,13 @@ class AWS(clouds.Cloud):
         if image_id.startswith('skypilot:'):
             return DEFAULT_AMI_GB
         assert region is not None, (image_id, region)
+        # first try the cache
+        workpace_profile = aws.get_workspace_profile()
+        kv_cache_key = f'aws:ami:size:{workpace_profile}:{region}:{image_id}'
+        image_size = kv_cache.get_cache_entry(kv_cache_key)
+        if image_size is not None:
+            return float(image_size)
+        # if not found in cache, query the cloud
         image_not_found_message = (
             f'Image {image_id!r} not found in AWS region {region}.\n'
             f'\nTo find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
@@ -508,6 +516,10 @@ class AWS(clouds.Cloud):
             )
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(image_not_found_message) from None
+        # cache the result for a day
+        day_in_seconds = 60 * 60 * 24  # 1 day, 60s * 60m * 24h
+        kv_cache.add_or_update_cache_entry(kv_cache_key, str(image_size),
+                                           time.time() + day_in_seconds)
         return image_size
 
     @classmethod
@@ -518,6 +530,12 @@ class AWS(clouds.Cloud):
         if image_id.startswith('skypilot:'):
             return DEFAULT_ROOT_DEVICE_NAME
         assert region is not None, (image_id, region)
+        workpace_profile = aws.get_workspace_profile()
+        kv_cache_key = f'aws:ami:root_device_name:{workpace_profile}:{region}:{image_id}'
+        root_device_name = kv_cache.get_cache_entry(kv_cache_key)
+        if root_device_name is not None:
+            return root_device_name
+        # if not found in cache, query the cloud
         image_not_found_message = (
             f'Image {image_id!r} not found in AWS region {region}.\n'
             f'To find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
@@ -535,7 +553,7 @@ class AWS(clouds.Cloud):
                              f'device name. '
                              f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
                 return DEFAULT_ROOT_DEVICE_NAME
-            return image['RootDeviceName']
+            root_device_name = image['RootDeviceName']
         except (aws.botocore_exceptions().NoCredentialsError,
                 aws.botocore_exceptions().ProfileNotFound) as e:
             # Fallback to default root device name if no credentials are
@@ -551,6 +569,11 @@ class AWS(clouds.Cloud):
                          f'{image_id} in region {region}: {e}.')
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(image_not_found_message) from None
+        # cache the result for a day
+        day_in_seconds = 60 * 60 * 24  # 1 day, 60s * 60m * 24h
+        kv_cache.add_or_update_cache_entry(kv_cache_key, root_device_name,
+                                           time.time() + day_in_seconds)
+        return root_device_name
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
