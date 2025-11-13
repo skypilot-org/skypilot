@@ -43,24 +43,25 @@ RAY_CMD_PREFIX=${RAY_CMD_PREFIX:-}  # Optional command prefix (e.g., "uv run")
 
 echo -e "${GREEN}Starting Ray cluster...${NC}"
 
-# Check if Ray is installed
-if ! ${RAY_CMD_PREFIX} ray --version &> /dev/null 2>&1; then
-    echo -e "${YELLOW}Ray is not installed. Installing ray[default]...${NC}"
-    uv pip install "ray[default]" || uv pip install --system "ray[default]"
-    if ! ${RAY_CMD_PREFIX} ray --version &> /dev/null 2>&1; then
-        echo -e "${RED}Error: Failed to install Ray.${NC}"
-        exit 1
-    fi
-    echo -e "${GREEN}Ray $(${RAY_CMD_PREFIX} ray --version | cut -d' ' -f3) installed successfully.${NC}"
+# Ensure ray[default] is installed (we need [default] to do `ray list nodes`)
+# Pin to existing version if Ray is already installed to avoid upgrading existing version.
+RAY_VERSION=$(${RAY_CMD_PREFIX} ray --version 2>/dev/null | cut -d' ' -f3 || echo "")
+if [ -n "${RAY_VERSION}" ]; then
+    # Pin to existing version.
+    VERSION_SPEC="==${RAY_VERSION}"
 else
-    # Ray is installed, but check if ray[default] is installed
-    # (needed for ray list nodes)
-    if ! ${RAY_CMD_PREFIX} python -c "import ray.dashboard" &> /dev/null; then
-        RAY_VERSION=$(${RAY_CMD_PREFIX} ray --version | cut -d' ' -f3)
-        echo -e "${YELLOW}Ray is installed but ray[default] extras are missing. Installing ray[default]==${RAY_VERSION}...${NC}"
-        uv pip install "ray[default]==${RAY_VERSION}" || uv pip install --system "ray[default]==${RAY_VERSION}"
-    fi
+    echo -e "${YELLOW}Installing ray[default]...${NC}"
+    VERSION_SPEC=""
 fi
+
+uv pip install "ray[default]${VERSION_SPEC}" || uv pip install --system "ray[default]${VERSION_SPEC}"
+
+# Verify Ray is working
+if ! ${RAY_CMD_PREFIX} ray --version &> /dev/null 2>&1; then
+    echo -e "${RED}Error: Failed to install Ray.${NC}"
+    exit 1
+fi
+echo -e "${GREEN}Ray $(${RAY_CMD_PREFIX} ray --version | cut -d' ' -f3) is installed.${NC}"
 
 RAY_ADDRESS="127.0.0.1:${RAY_HEAD_PORT}"
 if [ "${SKYPILOT_NODE_RANK}" -ne 0 ]; then
