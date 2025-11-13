@@ -77,6 +77,8 @@ Below is the available helm value keys and the default value of each key:
       :ref:`retention <helm-values-apiService-logs-retention>`:
         :ref:`enabled <helm-values-apiService-logs-retention-enabled>`: false
         :ref:`size <helm-values-apiService-logs-retention-size>`: 10M
+    :ref:`imagePullSecrets <helm-values-apiService-imagePullSecrets>`: null
+    :ref:`imagePullPolicy <helm-values-apiService-imagePullPolicy>`: Always
 
   :ref:`auth <helm-values-auth>`:
     :ref:`oauth <helm-values-auth-oauth>`:
@@ -200,6 +202,7 @@ Below is the available helm value keys and the default value of each key:
   :ref:`awsCredentials <helm-values-awsCredentials>`:
     :ref:`enabled <helm-values-awsCredentials-enabled>`: false
     :ref:`awsSecretName <helm-values-awsCredentials-awsSecretName>`: aws-credentials
+    :ref:`useCredentialsFile <helm-values-awsCredentials-useCredentialsFile>`: false
     :ref:`accessKeyIdKeyName <helm-values-awsCredentials-accessKeyIdKeyName>`: aws_access_key_id
     :ref:`secretAccessKeyKeyName <helm-values-awsCredentials-secretAccessKeyKeyName>`: aws_secret_access_key
 
@@ -281,6 +284,35 @@ To use a nightly build, find the desired nightly version on `pypi <https://pypi.
   apiService:
     # Replace 1.0.0.devYYYYMMDD with the desired nightly version
     image: berkeleyskypilot/skypilot-nightly:1.0.0.devYYYYMMDD
+
+.. _helm-values-apiService-imagePullSecrets:
+
+``apiService.imagePullSecrets``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+List of Kubernetes ``imagePullSecrets`` objects to attach to the API server pods. Set this when the API server image is hosted in a private registry so the pods can authenticate during pulls.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    imagePullSecrets:
+      - name: my-registry-credentials
+
+.. _helm-values-apiService-imagePullPolicy:
+
+``apiService.imagePullPolicy``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Image pull policy applied to the API server containers. Accepts the standard Kubernetes values (``Always``, ``IfNotPresent``, ``Never``). Use ``IfNotPresent`` when caching images locally is preferred.
+
+Default: ``"Always"``
+
+.. code-block:: yaml
+
+  apiService:
+    imagePullPolicy: Always
 
 .. _helm-values-apiService-upgradeStrategy:
 
@@ -1748,12 +1780,38 @@ Default: ``aws-credentials``
   awsCredentials:
     awsSecretName: aws-credentials
 
+.. _helm-values-awsCredentials-useCredentialsFile:
+
+``awsCredentials.useCredentialsFile``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Set to ``true`` to mount a complete AWS credentials file with multiple profiles. This is required for using different AWS profiles with different :ref:`workspaces <workspaces>`.
+
+If set to ``true``, the secret must contain a key named ``credentials`` with the full AWS credentials file content. Create the secret with:
+
+.. code-block:: bash
+
+    kubectl create secret generic aws-credentials \
+      --namespace $NAMESPACE \
+      --from-file=credentials=$HOME/.aws/credentials
+
+If set to ``false`` (default), ``accessKeyIdKeyName`` and ``secretAccessKeyKeyName`` are used as the default profile credentials.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  awsCredentials:
+    enabled: true
+    useCredentialsFile: true
+
+
 .. _helm-values-awsCredentials-accessKeyIdKeyName:
 
 ``awsCredentials.accessKeyIdKeyName``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Key name used to set AWS_ACCESS_KEY_ID.
+Key name used to set AWS_ACCESS_KEY_ID. Only used when ``useCredentialsFile`` is ``false``.
 
 Default: ``aws_access_key_id``
 
@@ -1767,7 +1825,7 @@ Default: ``aws_access_key_id``
 ``awsCredentials.secretAccessKeyKeyName``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Key name used to set AWS_SECRET_ACCESS_KEY.
+Key name used to set AWS_SECRET_ACCESS_KEY. Only used when ``useCredentialsFile`` is ``false``.
 
 Default: ``aws_secret_access_key``
 
@@ -2113,7 +2171,7 @@ SkyPilot provides a minimal Prometheus configuration by default. If you want to 
     kube-state-metrics:
       enabled: true
       metricLabelsAllowlist:
-        - pods=[skypilot-cluster]
+        - pods=[skypilot-cluster-name]
     prometheus-node-exporter:
       enabled: false
     prometheus-pushgateway:

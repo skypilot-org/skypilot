@@ -407,7 +407,9 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
         context: grpc.ServicerContext
     ) -> managed_jobsv1_pb2.GetJobTableResponse:
         try:
-            accessible_workspaces = list(request.accessible_workspaces)
+            accessible_workspaces = (
+                list(request.accessible_workspaces.workspaces)
+                if request.HasField('accessible_workspaces') else None)
             job_ids = (list(request.job_ids.ids)
                        if request.HasField('job_ids') else None)
             user_hashes: Optional[List[Optional[str]]] = None
@@ -419,6 +421,8 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     user_hashes.append(None)
             statuses = (list(request.statuses.statuses)
                         if request.HasField('statuses') else None)
+            fields = (list(request.fields.fields)
+                      if request.HasField('fields') else None)
             job_queue = managed_job_utils.get_managed_job_queue(
                 skip_finished=request.skip_finished,
                 accessible_workspaces=accessible_workspaces,
@@ -432,7 +436,9 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 page=request.page if request.HasField('page') else None,
                 limit=request.limit if request.HasField('limit') else None,
                 user_hashes=user_hashes,
-                statuses=statuses)
+                statuses=statuses,
+                fields=fields,
+            )
             jobs = job_queue['jobs']
             total = job_queue['total']
             total_no_filter = job_queue['total_no_filter']
@@ -440,7 +446,16 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
 
             jobs_info = []
             for job in jobs:
+                converted_metadata = None
+                metadata = job.get('metadata')
+                if metadata:
+                    converted_metadata = {
+                        k: v for k, v in metadata.items() if v is not None
+                    }
                 job_info = managed_jobsv1_pb2.ManagedJobInfo(
+                    # The `spot.job_id`, which can be used to identify
+                    # different tasks for the same job
+                    _job_id=job.get('_job_id'),
                     job_id=job.get('job_id'),
                     task_id=job.get('task_id'),
                     job_name=job.get('job_name'),
@@ -468,11 +483,7 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     end_at=job.get('end_at'),
                     user_yaml=job.get('user_yaml'),
                     entrypoint=job.get('entrypoint'),
-                    metadata={
-                        k: v
-                        for k, v in job.get('metadata', {}).items()
-                        if v is not None
-                    },
+                    metadata=converted_metadata,
                     pool=job.get('pool'),
                     pool_hash=job.get('pool_hash'))
                 jobs_info.append(job_info)

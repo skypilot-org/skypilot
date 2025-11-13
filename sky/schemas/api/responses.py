@@ -77,8 +77,13 @@ class APIHealthResponse(ResponseBaseModel):
     version: str = ''
     version_on_disk: str = ''
     commit: str = ''
+    # Whether basic auth on api server is enabled
     basic_auth_enabled: bool = False
     user: Optional[models.User] = None
+    # Whether service account token is enabled
+    service_account_token_enabled: bool = False
+    # Whether basic auth on ingress is enabled
+    ingress_basic_auth_enabled: bool = False
 
 
 class StatusResponse(ResponseBaseModel):

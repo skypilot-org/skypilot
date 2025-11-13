@@ -451,6 +451,9 @@ def test_multi_echo(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'multi_echo',
         [
+            # TODO(aylei): also test local API server after we have rate limit in local mode
+            # Use deploy mode to avoid ulimited concurrency requests exhausts the CPU
+            'sky api stop && sky api start --deploy',
             f'python examples/multi_echo.py {name} {generic_cloud} {int(use_spot)} {accelerator}',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
             'sleep 10',
@@ -481,7 +484,9 @@ def test_multi_echo(generic_cloud: str):
             # unfulfilled' error.  If process not found, grep->ssh returns 1.
             f'ssh {name} \'ps aux | grep "[/]"monitor.py\''
         ],
-        f'sky down -y {name}',
+        (f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api stop && '
+         f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api start; '
+         f'sky down -y {name}'),
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -1042,12 +1047,37 @@ def test_volumes_on_kubernetes():
     test = smoke_tests_utils.Test(
         'volumes_on_kubernetes',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'kubectl create -f - <<EOF\n'
+                f'apiVersion: v1\n'
+                f'kind: PersistentVolumeClaim\n'
+                f'metadata:\n'
+                f'  name: existing0\n'
+                f'spec:\n'
+                f'  accessModes:\n'
+                f'    - ReadWriteOnce\n'
+                f'  resources:\n'
+                f'    requests:\n'
+                f'      storage: 1Gi\n'
+                f'EOF',
+            ),
             f'sky volumes apply -y -n pvc0 --type k8s-pvc --size 2GB',
-            f'sky volumes ls | grep "pvc0"',
+            f'sky volumes apply -y -n existing0 --type k8s-pvc --size 2GB --use-existing',
+            f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep "pvc0" && echo "$vols" | grep "existing0"',
             f'sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky down -y {name} && sky volumes ls && sky volumes delete pvc0 existing0 -y',
+            f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "pvc0"); if [ -n "$vol" ]; then echo "pvc0 not deleted" && exit 1; else echo "pvc0 deleted"; fi',
+            f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "existing0"); if [ -n "$vol" ]; then echo "existing0 not deleted" && exit 1; else echo "existing0 deleted"; fi',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                'pvcs=$(kubectl get pvc) && echo "$pvcs" && pvc=$(echo "$pvcs" | grep "pvc0"); if [ -n "$pvc" ]; then echo "pvc0 not deleted" && exit 1; else echo "pvc0 deleted"; fi && '
+                'pvc=$(echo "$pvcs" | grep "existing0"); if [ -n "$pvc" ]; then echo "existing0 not deleted" && exit 1; else echo "existing0 deleted"; fi',
+            ),
         ],
-        f'sky down -y {name} && sky volumes delete pvc0 -y && (vol=$(sky volumes ls | grep "pvc0"); if [ -n "$vol" ]; then echo "pvc0 not deleted" && exit 1; else echo "pvc0 deleted"; fi)',
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1073,7 +1103,13 @@ def test_volume_env_mount_kubernetes():
                 f'sky volumes apply -y -n {full_pvc_name} --type k8s-pvc --size 2GB',
                 f's=$(sky jobs launch -y --infra kubernetes {f.name} --env USERNAME=user); echo "$s"; echo "$s" | grep "Job finished (status: SUCCEEDED)"',
             ],
-            f'sky jobs cancel -a || true && sleep 5 && sky volumes delete {full_pvc_name} -y && (vol=$(sky volumes ls | grep "{full_pvc_name}"); if [ -n "$vol" ]; then echo "{full_pvc_name} not deleted" && exit 1; else echo "{full_pvc_name} deleted"; fi)',
+            ' && '.join([
+                'sky jobs cancel -a -y || true', 'sleep 5',
+                f'sky volumes delete {full_pvc_name} -y',
+                f'(vol=$(sky volumes ls | grep "{full_pvc_name}"); '
+                f'if [ -n "$vol" ]; then echo "{full_pvc_name} not deleted" '
+                '&& exit 1; else echo "{full_pvc_name} deleted"; fi)'
+            ]),
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -1976,14 +2012,16 @@ def test_gcp_zero_quota_failover():
     smoke_tests_utils.run_one_test(test)
 
 
-# Skip this for kubernetes due to https://github.com/skypilot-org/skypilot/issues/7504#event-20180419521
-# TODO(aylei,zpoint): fix the infra issue and remove the mark
-@pytest.mark.no_kubernetes
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controller and auto-stop
 def test_long_setup_run_script(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
                                      suffix='.yaml') as f:
+        debug_command = (
+            f'sky exec {name} "source ~/skypilot-runtime/bin/activate; '
+            f'ray status --verbose; ray list tasks --detail; '
+            f'find /home/sky/sky_logs -name "*.log" -type f -exec tail -f '
+            f'{{}} +"')
         f.write(
             textwrap.dedent(""" \
             setup: |
@@ -2015,7 +2053,8 @@ def test_long_setup_run_script(generic_cloud: str):
                 f'sky jobs launch -y -n {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {f.name}',
                 f'sky jobs queue | grep {name} | grep SUCCEEDED',
             ],
-            f'sky down -y {name}; sky jobs cancel -n {name} -y',
+            debug_command +
+            f'; sky down -y {name}; sky jobs cancel -n {name} -y',
         )
         smoke_tests_utils.run_one_test(test)
 

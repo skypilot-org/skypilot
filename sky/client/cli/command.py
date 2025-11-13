@@ -60,6 +60,7 @@ from sky.adaptors import common as adaptors_common
 from sky.client import sdk
 from sky.client.cli import flags
 from sky.client.cli import table_utils
+from sky.jobs import utils as jobs_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
@@ -1383,7 +1384,26 @@ def _handle_jobs_queue_request(
     try:
         if not is_called_by_user:
             usage_lib.messages.usage.set_internal()
-        result = sdk.stream_and_get(request_id)
+        # Call both stream_and_get functions in parallel
+        def get_jobs_queue_result():
+            return sdk.stream_and_get(request_id)
+
+        def get_pool_status_result():
+            if pool_status_request_id is not None:
+                try:
+                    return sdk.stream_and_get(pool_status_request_id)
+                except Exception:  # pylint: disable=broad-except
+                    # If getting pool status fails, just continue without it
+                    return None
+            return None
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            jobs_future = executor.submit(get_jobs_queue_result)
+            pool_status_future = executor.submit(get_pool_status_result)
+
+            result = jobs_future.result()
+            pool_status_result = pool_status_future.result()
+
         if isinstance(result, tuple):
             managed_jobs_, total, status_counts, _ = result
             if only_in_progress:
@@ -1400,13 +1420,6 @@ def _handle_jobs_queue_request(
             managed_jobs_ = result
             num_in_progress_jobs = len(
                 set(job['job_id'] for job in managed_jobs_))
-        # Try to get pool status if request was made
-        if pool_status_request_id is not None:
-            try:
-                pool_status_result = sdk.stream_and_get(pool_status_request_id)
-            except Exception:  # pylint: disable=broad-except
-                # If getting pool status fails, just continue without it
-                pool_status_result = None
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
         msg = str(e)
@@ -4285,6 +4298,12 @@ cli.add_command(volumes, name='volume')
               required=False,
               type=str,
               help='Volume size. Override the size defined in the YAML.')
+@click.option(
+    '--use-existing/--no-use-existing',
+    required=False,
+    default=None,
+    help='Whether to use an existing volume. Override the use_existing '
+    'defined in the YAML.')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -4299,6 +4318,7 @@ def volumes_apply(
         infra: Optional[str],
         type: Optional[str],  # pylint: disable=redefined-builtin
         size: Optional[str],
+        use_existing: Optional[bool],
         yes: bool,
         async_call: bool):
     """Apply a volume.
@@ -4312,6 +4332,10 @@ def volumes_apply(
         \b
         # Apply a volume from a command.
         sky volumes apply --name pvc1 --infra k8s --type k8s-pvc --size 100Gi
+        \b
+        # Apply a volume with existing PVC `pvc2` from a command.
+        sky volumes apply --name pvc2 --infra k8s --type k8s-pvc --size 100Gi
+        --use-existing
     """
     # pylint: disable=import-outside-toplevel
     from sky.volumes import volume as volume_lib
@@ -4330,7 +4354,8 @@ def volumes_apply(
                     f'{entrypoint_str!r} needs to be a YAML file')
         if yaml_config is not None:
             volume_config_dict = yaml_config.copy()
-    override_config = _build_volume_override_config(name, infra, type, size)
+    override_config = _build_volume_override_config(name, infra, type, size,
+                                                    use_existing)
     volume_config_dict.update(override_config)
 
     # Create Volume instance
@@ -4361,11 +4386,15 @@ def volumes_apply(
                      f'{colorama.Style.RESET_ALL}')
 
 
-def _build_volume_override_config(name: Optional[str], infra: Optional[str],
-                                  volume_type: Optional[str],
-                                  size: Optional[str]) -> Dict[str, str]:
+def _build_volume_override_config(
+    name: Optional[str],
+    infra: Optional[str],
+    volume_type: Optional[str],
+    size: Optional[str],
+    use_existing: Optional[bool],
+) -> Dict[str, Any]:
     """Parse the volume override config."""
-    override_config = {}
+    override_config: Dict[str, Any] = {}
     if name is not None:
         override_config['name'] = name
     if infra is not None:
@@ -4374,6 +4403,8 @@ def _build_volume_override_config(name: Optional[str], infra: Optional[str],
         override_config['type'] = volume_type
     if size is not None:
         override_config['size'] = size
+    if use_existing is not None:
+        override_config['use_existing'] = use_existing
     return override_config
 
 
@@ -4621,18 +4652,7 @@ def jobs_launch(
         click.secho(f'Submitting to pool {colorama.Fore.CYAN}{pool!r}'
                     f'{colorama.Style.RESET_ALL} with {colorama.Fore.CYAN}'
                     f'{num_job_int}{colorama.Style.RESET_ALL} job{plural}.')
-        print_setup_fm_warning = False
-        for task_ in dag.tasks:
-            if (task_.setup is not None or task_.file_mounts or
-                    task_.storage_mounts):
-                print_setup_fm_warning = True
-                break
-        if print_setup_fm_warning:
-            click.secho(
-                f'{colorama.Fore.YELLOW}setup/file_mounts/storage_mounts'
-                ' will be ignored when submit jobs to pool. To update a pool, '
-                f'please use `sky jobs pool apply {pool} new-pool.yaml`. '
-                f'{colorama.Style.RESET_ALL}')
+        jobs_utils.validate_pool_job(dag, pool)
 
     # Optimize info is only show if _need_confirmation.
     if not yes:
@@ -4665,7 +4685,8 @@ def jobs_launch(
         else:
             # TODO(tian): This can be very long. Considering have a "group id"
             # and query all job ids with the same group id.
-            job_ids_str = ','.join(map(str, job_ids))
+            # Sort job ids to ensure consistent ordering.
+            job_ids_str = ','.join(map(str, sorted(job_ids)))
             click.secho(
                 f'Jobs submitted with IDs: {colorama.Fore.CYAN}'
                 f'{job_ids_str}{colorama.Style.RESET_ALL}.'
@@ -4779,19 +4800,28 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
             fields = fields + _USER_NAME_FIELD
             if verbose:
                 fields = fields + _USER_HASH_FIELD
-        managed_jobs_request_id = managed_jobs.queue(
-            refresh=refresh,
-            skip_finished=skip_finished,
-            all_users=all_users,
-            limit=max_num_jobs_to_show,
-            fields=fields)
-        # Try to get pool status for worker information
-        pool_status_request_id = None
-        try:
-            pool_status_request_id = managed_jobs.pool_status(pool_names=None)
-        except Exception:  # pylint: disable=broad-except
-            # If pool_status fails, we'll just skip the worker information
-            pass
+        # Call both managed_jobs.queue and managed_jobs.pool_status in parallel
+        def get_managed_jobs_queue():
+            return managed_jobs.queue(refresh=refresh,
+                                      skip_finished=skip_finished,
+                                      all_users=all_users,
+                                      limit=max_num_jobs_to_show,
+                                      fields=fields)
+
+        def get_pool_status():
+            try:
+                return managed_jobs.pool_status(pool_names=None)
+            except Exception:  # pylint: disable=broad-except
+                # If pool_status fails, we'll just skip the worker information
+                return None
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            managed_jobs_future = executor.submit(get_managed_jobs_queue)
+            pool_status_future = executor.submit(get_pool_status)
+
+            managed_jobs_request_id = managed_jobs_future.result()
+            pool_status_request_id = pool_status_future.result()
+
         num_jobs, msg = _handle_jobs_queue_request(
             managed_jobs_request_id,
             pool_status_request_id=pool_status_request_id,
@@ -6368,7 +6398,9 @@ INT_OR_NONE = IntOrNone()
               is_flag=True,
               default=False,
               required=False,
-              help='Show requests of all statuses.')
+              help=('Show requests of all statuses, including finished ones '
+                    '(SUCCEEDED, FAILED, CANCELLED). By default, only active '
+                    'requests (PENDING, RUNNING) are shown.'))
 @click.option(
     '--limit',
     '-l',
