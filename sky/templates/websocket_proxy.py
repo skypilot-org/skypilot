@@ -256,6 +256,8 @@ if __name__ == '__main__':
     if disable_latency_measurement:
         timestamps_are_supported = False
     else:
+        # TODO(aylei): remove the separate /api/health call and use the header
+        # during websocket handshake to determine the server version.
         health_url = f'{server_url}/api/health'
         cookie_hdr = _get_cookie_header(health_url)
         health_response = requests.get(health_url, headers=cookie_hdr)
