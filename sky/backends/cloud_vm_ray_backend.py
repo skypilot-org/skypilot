@@ -4830,9 +4830,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             (dir if constants.SKY_LOGS_DIRECTORY in dir else os.path.join(
                 constants.SKY_LOGS_DIRECTORY, dir)) for dir in dirs
         ]
-        local_log_dirs = [(dir.replace(constants.SKY_LOGS_DIRECTORY, local_dir)
-                           if constants.SKY_LOGS_DIRECTORY in dir else
-                           os.path.join(local_dir, dir)) for dir in dirs]
+        # Include cluster name in local log directory path to avoid conflicts
+        # when the same job_id exists on different clusters
+        cluster_name = handle.cluster_name
+        local_log_dirs = []
+        for remote_log_dir in dirs:
+            if constants.SKY_LOGS_DIRECTORY in remote_log_dir:
+                # Extract the job-specific directory name from the full path
+                # e.g., ~/sky_logs/1-job_name -> 1-job_name
+                job_dir = remote_log_dir.replace(constants.SKY_LOGS_DIRECTORY,
+                                                 '').lstrip('/')
+                local_log_dir = os.path.join(local_dir, cluster_name, job_dir)
+            else:
+                # remote_log_dir is already just the job directory name (e.g.,
+                # "1-job_name")
+                local_log_dir = os.path.join(local_dir, cluster_name,
+                                             remote_log_dir)
+            local_log_dirs.append(local_log_dir)
 
         runners = handle.get_command_runners()
 
