@@ -311,21 +311,22 @@ def submit_jobs(job_ids: List[int],
             state.get_job_schedule_state(job_id)
             # Job info exists, skip creation
         except (IndexError, TypeError):
-            # Job info doesn't exist, create it
-            state.set_job_info(job_id=job_id,
-                               name=dag_name,
-                               workspace=workspace,
-                               entrypoint=entrypoint,
-                               pool=pool,
-                               pool_hash=pool_hash,
-                               user_hash=user_hash)
+            # # Job info doesn't exist, create it
+            # state.set_job_info(job_id=job_id,
+            #                    name=dag_name,
+            #                    workspace=workspace,
+            #                    entrypoint=entrypoint,
+            #                    pool=pool,
+            #                    pool_hash=pool_hash,
+            #                    user_hash=user_hash)
 
-            # Set pending state for each task
-            for task_id, task in enumerate(dag.tasks):
-                resources_str = backend_utils.get_task_resources_str(
-                    task, is_managed_job=True)
-                state.set_pending(job_id, task_id, task.name, resources_str,
-                                  task.metadata_json)
+            # # Set pending state for each task
+            # for task_id, task in enumerate(dag.tasks):
+            #     resources_str = backend_utils.get_task_resources_str(
+            #         task, is_managed_job=True)
+            #     state.set_pending(job_id, task_id, task.name, resources_str,
+            #                       task.metadata_json)
+            pass
 
     with open(dag_yaml_path, 'r', encoding='utf-8') as dag_file:
         dag_yaml_content = dag_file.read()

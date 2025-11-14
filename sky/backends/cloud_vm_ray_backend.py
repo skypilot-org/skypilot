@@ -2673,6 +2673,13 @@ class SkyletClient:
     ) -> 'jobsv1_pb2.AddJobResponse':
         return self._jobs_stub.AddJob(request, timeout=timeout)
 
+    def set_job_info_without_job_id(
+        self,
+        request: 'jobsv1_pb2.SetJobInfoWithoutJobIdRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'jobsv1_pb2.SetJobInfoWithoutJobIdResponse':
+        return self._jobs_stub.SetJobInfoWithoutJobId(request, timeout=timeout)
+
     def queue_job(
         self,
         request: 'jobsv1_pb2.QueueJobRequest',
@@ -3894,16 +3901,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 job_submit_cmd = f'{mkdir_code} && {code}'
 
             def _maybe_add_managed_job_code(job_submit_cmd: str) -> str:
-                if managed_job_dag is not None:
+                #if managed_job_dag is not None:
                     # Add the managed job to job queue database.
-                    managed_job_codegen = managed_jobs.ManagedJobCodeGen()
-                    managed_job_code = managed_job_codegen.set_pending(
-                        job_id,
-                        managed_job_dag,
-                        skypilot_config.get_active_workspace(
-                            force_user_workspace=True),
-                        entrypoint=common_utils.get_current_command(),
-                        user_hash=managed_job_user_id)
+                    # managed_job_codegen = managed_jobs.ManagedJobCodeGen()
+                    # managed_job_code = managed_job_codegen.set_pending(
+                    #     job_id,
+                    #     managed_job_dag,
+                    #     skypilot_config.get_active_workspace(
+                    #         force_user_workspace=True),
+                    #     entrypoint=common_utils.get_current_command(),
+                    #     user_hash=managed_job_user_id)
                     # Set the managed job to PENDING state to make sure that
                     # this managed job appears in the `sky jobs queue`, even
                     # if it needs to wait to be submitted.
@@ -3911,7 +3918,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # job template (jobs-controller.yaml.j2), as it may need
                     # to wait for the run commands to be scheduled on the job
                     # controller in high-load cases.
-                    job_submit_cmd += ' && ' + managed_job_code
+                    # job_submit_cmd += ' && ' + managed_job_code
                 return job_submit_cmd
 
             job_submit_cmd = _maybe_add_managed_job_code(job_submit_cmd)
@@ -4049,6 +4056,90 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 raise ValueError(f'Failed to parse job id: {result_str}; '
                                  f'Returncode: {returncode}') from e
         return job_ids, log_dirs
+
+    def set_job_info_without_job_id(
+            self,
+            handle: CloudVmRayResourceHandle,
+            name: str,
+            workspace: str,
+            entrypoint: str,
+            pool: Optional[str],
+            pool_hash: Optional[str],
+            user_hash: Optional[str],
+            task_ids: List[int],
+            task_names: List[str],
+            resources_str: str,
+            metadata_jsons: List[str],
+            num_jobs: int = 1) -> List[int]:
+        """Set job info without creating entries in the jobs table (for managed jobs).
+        
+        This creates entries in job_info_table and spot_table without creating
+        entries in the jobs table, which prevents autostop from being blocked
+        by jobs stuck in INIT status.
+        """
+        use_legacy = not handle.is_grpc_enabled_with_flag
+
+        if not use_legacy:
+            try:
+                request = jobsv1_pb2.SetJobInfoWithoutJobIdRequest(
+                    name=name,
+                    workspace=workspace,
+                    entrypoint=entrypoint,
+                    pool=pool,
+                    pool_hash=pool_hash,
+                    user_hash=user_hash,
+                    task_ids=task_ids,
+                    task_names=task_names,
+                    resources_str=resources_str,
+                    metadata_jsons=metadata_jsons,
+                    num_jobs=num_jobs)
+                response = backend_utils.invoke_skylet_with_retries(
+                    lambda: SkyletClient(handle.get_grpc_channel()
+                                         ).set_job_info_without_job_id(request))
+                return list(response.job_ids)
+            except exceptions.SkyletMethodNotImplementedError:
+                use_legacy = True
+
+        if use_legacy:
+            code = job_lib.JobLibCodeGen.set_job_info_without_job_id(
+                name=name,
+                workspace=workspace,
+                entrypoint=entrypoint,
+                pool=pool,
+                pool_hash=pool_hash,
+                user_hash=user_hash,
+                task_ids=task_ids,
+                task_names=task_names,
+                resources_str=resources_str,
+                metadata_jsons=metadata_jsons,
+                num_jobs=num_jobs)
+            returncode, result_str, stderr = self.run_on_head(
+                handle,
+                code,
+                stream_logs=False,
+                require_outputs=True,
+                separate_stderr=True)
+            backend_utils.check_stale_runtime_on_remote(returncode, stderr,
+                                                        handle.cluster_name)
+            subprocess_utils.handle_returncode(returncode, code,
+                                               'Failed to fetch job id.',
+                                               stderr)
+            try:
+                # Parse job IDs from output
+                job_ids_match = _JOB_IDS_PATTERN.search(result_str)
+                if job_ids_match:
+                    job_ids = [
+                        int(x.strip())
+                        for x in job_ids_match.group(1).split(',')
+                    ]
+                    return job_ids
+                else:
+                    raise ValueError(
+                        f'Failed to parse job ids from: {result_str}')
+            except ValueError as e:
+                logger.error(stderr)
+                raise ValueError(f'Failed to parse job id: {result_str}; '
+                                 f'Returncode: {returncode}') from e
 
     def _execute(
         self,

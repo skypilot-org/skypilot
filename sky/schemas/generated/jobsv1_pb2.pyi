@@ -270,3 +270,31 @@ class GetJobExitCodesResponse(_message.Message):
     EXIT_CODES_FIELD_NUMBER: _ClassVar[int]
     exit_codes: _containers.RepeatedScalarFieldContainer[int]
     def __init__(self, exit_codes: _Optional[_Iterable[int]] = ...) -> None: ...
+
+class SetJobInfoWithoutJobIdRequest(_message.Message):
+    __slots__ = ("name", "workspace", "entrypoint", "pool", "pool_hash", "user_hash", "resources_str", "metadata", "num_jobs")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_FIELD_NUMBER: _ClassVar[int]
+    ENTRYPOINT_FIELD_NUMBER: _ClassVar[int]
+    POOL_FIELD_NUMBER: _ClassVar[int]
+    POOL_HASH_FIELD_NUMBER: _ClassVar[int]
+    USER_HASH_FIELD_NUMBER: _ClassVar[int]
+    RESOURCES_STR_FIELD_NUMBER: _ClassVar[int]
+    METADATA_FIELD_NUMBER: _ClassVar[int]
+    NUM_JOBS_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    workspace: str
+    entrypoint: str
+    pool: str
+    pool_hash: str
+    user_hash: str
+    resources_str: str
+    metadata: str
+    num_jobs: int
+    def __init__(self, name: _Optional[str] = ..., workspace: _Optional[str] = ..., entrypoint: _Optional[str] = ..., pool: _Optional[str] = ..., pool_hash: _Optional[str] = ..., user_hash: _Optional[str] = ..., resources_str: _Optional[str] = ..., metadata: _Optional[str] = ..., num_jobs: _Optional[int] = ...) -> None: ...
+
+class SetJobInfoWithoutJobIdResponse(_message.Message):
+    __slots__ = ("job_ids",)
+    JOB_IDS_FIELD_NUMBER: _ClassVar[int]
+    job_ids: _containers.RepeatedScalarFieldContainer[int]
+    def __init__(self, job_ids: _Optional[_Iterable[int]] = ...) -> None: ...
