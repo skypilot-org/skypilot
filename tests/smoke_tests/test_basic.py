@@ -93,6 +93,7 @@ def test_minimal(generic_cloud: str):
             f'sky logs {name} 9 | grep "hi test"',
             f'sky exec {name} && exit 1 || true',
             f'sky exec -c {name} && exit 1 || true',
+            f's=$(sky cost-report --all) && echo $s && echo $s | grep {name} && echo $s | grep "Total Cost"',
         ],
         f'sky down -y {name}',
         smoke_tests_utils.get_timeout(generic_cloud),
