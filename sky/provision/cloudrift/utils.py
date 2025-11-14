@@ -1,11 +1,6 @@
 """Utilities for CloudRift cloud provider."""
 
-import os
-import uuid
-from typing import Any, Dict, List, Optional, Mapping, Union
 from sky import sky_logging
-from sky.provision import common
-from sky.utils import common_utils
 import os
 import re
 from typing import Any, Dict, List, Mapping, Optional, Union
@@ -13,9 +8,6 @@ from typing import Any, Dict, List, Mapping, Optional, Union
 import requests
 from packaging import version
 from requests import Response
-
-# from dstack._internal.core.errors import BackendError, BackendInvalidCredentialsError
-# from dstack._internal.utils.logging import get_logger
 
 
 logger = sky_logging.init_logger(__name__)
@@ -40,20 +32,22 @@ def get_credentials_path() -> Optional[str]:
     # Check if the user has set the environment variable
     if _CLOUDRIFT_CREDENTIALS_PATH in os.environ:
         return os.environ[_CLOUDRIFT_CREDENTIALS_PATH]
-    
+
     # Default path for CloudRift credentials
     default_path = os.path.expanduser('~/.config/cloudrift/config.yaml')
     if os.path.exists(default_path):
         return default_path
-    
+
     return None
 
 
 class RiftClient:
+
     def __init__(self, api_key: Optional[str] = None):
         self.server_address = CLOUDRIFT_SERVER_ADDRESS
         self.public_api_root = os.path.join(CLOUDRIFT_SERVER_ADDRESS, "api/v1")
-        self.internal_api_root = os.path.join(CLOUDRIFT_SERVER_ADDRESS, "internal")
+        self.internal_api_root = os.path.join(CLOUDRIFT_SERVER_ADDRESS,
+                                              "internal")
         self.api_key = api_key if api_key else os.getenv("CLOUDRIFT_API_KEY")
 
     def validate_api_key(self) -> bool:
@@ -66,14 +60,17 @@ class RiftClient:
             if isinstance(response, dict):
                 return response.get("email", False)
             return False
-        # except BackendInvalidCredentialsError:
-        #     return False
         except Exception as e:
-            #logger.error(f"Error validating API key: {e}")
             return False
 
     def get_instance_types(self) -> List[Dict]:
-        request_data = {"selector": {"ByServiceAndLocation": {"services": ["vm"]}}}
+        request_data = {
+            "selector": {
+                "ByServiceAndLocation": {
+                    "services": ["vm"]
+                }
+            }
+        }
         response_data = self._make_request("instance-types/list", request_data)
         if isinstance(response_data, dict):
             return response_data.get("instance_types", [])
@@ -119,7 +116,8 @@ class RiftClient:
             if "Ubuntu" not in recipe_name:
                 continue
 
-            url = recipe["details"].get("VirtualMachine", {}).get("image_url", None)
+            url = recipe["details"].get("VirtualMachine",
+                                        {}).get("image_url", None)
             version_match = re.search(r".* (\d+\.\d+)", recipe_name)
             if url and version_match and version_match.group(1):
                 ubuntu_version = version.parse(version_match.group(1))
@@ -131,20 +129,21 @@ class RiftClient:
 
         return None
 
-    def deploy_instance(
-        self, instance_type: str, cluster_name:str, name:str, region: str, ssh_keys: List[str], cmd: str
-    ) -> List[str]:
+    def deploy_instance(self, instance_type: str, cluster_name:str, name:str,
+                        region: str, ssh_keys: List[str],
+                        cmd: str) -> List[str]:
         image_url = self.get_vm_image_url()
         if not image_url:
             raise RuntimeError("No suitable VM image found.")
 
-        request_data = {
+        request_data: Dict[str, Any] = {
             "config": {
                 "VirtualMachine": {
-                    "cloudinit_url": "https://storage.googleapis.com/cloudrift-vm-disks/cloudinit/ubuntu-base.cloudinit", # TODO FIX
-                    #"cloudinit_commands": cmd, # TODO FIX
+                    "cloudinit_url": "https://storage.googleapis.com/cloudrift-vm-disks/cloudinit/ubuntu-base.cloudinit",
                     "image_url": image_url,
-                    "ssh_key": {"PublicKeys": ssh_keys},
+                    "ssh_key": {
+                        "PublicKeys": ssh_keys
+                    },
                 }
             },
             "cluster_name": cluster_name,
@@ -157,8 +156,6 @@ class RiftClient:
             },
             "with_public_ip": True,
         }
-        #logger.debug("Deploying instance with request data: %s", request_data)
-        print(request_data)
 
         response_data = self._make_request("instances/rent", request_data)
         if isinstance(response_data, dict):
@@ -167,12 +164,8 @@ class RiftClient:
 
     def list_instances(self, cluster_name) -> List[Dict]:
         statuses =  ["Initializing", "Active", "Deactivating"]
-        request_data = {
-            "selector": {
-                "ByClusterName": cluster_name
-            }
-        }
-        # TODO use instance_ids
+        request_data = {"selector": {"ByClusterName": cluster_name}}
+
         logger.debug("Listing instances with request data: %s", request_data)
         try:
             response_data = self._make_request("instances/list", request_data)
@@ -188,7 +181,6 @@ class RiftClient:
 
     def get_instance_by_id(self, instance_id: str) -> Optional[Dict]:
         request_data = {"selector": {"ById": [instance_id]}}
-        #logger.debug("Getting instance with request data: %s", request_data)
         response_data = self._make_request("instances/list", request_data)
         if isinstance(response_data, dict):
             instances = response_data.get("instances", [])
@@ -216,7 +208,6 @@ class RiftClient:
 
     def terminate_instance(self, instance_id: str) -> bool:
         request_data = {"selector": {"ById": [instance_id]}}
-        #logger.debug("Terminating instance with request data: %s", request_data)
         response_data = self._make_request("instances/terminate", request_data)
         if isinstance(response_data, dict):
             info = response_data.get("terminated", [])
@@ -230,19 +221,6 @@ class RiftClient:
         if isinstance(response_data, dict):
             return response_data.get("providers", [])
         return []
-
-
-    # def add_ssh_key(self, name: str, public_key: str) -> bool:
-
-    #     request_data = {
-    #         "name": name,
-    #         "public_key": public_key,
-    #     }
-    #     response_data = self._make_request("ssh-keys/add", request_data)
-    #     if isinstance(response_data, dict):
-    #         return response_data.get("ssh_key", {}).get("id", None) is not None
-
-    #     return False
 
     def _make_request(
         self,
@@ -274,19 +252,13 @@ class RiftClient:
                 response_json = response.json()
                 if isinstance(response_json, str):
                     return response_json
-                #if version is not None and version < response_json["version"]:
-                    # logger.warning(
-                    #     "The API version %s is lower than the server version %s. ",
-                    #     version,
-                    #     response_json["version"],
-                    # )
                 return response_json["data"]
             except requests.exceptions.JSONDecodeError:
                 return response
         except requests.HTTPError as e:
             if e.response is not None and e.response.status_code in (
-                requests.codes.forbidden,
-                requests.codes.unauthorized,
+                    requests.codes.forbidden,
+                    requests.codes.unauthorized,
             ):
                 raise RuntimeError(e.response.text)
             raise

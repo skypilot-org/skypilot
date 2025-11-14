@@ -26,16 +26,16 @@ class CloudRift(clouds.Cloud):
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
         clouds.CloudImplementationFeatures.MULTI_NODE:
-            ('Multi-node not supported yet, as the interconnection among nodes '),
+            ('Multi-node not supported yet, as the interconnection among nodes'),
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instances are not supported in {_REPR}.',
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             (f'Customizing disk tier is not supported yet on {_REPR}.'),
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
             (f'Custom network tier is not supported yet on {_REPR}.'),
-        clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
-            (f'Mounting object stores is not supported on {_REPR}. To read data '
-             f'from object stores on {_REPR}, use `mode: COPY` to copy the data '
-             'to local disk.'),
+        clouds.CloudImplementationFeatures.STORAGE_MOUNTING: (
+            f'Mounting object stores is not supported on {_REPR}. To read data '
+            f'from object stores on {_REPR}, use `mode: COPY` to copy the data '
+            'to local disk.'),
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
             ('High availability controllers are not supported on RunPod.'),
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
@@ -52,7 +52,7 @@ class CloudRift(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls, resources: 'resources_lib.Resources', region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         """The features not supported based on the resources provided.
 
@@ -78,6 +78,7 @@ class CloudRift(clouds.Cloud):
         use_spot: bool,
         region: Optional[str],
         zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None,
     ) -> List[clouds.Region]:
         assert zone is None, 'CloudRift does not support zones.'
         del zone  # unused
@@ -104,7 +105,7 @@ class CloudRift(clouds.Cloud):
         instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-    ) -> Iterator[None]:
+    ) -> Iterator[clouds.Zone]:
         del num_nodes  # unused
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
@@ -272,10 +273,6 @@ class CloudRift(clouds.Cloud):
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Verify that the user has valid credentials for
         CloudRift's compute service."""
-        
-        # installed, err_msg = cloudrift.check_exceptions_dependencies_installed()
-        # if not installed:
-        #     return False, err_msg
 
         try:
             pass

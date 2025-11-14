@@ -11,7 +11,8 @@ import sys
 from typing import Dict, List
 
 # Add the parent directory to the path so we can import sky modules
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
+sys.path.insert(
+    0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
 
 from sky.provision.cloudrift.utils import get_cloudrift_client
 
@@ -39,7 +40,7 @@ def extract_region_from_dc(dc_name: str, providers_data: List[Dict]) -> str:
             if datacenter.get('name') == dc_name:
                 # Use country code as region
                 return datacenter.get('country_code', '')
-    
+
     # Fall back to original extraction method
     parts = dc_name.split('-')
     if parts[-1].isdigit():
@@ -50,28 +51,22 @@ def extract_region_from_dc(dc_name: str, providers_data: List[Dict]) -> str:
 def create_catalog(output_dir: str) -> None:
     """Create the catalog by querying CloudRift API and generating a CSV file."""
     client = get_cloudrift_client()
-    
+
     # Get instance types
     instance_types = client.get_instance_types()
 
     # Get providers data to extract region information
     providers = client.get_providers()
-    
-    with open(os.path.join(output_dir, 'vms.csv'), mode='w', encoding='utf-8') as f:
+
+    with open(os.path.join(output_dir, 'vms.csv'), mode='w',
+              encoding='utf-8') as f:
         writer = csv.writer(f, delimiter=',', quotechar='"')
         writer.writerow([
-            'InstanceType',
-            'AcceleratorName',
-            'AcceleratorCount',
-            'vCPUs',
-            'MemoryGiB',
-            'GpuInfo',
-            'Region',
-            'SpotPrice',
-            'Price',
+            'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
+            'MemoryGiB', 'GpuInfo', 'Region', 'SpotPrice', 'Price',
             'AvailabilityZone'
         ])
-        
+
         for instance_type in instance_types:
             # Process each variant
             for variant in instance_type.get('variants', []):
@@ -81,21 +76,21 @@ def create_catalog(output_dir: str) -> None:
                 # Skip instances without GPUs
                 if gpu_count == 0:
                     continue
-                
+
                 # Extract instance properties
                 vcpus = variant.get('logical_cpu_count', 0)
                 memory_bytes = variant.get('dram', 0)
                 memory_gib = memory_bytes / BYTES_TO_GIB
-                
+
                 # Get price (convert from cents to dollars)
                 price = variant.get('cost_per_hour', 0) / 100.0
-                
+
                 # Extract accelerator name from brand_short
                 accelerator_name = instance_type.get('brand_short', '')
-                
+
                 # Get available datacenters
                 dcs = variant.get('nodes_per_dc', {})
-                
+
                 # If there are no datacenters, use empty values but still include the instance
                 if not dcs:
                     writer.writerow([
@@ -108,14 +103,14 @@ def create_catalog(output_dir: str) -> None:
                         '',  # Region
                         0.0,  # SpotPrice (CloudRift doesn't have spot instances yet)
                         price,
-                        ''   # AvailabilityZone
+                        ''  # AvailabilityZone
                     ])
                     continue
-                
+
                 # Write a row for each datacenter
                 for dc_name in dcs.keys():
                     region = extract_region_from_dc(dc_name, providers)
-                    
+
                     writer.writerow([
                         instance_name,
                         accelerator_name,

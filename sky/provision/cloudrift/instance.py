@@ -18,8 +18,6 @@ MAX_POLLS_FOR_UP_OR_STOP = MAX_POLLS * 8
 logger = sky_logging.init_logger(__name__)
 
 
-
-
 def _get_head_instance(
         instances: Dict[str, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     for instance_id, instance_meta in instances.items():
@@ -31,7 +29,8 @@ def _filter_instances(
         cluster_name_on_cloud: str,
         status_filters: Optional[List[str]]) -> Dict[str, Dict[str, Any]]:
     cloudrift_client = utils.get_cloudrift_client()
-    instances = cloudrift_client.list_instances(cluster_name=cluster_name_on_cloud)
+    instances = cloudrift_client.list_instances(
+        cluster_name=cluster_name_on_cloud)
 
     filtered_instances = {}
     for instance in instances:
@@ -49,20 +48,17 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     del cluster_name  # unused
     pending_status = ['Initializing']
     while True:
-        instances = _filter_instances(cluster_name_on_cloud,
-                                      pending_status)
+        instances = _filter_instances(cluster_name_on_cloud, pending_status)
         if not instances:
             break
-        instance_statuses = [
-            instance['status'] for instance in instances
-        ]
+        instance_statuses = [instance['status'] for instance in instances]
         logger.info(f'Waiting for {len(instances)} instances to be ready: '
                     f'{instance_statuses}')
         time.sleep(constants.POLL_INTERVAL)
 
     exist_instances = _filter_instances(cluster_name_on_cloud,
-                                         status_filters=pending_status +
-                                         ['Active'])
+                                        status_filters=pending_status +
+                                        ['Active'])
 
     head_instance = _get_head_instance(exist_instances)
     to_start_count = config.count - len(exist_instances)
@@ -85,7 +81,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             resumed_instance_ids=[],
             created_instance_ids=[],
         )
-    
+
     def launch_node(node_type: str) -> str:
         try:
             suffix = uuid.uuid4().hex[:8]
@@ -96,9 +92,9 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                     instance_type=config.node_config['InstanceType'],
                     region=region,
                     cluster_name=cluster_name_on_cloud,
-                    name = f'{cluster_name_on_cloud}-{suffix}-{node_type}',
+                    name=f'{cluster_name_on_cloud}-{suffix}-{node_type}',
                     ssh_keys=[ssh_public_key],
-                    cmd = ""
+                    cmd=""
                 )
                 instance_id = launch_data[0]
                 logger.info(f'Launched {node_type} node, '
@@ -115,6 +111,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'run_instances error: {e}')
             raise
+
         logger.info(f'Launched instance {instance_id}.')
         created_instance_ids.append(instance_id)
         if head_instance is None:
@@ -129,10 +126,13 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         instances = cloudrift_client.list_instances(cluster_name_on_cloud)
         print("list instances", instances)
         for instance in instances:
-            if instance['status'] == 'Active' and instance['id'] in instances_to_wait:
+            if instance['status'] == 'Active' and instance[
+                'id'] in instances_to_wait:
                 instances_to_wait.remove(instance['id'])
-            elif instance['status'] != 'Initializing' and instance['id'] in instances_to_wait:
-                raise RuntimeError(f'Failed to launch instance {instance["id"]}')
+            elif instance['status'] != 'Initializing' and instance[
+                'id'] in instances_to_wait:
+                raise RuntimeError(
+                    f'Failed to launch instance {instance["id"]}')
         logger.info('Waiting for instances to be ready: '
                     f'({len(instances)}/{config.count}).')
         if len(instances_to_wait) == 0:
@@ -167,8 +167,7 @@ def stop_instances(
     provider_config: Optional[Dict[str, Any]] = None,
     worker_only: bool = False,
 ) -> None:
-    raise NotImplementedError(
-        'stop_instances is not supported for CloudRift')
+    raise NotImplementedError('stop_instances is not supported for CloudRift')
 
 def terminate_instances(
     cluster_name_on_cloud: str,
@@ -179,8 +178,8 @@ def terminate_instances(
     del provider_config  # unused
 
     cloudrift_client = utils.get_cloudrift_client()
-    exist_instances = _filter_instances(cluster_name_on_cloud,
-                                             status_filters=['Active', "Initializing"])
+    exist_instances = _filter_instances(
+        cluster_name_on_cloud, status_filters=['Active', "Initializing"])
     for instance_id in exist_instances:
         logger.info(f'Terminating instance {instance_id}')
         try:
@@ -205,7 +204,8 @@ def get_cluster_info(
         A tuple of (head_ip, worker_ips).
     """
     del region  # unused
-    running_instances = _filter_instances(cluster_name_on_cloud, ['Active', "Initializing"])
+    running_instances = _filter_instances(cluster_name_on_cloud,
+                                          ['Active', "Initializing"])
     print("running_instances", running_instances)
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
