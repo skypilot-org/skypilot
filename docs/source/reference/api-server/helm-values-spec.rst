@@ -280,9 +280,11 @@ For example, if ``global.imageRegistry`` is set to ``registry.example.com/custom
   # becomes
   registry.example.com/custom/oauth2-proxy/oauth2-proxy:v7.9.0
 
-Default: ``null``
+.. note::
 
-This override will only be applied to images defined in the SkyPilot chart; bundled subcharts such as ``ingress-nginx`` keep their own registry configuration. Refer to the documentations of subcharts for how to change them.
+  This override will only be applied to images defined in the SkyPilot chart; bundled subcharts such as ``ingress-nginx`` keep their own registry configuration. Refer to the documentations of subcharts for how to change them.
+
+Default: ``null``
 
 .. code-block:: yaml
 
