@@ -60,6 +60,7 @@ def _filter_instances(
 # for terminated instances, if they have already been fully deleted.
 @common_utils.retry
 def query_instances(
+    cluster_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
