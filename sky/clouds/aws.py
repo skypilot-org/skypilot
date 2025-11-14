@@ -482,8 +482,8 @@ class AWS(clouds.Cloud):
             return DEFAULT_AMI_GB
         assert region is not None, (image_id, region)
         # first try the cache
-        workpace_profile = aws.get_workspace_profile()
-        kv_cache_key = f'aws:ami:size:{workpace_profile}:{region}:{image_id}'
+        workspace_profile = aws.get_workspace_profile()
+        kv_cache_key = f'aws:ami:size:{workspace_profile}:{region}:{image_id}'
         image_size = kv_cache.get_cache_entry(kv_cache_key)
         if image_size is not None:
             return float(image_size)
@@ -527,8 +527,16 @@ class AWS(clouds.Cloud):
         # While AMIs can be deleted, if the AMI is deleted before cache expiration,
         # the actual VM launch still fails.
         day_in_seconds = 60 * 60 * 24  # 1 day, 60s * 60m * 24h
-        kv_cache.add_or_update_cache_entry(kv_cache_key, str(image_size),
-                                           time.time() + day_in_seconds)
+        try:
+            kv_cache.add_or_update_cache_entry(kv_cache_key, str(image_size),
+                                               time.time() + day_in_seconds)
+        except Exception as e:  # pylint: disable=broad-except
+            # Catch the error and continue.
+            # Failure to cache the result is not critical to the
+            # success of this function.
+            logger.debug(
+                f'Failed to cache image size for {image_id} in region {region}: {e}'
+            )
         return image_size
 
     @classmethod
@@ -539,8 +547,8 @@ class AWS(clouds.Cloud):
         if image_id.startswith('skypilot:'):
             return DEFAULT_ROOT_DEVICE_NAME
         assert region is not None, (image_id, region)
-        workpace_profile = aws.get_workspace_profile()
-        kv_cache_key = f'aws:ami:root_device_name:{workpace_profile}:{region}:{image_id}'
+        workspace_profile = aws.get_workspace_profile()
+        kv_cache_key = f'aws:ami:root_device_name:{workspace_profile}:{region}:{image_id}'
         root_device_name = kv_cache.get_cache_entry(kv_cache_key)
         if root_device_name is not None:
             return root_device_name
@@ -589,8 +597,16 @@ class AWS(clouds.Cloud):
         # While AMIs can be deleted, if the AMI is deleted before cache expiration,
         # the actual VM launch still fails.
         day_in_seconds = 60 * 60 * 24  # 1 day, 60s * 60m * 24h
-        kv_cache.add_or_update_cache_entry(kv_cache_key, root_device_name,
-                                           time.time() + day_in_seconds)
+        try:
+            kv_cache.add_or_update_cache_entry(kv_cache_key, root_device_name,
+                                               time.time() + day_in_seconds)
+        except Exception as e:  # pylint: disable=broad-except
+            # Catch the error and continue.
+            # Failure to cache the result is not critical to the
+            # success of this function.
+            logger.debug(
+                f'Failed to cache image root device name for {image_id} in region {region}: {e}'
+            )
         return root_device_name
 
     @classmethod
