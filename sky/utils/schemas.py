@@ -583,12 +583,8 @@ def get_volume_mount_schema():
                 'additionalProperties': True,
                 'properties': {
                     'cloud': {
-                        'anyOf': [{
-                            'type': 'string',
-                            'case_insensitive_enum': list(constants.ALL_CLOUDS)
-                        }, {
-                            'type': 'null'
-                        }]
+                        'type': 'string',
+                        'case_insensitive_enum': list(constants.ALL_CLOUDS)
                     },
                     'region': {
                         'anyOf': [{

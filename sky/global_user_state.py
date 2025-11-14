@@ -2294,6 +2294,7 @@ def add_volume(
     active_workspace = skypilot_config.get_active_workspace()
     if is_ephemeral:
         last_attached_at = int(time.time())
+        status = status_lib.VolumeStatus.IN_USE
     else:
         last_attached_at = None
 

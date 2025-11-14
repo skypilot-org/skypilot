@@ -131,7 +131,9 @@ class VolumeMount:
         volume_config = models.VolumeConfig(
             name='',
             type=config.get('type', ''),
-            cloud=None,
+            # Default to kubernetes cloud here for backward compatibility,
+            # but this will be reset to the correct cloud during provisioning.
+            cloud='kubernetes',
             region=None,
             zone=None,
             name_on_cloud='',

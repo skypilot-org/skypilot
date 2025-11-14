@@ -183,7 +183,6 @@ class VolumeTable(abc.ABC):
             row.get('status', ''),
             last_attached_at_str,
             usedby,
-            row.get('is_ephemeral', False),
         ]
 
     def _create_table(self, show_all: bool = False) -> prettytable.PrettyTable:
@@ -234,6 +233,7 @@ class PVCVolumeTable(VolumeTable):
         """Add rows to the PVC volume table."""
         for row in volumes:
             table_row = self._get_row_base_columns(row, show_all)
+            table_row.append(row.get('is_ephemeral', False))
             if show_all:
                 table_row.append(row.get('name_on_cloud', ''))
                 table_row.append(
