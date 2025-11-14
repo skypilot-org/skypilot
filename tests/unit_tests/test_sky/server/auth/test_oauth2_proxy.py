@@ -14,6 +14,81 @@ from sky.server.auth.oauth2_proxy import OAuth2ProxyMiddleware
 
 
 class TestOAuth2ProxyMiddleware:
+
+    @pytest.mark.asyncio
+    async def test_http_request_calls_underlying_middleware(self):
+        app = mock.AsyncMock()
+        middleware = OAuth2ProxyMiddleware(app=app)
+        dispatch_mock = mock.AsyncMock(return_value=fastapi.Response(
+            status_code=204))
+        middleware.middleware.dispatch = dispatch_mock
+        middleware.middleware.dispatch_func = dispatch_mock
+
+        scope = {
+            'type': 'http',
+            'method': 'GET',
+            'path': '/',
+            'headers': [],
+            'state': {},
+        }
+
+        async def receive():
+            return {
+                'type': 'http.request',
+                'body': b'',
+                'more_body': False,
+            }
+
+        async def send(message):
+            del message
+
+        await middleware(scope, receive, send)
+
+        middleware.middleware.dispatch.assert_awaited_once()
+        app.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_websocket_request_accepts_and_calls_app(self):
+        app = mock.AsyncMock()
+        middleware = OAuth2ProxyMiddleware(app=app)
+
+        async def fake_dispatch(request, call_next):
+            response = await call_next(request)
+            return response
+
+        dispatch_mock = mock.AsyncMock(side_effect=fake_dispatch)
+        middleware.middleware.dispatch = dispatch_mock
+        middleware.middleware.dispatch_func = dispatch_mock
+
+        scope = {
+            'type': 'websocket',
+            'scheme': 'ws',
+            'path': '/ws',
+            'root_path': '',
+            'headers': [(b'host', b'example.com')],
+            'state': {},
+            'client': ('127.0.0.1', 1234),
+            'http_version': '1.1',
+            'query_string': b'',
+        }
+
+        async def receive():
+            return {'type': 'websocket.disconnect'}
+
+        sent_messages = []
+
+        async def send(message):
+            sent_messages.append(message)
+
+        await middleware(scope, receive, send)
+
+        middleware.middleware.dispatch.assert_awaited_once()
+        app.assert_awaited_once_with(scope, receive, send)
+        assert all(
+            msg.get('type') != 'websocket.close' for msg in sent_messages)
+
+
+class TestOriginalOAuth2ProxyMiddleware:
     """Test cases for OAuth2 proxy middleware."""
 
     @pytest.fixture
@@ -25,7 +100,7 @@ class TestOAuth2ProxyMiddleware:
                 'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED': 'true',
                 'SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL': 'http://oauth2-proxy:4180'
             }):
-            return OAuth2ProxyMiddleware(app=mock.Mock())
+            return OAuth2ProxyMiddleware(app=mock.Mock()).middleware
 
     @pytest.fixture
     def middleware_disabled(self):
@@ -33,7 +108,7 @@ class TestOAuth2ProxyMiddleware:
         with mock.patch.dict(os.environ,
                              {'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED': 'false'},
                              clear=True):
-            return OAuth2ProxyMiddleware(app=mock.Mock())
+            return OAuth2ProxyMiddleware(app=mock.Mock()).middleware
 
     @pytest.fixture
     def mock_request(self):
@@ -376,7 +451,7 @@ class TestOAuth2ProxyMiddleware:
                     in response.body.decode())
 
 
-class TestOAuth2ProxyMiddlewareLoopback:
+class TestOriginalOAuth2ProxyMiddlewareLoopback:
     """Test cases for OAuth2 proxy middleware with loopback detection."""
 
     @pytest.fixture
@@ -388,7 +463,7 @@ class TestOAuth2ProxyMiddlewareLoopback:
                 'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED': 'true',
                 'SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL': 'http://oauth2-proxy:4180'
             }):
-            return OAuth2ProxyMiddleware(app=mock.Mock())
+            return OAuth2ProxyMiddleware(app=mock.Mock()).middleware
 
     @pytest.fixture
     def mock_call_next(self):

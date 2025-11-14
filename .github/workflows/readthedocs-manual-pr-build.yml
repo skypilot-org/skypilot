@@ -1,0 +1,267 @@
+name: Manual ReadTheDocs Build on PR
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request:
+    types: [closed]
+
+# No global env variables needed - using secrets
+
+jobs:
+  trigger-rtd-build:
+    # Only run if:
+    # 1. The comment is on a pull request (not an issue)
+    # 2. The comment contains /build-docs
+    if: |
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '/build-docs')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check authorization
+        id: check-auth
+        env:
+          AUTHORIZED_USERS: ${{ vars.AUTHORIZED_RTD_BUILDERS }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Get authorized users from repository variable (comma-separated list)
+            const authorizedUsersStr = process.env.AUTHORIZED_USERS || '';
+            const authorizedUsers = authorizedUsersStr
+              .split(',')
+              .map(u => u.trim())
+              .filter(u => u.length > 0);
+
+            if (authorizedUsers.length === 0) {
+              core.setFailed('AUTHORIZED_RTD_BUILDERS variable is not set or empty. Please configure it in repository settings.');
+              return false;
+            }
+
+            const commenter = context.payload.comment.user.login;
+            const isAuthorized = authorizedUsers.includes(commenter);
+
+            if (!isAuthorized) {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `❌ @${commenter} is not authorized to trigger ReadTheDocs builds. Please contact a maintainer.`
+              });
+              core.setFailed(`User ${commenter} is not authorized`);
+              return false;
+            }
+
+            console.log(`✅ User ${commenter} is authorized to trigger builds`);
+            return true;
+          result-encoding: string
+
+      - name: Get PR branch
+        id: get-branch
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            return pr.data.head.ref;
+          result-encoding: string
+
+      - name: Trigger ReadTheDocs build
+        env:
+          READTHEDOCS_TOKEN: ${{ secrets.READTHEDOCS_TOKEN }}
+          READTHEDOCS_PROJECT: ${{ secrets.READTHEDOCS_PROJECT }}
+          BRANCH_NAME: ${{ steps.get-branch.outputs.result }}
+        run: |
+          # Trigger a build for the PR branch on ReadTheDocs
+          # The branch needs to exist as a version on ReadTheDocs
+
+          # URL-encode the branch name (replace / with %2F, etc.)
+          VERSION_SLUG=$(echo -n "${BRANCH_NAME}" | jq -sRr @uri)
+
+          echo "Triggering ReadTheDocs build for project: ${READTHEDOCS_PROJECT}, branch: ${BRANCH_NAME}"
+
+          # Activate and configure the version (works for both existing and inactive versions)
+          echo "Activating and configuring version for branch: ${BRANCH_NAME}"
+          CONFIG_RESPONSE=$(curl -s -w "\n%{http_code}" -X PATCH \
+            "https://readthedocs.com/api/v3/projects/${READTHEDOCS_PROJECT}/versions/${VERSION_SLUG}/" \
+            -H "Authorization: Token ${READTHEDOCS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "active": true,
+              "hidden": true,
+              "privacy_level": "public"
+            }')
+
+          CONFIG_HTTP_CODE=$(echo "$CONFIG_RESPONSE" | tail -n1)
+          CONFIG_BODY=$(echo "$CONFIG_RESPONSE" | head -n-1)
+
+          if [ "$CONFIG_HTTP_CODE" -eq 404 ]; then
+            echo "⚠️  Branch '${BRANCH_NAME}' not found in ReadTheDocs."
+            echo "Triggering version sync from GitHub..."
+
+            # Trigger ReadTheDocs to sync versions from GitHub
+            SYNC_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+              "https://readthedocs.com/api/v3/projects/${READTHEDOCS_PROJECT}/sync-versions/" \
+              -H "Authorization: Token ${READTHEDOCS_TOKEN}" \
+              -H "Content-Type: application/json")
+
+            SYNC_HTTP_CODE=$(echo "$SYNC_RESPONSE" | tail -n1)
+            SYNC_BODY=$(echo "$SYNC_RESPONSE" | head -n-1)
+
+            if [ "$SYNC_HTTP_CODE" -eq 202 ] || [ "$SYNC_HTTP_CODE" -eq 200 ]; then
+              echo "✅ Version sync triggered successfully"
+              echo "Waiting 10 seconds for sync to complete..."
+              sleep 10
+
+              # Retry activating the version
+              echo "Retrying activation..."
+              CONFIG_RESPONSE=$(curl -s -w "\n%{http_code}" -X PATCH \
+                "https://readthedocs.com/api/v3/projects/${READTHEDOCS_PROJECT}/versions/${VERSION_SLUG}/" \
+                -H "Authorization: Token ${READTHEDOCS_TOKEN}" \
+                -H "Content-Type: application/json" \
+                -d '{
+                  "active": true,
+                  "hidden": true,
+                  "privacy_level": "public"
+                }')
+
+              CONFIG_HTTP_CODE=$(echo "$CONFIG_RESPONSE" | tail -n1)
+              CONFIG_BODY=$(echo "$CONFIG_RESPONSE" | head -n-1)
+
+              if [ "$CONFIG_HTTP_CODE" -eq 404 ]; then
+                echo "❌ Branch still not found after sync."
+                echo "The branch might not exist in GitHub, or the sync is taking longer than expected."
+                echo "Please verify the branch exists and try /build-docs again in a minute."
+                echo ""
+                echo "Response: $CONFIG_BODY"
+                exit 1
+              elif [ "$CONFIG_HTTP_CODE" -ne 200 ] && [ "$CONFIG_HTTP_CODE" -ne 204 ]; then
+                echo "❌ Failed to activate version after sync. HTTP status: $CONFIG_HTTP_CODE"
+                echo "$CONFIG_BODY"
+                exit 1
+              fi
+
+              echo "✅ Version activated and configured successfully after sync"
+            else
+              echo "❌ Failed to trigger version sync. HTTP status: $SYNC_HTTP_CODE"
+              echo "$SYNC_BODY"
+              exit 1
+            fi
+          elif [ "$CONFIG_HTTP_CODE" -ne 200 ] && [ "$CONFIG_HTTP_CODE" -ne 204 ]; then
+            echo "❌ Failed to activate version. HTTP status: $CONFIG_HTTP_CODE"
+            echo "$CONFIG_BODY"
+            exit 1
+          else
+            echo "✅ Version activated and configured successfully"
+          fi
+
+          # Trigger the build
+          echo "Triggering build..."
+          BUILD_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "https://readthedocs.com/api/v3/projects/${READTHEDOCS_PROJECT}/versions/${VERSION_SLUG}/builds/" \
+            -H "Authorization: Token ${READTHEDOCS_TOKEN}" \
+            -H "Content-Type: application/json")
+
+          BUILD_HTTP_CODE=$(echo "$BUILD_RESPONSE" | tail -n1)
+          BUILD_BODY=$(echo "$BUILD_RESPONSE" | head -n-1)
+
+          if [ "$BUILD_HTTP_CODE" -eq 202 ] || [ "$BUILD_HTTP_CODE" -eq 201 ]; then
+            echo "✅ ReadTheDocs build triggered successfully!"
+            echo "$BUILD_BODY"
+          else
+            echo "❌ Failed to trigger ReadTheDocs build. HTTP status: $BUILD_HTTP_CODE"
+            echo "$BUILD_BODY"
+            exit 1
+          fi
+
+      - name: Add label and comment on PR
+        if: success()
+        env:
+          READTHEDOCS_PROJECT: ${{ secrets.READTHEDOCS_PROJECT }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branch = '${{ steps.get-branch.outputs.result }}';
+            const projectSlug = process.env.READTHEDOCS_PROJECT;
+
+            // URL-encode the branch name for the documentation URL
+            const encodedBranch = encodeURIComponent(branch);
+
+            // Add label to track that a preview was built
+            try {
+              await github.rest.issues.addLabels({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                labels: ['rtd-preview']
+              });
+            } catch (error) {
+              console.log('Label may not exist or could not be added:', error.message);
+            }
+
+            // Comment on PR
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `✅ ReadTheDocs build triggered for branch \`${branch}\`\n\nThe documentation will be available at: https://docs.skypilot.co/en/${encodedBranch}/`
+            })
+
+      - name: Comment on failure
+        if: failure()
+        env:
+          BRANCH_NAME: ${{ steps.get-branch.outputs.result || 'unknown' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branch = process.env.BRANCH_NAME;
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `❌ Failed to trigger ReadTheDocs build for branch \`${branch}\`. Please check the [workflow logs](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) for details.`
+            })
+
+  cleanup-rtd-preview:
+    # Only run when a pull request is closed AND has the rtd-preview label
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.action == 'closed' &&
+      contains(github.event.pull_request.labels.*.name, 'rtd-preview')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deactivate ReadTheDocs preview
+        env:
+          READTHEDOCS_TOKEN: ${{ secrets.READTHEDOCS_TOKEN }}
+          READTHEDOCS_PROJECT: ${{ secrets.READTHEDOCS_PROJECT }}
+          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
+        run: |
+          # URL-encode the branch name (replace / with %2F, etc.)
+          VERSION_SLUG=$(echo -n "${BRANCH_NAME}" | jq -sRr @uri)
+
+          echo "Deactivating ReadTheDocs preview for branch: ${BRANCH_NAME}"
+
+          # Deactivate the version (set active to false)
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X PATCH \
+            "https://readthedocs.com/api/v3/projects/${READTHEDOCS_PROJECT}/versions/${VERSION_SLUG}/" \
+            -H "Authorization: Token ${READTHEDOCS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "active": false
+            }')
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n-1)
+
+          if [ "$HTTP_CODE" -eq 200 ] || [ "$HTTP_CODE" -eq 204 ]; then
+            echo "✅ ReadTheDocs preview deactivated successfully for branch: ${BRANCH_NAME}"
+            echo "$BODY"
+          elif [ "$HTTP_CODE" -eq 404 ]; then
+            echo "ℹ️ No ReadTheDocs preview found for branch: ${BRANCH_NAME} (this is normal if no preview was created)"
+          else
+            echo "⚠️ Failed to deactivate ReadTheDocs preview. HTTP status: $HTTP_CODE"
+            echo "$BODY"
+            # Don't fail the workflow - this is just cleanup
+          fi

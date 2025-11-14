@@ -33,6 +33,10 @@ SKYPILOT_CONFIG_DB_NAME = 'sky_config_db'
 SKYPILOT_CONFIG_VERSION = '001'
 SKYPILOT_CONFIG_LOCK_PATH = f'~/.sky/locks/.{SKYPILOT_CONFIG_DB_NAME}.lock'
 
+KV_CACHE_DB_NAME = 'kv_cache_db'
+KV_CACHE_VERSION = '001'
+KV_CACHE_LOCK_PATH = f'~/.sky/locks/.{KV_CACHE_DB_NAME}.lock'
+
 
 @contextlib.contextmanager
 def db_lock(db_name: str):

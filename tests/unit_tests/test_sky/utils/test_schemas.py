@@ -442,5 +442,190 @@ class TestKubernetesSchema(unittest.TestCase):
         jsonschema.validate(instance=valid_config, schema=self.k8s_schema)
 
 
+class TestSSHSchema(unittest.TestCase):
+    """Tests for the SSH schema in schemas.py."""
+
+    def setUp(self):
+        self.config_schema = schemas.get_config_schema()
+        self.ssh_schema = self.config_schema['properties']['ssh']
+
+    def test_ssh_context_configs_with_pod_config(self):
+        """Test that SSH context_configs allows pod_config."""
+        valid_config = {
+            'context_configs': {
+                'my-cluster': {
+                    'pod_config': {
+                        'metadata': {
+                            'labels': {
+                                'team': 'ml'
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        jsonschema.validate(instance=valid_config, schema=self.ssh_schema)
+
+    def test_ssh_context_configs_with_provision_timeout(self):
+        """Test that SSH context_configs allows provision_timeout."""
+        valid_config = {
+            'context_configs': {
+                'my-cluster': {
+                    'provision_timeout': 3600
+                }
+            }
+        }
+        jsonschema.validate(instance=valid_config, schema=self.ssh_schema)
+
+    def test_ssh_context_configs_with_multiple_fields(self):
+        """Test that SSH context_configs allows multiple fields."""
+        valid_config = {
+            'context_configs': {
+                'my-cluster': {
+                    'pod_config': {
+                        'metadata': {
+                            'labels': {
+                                'env': 'prod'
+                            }
+                        }
+                    },
+                    'provision_timeout': 1800
+                }
+            }
+        }
+        jsonschema.validate(instance=valid_config, schema=self.ssh_schema)
+
+    def test_ssh_context_configs_with_multiple_contexts(self):
+        """Test that SSH context_configs allows multiple contexts."""
+        valid_config = {
+            'context_configs': {
+                'cluster-1': {
+                    'pod_config': {
+                        'metadata': {
+                            'labels': {
+                                'team': 'ml'
+                            }
+                        }
+                    }
+                },
+                'cluster-2': {
+                    'provision_timeout': 3600
+                }
+            }
+        }
+        jsonschema.validate(instance=valid_config, schema=self.ssh_schema)
+
+    def test_ssh_context_configs_rejects_invalid_fields(self):
+        """Test that SSH context_configs rejects invalid fields."""
+        # Context configs should not allow kubernetes-specific fields
+        # like autoscaler, kueue, etc.
+        invalid_configs = [
+            {
+                'context_configs': {
+                    'my-cluster': {
+                        'autoscaler': 'gke'
+                    }
+                }
+            },
+            {
+                'context_configs': {
+                    'my-cluster': {
+                        'kueue': {
+                            'local_queue_name': 'my-queue'
+                        }
+                    }
+                }
+            },
+            {
+                'context_configs': {
+                    'my-cluster': {
+                        'dws': {
+                            'priorityClassName': 'high'
+                        }
+                    }
+                }
+            },
+        ]
+
+        for config in invalid_configs:
+            with self.assertRaises(
+                    jsonschema.exceptions.ValidationError,
+                    msg=f"Invalid SSH context config {config} should be rejected"
+            ):
+                jsonschema.validate(instance=config, schema=self.ssh_schema)
+
+    def test_ssh_top_level_fields(self):
+        """Test that SSH schema allows top-level pod_config and provision_timeout."""
+        valid_configs = [
+            {
+                'pod_config': {
+                    'spec': {
+                        'nodeSelector': {
+                            'gpu': 'true'
+                        }
+                    }
+                }
+            },
+            {
+                'provision_timeout': 1800
+            },
+            {
+                'pod_config': {
+                    'metadata': {
+                        'labels': {
+                            'env': 'test'
+                        }
+                    }
+                },
+                'provision_timeout': 3600
+            },
+        ]
+
+        for config in valid_configs:
+            try:
+                jsonschema.validate(instance=config, schema=self.ssh_schema)
+            except jsonschema.exceptions.ValidationError as e:
+                self.fail(f"Valid SSH config {config} was rejected: {e}")
+
+    def test_ssh_provision_timeout_must_be_integer(self):
+        """Test that SSH provision_timeout must be an integer."""
+        invalid_configs = [
+            {
+                'provision_timeout': '3600'
+            },  # String
+            {
+                'provision_timeout': 3600.5
+            },  # Float
+            {
+                'provision_timeout': None
+            },  # None
+        ]
+
+        for config in invalid_configs:
+            with self.assertRaises(
+                    jsonschema.exceptions.ValidationError,
+                    msg=f"Invalid provision_timeout config {config} should be "
+                    f"rejected"):
+                jsonschema.validate(instance=config, schema=self.ssh_schema)
+
+    def test_get_default_remote_identity_for_ssh(self):
+        """Test that get_default_remote_identity returns correct value for SSH."""
+        # SSH should use SERVICE_ACCOUNT as default (like kubernetes)
+        default_identity = schemas.get_default_remote_identity('ssh')
+        self.assertEqual(default_identity, 'SERVICE_ACCOUNT')
+
+    def test_get_default_remote_identity_for_kubernetes(self):
+        """Test that get_default_remote_identity returns correct value for kubernetes."""
+        default_identity = schemas.get_default_remote_identity('kubernetes')
+        self.assertEqual(default_identity, 'SERVICE_ACCOUNT')
+
+    def test_get_default_remote_identity_for_other_clouds(self):
+        """Test that get_default_remote_identity returns correct value for other clouds."""
+        # Other clouds should use LOCAL_CREDENTIALS as default
+        for cloud in ['aws', 'gcp', 'azure']:
+            default_identity = schemas.get_default_remote_identity(cloud)
+            self.assertEqual(default_identity, 'LOCAL_CREDENTIALS')
+
+
 if __name__ == "__main__":
     unittest.main()

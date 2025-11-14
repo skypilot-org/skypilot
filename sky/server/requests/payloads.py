@@ -469,6 +469,7 @@ class VolumeApplyBody(RequestBody):
     size: Optional[str] = None
     config: Optional[Dict[str, Any]] = None
     labels: Optional[Dict[str, str]] = None
+    use_existing: Optional[bool] = None
 
 
 class VolumeDeleteBody(RequestBody):
@@ -488,8 +489,8 @@ class VolumeValidateBody(RequestBody):
     infra: Optional[str] = None
     size: Optional[str] = None
     labels: Optional[Dict[str, str]] = None
-    resource_name: Optional[str] = None
     config: Optional[Dict[str, Any]] = None
+    use_existing: Optional[bool] = None
 
 
 class EndpointsBody(RequestBody):

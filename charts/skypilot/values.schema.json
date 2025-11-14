@@ -71,6 +71,21 @@
                 "image": {
                     "type": "string"
                 },
+                "imagePullPolicy": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "imagePullSecrets": {
+                    "type": [
+                        "array",
+                        "null"
+                    ],
+                    "items": {
+                        "type": "object"
+                    }
+                },
                 "initialBasicAuthCredentials": {
                     "type": "string"
                 },

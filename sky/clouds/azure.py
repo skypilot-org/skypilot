@@ -87,7 +87,9 @@ class Azure(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources.Resources'
+        cls,
+        resources: 'resources.Resources',
+        region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         features = {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
@@ -264,10 +266,15 @@ class Azure(clouds.Cloud):
         return _DEFAULT_GPU_IMAGE_ID
 
     @classmethod
-    def regions_with_offering(cls, instance_type: str,
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[clouds.Region]:
+    def regions_with_offering(
+        cls,
+        instance_type: str,
+        accelerators: Optional[Dict[str, int]],
+        use_spot: bool,
+        region: Optional[str],
+        zone: Optional[str],
+        resources: Optional['resources.Resources'] = None,
+    ) -> List[clouds.Region]:
         del accelerators  # unused
         assert zone is None, 'Azure does not support zones'
         regions = catalog.get_region_zones_for_instance_type(

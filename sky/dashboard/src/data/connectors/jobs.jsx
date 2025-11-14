@@ -156,11 +156,14 @@ export async function getManagedJobs(options = {}) {
         cloud = job.cloud || '';
         cluster_resources = job.cluster_resources;
         region = job.region || '';
+        if (region === '-') {
+          region = '';
+        }
 
         if (cloud) {
           infra = cloud;
           if (region) {
-            infra += `/${region}`;
+            infra += ` (${region})`;
           }
         }
 

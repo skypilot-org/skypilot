@@ -396,6 +396,7 @@ def launch(
             for task_ in dag_copy.tasks:
                 if job_rank is not None:
                     task_.update_envs({'SKYPILOT_JOB_RANK': str(job_rank)})
+                if num_jobs is not None:
                     task_.update_envs({'SKYPILOT_NUM_JOBS': str(num_jobs)})
 
             dag_utils.dump_chain_dag_to_yaml(dag_copy, f.name)

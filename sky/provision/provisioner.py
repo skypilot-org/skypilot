@@ -485,12 +485,13 @@ def _post_provision_setup(
         # ready by the provisioner, and we use kubectl instead of SSH to run the
         # commands and rsync on the pods. SSH will still be ready after a while
         # for the users to SSH into the pod.
-        if cloud_name.lower() != 'kubernetes':
+        is_k8s_cloud = cloud_name.lower() in ['kubernetes', 'ssh']
+        if not is_k8s_cloud:
             logger.debug(
                 f'\nWaiting for SSH to be available for {cluster_name!r} ...')
             wait_for_ssh(cluster_info, ssh_credentials)
             logger.debug(f'SSH Connection ready for {cluster_name!r}')
-        vm_str = 'Instance' if cloud_name.lower() != 'kubernetes' else 'Pod'
+        vm_str = 'Instance' if not is_k8s_cloud else 'Pod'
         plural = '' if len(cluster_info.instances) == 1 else 's'
         verb = 'is' if len(cluster_info.instances) == 1 else 'are'
         indent_str = (ux_utils.INDENT_SYMBOL

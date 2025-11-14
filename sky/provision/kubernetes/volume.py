@@ -9,6 +9,7 @@ from sky.provision import constants
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import resources_utils
 from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -68,7 +69,7 @@ def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
         except kubernetes.api_exception() as e:
             raise config_lib.KubernetesError(
                 f'Check storage class {storage_class_name} error: {e}')
-    create_persistent_volume_claim(namespace, context, pvc_spec)
+    create_persistent_volume_claim(namespace, context, pvc_spec, config)
     return config
 
 
@@ -231,21 +232,84 @@ def map_all_volumes_usedby(
                                                   {}).get(pvc_name, []))
 
 
-def create_persistent_volume_claim(namespace: str, context: Optional[str],
-                                   pvc_spec: Dict[str, Any]) -> None:
+def _populate_config_from_pvc(config: models.VolumeConfig,
+                              pvc_obj: Any) -> None:
+    """Populate missing fields in config from a PVC object.
+
+    Args:
+        config: VolumeConfig to populate
+        pvc_obj: V1PersistentVolumeClaim object from kubernetes client
+    """
+    if pvc_obj is None:
+        return
+    pvc_name = pvc_obj.metadata.name
+
+    # Populate storageClassName if not set
+    if config.config.get('storage_class_name') is None:
+        pvc_storage_class = getattr(pvc_obj.spec, 'storage_class_name', None)
+        if pvc_storage_class:
+            config.config['storage_class_name'] = pvc_storage_class
+
+    # Populate size if not set (prefer bound capacity, fallback to requested)
+    pvc_size = None
+    size_quantity = None
+    # Try status.capacity (dict) - actual bound size
+    capacity = getattr(getattr(pvc_obj, 'status', None), 'capacity', None)
+    if isinstance(capacity, dict) and 'storage' in capacity:
+        size_quantity = capacity['storage']
+    # Fallback to spec.resources.requests (dict) - requested size
+    if size_quantity is None:
+        requests = getattr(getattr(pvc_obj.spec, 'resources', None), 'requests',
+                           None)
+        if isinstance(requests, dict):
+            size_quantity = requests.get('storage')
+    # Parse and normalize the size if found
+    if size_quantity:
+        try:
+            # Normalize to GB string (e.g., '20')
+            pvc_size = resources_utils.parse_memory_resource(
+                size_quantity, 'size', allow_rounding=True)
+        except ValueError as e:
+            # Just log the error since it is not critical.
+            logger.warning(f'Failed to parse PVC size {size_quantity!r} '
+                           f'for PVC {pvc_name}: {e}')
+    if pvc_size is not None:
+        if config.size is not None and config.size != pvc_size:
+            logger.warning(f'PVC {pvc_name} has size {pvc_size} but config '
+                           f'size is {config.size}, overriding the config size'
+                           f' with the PVC size.')
+        config.size = pvc_size
+
+
+def create_persistent_volume_claim(
+    namespace: str,
+    context: Optional[str],
+    pvc_spec: Dict[str, Any],
+    config: Optional[models.VolumeConfig] = None,
+) -> None:
     """Creates a persistent volume claim for SkyServe controller."""
     pvc_name = pvc_spec['metadata']['name']
     try:
-        kubernetes.core_api(context).read_namespaced_persistent_volume_claim(
-            name=pvc_name, namespace=namespace)
+        pvc = kubernetes.core_api(
+            context).read_namespaced_persistent_volume_claim(
+                name=pvc_name, namespace=namespace)
+        if config is not None:
+            _populate_config_from_pvc(config, pvc)
         logger.debug(f'PVC {pvc_name} already exists')
         return
     except kubernetes.api_exception() as e:
         if e.status != 404:  # Not found
             raise
-    kubernetes.core_api(context).create_namespaced_persistent_volume_claim(
-        namespace=namespace, body=pvc_spec)
+    use_existing = config is not None and config.config.get('use_existing')
+    if use_existing:
+        raise ValueError(
+            f'PVC {pvc_name} does not exist while use_existing is True.')
+    pvc = kubernetes.core_api(
+        context).create_namespaced_persistent_volume_claim(namespace=namespace,
+                                                           body=pvc_spec)
     logger.info(f'Created PVC {pvc_name} in namespace {namespace}')
+    if config is not None:
+        _populate_config_from_pvc(config, pvc)
 
 
 def _get_pvc_spec(namespace: str,
@@ -254,8 +318,8 @@ def _get_pvc_spec(namespace: str,
     access_mode = config.config.get('access_mode')
     size = config.size
     # The previous code assumes that the access_mode and size are always set.
-    assert access_mode is not None
-    assert size is not None
+    assert access_mode is not None, f'access_mode is None for volume ' \
+                                    f'{config.name_on_cloud}'
     pvc_spec: Dict[str, Any] = {
         'metadata': {
             'name': config.name_on_cloud,
@@ -267,13 +331,10 @@ def _get_pvc_spec(namespace: str,
         },
         'spec': {
             'accessModes': [access_mode],
-            'resources': {
-                'requests': {
-                    'storage': f'{size}Gi'
-                }
-            },
         }
     }
+    if size is not None:
+        pvc_spec['spec']['resources'] = {'requests': {'storage': f'{size}Gi'}}
     if config.labels:
         pvc_spec['metadata']['labels'].update(config.labels)
     storage_class = config.config.get('storage_class_name')

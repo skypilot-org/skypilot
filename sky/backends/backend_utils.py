@@ -142,7 +142,7 @@ _CLUSTER_STATUS_CACHE_DURATION_SECONDS = 2
 
 CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS = 10
 WORKSPACE_LOCK_TIMEOUT_SECONDS = 10
-CLUSTER_TUNNEL_LOCK_TIMEOUT_SECONDS = 10
+CLUSTER_TUNNEL_LOCK_TIMEOUT_SECONDS = 10.0
 
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
@@ -1951,7 +1951,8 @@ def tag_filter_for_cluster(cluster_name: str) -> Dict[str, str]:
 
 @context_utils.cancellation_guard
 def _query_cluster_status_via_cloud_api(
-    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
+    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+    retry_if_missing: bool,
 ) -> List[Tuple[status_lib.ClusterStatus, Optional[str]]]:
     """Returns the status of the cluster as a list of tuples corresponding
     to the node status and an optional reason string for said status.
@@ -1978,8 +1979,11 @@ def _query_cluster_status_via_cloud_api(
         cloud_name = repr(handle.launched_resources.cloud)
         try:
             node_status_dict = provision_lib.query_instances(
-                cloud_name, cluster_name, cluster_name_on_cloud,
-                provider_config)
+                cloud_name,
+                cluster_name,
+                cluster_name_on_cloud,
+                provider_config,
+                retry_if_missing=retry_if_missing)
             logger.debug(f'Querying {cloud_name} cluster '
                          f'{cluster_name_in_hint} '
                          f'status:\n{pprint.pformat(node_status_dict)}')
@@ -2160,6 +2164,7 @@ def check_can_clone_disk_and_override_task(
 def _update_cluster_status(
         cluster_name: str,
         record: Dict[str, Any],
+        retry_if_missing: bool,
         include_user_info: bool = True,
         summary_response: bool = False) -> Optional[Dict[str, Any]]:
     """Update the cluster status.
@@ -2206,7 +2211,8 @@ def _update_cluster_status(
         return record
     cluster_name = handle.cluster_name
 
-    node_statuses = _query_cluster_status_via_cloud_api(handle)
+    node_statuses = _query_cluster_status_via_cloud_api(
+        handle, retry_if_missing=retry_if_missing)
 
     all_nodes_up = (all(status[0] == status_lib.ClusterStatus.UP
                         for status in node_statuses) and
@@ -2254,6 +2260,11 @@ def _update_cluster_status(
             total_nodes = handle.launched_nodes * handle.num_ips_per_node
 
             cloud_name = repr(handle.launched_resources.cloud).lower()
+            # Initialize variables in case all retries fail
+            ready_head = 0
+            ready_workers = 0
+            output = ''
+            stderr = ''
             for i in range(5):
                 try:
                     ready_head, ready_workers, output, stderr = (
@@ -2381,7 +2392,8 @@ def _update_cluster_status(
             # and check again. This is a best-effort leak prevention check.
             # See https://github.com/skypilot-org/skypilot/issues/4431.
             time.sleep(_LAUNCH_DOUBLE_CHECK_DELAY)
-            node_statuses = _query_cluster_status_via_cloud_api(handle)
+            node_statuses = _query_cluster_status_via_cloud_api(
+                handle, retry_if_missing=False)
             # Note: even if all the node_statuses are UP now, we will still
             # consider this cluster abnormal, and its status will be INIT.
 
@@ -2625,7 +2637,8 @@ def refresh_cluster_record(
         cluster_lock_already_held: bool = False,
         cluster_status_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS,
         include_user_info: bool = True,
-        summary_response: bool = False) -> Optional[Dict[str, Any]]:
+        summary_response: bool = False,
+        retry_if_missing: bool = True) -> Optional[Dict[str, Any]]:
     """Refresh the cluster, and return the possibly updated record.
 
     The function will update the cached cluster status in the global state. For
@@ -2654,6 +2667,8 @@ def refresh_cluster_record(
           value is <0, do not timeout (wait for the lock indefinitely). By
           default, this is set to CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS. Warning:
           if correctness is required, you must set this to -1.
+        retry_if_missing: Whether to retry the call to the cloud api if the
+          cluster is not found when querying the live status on the cloud.
 
     Returns:
         If the cluster is terminated or does not exist, return None.
@@ -2700,6 +2715,7 @@ def refresh_cluster_record(
 
             if cluster_lock_already_held:
                 return _update_cluster_status(cluster_name, record,
+                                              retry_if_missing,
                                               include_user_info,
                                               summary_response)
 
@@ -2717,6 +2733,7 @@ def refresh_cluster_record(
                         return record
                     # Update and return the cluster status.
                     return _update_cluster_status(cluster_name, record,
+                                                  retry_if_missing,
                                                   include_user_info,
                                                   summary_response)
 
@@ -2754,7 +2771,8 @@ def refresh_cluster_status_handle(
     *,
     force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]] = None,
     cluster_lock_already_held: bool = False,
-    cluster_status_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS
+    cluster_status_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS,
+    retry_if_missing: bool = True,
 ) -> Tuple[Optional[status_lib.ClusterStatus],
            Optional[backends.ResourceHandle]]:
     """Refresh the cluster, and return the possibly updated status and handle.
@@ -2769,7 +2787,8 @@ def refresh_cluster_status_handle(
         cluster_lock_already_held=cluster_lock_already_held,
         cluster_status_lock_timeout=cluster_status_lock_timeout,
         include_user_info=False,
-        summary_response=True)
+        summary_response=True,
+        retry_if_missing=retry_if_missing)
     if record is None:
         return None, None
     return record['status'], record['handle']
@@ -3243,11 +3262,10 @@ def get_clusters(
             handle = record['handle']
             resource_str_simple, resource_str_full = (
                 resources_utils.get_readable_resources_repr(
-                    handle, simplified_only=summary_response))
+                    handle, simplified_only=False))
             record['resources_str'] = resource_str_simple
+            record['resources_str_full'] = resource_str_full
             if not summary_response:
-                assert resource_str_full is not None
-                record['resources_str_full'] = resource_str_full
                 record['cluster_name_on_cloud'] = handle.cluster_name_on_cloud
 
     def _update_records_with_credentials(

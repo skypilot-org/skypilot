@@ -1692,3 +1692,80 @@ def test_cancel_logs_request(generic_cloud: str):
         f'sky down -y {name} || true',
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_ssh_proxy_connection():
+    """Test Kubernetes SSH proxy connection.
+    """
+    cluster_name = smoke_tests_utils.get_cluster_name()
+
+    test = smoke_tests_utils.Test(
+        'kubernetes_ssh_proxy_connection',
+        [
+            # Launch a minimal Kubernetes cluster for SSH proxy testing
+            f'sky launch -y -c {cluster_name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} echo "SSH test cluster ready"',
+            # Run an SSH command on the cluster.
+            f'ssh {cluster_name} echo "SSH command executed"',
+        ],
+        f'sky down -y {cluster_name}',
+        timeout=15 * 60,  # 15 minutes timeout
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# Only checks for processes in local machine, so skip remote server test.
+# TODO(kevin): Add metrics for number of open SSH tunnels and refactor this test to use it.
+@pytest.mark.no_remote_server
+def test_no_ssh_tunnel_process_leak_after_teardown(generic_cloud: str):
+    """Test that no SSH tunnel process leaks after teardown."""
+    cluster_name = smoke_tests_utils.get_cluster_name()
+    grep_ssh_tunnel_proc = f'ps aux | grep -E "ssh|port-forward" | grep 46590 | grep "{cluster_name if generic_cloud == "kubernetes" else "$IP"}" | grep -v grep'
+
+    test = smoke_tests_utils.Test(
+        'no_ssh_tunnel_process_leak_after_teardown',
+        [
+            # TODO(kevin): remove SKYPILOT_ENABLE_GRPC=1 after it becomes the default.
+            f'SKYPILOT_ENABLE_GRPC=1 sky launch -y -c {cluster_name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} echo hi',
+            f'IP=$(sky status --ip {cluster_name}) && echo "=== Before ===" && {grep_ssh_tunnel_proc} || exit 1 && '
+            f'SKYPILOT_DEBUG=0 sky down -y {cluster_name} && '
+            # Should not find any ssh tunnel process after teardown. If found, exit with error.
+            f'echo "=== After ===" && ! {grep_ssh_tunnel_proc} && echo "No SSH tunnel process found"',
+        ],
+        f'sky down -y {cluster_name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.gcp
+def test_cluster_setup_num_gpus():
+    """Test that the number of GPUs is set correctly in the setup script."""
+
+    setup_yaml = textwrap.dedent(f"""
+    resources:
+        accelerators: {{L4:2}}
+
+    setup: |
+        if [[ "$SKYPILOT_SETUP_NUM_GPUS_PER_NODE" != "2" ]]; then
+            exit 1
+        fi
+
+    run: |
+        echo "Done."
+    """)
+
+    with tempfile.NamedTemporaryFile(delete=True) as f:
+        f.write(setup_yaml.encode('utf-8'))
+        f.flush()
+        name = smoke_tests_utils.get_cluster_name()
+
+        test = smoke_tests_utils.Test(
+            'test_cluster_setup_num_gpus',
+            [
+                f's=$(sky launch -y -c {name} {f.name} -y); echo "$s"; echo; echo; echo "$s" | grep "Job finished (status: SUCCEEDED)"',
+            ],
+            timeout=smoke_tests_utils.get_timeout('gcp'),
+            teardown=f'sky down -y {name}',
+        )
+        smoke_tests_utils.run_one_test(test)

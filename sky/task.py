@@ -1092,7 +1092,7 @@ class Task:
     def set_resources(
         self, resources: Union['resources_lib.Resources',
                                List['resources_lib.Resources'],
-                               Set['resources_lib.Resources']]
+                               Set['resources_lib.Resources'], Dict[str, Any]]
     ) -> 'Task':
         """Sets the required resources to execute this task.
 
@@ -1106,7 +1106,9 @@ class Task:
         Returns:
           self: The current task, with resources set.
         """
-        if isinstance(resources, resources_lib.Resources):
+        if isinstance(resources, dict):
+            resources = resources_lib.Resources.from_yaml_config(resources)
+        elif isinstance(resources, resources_lib.Resources):
             resources = {resources}
         # TODO(woosuk): Check if the resources are None.
         self.resources = _with_docker_login_config(resources, self.envs,
@@ -1133,6 +1135,10 @@ class Task:
 
         self.set_resources(type(self.resources)(new_resources_list))
         return self
+
+    def get_resource_config(self) -> Dict[str, Any]:
+        return _resources_to_config(self.resources,
+                                    factor_out_common_fields=True)
 
     @property
     def service(self) -> Optional[service_spec.SkyServiceSpec]:
@@ -1660,16 +1666,7 @@ class Task:
 
         add_if_not_none('name', self.name)
 
-        tmp_resource_config: Union[Dict[str, Union[str, int]],
-                                   Dict[str, List[Dict[str, Union[str, int]]]]]
-        if len(self.resources) > 1:
-            resource_list = []
-            for r in self.resources:
-                resource_list.append(r.to_yaml_config())
-            key = 'ordered' if isinstance(self.resources, list) else 'any_of'
-            tmp_resource_config = {key: resource_list}
-        else:
-            tmp_resource_config = list(self.resources)[0].to_yaml_config()
+        tmp_resource_config = _resources_to_config(self.resources)
 
         add_if_not_none('resources', tmp_resource_config)
 
@@ -1782,3 +1779,47 @@ class Task:
         else:
             s += '\n  resources: default instances'
         return s
+
+
+def _resources_to_config(
+        resources: Union[List['resources_lib.Resources'],
+                         Set['resources_lib.Resources']],
+        factor_out_common_fields: bool = False) -> Dict[str, Any]:
+    if len(resources) > 1:
+        resource_list: List[Dict[str, Union[str, int]]] = []
+        for r in resources:
+            resource_list.append(r.to_yaml_config())
+        group_key = 'ordered' if isinstance(resources, list) else 'any_of'
+        if factor_out_common_fields:
+            return _factor_out_common_resource_fields(resource_list, group_key)
+        return {group_key: resource_list}
+    else:
+        return list(resources)[0].to_yaml_config()
+
+
+def _factor_out_common_resource_fields(configs: List[Dict[str, Union[str,
+                                                                     int]]],
+                                       group_key: str) -> Dict[str, Any]:
+    """Factors out the fields that are common to all resources."""
+    return_config: Dict[str, Any] = configs[0].copy()
+    if len(configs) > 1:
+        for config in configs[1:]:
+            for key, value in config.items():
+                if key in return_config and return_config[key] != value:
+                    del return_config[key]
+    num_empty_configs = 0
+    for config in configs:
+        keys_to_delete = []
+        for key, value in config.items():
+            if key in return_config:
+                keys_to_delete.append(key)
+        for key in keys_to_delete:
+            del config[key]
+        if not config:
+            num_empty_configs += 1
+
+    if num_empty_configs == len(configs):
+        return return_config
+    if len(configs) > 0:
+        return_config[group_key] = configs
+    return return_config

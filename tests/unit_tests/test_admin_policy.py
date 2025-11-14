@@ -270,7 +270,7 @@ def test_set_max_autostop_idle_minutes_policy(add_example_policy_paths, task):
     dag, _ = _load_task_and_apply_policy(
         task, os.path.join(POLICY_PATH, 'set_max_autostop_idle_minutes.yaml'))
 
-    resources = dag.tasks[0].resources
+    resources = list(dag.tasks[0].resources)
 
     assert resources[0].autostop_config is not None
     assert resources[0].autostop_config.enabled is True

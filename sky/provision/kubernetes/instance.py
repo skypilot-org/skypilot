@@ -34,6 +34,8 @@ POLL_INTERVAL = 2
 _TIMEOUT_FOR_POD_TERMINATION = 60  # 1 minutes
 _MAX_RETRIES = 3
 _MAX_MISSING_PODS_RETRIES = 5
+_MAX_QUERY_INSTANCES_RETRIES = 5
+_QUERY_INSTANCES_RETRY_INTERVAL = .5
 _NUM_THREADS = subprocess_utils.get_parallel_threads('kubernetes')
 
 # Pattern to extract SSH user from command output, handling MOTD contamination
@@ -1669,31 +1671,9 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
     return failure_reason
 
 
-def query_instances(
-    cluster_name: str,
-    cluster_name_on_cloud: str,
-    provider_config: Optional[Dict[str, Any]] = None,
-    non_terminated_only: bool = True
-) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
-    # Mapping from pod phase to skypilot status. These are the only valid pod
-    # phases.
-    # https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-phase
-    status_map = {
-        'Pending': status_lib.ClusterStatus.INIT,
-        'Running': status_lib.ClusterStatus.UP,
-        'Failed': status_lib.ClusterStatus.INIT,
-        'Unknown': None,
-        'Succeeded': None,
-    }
-
-    assert provider_config is not None
-    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-    context = kubernetes_utils.get_context_from_config(provider_config)
-    is_ssh = context.startswith('ssh-') if context else False
-    identity = 'SSH Node Pool' if is_ssh else 'Kubernetes cluster'
-    label_selector = (f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
-                      f'{cluster_name_on_cloud}')
-
+def list_namespaced_pod(context: Optional[str], namespace: str,
+                        cluster_name_on_cloud: str, is_ssh: bool, identity: str,
+                        label_selector: str) -> List[Any]:
     # Get all the pods with the label skypilot-cluster-name: <cluster_name>
     try:
         # log the query parameters we pass to the k8s api
@@ -1733,6 +1713,7 @@ def query_instances(
                              'pod.deletionTimestamp='
                              f'{pod.metadata.deletion_timestamp}, \n'
                              f'pod.status={pod.status}')
+        return pods
 
     except kubernetes.max_retry_error():
         with ux_utils.print_exception_no_traceback():
@@ -1756,6 +1737,54 @@ def query_instances(
             raise exceptions.ClusterStatusFetchingError(
                 f'Failed to query {identity} {cluster_name_on_cloud!r} '
                 f'status: {common_utils.format_exception(e)}')
+
+
+def query_instances(
+    cluster_name: str,
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    non_terminated_only: bool = True,
+    retry_if_missing: bool = False,
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
+    # Mapping from pod phase to skypilot status. These are the only valid pod
+    # phases.
+    # https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-phase
+    status_map = {
+        'Pending': status_lib.ClusterStatus.INIT,
+        'Running': status_lib.ClusterStatus.UP,
+        'Failed': status_lib.ClusterStatus.INIT,
+        'Unknown': None,
+        'Succeeded': None,
+    }
+
+    assert provider_config is not None
+    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
+    context = kubernetes_utils.get_context_from_config(provider_config)
+    is_ssh = context.startswith('ssh-') if context else False
+    identity = 'SSH Node Pool' if is_ssh else 'Kubernetes cluster'
+    label_selector = (f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
+                      f'{cluster_name_on_cloud}')
+
+    attempts = 0
+    pods = list_namespaced_pod(context, namespace, cluster_name_on_cloud,
+                               is_ssh, identity, label_selector)
+    # When we see no pods returned from the k8s api, we assume the pods have
+    # been terminated by the user directly and mark the cluster as terminated
+    # in the global user state.
+    # We add retry logic here as an attempt to mitigate a leak caused by the
+    # kubernetes api returning no pods despite the pods actually existing.
+    while (retry_if_missing and not pods and
+           attempts < _MAX_QUERY_INSTANCES_RETRIES):
+        logger.debug(f'Retrying to query k8s api for {cluster_name_on_cloud} '
+                     f'{attempts}/{_MAX_QUERY_INSTANCES_RETRIES} times.'
+                     f'after {_QUERY_INSTANCES_RETRY_INTERVAL} seconds.')
+        time.sleep(_QUERY_INSTANCES_RETRY_INTERVAL)
+        attempts += 1
+        pods = list_namespaced_pod(context, namespace, cluster_name_on_cloud,
+                                   is_ssh, identity, label_selector)
+        if len(pods) > 0:
+            logger.info(f'Found {len(pods)} pods for {label_selector} after'
+                        f'{attempts} retries.')
 
     # Check if the pods are running or pending
     cluster_status: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
