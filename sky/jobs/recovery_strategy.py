@@ -209,7 +209,7 @@ class StrategyExecutor:
             # should be functional with the `_try_cancel_if_cluster_is_init`
             # flag, i.e. it sends the cancel signal to the head node, which will
             # then kill the user process on remaining worker nodes.
-            # Only cancel the corresponding job for worker pool.
+            # Only cancel the corresponding job for pool.
             if self.pool is None:
                 kwargs = dict(all=True)
             else:

@@ -66,11 +66,15 @@ run: |
   }
 
   export RAY_RUNTIME_ENV_HOOK=ray._private.runtime_env.uv_runtime_env_hook.hook
+
+  # This script is only available on skypilot-nightly>=1.0.0.dev20251114
+  # If you are using an older version, you can copy and paste the script from:
+  # https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster
+  export RAY_HEAD_PORT=6479
+  ~/sky_templates/ray/start_cluster
+
+  # Head node: wait for workers and run training
   if [ "$SKYPILOT_NODE_RANK" = "0" ]; then
-    if ! ray status --address 127.0.0.1:6479 >/dev/null 2>&1; then
-      ray start --head --disable-usage-stats --port 6479
-    fi
-    wait_for_ray 127.0.0.1:6479
     # Ensure rollout GPUs match policy GPUs when colocating all models.
     # With colocate_all=true, we must have:
     #   policy_num_gpus_per_node * policy_num_nodes ==
@@ -117,11 +121,6 @@ run: |
       trainer.run_name="gsm8k_test" \
       trainer.resume_mode=null \
       trainer.ckpt_path="$HOME/ckpts/gsm8k_1.5B_ckpt"
-  else
-    if ! ray status --address "$head_ip:6479" >/dev/null 2>&1; then
-      ray start --address "$head_ip:6479" --disable-usage-stats
-    fi
-    wait_for_ray "$head_ip:6479"
   fi
 
   echo "Node setup and Ray start script finished for rank ${SKYPILOT_NODE_RANK}."

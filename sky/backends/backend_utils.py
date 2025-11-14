@@ -947,6 +947,8 @@ def write_cluster_config(
                         '{sky_wheel_hash}',
                         wheel_hash).replace('{cloud}',
                                             str(cloud).lower()),
+                'copy_skypilot_templates_commands':
+                    constants.COPY_SKYPILOT_TEMPLATES_COMMANDS,
                 # Port of Ray (GCS server).
                 # Ray's default port 6379 is conflicted with Redis.
                 'ray_port': constants.SKY_REMOTE_RAY_PORT,

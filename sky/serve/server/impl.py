@@ -169,7 +169,7 @@ def up(
                 'Pool creation does not support the `run` section. '
                 'During creation the goal is to setup the '
                 'environment the jobs will run in.')
-        # Use dummy run script for cluster pool.
+        # Use dummy run script for pool.
         task.run = serve_constants.POOL_DUMMY_RUN_COMMAND
 
     with rich_utils.safe_status(
@@ -569,7 +569,7 @@ def update(
             raise ValueError('Pool update does not support the `run` section. '
                              'During update the goal is to setup the '
                              'environment the jobs will run in.')
-        # Use dummy run script for cluster pool.
+        # Use dummy run script for pool.
         task.run = serve_constants.POOL_DUMMY_RUN_COMMAND
 
     assert task.service is not None
