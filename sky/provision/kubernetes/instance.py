@@ -533,6 +533,56 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                     'Failed to create init container for pod '
                     f'{pod.metadata.name}. Error details: {msg}.')
 
+    def _inspect_pod_status(pod):
+        # Check if pod is terminated/preempted/failed.
+        if (pod.metadata.deletion_timestamp is not None or
+                pod.status.phase == 'Failed'):
+            # Get the reason and write to cluster events before
+            # the pod gets completely deleted from the API.
+            reason = _get_pod_termination_reason(pod, cluster_name)
+            logger.warning(f'Pod {pod.metadata.name} terminated: {reason}')
+            raise config_lib.KubernetesError(
+                f'Pod {pod.metadata.name} has terminated or failed '
+                f'unexpectedly. Run `sky logs --provision {cluster_name}` '
+                'for more details.')
+
+        container_statuses = pod.status.container_statuses
+        # Continue if pod and all the containers within the
+        # pod are successfully created and running.
+        if (pod.status.phase == 'Running' and container_statuses is not None and
+                all(container.state.running
+                    for container in container_statuses)):
+            return True, None
+
+        reason = None
+        if pod.status.phase == 'Pending':
+            pending_reason = _get_pod_pending_reason(context, namespace,
+                                                     pod.metadata.name)
+            if pending_reason is not None:
+                reason, message = pending_reason
+                logger.debug(f'Pod {pod.metadata.name} is pending: '
+                             f'{reason}: {message}')
+
+            # Iterate over each container in pod to check their status
+            if container_statuses is not None:
+                for container_status in container_statuses:
+                    # If the container wasn't in 'ContainerCreating'
+                    # state, then we know pod wasn't scheduled or
+                    # had some other error, such as image pull error.
+                    # See list of possible reasons for waiting here:
+                    # https://stackoverflow.com/a/57886025
+                    waiting = container_status.state.waiting
+                    if waiting is not None:
+                        if waiting.reason == 'PodInitializing':
+                            _check_init_containers(pod)
+                        elif waiting.reason != 'ContainerCreating':
+                            msg = waiting.message if (
+                                waiting.message) else str(waiting)
+                            raise config_lib.KubernetesError(
+                                'Failed to create container while launching '
+                                f'the node. Error details: {msg}.')
+        return False, reason
+
     missing_pods_retry = 0
     while True:
         # Get all pods in a single API call
@@ -572,59 +622,21 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
             missing_pods_retry += 1
             continue
 
+        pods_to_check = [
+            pod for pod in all_pods if pod.metadata.name in expected_pod_names
+        ]
+        pod_statuses = subprocess_utils.run_in_parallel(_inspect_pod_status,
+                                                        pods_to_check,
+                                                        _NUM_THREADS)
+
         all_pods_running = True
         pending_reasons_count = {}
-        for pod in all_pods:
-            if pod.metadata.name not in expected_pod_names:
-                continue
-
-            # Check if pod is terminated/preempted/failed.
-            if (pod.metadata.deletion_timestamp is not None or
-                    pod.status.phase == 'Failed'):
-                # Get the reason and write to cluster events before
-                # the pod gets completely deleted from the API.
-                reason = _get_pod_termination_reason(pod, cluster_name)
-                logger.warning(f'Pod {pod.metadata.name} terminated: {reason}')
-                raise config_lib.KubernetesError(
-                    f'Pod {pod.metadata.name} has terminated or failed '
-                    f'unexpectedly. Run `sky logs --provision {cluster_name}` '
-                    'for more details.')
-
-            # Continue if pod and all the containers within the
-            # pod are successfully created and running.
-            if pod.status.phase == 'Running' and all(
-                    container.state.running
-                    for container in pod.status.container_statuses):
-                continue
-
-            all_pods_running = False
-            if pod.status.phase == 'Pending':
-                pending_reason = _get_pod_pending_reason(
-                    context, namespace, pod.metadata.name)
-                if pending_reason is not None:
-                    reason, message = pending_reason
-                    logger.debug(f'Pod {pod.metadata.name} is pending: '
-                                 f'{reason}: {message}')
-                    pending_reasons_count[reason] = pending_reasons_count.get(
-                        reason, 0) + 1
-
-                # Iterate over each container in pod to check their status
-                for container_status in pod.status.container_statuses:
-                    # If the container wasn't in 'ContainerCreating'
-                    # state, then we know pod wasn't scheduled or
-                    # had some other error, such as image pull error.
-                    # See list of possible reasons for waiting here:
-                    # https://stackoverflow.com/a/57886025
-                    waiting = container_status.state.waiting
-                    if waiting is not None:
-                        if waiting.reason == 'PodInitializing':
-                            _check_init_containers(pod)
-                        elif waiting.reason != 'ContainerCreating':
-                            msg = waiting.message if waiting.message else str(
-                                waiting)
-                            raise config_lib.KubernetesError(
-                                'Failed to create container while launching '
-                                f'the node. Error details: {msg}.')
+        for is_running, pending_reason in pod_statuses:
+            if not is_running:
+                all_pods_running = False
+            if pending_reason is not None:
+                pending_reasons_count[pending_reason] = (
+                    pending_reasons_count.get(pending_reason, 0) + 1)
 
         if all_pods_running:
             break
