@@ -102,11 +102,21 @@ cleanup() {
                 --db-subnet-group-name "$DB_SUBNET_GROUP_NAME" \
                 2>/dev/null || true
         fi
+
+        # Cleanup DB parameter group
+        PARAM_GROUP_NAME="skypilot-test-pg-${RDS_INSTANCE_ID}"
+        if aws rds describe-db-parameter-groups --region "$RDS_REGION" --db-parameter-group-name "$PARAM_GROUP_NAME" >/dev/null 2>&1; then
+            echo "Cleaning up DB parameter group: $PARAM_GROUP_NAME"
+            aws rds delete-db-parameter-group \
+                --region "$RDS_REGION" \
+                --db-parameter-group-name "$PARAM_GROUP_NAME" \
+                2>/dev/null || true
+        fi
     fi
 }
 
 # Set trap to cleanup on exit
-trap cleanup EXIT
+# trap cleanup EXIT
 
 echo "=========================================="
 echo "Large Production Performance Test"
@@ -131,8 +141,16 @@ if [ "$RESTART_API_SERVER" = "true" ]; then
 
         # Create the database and get connection URI
         export RDS_INSTANCE_ID
-        SKYPILOT_DB_CONNECTION_URI=$(bash "$CREATE_DB_SCRIPT")
+        # Run script - stderr shows progress, stdout (URI) is captured
+        SKYPILOT_DB_CONNECTION_URI=$(bash "$CREATE_DB_SCRIPT" | grep -oE 'postgresql://[^[:space:]]+' | head -n1)
+        if [ -z "$SKYPILOT_DB_CONNECTION_URI" ]; then
+            echo "ERROR: Failed to extract PostgreSQL connection URI from script output" >&2
+            exit 1
+        fi
+        # Trim any whitespace from the URI
+        SKYPILOT_DB_CONNECTION_URI=$(echo "$SKYPILOT_DB_CONNECTION_URI" | tr -d '\n\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
         export SKYPILOT_DB_CONNECTION_URI
+        echo "SQL Connection URI: $SKYPILOT_DB_CONNECTION_URI" >&2
         echo "✓ RDS database created"
     fi
 
@@ -146,6 +164,7 @@ if [ "$RESTART_API_SERVER" = "true" ]; then
 
     # Build the command with environment variables
     if [ -n "$SKYPILOT_DB_CONNECTION_URI" ]; then
+        echo "Starting sky api with SQL Connection URI: $SKYPILOT_DB_CONNECTION_URI" >&2
         SKYPILOT_DB_CONNECTION_URI="$SKYPILOT_DB_CONNECTION_URI" sky api start
         echo "✓ Sky api restarted with database connection and consolidation mode config"
     else
@@ -173,10 +192,16 @@ echo "$JOB_ID" > "$JOB_ID_FILE"
 
 # Step 4: Inject production-scale data
 echo "Step 4: Injecting production-scale data..."
-python "$INJECT_SCRIPT" \
-    --active-cluster "$ACTIVE_CLUSTER_NAME" \
-    --terminated-cluster "$TERMINATED_CLUSTER_NAME" \
+INJECT_ARGS=(
+    --active-cluster "$ACTIVE_CLUSTER_NAME"
+    --terminated-cluster "$TERMINATED_CLUSTER_NAME"
     --managed-job-id "$JOB_ID"
+)
+if [ -n "$SKYPILOT_DB_CONNECTION_URI" ]; then
+    INJECT_ARGS+=(--sql-url "$SKYPILOT_DB_CONNECTION_URI")
+    echo "Using remote PostgreSQL database for data injection"
+fi
+python "$INJECT_SCRIPT" "${INJECT_ARGS[@]}"
 
 # Step 5: Test sky status performance
 echo "Step 5: Testing sky status performance..."

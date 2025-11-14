@@ -22,13 +22,37 @@ import random
 import sqlite3
 import sys
 import time
+from urllib.parse import unquote
+from urllib.parse import urlparse
 import uuid
 
 # Add SkyPilot to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
+import psycopg2
+from psycopg2.extras import execute_batch
 from sample_based_generator import SampleBasedGenerator
 from scale_test_utils import TestScale
+
+
+def parse_sql_url(sql_url):
+    """Parse a PostgreSQL connection URL and return connection parameters.
+
+    Args:
+        sql_url: Connection URL in format postgresql://user:password@host:port/database
+
+    Returns:
+        dict with keys: host, port, database, user, password
+    """
+    parsed = urlparse(sql_url)
+
+    return {
+        'host': parsed.hostname or 'localhost',
+        'port': parsed.port or 5432,
+        'database': parsed.path.lstrip('/') if parsed.path else 'skypilot',
+        'user': unquote(parsed.username) if parsed.username else 'skypilot',
+        'password': unquote(parsed.password) if parsed.password else ''
+    }
 
 
 class ProductionScaleGenerator(SampleBasedGenerator):
@@ -164,10 +188,33 @@ class ProductionScaleTest(TestScale):
                    active_cluster_name,
                    terminated_cluster_name,
                    managed_job_id,
-                   num_users=10):
-        """Initialize with production-scale generator."""
-        self.db_path = os.path.expanduser("~/.sky/state.db")
-        self.jobs_db_path = os.path.expanduser("~/.sky/spot_jobs.db")
+                   num_users=10,
+                   sql_url=None):
+        """Initialize with production-scale generator.
+
+        Args:
+            active_cluster_name: Name of active cluster template
+            terminated_cluster_name: Name of terminated cluster template
+            managed_job_id: Job ID template
+            num_users: Number of users to simulate
+            sql_url: Optional PostgreSQL connection URL (e.g., postgresql://user:pass@host:port/db)
+                    If None, uses SQLite databases
+        """
+        self.sql_url = sql_url
+        self.use_postgres = sql_url is not None
+
+        if self.use_postgres:
+            self.db_params = parse_sql_url(sql_url)
+            self.jobs_db_params = self.db_params.copy(
+            )  # Same database for jobs
+            print(
+                f"Using PostgreSQL: {self.db_params['database']}@{self.db_params['host']}"
+            )
+        else:
+            self.db_path = os.path.expanduser("~/.sky/state.db")
+            self.jobs_db_path = os.path.expanduser("~/.sky/spot_jobs.db")
+            print(f"Using SQLite: {self.db_path}")
+
         self.test_cluster_names = []
         self.test_cluster_hashes = []
         self.test_job_ids = []
@@ -177,6 +224,41 @@ class ProductionScaleTest(TestScale):
             managed_job_id=managed_job_id,
             num_users=num_users)
 
+    def _get_connection(self, for_jobs=False):
+        """Get a database connection (SQLite or PostgreSQL)."""
+        if self.use_postgres:
+            params = self.jobs_db_params if for_jobs else self.db_params
+            return psycopg2.connect(**params)
+        else:
+            db_path = self.jobs_db_path if for_jobs else self.db_path
+            return sqlite3.connect(db_path)
+
+    def _format_sql(self, sql):
+        """Format SQL query with correct placeholders for the current database.
+
+        Converts '?' placeholders to '%s' for PostgreSQL, leaves as-is for SQLite.
+        """
+        if self.use_postgres:
+            return sql.replace('?', '%s')
+        return sql
+
+    def _execute_batch(self, cursor, sql, batch_data, page_size=100):
+        """Execute batch insert/update with optimal method for current database."""
+        if self.use_postgres:
+            execute_batch(cursor, sql, batch_data, page_size=page_size)
+        else:
+            cursor.executemany(sql, batch_data)
+
+    def _get_integrity_error_class(self):
+        """Get the IntegrityError exception class for the current database."""
+        if self.use_postgres:
+            return psycopg2.IntegrityError
+        return sqlite3.IntegrityError
+
+    def _get_excluded_keyword(self):
+        """Get the EXCLUDED keyword for ON CONFLICT clauses."""
+        return 'EXCLUDED' if self.use_postgres else 'excluded'
+
     def inject_production_clusters(self, count: int = 1500):
         """Inject production-scale clusters."""
         print(f"Injecting {count} production-scale clusters...")
@@ -185,12 +267,13 @@ class ProductionScaleTest(TestScale):
         clusters = self.generator.generate_production_cluster_data(count)
 
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
 
             # Load cluster YAML for the sample cluster
             cursor.execute(
-                "SELECT yaml FROM cluster_yaml WHERE cluster_name = ?",
+                self._format_sql(
+                    "SELECT yaml FROM cluster_yaml WHERE cluster_name = ?"),
                 (self.generator.active_cluster_name,))
             sample_yaml_row = cursor.fetchone()
             sample_yaml = sample_yaml_row[0] if sample_yaml_row else None
@@ -200,13 +283,15 @@ class ProductionScaleTest(TestScale):
             columns_str = ', '.join(cluster_columns)
             placeholders = ', '.join(['?' for _ in cluster_columns])
 
-            insert_sql = f"INSERT INTO clusters ({columns_str}) VALUES ({placeholders})"
+            insert_sql = self._format_sql(
+                f"INSERT INTO clusters ({columns_str}) VALUES ({placeholders})")
 
-            yaml_insert_sql = """
+            # ON CONFLICT syntax (both databases support it, but PostgreSQL uses EXCLUDED vs excluded)
+            yaml_insert_sql = self._format_sql(f"""
                 INSERT INTO cluster_yaml (cluster_name, yaml)
                 VALUES (?, ?)
-                ON CONFLICT(cluster_name) DO UPDATE SET yaml = excluded.yaml
-            """
+                ON CONFLICT(cluster_name) DO UPDATE SET yaml = {self._get_excluded_keyword()}.yaml
+            """)
 
             # Insert in batches for performance
             batch_size = 100
@@ -220,14 +305,20 @@ class ProductionScaleTest(TestScale):
                     row_data = tuple(cluster[col] for col in cluster_columns)
                     batch_data.append(row_data)
 
-                cursor.executemany(insert_sql, batch_data)
+                self._execute_batch(cursor,
+                                    insert_sql,
+                                    batch_data,
+                                    page_size=batch_size)
                 conn.commit()
 
                 if sample_yaml:
                     yaml_batch_data = [
                         (cluster['name'], sample_yaml) for cluster in batch
                     ]
-                    cursor.executemany(yaml_insert_sql, yaml_batch_data)
+                    self._execute_batch(cursor,
+                                        yaml_insert_sql,
+                                        yaml_batch_data,
+                                        page_size=batch_size)
                     conn.commit()
 
                 total_inserted += len(batch_data)
@@ -261,7 +352,7 @@ class ProductionScaleTest(TestScale):
             count)
 
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
 
             # Get column names from first cluster dict
@@ -269,7 +360,9 @@ class ProductionScaleTest(TestScale):
             columns_str = ', '.join(cluster_columns)
             placeholders = ', '.join(['?' for _ in cluster_columns])
 
-            insert_sql = f"INSERT INTO cluster_history ({columns_str}) VALUES ({placeholders})"
+            insert_sql = self._format_sql(
+                f"INSERT INTO cluster_history ({columns_str}) VALUES ({placeholders})"
+            )
 
             batch_size = 100
             total_inserted = 0
@@ -283,7 +376,10 @@ class ProductionScaleTest(TestScale):
                     batch_data.append(row_data)
                     self.test_cluster_hashes.append(cluster['cluster_hash'])
 
-                cursor.executemany(insert_sql, batch_data)
+                self._execute_batch(cursor,
+                                    insert_sql,
+                                    batch_data,
+                                    page_size=batch_size)
                 conn.commit()
                 total_inserted += len(batch_data)
 
@@ -325,7 +421,7 @@ class ProductionScaleTest(TestScale):
         statuses = ['INIT', 'UP', 'STOPPED']
 
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
 
             # Get all cluster hashes (both active and history)
@@ -333,7 +429,8 @@ class ProductionScaleTest(TestScale):
             active_clusters = cursor.fetchall()
 
             cursor.execute(
-                "SELECT cluster_hash, name FROM cluster_history LIMIT ?",
+                self._format_sql(
+                    "SELECT cluster_hash, name FROM cluster_history LIMIT ?"),
                 (min(count // 2,
                      100000),))  # Limit history clusters for performance
             history_clusters = cursor.fetchall()
@@ -416,12 +513,12 @@ class ProductionScaleTest(TestScale):
                 f"  Generated {len(events)} events, inserting into database...")
 
             # Insert events in batches
-            insert_sql = """
+            insert_sql = self._format_sql("""
                 INSERT INTO cluster_events
                 (cluster_hash, name, starting_status, ending_status, reason,
                  transitioned_at, type, request_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """
+            """)
 
             batch_size = 100
             total_inserted = 0
@@ -435,10 +532,13 @@ class ProductionScaleTest(TestScale):
                 ]
 
                 try:
-                    cursor.executemany(insert_sql, batch_data)
+                    self._execute_batch(cursor,
+                                        insert_sql,
+                                        batch_data,
+                                        page_size=batch_size)
                     conn.commit()
                     total_inserted += len(batch_data)
-                except sqlite3.IntegrityError:
+                except self._get_integrity_error_class():
                     # Skip duplicate events (same cluster_hash, reason, transitioned_at)
                     conn.rollback()
                     # Try inserting one by one
@@ -447,7 +547,7 @@ class ProductionScaleTest(TestScale):
                             cursor.execute(insert_sql, event_data)
                             conn.commit()
                             total_inserted += 1
-                        except sqlite3.IntegrityError:
+                        except self._get_integrity_error_class():
                             conn.rollback()
                             continue
 
@@ -476,7 +576,7 @@ class ProductionScaleTest(TestScale):
 
         try:
             # Clean up active clusters
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
 
             # Clean up production clusters (inject_production_clusters creates prod-cluster-*)
@@ -541,23 +641,23 @@ class ProductionScaleTest(TestScale):
             conn.close()
 
             # Clean up managed jobs
-            conn = sqlite3.connect(self.jobs_db_path)
+            conn = self._get_connection(for_jobs=True)
             cursor = conn.cursor()
 
             # Delete from job_info first (to handle foreign key constraints if any)
             cursor.execute(
-                """
+                self._format_sql("""
                 DELETE FROM job_info
                 WHERE spot_job_id > ?
-            """, (managed_job_id,))
+            """), (managed_job_id,))
             job_info_deleted = cursor.rowcount
 
             # Delete from spot
             cursor.execute(
-                """
+                self._format_sql("""
                 DELETE FROM spot
                 WHERE job_id > ?
-            """, (managed_job_id,))
+            """), (managed_job_id,))
             jobs_deleted = cursor.rowcount
             conn.commit()
 
@@ -659,6 +759,13 @@ def main():
         '--cleanup',
         action='store_true',
         help='Clean up (undo) all production-scale data instead of injecting')
+    parser.add_argument(
+        '--sql-url',
+        type=str,
+        default=None,
+        help=
+        'PostgreSQL connection URL (e.g., postgresql://user:pass@host:port/db). '
+        'If not provided, uses SQLite databases.')
 
     args = parser.parse_args()
 
@@ -672,8 +779,15 @@ def main():
 
         # Create test instance (minimal init for cleanup)
         test = ProductionScaleTest()
-        test.db_path = os.path.expanduser("~/.sky/state.db")
-        test.jobs_db_path = os.path.expanduser("~/.sky/spot_jobs.db")
+        if args.sql_url:
+            test.initialize(active_cluster_name='dummy',
+                            terminated_cluster_name='dummy',
+                            managed_job_id=args.managed_job_id,
+                            sql_url=args.sql_url)
+        else:
+            test.db_path = os.path.expanduser("~/.sky/state.db")
+            test.jobs_db_path = os.path.expanduser("~/.sky/spot_jobs.db")
+            test.use_postgres = False
 
         try:
             results = test.cleanup_production_data(args.managed_job_id)
@@ -701,7 +815,8 @@ def main():
     test.initialize(active_cluster_name=args.active_cluster,
                     terminated_cluster_name=args.terminated_cluster,
                     managed_job_id=args.managed_job_id,
-                    num_users=args.num_users)
+                    num_users=args.num_users,
+                    sql_url=args.sql_url)
 
     results = {}
     start_time = time.time()
