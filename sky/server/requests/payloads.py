@@ -87,7 +87,8 @@ def request_body_env_vars() -> dict:
         # server side.
         env_vars.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
         env_vars.pop(skypilot_config.ENV_VAR_GLOBAL_CONFIG, None)
-    # Project config is only used at client-side
+    # Project config is only loaded at client-side and merge with the server
+    # configs.
     env_vars.pop(skypilot_config.ENV_VAR_PROJECT_CONFIG, None)
     # Remove the config related env vars, as the client config override
     # should be passed in the request body.
