@@ -44,6 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { selector: '.toctree-l1 > a', text: 'High Availability Controller' },
         { selector: '.toctree-l2 > a', text: 'High Availability Controller' },
         { selector: '.toctree-l3 > a', text: 'Advanced: High Availability Controller' },
+        { selector: '.toctree-l1 > a', text: 'Using a Pool of Workers' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {
