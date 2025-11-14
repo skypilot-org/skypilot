@@ -66,6 +66,7 @@ setup_commands:
     which patch > /dev/null || sudo apt install -y patch;
     {{ conda_installation_commands }}
     {{ ray_skypilot_installation_commands }}
+    {{ copy_skypilot_templates_commands }}
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
     {{ ssh_max_sessions_config }}

@@ -1358,6 +1358,7 @@ setup_commands:
     echo "=== Ray and skypilot dependencies installation completed in $(($end_epoch - $start_epoch)) secs ===";
     start_epoch=$(date +%s);
     {{ skypilot_wheel_installation_commands }}
+    {{ copy_skypilot_templates_commands }}
     end_epoch=$(date +%s);
     echo "=== Skypilot wheel installation completed in $(($end_epoch - $start_epoch)) secs ===";
     start_epoch=$(date +%s);
