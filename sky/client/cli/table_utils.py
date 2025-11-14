@@ -183,6 +183,7 @@ class VolumeTable(abc.ABC):
             row.get('status', ''),
             last_attached_at_str,
             usedby,
+            row.get('is_ephemeral', False),
         ]
 
     def _create_table(self, show_all: bool = False) -> prettytable.PrettyTable:
@@ -208,20 +209,21 @@ class PVCVolumeTable(VolumeTable):
         """Create the PVC volume table."""
         #  If show_all is False, show the table with the columns:
         #   NAME, TYPE, INFRA, SIZE, USER, WORKSPACE,
-        #   AGE, STATUS, LAST_USE, USED_BY
+        #   AGE, STATUS, LAST_USE, USED_BY, IS_EPHEMERAL
         #  If show_all is True, show the table with the columns:
         #   NAME, TYPE, INFRA, SIZE, USER, WORKSPACE,
-        #   AGE, STATUS, LAST_USE, USED_BY, NAME_ON_CLOUD
+        #   AGE, STATUS, LAST_USE, USED_BY, IS_EPHEMERAL, NAME_ON_CLOUD
         #   STORAGE_CLASS, ACCESS_MODE
 
+        columns = _BASIC_COLUMNS + [
+            'IS_EPHEMERAL',
+        ]
         if show_all:
-            columns = _BASIC_COLUMNS + [
+            columns = columns + [
                 'NAME_ON_CLOUD',
                 'STORAGE_CLASS',
                 'ACCESS_MODE',
             ]
-        else:
-            columns = _BASIC_COLUMNS
 
         table = log_utils.create_table(columns)
         return table
