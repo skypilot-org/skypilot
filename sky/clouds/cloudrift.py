@@ -26,8 +26,10 @@ class CloudRift(clouds.Cloud):
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
         clouds.CloudImplementationFeatures.MULTI_NODE:
-            ('Multi-node not supported yet, as the interconnection among nodes'),
-        clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instances are not supported in {_REPR}.',
+            ('Multi-node not supported yet, as the interconnection'
+             'among nodes'),
+        clouds.CloudImplementationFeatures.SPOT_INSTANCE:
+            f'Spot instances are not supported in {_REPR}.',
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             (f'Customizing disk tier is not supported yet on {_REPR}.'),
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
@@ -277,10 +279,10 @@ class CloudRift(clouds.Cloud):
         try:
             pass
             # attempt to make a request for listing instances
-            #cloudrift_utils.client().instances.list()
+            cloudrift_utils.get_cloudrift_client().instances.list()
         except cloudrift_utils.CloudRiftError as err:
             return False, str(err)
-        except RuntimeError as err:  #cloudrift.exceptions().HttpResponseError as err:
+        except RuntimeError as err:
             return False, str(err)
 
         return True, None

@@ -90,11 +90,9 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 ssh_public_key = f.read().strip()
                 launch_data = cloudrift_client.deploy_instance(
                     instance_type=config.node_config['InstanceType'],
-                    region=region,
                     cluster_name=cluster_name_on_cloud,
                     name=f'{cluster_name_on_cloud}-{suffix}-{node_type}',
                     ssh_keys=[ssh_public_key],
-                    cmd=""
                 )
                 instance_id = launch_data[0]
                 logger.info(f'Launched {node_type} node, '

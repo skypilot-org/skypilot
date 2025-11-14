@@ -5,14 +5,13 @@ Usage:
 """
 
 import csv
-import json
 import os
 import sys
 from typing import Dict, List
 
-# Add the parent directory to the path so we can import sky modules
-sys.path.insert(
-    0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
+# # Add the parent directory to the path so we can import sky modules
+# sys.path.insert(
+#     0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
 
 from sky.provision.cloudrift.utils import get_cloudrift_client
 
@@ -22,17 +21,19 @@ BYTES_TO_GIB = 1024 * 1024 * 1024  # 1 GiB = 1024^3 bytes
 
 def extract_region_from_dc(dc_name: str, providers_data: List[Dict]) -> str:
     """Extract region information from datacenter name.
-    
+
     Uses provider data to extract country code as region.
-    Falls back to original extraction method if datacenter not found in providers data.
-    
+    Falls back to original extraction method if datacenter
+    not found in providers data.
+
     Args:
         dc_name: The datacenter name, e.g. 'us-east-nc-nr-1'
         providers_data: List of provider dictionaries from CloudRift API
-    
+
     Returns:
         Region string (country code) if found in providers data, otherwise
-        extracts region from datacenter name (e.g. 'us-east-nc-nr-1' -> 'us-east-nc-nr')
+        extracts region from datacenter name
+        (e.g. 'us-east-nc-nr-1' -> 'us-east-nc-nr')
     """
     # First try to find the datacenter in providers data
     for provider in providers_data:
@@ -49,7 +50,7 @@ def extract_region_from_dc(dc_name: str, providers_data: List[Dict]) -> str:
 
 
 def create_catalog(output_dir: str) -> None:
-    """Create the catalog by querying CloudRift API and generating a CSV file."""
+    """Create the CSV file catalog by querying CloudRift API"""
     client = get_cloudrift_client()
 
     # Get instance types
@@ -72,7 +73,7 @@ def create_catalog(output_dir: str) -> None:
             for variant in instance_type.get('variants', []):
                 instance_name = variant.get('name')
                 gpu_count = variant.get('gpu_count', 0)
-                
+
                 # Skip instances without GPUs
                 if gpu_count == 0:
                     continue
@@ -91,7 +92,8 @@ def create_catalog(output_dir: str) -> None:
                 # Get available datacenters
                 dcs = variant.get('nodes_per_dc', {})
 
-                # If there are no datacenters, use empty values but still include the instance
+                # If there are no datacenters, use empty values
+                # but still include the instance
                 if not dcs:
                     writer.writerow([
                         instance_name,
@@ -101,7 +103,8 @@ def create_catalog(output_dir: str) -> None:
                         round(memory_gib, 1),
                         accelerator_name,
                         '',  # Region
-                        0.0,  # SpotPrice (CloudRift doesn't have spot instances yet)
+                        0.0,  # SpotPrice
+                        # (CloudRift doesn't have spot instances yet)
                         price,
                         ''  # AvailabilityZone
                     ])
@@ -119,9 +122,11 @@ def create_catalog(output_dir: str) -> None:
                         round(memory_gib, 1),
                         accelerator_name,
                         region,
-                        0.0,  # SpotPrice (CloudRift doesn't have spot instances yet)
+                        0.0,  # SpotPrice
+                        # (CloudRift doesn't have spot instances yet)
                         price,
-                        dc_name  # Using the datacenter name as the availability zone
+                        dc_name  # Using the datacenter name
+                        # as the availability zone
                     ])
 
 
