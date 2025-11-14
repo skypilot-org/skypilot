@@ -24,6 +24,7 @@ def test_request_body_env_vars_includes_expected_keys(monkeypatch):
     assert local_env[
         skypilot_config.ENV_VAR_SKYPILOT_CONFIG] == '/tmp/config.yaml'
     assert constants.ENV_VAR_DB_CONNECTION_URI not in local_env
+    assert skypilot_config.ENV_VAR_GLOBAL_CONFIG not in local_env
     assert skypilot_config.ENV_VAR_PROJECT_CONFIG not in local_env
 
     payloads.request_body_env_vars.cache_clear()

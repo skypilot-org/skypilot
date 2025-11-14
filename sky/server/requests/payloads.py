@@ -82,13 +82,12 @@ def request_body_env_vars() -> dict:
     env_vars[
         usage_constants.USAGE_RUN_ID_ENV_VAR] = usage_lib.messages.usage.run_id
     if not common.is_api_server_local():
-        # Remove the path to config file, as the config content is included in
-        # the request body and will be merged with the config on the remote
-        # server side.
+        # Used in job controller, for local API server, keep the
+        # SKYPILOT_CONFIG env var to use the config for the managed job.
         env_vars.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
-        env_vars.pop(skypilot_config.ENV_VAR_GLOBAL_CONFIG, None)
-    # Project config is only loaded at client-side and merge with the server
-    # configs.
+    # Remove the path to config file, as the config content is included in the
+    # request body and will be merged with the config on the server side.
+    env_vars.pop(skypilot_config.ENV_VAR_GLOBAL_CONFIG, None)
     env_vars.pop(skypilot_config.ENV_VAR_PROJECT_CONFIG, None)
     # Remove the config related env vars, as the client config override
     # should be passed in the request body.
