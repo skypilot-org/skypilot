@@ -382,22 +382,15 @@ def make_job_command_with_user_switching(username: str,
 
 
 @init_db
-def add_jobs(job_name: str,
-             username: str,
-             run_timestamp: str,
-             resources_str: str,
-             metadata: str = '{}',
-             num_jobs: int = 1) -> Tuple[List[int], List[str]]:
-    """Atomically reserve the next available job id(s) for the user.
-
-    Args:
-        num_jobs: Number of job IDs to create. Defaults to 1.
-
-    Returns:
-        ([job_id1, job_id2, ...], [log_dir1, log_dir2, ...])
-    """
+def add_job(job_name: str,
+            username: str,
+            run_timestamp: str,
+            resources_str: str,
+            metadata: str = '{}') -> Tuple[int, str]:
+    """Atomically reserve the next available job id for the user."""
     assert _DB is not None
     job_submitted_at = time.time()
+    
     if int(constants.SKYLET_VERSION) >= 28:
         # Create multiple job IDs using bulk insert        
         # Prepare data for bulk insert - create list of tuples with same data 
@@ -425,23 +418,14 @@ def add_jobs(job_name: str,
             'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?)', # pylint: disable=line-too-long
             insert_data)
     _DB.conn.commit()
-
-    # Get all newly created job IDs using fetchall() to ensure we get all rows.
-    rows = _DB.cursor.execute(
-        f'SELECT job_id FROM jobs WHERE run_timestamp=(?) ORDER BY job_id '
-        f'LIMIT {num_jobs}', (run_timestamp,)).fetchall()
-    job_ids = []
-    log_dirs = []
+    rows = _DB.cursor.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
+                              (run_timestamp,))
     for row in rows:
         job_id = row[0]
-        job_ids.append(job_id)
-        log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
-                               f'{job_id}-{job_name}')
-        set_log_dir_no_lock(job_id, log_dir)
-        log_dirs.append(log_dir)
-    assert len(job_ids) == num_jobs, (
-        f'Expected {num_jobs} job IDs, got {len(job_ids)}')
-    return job_ids, log_dirs
+    assert job_id is not None
+    log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY, f'{job_id}-{job_name}')
+    set_log_dir_no_lock(job_id, log_dir)
+    return job_id, log_dir
 
 
 @init_db
@@ -1207,13 +1191,8 @@ class JobLibCodeGen:
     ]
 
     @classmethod
-    def add_jobs(cls,
-                 job_name: Optional[str],
-                 username: str,
-                 run_timestamp: str,
-                 resources_str: str,
-                 metadata: str,
-                 num_jobs: int = 1) -> str:
+    def add_job(cls, job_name: Optional[str], username: str, run_timestamp: str,
+                resources_str: str, metadata: str) -> str:
         if job_name is None:
             job_name = '-'
         code = [
@@ -1225,44 +1204,24 @@ class JobLibCodeGen:
             'raise RuntimeError("SkyPilot runtime is too old, which does not '
             'support submitting jobs.")',
             '\nresult = None',
-            '\njob_ids = []',
-            '\nlog_dirs = None',
             '\nif int(constants.SKYLET_VERSION) < 15: '
-            '\n for _ in range(num_jobs):'
-            '\n  result = job_lib.add_jobs('
+            '\n result = job_lib.add_job('
             f'{job_name!r},'
             f'{username!r},'
             f'{run_timestamp!r},'
-            f'{resources_str!r})'
-            '\n  job_ids.append(result[0])',
-            '\nelif int(constants.SKYLET_VERSION) < 26:'
-            '\n log_dirs = []'
-            '\n for _ in range(num_jobs):'
-            '\n  result = job_lib.add_jobs('
-            f'{job_name!r},'
-            f'{username!r},'
-            f'{run_timestamp!r},'
-            f'{resources_str!r},'
-            f'metadata={metadata!r})'
-            '\n  if isinstance(result, tuple):'
-            '\n    job_ids.append(result[0])'
-            '\n    log_dirs.append(result[1])'
-            '\n  else:'
-            '\n    job_ids.append(result)'
+            f'{resources_str!r})',
             '\nelse: '
-            '\n result = job_lib.add_jobs('
+            '\n result = job_lib.add_job('
             f'{job_name!r},'
             f'{username!r},'
             f'{run_timestamp!r},'
             f'{resources_str!r},'
-            f'metadata={metadata!r},'
-            f'num_jobs={num_jobs})'
-            '\n job_ids = result[0]'
-            '\n log_dirs = result[1]',
-            ('\nprint("Job IDs: " + ",".join(map(str, job_ids)), flush=True)'
-             '\nif log_dirs:'
-             '\n print("Log Dirs: " + ",".join(map(str, log_dirs)), flush=True)'
-            ),
+            f'metadata={metadata!r})',
+            ('\nif isinstance(result, tuple):'
+             '\n  print("Job ID: " + str(result[0]), flush=True)'
+             '\n  print("Log Dir: " + str(result[1]), flush=True)'
+             '\nelse:'
+             '\n  print("Job ID: " + str(result), flush=True)'),
         ]
         return cls._build(code)
 

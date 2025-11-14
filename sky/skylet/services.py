@@ -168,22 +168,11 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
             context: grpc.ServicerContext) -> jobsv1_pb2.AddJobResponse:
         try:
             job_name = request.job_name if request.HasField('job_name') else '-'
-            num_jobs = (request.num_jobs if request.HasField('num_jobs') and
-                        request.num_jobs > 0 else 1)
-            result = job_lib.add_jobs(job_name,
-                                      request.username,
-                                      request.run_timestamp,
-                                      request.resources_str,
-                                      request.metadata,
-                                      num_jobs=num_jobs)
-            if num_jobs == 1:
-                return jobsv1_pb2.AddJobResponse(job_id=result[0][0],
-                                                 log_dir=result[1][0],
-                                                 job_ids=result[0],
-                                                 log_dirs=result[1])
-            else:
-                return jobsv1_pb2.AddJobResponse(job_ids=result[0],
-                                                 log_dirs=result[1])
+            job_id, log_dir = job_lib.add_job(job_name, request.username,
+                                              request.run_timestamp,
+                                              request.resources_str,
+                                              request.metadata)
+            return jobsv1_pb2.AddJobResponse(job_id=job_id, log_dir=log_dir)
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
