@@ -48,11 +48,11 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     del cluster_name  # unused
     pending_status = ['Initializing']
     while True:
-        instances = _filter_instances(cluster_name_on_cloud, pending_status)
-        if not instances:
+        instances_dict = _filter_instances(cluster_name_on_cloud, pending_status)
+        if not instances_dict:
             break
-        instance_statuses = [instance.get('status') for instance in instances.values()]
-        logger.info(f'Waiting for {len(instances)} instances to be ready: '
+        instance_statuses = [instance.get('status') for instance in instances_dict.values()]
+        logger.info(f'Waiting for {len(instances_dict)} instances to be ready: '
                     f'{instance_statuses}')
         time.sleep(constants.POLL_INTERVAL)
 
@@ -203,7 +203,7 @@ def get_cluster_info(
     """
     del region  # unused
     running_instances = _filter_instances(cluster_name_on_cloud,
-                                          ['Active', "Initializing"])
+                                          ['Active', 'Initializing'])
     print("running_instances", running_instances)
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
@@ -217,8 +217,8 @@ def get_cluster_info(
         instances[instance_id] = [
             common.InstanceInfo(
                 instance_id=instance_id,
-                internal_ip=instance_info.get("internal_host_address"),
-                external_ip=instance_info.get('host_address'),
+                internal_ip=instance_info.get('internal_host_address', ''),
+                external_ip=instance_info.get('host_address', ''),
                 ssh_port=ssh_port,
                 tags={},
             )
