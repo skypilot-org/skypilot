@@ -75,10 +75,24 @@ class SampleBasedGenerator:
         return conn, cursor
 
     def _row_to_dict(self, row):
-        """Convert a database row to a dictionary."""
+        """Convert a database row to a dictionary, converting memoryview to bytes."""
         if isinstance(row, dict):
-            return row
-        return dict(row)
+            result = {}
+            for key, value in row.items():
+                if isinstance(value, memoryview):
+                    result[key] = bytes(value)
+                else:
+                    result[key] = value
+            return result
+        # SQLite Row object
+        result = {}
+        for key in row.keys():
+            value = row[key]
+            if isinstance(value, memoryview):
+                result[key] = bytes(value)
+            else:
+                result[key] = value
+        return result
 
     @property
     def active_cluster_sample(self):
