@@ -640,6 +640,10 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
             rich_utils.force_update_status(
                 ux_utils.spinner_message(f'Launching ({msg})',
                                          cluster_name=cluster_name))
+        else:
+            rich_utils.force_update_status(
+                ux_utils.spinner_message('Launching',
+                                         cluster_name=cluster_name))
         time.sleep(1)
 
 
@@ -1230,6 +1234,10 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     logger.debug(f'run_instances: waiting for pods to be running: '
                  f'{[pod.metadata.name for pod in pods]}')
     _wait_for_pods_to_run(namespace, context, cluster_name, pods)
+    # Reset spinner message here because it might have hinted the reason
+    # pods were pending.
+    rich_utils.force_update_status(
+        ux_utils.spinner_message('Launching', cluster_name=cluster_name))
     logger.debug(f'run_instances: all pods are scheduled and running: '
                  f'{[pod.metadata.name for pod in pods]}')
 
