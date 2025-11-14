@@ -15,16 +15,16 @@
 #   RAY_CMD=ray                            - (Optional) Command to invoke Ray (e.g., "uv run ray")
 #
 # Usage:
-#   ~/sky_templates/ray/start_cluster.sh
+#   ~/sky_templates/ray/start_cluster
 #
 #   # With custom configurations
 #   export RAY_DASHBOARD_HOST=0.0.0.0
 #   export RAY_DASHBOARD_PORT=8280
-#   ~/sky_templates/ray/start_cluster.sh
+#   ~/sky_templates/ray/start_cluster
 #
 #   # With uv
 #   export RAY_CMD="uv run ray"
-#   ~/sky_templates/ray/start_cluster.sh
+#   ~/sky_templates/ray/start_cluster
 
 set -e
 
