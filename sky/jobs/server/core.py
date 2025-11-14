@@ -248,6 +248,9 @@ def _submit_remotely(controller: controller_utils.Controllers,
         backend = backend_utils.get_backend_from_handle(local_handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
 
+        # Make sure the skylet is up to date before continuing.
+        backend.check_skylet_running(local_handle)
+
         workspace = skypilot_config.get_active_workspace(
             force_user_workspace=True)
         entrypoint = common_utils.get_current_command()
