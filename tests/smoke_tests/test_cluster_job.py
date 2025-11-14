@@ -1784,6 +1784,59 @@ def test_kubernetes_pod_failure_detection():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.kubernetes
+def test_kubernetes_pod_pending_reason():
+    """Ensure pending pod reasons are surfaced in provision logs."""
+    name = smoke_tests_utils.get_cluster_name()
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_k8s_pending_volume.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    task_yaml_content = template.render()
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(task_yaml_content)
+        f.flush()
+
+        # This launch will be stuck in pending, so launch
+        # in background and kill after timeout.
+        launch_with_timeout_cmd = (
+            f'sky launch -y -c {name} --infra kubernetes {f.name} & '
+            f'LAUNCH_PID=$!; '
+            f'sleep 60; '
+            f'kill $LAUNCH_PID 2>/dev/null || true; '
+            f'wait $LAUNCH_PID 2>/dev/null || true')
+
+        test = smoke_tests_utils.Test(
+            'kubernetes_pod_pending_reason',
+            [
+                launch_with_timeout_cmd,
+                f's=$(sky logs --provision {name} --no-follow 2>&1); echo "$s"; echo; '
+                f'echo "$s" | grep "is pending: FailedMount: MountVolume.SetUp failed for volume"'
+            ],
+            f'sky down -y {name}',
+            timeout=10 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_pod_long_image_pull():
+    """Ensure kubelet image pulling events are surfaced in provision logs."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'kubernetes_pod_long_image_pull',
+        [
+            # Use a large image, for example CUDA runtime.
+            f'sky launch -y -c {name} --infra kubernetes --num-nodes 3 --image-id docker:nvidia/cuda:13.0.1-runtime-ubuntu24.04',
+            f's=$(sky logs --provision {name} --no-follow 2>&1); echo "$s"; echo; '
+            f'echo "$s" | grep "is pending: Pulling: Pulling image"'
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.azure
 def test_azure_start_stop_two_nodes():
     name = smoke_tests_utils.get_cluster_name()
