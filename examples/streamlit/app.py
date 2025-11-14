@@ -6,7 +6,8 @@ import numpy as np
 st.set_page_config(page_title="SkyPilot Streamlit Demo", layout="wide")
 
 st.title("SkyPilot + Streamlit Demo")
-st.write("A simple example showing how to deploy your Streamlit app with SkyPilot")
+st.write(
+    "A simple example showing how to deploy your Streamlit app with SkyPilot")
 
 with st.sidebar:
     st.header("Settings")
