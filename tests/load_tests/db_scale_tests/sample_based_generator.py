@@ -287,10 +287,20 @@ class SampleBasedGenerator:
 
         # Find the highest existing job_id to avoid conflicts
         conn, cursor = self._get_cursor(for_jobs=True)
-        sql = self.format_sql("SELECT MAX(job_id) FROM spot")
+        sql = self.format_sql("SELECT MAX(job_id) AS max_job_id FROM spot")
         cursor.execute(sql)
         result = cursor.fetchone()
-        max_job_id = result[0] if result and result[0] is not None else 0
+        # Handle both PostgreSQL (dict) and SQLite (tuple/row) formats
+        if result:
+            if isinstance(result, dict):
+                # PostgreSQL RealDictCursor returns dict
+                max_job_id = (result.get('max_job_id')
+                              if result.get('max_job_id') is not None else 0)
+            else:
+                # SQLite returns tuple/row, access by index
+                max_job_id = result[0] if result[0] is not None else 0
+        else:
+            max_job_id = 0
         cursor.close()
         conn.close()
 
