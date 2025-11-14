@@ -34,6 +34,7 @@ from sky.provision import vast
 from sky.provision import vsphere
 from sky.utils import command_runner
 from sky.utils import timeline
+from sky.utils import volume as volume_utils
 
 if typing.TYPE_CHECKING:
     from sky.utils import status_lib
@@ -175,9 +176,14 @@ def map_all_volumes_usedby(
 
 
 @_route_to_cloud_impl
-def run_instances(provider_name: str, region: str, cluster_name: str,
-                  cluster_name_on_cloud: str,
-                  config: common.ProvisionConfig) -> common.ProvisionRecord:
+def run_instances(
+    provider_name: str,
+    region: str,
+    cluster_name: str,
+    cluster_name_on_cloud: str,
+    config: common.ProvisionConfig,
+    ephemeral_volumes: Optional[List[volume_utils.VolumeInfo]] = None,
+) -> common.ProvisionRecord:
     """Start instances with bootstrapped configuration."""
     raise NotImplementedError
 

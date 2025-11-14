@@ -148,11 +148,12 @@ def volume_list() -> List[responses.VolumeRecord]:
         return records
 
 
-def volume_delete(names: List[str]) -> None:
+def volume_delete(names: List[str], ignore_not_found: bool = False) -> None:
     """Deletes volumes.
 
     Args:
         names: List of volume names to delete.
+        ignore_not_found: If True, ignore volumes that are not found.
 
     Raises:
         ValueError: If the volume does not exist
@@ -162,6 +163,8 @@ def volume_delete(names: List[str]) -> None:
         for name in names:
             volume = global_user_state.get_volume_by_name(name)
             if volume is None:
+                if ignore_not_found:
+                    continue
                 raise ValueError(f'Volume {name} not found.')
             config = volume.get('handle')
             if config is None:
@@ -184,6 +187,7 @@ def volume_delete(names: List[str]) -> None:
             with _volume_lock(name):
                 provision.delete_volume(cloud, config)
                 global_user_state.delete_volume(name)
+    logger.info(f'Deleted volumes: {names}')
 
 
 def volume_apply(

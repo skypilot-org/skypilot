@@ -107,7 +107,7 @@ class VolumeConfig(pydantic.BaseModel):
     _version: int
     name: str
     type: str
-    cloud: str
+    cloud: Optional[str]
     region: Optional[str]
     zone: Optional[str]
     name_on_cloud: str
