@@ -35,7 +35,7 @@ Customize the Ray cluster by setting environment variables before calling `start
 | `RAY_DASHBOARD_HOST` | `127.0.0.1` | Dashboard host (set to `0.0.0.0` to expose externally) |
 | `RAY_DASHBOARD_AGENT_LISTEN_PORT` | `null` | Optional dashboard agent listen port |
 | `RAY_HEAD_IP_ADDRESS` | `null` | Optional head node IP address override |
-| `RAY_CMD_PREFIX` | `null` | Optional command prefix (e.g., `uv run`) |
+| `RAY_CMD` | `ray` | Ray command (e.g., `uv run ray`) |
 
 ## Managing the Ray Cluster
 

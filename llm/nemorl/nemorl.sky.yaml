@@ -41,7 +41,7 @@ run: |
   # This script is only available on skypilot-nightly>=1.0.0.dev20251113
   # If you are using an older version, you can copy and paste the script from:
   # https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster.sh
-  export RAY_CMD_PREFIX="uv run"
+  export RAY_CMD="uv run ray"
   ~/sky_templates/ray/start_cluster.sh
 
 

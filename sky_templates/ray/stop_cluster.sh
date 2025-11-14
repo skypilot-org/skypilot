@@ -9,7 +9,7 @@
 #
 # Environment Variables:
 #   RAY_HEAD_PORT=6379                     - Ray head node port to stop
-#   RAY_CMD_PREFIX=                        - (Optional) Command prefix (e.g., "uv run")
+#   RAY_CMD=ray                            - (Optional) Command to invoke Ray (e.g., "uv run ray")
 #
 # Usage:
 #   # Stop default Ray cluster (port 6379)
@@ -20,7 +20,7 @@
 #   ~/sky_templates/ray/stop_ray_cluster.sh
 #
 #   # With uv
-#   export RAY_CMD_PREFIX="uv run"
+#   export RAY_CMD="uv run ray"
 #   ~/sky_templates/ray/stop_ray_cluster.sh
 
 set -e
@@ -32,7 +32,14 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 RAY_HEAD_PORT=${RAY_HEAD_PORT:-6379}
-RAY_CMD_PREFIX=${RAY_CMD_PREFIX:-}  # Optional command prefix (e.g., "uv run")
+RAY_CMD=${RAY_CMD:-ray}
+# Tokenize the command string into an array so multi-word commands (e.g., "uv run ray")
+# are handled safely when expanded later.
+eval "RAY_CMD_ARR=( ${RAY_CMD} )"
+
+run_ray() {
+    "${RAY_CMD_ARR[@]}" "$@"
+}
 
 echo -e "${GREEN}Stopping Ray cluster on port ${RAY_HEAD_PORT}...${NC}"
 
@@ -43,7 +50,7 @@ if [ "$SKYPILOT_NODE_RANK" -ne 0 ]; then
 fi
 
 # Check if Ray is running
-if ! ${RAY_CMD_PREFIX} ray status --address="${RAY_ADDRESS}" &> /dev/null; then
+if ! run_ray status --address="${RAY_ADDRESS}" &> /dev/null; then
     echo -e "${YELLOW}No Ray cluster found running on port ${RAY_HEAD_PORT}.${NC}"
     exit 0
 fi
@@ -59,7 +66,7 @@ echo -e "${GREEN}Ray processes killed.${NC}"
 sleep 5
 
 # Verify Ray is stopped
-if ${RAY_CMD_PREFIX} ray status --address="${RAY_ADDRESS}" &> /dev/null; then
+if run_ray status --address="${RAY_ADDRESS}" &> /dev/null; then
     echo -e "${RED}Warning: Ray cluster may still be running. Try manually:${NC}"
     echo -e "${RED}  pkill -9 -f 'ray.*[=:]${RAY_HEAD_PORT}'${NC}"
     exit 1

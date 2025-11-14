@@ -12,7 +12,7 @@
 #   RAY_DASHBOARD_HOST=127.0.0.1           - Dashboard host (set to 0.0.0.0 to expose externally)
 #   RAY_DASHBOARD_AGENT_LISTEN_PORT=       - (Optional) Dashboard agent listen port
 #   RAY_HEAD_IP_ADDRESS=                   - (Optional) Node IP address
-#   RAY_CMD_PREFIX=                        - (Optional) Command prefix (e.g., "uv run")
+#   RAY_CMD=ray                            - (Optional) Command to invoke Ray (e.g., "uv run ray")
 #
 # Usage:
 #   ~/sky_templates/ray/start_cluster.sh
@@ -23,7 +23,7 @@
 #   ~/sky_templates/ray/start_cluster.sh
 #
 #   # With uv
-#   export RAY_CMD_PREFIX="uv run"
+#   export RAY_CMD="uv run ray"
 #   ~/sky_templates/ray/start_cluster.sh
 
 set -e
@@ -39,13 +39,22 @@ RAY_DASHBOARD_PORT=${RAY_DASHBOARD_PORT:-8265}
 RAY_DASHBOARD_HOST=${RAY_DASHBOARD_HOST:-127.0.0.1}
 RAY_DASHBOARD_AGENT_LISTEN_PORT=${RAY_DASHBOARD_AGENT_LISTEN_PORT:-}
 RAY_HEAD_IP_ADDRESS=${RAY_HEAD_IP_ADDRESS:-}
-RAY_CMD_PREFIX=${RAY_CMD_PREFIX:-}  # Optional command prefix (e.g., "uv run")
+
+RAY_CMD=${RAY_CMD:-ray}
+# Tokenize the command string into an array so multi-word commands
+# (e.g., "uv run ray") are handled safely when expanded later.
+eval "RAY_CMD_ARR=( ${RAY_CMD} )"
+
+# Convenience wrapper to invoke the configured Ray command with arbitrary args.
+run_ray() {
+    "${RAY_CMD_ARR[@]}" "$@"
+}
 
 echo -e "${GREEN}Starting Ray cluster...${NC}"
 
 # Ensure ray[default] is installed (we need [default] to do `ray list nodes`)
 # Pin to existing version if Ray is already installed to avoid upgrading existing version.
-RAY_VERSION=$(${RAY_CMD_PREFIX} ray --version 2>/dev/null | cut -d' ' -f3 || echo "")
+RAY_VERSION=$(run_ray --version 2>/dev/null | cut -d' ' -f3 || echo "")
 if [ -n "${RAY_VERSION}" ]; then
     # Pin to existing version.
     VERSION_SPEC="==${RAY_VERSION}"
@@ -57,11 +66,11 @@ fi
 uv pip install "ray[default]${VERSION_SPEC}" || uv pip install --system "ray[default]${VERSION_SPEC}"
 
 # Verify Ray is working
-if ! ${RAY_CMD_PREFIX} ray --version &> /dev/null 2>&1; then
+if ! run_ray --version &> /dev/null; then
     echo -e "${RED}Error: Failed to install Ray.${NC}"
     exit 1
 fi
-echo -e "${GREEN}Ray $(${RAY_CMD_PREFIX} ray --version | cut -d' ' -f3) is installed.${NC}"
+echo -e "${GREEN}Ray $(run_ray --version | cut -d' ' -f3) is installed.${NC}"
 
 RAY_ADDRESS="127.0.0.1:${RAY_HEAD_PORT}"
 if [ "${SKYPILOT_NODE_RANK}" -ne 0 ]; then
@@ -70,9 +79,9 @@ if [ "${SKYPILOT_NODE_RANK}" -ne 0 ]; then
 fi
 
 # Check if user-space Ray is already running
-if ${RAY_CMD_PREFIX} ray status --address="${RAY_ADDRESS}" &> /dev/null; then
+if run_ray status --address="${RAY_ADDRESS}" &> /dev/null; then
     echo -e "${YELLOW}Ray cluster is already running.${NC}"
-    ${RAY_CMD_PREFIX} ray status --address="${RAY_ADDRESS}"
+    run_ray status --address="${RAY_ADDRESS}"
     exit 0
 fi
 
@@ -81,7 +90,7 @@ TIMEOUT=300
 if [ "${SKYPILOT_NODE_RANK}" -eq 0 ]; then
     echo -e "${GREEN}Starting Ray head node...${NC}"
 
-    RAY_START_CMD="ray start --head \
+    RAY_START_CMD="start --head \
         --port=${RAY_HEAD_PORT} \
         --dashboard-port=${RAY_DASHBOARD_PORT} \
         --dashboard-host=${RAY_DASHBOARD_HOST} \
@@ -103,10 +112,10 @@ if [ "${SKYPILOT_NODE_RANK}" -eq 0 ]; then
         RAY_START_CMD="${RAY_START_CMD} --node-ip-address=${RAY_HEAD_IP_ADDRESS}"
     fi
 
-    eval "${RAY_CMD_PREFIX} ${RAY_START_CMD}"
+    run_ray ${RAY_START_CMD}
 
     start_time=$(date +%s)
-    while ! ${RAY_CMD_PREFIX} ray health-check --address="${RAY_ADDRESS}" &>/dev/null; do
+    while ! run_ray health-check --address="${RAY_ADDRESS}" &>/dev/null; do
         if [ "$(( $(date +%s) - start_time ))" -ge "$TIMEOUT" ]; then
             echo -e "${RED}Timed out waiting for head node. Exiting.${NC}" >&2
             exit 1
@@ -126,7 +135,7 @@ if [ "${SKYPILOT_NODE_RANK}" -eq 0 ]; then
                 echo -e "${RED}Error: Timeout waiting for nodes.${NC}" >&2
                 exit 1
             fi
-            ready_nodes=$(${RAY_CMD_PREFIX} ray list nodes --format=json | python3 -c "import sys, json; print(len(json.load(sys.stdin)))")
+            ready_nodes=$(run_ray list nodes --format=json | python3 -c "import sys, json; print(len(json.load(sys.stdin)))")
             if [ "${ready_nodes}" -ge "${SKYPILOT_NUM_NODES}" ]; then
                 break
             fi
@@ -143,7 +152,7 @@ else
 
     echo "Waiting for head node at ${RAY_ADDRESS}..."
     start_time=$(date +%s)
-    while ! ${RAY_CMD_PREFIX} ray health-check --address="${RAY_ADDRESS}" &>/dev/null; do
+    while ! run_ray health-check --address="${RAY_ADDRESS}" &>/dev/null; do
         if [ "$(( $(date +%s) - start_time ))" -ge "$TIMEOUT" ]; then
             echo -e "${RED}Timed out waiting for head node. Exiting.${NC}" >&2
             exit 1
@@ -153,14 +162,14 @@ else
     done
 
     echo -e "${GREEN}Head node is healthy. Starting worker node...${NC}"
-    WORKER_CMD="ray start --address=${RAY_ADDRESS} --disable-usage-stats"
+    WORKER_CMD="start --address=${RAY_ADDRESS} --disable-usage-stats"
 
     # Add --num-gpus only if > 0
     if [ "${SKYPILOT_NUM_GPUS_PER_NODE}" -gt 0 ]; then
         WORKER_CMD="${WORKER_CMD} --num-gpus=${SKYPILOT_NUM_GPUS_PER_NODE}"
     fi
 
-    eval "${RAY_CMD_PREFIX} ${WORKER_CMD}"
+    run_ray ${WORKER_CMD}
 
     echo -e "${GREEN}Worker node started successfully.${NC}"
 
