@@ -294,9 +294,12 @@
             "properties": {
                 "imagePullSecrets": {
                     "type": [
-                        "string",
+                        "array",
                         "null"
-                    ]
+                    ],
+                    "items": {
+                        "type": "object"
+                    }
                 },
                 "imageRegistry": {
                     "type": [
