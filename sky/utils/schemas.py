@@ -574,14 +574,21 @@ def get_volume_mount_schema():
             'volume_name': {
                 'type': 'string',
             },
+            'is_ephemeral': {
+                'type': 'boolean',
+            },
             'volume_config': {
                 'type': 'object',
                 'required': [],
                 'additionalProperties': True,
                 'properties': {
                     'cloud': {
-                        'type': 'string',
-                        'case_insensitive_enum': list(constants.ALL_CLOUDS)
+                        'anyOf': [{
+                            'type': 'string',
+                            'case_insensitive_enum': list(constants.ALL_CLOUDS)
+                        }, {
+                            'type': 'null'
+                        }]
                     },
                     'region': {
                         'anyOf': [{

@@ -67,6 +67,7 @@ from sky.utils import subprocess_utils
 from sky.utils import tempstore
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import volume as volume_utils
 from sky.utils import yaml_utils
 from sky.workspaces import core as workspaces_core
 
@@ -82,7 +83,6 @@ if typing.TYPE_CHECKING:
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
     from sky.backends import local_docker_backend
-    from sky.utils import volume as volume_lib
 else:
     yaml = adaptors_common.LazyImport('yaml')
     requests = adaptors_common.LazyImport('requests')
@@ -621,7 +621,7 @@ def write_cluster_config(
     zones: Optional[List[clouds.Zone]] = None,
     dryrun: bool = False,
     keep_launch_fields_in_existing_config: bool = True,
-    volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+    volume_mounts: Optional[List['volume_utils.VolumeMount']] = None,
 ) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
@@ -876,14 +876,19 @@ def write_cluster_config(
         cluster_name)
 
     volume_mount_vars = []
+    ephemeral_volume_mount_vars = []
     if volume_mounts is not None:
         for vol in volume_mounts:
-            volume_mount_vars.append({
-                'name': vol.volume_name,
-                'path': vol.path,
-                'volume_name_on_cloud': vol.volume_config.name_on_cloud,
-                'volume_id_on_cloud': vol.volume_config.id_on_cloud,
-            })
+            if vol.is_ephemeral:
+                ephemeral_volume_mount_vars.append(vol.to_yaml_config())
+            else:
+                volume_info = volume_utils.VolumeInfo(
+                    name=vol.volume_name,
+                    path=vol.path,
+                    volume_name_on_cloud=vol.volume_config.name_on_cloud,
+                    volume_id_on_cloud=vol.volume_config.id_on_cloud,
+                )
+                volume_mount_vars.append(volume_info)
 
     runcmd = skypilot_config.get_effective_region_config(
         cloud=str(to_provision.cloud).lower(),
@@ -991,6 +996,7 @@ def write_cluster_config(
 
                 # Volume mounts
                 'volume_mounts': volume_mount_vars,
+                'ephemeral_volume_mounts': ephemeral_volume_mount_vars,
 
                 # runcmd to append to the cloud-init cloud config passed to the
                 # machine's UserData. This is currently only used by AWS.

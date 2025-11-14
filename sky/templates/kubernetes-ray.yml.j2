@@ -46,6 +46,10 @@ provider:
     # Used to set up the necessary permissions and sidecars.
     fuse_device_required: {{k8s_fuse_device_required}}
 
+    {% if ephemeral_volume_mounts %}
+    ephemeral_volume_specs: {{ephemeral_volume_mounts | tojson}}
+    {% endif %}
+
     # ServiceAccount created by the autoscaler for the head node pod that it
     # runs in. If this field isn't provided, the head pod config below must
     # contain a user-created service account with the proper permissions.

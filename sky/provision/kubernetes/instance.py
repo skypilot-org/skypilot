@@ -28,6 +28,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import volume as volume_utils
 from sky.utils.db import db_utils
 
 POLL_INTERVAL = 2
@@ -926,8 +927,13 @@ def _wait_for_deployment_pod(context,
 
 
 @timeline.event
-def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
-                 config: common.ProvisionConfig) -> common.ProvisionRecord:
+def _create_pods(
+    region: str,
+    cluster_name: str,
+    cluster_name_on_cloud: str,
+    config: common.ProvisionConfig,
+    ephemeral_volumes: Optional[List[volume_utils.VolumeInfo]] = None,
+) -> common.ProvisionRecord:
     """Create pods based on the config."""
     provider_config = config.provider_config
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
@@ -951,6 +957,24 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         pod_spec['metadata']['labels'] = tags
     pod_spec['metadata']['labels'].update(
         {constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud})
+
+    if ephemeral_volumes:
+        for ephemeral_volume in ephemeral_volumes:
+            # Update the volumes and volume mounts in the pod spec
+            if 'volumes' not in pod_spec['spec']:
+                pod_spec['spec']['volumes'] = []
+            pod_spec['spec']['volumes'].append({
+                'name': ephemeral_volume.name,
+                'persistentVolumeClaim': {
+                    'claimName': ephemeral_volume.volume_name_on_cloud,
+                },
+            })
+            if 'volumeMounts' not in pod_spec['spec']['containers'][0]:
+                pod_spec['spec']['containers'][0]['volumeMounts'] = []
+            pod_spec['spec']['containers'][0]['volumeMounts'].append({
+                'name': ephemeral_volume.name,
+                'mountPath': ephemeral_volume.path,
+            })
 
     terminating_pods = kubernetes_utils.filter_pods(namespace, context, tags,
                                                     ['Terminating'])
@@ -1262,11 +1286,17 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     )
 
 
-def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
-                  config: common.ProvisionConfig) -> common.ProvisionRecord:
+def run_instances(
+    region: str,
+    cluster_name: str,
+    cluster_name_on_cloud: str,
+    config: common.ProvisionConfig,
+    ephemeral_volumes: Optional[List[volume_utils.VolumeInfo]] = None,
+) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
     try:
-        return _create_pods(region, cluster_name, cluster_name_on_cloud, config)
+        return _create_pods(region, cluster_name, cluster_name_on_cloud, config,
+                            ephemeral_volumes)
     except (kubernetes.api_exception(), config_lib.KubernetesError) as e:
         e_msg = common_utils.format_exception(e).replace('\n', ' ')
         logger.warning('run_instances: Error occurred when creating pods: '
