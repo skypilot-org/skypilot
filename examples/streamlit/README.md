@@ -2,7 +2,7 @@
 
 Deploy your Streamlit app with SkyPilot.
 
-![Streamlit Demo](image.png)
+![Streamlit Demo](https://raw.githubusercontent.com/skypilot-org/skypilot/master/examples/streamlit/image.png)
 
 ## Quick start
 
