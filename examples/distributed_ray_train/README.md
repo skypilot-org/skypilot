@@ -21,7 +21,7 @@ Under the hood, this script automatically:
 
 ## Customizing the Ray Cluster
 
-Customize the Ray cluster by setting environment variables before calling `start_cluster.sh`:
+Customize the Ray cluster by setting environment variables before calling `start_cluster`:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -42,7 +42,7 @@ Stop your Ray cluster with:
 
 Do not use `ray stop` directly, as it may interfere with SkyPilot's cluster management.
 
-To restart, simply run `start_cluster.sh` again. The script detects if Ray is already running and skips startup if the cluster is healthy.
+To restart, simply run `start_cluster` again. The script detects if Ray is already running and skips startup if the cluster is healthy.
 
 ## Running the Example
 
