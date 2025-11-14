@@ -27,16 +27,10 @@ VOLUME_LOCK_TIMEOUT_SECONDS = 20
 
 def volume_refresh():
     """Refreshes the volume status."""
-    volumes = global_user_state.get_volumes(is_ephemeral=False)
+    volumes = volume_list(is_ephemeral=False)
     for volume in volumes:
-        volume_name = volume.get('name')
-        config = volume.get('handle')
-        if config is None:
-            logger.warning(f'Volume {volume_name} has no handle.'
-                           'Skipping status refresh...')
-            continue
-        cloud = config.cloud
-        usedby_pods, _ = provision.get_volume_usedby(cloud, config)
+        volume_name = volume.name
+        usedby_pods = volume.usedby_pods
         with _volume_lock(volume_name):
             latest_volume = global_user_state.get_volume_by_name(volume_name)
             if latest_volume is None:
@@ -57,7 +51,8 @@ def volume_refresh():
                         volume_name, status=status_lib.VolumeStatus.IN_USE)
 
 
-def volume_list() -> List[responses.VolumeRecord]:
+def volume_list(
+        is_ephemeral: Optional[bool] = None) -> List[responses.VolumeRecord]:
     """Gets the volumes.
 
     Returns:
@@ -84,7 +79,7 @@ def volume_list() -> List[responses.VolumeRecord]:
         ]
     """
     with rich_utils.safe_status(ux_utils.spinner_message('Listing volumes')):
-        volumes = global_user_state.get_volumes()
+        volumes = global_user_state.get_volumes(is_ephemeral=is_ephemeral)
         cloud_to_configs: Dict[str, List[models.VolumeConfig]] = {}
         for volume in volumes:
             config = volume.get('handle')
@@ -189,7 +184,7 @@ def volume_delete(names: List[str], ignore_not_found: bool = False) -> None:
             with _volume_lock(name):
                 provision.delete_volume(cloud, config)
                 global_user_state.delete_volume(name)
-    logger.info(f'Deleted volumes: {names}')
+        logger.info(f'Deleted volumes: {names}')
 
 
 def volume_apply(
