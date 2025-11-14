@@ -643,7 +643,7 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
 
         if pending_reasons_count:
             msg = ', '.join([
-                f'{count} pod(s) in pending state due to {reason}'
+                f'{count} pod(s) pending due to {reason}'
                 for reason, count in pending_reasons_count.items()
             ])
             rich_utils.force_update_status(
