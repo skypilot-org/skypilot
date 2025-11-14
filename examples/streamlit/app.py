@@ -1,7 +1,7 @@
 """Simple Streamlit app example for SkyPilot deployment."""
-import streamlit as st
-import pandas as pd
 import numpy as np
+import pandas as pd
+import streamlit as st
 
 st.set_page_config(page_title="SkyPilot Streamlit Demo", layout="wide")
 
