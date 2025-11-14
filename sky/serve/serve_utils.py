@@ -696,6 +696,18 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
     return message
 
 
+def get_yaml_content(service_name: str, version: int) -> str:
+    yaml_content = serve_state.get_yaml_content(service_name, version)
+    if yaml_content is not None:
+        return yaml_content
+    # Backward compatibility for old service records that
+    # does not dump the yaml content to version database.
+    # TODO(tian): Remove this after 2 minor releases, i.e. 0.13.0.
+    latest_yaml_path = generate_task_yaml_file_name(service_name, version)
+    with open(latest_yaml_path, 'r', encoding='utf-8') as f:
+        return f.read()
+
+
 def _get_service_status(
         service_name: str,
         pool: bool,
@@ -718,21 +730,30 @@ def _get_service_status(
 
     record['pool_yaml'] = ''
     if record['pool']:
-        latest_yaml_path = generate_task_yaml_file_name(service_name,
-                                                        record['version'])
-        raw_yaml_config = yaml_utils.read_yaml(latest_yaml_path)
-        original_config = raw_yaml_config.get('_user_specified_yaml')
-        if original_config is None:
-            # Fall back to old display format.
-            original_config = raw_yaml_config
-            original_config.pop('run', None)
-            svc: Dict[str, Any] = original_config.pop('service')
-            if svc is not None:
-                svc.pop('pool', None)  # Remove pool from service config
-                original_config['pool'] = svc  # Add pool to root config
+        version = record['version']
+        try:
+            yaml_content = get_yaml_content(service_name, version)
+            raw_yaml_config = yaml_utils.read_yaml_str(yaml_content)
+        except Exception as e:  # pylint: disable=broad-except
+            # If this is a consolidation mode running without an PVC, the file
+            # might lost after an API server update (restart). In such case, we
+            # don't want it to crash the command. Fall back to an empty string.
+            logger.error(f'Failed to read YAML for service {service_name} '
+                         f'with version {version}: {e}')
+            record['pool_yaml'] = ''
         else:
-            original_config = yaml_utils.safe_load(original_config)
-        record['pool_yaml'] = yaml_utils.dump_yaml_str(original_config)
+            original_config = raw_yaml_config.get('_user_specified_yaml')
+            if original_config is None:
+                # Fall back to old display format.
+                original_config = raw_yaml_config
+                original_config.pop('run', None)
+                svc: Dict[str, Any] = original_config.pop('service')
+                if svc is not None:
+                    svc.pop('pool', None)  # Remove pool from service config
+                    original_config['pool'] = svc  # Add pool to root config
+            else:
+                original_config = yaml_utils.safe_load(original_config)
+            record['pool_yaml'] = yaml_utils.dump_yaml_str(original_config)
 
     record['target_num_replicas'] = 0
     try:

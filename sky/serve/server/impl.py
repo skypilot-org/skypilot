@@ -513,28 +513,10 @@ def update(
                     f'{workers} is not supported. Ignoring the update.')
 
         # Load the existing task configuration from the service's YAML file
-        latest_yaml_path = serve_utils.generate_task_yaml_file_name(
-            service_name, service_record['version'], expand_user=False)
+        yaml_content = service_record['yaml_content']
 
-        logger.debug('Loading existing task configuration from '
-                     f'{latest_yaml_path} to create a new modified task.')
-
-        # Get the path locally.
-        with tempfile.NamedTemporaryFile(
-                prefix=f'service-task-{service_name}-',
-                mode='w',
-        ) as service_file:
-            try:
-                backend.download_file(handle, latest_yaml_path,
-                                      service_file.name)
-            except exceptions.CommandError as e:
-                raise RuntimeError(
-                    f'Failed to download the old task configuration from '
-                    f'{latest_yaml_path}: {e.error_msg}') from e
-
-            # Load the existing task configuration
-            existing_config = yaml_utils.read_yaml(service_file.name)
-            task = task_lib.Task.from_yaml_config(existing_config)
+        # Load the existing task configuration
+        task = task_lib.Task.from_yaml_str(yaml_content)
 
         if task.service is None:
             with ux_utils.print_exception_no_traceback():
