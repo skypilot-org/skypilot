@@ -368,34 +368,6 @@ def launch(
     modified_catalogs = {} if is_consolidation_mode else (
         service_catalog_common.get_modified_catalog_file_mounts())
 
-    if (pool is not None and num_jobs > 1 and not is_consolidation_mode):
-        with rich_utils.safe_status(
-                ux_utils.spinner_message('Creating job IDs')):
-            # Get controller handle to create job IDs upfront
-            try:
-                local_handle = backend_utils.is_controller_accessible(
-                    controller=controller, stopped_message='')
-                backend = backend_utils.get_backend_from_handle(local_handle)
-                assert isinstance(backend, backends.CloudVmRayBackend)
-
-                # Create num_jobs - 1 job IDs upfront (the controller task's ray
-                # job ID will be used as the nth job ID)
-                resources_str = backend_utils.get_task_resources_str(
-                    dag.tasks[0], is_managed_job=True)
-                job_name = dag.name
-                result = backend.add_jobs(handle=local_handle,
-                                          job_name=job_name,
-                                          resources_str=resources_str,
-                                          metadata=dag.tasks[0].metadata_json,
-                                          num_jobs=num_jobs - 1)
-                job_ids = result[0]
-                logger.debug(f'Created {len(job_ids) + 1} job IDs upfront: '
-                             f'{job_ids} (will use controller task ray job '
-                             f'ID as the {num_jobs}th job).')
-            except exceptions.ClusterNotUpError:
-                # Controller not up yet, will create job IDs during submission
-                pass
-
     def _job_ids_to_str(job_ids: Optional[List[int]]) -> str:
         if not job_ids:
             return ''
@@ -423,6 +395,61 @@ def launch(
         num_jobs: Optional[int] = None,
         is_consolidation_mode: bool = False,
     ) -> Tuple[Optional[List[int]], Optional[backends.ResourceHandle]]:
+        # For non-consolidation mode with pools and multiple jobs, create job IDs upfront
+        # using set_job_info_without_job_id to avoid creating entries in the jobs table
+        # (which would block autostop).
+        if (not is_consolidation_mode and pool is not None and num_jobs is not None
+                and num_jobs > 1 and job_ids is None):
+            try:
+                local_handle = backend_utils.is_controller_accessible(
+                    controller=controller, stopped_message='')
+                backend = backend_utils.get_backend_from_handle(local_handle)
+                assert isinstance(backend, backends.CloudVmRayBackend)
+                
+                # Create num_jobs - 1 job IDs upfront (the controller task's ray
+                # job ID will be used as the nth job ID)
+                workspace = skypilot_config.get_active_workspace(
+                    force_user_workspace=True)
+                entrypoint = common_utils.get_current_command()
+                pool_hash = serve_state.get_service_hash(pool)
+                user_hash = common_utils.get_user_hash()
+                
+                # Prepare task data
+                task_ids = []
+                task_names = []
+                metadata_jsons = []
+                for task_id, task in enumerate(dag.tasks):
+                    task_ids.append(task_id)
+                    task_names.append(task.name)
+                    metadata_jsons.append(task.metadata_json)
+                
+                # Use the same resources_str for all tasks
+                resources_str = backend_utils.get_task_resources_str(
+                    dag.tasks[0], is_managed_job=True)
+                
+                job_ids = backend.set_job_info_without_job_id(
+                    handle=local_handle,
+                    name=dag.name,
+                    workspace=workspace,
+                    entrypoint=entrypoint,
+                    pool=pool,
+                    pool_hash=pool_hash,
+                    user_hash=user_hash,
+                    task_ids=task_ids,
+                    task_names=task_names,
+                    resources_str=resources_str,
+                    metadata_jsons=metadata_jsons,
+                    num_jobs=num_jobs)
+                logger.debug(f'Created {len(job_ids)} job IDs upfront: '
+                             f'{job_ids} (will use controller task ray job '
+                             f'ID as the {num_jobs}th job).')
+            except exceptions.ClusterNotUpError:
+                # This will happen if the controller is not up yet. Since
+                # we are using this for jobs launch on pools the jobs 
+                # controller should already be up.
+                raise ValueError('Controller not up yet could not create job'
+                'IDs.')
+        
         # Create a single set of YAML files (not per-rank)
         remote_orig_user_yaml_path = (
             f'{prefix}/{dag.name}-{dag_uuid}.original_user_yaml')
@@ -575,10 +602,10 @@ def launch(
 
                         # Append the controller task's ray job ID since it
                         # is one of the jobs that we are launching.
-                        all_job_ids = (job_ids + [controller_ray_job_id])
+                        # all_job_ids = (job_ids + [controller_ray_job_id])
 
                         # Return the complete list of job IDs and handle
-                        return all_job_ids, result[1]
+                        return job_ids, result[1]
                     else:
                         return [result[0]], result[1]
 

@@ -25,6 +25,8 @@ service JobsService {
   rpc GetJobEndedTimestamp(GetJobEndedTimestampRequest) returns (GetJobEndedTimestampResponse);
   // Get log directories for jobs.
   rpc GetLogDirsForJobs(GetLogDirsForJobsRequest) returns (GetLogDirsForJobsResponse);
+  // Set job info without creating entries in the jobs table (for managed jobs).
+  rpc SetJobInfoWithoutJobId(SetJobInfoWithoutJobIdRequest) returns (SetJobInfoWithoutJobIdResponse);
 }
 
 enum JobStatus {
@@ -168,4 +170,22 @@ message GetLogDirsForJobsRequest {
 
 message GetLogDirsForJobsResponse {
   map<int64, string> job_log_dirs = 1;
+}
+
+message SetJobInfoWithoutJobIdRequest {
+  string name = 1;
+  string workspace = 2;
+  string entrypoint = 3;
+  optional string pool = 4;
+  optional string pool_hash = 5;
+  optional string user_hash = 6;
+  repeated int32 task_ids = 7;
+  repeated string task_names = 8;
+  string resources_str = 9;
+  repeated string metadata_jsons = 10;
+  int32 num_jobs = 11;
+}
+
+message SetJobInfoWithoutJobIdResponse {
+  repeated int64 job_ids = 1;
 }
