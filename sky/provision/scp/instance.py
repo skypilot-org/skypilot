@@ -65,6 +65,18 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                      for instance in existing_instances)
         if has_v1:
             return 'v1'
+
+        if not existing_instances:
+            logger.debug(
+                'detect_naming_version: no instances for cluster %s; '
+                'defaulting to v2.', cluster_name_on_cloud)
+        else:
+            logger.error(
+                'detect_naming_version: unexpected instance names for cluster '
+                '%s: %s; defaulting to v2.', cluster_name_on_cloud, [
+                    instance['virtualServerName']
+                    for instance in existing_instances
+                ])
         return 'v2'
 
     naming_version = _detect_naming_version(existing_instances,
