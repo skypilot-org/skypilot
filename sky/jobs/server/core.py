@@ -372,8 +372,7 @@ def launch(
     # Create a temporary config file with the workspaces section from the
     # API server's config. This is only needed for non-consolidation mode.
     # In consolidation mode, the controller uses the same config as API server.
-    mutated_local_api_server_config_path = None
-
+    mutated_local_api_server_config = None
     if consolidation_mode_job_ids is None:
         server_config = skypilot_config.get_server_config()
         mutated_local_api_server_config = config_utils.Config.from_dict({})
@@ -383,15 +382,8 @@ def launch(
         workspaces = server_config.get_nested(('workspaces',), default_value={})
         mutated_local_api_server_config.set_nested(('workspaces',), workspaces)
 
-        logger.debug(f'ROHANDEBUG: mutated_local_api_server_config: '
+        logger.debug(f'mutated_local_api_server_config: '
                      f'{mutated_local_api_server_config}')
-        with tempfile.NamedTemporaryFile(prefix='jobs-controller-config-',
-                                         suffix='.yaml',
-                                         mode='w',
-                                         delete=False) as config_file:
-            config_as_plain_dict = dict(mutated_local_api_server_config)
-            yaml_utils.dump_yaml(config_file.name, config_as_plain_dict)
-            mutated_local_api_server_config_path = config_file.name
 
     def _submit_one(
         consolidation_mode_job_id: Optional[int] = None,
@@ -413,7 +405,11 @@ def launch(
         ) as f, tempfile.NamedTemporaryFile(
                 prefix=f'managed-user-dag-{dag.name}{rank_suffix}-',
                 mode='w',
-        ) as original_user_yaml_path:
+        ) as original_user_yaml_path, tempfile.NamedTemporaryFile(
+                prefix='jobs-controller-config-',
+                suffix='.yaml',
+                mode='w',
+        ) as mutated_local_api_server_config_file:
             original_user_yaml_path.write(user_dag_str_user_specified)
             original_user_yaml_path.flush()
             # Copy tasks to avoid race conditions when multiple threads modify
@@ -426,6 +422,11 @@ def launch(
                     task_.update_envs({'SKYPILOT_NUM_JOBS': str(num_jobs)})
 
             dag_utils.dump_chain_dag_to_yaml(dag_copy, f.name)
+
+            if mutated_local_api_server_config is not None:
+                yaml_utils.dump_yaml(mutated_local_api_server_config_file.name,
+                                     dict(mutated_local_api_server_config))
+                mutated_local_api_server_config_file.flush()
 
             vars_to_fill = {
                 'remote_original_user_yaml_path':
@@ -447,7 +448,7 @@ def launch(
                 'job_controller_indicator_file':
                     managed_job_constants.JOB_CONTROLLER_INDICATOR_FILE,
                 'mutated_local_api_server_config_path':
-                    (mutated_local_api_server_config_path),
+                    (mutated_local_api_server_config_file.name),
                 **controller_utils.shared_controller_vars_to_fill(
                     controller,
                     remote_user_config_path=remote_user_config_path,
