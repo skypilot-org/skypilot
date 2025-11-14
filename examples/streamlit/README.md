@@ -6,7 +6,7 @@ Deploy your Streamlit app with SkyPilot.
 
 ## Quick start
 
-Launch the app using `streamlit.sky.yaml`:
+Launch the app using [`streamlit.sky.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/streamlit/streamlit.sky.yaml):
 ```bash
 sky launch -c streamlit-app streamlit.sky.yaml # specify "--infra aws" or other cloud if desired
 ```
@@ -24,8 +24,8 @@ Open the URL in your browser to access your app.
 
 ## Using your own Streamlit app
 
-1. **Replace `app.py`** with your own Streamlit application
-2. **Update `streamlit.sky.yaml`**:
+1. **Replace [`app.py`](https://github.com/skypilot-org/skypilot/blob/master/examples/streamlit/app.py)** with your own Streamlit application
+2. **Update [`streamlit.sky.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/streamlit/streamlit.sky.yaml)**:
    - Add any dependencies to the `setup` section
    - Modify the `run` command if your app has a different filename
 3. **Launch**:
@@ -71,8 +71,8 @@ resources:
 
 ## Files
 
-- `app.py` - Simple Streamlit demo application
-- `streamlit.sky.yaml` - SkyPilot task configuration
+- [`app.py`](https://github.com/skypilot-org/skypilot/blob/master/examples/streamlit/app.py) - Simple Streamlit demo application
+- [`streamlit.sky.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/streamlit/streamlit.sky.yaml) - SkyPilot task configuration
 
 ## Learn more
 
