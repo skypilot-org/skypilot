@@ -66,7 +66,7 @@ class RiftClient:
             return False
 
     def get_instance_types(self) -> List[Dict]:
-        request_data = {
+        request_data: Dict[str, Any] = {
             'selector': {
                 'ByServiceAndLocation': {
                     'services': ['vm']
@@ -79,7 +79,7 @@ class RiftClient:
         return []
 
     def list_recipies(self) -> List[Dict]:
-        request_data = {}
+        request_data: Dict[str, Any] = {}
         response_data = self._make_request('recipes/list', request_data)
         if isinstance(response_data, dict):
             return response_data.get('groups', [])
@@ -164,7 +164,7 @@ class RiftClient:
         return []
 
     def list_instances(self, cluster_name) -> List[Dict]:
-        request_data = {'selector': {'ByClusterName': cluster_name}}
+        request_data: Dict[str, Any] = {'selector': {'ByClusterName': cluster_name}}
 
         logger.debug('Listing instances with request data: %s', request_data)
         try:
@@ -180,7 +180,7 @@ class RiftClient:
         return []
 
     def get_instance_by_id(self, instance_id: str) -> Optional[Dict]:
-        request_data = {'selector': {'ById': [instance_id]}}
+        request_data: Dict[str, Any] = {'selector': {'ById': [instance_id]}}
         response_data = self._make_request('instances/list', request_data)
         if isinstance(response_data, dict):
             instances = response_data.get('instances', [])
@@ -207,7 +207,7 @@ class RiftClient:
         return False
 
     def terminate_instance(self, instance_id: str) -> bool:
-        request_data = {'selector': {'ById': [instance_id]}}
+        request_data: Dict[str, Any] = {'selector': {'ById': [instance_id]}}
         response_data = self._make_request('instances/terminate', request_data)
         if isinstance(response_data, dict):
             info = response_data.get('terminated', [])
@@ -216,7 +216,7 @@ class RiftClient:
         return False
 
     def get_providers(self) -> List[Dict]:
-        request_data = {}
+        request_data: Dict[str, Any] = {}
         response_data = self._make_request('providers/list', request_data)
         if isinstance(response_data, dict):
             return response_data.get('providers', [])

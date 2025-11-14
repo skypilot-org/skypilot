@@ -35,9 +35,9 @@ def _filter_instances(
     filtered_instances = {}
     for instance in instances:
         if (status_filters is not None and
-                instance['status'] not in status_filters):
+                instance.get('status') not in status_filters):
             continue
-        filtered_instances[instance['id']] = instance
+        filtered_instances[instance.get('id')] = instance
     return filtered_instances
 
 
@@ -51,7 +51,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         instances = _filter_instances(cluster_name_on_cloud, pending_status)
         if not instances:
             break
-        instance_statuses = [instance['status'] for instance in instances]
+        instance_statuses = [instance.get('status') for instance in instances.values()]
         logger.info(f'Waiting for {len(instances)} instances to be ready: '
                     f'{instance_statuses}')
         time.sleep(constants.POLL_INTERVAL)
@@ -77,7 +77,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             cluster_name=cluster_name_on_cloud,
             region=region,
             zone=None,
-            head_instance_id=head_instance['name'],
+            head_instance_id=str(head_instance.get('id')),
             resumed_instance_ids=[],
             created_instance_ids=[],
         )
@@ -124,13 +124,13 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         instances = cloudrift_client.list_instances(cluster_name_on_cloud)
         print("list instances", instances)
         for instance in instances:
-            if instance['status'] == 'Active' and instance[
-                'id'] in instances_to_wait:
-                instances_to_wait.remove(instance['id'])
-            elif instance['status'] != 'Initializing' and instance[
-                'id'] in instances_to_wait:
+            if instance.get('status') == 'Active' and instance.get(
+                'id') in instances_to_wait:
+                instances_to_wait.remove(instance.get('id'))
+            elif instance.get('status') != 'Initializing' and instance.get(
+                'id') in instances_to_wait:
                 raise RuntimeError(
-                    f'Failed to launch instance {instance["id"]}')
+                    f'Failed to launch instance {instance.get("id")}')
         logger.info('Waiting for instances to be ready: '
                     f'({len(instances)}/{config.count}).')
         if len(instances_to_wait) == 0:
@@ -148,7 +148,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         cluster_name=cluster_name_on_cloud,
         region=region,
         zone=None,
-        head_instance_id=head_instance,
+        head_instance_id=str(head_instance),
         resumed_instance_ids=[],
         created_instance_ids=created_instance_ids,
     )
@@ -217,8 +217,8 @@ def get_cluster_info(
         instances[instance_id] = [
             common.InstanceInfo(
                 instance_id=instance_id,
-                internal_ip=instance_info["internal_host_address"],
-                external_ip=instance_info['host_address'],
+                internal_ip=instance_info.get("internal_host_address"),
+                external_ip=instance_info.get('host_address'),
                 ssh_port=ssh_port,
                 tags={},
             )

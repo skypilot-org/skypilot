@@ -107,7 +107,7 @@ class CloudRift(clouds.Cloud):
         instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-    ) -> Iterator[clouds.Zone]:
+    ) -> Iterator[Optional[List[clouds.Zone]]]:
         del num_nodes  # unused
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
@@ -116,7 +116,7 @@ class CloudRift(clouds.Cloud):
                                             zone=None)
         for r in regions:
             assert r
-            yield r.zones
+            yield [r.zones]
 
     def instance_type_to_hourly_cost(
         self,

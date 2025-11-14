@@ -99,6 +99,8 @@ def get_instance_type_for_accelerator(
 
 def get_region_zones_for_instance_type(instance_type: str,
                                        use_spot: bool) -> List['cloud.Region']:
+    if _df is None:
+        return []
     df = _df[_df['InstanceType'] == instance_type]
     return common.get_region_zones(df, use_spot)
 
