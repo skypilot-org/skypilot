@@ -27,7 +27,7 @@ VOLUME_LOCK_TIMEOUT_SECONDS = 20
 
 def volume_refresh():
     """Refreshes the volume status."""
-    volumes = global_user_state.get_volumes()
+    volumes = global_user_state.get_volumes(is_ephemeral=False)
     for volume in volumes:
         volume_name = volume.get('name')
         config = volume.get('handle')
@@ -79,6 +79,7 @@ def volume_list() -> List[responses.VolumeRecord]:
                 'status': sky.VolumeStatus,
                 'usedby_pods': List[str],
                 'usedby_clusters': List[str],
+                'is_ephemeral': bool,
             }
         ]
     """
@@ -118,6 +119,7 @@ def volume_list() -> List[responses.VolumeRecord]:
                 'last_use': volume.get('last_use'),
                 'usedby_pods': [],
                 'usedby_clusters': [],
+                'is_ephemeral': volume.get('is_ephemeral', False),
             }
             status = volume.get('status')
             if status is not None:
@@ -200,6 +202,7 @@ def volume_apply(
     config: Dict[str, Any],
     labels: Optional[Dict[str, str]] = None,
     use_existing: Optional[bool] = None,
+    is_ephemeral: bool = False,
 ) -> None:
     """Creates or registers a volume.
 
@@ -213,7 +216,7 @@ def volume_apply(
         config: The configuration of the volume.
         labels: The labels of the volume.
         use_existing: Whether to use an existing volume.
-
+        is_ephemeral: Whether the volume is ephemeral.
     """
     with rich_utils.safe_status(ux_utils.spinner_message('Creating volume')):
         # Reuse the method for cluster name on cloud to
@@ -247,8 +250,12 @@ def volume_apply(
                 logger.info(f'Volume {name} already exists.')
                 return
             config = provision.apply_volume(cloud, config)
-            global_user_state.add_volume(name, config,
-                                         status_lib.VolumeStatus.READY)
+            global_user_state.add_volume(
+                name,
+                config,
+                status_lib.VolumeStatus.READY,
+                is_ephemeral,
+            )
         logger.info(f'Created volume {name} on cloud {cloud}')
 
 

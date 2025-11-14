@@ -111,6 +111,7 @@ def _create_ephemeral_volume(
         size=volume_config.size,
         config=internal_volume_config,
         labels=labels,
+        is_ephemeral=True,
     )
     volume = global_user_state.get_volume_by_name(volume_name)
     if volume is None:
