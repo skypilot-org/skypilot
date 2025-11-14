@@ -3079,6 +3079,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             f'{cluster_name!r}: {", ".join(failure_details)}'
                             f'{colorama.Style.RESET_ALL}')
 
+
+    def check_skylet_running(self, handle: CloudVmRayResourceHandle) -> bool:
+        # For backward compatibility and robustness of skylet, it is checked
+        # and restarted if necessary.
+        logger.debug('Checking if skylet is running on the head node.')
+        with rich_utils.safe_status(
+                ux_utils.spinner_message('Preparing SkyPilot runtime')):
+            # We need to source bashrc for skylet to make sure the autostop
+            # event can access the path to the cloud CLIs.
+            self.run_on_head(handle,
+                                instance_setup.MAYBE_SKYLET_RESTART_CMD,
+                                source_bashrc=True)
+
     def _locked_provision(
         self,
         lock_id: str,
@@ -3333,15 +3346,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             # For backward compatibility and robustness of skylet, it is checked
             # and restarted if necessary.
-            logger.debug('Checking if skylet is running on the head node.')
-            with rich_utils.safe_status(
-                    ux_utils.spinner_message('Preparing SkyPilot runtime')):
-                # We need to source bashrc for skylet to make sure the autostop
-                # event can access the path to the cloud CLIs.
-                self.run_on_head(handle,
-                                 instance_setup.MAYBE_SKYLET_RESTART_CMD,
-                                 source_bashrc=True)
-
+            self.check_skylet_running(handle)
+            
             self._update_after_cluster_provisioned(
                 handle, to_provision_config.prev_handle, task,
                 prev_cluster_status, config_hash)
