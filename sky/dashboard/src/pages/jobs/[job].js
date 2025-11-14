@@ -1168,7 +1168,7 @@ function JobDetailsContent({
       </div>
 
       <div>
-        <div className="text-gray-600 font-medium text-base">Worker Pool</div>
+        <div className="text-gray-600 font-medium text-base">Pool</div>
         <div className="text-base mt-1">
           {renderPoolLink(jobData.pool, jobData.pool_hash, poolsData)}
         </div>

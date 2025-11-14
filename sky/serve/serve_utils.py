@@ -402,7 +402,7 @@ def validate_service_task(task: 'sky.Task', pool: bool) -> None:
                           if task.service.dynamic_ondemand_fallback else 'spot')
     for resource in list(task.resources):
         if resource.job_recovery is not None:
-            sys_name = 'SkyServe' if not pool else 'Cluster Pool'
+            sys_name = 'SkyServe' if not pool else 'Pool'
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'job_recovery is disabled for {sys_name}. '
                                  f'{sys_name} will replenish preempted spot '
@@ -421,7 +421,7 @@ def validate_service_task(task: 'sky.Task', pool: bool) -> None:
         if len(accelerators) > 1:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Heterogeneous clusters are not supported for '
-                                 'cluster pools please specify one accelerator '
+                                 'pools please specify one accelerator '
                                  'for all workers.')
 
     # Try to create a spot placer from the task yaml. Check if the task yaml
@@ -468,7 +468,7 @@ def validate_service_task(task: 'sky.Task', pool: bool) -> None:
             if (task.service.ports is not None or
                     requested_resources.ports is not None):
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError('Cannot specify ports in a cluster pool.')
+                    raise ValueError('Cannot specify ports in a pool.')
 
 
 def generate_service_name(pool: bool = False):
@@ -856,7 +856,7 @@ def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
         logger.error(f'Service {service_name!r} does not exist.')
         return None
     if not service_status['pool']:
-        logger.error(f'Service {service_name!r} is not a cluster pool.')
+        logger.error(f'Service {service_name!r} is not a pool.')
         return None
     with filelock.FileLock(get_service_filelock_path(service_name)):
         logger.debug(f'Get next cluster name for pool {service_name!r}')

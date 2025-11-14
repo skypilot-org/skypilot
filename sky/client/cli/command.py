@@ -1117,7 +1117,7 @@ def launch(
     if task.service is not None:
         noun = 'pool' if task.service.pool else 'service'
         capnoun = noun.capitalize()
-        sysname = 'Jobs Worker Pool' if task.service.pool else 'SkyServe'
+        sysname = 'Pool' if task.service.pool else 'SkyServe'
         cmd = 'sky jobs pool apply' if task.service.pool else 'sky serve up'
         logger.info(
             f'{colorama.Fore.YELLOW}{capnoun} section will be ignored when '
@@ -1723,7 +1723,7 @@ def _show_enabled_infra(
               default=True,
               is_flag=True,
               required=False,
-              help='Also show cluster pools, if any.')
+              help='Also show pools, if any.')
 @click.option(
     '--kubernetes',
     '--k8s',
@@ -5025,8 +5025,8 @@ def pool():
               type=click.Choice([m.value for m in serve_lib.UpdateMode],
                                 case_sensitive=False),
               required=False,
-              help=('Update mode. If "rolling", cluster pool will be updated '
-                    'with rolling update. If "blue_green", cluster pool will '
+              help=('Update mode. If "rolling", pool will be updated '
+                    'with rolling update. If "blue_green", pool will '
                     'be updated with blue-green update. This option is only '
                     'valid when the pool is already running.'))
 @click.option('--workers',
@@ -5066,7 +5066,7 @@ def jobs_pool_apply(
     yes: bool,
     async_call: bool,
 ):
-    """Either apply a config to a cluster pool for managed jobs submission
+    """Either apply a config to a pool for managed jobs submission
     or update the number of workers in the pool. One of POOL_YAML or --workers
     must be provided.
     Config:
@@ -5148,7 +5148,7 @@ def jobs_pool_apply(
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def jobs_pool_status(verbose: bool, pool_names: List[str]):
-    """Show statuses of cluster pools.
+    """Show statuses of pools.
 
     Show detailed statuses of one or more pools. If POOL_NAME is not
     provided, show all pools' status.
@@ -5507,7 +5507,7 @@ def _generate_task_with_service(
     if task.service.pool:
         if task.service.ports is not None or ports:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('Cannot specify ports in a cluster pool.')
+                raise ValueError('Cannot specify ports in a pool.')
         return task
 
     # NOTE(yi): we only allow one service port now.
