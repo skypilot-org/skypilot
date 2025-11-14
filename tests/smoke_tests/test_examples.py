@@ -155,15 +155,21 @@ def test_ray_basic(generic_cloud: str) -> None:
                 f'sky launch -y -c {name} --infra {generic_cloud} {yaml_file_path}',
                 f'sky logs {name} 1 --status',
                 f'outputs=$(sky logs {name} 1); echo "$outputs" && '
-                f'echo "$outputs" | grep "Sum of squares:" && '
                 f'echo "$outputs" | grep "All 2 nodes have joined" && '
+                f'echo "$outputs" | grep "Sum of squares: 328350" && '
                 f'echo "$outputs" | grep "SUCCEEDED"',
+                # Test that running on existing Ray cluster works
                 f'sky exec {name} {yaml_file_path}',
                 f'sky logs {name} 2 --status',
                 f'outputs=$(sky logs {name} 2); echo "$outputs" && '
+                f'echo "$outputs" | grep "Ray cluster is already running" && '
+                f'echo "$outputs" | grep "Sum of squares: 328350" && '
+                f'echo "$outputs" | grep "SUCCEEDED"',
+                # Test that stopping the Ray cluster works
+                f'sky exec {name} --num-nodes 2 "~/sky_templates/ray/stop_cluster"',
+                f'sky logs {name} 3 --status',
+                f'outputs=$(sky logs {name} 3); echo "$outputs" && '
                 f'echo "$outputs" | grep "Ray cluster successfully stopped" && '
-                f'echo "$outputs" | grep "Sum of squares:" && '
-                f'echo "$outputs" | grep "All 2 nodes have joined" && '
                 f'echo "$outputs" | grep "SUCCEEDED"',
             ],
             f'sky down -y {name}; rm {yaml_file_path}',
