@@ -4,13 +4,13 @@ Deploy your Streamlit app with SkyPilot.
 
 ## Quick start
 
-Launch the app using [streamlit.yaml](streamlit.yaml):
+Launch the app using `streamlit.sky.yaml`:
 ```bash
-sky launch -c streamlit-app streamlit.yaml # specify "--infra aws" or other cloud if desired
+sky launch -c streamlit-app streamlit.sky.yaml # specify "--infra aws" or other cloud if desired
 ```
 
-> **Tip:** Add `-d` to detach and return to your terminal immediately: 
-> `sky launch -c streamlit-app streamlit.yaml -d`
+> **Tip:** Add `-d` to detach and return to your terminal immediately:
+> `sky launch -c streamlit-app streamlit.sky.yaml -d`
 
 Get the endpoint URL:
 ```bash
@@ -22,13 +22,13 @@ Open the URL in your browser to access your app.
 
 ## Using your own Streamlit app
 
-1. **Replace [app.py](app.py)** with your own Streamlit application
-2. **Update [streamlit.yaml](streamlit.yaml)**:
+1. **Replace `app.py`** with your own Streamlit application
+2. **Update `streamlit.sky.yaml`**:
    - Add any dependencies to the `setup` section
    - Modify the `run` command if your app has a different filename
 3. **Launch**:
    ```bash
-   sky launch -c my-app streamlit.yaml
+   sky launch -c my-app streamlit.sky.yaml
    ```
 
 ### Example with requirements.txt
@@ -69,8 +69,8 @@ resources:
 
 ## Files
 
-- [app.py](app.py) - Simple Streamlit demo application
-- [streamlit.yaml](streamlit.yaml) - SkyPilot task configuration
+- `app.py` - Simple Streamlit demo application
+- `streamlit.sky.yaml` - SkyPilot task configuration
 
 ## Learn more
 
