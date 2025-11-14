@@ -186,8 +186,9 @@ _MAX_RAY_UP_RETRY = 5
 # Number of retries for getting zones.
 _MAX_GET_ZONE_RETRY = 3
 
+_JOB_ID_PATTERN = re.compile(r'Job ID: ([0-9]+)')
 _JOB_IDS_PATTERN = re.compile(r'Job IDs: ([0-9,]+)')
-_LOG_DIRS_PATTERN = re.compile(r'Log Dirs: ([^ ]+)')
+_LOG_DIR_PATTERN = re.compile(r'Log Dir: ([^ ]+)')
 
 # Path to the monkey-patched ray up script.
 # We don't do import then __file__ because that script needs to be filled in
@@ -3224,7 +3225,7 @@ class SkyletClient:
     ) -> 'autostopv1_pb2.IsAutostoppingResponse':
         return self._autostop_stub.IsAutostopping(request, timeout=timeout)
 
-    def add_jobs(
+    def add_job(
         self,
         request: 'jobsv1_pb2.AddJobRequest',
         timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
@@ -3610,7 +3611,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                  'sky api status -v | grep '
                                                  f'{cluster_name}'))
 
-    def check_skylet_running(self, handle: CloudVmRayResourceHandle) -> bool:
+    def check_skylet_running(self, handle: CloudVmRayResourceHandle):
         # For backward compatibility and robustness of skylet, it is checked
         # and restarted if necessary.
         logger.debug('Checking if skylet is running on the head node.')
@@ -3619,8 +3620,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # We need to source bashrc for skylet to make sure the autostop
             # event can access the path to the cloud CLIs.
             self.run_on_head(handle,
-                                instance_setup.MAYBE_SKYLET_RESTART_CMD,
-                                source_bashrc=True)
+                             instance_setup.MAYBE_SKYLET_RESTART_CMD,
+                             source_bashrc=True)
 
     def _locked_provision(
         self,
@@ -3874,7 +3875,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # For backward compatibility and robustness of skylet, it is checked
             # and restarted if necessary.
             self.check_skylet_running(handle)
-            
+
             self._update_after_cluster_provisioned(
                 handle, to_provision_config.prev_handle, task,
                 prev_cluster_status, config_hash)
@@ -4456,12 +4457,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 ux_utils.starting_message(f'Job submitted, ID: {job_id}'))
         rich_utils.stop_safe_status()
 
-    def add_jobs(self,
-                 handle: CloudVmRayResourceHandle,
-                 job_name: Optional[str],
-                 resources_str: str,
-                 metadata: str,
-                 num_jobs: int = 1) -> Tuple[List[int], List[str]]:
+    def _add_job(self, handle: CloudVmRayResourceHandle,
+                 job_name: Optional[str], resources_str: str,
+                 metadata: str) -> Tuple[int, str]:
         use_legacy = not handle.is_grpc_enabled_with_flag
 
         if not use_legacy:
@@ -4471,41 +4469,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     username=common_utils.get_user_hash(),
                     run_timestamp=self.run_timestamp,
                     resources_str=resources_str,
-                    metadata=metadata,
-                    num_jobs=num_jobs)
+                    metadata=metadata)
                 response = backend_utils.invoke_skylet_with_retries(
-                    lambda: SkyletClient(handle.get_grpc_channel()).add_jobs(
+                    lambda: SkyletClient(handle.get_grpc_channel()).add_job(
                         request))
-
-                if response.HasField('job_ids'):
-                    job_ids = list(response.job_ids)
-                    log_dirs = list(response.log_dirs)
-                    return job_ids, log_dirs
-                else:
-                    # Old server version.
-                    # TODO(lloyd): Remove in version 0.13.0.
-                    job_ids = [response.job_id]
-                    log_dirs = [response.log_dir]
-                    # Now we need to do this (num_jobs - 1) times to get the
-                    # rest of the job_ids and log_dirs.
-                    for _ in range(num_jobs - 1):
-                        response = backend_utils.invoke_skylet_with_retries(
-                            lambda: SkyletClient(handle.get_grpc_channel()
-                                                ).add_jobs(request))
-                        job_ids.append(response.job_id)
-                        log_dirs.append(response.log_dir)
-                    return job_ids, log_dirs
+                job_id = response.job_id
+                log_dir = response.log_dir
+                return job_id, log_dir
             except exceptions.SkyletMethodNotImplementedError:
                 use_legacy = True
 
         if use_legacy:
-            code = job_lib.JobLibCodeGen.add_jobs(
+            code = job_lib.JobLibCodeGen.add_job(
                 job_name=job_name,
                 username=common_utils.get_user_hash(),
                 run_timestamp=self.run_timestamp,
                 resources_str=resources_str,
-                metadata=metadata,
-                num_jobs=num_jobs)
+                metadata=metadata)
             returncode, result_str, stderr = self.run_on_head(
                 handle,
                 code,
@@ -4522,26 +4502,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                'Failed to fetch job id.',
                                                stderr)
             try:
-                # Parse multiple job IDs and log dirs
-                job_ids_match = _JOB_IDS_PATTERN.search(result_str)
-                log_dirs_match = _LOG_DIRS_PATTERN.search(result_str)
-                if job_ids_match and log_dirs_match:
-                    job_ids = [
-                        int(x.strip())
-                        for x in job_ids_match.group(1).split(',')
-                    ]
-                    log_dirs = [
-                        x.strip() for x in log_dirs_match.group(1).split(',')
-                    ]
-                    return job_ids, log_dirs
+                job_id_match = _JOB_ID_PATTERN.search(result_str)
+                if job_id_match is not None:
+                    job_id = int(job_id_match.group(1))
                 else:
-                    raise ValueError(
-                        f'Failed to parse multiple job ids from: {result_str}')
+                    # For backward compatibility.
+                    job_id = int(result_str)
+                log_dir_match = _LOG_DIR_PATTERN.search(result_str)
+                if log_dir_match is not None:
+                    log_dir = log_dir_match.group(1).strip()
+                else:
+                    # For backward compatibility, use the same log dir as local.
+                    log_dir = self.log_dir
             except ValueError as e:
                 logger.error(stderr)
                 raise ValueError(f'Failed to parse job id: {result_str}; '
                                  f'Returncode: {returncode}') from e
-        return job_ids, log_dirs
+        return job_id, log_dir
 
     def set_job_info_without_job_id(self,
                                     handle: CloudVmRayResourceHandle,
@@ -4556,8 +4533,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                     resources_str: str,
                                     metadata_jsons: List[str],
                                     num_jobs: int = 1) -> List[int]:
-        """Set job info without creating entries in the jobs table (for managed jobs).
-        
+        """Set job info without creating entries in the jobs table.
+
         This creates entries in job_info_table and spot_table without creating
         entries in the jobs table, which prevents autostop from being blocked
         by jobs stuck in INIT status.
@@ -4676,10 +4653,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.info(f'Dryrun complete. Would have run:\n{task}')
             return None
 
-        job_ids, log_dirs = self.add_jobs(handle, task_copy.name, resources_str,
-                                          task.metadata_json)
-        job_id = job_ids[0]
-        log_dir = log_dirs[0]
+        job_id, log_dir = self._add_job(handle, task_copy.name, resources_str,
+                                        task.metadata_json)
 
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods

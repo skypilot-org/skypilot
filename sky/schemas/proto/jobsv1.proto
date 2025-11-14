@@ -43,21 +43,16 @@ enum JobStatus {
 }
 
 message AddJobRequest {
-  optional string job_name = 1; // Introduced in skylet version 18.
-  string username = 2; // Introduced in skylet version 18.
-  string run_timestamp = 3; // Introduced in skylet version 18.
-  string resources_str = 4; // Introduced in skylet version 18.
-  string metadata = 5; // Introduced in skylet version 18.
-  optional int32 num_jobs = 6; // Introduced in skylet version 26.
+  optional string job_name = 1;
+  string username = 2;
+  string run_timestamp = 3;
+  string resources_str = 4;
+  string metadata = 5;
 }
 
 message AddJobResponse {
-  // Deprecated, remove in version 0.13.0
-  optional int64 job_id = 1; // Introduced in skylet version 18.
-  // Deprecated, remove in version 0.13.0
-  optional string log_dir = 2; // Introduced in skylet version 18.
-  repeated int64 job_ids = 3; // Introduced in skylet version 26.
-  repeated string log_dirs = 4; // Introduced in skylet version 26.
+  int64 job_id = 1;
+  string log_dir = 2;
 }
 
 message QueueJobRequest {

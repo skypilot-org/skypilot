@@ -57,14 +57,12 @@ import filelock
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
-from sky.backends import backend_utils
 from sky.client import sdk
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants
 from sky.utils import controller_utils
-from sky.utils import dag_utils
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
