@@ -265,7 +265,7 @@ def is_consolidation_mode(on_api_restart: bool = False) -> bool:
     return consolidation_mode
 
 
-def ha_recovery_for_consolidation_mode():
+def ha_recovery_for_consolidation_mode() -> None:
     """Recovery logic for HA mode."""
     # Touch the signal file here to avoid conflict with
     # update_managed_jobs_statuses. Although we run this first and then start
