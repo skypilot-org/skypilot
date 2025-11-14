@@ -113,6 +113,8 @@ cleanup() {
                 2>/dev/null || true
         fi
     fi
+
+    sky api stop || true
 }
 
 # Set trap to cleanup on exit
