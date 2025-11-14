@@ -152,12 +152,32 @@ def check_capabilities(
 
         # filter out the clouds that are disabled in the workspace config
         workspace_disabled_clouds = []
+        workspace_cloud_capabilities: Dict[
+            str, List[sky_cloud.CloudCapability]] = {}
         for cloud in config_allowed_cloud_names:
             cloud_config = skypilot_config.get_workspace_cloud(
                 cloud, workspace=current_workspace_name)
             cloud_disabled = cloud_config.get('disabled', False)
             if cloud_disabled:
                 workspace_disabled_clouds.append(cloud)
+            else:
+                cloud_capabilities = cloud_config.get('capabilities', None)
+                if cloud_capabilities:
+                    # filter the capabilities to only the ones passed
+                    # in as argument to this function
+                    workspace_cloud_capabilities[cloud] = [
+                        sky_cloud.CloudCapability(capability.lower())
+                        for capability in cloud_capabilities
+                        if sky_cloud.CloudCapability(capability.lower()) in
+                        capabilities
+                    ]
+                    # mark capabilities that are not enabled
+                    # in the workspace config as disabled
+                    for capability in capabilities:
+                        if capability not in workspace_cloud_capabilities[
+                                cloud]:
+                            disabled_clouds.setdefault(cloud,
+                                                       []).append(capability)
 
         config_allowed_cloud_names = [
             c for c in config_allowed_cloud_names
@@ -177,7 +197,8 @@ def check_capabilities(
         for c in clouds_to_check:
             allowed = c[0] in config_allowed_cloud_names
             if allowed or check_explicit:
-                for capability in capabilities:
+                for capability in workspace_cloud_capabilities.get(
+                        c[0], capabilities):
                     combinations.append((c, capability, allowed))
 
         cloud2ctx2text: Dict[str, Dict[str, str]] = {}
