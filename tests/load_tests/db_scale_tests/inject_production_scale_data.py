@@ -39,20 +39,30 @@ def parse_sql_url(sql_url):
     """Parse a PostgreSQL connection URL and return connection parameters.
 
     Args:
-        sql_url: Connection URL in format postgresql://user:password@host:port/database
+        sql_url: Connection URL in format postgresql://user:password@host:port/database?sslmode=require
 
     Returns:
-        dict with keys: host, port, database, user, password
+        dict with keys: host, port, database, user, password, sslmode (if present)
     """
     parsed = urlparse(sql_url)
 
-    return {
+    params = {
         'host': parsed.hostname or 'localhost',
         'port': parsed.port or 5432,
         'database': parsed.path.lstrip('/') if parsed.path else 'skypilot',
         'user': unquote(parsed.username) if parsed.username else 'skypilot',
         'password': unquote(parsed.password) if parsed.password else ''
     }
+
+    # Parse query parameters (e.g., sslmode=require)
+    if parsed.query:
+        from urllib.parse import parse_qs
+        query_params = parse_qs(parsed.query)
+        for key, value_list in query_params.items():
+            if value_list:
+                params[key] = value_list[0]
+
+    return params
 
 
 class ProductionScaleGenerator(SampleBasedGenerator):
@@ -62,7 +72,9 @@ class ProductionScaleGenerator(SampleBasedGenerator):
                  active_cluster_name: str,
                  terminated_cluster_name: str,
                  managed_job_id: int,
-                 num_users: int = 10):
+                 num_users: int = 10,
+                 db_connection_getter=None,
+                 format_sql=None):
         """Initialize the generator.
 
         Args:
@@ -70,9 +82,14 @@ class ProductionScaleGenerator(SampleBasedGenerator):
             terminated_cluster_name: Name of a terminated cluster to use as template
             managed_job_id: Job ID of a managed job to use as template
             num_users: Number of users to simulate
+            db_connection_getter: Optional function to get database connection
+            format_sql: Optional function to format SQL queries
         """
-        super().__init__(active_cluster_name, terminated_cluster_name,
-                         managed_job_id)
+        super().__init__(active_cluster_name,
+                         terminated_cluster_name,
+                         managed_job_id,
+                         db_connection_getter=db_connection_getter,
+                         format_sql=format_sql)
         self.num_users = num_users
         self.user_hashes = [
             f"user-{i:02d}-{uuid.uuid4().hex[:8]}" for i in range(num_users)
@@ -222,7 +239,10 @@ class ProductionScaleTest(TestScale):
             active_cluster_name=active_cluster_name,
             terminated_cluster_name=terminated_cluster_name,
             managed_job_id=managed_job_id,
-            num_users=num_users)
+            num_users=num_users,
+            db_connection_getter=self._get_connection
+            if self.use_postgres else None,
+            format_sql=self._format_sql if self.use_postgres else None)
 
     def _get_connection(self, for_jobs=False):
         """Get a database connection (SQLite or PostgreSQL)."""
