@@ -282,17 +282,18 @@ For example, if ``global.imageRegistry`` is set to ``registry.example.com/custom
 
 Default: ``null``
 
+This override will only be applied to images defined in the SkyPilot chart; bundled subcharts such as ``ingress-nginx`` keep their own registry configuration. Refer to the documentations of subcharts for how to change them.
+
 .. code-block:: yaml
 
   global:
     imageRegistry: registry.example.com/custom
 
 
-
 .. _helm-values-global-imagePullSecrets:
 
 ``global.imagePullSecrets``
-^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Specify imagePullSecrets for all components in the chart.
 
