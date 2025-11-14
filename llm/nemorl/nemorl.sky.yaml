@@ -38,11 +38,11 @@ run: |
   sudo chmod 777 -R /var/tmp
   cd nemo-rl
 
-  # This script is only available on skypilot-nightly>=1.0.0.dev20251113
+  # This script is only available on skypilot-nightly>=1.0.0.dev20251114
   # If you are using an older version, you can copy and paste the script from:
-  # https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster.sh
+  # https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster
   export RAY_CMD="uv run ray"
-  ~/sky_templates/ray/start_cluster.sh
+  ~/sky_templates/ray/start_cluster
 
 
   num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`

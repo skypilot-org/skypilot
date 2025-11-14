@@ -255,7 +255,8 @@ COPY_SKYPILOT_TEMPLATES_COMMANDS = (
     'shutil.copytree(src, dst, dirs_exist_ok=True); '
     'print(f\"Templates copied successfully\")\'; '
     # Make scripts executable.
-    'find ~/sky_templates -name "*.sh" -type f -exec chmod +x {} \\; ')
+    'find ~/sky_templates -type f ! -name "*.py" ! -name "*.md" '
+    '-exec chmod +x {} \\; ')
 
 SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     f'{SKY_UV_INSTALL_CMD};'

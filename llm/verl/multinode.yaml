@@ -111,15 +111,15 @@ run: |
     python3 -c "import transformers; transformers.pipeline('text-generation', model='Qwen/Qwen2.5-0.5B-Instruct')"
   fi
 
-  # This script is only available on skypilot-nightly>=1.0.0.dev20251113
+  # This script is only available on skypilot-nightly>=1.0.0.dev20251114
   # If you are using an older version, you can copy and paste the script from:
-  # https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster.sh
+  # https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster
   export RAY_HEAD_PORT=6385
   export RAY_DASHBOARD_PORT=8280
   export RAY_DASHBOARD_HOST=0.0.0.0
   export RAY_DASHBOARD_AGENT_LISTEN_PORT=52366
   export RAY_HEAD_IP_ADDRESS="$head_ip"
-  ~/sky_templates/ray/start_cluster.sh
+  ~/sky_templates/ray/start_cluster
 
   # Head node: submit training job
   if [ "$SKYPILOT_NODE_RANK" == "0" ]; then

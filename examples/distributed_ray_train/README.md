@@ -4,11 +4,11 @@ This example shows how to launch distributed Ray jobs with SkyPilot.
 
 ## Setting Up Your Ray Cluster
 
-SkyPilot provides templates for common workloads, such as Ray: [~/sky_templates/ray/start_cluster.sh](https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster.sh) will be available on SkyPilot clusters, and will set up a Ray cluster for your workloads. Simply call it in your task's `run` commands:
+SkyPilot provides templates for common workloads, such as Ray: [~/sky_templates/ray/start_cluster](https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster) will be available on SkyPilot clusters, and will set up a Ray cluster for your workloads. Simply call it in your task's `run` commands:
 
 ```bash
 run: |
-  ~/sky_templates/ray/start_cluster.sh
+  ~/sky_templates/ray/start_cluster
 ```
 
 Under the hood, this script automatically:
@@ -37,7 +37,7 @@ Customize the Ray cluster by setting environment variables before calling `start
 Stop your Ray cluster with:
 
 ```bash
-~/sky_templates/ray/stop_cluster.sh
+~/sky_templates/ray/stop_cluster
 ```
 
 Do not use `ray stop` directly, as it may interfere with SkyPilot's cluster management.
@@ -54,7 +54,7 @@ wget https://raw.githubusercontent.com/skypilot-org/skypilot/master/examples/dis
 sky launch -c ray-train --num-nodes 4 ray_train.yaml
 
 # To stop the Ray cluster
-sky exec ray-train --num-nodes 4 'RAY_CMD=~/sky_workdir/.venv/bin/ray ~/sky_templates/ray/stop_cluster.sh'
+sky exec ray-train --num-nodes 4 'RAY_CMD=~/sky_workdir/.venv/bin/ray ~/sky_templates/ray/stop_cluster'
 ```
 
 ## Important: Ray Runtime Best Practices

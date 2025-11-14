@@ -28,10 +28,10 @@ run: |
   echo "Starting Ray..."
   sudo chmod 777 -R /var/tmp
 
-  # This script is only available on skypilot-nightly>=1.0.0.dev20251113
+  # This script is only available on skypilot-nightly>=1.0.0.dev20251114
   # If you are using an older version, you can copy and paste the script from:
-  # https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster.sh
-  ~/sky_templates/ray/start_cluster.sh
+  # https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster
+  ~/sky_templates/ray/start_cluster
 
   echo 'Starting vllm api server...'
 
