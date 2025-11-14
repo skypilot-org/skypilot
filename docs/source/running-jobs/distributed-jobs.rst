@@ -146,25 +146,15 @@ SSH access is only available for :ref:`clusters <dev-cluster>` (designed for int
 Executing a distributed Ray program
 ------------------------------------
 
-.. note::
+**Best practices for Ray on SkyPilot:**
 
-   **Important**: Always start your own Ray cluster for user workloads. SkyPilot uses Ray internally on port 6380 for cluster management. The example below starts a separate Ray cluster on port 6379.
+- **Do:** Use SkyPilot's ``~/sky_templates/ray/start_cluster.sh`` script to automatically set up your Ray cluster
+- **Do:** Use ``ray.init()`` or ``ray.init(address="localhost:6379")`` for explicit connection
+- **Avoid:** ``ray.init(address="auto")`` - While it typically connects to your user cluster when available, the behavior can be unpredictable
+- **Never:** Call ``ray stop`` - It may interfere with SkyPilot operations
+- **Do:** Instead, to stop your Ray cluster, use ``~/sky_templates/ray/stop_cluster.sh`` or kill the Ray processes directly
 
-   **Best practices for Ray on SkyPilot:**
-
-   - **Do:** Use SkyPilot's ``~/sky_templates/ray/start_cluster.sh`` script to automatically set up your Ray cluster
-   - **Do:** Use ``ray.init()`` or ``ray.init(address="localhost:6379")`` for explicit connection
-   - **Avoid:** ``ray.init(address="auto")`` - While it typically connects to your user cluster when available, the behavior can be unpredictable
-   - **Never:** Call ``ray stop`` - It may interfere with SkyPilot operations
-
-   **To stop your Ray cluster**, use ``~/sky_templates/ray/stop_cluster.sh`` or kill the Ray processes directly:
-
-   .. code-block:: bash
-
-      # Kill all Ray processes on port 6379 (user's Ray cluster)
-      pkill -f "ray.*[=:]6379"
-
-   See :doc:`Ray training example </examples/training/ray>` for more details.
+See :doc:`Ray training example </examples/training/ray>` for more details.
 
 To execute a distributed Ray program on many nodes, download the `training script <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/train.py>`_ and launch the `job yaml <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/ray_train.yaml>`_:
 
@@ -179,6 +169,7 @@ To execute a distributed Ray program on many nodes, download the `training scrip
   $ sky jobs launch ray_train.yaml
 
 .. code-block:: yaml
+   :emphasize-lines: 24
 
     resources:
       accelerators: L4:2
@@ -209,3 +200,12 @@ To execute a distributed Ray program on many nodes, download the `training scrip
       if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
         python train.py --num-workers $num_nodes
       fi
+
+SkyPilot provides templates for common workloads. The following scripts are available for Ray:
+
+- ``~/sky_templates/ray/start_cluster.sh``: starts a Ray cluster on your SkyPilot cluster
+- ``~/sky_templates/ray/stop_cluster.sh``: shuts down the Ray cluster; prefer this to calling ``ray stop``
+
+.. note::
+
+   **Important**: Always start your own Ray cluster for user workloads. SkyPilot uses Ray internally on port 6380 for cluster management. The example above starts a separate Ray cluster on port 6379.

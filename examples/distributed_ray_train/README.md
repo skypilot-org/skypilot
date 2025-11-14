@@ -2,18 +2,13 @@
 
 This example shows how to launch distributed Ray jobs with SkyPilot.
 
-## Important: Ray Runtime Best Practices
-
-SkyPilot uses Ray internally on port 6380 for cluster management. So when running your own Ray applications, you need to start a separate Ray
-cluster on a different port (e.g. 6379 is the default) to avoid conflicts. Do not use `ray.init(address="auto")` as it would connect to
-SkyPilot’s internal cluster, causing resource conflicts.
-
 ## Setting Up Your Ray Cluster
 
-SkyPilot provides a [start_cluster.sh](https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster.sh) script that sets up a Ray cluster for your workloads. Simply call it in your task's `run` commands:
+SkyPilot provides templates for common workloads, such as Ray: [~/sky_templates/ray/start_cluster.sh](https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster.sh) will be available on SkyPilot clusters, and will set up a Ray cluster for your workloads. Simply call it in your task's `run` commands:
 
 ```bash
-~/sky_templates/ray/start_cluster.sh
+run: |
+  ~/sky_templates/ray/start_cluster.sh
 ```
 
 Under the hood, this script automatically:
@@ -56,5 +51,14 @@ To restart, simply run `start_cluster.sh` again. The script detects if Ray is al
 wget https://raw.githubusercontent.com/skypilot-org/skypilot/master/examples/distributed_ray_train/train.py
 
 # Launch on a cluster
-sky launch -c ray-train ray_train.yaml
+sky launch -c ray-train --num-nodes 4 ray_train.yaml
+
+# To stop the Ray cluster
+sky exec ray-train --num-nodes 4 'RAY_CMD=~/sky_workdir/.venv/bin/ray ~/sky_templates/ray/stop_cluster.sh'
 ```
+
+## Important: Ray Runtime Best Practices
+
+SkyPilot uses Ray internally on port 6380 for cluster management. So when running your own Ray applications, you need to start a separate Ray
+cluster on a different port (e.g. 6379 is the default) to avoid conflicts. Do not use `ray.init(address="auto")` as it would connect to
+SkyPilot’s internal cluster, causing resource conflicts.
