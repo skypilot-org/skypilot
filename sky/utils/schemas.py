@@ -1664,7 +1664,14 @@ def get_config_schema():
                         },
                         'disabled': {
                             'type': 'boolean'
-                        }
+                        },
+                        'capabilities': {
+                            'type': 'array',
+                            'items': {
+                                'type': 'string',
+                                'case_insensitive_enum': ['compute', 'storage']
+                            },
+                        },
                     },
                     'additionalProperties': False,
                 },
@@ -1676,6 +1683,13 @@ def get_config_schema():
                         },
                         'disabled': {
                             'type': 'boolean'
+                        },
+                        'capabilities': {
+                            'type': 'array',
+                            'items': {
+                                'type': 'string',
+                                'case_insensitive_enum': ['compute', 'storage']
+                            },
                         },
                     },
                     'additionalProperties': False,
