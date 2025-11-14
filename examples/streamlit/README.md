@@ -2,6 +2,8 @@
 
 Deploy your Streamlit app with SkyPilot.
 
+![Streamlit Demo](image.png)
+
 ## Quick start
 
 Launch the app using `streamlit.sky.yaml`:
