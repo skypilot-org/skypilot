@@ -1807,7 +1807,7 @@ def test_kubernetes_pod_long_image_pull():
         'kubernetes_pod_long_image_pull',
         [
             # Use a large image, for example CUDA runtime.
-            f'sky launch -y -c {name} --infra kubernetes --image-id docker:nvidia/cuda:13.0.1-runtime-ubuntu24.04',
+            f'sky launch -y -c {name} --infra kubernetes --num-nodes 3 --image-id docker:nvidia/cuda:13.0.1-runtime-ubuntu24.04',
             f's=$(sky logs --provision {name} --no-follow 2>&1); echo "$s"; echo; '
             f'echo "$s" | grep "is pending: Pulling: Pulling image"'
         ],

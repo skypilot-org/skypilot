@@ -573,6 +573,7 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
             continue
 
         all_pods_running = True
+        pending_reasons_count = {}
         for pod in all_pods:
             if pod.metadata.name not in expected_pod_names:
                 continue
@@ -597,7 +598,6 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                 continue
 
             all_pods_running = False
-            pending_reasons_count = {}
             if pod.status.phase == 'Pending':
                 pending_reason = _get_pod_pending_reason(
                     context, namespace, pod.metadata.name)
@@ -625,9 +625,6 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                             raise config_lib.KubernetesError(
                                 'Failed to create container while launching '
                                 f'the node. Error details: {msg}.')
-            # Reaching this point means that one of the pods had an issue,
-            # so break out of the loop, and wait until next second.
-            break
 
         if all_pods_running:
             break
