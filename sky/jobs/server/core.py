@@ -41,6 +41,7 @@ from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import rich_utils
@@ -48,6 +49,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
@@ -367,6 +369,30 @@ def launch(
     modified_catalogs = {} if consolidation_mode_job_ids is not None else (
         service_catalog_common.get_modified_catalog_file_mounts())
 
+    # Create a temporary config file with the workspaces section from the
+    # API server's config. This is only needed for non-consolidation mode.
+    # In consolidation mode, the controller uses the same config as API server.
+    mutated_local_api_server_config_path = None
+
+    if consolidation_mode_job_ids is None:
+        server_config = skypilot_config.get_server_config()
+        mutated_local_api_server_config = config_utils.Config.from_dict({})
+
+        # currently, we only pass the workspaces section of the skypilot api
+        # server config to the jobs controller's local api server config
+        workspaces = server_config.get_nested(('workspaces',), default_value={})
+        mutated_local_api_server_config.set_nested(('workspaces',), workspaces)
+
+        logger.debug(f'ROHANDEBUG: mutated_local_api_server_config: '
+                     f'{mutated_local_api_server_config}')
+        with tempfile.NamedTemporaryFile(prefix='jobs-controller-config-',
+                                         suffix='.yaml',
+                                         mode='w',
+                                         delete=False) as config_file:
+            config_as_plain_dict = dict(mutated_local_api_server_config)
+            yaml_utils.dump_yaml(config_file.name, config_as_plain_dict)
+            mutated_local_api_server_config_path = config_file.name
+
     def _submit_one(
         consolidation_mode_job_id: Optional[int] = None,
         job_rank: Optional[int] = None,
@@ -420,6 +446,8 @@ def launch(
                 'pool': pool,
                 'job_controller_indicator_file':
                     managed_job_constants.JOB_CONTROLLER_INDICATOR_FILE,
+                'mutated_local_api_server_config_path':
+                    (mutated_local_api_server_config_path),
                 **controller_utils.shared_controller_vars_to_fill(
                     controller,
                     remote_user_config_path=remote_user_config_path,

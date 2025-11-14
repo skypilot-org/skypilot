@@ -15,7 +15,7 @@ file_mounts:
   {{controller_file_mount_path}}: {{local_file_mount_path}}
   {%- endfor %}
   {%- if consolidation_mode_job_id is none %}
-  {{ '~/.sky/config.yaml' }}: {{ '~/.sky/config.yaml' }}
+  {{ '~/.sky/config.yaml' }}: {{ mutated_local_api_server_config_path }}
   {%- endif %}
 
 # NOTE(dev): This needs to be a subset of sky/templates/sky-serve-controller.yaml.j2.
