@@ -15,7 +15,7 @@ workdir:
 
 # Set secrets
 secrets:
-  WANDB_API_KEY: ""
+  WANDB_API_KEY: null
 
 envs:
   LOGGER: "wandb" # change to "console" to print to stdout
@@ -51,7 +51,7 @@ run: |
   DATA_DIR="$HOME/data/gsm8k"
 
   # Login to Weights & Biases once the secrets are available.
-  # uv run -- python3 -c "import wandb; wandb.login(relogin=True, key='$WANDB_API_KEY')"
+  uv run -- python3 -c "import wandb; wandb.login(relogin=True, key='$WANDB_API_KEY')"
 
   wait_for_ray() {
     local address=$1
