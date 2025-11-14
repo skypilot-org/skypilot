@@ -116,7 +116,7 @@ cleanup() {
 }
 
 # Set trap to cleanup on exit
-# trap cleanup EXIT
+trap cleanup EXIT
 
 echo "=========================================="
 echo "Large Production Performance Test"
