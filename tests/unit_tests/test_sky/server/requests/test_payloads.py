@@ -8,7 +8,6 @@ from sky.usage import usage_lib
 def test_request_body_env_vars_includes_expected_keys(monkeypatch):
     monkeypatch.setattr(usage_lib.messages.usage, 'run_id', 'run-id')
 
-    skypilot_env = f'{constants.SKYPILOT_ENV_VAR_PREFIX}FOO'
     server_env = f'{constants.SKYPILOT_SERVER_ENV_VAR_PREFIX}BAR'
     monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
                        '/tmp/config.yaml')
@@ -25,6 +24,7 @@ def test_request_body_env_vars_includes_expected_keys(monkeypatch):
     assert local_env[
         skypilot_config.ENV_VAR_SKYPILOT_CONFIG] == '/tmp/config.yaml'
     assert constants.ENV_VAR_DB_CONNECTION_URI not in local_env
+    assert skypilot_config.ENV_VAR_PROJECT_CONFIG not in local_env
 
     payloads.request_body_env_vars.cache_clear()
     monkeypatch.setattr(payloads.common, 'is_api_server_local', lambda: False)
