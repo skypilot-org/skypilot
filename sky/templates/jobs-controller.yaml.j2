@@ -59,8 +59,6 @@ run: |
 
   # Submit the job(s) to the scheduler.
   # Note: The job is already in the `spot` table, marked as PENDING.
-  # CloudVmRayBackend._exec_code_on_head() calls
-  # managed_job_codegen.set_pending() before we get here.
   {%- if job_ids is defined and job_ids is not none %}
   job_ids_array=({% for job_id in job_ids %}{{job_id}} {% endfor %})
   # Create a space-separated string of job IDs
