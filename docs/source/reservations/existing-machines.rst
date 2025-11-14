@@ -92,10 +92,6 @@ Equivalently, use ``resources.infra: ssh/<node_pool_name>`` in a task YAML:
 
 See more customization options and details about SSH Node Pools in the rest of this guide.
 
-.. tip::
-
-    When working with VMs with GPUs, the VMs must have `nvidia-smi` installed.
-
 .. _defining-ssh-node-pools:
 
 Defining SSH Node Pools
@@ -343,7 +339,8 @@ Details: Prerequisites
 
 **Remote machines:**
 
-* Debian-based OS (tested on Debian 11)
-* SSH access from SkyPilot API server host to all remote machines
+* Debian-based OS (tested on Debian 11).
+* SSH access from SkyPilot API server host to all remote machines.
 * All nodes within a SSH Node Pool must have access to port 6443 to its peers (e.g., same VPC). Port 6443 doesn't have to be open to machines outside of the network.
-* Nodes should not be part of an existing Kubernetes cluster (use :ref:`Kubernetes Support <kubernetes-overview>` instead)
+* Nodes should not be part of an existing Kubernetes cluster (use :ref:`Kubernetes Support <kubernetes-overview>` instead).
+* When working with GPU instances, GPU drivers must be installed on the host. Verify by running ``nvidia-smi``.
