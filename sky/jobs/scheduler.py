@@ -280,17 +280,6 @@ def submit_jobs(job_ids: List[int],
     The user hash should be set (e.g. via SKYPILOT_USER_ID) before calling this.
     """
     # Load DAG to get task information for setting job_info and pending state
-    dag = dag_utils.load_chain_dag_from_yaml(dag_yaml_path)
-    dag_name = dag.name or 'unnamed-job'
-
-    # Get workspace and entrypoint from environment or use defaults
-    workspace = skypilot_config.get_active_workspace(force_user_workspace=True)
-    entrypoint = common_utils.get_current_command()
-    user_hash = common_utils.get_user_hash()
-    pool_hash = None
-    if pool is not None:
-        pool_hash = serve_state.get_service_hash(pool)
-
     for job_id in job_ids:
         controller_pid = state.get_job_controller_pid(job_id)
         if controller_pid is not None:
@@ -304,29 +293,6 @@ def submit_jobs(job_ids: List[int],
                     f'Job {job_id} is still alive, skipping submission')
                 maybe_start_controllers(from_scheduler=True)
                 continue
-
-        # Set job_info if it doesn't exist (for pre-created job IDs)
-        # Check if job_info exists by trying to get schedule state
-        try:
-            state.get_job_schedule_state(job_id)
-            # Job info exists, skip creation
-        except (IndexError, TypeError):
-            # # Job info doesn't exist, create it
-            # state.set_job_info(job_id=job_id,
-            #                    name=dag_name,
-            #                    workspace=workspace,
-            #                    entrypoint=entrypoint,
-            #                    pool=pool,
-            #                    pool_hash=pool_hash,
-            #                    user_hash=user_hash)
-
-            # # Set pending state for each task
-            # for task_id, task in enumerate(dag.tasks):
-            #     resources_str = backend_utils.get_task_resources_str(
-            #         task, is_managed_job=True)
-            #     state.set_pending(job_id, task_id, task.name, resources_str,
-            #                       task.metadata_json)
-            pass
 
     with open(dag_yaml_path, 'r', encoding='utf-8') as dag_file:
         dag_yaml_content = dag_file.read()

@@ -4412,29 +4412,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 _dump_code_to_file(codegen)
                 job_submit_cmd = f'{mkdir_code} && {code}'
 
-            def _maybe_add_managed_job_code(job_submit_cmd: str) -> str:
-                #if managed_job_dag is not None:
-                    # Add the managed job to job queue database.
-                    # managed_job_codegen = managed_jobs.ManagedJobCodeGen()
-                    # managed_job_code = managed_job_codegen.set_pending(
-                    #     job_id,
-                    #     managed_job_dag,
-                    #     skypilot_config.get_active_workspace(
-                    #         force_user_workspace=True),
-                    #     entrypoint=common_utils.get_current_command(),
-                    #     user_hash=managed_job_user_id)
-                    # Set the managed job to PENDING state to make sure that
-                    # this managed job appears in the `sky jobs queue`, even
-                    # if it needs to wait to be submitted.
-                    # We cannot set the managed job to PENDING state in the
-                    # job template (jobs-controller.yaml.j2), as it may need
-                    # to wait for the run commands to be scheduled on the job
-                    # controller in high-load cases.
-                    # job_submit_cmd += ' && ' + managed_job_code
-                return job_submit_cmd
-
-            job_submit_cmd = _maybe_add_managed_job_code(job_submit_cmd)
-
             returncode, stdout, stderr = self.run_on_head(handle,
                                                           job_submit_cmd,
                                                           stream_logs=False,
@@ -4454,7 +4431,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'Output: {output}')
                 _dump_code_to_file(codegen)
                 job_submit_cmd = f'{mkdir_code} && {code}'
-                job_submit_cmd = _maybe_add_managed_job_code(job_submit_cmd)
                 returncode, stdout, stderr = self.run_on_head(
                     handle,
                     job_submit_cmd,
@@ -4562,20 +4538,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                  f'Returncode: {returncode}') from e
         return job_ids, log_dirs
 
-    def set_job_info_without_job_id(
-            self,
-            handle: CloudVmRayResourceHandle,
-            name: str,
-            workspace: str,
-            entrypoint: str,
-            pool: Optional[str],
-            pool_hash: Optional[str],
-            user_hash: Optional[str],
-            task_ids: List[int],
-            task_names: List[str],
-            resources_str: str,
-            metadata_jsons: List[str],
-            num_jobs: int = 1) -> List[int]:
+    def set_job_info_without_job_id(self,
+                                    handle: CloudVmRayResourceHandle,
+                                    name: str,
+                                    workspace: str,
+                                    entrypoint: str,
+                                    pool: Optional[str],
+                                    pool_hash: Optional[str],
+                                    user_hash: Optional[str],
+                                    task_ids: List[int],
+                                    task_names: List[str],
+                                    resources_str: str,
+                                    metadata_jsons: List[str],
+                                    num_jobs: int = 1) -> List[int]:
         """Set job info without creating entries in the jobs table (for managed jobs).
         
         This creates entries in job_info_table and spot_table without creating
@@ -4600,7 +4575,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     num_jobs=num_jobs)
                 response = backend_utils.invoke_skylet_with_retries(
                     lambda: SkyletClient(handle.get_grpc_channel()
-                                         ).set_job_info_without_job_id(request))
+                                        ).set_job_info_without_job_id(request))
                 return list(response.job_ids)
             except exceptions.SkyletMethodNotImplementedError:
                 use_legacy = True
@@ -4645,6 +4620,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 logger.error(stderr)
                 raise ValueError(f'Failed to parse job id: {result_str}; '
                                  f'Returncode: {returncode}') from e
+        return []
 
     def _execute(
         self,

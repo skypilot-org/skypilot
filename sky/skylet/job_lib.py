@@ -1185,24 +1185,27 @@ class JobLibCodeGen:
 
     @classmethod
     def set_job_info_without_job_id(cls,
-                                     name: str,
-                                     workspace: str,
-                                     entrypoint: str,
-                                     pool: Optional[str],
-                                     pool_hash: Optional[str],
-                                     user_hash: Optional[str],
-                                     task_ids: List[int],
-                                     task_names: List[str],
-                                     resources_str: str,
-                                     metadata_jsons: List[str],
-                                     num_jobs: int = 1) -> str:
+                                    name: str,
+                                    workspace: str,
+                                    entrypoint: str,
+                                    pool: Optional[str],
+                                    pool_hash: Optional[str],
+                                    user_hash: Optional[str],
+                                    task_ids: List[int],
+                                    task_names: List[str],
+                                    resources_str: str,
+                                    metadata_jsons: List[str],
+                                    num_jobs: int = 1) -> str:
         pool_str = f'{pool!r}' if pool is not None else 'None'
         pool_hash_str = f'{pool_hash!r}' if pool_hash is not None else 'None'
         user_hash_str = f'{user_hash!r}' if user_hash is not None else 'None'
         # Build the tasks data as Python code
         task_ids_str = '[' + ','.join(str(tid) for tid in task_ids) + ']'
-        task_names_str = '[' + ','.join(f'{name!r}' for name in task_names) + ']'
-        metadata_jsons_str = '[' + ','.join(f'{md!r}' for md in metadata_jsons) + ']'
+        task_names_str = ('[' + ','.join(f'{name!r}' for name in task_names) +
+                          ']')
+        metadata_jsons_str = ('[' +
+                              ','.join(f'{md!r}' for md in metadata_jsons) +
+                              ']')
         code = [
             '\nfrom sky.jobs import state as managed_job_state',
             f'\nnum_jobs = {num_jobs}',

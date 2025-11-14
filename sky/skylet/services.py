@@ -249,12 +249,15 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     def SetJobInfoWithoutJobId(  # type: ignore[return]
-            self, request: jobsv1_pb2.SetJobInfoWithoutJobIdRequest,
-            context: grpc.ServicerContext) -> jobsv1_pb2.SetJobInfoWithoutJobIdResponse:
+        self, request: jobsv1_pb2.SetJobInfoWithoutJobIdRequest,
+        context: grpc.ServicerContext
+    ) -> jobsv1_pb2.SetJobInfoWithoutJobIdResponse:
         try:
             pool = request.pool if request.HasField('pool') else None
-            pool_hash = request.pool_hash if request.HasField('pool_hash') else None
-            user_hash = request.user_hash if request.HasField('user_hash') else None
+            pool_hash = request.pool_hash if request.HasField(
+                'pool_hash') else None
+            user_hash = request.user_hash if request.HasField(
+                'user_hash') else None
             job_ids = []
             for _ in range(request.num_jobs):
                 job_id = managed_job_state.set_job_info_without_job_id(
@@ -269,9 +272,9 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                 for task_id, task_name, metadata_json in zip(
                         request.task_ids, request.task_names,
                         request.metadata_jsons):
-                    managed_job_state.set_pending(
-                        job_id, task_id, task_name, request.resources_str,
-                        metadata_json)
+                    managed_job_state.set_pending(job_id, task_id, task_name,
+                                                  request.resources_str,
+                                                  metadata_json)
             return jobsv1_pb2.SetJobInfoWithoutJobIdResponse(job_ids=job_ids)
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
