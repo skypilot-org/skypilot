@@ -1140,15 +1140,8 @@ class SkyPilotReplicaManager(ReplicaManager):
         if self.least_recent_version < current_least_recent_version:
             for version in range(self.least_recent_version,
                                  current_least_recent_version):
-                yaml_content = serve_state.get_yaml_content(
+                yaml_content = serve_utils.get_yaml_content(
                     self._service_name, version)
-                # Backward compatibility for old service records that
-                # does not dump the yaml content to version database.
-                if yaml_content is None:
-                    task_yaml = serve_utils.generate_task_yaml_file_name(
-                        self._service_name, version)
-                    with open(task_yaml, 'r', encoding='utf-8') as f:
-                        yaml_content = f.read()
                 # Delete old version metadata.
                 serve_state.delete_version(self._service_name, version)
                 # Delete storage buckets of older versions.

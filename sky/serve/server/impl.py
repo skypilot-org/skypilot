@@ -510,8 +510,7 @@ def update(
         yaml_content = service_record['yaml_content']
 
         # Load the existing task configuration
-        existing_config = yaml_utils.read_yaml_str(yaml_content)
-        task = task_lib.Task.from_yaml_config(existing_config)
+        task = task_lib.Task.from_yaml_str(yaml_content)
 
         if task.service is None:
             with ux_utils.print_exception_no_traceback():

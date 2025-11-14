@@ -240,6 +240,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
         yaml_content = service['yaml_content']
         # Backward compatibility for old service records that
         # does not dump the yaml content to version database.
+        # TODO(tian): Remove this after 2 minor releases, i.e. 0.13.0.
         if yaml_content is None:
             yaml_content = _read_yaml_content(tmp_task_yaml)
     else:
