@@ -17,6 +17,17 @@ The scale tests help understand performance bottlenecks and database query perfo
 
 The tests will add many entries to these tables during execution but will clean up automatically at the end.
 
+ **PostgreSQL Testing**: The `test_large_production_performance.sh` script supports testing with AWS RDS PostgreSQL database. When using the `--postgres` flag, the script will:
+- Create an AWS RDS PostgreSQL instance (named `skypilot-large-production-test-db`)
+- Configure the SkyPilot API server to use the PostgreSQL database
+- Automatically restart the API server with the database connection
+- Clean up the RDS instance on test completion
+
+**Prerequisites for PostgreSQL Testing:**
+- AWS CLI installed and configured with appropriate credentials
+- AWS account with permissions to create/delete RDS instances
+- Default VPC with at least 2 subnets in different availability zones
+
 ## Prerequisites
 
 Before running scale tests, you **must**:
@@ -320,6 +331,44 @@ The `--cleanup` flag removes all production-scale data that was injected:
 Unlike clusters which have predictable name patterns (`prod-cluster-*`), managed jobs are identified by their `job_id`. The cleanup script needs to know which job ID was used as the template to delete all jobs created after it. If you don't remember the template job ID, you can skip job cleanup by omitting `--managed-job-id` - clusters, history, and events will still be cleaned up.
 
 **Note**: This script injects large amounts of data and may take significant time to complete. Use `--cleanup` to remove all injected data when done testing.
+
+## Running Production Performance Test
+
+The `test_large_production_performance.sh` script runs a complete production-scale performance test that:
+- Creates sample clusters and managed jobs
+- Injects production-scale data (12,501 clusters, 12,500 managed jobs)
+- Tests performance of `sky status` and `sky jobs queue` commands
+- Automatically cleans up all test data
+
+### Usage
+
+```bash
+# Run with SQLite (default, local database)
+bash tests/load_tests/db_scale_tests/test_large_production_performance.sh
+
+# Run with PostgreSQL database (creates AWS RDS instance)
+bash tests/load_tests/db_scale_tests/test_large_production_performance.sh --postgres --restart-api-server
+
+# Run with consolidation mode config only (no PostgreSQL)
+bash tests/load_tests/db_scale_tests/test_large_production_performance.sh --restart-api-server
+```
+
+**Options:**
+- `--postgres` - Create AWS RDS PostgreSQL database and configure API server to use it. Automatically enables `--restart-api-server`.
+- `--restart-api-server` - Restart the API server with consolidation mode config (`tests/test_yamls/consolidation_mode_config.yaml`)
+
+**Note:** When `--postgres` is used, the script will:
+1. Create an AWS RDS PostgreSQL instance (`skypilot-large-production-test-db`)
+2. Export `SKYPILOT_DB_CONNECTION_URI` environment variable
+3. Automatically set `--restart-api-server` flag
+4. Restart the API server once with both the database connection and consolidation mode config
+5. Clean up the RDS instance on script exit
+
+**PostgreSQL Requirements:**
+- AWS CLI installed and configured
+- AWS credentials with RDS permissions
+- Default VPC with at least 2 subnets in different availability zones
+- Region can be specified via `AWS_REGION` environment variable (default: `us-east-1`)
 
 ## Future Enhancements
 
