@@ -208,20 +208,21 @@ class PVCVolumeTable(VolumeTable):
         """Create the PVC volume table."""
         #  If show_all is False, show the table with the columns:
         #   NAME, TYPE, INFRA, SIZE, USER, WORKSPACE,
-        #   AGE, STATUS, LAST_USE, USED_BY
+        #   AGE, STATUS, LAST_USE, USED_BY, IS_EPHEMERAL
         #  If show_all is True, show the table with the columns:
         #   NAME, TYPE, INFRA, SIZE, USER, WORKSPACE,
-        #   AGE, STATUS, LAST_USE, USED_BY, NAME_ON_CLOUD
+        #   AGE, STATUS, LAST_USE, USED_BY, IS_EPHEMERAL, NAME_ON_CLOUD
         #   STORAGE_CLASS, ACCESS_MODE
 
+        columns = _BASIC_COLUMNS + [
+            'IS_EPHEMERAL',
+        ]
         if show_all:
-            columns = _BASIC_COLUMNS + [
+            columns = columns + [
                 'NAME_ON_CLOUD',
                 'STORAGE_CLASS',
                 'ACCESS_MODE',
             ]
-        else:
-            columns = _BASIC_COLUMNS
 
         table = log_utils.create_table(columns)
         return table
@@ -232,6 +233,7 @@ class PVCVolumeTable(VolumeTable):
         """Add rows to the PVC volume table."""
         for row in volumes:
             table_row = self._get_row_base_columns(row, show_all)
+            table_row.append(row.get('is_ephemeral', False))
             if show_all:
                 table_row.append(row.get('name_on_cloud', ''))
                 table_row.append(
