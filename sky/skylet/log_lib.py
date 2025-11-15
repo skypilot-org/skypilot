@@ -9,6 +9,8 @@ import io
 import multiprocessing.pool
 import os
 import queue as queue_lib
+import re
+import select
 import shlex
 import subprocess
 import sys
@@ -27,12 +29,16 @@ from sky.skylet import job_lib
 from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import log_utils
+from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 SKY_LOG_WAITING_GAP_SECONDS = 1
 SKY_LOG_WAITING_MAX_RETRY = 5
 SKY_LOG_TAILING_GAP_SECONDS = 0.2
+
+SKY_LOG_SETUP_SPINNER_TIMEOUT = 60
+SKY_LOG_SETUP_SPINNER_STALL_INTERVAL = 5
 # Peek the head of the lines to check if we need to start
 # streaming when tail > 0.
 PEEK_HEAD_LINES_FOR_START_STREAM = 20
@@ -462,11 +468,152 @@ def _should_stream_the_whole_tail_lines(head_lines_of_log_file: List[str],
     return False
 
 
+def _setup_watcher(log_file: TextIO, setup_output_iterator: Iterator[str],
+                   cluster_name: Optional[str], num_nodes: int,
+                   job_id: int) -> bool:
+    """Watch the setup logs and print logs with a spinner during setup."""
+
+    # The logic of this function is complicated by the fact that during
+    # detached setup the setup logs and the runtime logs are interleaved. That
+    # means we need to parse the logs until we see the first setup log, and then
+    # parse using a spinner until setup is complete.
+
+    # Setup line format: (setup pid=<pid>) <message> or
+    # (setup pid=<pid>, ip=<ip>) <message>
+    # Use regex to parse the line.
+    setup_line_pattern = r'\(setup pid=(\d+)(?:, ip=\S+)?\) (.*)'
+
+    def parse_setup_line(line: str) -> Tuple[str, str]:
+        # Attempt to match the two patterns. Return all None if failed, but
+        # don't error out in case it's just a version change.
+        # Remove all ANSI escape codes.
+        line = re.sub(r'\x1b\[[0-9;]*m', '', line)
+        match = re.match(setup_line_pattern, line)
+        if match:
+            pid = match.group(1)
+            message = match.group(2)
+            return pid, message
+        logger.debug(f'Failed to parse setup line: {line}')
+        return None, None
+
+    def is_setup_line(line: str) -> bool:
+        return '(setup' in line
+
+    def is_setup_complete(line: str) -> bool:
+        return 'Setup complete' == line
+
+    def is_setup_error(line: str) -> bool:
+        if line.startswith('ERROR:'):
+            print(line, end='', flush=True)
+            return True
+        return False
+
+    def get_next_non_blocking() -> Optional[str]:
+        nonlocal log_file
+        fd = log_file.fileno()
+        ready, _, _ = select.select([fd], [], [], 1.0)
+        if ready:
+            res = log_file.readline()
+            if res == '':
+                time.sleep(1)
+                return None
+            return res
+        else:
+            return None
+
+    # Step 1: parse until we see the first setup log.
+    should_continue = False
+    line = None
+    for line in setup_output_iterator:
+        if is_setup_error(line):
+            return
+        if is_setup_line(line):
+            should_continue = True
+            break
+        print(line, end='', flush=True)
+
+    if not should_continue:
+        # Don't look for setup logs if we stopped iteration because we
+        # ran out of logs.
+        return
+
+    # Step 2: parse using a spinner until setup is complete.
+    setup_timeout = SKY_LOG_SETUP_SPINNER_TIMEOUT
+    pids = set()
+    pid_to_last_update = dict()
+    completed_pids = set()
+
+    def update_pids(line: str) -> None:
+        pid, message = parse_setup_line(line)
+        if pid is None or message is None:
+            return
+        pids.add(pid)
+        pid_to_last_update[pid] = time.time()
+        if is_setup_complete(message):
+            completed_pids.add(pid)
+
+    def resolve_str() -> str:
+        spinner_str = (f'Job setup in progress: ({len(completed_pids)}/'
+                       f'{num_nodes} workers setup)')
+        uncompleted_pids = pids - completed_pids
+        # Sort so the spinner doesn't interchange the order of the pids.
+        uncompleted_pids = sorted(list(uncompleted_pids))
+        for i in range(len(uncompleted_pids)):
+            pid = uncompleted_pids[i]
+            if (time.time() - pid_to_last_update[pid] >
+                    SKY_LOG_SETUP_SPINNER_STALL_INTERVAL):
+                indent_symbol = (ux_utils.INDENT_SYMBOL
+                                 if i != len(uncompleted_pids) - 1 else
+                                 ux_utils.INDENT_LAST_SYMBOL)
+                if cluster_name is not None:
+                    spinner_str += (
+                        f'\n{colorama.Style.RESET_ALL}'
+                        f'{colorama.Style.DIM}'
+                        f'{indent_symbol} {colorama.Style.DIM} Worker: {pid} '
+                        'may have stalled, '
+                        f'check logs: `sky logs {cluster_name} {job_id} '
+                        f'--no-follow | grep pid={pid}`')
+                else:
+                    spinner_str += (f'\n{indent_symbol} Worker: {pid} may have '
+                                    'stalled')
+        return spinner_str
+
+    setup_start_time = time.time()
+    with rich_utils.safe_status(
+            ux_utils.spinner_message(
+                f'{colorama.Style.RESET_ALL}{colorama.Style.DIM}Job setup in '
+                'progress')):
+        while True:
+            if line:
+                if is_setup_error(line):
+                    return
+                pid, message = parse_setup_line(line)
+                if pid and message:
+                    update_pids(line)
+                print(line, end='', flush=True)
+                line = None
+                if len(completed_pids) == num_nodes:
+                    break
+            if time.time() - setup_start_time > setup_timeout:
+                rich_utils.force_update_status(
+                    ux_utils.spinner_message(f'{colorama.Style.RESET_ALL}'
+                                             f'{colorama.Style.DIM}'
+                                             f'{resolve_str()}'))
+            line = get_next_non_blocking()
+
+    # Step 3: print the running logs.
+    for line in setup_output_iterator:
+        print(line, end='', flush=True)
+
+
 def tail_logs(job_id: Optional[int],
               log_dir: Optional[str],
               managed_job_id: Optional[int] = None,
               follow: bool = True,
-              tail: int = 0) -> None:
+              tail: int = 0,
+              setup_spinner: bool = False,
+              cluster_name: Optional[str] = None,
+              num_nodes: int = 0) -> None:
     """Tail the logs of a job.
 
     Args:
@@ -477,6 +624,9 @@ def tail_logs(job_id: Optional[int],
         follow: Whether to follow the logs or print the logs so far and exit.
         tail: The number of lines to display from the end of the log file,
             if 0, print all lines.
+        setup_spinner: Whether to show a spinner during setup.
+        cluster_name: The name of the cluster.
+        num_nodes: The number of nodes in the cluster.
     """
     if job_id is None:
         # This only happens when job_lib.get_latest_job_id() returns None,
@@ -544,11 +694,17 @@ def tail_logs(job_id: Optional[int],
                 print(end='', flush=True)
             # Now, the cursor is at the end of the last lines
             # if tail > 0
-            for line in _follow_job_logs(log_file,
-                                         job_id=job_id,
-                                         start_streaming=start_streaming,
-                                         start_streaming_at=start_stream_at):
-                print(line, end='', flush=True)
+            iterator = _follow_job_logs(log_file,
+                                        job_id=job_id,
+                                        start_streaming=start_streaming,
+                                        start_streaming_at=start_stream_at)
+
+            if setup_spinner:
+                _setup_watcher(log_file, iterator, cluster_name, num_nodes,
+                               job_id)
+            else:
+                for line in iterator:
+                    print(line, end='', flush=True)
     else:
         try:
             start_streaming = False

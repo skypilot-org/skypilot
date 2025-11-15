@@ -1156,7 +1156,8 @@ def launch(
         if not detach_run and job_id is not None:
             returncode = sdk.tail_logs(handle.get_cluster_name(),
                                        job_id,
-                                       follow=True)
+                                       follow=True,
+                                       setup_spinner=True)
         click.secho(
             ux_utils.command_hint_messages(ux_utils.CommandHintType.CLUSTER_JOB,
                                            job_id, handle.get_cluster_name()))
