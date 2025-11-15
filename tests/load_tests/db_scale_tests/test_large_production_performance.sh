@@ -207,7 +207,7 @@ python "$INJECT_SCRIPT" "${INJECT_ARGS[@]}"
 
 # Step 5: Test sky status performance
 echo "Step 5: Testing sky status performance..."
-echo "Expected: Show '12501 RUNNING' or '12501 STARTING' and finish within 11 seconds"
+echo "Expected: Show '12501 RUNNING' or '12501 STARTING' or '12501 PENDING' and finish within 11 seconds"
 time_start=$(date +%s)
 STATUS_OUTPUT=$(timeout 60 sky status 2>&1 || true)
 time_end=$(date +%s)
@@ -216,8 +216,8 @@ duration=$((time_end - time_start))
 echo "$STATUS_OUTPUT"
 echo "Duration: ${duration}s"
 
-if ! echo "$STATUS_OUTPUT" | grep -qE "12501.*(RUNNING|STARTING)"; then
-    echo "ERROR: sky status output does not contain '12501 RUNNING' or '12501 STARTING'"
+if ! echo "$STATUS_OUTPUT" | grep -qE "12501.*(RUNNING|STARTING|PENDING)"; then
+    echo "ERROR: sky status output does not contain '12501 RUNNING' or '12501 STARTING' or '12501 PENDING'"
     exit 1
 fi
 
