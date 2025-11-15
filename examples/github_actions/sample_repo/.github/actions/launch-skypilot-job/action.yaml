@@ -1,0 +1,57 @@
+name: "Launch SkyPilot Job"
+description: "Sets up and launches a SkyPilot job with necessary configurations."
+
+inputs:
+  task_yaml_path:
+    description: "Path to the task YAML file"
+    required: true
+  job_name:
+    description: "The unique name for the SkyPilot job."
+    required: true
+  commit_sha:
+    description: "Git commit SHA for status reporting"
+    required: true
+
+outputs:
+  launch_output:
+    description: "The output from the SkyPilot jobs launch command"
+    value: ${{ steps.launch.outputs.launch_output }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Environment
+      uses: ./.github/actions/setup-environment
+
+    - name: Configure SkyPilot API server
+      shell: bash
+      run: |
+        sky api login -e ${{ secrets.SKYPILOT_API_URL }} --token ${{ secrets.SKYPILOT_SERVICE_ACCOUNT_TOKEN }}
+
+    - name: Launch SkyPilot job
+      id: launch
+      shell: bash
+      run: |
+        set -x # Enable command printing for debugging
+
+        LAUNCH_ARGS=()
+
+        if [ -n "${{ inputs.job_name }}" ]; then
+          LAUNCH_ARGS+=( "--job-name=${{ inputs.job_name }}" )
+        fi
+
+        # Capture the output
+        LAUNCH_OUTPUT=$(uv run launch_sky.py "${LAUNCH_ARGS[@]}" 2>&1)
+        echo "$LAUNCH_OUTPUT"
+
+        # Save to file for fallback
+        echo "$LAUNCH_OUTPUT" > /tmp/skypilot_launch_output.txt
+
+        # Set as GitHub Actions output
+        {
+          echo 'launch_output<<EOF'
+          echo "$LAUNCH_OUTPUT"
+          echo 'EOF'
+        } >> $GITHUB_OUTPUT
+
+        set +x # Disable command printing

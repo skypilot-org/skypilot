@@ -1,0 +1,21 @@
+# This YAML is taken directly from the PyTorch quickstart example.
+# https://docs.skypilot.co/en/latest/getting-started/tutorial.html
+resources:
+    cpus: 4+
+    accelerators: L4:4
+
+setup: |
+    git clone --depth 1 https://github.com/pytorch/examples || true
+    cd examples
+    git filter-branch --prune-empty --subdirectory-filter distributed/minGPT-ddp
+    pip install -r requirements.txt
+
+run: |
+    cd examples/mingpt
+    export LOGLEVEL=INFO
+
+    echo "Starting minGPT-ddp training"
+
+    torchrun \
+    --nproc_per_node=$SKYPILOT_NUM_GPUS_PER_NODE \
+    main.py
