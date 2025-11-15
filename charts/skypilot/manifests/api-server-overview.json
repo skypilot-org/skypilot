@@ -2799,7 +2799,7 @@
             },
             "insertNulls": false,
             "lineInterpolation": "linear",
-            "lineWidth": 1,
+            "lineWidth": 2,
             "pointSize": 5,
             "scaleDistribution": {
               "type": "linear"
@@ -2864,7 +2864,7 @@
           "refId": "A"
         }
       ],
-      "title": "Monthly GPU Launches per User per Region (Last 30 Days)",
+      "title": "Monthly GPU Launches per User per Infra (Last 30 Days)",
       "type": "timeseries"
     }
   ],
