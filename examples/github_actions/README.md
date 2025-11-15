@@ -33,17 +33,7 @@ In this example, create the following repository secrets:
 - ``SKYPILOT_SERVICE_ACCOUNT_TOKEN``: Service account token for Github actions user generated above.
 - ``SLACK_BOT_TOKEN``: Slack bot token to send a summary message.
 - ``SLACK_CHANNEL_ID``: Slack Channel ID to send a summary message.
-
-### Workflow: Fill in the API server URL
-
-`sky-job.yaml` provided in this example has an `env` section with a placeholder ``SKYPILOT_API_URL`` variable: 
-```
-env:
-  RUN_NAME_PREFIX: "gh-actions"
-  SKYPILOT_API_URL: "YOUR_SKYPILOT_API_URL"
-```
-
-fill in the ``SKYPILOT_API_URL`` with your API server URL.
+- ``SKYPILOT_API_URL``: URL to the SkyPilot API server in the format ``http(s)://url-or-ip``
 
 ## Repository Structure
 
@@ -136,8 +126,8 @@ runs:
     - name: Configure SkyPilot API server
       shell: bash
       run: |
--       sky api login -e ${{ inputs.skypilot_api_url }} --token ${{ inputs.skypilot_service_account_token }}
-+       sky api login -e ${{ inputs.skypilot_api_url }}
+-       sky api login -e ${{ secrets.SKYPILOT_API_URL }} --token ${{ secrets.SKYPILOT_SERVICE_ACCOUNT_TOKEN }}
++       sky api login -e ${{ secrets.SKYPILOT_API_URL }}
 ```
 
 ``sky-job.yaml`` should be modified to 
@@ -153,12 +143,10 @@ jobs:
         with:
           task_yaml_path: ${{ github.event.inputs.task_yaml_path }}
           job_name: ${{ steps.generate_job_name.outputs.job_name }}
+          commit_sha: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.commit_to_run || github.sha }}
+        secrets:
           skypilot_api_url: ${{ env.SKYPILOT_API_URL }}
 -         skypilot_service_account_token: ${{ secrets.SKYPILOT_SERVICE_ACCOUNT_TOKEN }}
-          commit_sha: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.commit_to_run || github.sha }}
-
 ```
 
-The credential should be supplied via ``SKYPILOT_API_URL`` environment variable instead, using the format ``http(s)://username:password@url-or-ip``.
-
-Since the URL now contains sensitive credentials, it is suggested to provide ``SKYPILOT_API_URL`` via GitHub Secret instead of via the ``env`` section.
+The credential should be supplied via ``SKYPILOT_API_URL`` GitHub secret instead, using the format ``http(s)://username:password@url-or-ip``.

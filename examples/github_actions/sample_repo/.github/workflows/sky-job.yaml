@@ -17,7 +17,6 @@ on:
 
 env:
   RUN_NAME_PREFIX: "gh-actions"
-  SKYPILOT_API_URL: "YOUR_SKYPILOT_API_URL"
 
 jobs:
   launch-skypilot-job:
@@ -107,9 +106,10 @@ jobs:
         with:
           task_yaml_path: ${{ github.event.inputs.task_yaml_path }}
           job_name: ${{ steps.generate_job_name.outputs.job_name }}
-          skypilot_api_url: ${{ env.SKYPILOT_API_URL }}
-          skypilot_service_account_token: ${{ secrets.SKYPILOT_SERVICE_ACCOUNT_TOKEN }}
           commit_sha: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.commit_to_run || github.sha }}
+        secrets:
+          SKYPILOT_API_URL: ${{ secrets.SKYPILOT_API_URL }}
+          SKYPILOT_SERVICE_ACCOUNT_TOKEN: ${{ secrets.SKYPILOT_SERVICE_ACCOUNT_TOKEN }}
 
       - name: Extract SkyPilot Request ID
         id: extract_request_id

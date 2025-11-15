@@ -8,12 +8,6 @@ inputs:
   job_name:
     description: "The unique name for the SkyPilot job."
     required: true
-  skypilot_api_url:
-    description: "SkyPilot API URL"
-    default: "https://skypilot-api.softmax-research.net"
-  skypilot_service_account_token:
-    description: "SkyPilot service account token"
-    required: true
   commit_sha:
     description: "Git commit SHA for status reporting"
     required: true
@@ -32,7 +26,7 @@ runs:
     - name: Configure SkyPilot API server
       shell: bash
       run: |
-        sky api login -e ${{ inputs.skypilot_api_url }} --token ${{ inputs.skypilot_service_account_token }}
+        sky api login -e ${{ secrets.SKYPILOT_API_URL }} --token ${{ secrets.SKYPILOT_SERVICE_ACCOUNT_TOKEN }}
 
     - name: Launch SkyPilot job
       id: launch
