@@ -216,14 +216,20 @@ def check_logs(job_id: int, expected_pattern: str):
         expected_pattern: The pattern to grep for in the logs.
     """
     return (
-        f'logs=$(sky jobs logs --controller {job_id} --no-follow 2>&1); '
-        f'echo "$logs"; '
-        f'if ! echo "$logs" | grep "{expected_pattern}"; then '
-        f'  echo "ERROR: Job {job_id} logs do not contain expected pattern: {expected_pattern}"; '
-        f'  exit 1; '
-        f'fi; '
-        f'echo "Job {job_id} logs contain expected pattern: {expected_pattern}"'
-    )
+        f'for attempt in 1 2; do '
+        f'  logs=$(sky jobs logs --controller {job_id} --no-follow 2>&1); '
+        f'  echo "$logs"; '
+        f'  if echo "$logs" | grep "{expected_pattern}"; then '
+        f'    echo "Job {job_id} logs contain expected pattern: {expected_pattern}"; '
+        f'    exit 0; '
+        f'  fi; '
+        f'  if [ $attempt -eq 1 ]; then '
+        f'    echo "Pattern not found on attempt $attempt, retrying in 5 seconds..."; '
+        f'    sleep 5; '
+        f'  fi; '
+        f'done; '
+        f'echo "ERROR: Job {job_id} logs do not contain expected pattern: {expected_pattern} after 2 attempts"; '
+        f'exit 1')
 
 
 def wait_until_job_status_by_id(
@@ -1527,7 +1533,8 @@ def test_pools_num_jobs_rank(generic_cloud: str):
                                                NUM_JOBS=NUM_JOBS)
             test_commands.append(launch_cmd)
 
-            job_ids = [i for i in range(2, NUM_JOBS + 2)]
+            START_JOB_ID = 1
+            job_ids = [i for i in range(START_JOB_ID, START_JOB_ID + NUM_JOBS)]
             for job_id in job_ids:
                 test_commands.append(
                     wait_until_job_status_by_id(
@@ -1535,9 +1542,12 @@ def test_pools_num_jobs_rank(generic_cloud: str):
                         ['CANCELLED', 'FAILED_CONTROLLER'],
                         timeout=timeout))
 
+            # Wait for the job logs to be ready.
+            test_commands.append('sleep 30')
+
             for job_id in job_ids:
                 test_commands.append(
-                    check_logs(job_id, f'My rank is {job_id - 2}'))
+                    check_logs(job_id, f'My rank is {job_id - 1}'))
 
             test = smoke_tests_utils.Test(
                 'test_pools_num_jobs_rank',
