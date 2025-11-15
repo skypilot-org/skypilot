@@ -121,29 +121,48 @@ def down(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-def terminate_replica(service_name: str, replica_id: int,
-                      purge: bool) -> server_common.RequestId[None]:
-    """Tears down a specific replica for the given service.
+def terminate_replica(
+        service_name: str,
+        replica_id: Optional[int],
+        purge: bool,
+        failed_replicas: bool = False) -> server_common.RequestId[None]:
+    """Tears down a replica or all failed replicas for a service.
 
     Args:
         service_name: Name of the service.
-        replica_id: ID of replica to terminate.
-        purge: Whether to terminate replicas in a failed status. These replicas
-          may lead to resource leaks, so we require the user to explicitly
-          specify this flag to make sure they are aware of this potential
-          resource leak.
+        replica_id: ID of replica to terminate. If None and
+          failed_replicas=True, terminates all failed replicas.
+        purge: Whether to terminate replicas in a failed status. These
+          replicas may lead to resource leaks, so we require the user to
+          explicitly specify this flag to make sure they are aware of this
+          potential resource leak.
+        failed_replicas: If True, terminates all failed replicas instead
+          of a specific replica. replica_id must be None when this is True.
 
     Returns:
         The request ID of the terminate replica request.
 
     Request Raises:
-        sky.exceptions.ClusterNotUpError: if the sky sere controller is not up.
-        RuntimeError: if failed to terminate the replica.
+        sky.exceptions.ClusterNotUpError: if the sky serve controller is
+          not up.
+        RuntimeError: if failed to terminate the replica(s).
+        ValueError: if the service or replica does not exist, or if
+          failed_replicas=True and replica_id is not None.
     """
+    if failed_replicas and replica_id is not None:
+        raise ValueError('replica_id must be None when failed_replicas=True')
+
+    # Use -1 as sentinel value for "all failed replicas"
+    actual_replica_id = -1 if failed_replicas else replica_id
+    if actual_replica_id is None:
+        raise ValueError('replica_id must be provided when '
+                         'failed_replicas=False')
+
     body = payloads.ServeTerminateReplicaBody(
         service_name=service_name,
-        replica_id=replica_id,
+        replica_id=actual_replica_id,
         purge=purge,
+        failed_replicas=failed_replicas,
     )
     response = server_common.make_authenticated_request(
         'POST',
