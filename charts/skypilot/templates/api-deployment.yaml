@@ -56,13 +56,13 @@ spec:
       {{- end }}
       runtimeClassName: {{ .Values.runtimeClassName }}
       terminationGracePeriodSeconds: {{ .Values.apiService.terminationGracePeriodSeconds }}
-      {{- with .Values.apiService.imagePullSecrets }}
+      {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:
       - name: skypilot-api
-        image: {{ .Values.apiService.image }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         imagePullPolicy: {{ .Values.apiService.imagePullPolicy }}
         {{- with .Values.securityContext }}
         securityContext:
@@ -346,7 +346,7 @@ spec:
         {{- end }}
       {{- if .Values.apiService.logs.retention.enabled }}
       - name: logrotate
-        image: {{ .Values.apiService.image }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         command: ["/bin/sh", "-c"]
         # Warn if logrotate is missing in the image and keep the sidecar running
         args:
@@ -383,7 +383,7 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: {{ .Values.apiService.image }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -418,7 +418,7 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: {{ .Values.apiService.image }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -465,7 +465,7 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: google/cloud-sdk:latest
+        image: {{ include "common.image" (dict "root" . "image" .Values.gcpCredentials.image) }}
         command: ["/bin/sh", "-c"]
         env:
         - name: GOOGLE_APPLICATION_CREDENTIALS
@@ -487,7 +487,7 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: {{ .Values.apiService.image }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -517,7 +517,7 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: {{ .Values.apiService.image }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -546,7 +546,7 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: {{ .Values.apiService.image }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         command: ["/bin/sh", "-c"]
         args:
         - |
