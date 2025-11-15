@@ -89,6 +89,9 @@ def restore_job_config_file(job_id: int, env_vars: dict) -> None:
     that jobs can run on any controller, even if the original config file
     doesn't exist on disk.
 
+    For backward compatibility with jobs submitted before config persistence was
+    implemented, we fall back to using the file if it already exists on disk.
+
     Args:
         job_id: The job ID
         env_vars: Dictionary of environment variables (from dotenv)
@@ -100,19 +103,27 @@ def restore_job_config_file(job_id: int, env_vars: dict) -> None:
 
     file_info = managed_job_state.get_job_file_contents(job_id)
     config_content = file_info['config_file_content']
-    if not config_content:
-        logger.warning(
-            f'SKYPILOT_CONFIG is set to {config_path} but config content not '
-            f'found in database for job {job_id}. The job may have been '
-            f'submitted before config persistence was implemented.')
-        return
 
     # Expand ~ in config path
     config_path_expanded = os.path.expanduser(config_path)
-    # Ensure the directory exists
-    os.makedirs(os.path.dirname(config_path_expanded), exist_ok=True)
-    # Write the config file
-    with open(config_path_expanded, 'w', encoding='utf-8') as f:
-        f.write(config_content)
-    logger.info(f'Restored config file for job {job_id} to '
-                f'{config_path_expanded} ({len(config_content)} bytes)')
+
+    if config_content is not None:
+        # Config content is in database - restore it
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(config_path_expanded), exist_ok=True)
+        # Write the config file
+        with open(config_path_expanded, 'w', encoding='utf-8') as f:
+            f.write(config_content)
+        logger.info(f'Restored config file for job {job_id} to '
+                    f'{config_path_expanded} ({len(config_content)} bytes)')
+    elif os.path.exists(config_path_expanded):
+        # Backward compatibility: config not in DB but file exists on disk
+        # This can happen for jobs submitted before config persistence
+        logger.debug(f'Config file for job {job_id} not in database, but '
+                     f'found on disk at {config_path_expanded}')
+    else:
+        # Config should exist but doesn't - warn about it
+        logger.warning(
+            f'SKYPILOT_CONFIG is set to {config_path} but config content not '
+            f'found in database or on disk for job {job_id}. The job may fail '
+            f'if it relies on custom config settings.')
