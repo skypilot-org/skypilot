@@ -18,7 +18,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
-  "id": 1,
+  "id": 39,
   "links": [],
   "panels": [
     {
@@ -312,6 +312,19 @@
           "legendFormat": "LIMIT",
           "range": true,
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(sky_apiserver_process_cpu_total{app=\"$app\", pid=~\"$worker\"}[2m])) by (pod)",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "{{pod}}-app-cpu",
+          "range": true,
+          "refId": "C"
         }
       ],
       "title": "CPU Usage",
@@ -436,6 +449,19 @@
           "legendFormat": "{{pod}}-RSS",
           "range": true,
           "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(sky_apiserver_process_peak_rss{app=\"$app\", pid=~\"$worker\"}) by (pod)",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "{{pod}}-app-mem",
+          "range": true,
+          "refId": "D"
         }
       ],
       "title": "Memory Usage",
@@ -2519,5 +2545,5 @@
   "timezone": "browser",
   "title": "SkyPilot API Server",
   "uid": "skypilot-apiserver-overview",
-  "version": 1
+  "version": 4
 }
