@@ -182,7 +182,7 @@ async def test_get_job_schedule_state_same(_seed_one_job: int):
     job_id = _seed_one_job
     # Transition to WAITING using the scheduler API
     state.scheduler_set_waiting(
-        job_id,
+        [job_id],
         dag_yaml_path='dummy.yaml',
         original_user_yaml_path='dummy_user.yaml',
         env_file_path='dummy.env',
@@ -210,7 +210,7 @@ async def test_schedule_state_transitions_same(_mock_jobs_db_conn):
 
     # WAITING
     state.scheduler_set_waiting(
-        job_id,
+        [job_id],
         dag_yaml_path='d.yaml',
         original_user_yaml_path='u.yaml',
         env_file_path='e.env',

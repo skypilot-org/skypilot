@@ -68,7 +68,7 @@ def _create_basic_job(tmp_path,
                       metadata='{}')
 
     if store_content:
-        state.scheduler_set_waiting(job_id,
+        state.scheduler_set_waiting([job_id],
                                     dag_content,
                                     user_yaml_content,
                                     env_content,
