@@ -3969,7 +3969,7 @@ def show_gpus(
 
             list_accelerator_counts_result = sdk.stream_and_get(
                 sdk.list_accelerator_counts(
-                    gpus_only=True,
+                    gpus_only=not show_all,
                     clouds=clouds_to_list,
                     region_filter=region,
                 ))
@@ -4057,7 +4057,7 @@ def show_gpus(
         # For clouds other than Kubernetes, get the accelerator details
         # Case-sensitive
         list_accelerators_result = sdk.stream_and_get(
-            sdk.list_accelerators(gpus_only=True,
+            sdk.list_accelerators(gpus_only=False,
                                   name_filter=name,
                                   quantity_filter=quantity,
                                   region_filter=region,
