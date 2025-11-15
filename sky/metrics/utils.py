@@ -161,6 +161,20 @@ SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS = prom.Histogram(
              960.0, 980.0, 1000.0, float('inf')),
 )
 
+# GPU metrics
+SKY_APISERVER_GPU_LAUNCHED_TOTAL = prom.Counter(
+    'sky_apiserver_gpu_launched_total',
+    'Total number of GPUs launched',
+    ['accelerator_type', 'cloud', 'region', 'user'],
+)
+
+# User info metric - maps user hash to username
+SKY_APISERVER_USER_INFO = prom.Gauge(
+    'sky_apiserver_user_info',
+    'User information mapping hash to username',
+    ['user_hash', 'username'],
+)
+
 
 @contextlib.contextmanager
 def time_it(name: str, group: str = 'default'):

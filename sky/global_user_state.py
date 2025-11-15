@@ -284,6 +284,56 @@ def _glob_to_similar(glob_pattern):
     return like_pattern
 
 
+def _track_gpu_launch_metrics(launched_resources: Any,
+                               launched_nodes: int,
+                               user_hash: str,
+                               username: Optional[str] = None) -> None:
+    """Track GPU launch metrics for Prometheus.
+
+    Args:
+        launched_resources: Resources object containing accelerator info.
+        launched_nodes: Number of nodes in the cluster.
+        user_hash: Hash of the user launching the cluster.
+        username: Username of the user (optional, for display purposes).
+    """
+    try:
+        # Get accelerators from resources
+        accelerators = getattr(launched_resources, 'accelerators', None)
+        if accelerators is None:
+            return
+
+        # Register user info for Grafana display
+        if username:
+            metrics_lib.SKY_APISERVER_USER_INFO.labels(
+                user_hash=user_hash,
+                username=username
+            ).set(1)
+
+        # Get cloud and region info
+        cloud = getattr(launched_resources, 'cloud', None)
+        cloud_name = cloud.canonical_name() if cloud else 'unknown'
+        region = getattr(launched_resources, 'region', None) or 'unknown'
+
+        # Track each accelerator type
+        for accelerator_type, count in accelerators.items():
+            # Total GPUs = count per node * number of nodes
+            total_gpus = count * launched_nodes
+
+            # Increment the GPU launch counter
+            metrics_lib.SKY_APISERVER_GPU_LAUNCHED_TOTAL.labels(
+                accelerator_type=accelerator_type,
+                cloud=cloud_name,
+                region=region,
+                user=user_hash
+            ).inc(total_gpus)
+
+            logger.debug(f'Tracked GPU launch: {total_gpus} x {accelerator_type} '
+                        f'on {cloud_name}/{region} for user {username or user_hash}')
+    except Exception as e:  # pylint: disable=broad-except
+        # Don't fail cluster launch if metrics tracking fails
+        logger.debug(f'Failed to track GPU launch metrics: {e}')
+
+
 def create_table(engine: sqlalchemy.engine.Engine):
     # Enable WAL mode to avoid locking issues.
     # See: issue #1441 and PR #1509
@@ -795,6 +845,14 @@ def add_or_update_cluster(cluster_name: str,
         # Modify cluster history table
         launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
         launched_resources = getattr(cluster_handle, 'launched_resources', None)
+
+        # Track GPU metrics if this is a new cluster launch
+        if (is_launch and launched_resources is not None and
+            launched_nodes is not None and metrics_lib.METRICS_ENABLED):
+            username = common_utils.get_current_user_name()
+            _track_gpu_launch_metrics(launched_resources, launched_nodes,
+                                     user_hash, username)
+
         if cluster_row and cluster_row.workspace:
             history_workspace = cluster_row.workspace
         if cluster_row and cluster_row.user_hash:
