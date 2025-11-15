@@ -348,15 +348,27 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
         original_user_yaml_content = original_user_yaml_file.read()
     with open(env_file_path, 'r', encoding='utf-8') as env_file:
         env_file_content = env_file.read()
+
+    # Read config file if SKYPILOT_CONFIG env var is set
+    config_file_content: Optional[str] = None
+    config_file_path = os.environ.get(skypilot_config.ENV_VAR_SKYPILOT_CONFIG)
+    if config_file_path and os.path.exists(config_file_path):
+        with open(config_file_path, 'r', encoding='utf-8') as config_file:
+            config_file_content = config_file.read()
+
+    config_bytes = (len(config_file_content) if config_file_content else 0)
     logger.debug(f'Storing job {job_id} file contents in database '
                  f'(DAG bytes={len(dag_yaml_content)}, '
                  f'original user yaml bytes={len(original_user_yaml_content)}, '
-                 f'env bytes={len(env_file_content)}).')
+                 f'env bytes={len(env_file_content)}, '
+                 f'config bytes={config_bytes}).')
     state.scheduler_set_waiting(job_id, dag_yaml_content,
                                 original_user_yaml_content, env_file_content,
-                                priority)
+                                config_file_content, priority)
     if state.get_ha_recovery_script(job_id) is None:
-        # the run command is just the command that called scheduler
+        # the run command is just the command that called scheduler.
+        # The config file path is passed via SKYPILOT_CONFIG env var, which is
+        # sourced from env_file_path.
         run = (f'source {env_file_path} && '
                f'{sys.executable} -m sky.jobs.scheduler {dag_yaml_path} '
                f'--job-id {job_id} --env-file {env_file_path} '

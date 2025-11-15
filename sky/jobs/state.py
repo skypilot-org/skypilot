@@ -115,6 +115,9 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('env_file_path', sqlalchemy.Text),
     sqlalchemy.Column('dag_yaml_content', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('env_file_content', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('config_file_content',
+                      sqlalchemy.Text,
+                      server_default=None),
     sqlalchemy.Column('user_hash', sqlalchemy.Text),
     sqlalchemy.Column('workspace', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('priority',
@@ -361,6 +364,7 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'env_file_path': r.get('env_file_path'),
         'dag_yaml_content': r.get('dag_yaml_content'),
         'env_file_content': r.get('env_file_content'),
+        'config_file_content': r.get('config_file_content'),
         'user_hash': r.get('user_hash'),
         'workspace': r.get('workspace'),
         'priority': r.get('priority'),
@@ -1608,7 +1612,8 @@ def get_task_specs(job_id: int, task_id: int) -> Dict[str, Any]:
 @_init_db
 def scheduler_set_waiting(job_id: int, dag_yaml_content: str,
                           original_user_yaml_content: str,
-                          env_file_content: str, priority: int):
+                          env_file_content: str,
+                          config_file_content: Optional[str], priority: int):
     """Do not call without holding the scheduler lock.
 
     Returns: Whether this is a recovery run or not.
@@ -1627,6 +1632,7 @@ def scheduler_set_waiting(job_id: int, dag_yaml_content: str,
                 job_info_table.c.original_user_yaml_content:
                     (original_user_yaml_content),
                 job_info_table.c.env_file_content: env_file_content,
+                job_info_table.c.config_file_content: config_file_content,
                 job_info_table.c.priority: priority,
             })
         session.commit()
@@ -1644,6 +1650,7 @@ def get_job_file_contents(job_id: int) -> Dict[str, Optional[str]]:
                 job_info_table.c.env_file_path,
                 job_info_table.c.dag_yaml_content,
                 job_info_table.c.env_file_content,
+                job_info_table.c.config_file_content,
             ).where(job_info_table.c.spot_job_id == job_id)).fetchone()
 
     if row is None:
@@ -1652,6 +1659,7 @@ def get_job_file_contents(job_id: int) -> Dict[str, Optional[str]]:
             'env_file_path': None,
             'dag_yaml_content': None,
             'env_file_content': None,
+            'config_file_content': None,
         }
 
     return {
@@ -1659,6 +1667,7 @@ def get_job_file_contents(job_id: int) -> Dict[str, Optional[str]]:
         'env_file_path': row[1],
         'dag_yaml_content': row[2],
         'env_file_content': row[3],
+        'config_file_content': row[4],
     }
 
 
