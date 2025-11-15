@@ -605,3 +605,28 @@ Common issues
       # .bashrc / .zshrc
       # Enable AWS profile named "AWSPowerUserAccess-123456789012"
       export AWS_PROFILE='AWSPowerUserAccess-123456789012'
+
+.. _airgap-aws:
+
+Working with an air-gapped environment
+--------------------------------------
+
+:ref:`AWS SSM <aws-ssm>` allows for secure shell access to EC2 instances without direct network access.
+This enables an airgapped setup where launched instances don’t have a public IP address but are still accessible.
+
+Assume we have a private VPC for our airgapped AWS cluster with the name ``private-vpc`` and a private security group ``private-sg`` where we want to launch a SkyPilot cluster. We can use a very simple yaml file to enable SkyPilot.
+The following yaml is the skypilot config which is editable at ``http://<api-server-url>/dashboard/config``, see the spec :ref:`yaml-spec` for more details. 
+
+.. code-block:: yaml
+
+    # ~/.sky/config.yaml
+    aws:
+        vpc_name: <private-vpc>
+        security_group_name: <private-sg>
+        use_internal_ips: true
+        use_ssm: true
+
+With only a small additional configuration we can have SkyPilot use the
+directed VPC and security group and create a cluster in AWS using private IPs (as a result of ``use_internal_ips: true``) only relying on SSM for connectivity.
+
+See :ref:`Using AWS Systems Manager SSM <aws-ssm>` for further instructions on setting up SSM in SkyPilot including required packages and permissions.

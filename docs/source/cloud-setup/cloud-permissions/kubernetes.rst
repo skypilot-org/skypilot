@@ -388,3 +388,39 @@ Users should also configure SkyPilot to use the ``sky-sa`` service account throu
     # ~/.sky/config.yaml
     kubernetes:
       remote_identity: sky-sa   # Or your service account name
+
+.. _airgap-kubernetes:
+
+Working with an air-gapped environment
+--------------------------------------
+
+SkyPilot can also support airgapped Kubernetes clusters that use an HTTP proxy to enable outbound traffic.
+
+Assume we have a Kubernetes cluster with a corporate HTTP proxy at ``http://proxy-host:3128``. We can use a very simple yaml file to enable SkyPilot.
+The following yaml is the skypilot config which is editable at ``http://<api-server-url>/dashboard/config``, see the spec :ref:`yaml-spec` for more details.
+
+.. code-block:: yaml
+
+    # ~/.sky/config.yaml
+    kubernetes:
+      pod_config:
+        spec:
+          containers:
+            - env:
+                - name: HTTP_PROXY
+                  value: http://proxy-host:3128
+                - name: HTTPS_PROXY
+                  value: http://proxy-host:3128
+                - name: NO_PROXY
+                  value: localhost,127.0.0.1
+                - name: http_proxy
+                  value: http://proxy-host:3128
+                - name: https_proxy
+                  value: http://proxy-host:3128
+                - name: no_proxy
+                  value: localhost,127.0.0.1
+
+``NO_PROXY`` is used to specify the addresses that should be excluded from the proxy, typically internal addresses.
+Because different tools and libraries use different environment variable names we include all the possible names to ensure compatibility.
+
+This configuration guarantees that all SkyPilot pods will be configured to use the corporate proxy for outbound traffic.
