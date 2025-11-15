@@ -8,14 +8,6 @@ inputs:
   job_name:
     description: "The unique name for the SkyPilot job."
     required: true
-  num_gpus:
-    description: "Number of GPUs to request. If empty, uses SkyPilot task default."
-    required: false
-    default: ""
-  num_nodes:
-    description: "Number of Nodes to request. If empty, uses SkyPilot task default."
-    required: false
-    default: ""
   skypilot_api_url:
     description: "SkyPilot API URL"
     default: "https://skypilot-api.softmax-research.net"
@@ -49,14 +41,6 @@ runs:
         set -x # Enable command printing for debugging
 
         LAUNCH_ARGS=()
-
-        if [ -n "${{ inputs.num_gpus }}" ]; then
-          LAUNCH_ARGS+=( "--gpus=${{ inputs.num_gpus }}" )
-        fi
-
-        if [ -n "${{ inputs.num_nodes }}" ]; then
-          LAUNCH_ARGS+=( "--nodes=${{ inputs.num_nodes }}" )
-        fi
 
         if [ -n "${{ inputs.job_name }}" ]; then
           LAUNCH_ARGS+=( "--job-name=${{ inputs.job_name }}" )

@@ -1,6 +1,6 @@
 # Example: Github Actions + SkyPilot
 
-This example provides a GitHub CI pipeline that automatically starts a SkyPilot job when a PR is merged to ``main`` branch and notifies a slack channel.
+This example provides a GitHub CI pipeline that automatically starts a SkyPilot job when a PR is merged to ``main`` branch and notifies a slack channel. It is useful for automatically trigger a training job when there is a new commit for config changes, and send notification for the training status and logs.
 
 > **_NOTE:_**  This example is adapted from Metta AI's GitHub actions pipeline: https://github.com/Metta-AI/metta/tree/main
 
@@ -9,22 +9,9 @@ This example provides a GitHub CI pipeline that automatically starts a SkyPilot 
 
 The following steps are required to use the example github action in your repository.
 
-### GitHub: Enforce Squash and Merge
+### SkyPilot: Deploy a centralized API server
 
-In this example, all commits landing on ``main`` branch is expected to be a squash commit, with commit messages of the form
-
-```
-Commit message (#1234)
-```
-
-where `1234` is the PR number. 
-
-To enforce squash and merge:
-
-- **Navigate to Repository Settings**: On the main page of your repository, click "Settings".
-- **Access Pull Request Settings**: On the "General" settings page, scroll down to the "Pull Requests" section. 
-- **Enable Squash Merging**: Select the checkbox next to "Allow squash merging". This enables the option for contributors to squash commits when merging.
-- **Disable Other Merge Options**: To strictly enforce squash merging, deselect "Allow merge commits" and "Allow rebase merging". This makes squash and merge the only available merge option for pull requests.
+Follow the [instructions](https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html) to deploy a centralized SkyPilot API server.
 
 ### SkyPilot: Obtain a service account key
 
@@ -52,8 +39,6 @@ In this example, create the following repository secrets:
 `sky-job.yaml` provided in this example has an `env` section with a placeholder ``SKYPILOT_API_URL`` variable: 
 ```
 env:
-  DEFAULT_NUM_GPUS: "4"
-  DEFAULT_NUM_NODES: "1"
   RUN_NAME_PREFIX: "gh-actions"
   SKYPILOT_API_URL: "YOUR_SKYPILOT_API_URL"
 ```
@@ -167,8 +152,6 @@ jobs:
         uses: ./.github/actions/launch-skypilot-job
         with:
           task_yaml_path: ${{ github.event.inputs.task_yaml_path }}
-          num_gpus: ${{ github.event_name == 'push' && env.DEFAULT_NUM_GPUS || github.event.inputs.num_gpus || '' }}
-          num_nodes: ${{ github.event_name == 'push' && env.DEFAULT_NUM_NODES || github.event.inputs.num_nodes || '' }}
           job_name: ${{ steps.generate_job_name.outputs.job_name }}
           skypilot_api_url: ${{ env.SKYPILOT_API_URL }}
 -         skypilot_service_account_token: ${{ secrets.SKYPILOT_SERVICE_ACCOUNT_TOKEN }}

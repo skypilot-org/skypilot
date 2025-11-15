@@ -11,21 +11,11 @@ on:
         description: "The full commit hash to run the job against (required for manual runs)."
         required: true
         type: string
-      num_gpus:
-        description: "Number of GPUs to request (e.g., 1, 4). If empty, defaults to SkyPilot task definition (usually 1)."
-        required: false
-        type: string
-      num_nodes:
-        description: "Number of Nodes to request (e.g., 1, 2). If empty, defaults to SkyPilot task definition (usually 1)."
-        required: false
-        type: string
   push:
     branches: [main]
 
 
 env:
-  DEFAULT_NUM_GPUS: "4"
-  DEFAULT_NUM_NODES: "1"
   RUN_NAME_PREFIX: "gh-actions"
   SKYPILOT_API_URL: "YOUR_SKYPILOT_API_URL"
 
@@ -116,8 +106,6 @@ jobs:
         uses: ./.github/actions/launch-skypilot-job
         with:
           task_yaml_path: ${{ github.event.inputs.task_yaml_path }}
-          num_gpus: ${{ github.event_name == 'push' && env.DEFAULT_NUM_GPUS || github.event.inputs.num_gpus || '' }}
-          num_nodes: ${{ github.event_name == 'push' && env.DEFAULT_NUM_NODES || github.event.inputs.num_nodes || '' }}
           job_name: ${{ steps.generate_job_name.outputs.job_name }}
           skypilot_api_url: ${{ env.SKYPILOT_API_URL }}
           skypilot_service_account_token: ${{ secrets.SKYPILOT_SERVICE_ACCOUNT_TOKEN }}
