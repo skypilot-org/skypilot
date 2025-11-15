@@ -1,0 +1,72 @@
+name: Skravlekåkå - Format Police 🚨
+
+on:
+  push:
+    branches:
+      - master
+      - "releases/**"
+  pull_request:
+    branches:
+      - master
+      - "releases/**"
+  merge_group:
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.8"]
+
+    steps:
+      - name: 🚀 Check out the repo
+        uses: actions/checkout@v3
+
+      - name: 📦 Install the latest version of uv (because we're cool)
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          python-version: ${{ matrix.python-version }}
+
+      - name: 🔧 Set up Python environment & install dependencies
+        run: |
+          echo "Creating a fancy fresh Python environment... 🛠️"
+          uv venv --seed ~/test-env
+          source ~/test-env/bin/activate
+          
+          echo "Installing the strictest formatters known to mankind... ⏳"
+          uv pip install yapf==0.32.0 toml==0.10.2 black==22.10.0 isort==5.12.0
+          echo "Done! The repo is now under formatting surveillance. 👀"
+
+      - name: 🔎 Running YAPF (Because spacing matters!)
+        run: |
+          source ~/test-env/bin/activate
+          echo "Checking code with YAPF... 🤖"
+          yapf --diff --recursive ./ --exclude 'sky/skylet/ray_patches/**' --exclude 'sky/skylet/providers/ibm/**'
+          echo "YAPF is done. If it yelled at you, go fix your spacing! 📏"
+
+      - name: 🎨 Running Black (Strict mode: ON)
+        run: |
+          source ~/test-env/bin/activate
+          echo "BLACK is coming... and it’s UNFORGIVING. 🖤"
+          black --diff --check sky/skylet/providers/ibm/
+          echo "Black is done. Your code is either perfect or crying. 💀"
+
+      - name: 📏 Running isort for Black-formatted files
+        run: |
+          source ~/test-env/bin/activate
+          echo "Sorting imports like a pro for Black-formatted files... 📂"
+          isort --diff --check --profile black -l 88 -m 3 sky/skylet/providers/ibm/
+          echo "Imports are now beautifully aligned. Zen achieved. ✨"
+
+      - name: 📏 Running isort for YAPF-formatted files
+        run: |
+          source ~/test-env/bin/activate
+          echo "Sorting imports for YAPF-formatted files... ⚖️"
+          isort --diff --check ./ --sg 'sky/skylet/ray_patches/**' --sg 'sky/skylet/providers/ibm/**'
+          echo "Imports have been disciplined. Your repo thanks you. 🙌"
+
+      - name: ✅ All checks complete!
+        run: |
+          echo "🎉 Formatting and sorting are done! If there were issues, go fix 'em! 🛠️"
+          echo "Otherwise, you just passed the Skravlekåkå Format Police. Congrats! 🚔😆"

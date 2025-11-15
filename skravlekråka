@@ -1,0 +1,45 @@
+{
+  "name": "GoldenTeacherApp",
+  "version": "1.0",
+  "developer": "Megaman & Co.",
+  "settings": {
+    "theme": "dark",
+    "language": "no",
+    "autosave": true,
+    "max_sessions": 3
+  },
+  "users": [
+    {
+      "id": 1,
+      "username": "Psykonaut_01",
+      "role": "admin",
+      "preferences": {
+        "music": "psychedelic",
+        "visuals": "fractal",
+        "notifications": false
+      }
+    },
+    {
+      "id": 2,
+      "username": "Megaman",
+      "role": "master",
+      "preferences": {
+        "music": "synthwave",
+        "visuals": "cyberpunk",
+        "notifications": true
+      }
+    }
+  ],
+  "logs": [
+    {
+      "timestamp": "2025-02-17T22:30:00Z",
+      "event": "User login",
+      "user": "Psykonaut_01"
+    },
+    {
+      "timestamp": "2025-02-17T22:32:10Z",
+      "event": "Cosmic connection established",
+      "user": "Megaman"
+    }
+  ]
+}

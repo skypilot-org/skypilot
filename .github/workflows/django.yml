@@ -1,0 +1,18 @@
+            - name: elmah.io Create Deployment Action
+  # You may pin to the exact commit or the version.
+  # uses: elmahio/github-create-deployment-action@132611db9161ecebb1b07db6510d4ea5e0d2d415
+  uses: elmahio/github-create-deployment-action@v1
+  with:
+    # An API key with permission to create deployments.
+    apiKey: 
+    # The version number of this deployment. The value of version can be a SemVer compliant string or any other syntax that you are using as your version numbering scheme.
+    version: 
+    # Optional description of this deployment. Can be markdown or clear text.
+    description: # optional
+    # The name of the person responsible for creating this deployment. This can be the name taken from your deployment server.
+    userName: # optional
+    # The email of the person responsible for creating this deployment. This can be the email taken from your deployment server.
+    userEmail: # optional
+    # As default, deployments are attached all logs of the organization. If you want a deployment to attach to a single log only, set this to the ID of that log.
+    logId: # optional
+          
