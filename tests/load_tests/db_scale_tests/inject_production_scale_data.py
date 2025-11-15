@@ -19,50 +19,15 @@ import argparse
 import copy
 import os
 import random
-import sqlite3
 import sys
 import time
-from urllib.parse import unquote
-from urllib.parse import urlparse
 import uuid
 
 # Add SkyPilot to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-import psycopg2
-from psycopg2.extras import execute_batch
 from sample_based_generator import SampleBasedGenerator
 from scale_test_utils import TestScale
-
-
-def parse_sql_url(sql_url):
-    """Parse a PostgreSQL connection URL and return connection parameters.
-
-    Args:
-        sql_url: Connection URL in format postgresql://user:password@host:port/database?sslmode=require
-
-    Returns:
-        dict with keys: host, port, database, user, password, sslmode (if present)
-    """
-    parsed = urlparse(sql_url)
-
-    params = {
-        'host': parsed.hostname or 'localhost',
-        'port': parsed.port or 5432,
-        'database': parsed.path.lstrip('/') if parsed.path else 'skypilot',
-        'user': unquote(parsed.username) if parsed.username else 'skypilot',
-        'password': unquote(parsed.password) if parsed.password else ''
-    }
-
-    # Parse query parameters (e.g., sslmode=require)
-    if parsed.query:
-        from urllib.parse import parse_qs
-        query_params = parse_qs(parsed.query)
-        for key, value_list in query_params.items():
-            if value_list:
-                params[key] = value_list[0]
-
-    return params
 
 
 class ProductionScaleGenerator(SampleBasedGenerator):
@@ -217,24 +182,13 @@ class ProductionScaleTest(TestScale):
             sql_url: Optional PostgreSQL connection URL (e.g., postgresql://user:pass@host:port/db)
                     If None, uses SQLite databases
         """
-        self.sql_url = sql_url
-        self.use_postgres = sql_url is not None
+        # Initialize parent class with PostgreSQL support
+        super().initialize(active_cluster_name,
+                           terminated_cluster_name,
+                           managed_job_id,
+                           sql_url=sql_url)
 
-        if self.use_postgres:
-            self.db_params = parse_sql_url(sql_url)
-            self.jobs_db_params = self.db_params.copy(
-            )  # Same database for jobs
-            print(
-                f"Using PostgreSQL: {self.db_params['database']}@{self.db_params['host']}"
-            )
-        else:
-            self.db_path = os.path.expanduser("~/.sky/state.db")
-            self.jobs_db_path = os.path.expanduser("~/.sky/spot_jobs.db")
-            print(f"Using SQLite: {self.db_path}")
-
-        self.test_cluster_names = []
-        self.test_cluster_hashes = []
-        self.test_job_ids = []
+        # Replace generator with production-scale generator
         self.generator = ProductionScaleGenerator(
             active_cluster_name=active_cluster_name,
             terminated_cluster_name=terminated_cluster_name,
@@ -243,41 +197,6 @@ class ProductionScaleTest(TestScale):
             db_connection_getter=self._get_connection
             if self.use_postgres else None,
             format_sql=self._format_sql if self.use_postgres else None)
-
-    def _get_connection(self, for_jobs=False):
-        """Get a database connection (SQLite or PostgreSQL)."""
-        if self.use_postgres:
-            params = self.jobs_db_params if for_jobs else self.db_params
-            return psycopg2.connect(**params)
-        else:
-            db_path = self.jobs_db_path if for_jobs else self.db_path
-            return sqlite3.connect(db_path)
-
-    def _format_sql(self, sql):
-        """Format SQL query with correct placeholders for the current database.
-
-        Converts '?' placeholders to '%s' for PostgreSQL, leaves as-is for SQLite.
-        """
-        if self.use_postgres:
-            return sql.replace('?', '%s')
-        return sql
-
-    def _execute_batch(self, cursor, sql, batch_data, page_size=100):
-        """Execute batch insert/update with optimal method for current database."""
-        if self.use_postgres:
-            execute_batch(cursor, sql, batch_data, page_size=page_size)
-        else:
-            cursor.executemany(sql, batch_data)
-
-    def _get_integrity_error_class(self):
-        """Get the IntegrityError exception class for the current database."""
-        if self.use_postgres:
-            return psycopg2.IntegrityError
-        return sqlite3.IntegrityError
-
-    def _get_excluded_keyword(self):
-        """Get the EXCLUDED keyword for ON CONFLICT clauses."""
-        return 'EXCLUDED' if self.use_postgres else 'excluded'
 
     def inject_production_clusters(self, count: int = 1500):
         """Inject production-scale clusters."""
