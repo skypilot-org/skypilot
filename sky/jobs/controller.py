@@ -956,33 +956,8 @@ class ControllerManager:
                             logger.debug('Set environment variable: %s=%s', key,
                                          value)
 
-                    # Restore config file if SKYPILOT_CONFIG is set
-                    config_path = env_vars.get(
-                        skypilot_config.ENV_VAR_SKYPILOT_CONFIG)
-                    if config_path:
-                        config_content = (
-                            file_content_utils.get_job_config_content(job_id))
-                        if config_content:
-                            # Expand ~ in config path
-                            config_path_expanded = os.path.expanduser(
-                                config_path)
-                            # Ensure the directory exists
-                            os.makedirs(os.path.dirname(config_path_expanded),
-                                        exist_ok=True)
-                            # Write the config file
-                            with open(config_path_expanded,
-                                      'w',
-                                      encoding='utf-8') as f:
-                                f.write(config_content)
-                            logger.info(
-                                'Restored config file for job %s to %s '
-                                '(%d bytes)', job_id, config_path_expanded,
-                                len(config_content))
-                        else:
-                            logger.warning(
-                                'SKYPILOT_CONFIG is set to %s but config '
-                                'content not found in database for job %s',
-                                config_path, job_id)
+                    # Restore config file if needed
+                    file_content_utils.restore_job_config_file(job_id, env_vars)
 
                     skypilot_config.reload_config()
                 else:  # pragma: no cover - defensive

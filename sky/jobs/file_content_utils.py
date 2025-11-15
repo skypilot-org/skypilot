@@ -81,19 +81,54 @@ def get_job_env_content(job_id: int) -> Optional[str]:
 
 
 def get_job_config_content(job_id: int) -> Optional[str]:
-    """Get config file content for a job from database or disk.
+    """Get config file content for a job from database.
 
     Args:
         job_id: The job ID
 
     Returns:
-        Config file content as string, or None if not found
+        Config file content as string, or None if the job has no config file.
+        Config files are optional - users without a config file will have None.
     """
     file_info = managed_job_state.get_job_file_contents(job_id)
+    return file_info['config_file_content']
 
-    # Prefer content stored in the database
-    if file_info['config_file_content'] is not None:
-        return file_info['config_file_content']
 
-    # Config file is optional, so don't warn if not found
-    return None
+def restore_job_config_file(job_id: int, env_vars: dict) -> None:
+    """Restore config file from database if SKYPILOT_CONFIG is set.
+
+    This reads the config file content from the database and writes it to the
+    path specified in the SKYPILOT_CONFIG environment variable. This ensures
+    that jobs can run on any controller, even if the original config file
+    doesn't exist on disk.
+
+    Args:
+        job_id: The job ID
+        env_vars: Dictionary of environment variables (from dotenv)
+    """
+    import os  # pylint: disable=import-outside-toplevel
+
+    from sky import skypilot_config  # pylint: disable=import-outside-toplevel
+
+    config_path = env_vars.get(skypilot_config.ENV_VAR_SKYPILOT_CONFIG)
+    if not config_path:
+        # No config file for this job
+        return
+
+    config_content = get_job_config_content(job_id)
+    if not config_content:
+        logger.warning(
+            'SKYPILOT_CONFIG is set to %s but config content not found in '
+            'database for job %s. The job may have been submitted before '
+            'config persistence was implemented.', config_path, job_id)
+        return
+
+    # Expand ~ in config path
+    config_path_expanded = os.path.expanduser(config_path)
+    # Ensure the directory exists
+    os.makedirs(os.path.dirname(config_path_expanded), exist_ok=True)
+    # Write the config file
+    with open(config_path_expanded, 'w', encoding='utf-8') as f:
+        f.write(config_content)
+    logger.info('Restored config file for job %s to %s (%d bytes)', job_id,
+                config_path_expanded, len(config_content))
