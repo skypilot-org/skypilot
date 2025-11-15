@@ -10,6 +10,7 @@ import os
 from typing import Optional
 
 from sky import sky_logging
+from sky import skypilot_config
 from sky.jobs import state as managed_job_state
 
 logger = sky_logging.init_logger(__name__)
@@ -80,20 +81,6 @@ def get_job_env_content(job_id: int) -> Optional[str]:
     return None
 
 
-def get_job_config_content(job_id: int) -> Optional[str]:
-    """Get config file content for a job from database.
-
-    Args:
-        job_id: The job ID
-
-    Returns:
-        Config file content as string, or None if the job has no config file.
-        Config files are optional - users without a config file will have None.
-    """
-    file_info = managed_job_state.get_job_file_contents(job_id)
-    return file_info['config_file_content']
-
-
 def restore_job_config_file(job_id: int, env_vars: dict) -> None:
     """Restore config file from database if SKYPILOT_CONFIG is set.
 
@@ -106,21 +93,18 @@ def restore_job_config_file(job_id: int, env_vars: dict) -> None:
         job_id: The job ID
         env_vars: Dictionary of environment variables (from dotenv)
     """
-    import os  # pylint: disable=import-outside-toplevel
-
-    from sky import skypilot_config  # pylint: disable=import-outside-toplevel
-
     config_path = env_vars.get(skypilot_config.ENV_VAR_SKYPILOT_CONFIG)
     if not config_path:
         # No config file for this job
         return
 
-    config_content = get_job_config_content(job_id)
+    file_info = managed_job_state.get_job_file_contents(job_id)
+    config_content = file_info['config_file_content']
     if not config_content:
         logger.warning(
-            'SKYPILOT_CONFIG is set to %s but config content not found in '
-            'database for job %s. The job may have been submitted before '
-            'config persistence was implemented.', config_path, job_id)
+            f'SKYPILOT_CONFIG is set to {config_path} but config content not '
+            f'found in database for job {job_id}. The job may have been '
+            f'submitted before config persistence was implemented.')
         return
 
     # Expand ~ in config path
@@ -130,5 +114,5 @@ def restore_job_config_file(job_id: int, env_vars: dict) -> None:
     # Write the config file
     with open(config_path_expanded, 'w', encoding='utf-8') as f:
         f.write(config_content)
-    logger.info('Restored config file for job %s to %s (%d bytes)', job_id,
-                config_path_expanded, len(config_content))
+    logger.info(f'Restored config file for job {job_id} to '
+                f'{config_path_expanded} ({len(config_content)} bytes)')
