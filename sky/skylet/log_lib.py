@@ -481,27 +481,20 @@ def _setup_watcher(log_file: TextIO, setup_output_iterator: Iterator[str],
     # Setup line format: (setup pid=<pid>) <message> or
     # (setup pid=<pid>, ip=<ip>) <message>
     # Use regex to parse the line.
-    setup_line_pattern_one = r'\(setup pid=(\d+)\) (.*)'
-    setup_line_pattern_two = r'\(setup pid=(\d+), ip=(\S+)\) (.*)'
+    setup_line_pattern = r'\(setup pid=(\d+)(?:, ip=\S+)?\) (.*)'
 
     def parse_setup_line(line: str) -> Tuple[str, str]:
         # Attempt to match the two patterns. Return all None if failed, but
         # don't error out in case it's just a version change.
         # Remove all ANSI escape codes.
-        line = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', line)
-        match = re.match(setup_line_pattern_two, line)
-        if match:
-            pid = match.group(1)
-            ip = match.group(2)
-            message = match.group(3)
-            return pid, ip, message
-        match = re.match(setup_line_pattern_one, line)
+        line = re.sub(r'\x1b\[[0-9;]*m', '', line)
+        match = re.match(setup_line_pattern, line)
         if match:
             pid = match.group(1)
             message = match.group(2)
-            return pid, None, message
+            return pid, message
         logger.debug(f'Failed to parse setup line: {line}')
-        return None, None, None
+        return None, None
 
     def is_setup_line(line: str) -> bool:
         return '(setup' in line
@@ -551,7 +544,7 @@ def _setup_watcher(log_file: TextIO, setup_output_iterator: Iterator[str],
     completed_pids = set()
 
     def update_pids(line: str) -> None:
-        pid, _, message = parse_setup_line(line)
+        pid, message = parse_setup_line(line)
         if pid is None or message is None:
             return
         pids.add(pid)
@@ -594,7 +587,7 @@ def _setup_watcher(log_file: TextIO, setup_output_iterator: Iterator[str],
             if line:
                 if is_setup_error(line):
                     return
-                pid, _, message = parse_setup_line(line)
+                pid, message = parse_setup_line(line)
                 if pid and message:
                     update_pids(line)
                 print(line, end='', flush=True)
