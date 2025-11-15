@@ -278,19 +278,22 @@ def submit_jobs(job_ids: List[int],
     The user hash should be set (e.g. via SKYPILOT_USER_ID) before calling this.
     """
     # Load DAG to get task information for setting job_info and pending state
+    non_alive_job_ids = []
     for job_id in job_ids:
-        controller_pid = state.get_job_controller_pid(job_id)
-        if controller_pid is not None:
+        controller_process = state.get_job_controller_process(job_id)
+        if controller_process is not None:
             # why? TODO(cooperc): figure out why this is needed, fix it, and
             # remove
             if managed_job_utils.controller_process_alive(
-                    controller_pid, job_id):
+                    controller_process, job_id):
                 # This can happen when HA recovery runs for some reason but the
                 # job controller is still alive.
                 logger.warning(
                     f'Job {job_id} is still alive, skipping submission')
                 maybe_start_controllers(from_scheduler=True)
-                continue
+            else:
+                non_alive_job_ids.append(job_id)
+    job_ids = non_alive_job_ids
 
     with open(dag_yaml_path, 'r', encoding='utf-8') as dag_file:
         dag_yaml_content = dag_file.read()
