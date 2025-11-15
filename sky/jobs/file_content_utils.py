@@ -78,3 +78,22 @@ def get_job_env_content(job_id: int) -> Optional[str]:
 
     # Environment file is optional, so don't warn if not found
     return None
+
+
+def get_job_config_content(job_id: int) -> Optional[str]:
+    """Get config file content for a job from database or disk.
+
+    Args:
+        job_id: The job ID
+
+    Returns:
+        Config file content as string, or None if not found
+    """
+    file_info = managed_job_state.get_job_file_contents(job_id)
+
+    # Prefer content stored in the database
+    if file_info['config_file_content'] is not None:
+        return file_info['config_file_content']
+
+    # Config file is optional, so don't warn if not found
+    return None

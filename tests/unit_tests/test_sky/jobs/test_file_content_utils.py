@@ -72,6 +72,7 @@ def _create_basic_job(tmp_path,
                                     dag_content,
                                     user_yaml_content,
                                     env_content,
+                                    config_file_content=None,
                                     priority=100)
 
     if set_paths:

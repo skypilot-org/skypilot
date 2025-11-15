@@ -67,7 +67,7 @@ def _seed_test_jobs(_mock_managed_jobs_db_conn):
                           metadata='{}')
         # Set priority and schedule state
         state.scheduler_set_waiting(job_id1, '/tmp/dag1.yaml',
-                                    '/tmp/user1.yaml', '/tmp/env1', 100)
+                                    '/tmp/user1.yaml', '/tmp/env1', None, 100)
 
         # Job 2: STARTING state (launched but not yet running)
         job_id2 = state.set_job_info_without_job_id(name='test-job-b',
@@ -82,7 +82,7 @@ def _seed_test_jobs(_mock_managed_jobs_db_conn):
                           resources_str='{}',
                           metadata='{}')
         state.scheduler_set_waiting(job_id2, '/tmp/dag2.yaml',
-                                    '/tmp/user2.yaml', '/tmp/env2', 200)
+                                    '/tmp/user2.yaml', '/tmp/env2', None, 200)
         await state.set_starting_async(job_id2, 0, 'run_123', time.time(), '{}',
                                        {}, mock_callback)
 
