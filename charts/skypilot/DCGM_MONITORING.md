@@ -106,25 +106,15 @@ helm install skypilot ./charts/skypilot \
 
 ### Dashboard Configuration
 
-The NVIDIA DCGM dashboard is automatically provisioned using Grafana's dashboard import feature:
+The NVIDIA DCGM dashboards are automatically provisioned using Grafana's dashboards sidecar:
 
 ```yaml
 # In values.yaml
 grafana:
   enabled: true
-  dashboardProviders:
-    dashboardproviders.yaml:
-      apiVersion: 1
-      providers:
-      - name: 'default'
-        orgId: 1
-        folder: ''
-        type: file
-        disableDeletion: false
-        allowUiUpdates: false
-        updateIntervalSeconds: 30
-        options:
-          path: /var/lib/grafana/dashboards/default
+  sidecar:
+    dashboards:
+      enabled: true
 ```
 
 ## How It Works
