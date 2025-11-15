@@ -161,6 +161,16 @@ SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS = prom.Histogram(
              960.0, 980.0, 1000.0, float('inf')),
 )
 
+SKY_APISERVER_LONG_EXECUTORS = prom.Gauge(
+    'sky_apiserver_long_executors',
+    'Total number of long-running request executors in the API server',
+)
+
+SKY_APISERVER_SHORT_EXECUTORS = prom.Gauge(
+    'sky_apiserver_short_executors',
+    'Total number of short-running request executors in the API server',
+)
+
 
 @contextlib.contextmanager
 def time_it(name: str, group: str = 'default'):
