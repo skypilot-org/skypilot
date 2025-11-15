@@ -448,3 +448,176 @@ class TestVolumeServer:
             assert call_args[1]['func'] == server.core.volume_delete
             assert call_args[1][
                 'schedule_type'] == requests_lib.ScheduleType.LONG
+
+    def test_volume_validate_success(self, monkeypatch):
+        """Test volume_validate endpoint with successful validation."""
+        # Mock Volume class
+        mock_volume = mock.MagicMock()
+        mock_volume.validate.return_value = None
+        mock_volume_class = mock.MagicMock()
+        mock_volume_class.from_yaml_config.return_value = mock_volume
+
+        # Create test client
+        app = fastapi.FastAPI()
+        app.include_router(server.router, prefix='/volumes')
+        client = TestClient(app)
+
+        # Test data
+        validate_body = {
+            'name': 'test-volume',
+            'volume_type': volume.VolumeType.PVC.value,
+            'infra': 'k8s',
+            'size': '100Gi',
+            'labels': {
+                'env': 'test'
+            },
+            'config': {
+                'storage_class': 'gp2'
+            },
+            'use_existing': False
+        }
+
+        # Mock volume_lib.Volume
+        with mock.patch('sky.volumes.volume.Volume', mock_volume_class):
+            # Make request
+            response = client.post('/volumes/validate', json=validate_body)
+
+            # Verify response
+            assert response.status_code == 200
+
+            # Verify Volume.from_yaml_config was called correctly
+            mock_volume_class.from_yaml_config.assert_called_once()
+            call_args = mock_volume_class.from_yaml_config.call_args[0][0]
+            assert call_args['name'] == 'test-volume'
+            assert call_args['type'] == volume.VolumeType.PVC.value
+            assert call_args['infra'] == 'k8s'
+            assert call_args['size'] == '100Gi'
+            assert call_args['labels'] == {'env': 'test'}
+            assert call_args['config'] == {'storage_class': 'gp2'}
+            assert call_args['use_existing'] is False
+
+            # Verify validate was called
+            mock_volume.validate.assert_called_once()
+
+    def test_volume_validate_failure(self, monkeypatch):
+        """Test volume_validate endpoint with validation failure."""
+        # Mock Volume class to raise exception
+        mock_volume_class = mock.MagicMock()
+        mock_volume_class.from_yaml_config.side_effect = ValueError(
+            'Invalid volume configuration')
+
+        # Create test client
+        app = fastapi.FastAPI()
+        app.include_router(server.router, prefix='/volumes')
+        client = TestClient(app)
+
+        # Test data
+        validate_body = {
+            'name': 'test-volume',
+            'volume_type': volume.VolumeType.PVC.value,
+            'infra': 'k8s',
+            'size': 'invalid-size',
+            'labels': {},
+            'config': {},
+            'use_existing': False
+        }
+
+        # Mock volume_lib.Volume
+        with mock.patch('sky.volumes.volume.Volume', mock_volume_class):
+            # Make request and expect error
+            response = client.post('/volumes/validate', json=validate_body)
+
+            # Verify response
+            assert response.status_code == 400
+            detail = response.json()['detail']
+            # The detail is a serialized exception dictionary
+            assert detail['message'] == 'Invalid volume configuration'
+
+    def test_volume_apply_success_runpod_network_volume(self, monkeypatch):
+        """Test volume_apply endpoint with successful RunPod network volume creation."""
+        # Mock executor.schedule_request
+        mock_schedule_async = mock.AsyncMock()
+        monkeypatch.setattr(executor, 'schedule_request_async',
+                            mock_schedule_async)
+
+        # Mock cloud registry
+        mock_cloud = mock.MagicMock()
+        mock_cloud.is_same_cloud.return_value = True
+        mock_cloud_registry = mock.MagicMock()
+        mock_cloud_registry.from_str.return_value = mock_cloud
+        monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
+                            mock_cloud_registry)
+
+        # Create test client
+        app = fastapi.FastAPI()
+        app.include_router(server.router, prefix='/volumes')
+        client = TestClient(app)
+
+        # Mock request state
+        with mock.patch.object(fastapi.Request, 'state') as mock_state:
+            mock_state.request_id = 'test-request-id'
+
+            # Test data for RunPod network volume
+            apply_body = {
+                'name': 'test-runpod-volume',
+                'volume_type': volume.VolumeType.RUNPOD_NETWORK_VOLUME.value,
+                'cloud': 'runpod',
+                'region': 'us-east',
+                'size': '100',
+                'config': {}
+            }
+
+            # Make request
+            response = client.post('/volumes/apply', json=apply_body)
+
+            # Verify response
+            assert response.status_code == 200
+
+            # Verify executor was called correctly
+            mock_schedule_async.assert_called_once()
+            call_args = mock_schedule_async.call_args
+            assert call_args[1]['request_id'] == 'test-request-id'
+            assert call_args[1]['request_name'] == 'volume_apply'
+            assert call_args[1]['func'] == server.core.volume_apply
+            assert call_args[1][
+                'schedule_type'] == requests_lib.ScheduleType.LONG
+            assert isinstance(call_args[1]['request_body'],
+                              payloads.VolumeApplyBody)
+
+    def test_volume_apply_runpod_network_volume_non_runpod_cloud(
+            self, monkeypatch):
+        """Test volume_apply endpoint with RunPod network volume on non-RunPod cloud."""
+        # Mock cloud registry
+        mock_cloud = mock.MagicMock()
+        mock_cloud.is_same_cloud.return_value = False  # Not RunPod
+        mock_cloud_registry = mock.MagicMock()
+        mock_cloud_registry.from_str.return_value = mock_cloud
+        monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
+                            mock_cloud_registry)
+
+        # Create test client
+        app = fastapi.FastAPI()
+        app.include_router(server.router, prefix='/volumes')
+        client = TestClient(app)
+
+        # Mock request state
+        with mock.patch.object(fastapi.Request, 'state') as mock_state:
+            mock_state.request_id = 'test-request-id'
+
+            # Test data for RunPod network volume on non-RunPod cloud
+            apply_body = {
+                'name': 'test-runpod-volume',
+                'volume_type': volume.VolumeType.RUNPOD_NETWORK_VOLUME.value,
+                'cloud': 'aws',  # Non-RunPod cloud
+                'region': 'us-east-1',
+                'size': '100',
+                'config': {}
+            }
+
+            # Make request and expect error
+            response = client.post('/volumes/apply', json=apply_body)
+
+            # Verify response
+            assert response.status_code == 400
+            assert 'Runpod network volume is only supported on Runpod' in response.json(
+            )['detail']
