@@ -88,6 +88,8 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`dws <config-yaml-kubernetes-dws>`:
       enabled: true
       max_run_duration: 10m
+    :ref:`post_provision_runcmd <config-yaml-kubernetes-post-provision-runcmd>`:
+      - echo "hello world!"
     :ref:`context_configs <config-yaml-kubernetes-context-configs>`:
       context1:
         pod_config:
@@ -1365,6 +1367,28 @@ Example:
     dws:
       enabled: true
       max_run_duration: 10m
+
+.. _config-yaml-kubernetes-post-provision-runcmd:
+
+``kubernetes.post_provision_runcmd``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Run commands during the instance initialization phase (optional).
+
+This is executed before any of the SkyPilot runtime setup commands, which is useful for doing any setup that must happen right after the instance starts, such as:
+
+- Configuring system settings
+- Installing certificates
+
+Each item is a string.
+
+Example:
+
+.. code-block:: yaml
+
+  kubernetes:
+    post_provision_runcmd:
+      - echo "hello world!"
 
 .. _config-yaml-kubernetes-context-configs:
 
