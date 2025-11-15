@@ -136,6 +136,7 @@ from sky.utils.status_lib import ClusterStatus
 IBM = clouds.IBM
 AWS = clouds.AWS
 Azure = clouds.Azure
+CloudRift = clouds.CloudRift
 Cudo = clouds.Cudo
 GCP = clouds.GCP
 Lambda = clouds.Lambda
@@ -158,6 +159,7 @@ __all__ = [
     '__version__',
     'AWS',
     'Azure',
+    'CloudRift',
     'Cudo',
     'GCP',
     'IBM',

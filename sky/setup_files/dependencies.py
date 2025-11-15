@@ -196,6 +196,7 @@ cloud_dependencies: Dict[str, List[str]] = {
     'docker': ['docker'] + local_ray,
     'lambda': [],  # No dependencies needed for lambda
     'cloudflare': aws_dependencies,
+    'cloudrift': [],  # No dependencies needed for cloudrift
     'coreweave': aws_dependencies + kubernetes_dependencies,
     'scp': local_ray,
     'oci': ['oci'],
