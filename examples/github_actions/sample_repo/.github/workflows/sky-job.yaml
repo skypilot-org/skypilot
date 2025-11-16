@@ -17,6 +17,7 @@ on:
 
 env:
   RUN_NAME_PREFIX: "gh-actions"
+  DEFAULT_TASK_YAML_PATH: "sample_task.yml"
 
 jobs:
   launch-skypilot-job:
@@ -104,12 +105,11 @@ jobs:
         id: skylaunch
         uses: ./.github/actions/launch-skypilot-job
         with:
-          task_yaml_path: ${{ github.event.inputs.task_yaml_path }}
+          task_yaml_path: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.task_yaml_path || env.DEFAULT_TASK_YAML_PATH }}
           job_name: ${{ steps.generate_job_name.outputs.job_name }}
           commit_sha: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.commit_to_run || github.sha }}
-        secrets:
-          SKYPILOT_API_URL: ${{ secrets.SKYPILOT_API_URL }}
-          SKYPILOT_SERVICE_ACCOUNT_TOKEN: ${{ secrets.SKYPILOT_SERVICE_ACCOUNT_TOKEN }}
+          skypilot_api_url: ${{ secrets.SKYPILOT_API_URL }}
+          skypilot_service_account_token: ${{ secrets.SKYPILOT_SERVICE_ACCOUNT_TOKEN }}
 
       - name: Extract SkyPilot Request ID
         id: extract_request_id
@@ -163,8 +163,19 @@ jobs:
 
           set -e
 
+      - name: Check if slack secrets are set
+        id: check_slack_secrets
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.SLACK_BOT_TOKEN }}" ] || [ -z "${{ secrets.SLACK_CHANNEL_ID }}" ]; then
+            echo "slack_secrets_set=False" >> $GITHUB_OUTPUT
+          else
+            echo "slack_secrets_set=True" >> $GITHUB_OUTPUT
+          fi
+
       - name: Generate Run Information for Slack
         id: generate_slack_message
+        if: steps.check_slack_secrets.outputs.slack_secrets_set == 'True'
         shell: bash
         run: |
           MESSAGE_TEXT="Skypilot job ${{ steps.get_job_id.outputs.job_id }} triggered by: ${{ github.event_name }}"
@@ -173,7 +184,7 @@ jobs:
           if [ -n "${{ steps.get_job_id.outputs.job_id }}" ]; then
             MESSAGE_BLOCK="$MESSAGE_BLOCK\n✅ SkyPilot Job ID: ${{ steps.get_job_id.outputs.job_id }}"
             MESSAGE_BLOCK="$MESSAGE_BLOCK\n📝 View logs: sky jobs logs ${{ steps.get_job_id.outputs.job_id }}"
-            MESSAGE_BLOCK="$MESSAGE_BLOCK\n🔗 View job: ${{ env.SKYPILOT_API_URL }}/dashboard/jobs/${{ steps.get_job_id.outputs.job_id }}"
+            MESSAGE_BLOCK="$MESSAGE_BLOCK\n🔗 View job: ${{ secrets.SKYPILOT_API_URL }}/dashboard/jobs/${{ steps.get_job_id.outputs.job_id }}"
           elif [ -n "${{ steps.extract_request_id.outputs.request_id_short }}" ]; then
             MESSAGE_BLOCK="$MESSAGE_BLOCK\n⏳ Request ID: ${{ steps.extract_request_id.outputs.request_id_short }}"
             MESSAGE_BLOCK="$MESSAGE_BLOCK\n📝 Get job ID: sky api logs ${{ steps.extract_request_id.outputs.request_id_short }}"
@@ -187,6 +198,7 @@ jobs:
 
       - name: Notify Slack channel
         uses: slackapi/slack-github-action@v2.0.0
+        if: steps.check_slack_secrets.outputs.slack_secrets_set == 'True'
         with:
           method: chat.postMessage
           token: ${{ secrets.SLACK_BOT_TOKEN }}

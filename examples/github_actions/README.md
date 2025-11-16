@@ -1,4 +1,4 @@
-# Example: Github Actions + SkyPilot
+# Example: GitHub Actions + SkyPilot
 
 This example provides a GitHub CI pipeline that automatically starts a SkyPilot job when a PR is merged to ``main`` branch and notifies a slack channel. It is useful for automatically trigger a training job when there is a new commit for config changes, and send notification for the training status and logs.
 
@@ -7,7 +7,7 @@ This example provides a GitHub CI pipeline that automatically starts a SkyPilot 
 
 ## Prerequisites
 
-The following steps are required to use the example github action in your repository.
+The following steps are required to use the example GitHub action in your repository.
 
 ### SkyPilot: Deploy a centralized API server
 
@@ -15,7 +15,7 @@ Follow the [instructions](https://docs.skypilot.co/en/latest/reference/api-serve
 
 ### SkyPilot: Obtain a service account key
 
-For SkyPilot API Server deployment using OAuth, a service account key is required for the github action.
+This section is required only for SkyPilot API Server deployment using OAuth.
 
 To create a service account key:
 
@@ -25,15 +25,16 @@ To create a service account key:
 
 ### GitHub: Define repository secrets
 
-The example github action relies on a few repository secrets. 
+The example GitHub action relies on a few repository secrets. 
 Follow this tutorial to add [repository secrets](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions#creating-secrets-for-a-repository).
 
 In this example, create the following repository secrets:
 
-- ``SKYPILOT_SERVICE_ACCOUNT_TOKEN``: Service account token for Github actions user generated above.
-- ``SLACK_BOT_TOKEN``: Slack bot token to send a summary message.
-- ``SLACK_CHANNEL_ID``: Slack Channel ID to send a summary message.
-- ``SKYPILOT_API_URL``: URL to the SkyPilot API server in the format ``http(s)://url-or-ip``
+- ``SKYPILOT_API_URL``: URL to the SkyPilot API server, in format of ``http(s)://url-or-ip``.
+If using basic auth, the URL should also include the credentials in format of ``http(s)://username:password@url-or-ip``.
+- ``SKYPILOT_SERVICE_ACCOUNT_TOKEN``: Only required if using OAuth. Service account token for GitHub actions user generated above.
+- ``SLACK_BOT_TOKEN``: Slack bot token to send a summary message. Optional - if not provided, a slack message is not sent after a job is queued.
+- ``SLACK_CHANNEL_ID``: Slack Channel ID to send a summary message. Optional - if not provided, a slack message is not sent after a job is queued.
 
 ## Repository Structure
 
@@ -50,11 +51,10 @@ The example repository has the following directory tree:
 │   │       └── action.yaml
 │   └── workflows
 │       └── sky-job.yaml
-├── sample_task.yaml
 └── launch_sky.py
 ```
 
-The `sky-job.yaml` defines the actual github workflow. This github action is configured to run in two modes:
+The `sky-job.yaml` defines the actual GitHub workflow. This GitHub action is configured to run in two modes:
 
 - `workflow_dispatch`: Triggered manually via the "Actions" page of the GitHub repo.
 - `push`: Triggered when a commit is pushed to specific branches (in this example, ``main``).
@@ -71,21 +71,13 @@ on:
         description: "The full commit hash to run the job against (required for manual runs)."
         required: true
         type: string
-      num_gpus:
-        description: "Number of GPUs to request (e.g., 1, 4). If empty, defaults to SkyPilot task definition (usually 1)."
-        required: false
-        type: string
-      num_nodes:
-        description: "Number of Nodes to request (e.g., 1, 2). If empty, defaults to SkyPilot task definition (usually 1)."
-        required: false
-        type: string
   push:
     branches: [main]
 ```
 
 The workflow checks out the GitHub repo to a specified commit, generates a unique job name, and launches a custom action located at ``.github/actions/launch-skypilot-job/action.yaml``.
 
-The ``Launch SkyPilot Job`` action in turn uses a custom action located at ``.github/actions/setup-environment/action.yaml`` to install necessary dependencies (including ``skypilot``), and calls ``launch_sky.py`` to launch the actual job.
+The ``Launch SkyPilot Job`` action in turn uses a custom action located at ``.github/actions/setup-environment/action.yaml`` to install necessary dependencies (including ``skypilot``), and launches a SkyPilot job.
 
 Once the job is successfully launched, ``sky-job.yaml`` then parses out the job ID of the submitted job. A slack message is then sent to the configured slack channel. An example message is provided below:
 ```
@@ -108,45 +100,3 @@ on:
 -   branches: [main]
 +   branches: [master]
 ```
-
-### What if my SkyPilot API server is using Basic Auth instead of OAuth?
-
-If SkyPilot API server is using basic auth, there is no need for a service account token. In this case, ``Configure SkyPilot API server`` step of ``launch-skypilot-job/action.yaml`` should be changed to not pass in a token:
-
-```diff
-inputs:
-  ...
-- skypilot_service_account_token:
--   description: "SkyPilot service account token"
--   required: true
-
-runs:
-  steps:
-    ...
-    - name: Configure SkyPilot API server
-      shell: bash
-      run: |
--       sky api login -e ${{ secrets.SKYPILOT_API_URL }} --token ${{ secrets.SKYPILOT_SERVICE_ACCOUNT_TOKEN }}
-+       sky api login -e ${{ secrets.SKYPILOT_API_URL }}
-```
-
-``sky-job.yaml`` should be modified to 
-
-```diff
-jobs:
-  launch-batch-job:
-    steps:
-      ...
-      - name: Launch SkyPilot Job via Custom Action
-        id: skylaunch
-        uses: ./.github/actions/launch-skypilot-job
-        with:
-          task_yaml_path: ${{ github.event.inputs.task_yaml_path }}
-          job_name: ${{ steps.generate_job_name.outputs.job_name }}
-          commit_sha: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.commit_to_run || github.sha }}
-        secrets:
-          skypilot_api_url: ${{ env.SKYPILOT_API_URL }}
--         skypilot_service_account_token: ${{ secrets.SKYPILOT_SERVICE_ACCOUNT_TOKEN }}
-```
-
-The credential should be supplied via ``SKYPILOT_API_URL`` GitHub secret instead, using the format ``http(s)://username:password@url-or-ip``.
