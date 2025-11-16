@@ -2389,6 +2389,19 @@
       "type": "timeseries"
     },
     {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 69
+      },
+      "id": 35,
+      "panels": [],
+      "title": "GPU Usage",
+      "type": "row"
+    },
+    {
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -2402,7 +2415,7 @@
             "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "",
+            "axisLabel": "Total GPUs",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "barWidthFactor": 0.6,
@@ -2449,7 +2462,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 69
+        "y": 70
       },
       "id": 29,
       "options": {
@@ -2475,8 +2488,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(sky_apiserver_gpu_launched_total) by (accelerator_type, cloud, user)",
-          "legendFormat": "{{accelerator_type}} ({{cloud}}/{{user}})",
+          "expr": "sky_apiserver_gpu_launched_total",
+          "legendFormat": "{{accelerator_type}} ({{cloud}}/{{region}}/{{user}})",
           "range": true,
           "refId": "A"
         }
@@ -2545,7 +2558,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 77
+        "y": 78
       },
       "id": 31,
       "options": {
@@ -2640,7 +2653,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 85
+        "y": 86
       },
       "id": 32,
       "options": {
@@ -2736,7 +2749,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 85
+        "y": 86
       },
       "id": 33,
       "options": {
@@ -2762,7 +2775,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(increase(label_replace(sky_apiserver_gpu_launched_total, \"user_hash\", \"$1\", \"user\", \"(.*)\")[30d]) * on(user_hash) group_left(username) sky_apiserver_user_info) by (username)",
+          "expr": "sum(label_replace(increase(sky_apiserver_gpu_launched_total[30d]), \"user_hash\", \"$1\", \"user\", \"(.*)\") * on(user_hash) group_left(username) sky_apiserver_user_info) by (username)",
           "legendFormat": "{{username}}",
           "range": true,
           "refId": "A"
@@ -2832,7 +2845,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 85
+        "y": 86
       },
       "id": 34,
       "options": {
@@ -2858,7 +2871,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(increase(label_replace(sky_apiserver_gpu_launched_total, \"user_hash\", \"$1\", \"user\", \"(.*)\")[30d]) * on(user_hash) group_left(username) sky_apiserver_user_info) by (username, cloud, region)",
+          "expr": "sum(label_replace(increase(sky_apiserver_gpu_launched_total[30d]), \"user_hash\", \"$1\", \"user\", \"(.*)\") * on(user_hash) group_left(username) sky_apiserver_user_info) by (username, cloud, region)",
           "legendFormat": "{{username}} - {{cloud}}/{{region}}",
           "range": true,
           "refId": "A"
