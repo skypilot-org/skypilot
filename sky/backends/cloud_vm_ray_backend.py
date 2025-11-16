@@ -46,7 +46,6 @@ from sky.clouds import cloud as sky_cloud
 from sky.clouds.utils import gcp_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
-from sky.metrics import utils as metrics_utils
 from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision import metadata_utils
@@ -3895,10 +3894,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         user = common_utils.get_current_user()
         if (prev_cluster_status is None or
                 prev_cluster_status == status_lib.ClusterStatus.STOPPED):
-            metrics_utils.track_gpu_launch_metrics(
-                launched_resources=handle.launched_resources,
-                launched_nodes=handle.launched_nodes,
-                user=user)
+            # Track GPU launches in the database
+            try:
+                global_user_state.record_daily_gpu_launch(
+                    launched_resources=handle.launched_resources,
+                    launched_nodes=handle.launched_nodes,
+                    user_hash=user.id)
+            except Exception as e:  # pylint: disable=broad-except
+                # Don't fail cluster launch if metrics tracking fails
+                logger.debug('Failed to track GPU launch metrics: '
+                             f'{common_utils.format_exception(e)}')
 
         # Update job queue to avoid stale jobs (when restarted), before
         # setting the cluster to be ready.
