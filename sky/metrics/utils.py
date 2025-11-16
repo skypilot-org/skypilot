@@ -177,6 +177,7 @@ SKY_APISERVER_USER_INFO = prom.Gauge(
 # Daily GPU launches metric - populated from database
 # Note: This is a Gauge (not Counter) because it's read from the database
 # and represents the total GPUs launched on a specific date.
+# Historical data is retained by Prometheus, so we only refresh recent days.
 SKY_APISERVER_DAILY_GPU_LAUNCHES = prom.Gauge(
     'sky_apiserver_daily_gpu_launches',
     'Daily GPU launches stored in the database',
@@ -480,11 +481,12 @@ def refresh_daily_gpu_launches_metrics(days: int = 2,
 
     This function queries the database for recent GPU launches and updates
     the Prometheus gauge metrics. Only loads recent days (default: 2) since
-    older data doesn't change and is already in Prometheus. Results are
-    cached for 5 minutes to avoid excessive database queries.
+    Prometheus retains historical data. The monthly aggregation is done via
+    PromQL queries in Grafana. Results are cached for 5 minutes to avoid
+    excessive database queries.
 
     Args:
-        days: Number of days of history to load (2 days - today and yesterday)
+        days: Number of days of history to load (default: 2 days)
         force: Force refresh even if cache is valid (default: False)
     """
     if not METRICS_ENABLED:
@@ -492,7 +494,8 @@ def refresh_daily_gpu_launches_metrics(days: int = 2,
 
     # Check if cache is still valid
     current_time = time.time()
-    time_since_refresh = (current_time - _DAILY_GPU_LAUNCHES_CACHE['last_refresh'])
+    time_since_refresh = (current_time -
+                          _DAILY_GPU_LAUNCHES_CACHE['last_refresh'])
     cache_valid = (time_since_refresh < _CACHE_TTL_SECONDS and
                    _DAILY_GPU_LAUNCHES_CACHE['days'] == days)
 
@@ -517,7 +520,7 @@ def refresh_daily_gpu_launches_metrics(days: int = 2,
         launches = global_user_state.get_daily_gpu_launches(
             start_date=start_date, end_date=end_date)
 
-        # Update Prometheus gauges
+        # Update Prometheus gauges for daily metrics
         for launch in launches:
             SKY_APISERVER_DAILY_GPU_LAUNCHES.labels(
                 date=launch['date'],
