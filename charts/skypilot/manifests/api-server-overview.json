@@ -1597,7 +1597,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(round(increase(sky_apiserver_gpu_launched_total[1d]))) by (accelerator_type)",
+          "expr": "sum(round(increase(sky_apiserver_gpu_launched_count[1d]))) by (accelerator_type)",
           "legendFormat": "{{accelerator_type}}",
           "range": true,
           "refId": "A"
@@ -1708,7 +1708,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(round(label_replace(increase(sky_apiserver_gpu_launched_total[1d]), \"user_hash\", \"$1\", \"user\", \"(.*)\") * on(user_hash) group_left(username) sky_apiserver_user_info)) by (username)",
+          "expr": "sum(round(label_replace(increase(sky_apiserver_gpu_launched_count[1d]), \"user_hash\", \"$1\", \"user\", \"(.*)\") * on(user_hash) group_left(username) sky_apiserver_user_info)) by (username)",
           "legendFormat": "{{username}}",
           "range": true,
           "refId": "A"
@@ -1819,7 +1819,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(round(increase(sky_apiserver_gpu_launched_total[7d]))) by (accelerator_type)",
+          "expr": "sum(round(increase(sky_apiserver_gpu_launched_count[7d]))) by (accelerator_type)",
           "legendFormat": "{{accelerator_type}}",
           "range": true,
           "refId": "A"
@@ -1930,7 +1930,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(round(increase(sky_apiserver_gpu_launched_total[30d]))) by (accelerator_type)",
+          "expr": "sum(round(increase(sky_apiserver_gpu_launched_count[30d]))) by (accelerator_type)",
           "legendFormat": "{{accelerator_type}}",
           "range": true,
           "refId": "A"
@@ -2016,7 +2016,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(round(label_replace(increase(sky_apiserver_gpu_launched_total[$__range]), \"user_hash\", \"$1\", \"user\", \"(.*)\") * on(user_hash) group_left(username) sky_apiserver_user_info)) by (username)",
+          "expr": "sum(round(label_replace(increase(sky_apiserver_gpu_launched_count[$__range]), \"user_hash\", \"$1\", \"user\", \"(.*)\") * on(user_hash) group_left(username) sky_apiserver_user_info)) by (username)",
           "format": "table",
           "instant": true,
           "legendFormat": "__auto",
@@ -2142,7 +2142,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(round(label_replace(increase(sky_apiserver_gpu_launched_total[$__range]), \"user_hash\", \"$1\", \"user\", \"(.*)\") * on(user_hash) group_left(username) sky_apiserver_user_info)) by (username, accelerator_type)",
+          "expr": "sum(round(label_replace(increase(sky_apiserver_gpu_launched_count[$__range]), \"user_hash\", \"$1\", \"user\", \"(.*)\") * on(user_hash) group_left(username) sky_apiserver_user_info)) by (username, accelerator_type)",
           "format": "table",
           "instant": true,
           "legendFormat": "__auto",

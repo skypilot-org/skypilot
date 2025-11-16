@@ -311,6 +311,7 @@ def _track_gpu_launch_metrics(launched_resources: Any,
         cloud = getattr(launched_resources, 'cloud', None)
         cloud_name = cloud.canonical_name() if cloud else 'unknown'
         region = getattr(launched_resources, 'region', None) or 'unknown'
+        zone = getattr(launched_resources, 'zone', None) or 'unknown'
 
         # Track each accelerator type
         for accelerator_type, count in accelerators.items():
@@ -322,6 +323,7 @@ def _track_gpu_launch_metrics(launched_resources: Any,
                 accelerator_type=accelerator_type,
                 cloud=cloud_name,
                 region=region,
+                zone=zone,
                 user=user_hash).inc(total_gpus)
 
             logger.debug(
