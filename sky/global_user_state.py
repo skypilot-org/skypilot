@@ -44,6 +44,7 @@ from sky.utils.db import migration_utils
 if typing.TYPE_CHECKING:
     from sky import backends
     from sky import clouds
+    from sky import resources as resources_lib
     from sky.clouds import cloud
     from sky.data import Storage
 
@@ -284,10 +285,11 @@ def _glob_to_similar(glob_pattern):
     return like_pattern
 
 
-def _track_gpu_launch_metrics(launched_resources: Any,
-                              launched_nodes: int,
-                              user_hash: str,
-                              username: Optional[str] = None) -> None:
+def _track_gpu_launch_metrics(
+        launched_resources: Optional['resources_lib.Resources'],
+        launched_nodes: Optional[int],
+        user_hash: str,
+        username: Optional[str] = None) -> None:
     """Track GPU launch metrics for Prometheus.
 
     Args:
@@ -296,9 +298,11 @@ def _track_gpu_launch_metrics(launched_resources: Any,
         user_hash: Hash of the user launching the cluster.
         username: Username of the user (optional, for display purposes).
     """
+    if launched_resources is None or launched_nodes is None:
+        return
     try:
         # Get accelerators from resources
-        accelerators = getattr(launched_resources, 'accelerators', None)
+        accelerators = launched_resources.accelerators
         if accelerators is None:
             return
 
@@ -308,10 +312,10 @@ def _track_gpu_launch_metrics(launched_resources: Any,
                                                        username=username).set(1)
 
         # Get cloud and region info
-        cloud = getattr(launched_resources, 'cloud', None)
-        cloud_name = cloud.canonical_name() if cloud else 'unknown'
-        region = getattr(launched_resources, 'region', None) or 'unknown'
-        zone = getattr(launched_resources, 'zone', None) or 'unknown'
+        cloud = launched_resources.cloud
+        cloud_name = cloud.canonical_name() if cloud is not None else 'unknown'
+        region = launched_resources.region if launched_resources.region is not None else 'unknown'
+        zone = launched_resources.zone if launched_resources.zone is not None else 'unknown'
 
         # Track each accelerator type
         for accelerator_type, count in accelerators.items():
@@ -762,6 +766,7 @@ def add_or_update_cluster(cluster_name: str,
             'config_hash': config_hash,
         })
 
+    cluster_just_up = False
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         # with_for_update() locks the row until commit() or rollback()
         # is called, or until the code escapes the with block.
@@ -783,6 +788,7 @@ def add_or_update_cluster(cluster_name: str,
             })
         if (is_launch and not cluster_row or
                 cluster_row.status != status_lib.ClusterStatus.UP.value):
+            cluster_just_up = True
             conditional_values.update({
                 'last_creation_yaml': yaml_utils.dump_yaml_str(task_config)
                                       if task_config else None,
@@ -849,10 +855,7 @@ def add_or_update_cluster(cluster_name: str,
         # Track GPU metrics if this is a new cluster launch
         # Only track when the cluster becomes UP to avoid double counting
         # (once during INIT and once during UP transition)
-        if (is_launch and ready and launched_resources is not None and
-                launched_nodes is not None and metrics_lib.METRICS_ENABLED and
-            (not cluster_row or
-             cluster_row.status != status_lib.ClusterStatus.UP.value)):
+        if cluster_just_up and ready:
             username = common_utils.get_current_user_name()
             _track_gpu_launch_metrics(launched_resources, launched_nodes,
                                       user_hash, username)
