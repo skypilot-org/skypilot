@@ -27,6 +27,7 @@ jobs:
         run: |
           uv venv --seed ~/test-env
           source ~/test-env/bin/activate
+          uv pip install --prerelease=allow "azure-cli>=2.65.0"
           uv pip install -e ".[all]"
           uv pip install -r requirements-dev.txt
 
