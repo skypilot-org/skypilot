@@ -21,7 +21,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
-          python-version: "3.8"
+          python-version: "3.11"
 
       - name: Install dependencies
         run: |
