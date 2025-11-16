@@ -162,7 +162,7 @@ SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS = prom.Histogram(
 )
 
 # GPU metrics
-SKY_APISERVER_GPU_LAUNCHED_TOTAL = prom.Counter(
+SKY_APISERVER_GPU_LAUNCHED_COUNT = prom.Counter(
     'sky_apiserver_gpu_launched_count',
     'Total number of GPUs launched',
     ['accelerator_type', 'cloud', 'region', 'zone', 'user'],

@@ -319,7 +319,7 @@ def _track_gpu_launch_metrics(launched_resources: Any,
             total_gpus = count * launched_nodes
 
             # Increment the GPU launch counter
-            metrics_lib.SKY_APISERVER_GPU_LAUNCHED_TOTAL.labels(
+            metrics_lib.SKY_APISERVER_GPU_LAUNCHED_COUNT.labels(
                 accelerator_type=accelerator_type,
                 cloud=cloud_name,
                 region=region,
