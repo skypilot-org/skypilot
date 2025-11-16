@@ -845,9 +845,9 @@ def add_or_update_cluster(cluster_name: str,
         launched_resources = getattr(cluster_handle, 'launched_resources', None)
 
         # Track GPU metrics if this is a new cluster launch
-        # Only track if the cluster's previous state was not UP to avoid double
-        # counting
-        if (is_launch and launched_resources is not None and
+        # Only track when the cluster becomes UP to avoid double counting
+        # (once during INIT and once during UP transition)
+        if (is_launch and ready and launched_resources is not None and
                 launched_nodes is not None and metrics_lib.METRICS_ENABLED and
             (not cluster_row or
              cluster_row.status != status_lib.ClusterStatus.UP.value)):
