@@ -24,6 +24,7 @@ runs:
         version: "latest"
         python-version: ${{ inputs.python-version }}
     - name: Install dependencies
+      shell: bash
       run: |
         uv venv --seed ~/test-env
         source ~/test-env/bin/activate
@@ -57,6 +58,7 @@ runs:
           } >> $GITHUB_OUTPUT
         fi
     - name: Run tests with pytest
+      shell: bash
       env:
         TEST_PATH: ${{ inputs.test-path }}
         TEST_NAME: ${{ inputs.test-name }}
