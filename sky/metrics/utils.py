@@ -6,6 +6,7 @@ import re
 import select
 import subprocess
 import time
+import typing
 from typing import List, Optional, Tuple
 
 import httpx
@@ -15,6 +16,10 @@ from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import context_utils
+
+if typing.TYPE_CHECKING:
+    from sky import models
+    from sky import resources as resources_lib
 
 _SELECT_TIMEOUT = 1
 _SELECT_BUFFER_SIZE = 4096
@@ -455,3 +460,57 @@ async def get_metrics_for_context(context: str) -> str:
     metrics_text = await add_cluster_name_label(metrics_text, context)
 
     return metrics_text
+
+
+def track_gpu_launch_metrics(launched_resources: 'resources_lib.Resources',
+                             launched_nodes: int, user: 'models.User') -> None:
+    """Track GPU launch metrics for Prometheus.
+
+    Args:
+        launched_resources: Resources object containing accelerator info.
+        launched_nodes: Number of nodes in the cluster.
+        user: User object containing user information.
+    """
+    if launched_resources is None or launched_nodes is None:
+        return
+    try:
+        # Get accelerators from resources
+        accelerators = launched_resources.accelerators
+        if accelerators is None:
+            return
+
+        # Register user info for Grafana display
+        if user.name:
+            SKY_APISERVER_USER_INFO.labels(user_hash=user.id,
+                                           username=user.name).set(1)
+
+        # Get cloud and region info
+        cloud = launched_resources.cloud
+        cloud_name = cloud.canonical_name() if cloud is not None else 'unknown'
+        region = launched_resources.region
+        if region is None:
+            region = 'unknown'
+        zone = launched_resources.zone
+        if zone is None:
+            zone = 'unknown'
+
+        # Track each accelerator type
+        for accelerator_type, count in accelerators.items():
+            # Total GPUs = count per node * number of nodes
+            total_gpus = count * launched_nodes
+
+            # Increment the GPU launch counter
+            SKY_APISERVER_GPU_LAUNCHED_COUNT.labels(
+                accelerator_type=accelerator_type,
+                cloud=cloud_name,
+                region=region,
+                zone=zone,
+                user=user.id).inc(total_gpus)
+
+            logger.debug(
+                f'Tracked GPU launch: {total_gpus} x {accelerator_type} '
+                f'on {cloud_name}/{region} for user {user.name}')
+    except Exception as e:  # pylint: disable=broad-except
+        # Don't fail cluster launch if metrics tracking fails
+        logger.debug('Failed to track GPU launch metrics: '
+                     f'{common_utils.format_exception(e)}')

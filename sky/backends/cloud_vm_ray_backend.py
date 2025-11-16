@@ -46,6 +46,7 @@ from sky.clouds import cloud as sky_cloud
 from sky.clouds.utils import gcp_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
+from sky.metrics import utils as metrics_utils
 from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision import metadata_utils
@@ -3887,6 +3888,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             handle.launched_nodes, handle.launched_resources)
         usage_lib.messages.usage.update_final_cluster_status(
             status_lib.ClusterStatus.UP)
+
+        # Track GPU metrics if this is a new cluster launch
+        # Only track when the cluster becomes UP to avoid double counting
+        # (once during INIT and once during UP transition)
+        user = common_utils.get_current_user()
+        if (prev_cluster_status is None or
+                prev_cluster_status == status_lib.ClusterStatus.STOPPED):
+            metrics_utils.track_gpu_launch_metrics(
+                launched_resources=handle.launched_resources,
+                launched_nodes=handle.launched_nodes,
+                user=user)
 
         # Update job queue to avoid stale jobs (when restarted), before
         # setting the cluster to be ready.
