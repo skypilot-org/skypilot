@@ -1,0 +1,42 @@
+name: Custom Code Rules
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  merge_group:
+
+jobs:
+  custom-rules:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          python-version: "3.8"
+
+      - name: Install dependencies
+        run: |
+          uv venv --seed ~/test-env
+          source ~/test-env/bin/activate
+          uv pip install -e ".[all]"
+          uv pip install -r requirements-dev.txt
+
+      - name: Run custom rules
+        run: |
+          source ~/test-env/bin/activate
+          set -e
+          for script in tests/custom_rules/*.py; do
+            if [ -f "$script" ]; then
+              echo "Running: $script"
+              python "$script"
+            fi
+          done
