@@ -1,5 +1,9 @@
 # Example: GitHub Actions + SkyPilot
 
+![overview](https://i.imgur.com/JyQupxh.png "Overview")
+
+![slack message](https://i.imgur.com/p50yoD5.png "Slack message")
+
 This example provides a GitHub CI pipeline that automatically starts a SkyPilot job when a PR is merged to ``main`` branch and notifies a slack channel. It is useful for automatically trigger a training job when there is a new commit for config changes, and send notification for the training status and logs.
 
 > **_NOTE:_**  This example is adapted from Metta AI's GitHub actions pipeline: https://github.com/Metta-AI/metta/tree/main
@@ -16,6 +20,8 @@ Follow the [instructions](https://docs.skypilot.co/en/latest/reference/api-serve
 ### SkyPilot: Obtain a service account key
 
 This section is required only for SkyPilot API Server deployment using OAuth.
+
+![service accounts](https://i.imgur.com/PyUhBrf.png "Service accounts")
 
 To create a service account key:
 
@@ -51,7 +57,7 @@ The example repository has the following directory tree:
 │   │       └── action.yaml
 │   └── workflows
 │       └── sky-job.yaml
-└── launch_sky.py
+└── sample_task.yaml
 ```
 
 The `sky-job.yaml` defines the actual GitHub workflow. This GitHub action is configured to run in two modes:
@@ -80,13 +86,7 @@ The workflow checks out the GitHub repo to a specified commit, generates a uniqu
 The ``Launch SkyPilot Job`` action in turn uses a custom action located at ``.github/actions/setup-environment/action.yaml`` to install necessary dependencies (including ``skypilot``), and launches a SkyPilot job.
 
 Once the job is successfully launched, ``sky-job.yaml`` then parses out the job ID of the submitted job. A slack message is then sent to the configured slack channel. An example message is provided below:
-```
-Skypilot job 10 triggered by: push
-SkyPilot Job Name: gh-actions.pr19.017451b.20251111_235537
-✅ SkyPilot Job ID: 10
-📝 View logs: sky jobs logs 10
-🔗 View job: https://YOUR_SKYPILOT_API_URL/dashboard/jobs/10
-```
+![slack message](https://i.imgur.com/p50yoD5.png "Slack message")
 
 ## Frequently Asked Questions
 
