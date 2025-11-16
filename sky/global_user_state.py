@@ -2880,6 +2880,78 @@ def get_daily_gpu_launches(
 
 
 @_init_db
+def get_monthly_gpu_launches(
+        start_month: Optional[str] = None,
+        end_month: Optional[str] = None,
+        accelerator_type: Optional[str] = None,
+        cloud: Optional[str] = None,
+        user_hash: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Query monthly GPU launch aggregations from the database.
+
+    Args:
+        start_month: Start month in YYYY-MM format (inclusive)
+        end_month: End month in YYYY-MM format (inclusive)
+        accelerator_type: Filter by accelerator type
+        cloud: Filter by cloud provider
+        user_hash: Filter by user hash
+
+    Returns:
+        List of dictionaries containing:
+        - month: Month in YYYY-MM format
+        - accelerator_type: GPU/accelerator type
+        - cloud: Cloud provider
+        - username: Username
+        - gpu_count: Total GPU count for that month
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        # Get daily data first
+        query = session.query(
+            daily_gpu_launch_table,
+            user_table.c.name.label('username')).outerjoin(
+                user_table,
+                daily_gpu_launch_table.c.user_hash == user_table.c.id)
+
+        # Apply month filters (extract YYYY-MM from date)
+        if start_month is not None:
+            query = query.filter(daily_gpu_launch_table.c.date >= start_month)
+        if end_month is not None:
+            # Add -31 to cover the full month
+            query = query.filter(
+                daily_gpu_launch_table.c.date <= f'{end_month}-31')
+        if accelerator_type is not None:
+            query = query.filter(
+                daily_gpu_launch_table.c.accelerator_type == accelerator_type)
+        if cloud is not None:
+            query = query.filter(daily_gpu_launch_table.c.cloud == cloud)
+        if user_hash is not None:
+            query = query.filter(
+                daily_gpu_launch_table.c.user_hash == user_hash)
+
+        # Get results and aggregate by month
+        results = query.all()
+        monthly_data = {}
+        for row in results:
+            month = row.date[:7]  # Extract YYYY-MM
+            key = (month, row.accelerator_type, row.cloud, row.username or
+                   'unknown')
+            if key not in monthly_data:
+                monthly_data[key] = 0
+            monthly_data[key] += row.gpu_count
+
+        # Convert to list of dicts
+        return [{
+            'month': month,
+            'accelerator_type': accelerator_type,
+            'cloud': cloud,
+            'username': username,
+            'gpu_count': gpu_count,
+        } for (month, accelerator_type, cloud,
+               username), gpu_count in sorted(monthly_data.items())]
+
+
+@_init_db
 def get_max_db_connections() -> Optional[int]:
     """Get the maximum number of connections for the engine."""
     assert _SQLALCHEMY_ENGINE is not None

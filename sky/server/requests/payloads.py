@@ -832,6 +832,15 @@ class CostReportBody(RequestBody):
     dashboard_summary_response: bool = False
 
 
+class StatisticsRequestBody(RequestBody):
+    """The request body for GPU launch statistics endpoint."""
+    period: str = 'monthly'
+    start: Optional[str] = None
+    end: Optional[str] = None
+    accelerator: Optional[str] = None
+    cloud: Optional[str] = None
+
+
 class RequestPayload(BasePayload):
     """The payload for the requests."""
 

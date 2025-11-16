@@ -2732,6 +2732,39 @@ def api_login(endpoint: Optional[str] = None,
 
 
 @usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
+def statistics(
+    period: str = 'monthly',
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    accelerator: Optional[str] = None,
+    cloud: Optional[str] = None
+) -> server_common.RequestId[List[Dict[str, Any]]]:
+    """Get GPU launch statistics.
+
+    Args:
+        period: Aggregation period ('daily' or 'monthly')
+        start: Start date (YYYY-MM-DD for daily, YYYY-MM for monthly)
+        end: End date (YYYY-MM-DD for daily, YYYY-MM for monthly)
+        accelerator: Filter by accelerator type
+        cloud: Filter by cloud provider
+
+    Returns:
+        Request ID for the statistics query.
+    """
+    body = payloads.StatisticsRequestBody(
+        period=period,
+        start=start,
+        end=end,
+        accelerator=accelerator,
+        cloud=cloud,
+    )
+    response = server_common.make_authenticated_request(
+        'POST', '/statistics', json=json.loads(body.model_dump_json()))
+    return server_common.get_request_id(response)
+
+
 @annotations.client_api
 def api_logout() -> None:
     """Logout of the API server.
