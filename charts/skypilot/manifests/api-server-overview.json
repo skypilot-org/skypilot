@@ -2603,33 +2603,21 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "GPUs",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "drawStyle": "line",
-            "fillOpacity": 10,
+            "lineWidth": 1,
+            "fillOpacity": 80,
             "gradientMode": "none",
+            "axisPlacement": "auto",
+            "axisLabel": "GPUs",
+            "axisColorMode": "text",
+            "axisBorderShow": false,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "axisCenteredZero": false,
             "hideFrom": {
               "tooltip": false,
               "viz": false,
               "legend": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
             },
             "thresholdsStyle": {
               "mode": "off"
@@ -2656,19 +2644,28 @@
         "y": 56
       },
       "id": 32,
+      "interval": "30d",
+      "maxDataPoints": 6,
       "options": {
-        "legend": {
-          "calcs": [
-            "last",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
+        "orientation": "auto",
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0,
+        "showValue": "auto",
+        "stacking": "normal",
+        "groupWidth": 0.7,
+        "barWidth": 0.97,
+        "barRadius": 0,
+        "fullHighlight": false,
         "tooltip": {
           "mode": "multi",
-          "sort": "desc"
+          "sort": "desc",
+          "hideZeros": false
+        },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["last", "max"]
         }
       },
       "pluginVersion": "12.0.1",
@@ -2685,8 +2682,9 @@
           "refId": "A"
         }
       ],
-      "title": "Monthly GPU Launches (Last 30 Days)",
-      "type": "timeseries"
+      "timeFrom": "180d",
+      "title": "Monthly GPU Launches",
+      "type": "barchart"
     },
     {
       "datasource": {
@@ -2699,33 +2697,21 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "GPUs",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "drawStyle": "line",
-            "fillOpacity": 10,
+            "lineWidth": 1,
+            "fillOpacity": 80,
             "gradientMode": "none",
+            "axisPlacement": "auto",
+            "axisLabel": "GPUs",
+            "axisColorMode": "text",
+            "axisBorderShow": false,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "axisCenteredZero": false,
             "hideFrom": {
               "tooltip": false,
               "viz": false,
               "legend": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
             },
             "thresholdsStyle": {
               "mode": "off"
@@ -2752,19 +2738,28 @@
         "y": 56
       },
       "id": 33,
+      "interval": "30d",
+      "maxDataPoints": 6,
       "options": {
-        "legend": {
-          "calcs": [
-            "last",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
+        "orientation": "auto",
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0,
+        "showValue": "auto",
+        "stacking": "normal",
+        "groupWidth": 0.7,
+        "barWidth": 0.97,
+        "barRadius": 0,
+        "fullHighlight": false,
         "tooltip": {
           "mode": "multi",
-          "sort": "desc"
+          "sort": "desc",
+          "hideZeros": false
+        },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["last", "max"]
         }
       },
       "pluginVersion": "12.0.1",
@@ -2781,8 +2776,9 @@
           "refId": "A"
         }
       ],
-      "title": "Monthly GPU Launches per User (Last 30 Days)",
-      "type": "timeseries"
+      "timeFrom": "180d",
+      "title": "Monthly GPU Launches per User",
+      "type": "barchart"
     },
     {
       "datasource": {
@@ -2795,33 +2791,21 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "GPUs",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "drawStyle": "line",
-            "fillOpacity": 10,
+            "lineWidth": 1,
+            "fillOpacity": 80,
             "gradientMode": "none",
+            "axisPlacement": "auto",
+            "axisLabel": "GPUs",
+            "axisColorMode": "text",
+            "axisBorderShow": false,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "axisCenteredZero": false,
             "hideFrom": {
               "tooltip": false,
               "viz": false,
               "legend": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
             },
             "thresholdsStyle": {
               "mode": "off"
@@ -2848,19 +2832,28 @@
         "y": 56
       },
       "id": 34,
+      "interval": "30d",
+      "maxDataPoints": 6,
       "options": {
-        "legend": {
-          "calcs": [
-            "last",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
+        "orientation": "auto",
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0,
+        "showValue": "auto",
+        "stacking": "normal",
+        "groupWidth": 0.7,
+        "barWidth": 0.97,
+        "barRadius": 0,
+        "fullHighlight": false,
         "tooltip": {
           "mode": "multi",
-          "sort": "desc"
+          "sort": "desc",
+          "hideZeros": false
+        },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["last", "max"]
         }
       },
       "pluginVersion": "12.0.1",
@@ -2877,8 +2870,9 @@
           "refId": "A"
         }
       ],
-      "title": "Monthly GPU Launches per User per Infra (Last 30 Days)",
-      "type": "timeseries"
+      "timeFrom": "180d",
+      "title": "Monthly GPU Launches per User per Infra",
+      "type": "barchart"
     }
   ],
   "preload": false,
