@@ -494,10 +494,19 @@ class AWS(clouds.Cloud):
         for iteration in range(1, max_retries + 1):
             try:
                 client = aws.client('ec2', region_name=region)
-                image_info = client.describe_images(ImageIds=[image_id]).get(
-                    'Images', [])
+                response = client.describe_images(ImageIds=[image_id])
+                metadata = response['ResponseMetadata']
+                debug_message = ('describe_images response:\n'
+                             f'  status code: {metadata["HTTPStatusCode"]}\n'
+                             f'  retry attempts: {metadata["RetryAttempts"]}'
+                             f'  len(images): {len(response["Images"])}'
+                             f'  next token: {metadata.get("NextToken")}')
+                logger.debug(debug_message)
+                image_info = response['Images']
                 if not image_info:
                     with ux_utils.print_exception_no_traceback():
+                        if env_options.Options.SHOW_DEBUG_INFO.get():
+                            image_not_found_message += f'\n{debug_message}'
                         raise ValueError(image_not_found_message)
                 image = image_info[0]
                 return image
@@ -517,6 +526,14 @@ class AWS(clouds.Cloud):
                     f'{region}: {e}')
                 if iteration == max_retries:
                     with ux_utils.print_exception_no_traceback():
+                        if env_options.Options.SHOW_DEBUG_INFO.get():
+                            image_not_found_message += f'\n{debug_message}'
+                            # Note: the ClientError's exception message should
+                            # include most useful info:
+                            # https://github.com/boto/botocore/blob/260a8b91cedae895165984d2102bcbc487de3027/botocore/exceptions.py#L518-L532
+                            additional_info = f'  ClientError: {e}'
+                            logger.debug(additional_info)
+                            image_not_found_message += additional_info
                         raise ValueError(image_not_found_message) from None
             # linear backoff starting from 0.5 seconds
             time.sleep(iteration * 0.5)
