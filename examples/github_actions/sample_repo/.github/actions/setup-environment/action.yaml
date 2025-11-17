@@ -20,4 +20,4 @@ runs:
 
         uv venv --seed
         uv pip install --prerelease=allow "azure-cli>=2.65.0"
-        uv pip install 'skypilot[all]'
+        uv pip install skypilot

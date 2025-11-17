@@ -1,6 +1,6 @@
 # Example: GitHub Actions + SkyPilot
 
-![overview](https://i.imgur.com/JyQupxh.png "Overview")
+![overview](https://i.imgur.com/2kg56i6.png "Overview")
 
 ![slack message](https://i.imgur.com/p50yoD5.png "Slack message")
 

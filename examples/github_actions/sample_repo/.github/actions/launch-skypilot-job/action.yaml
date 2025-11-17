@@ -42,6 +42,9 @@ runs:
       id: launch
       shell: bash
       run: |
+        # Prepare launch arguments from GitHub Actions inputs
+        # and launch the job asynchronously via CLI.
+        # Save the output which contains the request ID for later use.
         set -x # Enable command printing for debugging
 
         LAUNCH_ARGS=()
