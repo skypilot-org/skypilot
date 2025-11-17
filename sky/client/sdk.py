@@ -382,7 +382,7 @@ def workspaces() -> server_common.RequestId[Dict[str, Any]]:
     return server_common.get_request_id(response)
 
 
-def raise_exception_object_on_client(e: BaseException) -> None:
+def _raise_exception_object_on_client(e: BaseException) -> None:
     """Raise the exception object on the client."""
     if env_options.Options.SHOW_DEBUG_INFO.get():
         stacktrace = getattr(e, 'stacktrace', str(e))
@@ -432,7 +432,7 @@ def validate(
     response = server_common.make_authenticated_request(
         'POST', '/validate', json=json.loads(body.model_dump_json()))
     if response.status_code == 400:
-        raise_exception_object_on_client(
+        _raise_exception_object_on_client(
             exceptions.deserialize_exception(response.json().get('detail')))
 
 
@@ -2026,7 +2026,7 @@ def get(request_id: server_common.RequestId[T]) -> T:
     error = request_task.get_error()
     if error is not None:
         error_obj = error['object']
-        raise_exception_object_on_client(error_obj)
+        _raise_exception_object_on_client(error_obj)
     if request_task.status == requests_lib.RequestStatus.CANCELLED:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.RequestCancelled(
