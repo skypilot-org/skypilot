@@ -17,7 +17,7 @@ The following steps are required to use the example GitHub action in your reposi
 
 Follow the [instructions](https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html) to deploy a centralized SkyPilot API server.
 
-### SkyPilot: Obtain a service account key
+### [Optional] Obtain a SkyPilot service account key if using SSO
 
 This section is required only for SkyPilot API Server deployment using OAuth.
 
@@ -39,8 +39,8 @@ In this example, create the following repository secrets:
 - ``SKYPILOT_API_URL``: URL to the SkyPilot API server, in format of ``http(s)://url-or-ip``.
 If using basic auth, the URL should also include the credentials in format of ``http(s)://username:password@url-or-ip``.
 - ``SKYPILOT_SERVICE_ACCOUNT_TOKEN``: Only required if using OAuth. Service account token for GitHub actions user generated above.
-- ``SLACK_BOT_TOKEN``: Slack bot token to send a summary message. Optional - if not provided, a slack message is not sent after a job is queued.
-- ``SLACK_CHANNEL_ID``: Slack Channel ID to send a summary message. Optional - if not provided, a slack message is not sent after a job is queued.
+- ``SLACK_BOT_TOKEN``: Optional, create a [Slack App](https://api.slack.com/apps) and get a slack "App-Level Token" with `connections:write` permssion to send a summary message. If not provided, a slack message is not sent after a job is queued.
+- ``SLACK_CHANNEL_ID``: Optional, Slack Channel ID to send a summary message. If not provided, a slack message is not sent after a job is queued.
 
 ## Repository Structure
 

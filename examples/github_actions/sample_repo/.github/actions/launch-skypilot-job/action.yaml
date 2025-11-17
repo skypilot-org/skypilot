@@ -29,7 +29,7 @@ runs:
     - name: Setup Environment
       uses: ./.github/actions/setup-environment
 
-    - name: Configure SkyPilot API server
+    - name: Log into SkyPilot API server
       shell: bash
       run: |
         if [ -z "${{ inputs.skypilot_service_account_token }}" ]; then
