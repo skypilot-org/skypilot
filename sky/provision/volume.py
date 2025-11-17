@@ -139,16 +139,20 @@ def provision_ephemeral_volumes(
     if not ephemeral_volume_mounts:
         return None
     volume_infos = []
-    for ephemeral_volume_mount in ephemeral_volume_mounts:
-        mount_copy = copy.deepcopy(ephemeral_volume_mount)
-        volume_mount = volume_utils.VolumeMount.from_yaml_config(mount_copy)
-        volume_info = _create_ephemeral_volume(cloud, region,
-                                               cluster_name_on_cloud, config,
-                                               volume_mount)
-        if volume_info is None:
-            continue
-        volume_infos.append(volume_info)
-    return volume_infos
+    try:
+        for ephemeral_volume_mount in ephemeral_volume_mounts:
+            mount_copy = copy.deepcopy(ephemeral_volume_mount)
+            volume_mount = volume_utils.VolumeMount.from_yaml_config(mount_copy)
+            volume_info = _create_ephemeral_volume(cloud, region,
+                                                   cluster_name_on_cloud,
+                                                   config, volume_mount)
+            if volume_info is None:
+                continue
+            volume_infos.append(volume_info)
+        return volume_infos
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.error(f'Failed to provision ephemeral volumes: {e}')
+        raise e
 
 
 def delete_ephemeral_volumes(
