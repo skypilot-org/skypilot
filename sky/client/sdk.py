@@ -1945,7 +1945,8 @@ def status_kubernetes() -> server_common.RequestId[
     Tuple[List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
           List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
           List[responses.ManagedJobRecord], Optional[str]]]:
-    """Gets all SkyPilot clusters and jobs in the Kubernetes cluster.
+    """[Experimental] Gets all SkyPilot clusters and jobs
+    in the Kubernetes cluster.
 
     Managed jobs and services are also included in the clusters returned.
     The caller must parse the controllers to identify which clusters are run
