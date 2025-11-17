@@ -9,7 +9,7 @@ Run a personal Jupyter Lab server on a SkyPilot cluster.
 Launch a Jupyter Lab cluster with the command:
 
 ```bash
-sky launch -c jupyter-lab-example jupyter_lab.yaml`
+sky launch -c jupyter-lab-example jupyter_lab.yaml
 ```
 
 Look for the following lines in the output for the link to the web UI.
