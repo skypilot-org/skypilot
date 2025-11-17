@@ -1158,6 +1158,12 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
     },
     'remote_identity': {
         'type': 'string',
+    },
+    'post_provision_runcmd': {
+        'type': 'array',
+        'items': {
+            'type': 'string'
+        },
     }
 }
 
