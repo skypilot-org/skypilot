@@ -19,5 +19,4 @@ runs:
         echo "UV_HTTP_TIMEOUT=120" >> $GITHUB_ENV
 
         uv venv --seed
-        uv pip install --prerelease=allow "azure-cli>=2.65.0"
         uv pip install skypilot
