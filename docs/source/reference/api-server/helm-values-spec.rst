@@ -1484,11 +1484,12 @@ Default: ``null``
 
 ``ingress.tls``
 ^^^^^^^^^^^^^^^
-TLS configuration for the ingress controller. When setting to `true`, TLS will be enabled. User can either provide their own TLS secret with a name `<release-name>-tls-secrets` or use `cert-manager` to automatically manage TLS certificates.
+TLS configuration for the ingress controller. When setting to ``true``, TLS will be enabled. User can either provide their own TLS secret with a name ``<release-name>-tls-secrets`` or use ``cert-manager`` to automatically manage TLS certificates.
 
 Default: ``false``
 
-Example with TLS enabled using `cert-manager<https://cert-manager.io/docs/>`_:
+Example with TLS enabled using `cert-manager <https://cert-manager.io/docs/>`_:
+
 .. code-block:: yaml
 
   ingress:
@@ -1499,6 +1500,13 @@ Example with TLS enabled using `cert-manager<https://cert-manager.io/docs/>`_:
       kubernetes.io/ingress.allow-http: "false"
     tls:
       enabled: true
+
+.. _helm-values-ingress-tls-enabled:
+
+``ingress.tls.enabled``
+'''''''''''''''''''''''
+
+Enable TLS for the ingress. When enabled, either cert-manager annotation should be provided or a TLS secret with name ``<release-name>-tls-secrets`` should be created in the namespace.
 
 .. _helm-values-ingress-nginx:
 
