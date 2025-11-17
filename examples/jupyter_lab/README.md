@@ -1,12 +1,14 @@
-# Example: Run Jupyter Lab on SkyPilot
+# Run JupyterLab on SkyPilot
 
-Run a personal Jupyter Lab server on a SkyPilot Cluster
+Run a personal Jupyter Lab server on a SkyPilot cluster.
 
 ## Launch with CLI
 
 Launch a Jupyter Lab cluster with the command:
 
-`sky launch -c jupyter-lab-example jupyter_lab.yaml`
+` ``bash
+sky launch -c jupyter-lab-example jupyter_lab.yaml`
+` ``
 
 Look for the following lines in the output for the link to the web UI.
 ```

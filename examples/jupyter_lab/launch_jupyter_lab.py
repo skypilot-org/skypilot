@@ -57,7 +57,7 @@ def launch_jupyterlab_cluster(cluster_name: str):
     # if you don't want to stream the logs
     # sky.stream_and_get(sky.stop(cluster_name))
 
-    # terminate the cluster/.
+    # terminate the cluster.
     # sky.stream_and_get can be replaced with sky.get
     # if you don't want to stream the logs
     # sky.stream_and_get(sky.down(cluster_name))
