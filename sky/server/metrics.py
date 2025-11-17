@@ -29,6 +29,9 @@ metrics_app = fastapi.FastAPI()
 @metrics_app.get('/metrics')
 def metrics() -> fastapi.Response:
     """Expose aggregated Prometheus metrics from all worker processes."""
+    # Refresh daily GPU launches from database before exposing metrics
+    metrics_utils.refresh_daily_gpu_launches_metrics()
+
     if os.environ.get('PROMETHEUS_MULTIPROC_DIR'):
         # In multiprocess mode, we need to collect metrics from all processes.
         registry = prom.CollectorRegistry()

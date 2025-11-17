@@ -1,11 +1,13 @@
 """Utilities for processing GPU metrics from Kubernetes clusters."""
 import contextlib
+import datetime
 import functools
 import os
 import re
 import select
 import subprocess
 import time
+import typing
 from typing import List, Optional, Tuple
 
 import httpx
@@ -15,6 +17,10 @@ from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import context_utils
+
+if typing.TYPE_CHECKING:
+    from sky import models
+    from sky import resources as resources_lib
 
 _SELECT_TIMEOUT = 1
 _SELECT_BUFFER_SIZE = 4096
@@ -159,6 +165,26 @@ SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS = prom.Histogram(
              600.0, 620.0, 640.0, 660.0, 680.0, 700.0, 720.0, 740.0, 760.0,
              780.0, 800.0, 820.0, 840.0, 860.0, 880.0, 900.0, 920.0, 940.0,
              960.0, 980.0, 1000.0, float('inf')),
+)
+
+# User info metric - maps user hash to username
+SKY_APISERVER_USER_INFO = prom.Gauge(
+    'sky_apiserver_user_info',
+    'User information mapping hash to username',
+    ['user_hash', 'username'],
+)
+
+# Daily GPU launches metric - populated from database
+# Note: This is a Gauge (not Counter) because it's read from the database
+# and represents the total GPUs launched on a specific date.
+# Historical data is retained by Prometheus, so we only refresh recent days.
+SKY_APISERVER_DAILY_GPU_LAUNCHES = prom.Gauge(
+    'sky_apiserver_daily_gpu_launches',
+    'Daily GPU launches stored in the database',
+    [
+        'date', 'accelerator_type', 'cloud', 'region', 'zone', 'user_hash',
+        'username'
+    ],
 )
 
 
@@ -441,3 +467,78 @@ async def get_metrics_for_context(context: str) -> str:
     metrics_text = await add_cluster_name_label(metrics_text, context)
 
     return metrics_text
+
+
+# Cache for daily GPU launches metrics refresh
+# Format: {'last_refresh': timestamp, 'days': days_loaded}
+_DAILY_GPU_LAUNCHES_CACHE = {'last_refresh': 0.0, 'days': 0}
+_CACHE_TTL_SECONDS = 300  # 5 minutes
+
+
+def refresh_daily_gpu_launches_metrics(days: int = 2,
+                                       force: bool = False) -> None:
+    """Refresh Prometheus metrics from the daily GPU launches database.
+
+    This function queries the database for recent GPU launches and updates
+    the Prometheus gauge metrics. Only loads recent days (default: 2) since
+    Prometheus retains historical data. The monthly aggregation is done via
+    PromQL queries in Grafana. Results are cached for 5 minutes to avoid
+    excessive database queries.
+
+    Args:
+        days: Number of days of history to load (default: 2 days)
+        force: Force refresh even if cache is valid (default: False)
+    """
+    if not METRICS_ENABLED:
+        return
+
+    # Check if cache is still valid
+    current_time = time.time()
+    time_since_refresh = (current_time -
+                          _DAILY_GPU_LAUNCHES_CACHE['last_refresh'])
+    cache_valid = (time_since_refresh < _CACHE_TTL_SECONDS and
+                   _DAILY_GPU_LAUNCHES_CACHE['days'] == days)
+
+    if cache_valid and not force:
+        # Cache is still valid, skip refresh
+        return
+
+    try:
+
+        # pylint: disable=import-outside-toplevel
+        from sky import global_user_state
+
+        # Calculate date range
+        end_date = datetime.datetime.now().strftime('%Y-%m-%d')
+        start_date = (datetime.datetime.now() -
+                      datetime.timedelta(days=days)).strftime('%Y-%m-%d')
+
+        # Query database for recent GPU launches
+        # Note: We don't clear old metrics - they persist in Prometheus and
+        # expire based on Prometheus's retention policy. This allows us to
+        # only update recent days while keeping historical data.
+        launches = global_user_state.get_daily_gpu_launches(
+            start_date=start_date, end_date=end_date)
+
+        # Update Prometheus gauges for daily metrics
+        for launch in launches:
+            SKY_APISERVER_DAILY_GPU_LAUNCHES.labels(
+                date=launch['date'],
+                accelerator_type=launch['accelerator_type'],
+                cloud=launch['cloud'],
+                region=launch['region'],
+                zone=launch['zone'],
+                user_hash=launch['user_hash'],
+                username=launch['username'] or 'unknown',
+            ).set(launch['gpu_count'])
+
+        # Update cache timestamp
+        _DAILY_GPU_LAUNCHES_CACHE['last_refresh'] = current_time
+        _DAILY_GPU_LAUNCHES_CACHE['days'] = days
+
+        logger.debug(f'Refreshed {len(launches)} daily GPU launch metrics '
+                     f'(next refresh in {_CACHE_TTL_SECONDS}s)')
+    except Exception as e:  # pylint: disable=broad-except
+        # Don't fail metrics export if refresh fails
+        logger.debug('Failed to refresh daily GPU launch metrics: '
+                     f'{common_utils.format_exception(e)}')

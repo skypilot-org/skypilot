@@ -269,6 +269,86 @@ async def test_middleware_different_status_codes(prometheus_middleware):
         assert total_requests == 1.0
 
 
+def test_gpu_metrics_exist():
+    """Test that GPU metrics are properly defined."""
+    # Check that GPU metrics are defined
+    assert hasattr(metrics_utils, 'SKY_APISERVER_GPU_LAUNCHED_TOTAL')
+    assert hasattr(metrics_utils, 'SKY_APISERVER_GPU_HOURS')
+
+    # Check that the metrics have the correct labels
+    gpu_launched = metrics_utils.SKY_APISERVER_GPU_LAUNCHED_TOTAL
+    gpu_hours = metrics_utils.SKY_APISERVER_GPU_HOURS
+
+    # These should be Prometheus Counter objects
+    assert gpu_launched._type == 'counter'
+    assert gpu_hours._type == 'counter'
+
+    # Verify label names
+    assert set(gpu_launched._labelnames) == {'accelerator_type', 'cloud', 'region'}
+    assert set(gpu_hours._labelnames) == {'accelerator_type', 'cloud', 'region'}
+
+
+def test_gpu_launched_counter():
+    """Test GPU launched counter increments correctly."""
+    # Clear the metric first
+    metrics_utils.SKY_APISERVER_GPU_LAUNCHED_TOTAL.clear()
+
+    # Increment with different labels
+    metrics_utils.SKY_APISERVER_GPU_LAUNCHED_TOTAL.labels(
+        accelerator_type='V100',
+        cloud='gcp',
+        region='us-central1'
+    ).inc(8)
+
+    metrics_utils.SKY_APISERVER_GPU_LAUNCHED_TOTAL.labels(
+        accelerator_type='A100',
+        cloud='aws',
+        region='us-east-1'
+    ).inc(4)
+
+    # Create a registry and check the output
+    registry = CollectorRegistry()
+    registry.register(metrics_utils.SKY_APISERVER_GPU_LAUNCHED_TOTAL)
+    output = generate_latest(registry).decode('utf-8')
+
+    # Verify both metrics are present
+    assert 'accelerator_type="V100"' in output
+    assert 'cloud="gcp"' in output
+    assert 'region="us-central1"' in output
+    assert 'accelerator_type="A100"' in output
+    assert 'cloud="aws"' in output
+
+    # Clean up
+    metrics_utils.SKY_APISERVER_GPU_LAUNCHED_TOTAL.clear()
+
+
+def test_gpu_hours_counter():
+    """Test GPU hours counter increments correctly."""
+    # Clear the metric first
+    metrics_utils.SKY_APISERVER_GPU_HOURS.clear()
+
+    # Increment with fractional hours
+    metrics_utils.SKY_APISERVER_GPU_HOURS.labels(
+        accelerator_type='H100',
+        cloud='gcp',
+        region='us-west1'
+    ).inc(2.5)
+
+    # Create a registry and check the output
+    registry = CollectorRegistry()
+    registry.register(metrics_utils.SKY_APISERVER_GPU_HOURS)
+    output = generate_latest(registry).decode('utf-8')
+
+    # Verify metric is present
+    assert 'accelerator_type="H100"' in output
+    assert 'cloud="gcp"' in output
+    assert 'region="us-west1"' in output
+    assert '2.5' in output
+
+    # Clean up
+    metrics_utils.SKY_APISERVER_GPU_HOURS.clear()
+
+
 @pytest.fixture(autouse=True)
 def cleanup_metrics():
     """Clean up metrics after each test to avoid interference."""
@@ -276,3 +356,5 @@ def cleanup_metrics():
     # Clear all metrics after each test
     metrics_utils.SKY_APISERVER_REQUESTS_TOTAL.clear()
     metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS.clear()
+    metrics_utils.SKY_APISERVER_GPU_LAUNCHED_TOTAL.clear()
+    metrics_utils.SKY_APISERVER_GPU_HOURS.clear()

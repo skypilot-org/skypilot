@@ -5434,6 +5434,88 @@ def ui() -> None:
     sdk.dashboard()
 
 
+@cli.command(cls=_DocumentedCodeCommand)
+@click.option('--period',
+              type=click.Choice(['daily', 'monthly']),
+              default='monthly',
+              help='Aggregation period for GPU launch statistics.')
+@click.option('--start',
+              help='Start date (YYYY-MM-DD for daily, YYYY-MM for monthly).')
+@click.option('--end',
+              help='End date (YYYY-MM-DD for daily, YYYY-MM for monthly).')
+@click.option('--accelerator',
+              help='Filter by accelerator type (e.g., T4, L4, H100).')
+@click.option('--cloud',
+              help='Filter by cloud provider (e.g., gcp, aws, azure).')
+@flags.config_option(expose_value=False)
+@usage_lib.entrypoint
+def statistics(period: str, start: Optional[str], end: Optional[str],
+               accelerator: Optional[str], cloud: Optional[str]) -> None:
+    """Show GPU launch statistics.
+
+    Examples:
+        # Show monthly GPU launches for the last 6 months
+        sky statistics
+
+        # Show daily GPU launches for a specific month
+        sky statistics --period daily --start 2025-11 --end 2025-11
+
+        # Show monthly launches for a specific accelerator
+        sky statistics --accelerator H100
+
+        # Show launches for a specific cloud and time range
+        sky statistics --cloud gcp --start 2025-01 --end 2025-06
+    """
+    import datetime
+
+    # Set defaults based on period
+    if start is None and end is None:
+        end_date = datetime.datetime.now()
+        days = 180 if period == 'monthly' else 30
+        date_fmt = '%Y-%m' if period == 'monthly' else '%Y-%m-%d'
+        start_date = end_date - datetime.timedelta(days=days)
+        start = start_date.strftime(date_fmt)
+        end = end_date.strftime(date_fmt)
+
+    # Call SDK to get statistics
+    request_id = sdk.statistics(period=period,
+                                start=start,
+                                end=end,
+                                accelerator=accelerator,
+                                cloud=cloud)
+    launches = sdk.stream_and_get(request_id)
+
+    if not launches:
+        click.echo('No GPU launches found for the specified criteria.')
+        return
+
+    # Determine grouping key based on period
+    time_key = 'month' if period == 'monthly' else 'date'
+    title = 'Monthly' if period == 'monthly' else 'Daily'
+
+    # Display results
+    click.echo(f'\n{title} GPU Launches:')
+    click.echo('=' * 80)
+
+    # Group by time period
+    time_totals: Dict[str, Dict[str, int]] = {}
+    for launch in launches:
+        time_period = launch[time_key]
+        if time_period not in time_totals:
+            time_totals[time_period] = {}
+        key = f"{launch['accelerator_type']} ({launch['cloud']})"
+        time_totals[time_period][key] = time_totals[time_period].get(
+            key, 0) + launch['gpu_count']
+
+    # Print summary
+    for time_period in sorted(time_totals.keys()):
+        click.echo(f'\n{time_period}:')
+        total = sum(time_totals[time_period].values())
+        for accel, count in sorted(time_totals[time_period].items()):
+            click.echo(f'  {accel:30s}: {count:5d} GPUs')
+        click.echo(f'  {"Total":30s}: {total:5d} GPUs')
+
+
 @cli.group(cls=_NaturalOrderGroup)
 def serve():
     """SkyServe CLI (multi-region, multi-cloud serving)."""

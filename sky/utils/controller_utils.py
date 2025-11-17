@@ -24,6 +24,7 @@ from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
+from sky.metrics import utils as metrics_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
@@ -569,6 +570,8 @@ def shared_controller_vars_to_fill(
         # with a remote API server.
         constants.USING_REMOTE_API_SERVER_ENV_VAR: str(
             common_utils.get_using_remote_api_server()),
+        constants.ENV_VAR_SERVER_METRICS_ENABLED: str(
+            metrics_utils.METRICS_ENABLED),
     })
     if skypilot_config.loaded():
         # Only set the SKYPILOT_CONFIG env var if the user has a config file.

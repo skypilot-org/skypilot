@@ -7,6 +7,7 @@ Concepts:
   interact with a cluster.
 """
 import asyncio
+from datetime import datetime
 import enum
 import functools
 import json
@@ -44,6 +45,7 @@ from sky.utils.db import migration_utils
 if typing.TYPE_CHECKING:
     from sky import backends
     from sky import clouds
+    from sky import resources as resources_lib
     from sky.clouds import cloud
     from sky.data import Storage
 
@@ -261,6 +263,22 @@ system_config_table = sqlalchemy.Table(
     sqlalchemy.Column('config_value', sqlalchemy.Text),
     sqlalchemy.Column('created_at', sqlalchemy.Integer),
     sqlalchemy.Column('updated_at', sqlalchemy.Integer),
+)
+
+# Table for tracking daily GPU launches
+# Stores aggregated GPU launch counts per day, grouped by accelerator type,
+# cloud, region, zone, and user. This provides persistent metrics that survive
+# API server restarts, unlike Prometheus counters.
+daily_gpu_launch_table = sqlalchemy.Table(
+    'daily_gpu_launches',
+    Base.metadata,
+    sqlalchemy.Column('date', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('accelerator_type', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('cloud', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('region', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('zone', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('user_hash', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('gpu_count', sqlalchemy.Integer, server_default='0'),
 )
 
 
@@ -795,6 +813,7 @@ def add_or_update_cluster(cluster_name: str,
         # Modify cluster history table
         launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
         launched_resources = getattr(cluster_handle, 'launched_resources', None)
+
         if cluster_row and cluster_row.workspace:
             history_workspace = cluster_row.workspace
         if cluster_row and cluster_row.user_hash:
@@ -2710,6 +2729,226 @@ def set_system_config(config_key: str, config_value: str) -> None:
             })
         session.execute(upsert_stmnt)
         session.commit()
+
+
+@_init_db
+def record_daily_gpu_launch(launched_resources: 'resources_lib.Resources',
+                            launched_nodes: int, user_hash: str) -> None:
+    """Record daily GPU launch metrics in the database.
+
+    Extracts GPU/accelerator information from the launched resources and
+    records the daily launch count for each accelerator type. Uses an upsert
+    operation to either insert a new row or increment the existing count.
+
+    Args:
+        launched_resources: Resources object containing accelerator info.
+        launched_nodes: Number of nodes in the cluster.
+        user_hash: Hash of the user launching the GPUs.
+    """
+    if launched_resources is None or launched_nodes is None:
+        return
+
+    # Get accelerators from resources
+    accelerators = launched_resources.accelerators
+    if accelerators is None:
+        return
+
+    assert _SQLALCHEMY_ENGINE is not None
+    # Get current date in YYYY-MM-DD format
+    current_date = datetime.now().strftime('%Y-%m-%d')
+
+    # Get cloud and region info
+    cloud = launched_resources.cloud
+    cloud_name = cloud.canonical_name() if cloud is not None else 'unknown'
+    region = launched_resources.region or 'unknown'
+    zone = launched_resources.zone or 'unknown'
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+
+        # Track each accelerator type
+        for accelerator_type, count in accelerators.items():
+            # Total GPUs = count per node * number of nodes
+            total_gpus = count * launched_nodes
+
+            insert_stmnt = insert_func(daily_gpu_launch_table).values(
+                date=current_date,
+                accelerator_type=accelerator_type,
+                cloud=cloud_name,
+                region=region,
+                zone=zone,
+                user_hash=user_hash,
+                gpu_count=total_gpus)
+
+            # On conflict, increment the gpu_count
+            upsert_stmnt = insert_stmnt.on_conflict_do_update(
+                index_elements=[
+                    daily_gpu_launch_table.c.date,
+                    daily_gpu_launch_table.c.accelerator_type,
+                    daily_gpu_launch_table.c.cloud,
+                    daily_gpu_launch_table.c.region,
+                    daily_gpu_launch_table.c.zone,
+                    daily_gpu_launch_table.c.user_hash,
+                ],
+                set_={
+                    daily_gpu_launch_table.c.gpu_count:
+                        daily_gpu_launch_table.c.gpu_count + total_gpus,
+                })
+            session.execute(upsert_stmnt)
+
+        session.commit()
+
+
+@_init_db
+def get_daily_gpu_launches(
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        accelerator_type: Optional[str] = None,
+        cloud: Optional[str] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        user_hash: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Query daily GPU launch metrics from the database.
+
+    Args:
+        start_date: Start date in YYYY-MM-DD format (inclusive)
+        end_date: End date in YYYY-MM-DD format (inclusive)
+        accelerator_type: Filter by accelerator type
+        cloud: Filter by cloud provider
+        region: Filter by region
+        zone: Filter by zone
+        user_hash: Filter by user hash
+
+    Returns:
+        List of dictionaries containing:
+        - date: Date in YYYY-MM-DD format
+        - accelerator_type: GPU/accelerator type
+        - cloud: Cloud provider
+        - region: Cloud region
+        - zone: Cloud zone
+        - user_hash: User hash
+        - username: Username (from user table join, may be None)
+        - gpu_count: Total GPU count for that combination
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        # Join with user table to get username
+        query = session.query(
+            daily_gpu_launch_table,
+            user_table.c.name.label('username')).outerjoin(
+                user_table,
+                daily_gpu_launch_table.c.user_hash == user_table.c.id)
+
+        # Apply filters
+        if start_date is not None:
+            query = query.filter(daily_gpu_launch_table.c.date >= start_date)
+        if end_date is not None:
+            query = query.filter(daily_gpu_launch_table.c.date <= end_date)
+        if accelerator_type is not None:
+            query = query.filter(
+                daily_gpu_launch_table.c.accelerator_type == accelerator_type)
+        if cloud is not None:
+            query = query.filter(daily_gpu_launch_table.c.cloud == cloud)
+        if region is not None:
+            query = query.filter(daily_gpu_launch_table.c.region == region)
+        if zone is not None:
+            query = query.filter(daily_gpu_launch_table.c.zone == zone)
+        if user_hash is not None:
+            query = query.filter(
+                daily_gpu_launch_table.c.user_hash == user_hash)
+
+        # Execute query and convert to list of dicts
+        results = query.all()
+        return [{
+            'date': row.date,
+            'accelerator_type': row.accelerator_type,
+            'cloud': row.cloud,
+            'region': row.region,
+            'zone': row.zone,
+            'user_hash': row.user_hash,
+            'username': row.username,
+            'gpu_count': row.gpu_count,
+        } for row in results]
+
+
+@_init_db
+def get_monthly_gpu_launches(
+        start_month: Optional[str] = None,
+        end_month: Optional[str] = None,
+        accelerator_type: Optional[str] = None,
+        cloud: Optional[str] = None,
+        user_hash: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Query monthly GPU launch aggregations from the database.
+
+    Args:
+        start_month: Start month in YYYY-MM format (inclusive)
+        end_month: End month in YYYY-MM format (inclusive)
+        accelerator_type: Filter by accelerator type
+        cloud: Filter by cloud provider
+        user_hash: Filter by user hash
+
+    Returns:
+        List of dictionaries containing:
+        - month: Month in YYYY-MM format
+        - accelerator_type: GPU/accelerator type
+        - cloud: Cloud provider
+        - username: Username
+        - gpu_count: Total GPU count for that month
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        # Get daily data first
+        query = session.query(
+            daily_gpu_launch_table,
+            user_table.c.name.label('username')).outerjoin(
+                user_table,
+                daily_gpu_launch_table.c.user_hash == user_table.c.id)
+
+        # Apply month filters (extract YYYY-MM from date)
+        if start_month is not None:
+            query = query.filter(daily_gpu_launch_table.c.date >= start_month)
+        if end_month is not None:
+            # Add -31 to cover the full month
+            query = query.filter(
+                daily_gpu_launch_table.c.date <= f'{end_month}-31')
+        if accelerator_type is not None:
+            query = query.filter(
+                daily_gpu_launch_table.c.accelerator_type == accelerator_type)
+        if cloud is not None:
+            query = query.filter(daily_gpu_launch_table.c.cloud == cloud)
+        if user_hash is not None:
+            query = query.filter(
+                daily_gpu_launch_table.c.user_hash == user_hash)
+
+        # Get results and aggregate by month
+        results = query.all()
+        monthly_data = {}
+        for row in results:
+            month = row.date[:7]  # Extract YYYY-MM
+            key = (month, row.accelerator_type, row.cloud, row.username or
+                   'unknown')
+            if key not in monthly_data:
+                monthly_data[key] = 0
+            monthly_data[key] += row.gpu_count
+
+        # Convert to list of dicts
+        return [{
+            'month': month,
+            'accelerator_type': accelerator_type,
+            'cloud': cloud,
+            'username': username,
+            'gpu_count': gpu_count,
+        } for (month, accelerator_type, cloud,
+               username), gpu_count in sorted(monthly_data.items())]
 
 
 @_init_db

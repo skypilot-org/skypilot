@@ -3888,6 +3888,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         usage_lib.messages.usage.update_final_cluster_status(
             status_lib.ClusterStatus.UP)
 
+        # Track GPU metrics if this is a new cluster launch
+        # Only track when the cluster becomes UP to avoid double counting
+        # (once during INIT and once during UP transition)
+        user = common_utils.get_current_user()
+        if (prev_cluster_status is None or
+                prev_cluster_status == status_lib.ClusterStatus.STOPPED):
+            # Track GPU launches in the database
+            try:
+                global_user_state.record_daily_gpu_launch(
+                    launched_resources=handle.launched_resources,
+                    launched_nodes=handle.launched_nodes,
+                    user_hash=user.id)
+            except Exception as e:  # pylint: disable=broad-except
+                # Don't fail cluster launch if metrics tracking fails
+                logger.debug('Failed to track GPU launch metrics: '
+                             f'{common_utils.format_exception(e)}')
+
         # Update job queue to avoid stale jobs (when restarted), before
         # setting the cluster to be ready.
         if prev_cluster_status == status_lib.ClusterStatus.INIT:

@@ -1492,6 +1492,265 @@
         "x": 0,
         "y": 47
       },
+      "id": 35,
+      "panels": [],
+      "title": "GPU Usage",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "GPUs"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 48
+      },
+      "id": 37,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "enablePagination": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "GPUs"
+          }
+        ]
+      },
+      "pluginVersion": "12.0.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "sum(sky_apiserver_daily_gpu_launches{date=~\"$date_filter\"}) by (username)",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Daily GPU Launches per User",
+      "transformations": [
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "Value": {
+                "aggregations": [
+                  "sum"
+                ],
+                "operation": "aggregate"
+              },
+              "username": {
+                "aggregations": [],
+                "operation": "groupby"
+              }
+            }
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "includeByName": {},
+            "indexByName": {
+              "Value (sum)": 1,
+              "username": 0
+            },
+            "renameByName": {
+              "Value (sum)": "GPUs",
+              "username": "User"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "GPUs"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 48
+      },
+      "id": 31,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "enablePagination": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "GPUs"
+          }
+        ]
+      },
+      "pluginVersion": "12.0.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "sum(sky_apiserver_daily_gpu_launches{date=~\"$date_filter\"}) by (username, accelerator_type)",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Daily GPU Launches per User per Accelerator Type",
+      "transformations": [
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "Value": {
+                "aggregations": [
+                  "sum"
+                ],
+                "operation": "aggregate"
+              },
+              "accelerator_type": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "username": {
+                "aggregations": [],
+                "operation": "groupby"
+              }
+            }
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "includeByName": {},
+            "indexByName": {
+              "Value (sum)": 2,
+              "accelerator_type": 1,
+              "username": 0
+            },
+            "renameByName": {
+              "Value (sum)": "GPUs",
+              "accelerator_type": "Accelerator",
+              "username": "User"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 56
+      },
       "id": 17,
       "panels": [],
       "title": "Internals",
@@ -1561,7 +1820,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 48
+        "y": 57
       },
       "id": 7,
       "options": {
@@ -1660,7 +1919,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 48
+        "y": 65
       },
       "id": 20,
       "options": {
@@ -1759,7 +2018,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 48
+        "y": 65
       },
       "id": 21,
       "options": {
@@ -1858,7 +2117,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 55
+        "y": 72
       },
       "id": 6,
       "options": {
@@ -1957,7 +2216,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 55
+        "y": 72
       },
       "id": 5,
       "options": {
@@ -2056,7 +2315,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 55
+        "y": 72
       },
       "id": 22,
       "options": {
@@ -2155,7 +2414,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 62
+        "y": 79
       },
       "id": 10,
       "options": {
@@ -2254,7 +2513,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 62
+        "y": 79
       },
       "id": 9,
       "options": {
@@ -2353,7 +2612,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 62
+        "y": 79
       },
       "id": 23,
       "options": {
@@ -2508,6 +2767,34 @@
         "refresh": 1,
         "regex": "",
         "type": "query"
+      },
+      {
+        "allValue": ".+",
+        "current": {
+          "text": "All",
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(sky_apiserver_daily_gpu_launches,date)",
+        "includeAll": true,
+        "label": "Date Range",
+        "multi": true,
+        "name": "date_filter",
+        "options": [],
+        "query": {
+          "qryType": 1,
+          "query": "label_values(sky_apiserver_daily_gpu_launches,date)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
       }
     ]
   },
@@ -2519,5 +2806,5 @@
   "timezone": "browser",
   "title": "SkyPilot API Server",
   "uid": "skypilot-apiserver-overview",
-  "version": 1
+  "version": 11
 }
