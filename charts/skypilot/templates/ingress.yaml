@@ -64,6 +64,8 @@ spec:
   tls:
   - hosts:
     - {{ .Values.ingress.host }}
+    # cert-manager will manage this secret if enabled by annotations
+    # otherwise, user needs to create this secret manually
     secretName: {{ .Release.Name }}-tls-secrets
   {{- end }}
   rules:

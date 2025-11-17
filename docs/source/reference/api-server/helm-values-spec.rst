@@ -130,6 +130,8 @@ Below is the available helm value keys and the default value of each key:
       :ref:`redis-url <helm-values-ingress-oauth2-proxy-redis-url>`: null
       :ref:`cookie-refresh <helm-values-ingress-oauth2-proxy-cookie-refresh>`: null
       :ref:`cookie-expire <helm-values-ingress-oauth2-proxy-cookie-expire>`: null
+    :ref:`tls <helm-values-ingress-tls>`:
+      :ref:`enabled <helm-values-ingress-tls-enabled>`: false
 
   :ref:`ingress-nginx <helm-values-ingress-nginx>`:
     :ref:`enabled <helm-values-ingress-nginx-enabled>`: true
@@ -1477,6 +1479,26 @@ Default: ``null``
   ingress:
     oauth2-proxy:
       cookie-expire: 86400  # 24 hours
+
+.. _helm-values-ingress-tls:
+
+``ingress.tls``
+^^^^^^^^^^^^^^^
+TLS configuration for the ingress controller. When setting to `true`, TLS will be enabled. User can either provide their own TLS secret with a name `<release-name>-tls-secrets` or use `cert-manager` to automatically manage TLS certificates.
+
+Default: ``false``
+
+Example with TLS enabled using `cert-manager<https://cert-manager.io/docs/>`_:
+.. code-block:: yaml
+
+  ingress:
+    enabled: true
+    host: skypilot.example.com
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt
+      kubernetes.io/ingress.allow-http: "false"
+    tls:
+      enabled: true
 
 .. _helm-values-ingress-nginx:
 
