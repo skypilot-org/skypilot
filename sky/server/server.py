@@ -881,7 +881,7 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     except Exception as e:  # pylint: disable=broad-except
         # Print the exception to the API server log.
         if env_options.Options.SHOW_DEBUG_INFO.get():
-            logger.info(f'/validate exception:', exc_info=True)
+            logger.info('/validate exception:', exc_info=True)
         # Set the exception stacktrace for the serialized exception.
         requests_lib.set_exception_stacktrace(e)
         raise fastapi.HTTPException(
