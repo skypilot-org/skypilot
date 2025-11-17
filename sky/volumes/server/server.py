@@ -69,6 +69,7 @@ async def volume_validate(
         volume = volume_lib.Volume.from_yaml_config(volume_config)
         volume.validate()
     except Exception as e:
+        requests_lib.set_exception_stacktrace(e)
         raise fastapi.HTTPException(status_code=400,
                                     detail=exceptions.serialize_exception(e))
 
