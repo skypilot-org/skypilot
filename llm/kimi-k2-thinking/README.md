@@ -2,7 +2,7 @@
 <!-- $REMOVE -->
 # Run Kimi K2 Thinking on Kubernetes or Any Cloud
 <!-- $END_REMOVE -->
-<!-- $UNCOMMENT# Kimi-K2-Thinking -->
+<!-- $UNCOMMENT# Kimi K2 Thinking -->
 
 [Kimi K2 Thinking](https://huggingface.co/moonshotai/Kimi-K2-Thinking) is an advanced large language model created by [Moonshot AI](https://www.moonshot.ai/).
 
