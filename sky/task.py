@@ -1755,7 +1755,12 @@ class Task:
         return required_features
 
     def __rshift__(self, b):
-        dag_lib.get_current_dag().add_edge(self, b)
+        dag = dag_lib.get_current_dag()
+        if dag is None:
+            raise RuntimeError(
+                'Cannot use >> operator outside of a DAG context. '
+                'Please use "with sky.Dag() as dag:" to create a DAG context.')
+        dag.add_edge(self, b)
 
     def __repr__(self):
         if isinstance(self.run, str):

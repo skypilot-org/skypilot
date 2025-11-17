@@ -85,7 +85,7 @@ class EnvAwareHandler(rich_utils.RichSafeStreamHandler):
     @level.setter
     def level(self, level):
         # pylint: disable=protected-access
-        self._level = logging._checkLevel(level)
+        self._level = logging._checkLevel(level)  # type: ignore[attr-defined]
 
 
 _root_logger = logging.getLogger('sky')
@@ -146,7 +146,8 @@ def reload_logger():
     such as SKYPILOT_DEBUG.
     """
     global _default_handler
-    _root_logger.removeHandler(_default_handler)
+    if _default_handler is not None:
+        _root_logger.removeHandler(_default_handler)
     _default_handler = None
     _setup_logger()
 

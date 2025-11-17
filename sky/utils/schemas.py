@@ -1552,7 +1552,7 @@ def get_config_schema():
         }
     }
 
-    daemon_schema = {
+    daemon_schema: Dict[str, Any] = {
         'type': 'object',
         'required': [],
         'additionalProperties': False,
