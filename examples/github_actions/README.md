@@ -57,7 +57,8 @@ The example repository has the following directory tree:
 │   │       └── action.yaml
 │   └── workflows
 │       └── sky-job.yaml
-└── sample_task.yaml
+└── tasks
+    └── train.yaml
 ```
 
 The `sky-job.yaml` defines the actual GitHub workflow. This GitHub action is configured to run in two modes:

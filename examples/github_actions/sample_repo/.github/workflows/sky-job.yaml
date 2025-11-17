@@ -17,7 +17,7 @@ on:
 
 env:
   RUN_NAME_PREFIX: "gh-actions"
-  DEFAULT_TASK_YAML_PATH: "sample_task.yml"
+  DEFAULT_TASK_YAML_PATH: "tasks/train.yaml"
 
 jobs:
   launch-skypilot-job:
@@ -45,6 +45,7 @@ jobs:
           # Expects commit message to be in format "commit message (#123)"
           PR_FROM_COMMIT=$(git log -1 --pretty=format:"%s" | sed -n 's/.*(#\([0-9][0-9]*\)).*/\1/p')
           echo "Extracted PR number from commit message (if any): $PR_FROM_COMMIT"
+          echo "### Extracted PR number from commit message (if any): $PR_FROM_COMMIT" >> $GITHUB_STEP_SUMMARY
           echo "pr_number_for_name_generation=${PR_FROM_COMMIT}" >> $GITHUB_OUTPUT
 
       - name: Generate Job Name
@@ -98,8 +99,9 @@ jobs:
             exit 1
           fi
 
-          echo "Generated run name for SkyPilot: $FINAL_RUN_NAME"
+          echo "Generated job name for SkyPilot: $FINAL_RUN_NAME"
           echo "job_name=$FINAL_RUN_NAME" >> $GITHUB_OUTPUT
+          echo "### Generated job name: $FINAL_RUN_NAME" >> $GITHUB_STEP_SUMMARY
 
       - name: Launch SkyPilot Job via Custom Action
         id: skylaunch
@@ -128,10 +130,12 @@ jobs:
             echo "Extracted request ID: $REQUEST_ID"
             echo "request_id=$REQUEST_ID" >> $GITHUB_OUTPUT
             echo "request_id_short=$(echo $REQUEST_ID | cut -c1-8)" >> $GITHUB_OUTPUT
+            echo '### SkyPilot Request ID $REQUEST_ID extracted' >> $GITHUB_STEP_SUMMARY
           else
             echo "Could not extract request ID from launch output"
             echo "request_id=" >> $GITHUB_OUTPUT
             echo "request_id_short=" >> $GITHUB_OUTPUT
+            echo '### SkyPilot Request ID not found in logs' >> $GITHUB_STEP_SUMMARY
           fi
 
       - name: Get SkyPilot Job ID
@@ -154,11 +158,13 @@ jobs:
           if [ -n "$JOB_ID" ]; then
             echo "Extracted SkyPilot Job ID: $JOB_ID"
             echo "job_id=$JOB_ID" >> $GITHUB_OUTPUT
+            echo '### SkyPilot Job ID $JOB_ID launched' >> $GITHUB_STEP_SUMMARY
           else
             echo "Could not extract Job ID from logs"
             echo "Log output was:"
             echo "$LOG_OUTPUT"
             echo "job_id=" >> $GITHUB_OUTPUT
+            echo '### SkyPilot Job ID not found in logs' >> $GITHUB_STEP_SUMMARY
           fi
 
           set -e
@@ -195,6 +201,7 @@ jobs:
           echo "message_text=$MESSAGE_TEXT" >> $GITHUB_OUTPUT
           echo "message_block=$MESSAGE_BLOCK" >> $GITHUB_OUTPUT
           echo $MESSAGE_BLOCK
+          echo "$MESSAGE_BLOCK" >> $GITHUB_STEP_SUMMARY
 
       - name: Notify Slack channel
         uses: slackapi/slack-github-action@v2.0.0
