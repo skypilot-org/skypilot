@@ -69,7 +69,7 @@ From [vLLM's benchmark](https://docs.vllm.ai/projects/recipes/en/latest/moonshot
 
 To curl `/v1/chat/completions`:
 
-```console
+```bash
 ENDPOINT=$(sky status --endpoint 8081 kimi-k2-thinking)
 
 curl http://$ENDPOINT/v1/chat/completions \
@@ -94,7 +94,7 @@ The model will provide its reasoning process in the response, showing its chain-
 ## Clean up resources
 To shut down all resources:
 
-```console
+```bash
 sky down kimi-k2-thinking
 ```
 
@@ -102,19 +102,19 @@ sky down kimi-k2-thinking
 
 With no change to the YAML, launch a fully managed service with autoscaling replicas and load-balancing on your infra:
 
-```console
+```bash
 sky serve up kimi-k2-thinking.sky.yaml -n kimi-k2-thinking
 ```
 
 Wait until the service is ready:
 
-```console
+```bash
 watch -n10 sky serve status kimi-k2-thinking
 ```
 
 Get a single endpoint that load-balances across replicas:
 
-```console
+```bash
 ENDPOINT=$(sky serve status --endpoint kimi-k2-thinking)
 ```
 
@@ -122,7 +122,7 @@ ENDPOINT=$(sky serve status --endpoint kimi-k2-thinking)
 
 To curl the endpoint:
 
-```console
+```bash
 curl http://$ENDPOINT/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
@@ -142,7 +142,7 @@ curl http://$ENDPOINT/v1/chat/completions \
 
 To shut down all resources:
 
-```console
+```bash
 sky serve down kimi-k2-thinking
 ```
 
