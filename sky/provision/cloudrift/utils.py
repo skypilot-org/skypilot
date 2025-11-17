@@ -9,7 +9,6 @@ import requests
 from packaging import version
 from requests import Response
 
-
 logger = sky_logging.init_logger(__name__)
 
 # CloudRift credentials environment variable
@@ -43,11 +42,11 @@ def get_credentials_path() -> Optional[str]:
 
 class RiftClient:
     """Client for interacting with the CloudRift API."""
+
     def __init__(self, api_key: Optional[str] = None):
         self.server_address = CLOUDRIFT_SERVER_ADDRESS
         self.public_api_root = os.path.join(CLOUDRIFT_SERVER_ADDRESS, 'api/v1')
-        self.internal_api_root = os.path.join(CLOUDRIFT_SERVER_ADDRESS,
-                                              'internal')
+        self.internal_api_root = os.path.join(CLOUDRIFT_SERVER_ADDRESS, 'internal')
         self.api_key = api_key if api_key else os.getenv('CLOUDRIFT_API_KEY')
 
     def validate_api_key(self) -> bool:
@@ -93,7 +92,7 @@ class RiftClient:
         recipe_group = self.list_recipies()
         vm_recipes = []
         for group in recipe_group:
-            tags = group.get('tags ', [])
+            tags = group.get('tags', [])
             has_vm = 'vm' in tags
             if group.get('name', '').lower() != 'linux' and not has_vm:
                 continue
@@ -118,8 +117,7 @@ class RiftClient:
             if 'Ubuntu' not in recipe_name:
                 continue
 
-            url = recipe['details'].get('VirtualMachine',
-                                        {}).get('image_url', None)
+            url = recipe['details'].get('VirtualMachine', {}).get('image_url', None)
             version_match = re.search(r'.* (\d+\.\d+)', recipe_name)
             if url and version_match and version_match.group(1):
                 ubuntu_version = version.parse(version_match.group(1))
@@ -131,8 +129,7 @@ class RiftClient:
 
         return None
 
-    def deploy_instance(self, instance_type: str, cluster_name:str, name:str,
-                        ssh_keys: List[str]) -> List[str]:
+    def deploy_instance(self, instance_type: str, cluster_name: str, name: str, ssh_keys: List[str]) -> List[str]:
         image_url = self.get_vm_image_url()
         if not image_url:
             raise RuntimeError('No suitable VM image found.')
@@ -164,7 +161,11 @@ class RiftClient:
         return []
 
     def list_instances(self, cluster_name) -> List[Dict]:
-        request_data: Dict[str, Any] = {'selector': {'ByClusterName': cluster_name}}
+        request_data: Dict[str, Any] = {
+            'selector': {
+                'ByClusterName': cluster_name
+            }
+        }
 
         logger.debug('Listing instances with request data: %s', request_data)
         try:
@@ -241,7 +242,10 @@ class RiftClient:
                 method,
                 full_url,
                 headers=headers,
-                json={'version': api_version, 'data': data},
+                json={
+                    'version': api_version,
+                    'data': data
+                },
                 timeout=120,
                 **kwargs,
             )

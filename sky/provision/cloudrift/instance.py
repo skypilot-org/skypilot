@@ -46,14 +46,22 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     """Runs instances for the given cluster."""
     cloudrift_client = utils.get_cloudrift_client()
     del cluster_name  # unused
+
     pending_status = ['Initializing']
     while True:
         instances_dict = _filter_instances(cluster_name_on_cloud, pending_status)
         if not instances_dict:
             break
-        instance_statuses = [instance.get('status') for instance in instances_dict.values()]
-        logger.info(f'Waiting for {len(instances_dict)} instances to be ready: '
-                    f'{instance_statuses}')
+
+        instance_statuses = [
+            instance.get('status') for instance in instances_dict.values()
+        ]
+
+        logger.info(
+            f'Waiting for {len(instances_dict)} instances to be ready: '
+            f'{instance_statuses}'
+        )
+
         time.sleep(constants.POLL_INTERVAL)
 
     exist_instances = _filter_instances(cluster_name_on_cloud,
@@ -61,17 +69,26 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                                         ['Active'])
 
     head_instance = _get_head_instance(exist_instances)
+    head_instance_id = head_instance.get('id') if head_instance else None
+
     to_start_count = config.count - len(exist_instances)
     if to_start_count < 0:
         raise RuntimeError(
             f'Cluster {cluster_name_on_cloud} already has '
-            f'{len(exist_instances)} nodes, but {config.count} are required.')
+            f'{len(exist_instances)} nodes, but {config.count} are required.'
+        )
+
     if to_start_count == 0:
         if head_instance is None:
             raise RuntimeError(
-                f'Cluster {cluster_name_on_cloud} has no head node.')
-        logger.info(f'Cluster {cluster_name_on_cloud} already has '
-                    f'{len(exist_instances)} nodes, no need to start more.')
+                f'Cluster {cluster_name_on_cloud} has no head node.'
+            )
+
+        logger.info(
+            f'Cluster {cluster_name_on_cloud} already has '
+            f'{len(exist_instances)} nodes, no need to start more.'
+        )
+
         return common.ProvisionRecord(
             provider_name='CloudRift',
             cluster_name=cluster_name_on_cloud,
@@ -101,6 +118,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         except Exception as e:
             logger.warning(f'run_instances error: {e}')
             raise
+
     created_instance_ids: List[str] = []
     for _ in range(to_start_count):
         instance_type = 'head' if head_instance is None else 'worker'
@@ -113,7 +131,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         logger.info(f'Launched instance {instance_id}.')
         created_instance_ids.append(instance_id)
         if head_instance is None:
-            head_instance = instance_id
+            head_instance_id = instance_id
 
     instances_to_wait = created_instance_ids.copy()
 
@@ -123,32 +141,39 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
         instances = cloudrift_client.list_instances(cluster_name_on_cloud)
         print("list instances", instances)
+
         for instance in instances:
             if instance.get('status') == 'Active' and instance.get(
-                'id') in instances_to_wait:
+                    'id') in instances_to_wait:
                 instances_to_wait.remove(instance.get('id'))
             elif instance.get('status') != 'Initializing' and instance.get(
-                'id') in instances_to_wait:
+                    'id') in instances_to_wait:
                 raise RuntimeError(
-                    f'Failed to launch instance {instance.get("id")}')
+                    f'Failed to launch instance {instance.get("id")}'
+                )
+
         logger.info('Waiting for instances to be ready: '
                     f'({len(instances)}/{config.count}).')
+
         if len(instances_to_wait) == 0:
             break
 
         time.sleep(constants.POLL_INTERVAL)
+
     else:
         # Failed to launch config.count of instances after max retries
         msg = 'run_instances: Failed to create the instances'
         logger.warning(msg)
         raise RuntimeError(msg)
-    assert head_instance is not None, 'head_instance should not be None'
+
+    assert head_instance_id is not None, 'head_instance should not be None'
+
     return common.ProvisionRecord(
         provider_name='CloudRift',
         cluster_name=cluster_name_on_cloud,
         region=region,
         zone=None,
-        head_instance_id=str(head_instance),
+        head_instance_id=head_instance_id,
         resumed_instance_ids=[],
         created_instance_ids=created_instance_ids,
     )
@@ -167,6 +192,7 @@ def stop_instances(
 ) -> None:
     raise NotImplementedError('stop_instances is not supported for CloudRift')
 
+
 def terminate_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
@@ -177,7 +203,9 @@ def terminate_instances(
 
     cloudrift_client = utils.get_cloudrift_client()
     exist_instances = _filter_instances(
-        cluster_name_on_cloud, status_filters=['Active', "Initializing"])
+        cluster_name_on_cloud, status_filters=['Active', "Initializing"]
+    )
+
     for instance_id in exist_instances:
         logger.info(f'Terminating instance {instance_id}')
         try:
@@ -202,18 +230,24 @@ def get_cluster_info(
         A tuple of (head_ip, worker_ips).
     """
     del region  # unused
+
     running_instances = _filter_instances(cluster_name_on_cloud,
                                           ['Active', 'Initializing'])
+
     print("running_instances", running_instances)
+
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
+
     for instance_id, instance_info in running_instances.items():
         port_mappings = instance_info.get('port_mappings', [])
         ssh_port = 22
+
         for port_mapping in port_mappings:
             if port_mapping[0] == 22:
                 ssh_port = port_mapping[1]
                 break
+
         instances[instance_id] = [
             common.InstanceInfo(
                 instance_id=instance_id,
@@ -223,6 +257,7 @@ def get_cluster_info(
                 tags={},
             )
         ]
+
         if head_instance_id is None:
             head_instance_id = instance_id
 
@@ -242,7 +277,9 @@ def query_instances(
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
     del cluster_name, provider_config  # unused
+
     instances = _filter_instances(cluster_name_on_cloud, status_filters=None)
+
     statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
                               Optional[str]]] = {}
 
@@ -251,13 +288,17 @@ def query_instances(
         'Initializing': status_lib.ClusterStatus.INIT,
         'Inactive': None,
     }
+
     for instance_name, instance_meta in instances.items():
         status = instance_meta.get('status')
+
         # Skip terminated instances if non_terminated_only is True
         if non_terminated_only and status == 'terminated':
             continue
+
         # Convert the status to the SkyPilot status
         statuses[instance_name] = (status_map.get(status), None)
+
     return statuses
 
 
@@ -268,6 +309,7 @@ def open_ports(
 ) -> None:
     """See sky/provision/__init__.py"""
     del provider_config  # unused
+
     # instances = utils.filter_instances(cluster_name_on_cloud, ['running'])
     # for instance_meta in instances.values():
     #     utils.open_ports_instance(instance_meta, ports)
