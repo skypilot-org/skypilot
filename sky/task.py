@@ -928,6 +928,8 @@ class Task:
                         vol_req)
                 else:
                     override_params[key] = vol_req
+        logger.debug(
+            f'Override resources with volume constraints: {override_params}')
         self.set_resources_override(override_params)
         self.volume_mounts = volume_mounts
 

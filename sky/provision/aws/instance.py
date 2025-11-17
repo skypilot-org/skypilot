@@ -30,6 +30,8 @@ if typing.TYPE_CHECKING:
     import mypy_boto3_ec2
     from mypy_boto3_ec2 import type_defs as ec2_type_defs
 
+    from sky.utils import volume as volume_utils
+
 logger = sky_logging.init_logger(__name__)
 
 _T = TypeVar('_T')
@@ -311,10 +313,15 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
     return head_instance_id
 
 
-def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
-                  config: common.ProvisionConfig) -> common.ProvisionRecord:
+def run_instances(
+    region: str,
+    cluster_name: str,
+    cluster_name_on_cloud: str,
+    config: common.ProvisionConfig,
+    ephemeral_volumes: Optional[List['volume_utils.VolumeInfo']] = None,
+) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
-    del cluster_name  # unused
+    del cluster_name, ephemeral_volumes  # unused
     ec2 = _default_ec2_resource(region)
     # NOTE: We set max_attempts=0 for fast failing when the resource is not
     # available (although the doc says it will only retry for network

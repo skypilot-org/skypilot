@@ -1,6 +1,7 @@
 """Cudo Compute instance provisioning."""
 
 import time
+import typing
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
@@ -8,6 +9,9 @@ from sky.provision import common
 from sky.provision.cudo import cudo_machine_type
 from sky.provision.cudo import cudo_wrapper
 from sky.utils import status_lib
+
+if typing.TYPE_CHECKING:
+    from sky.utils import volume as volume_utils
 
 POLL_INTERVAL = 10
 
@@ -40,10 +44,15 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
     return head_instance_id
 
 
-def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
-                  config: common.ProvisionConfig) -> common.ProvisionRecord:
+def run_instances(
+    region: str,
+    cluster_name: str,
+    cluster_name_on_cloud: str,
+    config: common.ProvisionConfig,
+    ephemeral_volumes: Optional[List['volume_utils.VolumeInfo']] = None,
+) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
-    del cluster_name  # unused
+    del cluster_name, ephemeral_volumes  # unused
     pending_status = ['pend', 'init', 'prol', 'boot']
 
     while True:

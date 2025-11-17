@@ -8,18 +8,27 @@ import logging
 import random
 import string
 import time
+import typing
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky.clouds.utils import scp_utils
 from sky.provision import common
 from sky.utils import status_lib
 
+if typing.TYPE_CHECKING:
+    from sky.utils import volume as volume_utils
+
 logger = logging.getLogger(__name__)
 
 
-def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
-                  config: common.ProvisionConfig) -> common.ProvisionRecord:
-    del cluster_name  # unused
+def run_instances(
+    region: str,
+    cluster_name: str,
+    cluster_name_on_cloud: str,
+    config: common.ProvisionConfig,
+    ephemeral_volumes: Optional[List['volume_utils.VolumeInfo']] = None,
+) -> common.ProvisionRecord:
+    del cluster_name, ephemeral_volumes  # unused
     zone_id = config.node_config['zone_id']
 
     running_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])

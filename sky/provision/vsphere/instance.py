@@ -19,6 +19,8 @@ from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:
     import pandas as pd
+
+    from sky.utils import volume as volume_utils
 else:
     pd = adaptors_common.LazyImport('pandas')
 
@@ -30,10 +32,15 @@ HEAD_NODE_VALUE = '1'
 WORKER_NODE_VALUE = '0'
 
 
-def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
-                  config: common.ProvisionConfig) -> common.ProvisionRecord:
+def run_instances(
+    region: str,
+    cluster_name: str,
+    cluster_name_on_cloud: str,
+    config: common.ProvisionConfig,
+    ephemeral_volumes: Optional[List['volume_utils.VolumeInfo']] = None,
+) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
-    del cluster_name  # unused
+    del cluster_name, ephemeral_volumes  # unused
     logger.info('New provision of Vsphere: run_instances().')
 
     resumed_instance_ids: List[str] = []

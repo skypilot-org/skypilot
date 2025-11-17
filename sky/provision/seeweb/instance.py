@@ -7,6 +7,7 @@ Prerequisites:
 import os
 import subprocess
 import time
+import typing
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
@@ -20,6 +21,9 @@ from sky.utils import auth_utils
 from sky.utils import command_runner  # Unified SSH helper
 from sky.utils import common_utils
 from sky.utils import status_lib
+
+if typing.TYPE_CHECKING:
+    from sky.utils import volume as volume_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -507,10 +511,15 @@ class SeewebNodeProvider:
 # =============================================================================
 
 
-def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
-                  config: ProvisionConfig) -> ProvisionRecord:
+def run_instances(
+    region: str,
+    cluster_name: str,
+    cluster_name_on_cloud: str,
+    config: ProvisionConfig,
+    ephemeral_volumes: Optional[List['volume_utils.VolumeInfo']] = None,
+) -> ProvisionRecord:
     """Run instances for Seeweb cluster."""
-    del cluster_name  # unused
+    del cluster_name, ephemeral_volumes  # unused
     provider = SeewebNodeProvider(config, cluster_name_on_cloud)
     provider.run_instances(config.node_config, config.count)
 

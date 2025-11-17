@@ -25,6 +25,8 @@ if typing.TYPE_CHECKING:
     from azure.mgmt.compute import models as azure_compute_models
     from azure.mgmt.network import models as azure_network_models
 
+    from sky.utils import volume as volume_utils
+
 logger = sky_logging.init_logger(__name__)
 
 # Suppress noisy logs from Azure SDK. Reference:
@@ -362,10 +364,15 @@ def _create_instances(compute_client: 'azure_compute.ComputeManagementClient',
     return instances
 
 
-def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
-                  config: common.ProvisionConfig) -> common.ProvisionRecord:
+def run_instances(
+    region: str,
+    cluster_name: str,
+    cluster_name_on_cloud: str,
+    config: common.ProvisionConfig,
+    ephemeral_volumes: Optional[List['volume_utils.VolumeInfo']] = None,
+) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
-    del cluster_name  # unused
+    del cluster_name, ephemeral_volumes  # unused
     # TODO(zhwu): This function is too long. We should refactor it.
     provider_config = config.provider_config
     resource_group = provider_config['resource_group']

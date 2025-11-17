@@ -1,5 +1,6 @@
 """Shadeform instance provisioning."""
 import time
+import typing
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -8,6 +9,9 @@ from sky import sky_logging
 from sky.provision import common
 from sky.provision.shadeform import shadeform_utils
 from sky.utils import status_lib
+
+if typing.TYPE_CHECKING:
+    from sky.utils import volume as volume_utils
 
 POLL_INTERVAL = 10
 INSTANCE_READY_TIMEOUT = 3600
@@ -80,10 +84,15 @@ def _wait_for_instances_ready(cluster_name_on_cloud: str,
     return False
 
 
-def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
-                  config: common.ProvisionConfig) -> common.ProvisionRecord:
+def run_instances(
+    region: str,
+    cluster_name: str,
+    cluster_name_on_cloud: str,
+    config: common.ProvisionConfig,
+    ephemeral_volumes: Optional[List['volume_utils.VolumeInfo']] = None,
+) -> common.ProvisionRecord:
     """Run instances for the given cluster."""
-    del cluster_name  # unused - we use cluster_name_on_cloud
+    del cluster_name, ephemeral_volumes  # unused - we use cluster_name_on_cloud
     logger.info(f'Running instances for cluster {cluster_name_on_cloud} '
                 f'in region {region}')
     logger.debug(f'DEBUG: region type={type(region)}, value={region!r}')

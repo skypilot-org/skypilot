@@ -1,6 +1,7 @@
 """DigitalOcean instance provisioning."""
 
 import time
+import typing
 from typing import Any, Dict, List, Optional, Tuple
 import uuid
 
@@ -9,6 +10,9 @@ from sky.provision import common
 from sky.provision.do import constants
 from sky.provision.do import utils
 from sky.utils import status_lib
+
+if typing.TYPE_CHECKING:
+    from sky.utils import volume as volume_utils
 
 # The maximum number of times to poll for the status of an operation
 MAX_POLLS = 60 // constants.POLL_INTERVAL
@@ -26,10 +30,15 @@ def _get_head_instance(
     return None
 
 
-def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
-                  config: common.ProvisionConfig) -> common.ProvisionRecord:
+def run_instances(
+    region: str,
+    cluster_name: str,
+    cluster_name_on_cloud: str,
+    config: common.ProvisionConfig,
+    ephemeral_volumes: Optional[List['volume_utils.VolumeInfo']] = None,
+) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
-    del cluster_name  # unused
+    del cluster_name, ephemeral_volumes  # unused
     pending_status = ['new']
     newly_started_instances = utils.filter_instances(cluster_name_on_cloud,
                                                      pending_status + ['off'])
