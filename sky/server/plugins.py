@@ -1,47 +1,122 @@
 """Load plugins for the SkyPilot API server."""
+import abc
 import dataclasses
-import importlib.metadata
+import importlib
+import os
 from typing import Dict, List, Optional
 
 from fastapi import FastAPI
 
 from sky import sky_logging
+from sky.skylet import constants as skylet_constants
+from sky.utils import common_utils
+from sky.utils import config_utils
+from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
 
+_DEFAULT_PLUGINS_CONFIG_PATH = '~/.sky/plugins.yaml'
+_PLUGINS_CONFIG_ENV_VAR = (
+    f'{skylet_constants.SKYPILOT_SERVER_ENV_VAR_PREFIX}PLUGINS_CONFIG')
+
+
 @dataclasses.dataclass
-class ExtensionPoints:
+class ExtensionContext:
     app: FastAPI
 
 
-class Plugin:
-    # Name of the plugin
-    name: str
-    # Path to the JavaScript file to load for the plugin, None
-    # if no frontend extension is needed
-    js_path: Optional[str] = None
+class BasePlugin(abc.ABC):
+    """Base class for all SkyPilot server plugins."""
 
-    def __init__(self, name: str, js_path: Optional[str] = None):
-        self.name = name
-        self.js_path = js_path
+    @property
+    def js_extension_path(self) -> Optional[str]:
+        """Optional API route to the JavaScript extension to load."""
+        return None
 
-_PLUGINS: Dict[str, Plugin] = {}
+    @abc.abstractmethod
+    def install(self, extension_context: ExtensionContext):
+        """Hook called by API server to let the plugin install itself."""
+        raise NotImplementedError
 
-def load_plugins(ep: ExtensionPoints):
-    for plugin in importlib.metadata.entry_points(group='skypilot.plugins'):
-        logger.info('Loading plugin: %s', plugin.name)
+
+def _config_schema():
+    plugin_schema = {
+        'type': 'object',
+        'required': ['class'],
+        'additionalProperties': False,
+        'properties': {
+            'class': {
+                'type': 'string',
+            },
+            'parameters': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': True,
+            },
+        },
+    }
+    return {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'plugins': {
+                'type': 'array',
+                'items': plugin_schema,
+                'default': [],
+            },
+        },
+    }
+
+
+def _load_plugin_config() -> Optional[config_utils.Config]:
+    """Load plugin config."""
+    config_path = os.getenv(_PLUGINS_CONFIG_ENV_VAR,
+                            _DEFAULT_PLUGINS_CONFIG_PATH)
+    config_path = os.path.expanduser(config_path)
+    if not os.path.exists(config_path):
+        return None
+    config = yaml_utils.read_yaml(config_path) or {}
+    common_utils.validate_schema(config,
+                                 _config_schema(),
+                                 err_msg_prefix='Invalid plugins config: ')
+    return config_utils.Config.from_dict(config)
+
+
+_PLUGINS: Dict[str, BasePlugin] = {}
+
+
+def load_plugins(extension_context: ExtensionContext):
+    """Load and initialize plugins from the config."""
+    config = _load_plugin_config()
+    if not config:
+        return
+
+    for plugin_config in config.get('plugins', []):
+        class_path = plugin_config['class']
+        module_path, class_name = class_path.rsplit('.', 1)
         try:
-            install_fn = plugin.load()
-        except Exception as e:  # pylint: disable=broad-except
-            logger.exception(f'Failed to import plugin {plugin.name}: {e}')
-            continue
-
+            module = importlib.import_module(module_path)
+        except ImportError as e:
+            raise ImportError(
+                f'Failed to import plugin module: {module_path}. '
+                'Please check if the module is installed in your Python '
+                'environment.') from e
         try:
-            _PLUGINS[plugin.name] = install_fn(ep)
-        except Exception:  # pylint: disable=broad-except
-            logger.exception('Plugin %s raised during initialization', ep.name)
+            plugin_cls = getattr(module, class_name)
+        except AttributeError as e:
+            raise AttributeError(
+                f'Could not find plugin {class_name} class in module '
+                f'{module_path}. ') from e
+        if not issubclass(plugin_cls, BasePlugin):
+            raise TypeError(
+                f'Plugin {class_path} must inherit from BasePlugin.')
+        parameters = plugin_config.get('parameters') or {}
+        plugin = plugin_cls(**parameters)
+        plugin.install(extension_context)
+        _PLUGINS[class_path] = plugin
 
 
-def get_plugins() -> List[Plugin]:
+def get_plugins() -> List[BasePlugin]:
     """Return shallow copies of the registered plugins."""
     return list(_PLUGINS.values())

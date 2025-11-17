@@ -11,14 +11,17 @@ import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 
 const PluginContext = createContext({
   topNavLinks: [],
+  routes: [],
 });
 
 const initialState = {
   topNavLinks: [],
+  routes: [],
 };
 
 const actions = {
   REGISTER_TOP_NAV_LINK: 'REGISTER_TOP_NAV_LINK',
+  REGISTER_ROUTE: 'REGISTER_ROUTE',
 };
 
 function pluginReducer(state, action) {
@@ -27,6 +30,11 @@ function pluginReducer(state, action) {
       return {
         ...state,
         topNavLinks: upsertById(state.topNavLinks, action.payload),
+      };
+    case actions.REGISTER_ROUTE:
+      return {
+        ...state,
+        routes: upsertById(state.routes, action.payload),
       };
     default:
       return state;
@@ -150,9 +158,9 @@ function extractJsPath(pluginDescriptor) {
   if (!pluginDescriptor || typeof pluginDescriptor !== 'object') {
     return null;
   }
-  if (pluginDescriptor.js_path) {
-    console.log('Extracting JS path:', pluginDescriptor.js_path);
-    return pluginDescriptor.js_path;
+  if (pluginDescriptor.js_extension_path) {
+    console.log('Extracting JS extension path:', pluginDescriptor.js_extension_path);
+    return pluginDescriptor.js_extension_path;
   }
   return null;
 }
@@ -190,6 +198,38 @@ function normalizeNavLink(link) {
   return normalized;
 }
 
+function normalizeRoute(route) {
+  if (
+    !route ||
+    typeof route !== 'object' ||
+    !route.id ||
+    !route.path ||
+    typeof route.mount !== 'function'
+  ) {
+    console.warn('[SkyDashboardPlugin] Invalid route registration:', route);
+    return null;
+  }
+
+  const normalizedPath = String(route.path);
+  const pathname = normalizedPath.startsWith('/')
+    ? normalizedPath
+    : `/${normalizedPath}`;
+
+  return {
+    id: String(route.id),
+    path: pathname,
+    title: typeof route.title === 'string' ? route.title : undefined,
+    description:
+      typeof route.description === 'string' ? route.description : undefined,
+    mount: route.mount,
+    unmount: typeof route.unmount === 'function' ? route.unmount : undefined,
+    context:
+      route.context && typeof route.context === 'object'
+        ? route.context
+        : undefined,
+  };
+}
+
 function createPluginApi(dispatch) {
   return {
     registerTopNavLink(link) {
@@ -199,6 +239,17 @@ function createPluginApi(dispatch) {
       }
       dispatch({
         type: actions.REGISTER_TOP_NAV_LINK,
+        payload: normalized,
+      });
+      return normalized.id;
+    },
+    registerRoute(route) {
+      const normalized = normalizeRoute(route);
+      if (!normalized) {
+        return null;
+      }
+      dispatch({
+        type: actions.REGISTER_ROUTE,
         payload: normalized,
       });
       return normalized.id;
@@ -270,4 +321,19 @@ export function useTopNavLinks() {
       }),
     [topNavLinks]
   );
+}
+
+export function usePluginRoutes() {
+  const { routes } = usePluginState();
+  return routes;
+}
+
+export function usePluginRoute(pathname) {
+  const routes = usePluginRoutes();
+  return useMemo(() => {
+    if (!pathname) {
+      return null;
+    }
+    return routes.find((route) => route.path === pathname) || null;
+  }, [pathname, routes]);
 }

@@ -26,7 +26,7 @@ import { Settings, User } from 'lucide-react';
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
-import { useTopNavLinks } from '@/plugins/PluginProvider';
+import { useTopNavLinks, usePluginRoutes } from '@/plugins/PluginProvider';
 
 // Create a context for sidebar state management
 const SidebarContext = createContext(null);
@@ -163,6 +163,7 @@ export function TopBar() {
     useSidebar();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const pluginNavLinks = useTopNavLinks();
+  const pluginRoutes = usePluginRoutes();
 
   const dropdownRef = useRef(null);
   const mobileNavRef = useRef(null);
@@ -255,6 +256,25 @@ export function TopBar() {
     </>
   );
 
+  const resolvePluginHref = (href) => {
+    if (typeof href !== 'string') {
+      return href;
+    }
+    const route = pluginRoutes.find((entry) => entry.path === href);
+    if (!route || !route.path.startsWith('/plugins')) {
+      return href;
+    }
+    const slugSegments = route.path
+      .replace(/^\/+/, '')
+      .split('/')
+      .slice(1)
+      .filter(Boolean);
+    return {
+      pathname: '/plugins/[...slug]',
+      query: slugSegments.length ? { slug: slugSegments } : {},
+    };
+  };
+
   const renderDesktopPluginNavLink = (link) => {
     if (link.external) {
       return (
@@ -273,7 +293,7 @@ export function TopBar() {
     return (
       <Link
         key={link.id}
-        href={link.href}
+        href={resolvePluginHref(link.href)}
         className={getLinkClasses(link.href)}
         prefetch={false}
       >
@@ -319,7 +339,7 @@ export function TopBar() {
     return (
       <Link
         key={link.id}
-        href={link.href}
+        href={resolvePluginHref(link.href)}
         className={getMobileLinkClasses(link.href)}
         onClick={toggleMobileSidebar}
         prefetch={false}

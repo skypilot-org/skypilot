@@ -649,7 +649,7 @@ app.add_middleware(InitializeRequestAuthUserMiddleware)
 app.add_middleware(RequestIDMiddleware)
 
 logger.info(f'PID {os.getpid()}: Loading plugins...')
-plugins.load_plugins(plugins.ExtensionPoints(app=app))
+plugins.load_plugins(plugins.ExtensionContext(app=app))
 
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
@@ -1755,13 +1755,11 @@ async def api_status(
         return encoded_request_tasks
 
 
-@app.get('/api/plugins',
-         response_class=fastapi_responses.ORJSONResponse)
+@app.get('/api/plugins', response_class=fastapi_responses.ORJSONResponse)
 async def list_plugins() -> Dict[str, List[Dict[str, Any]]]:
     """Return metadata about loaded backend plugins."""
     plugin_info = [{
-        'name': plugin.name,
-        'js_path': plugin.js_path,
+        'js_extension_path': plugin.js_extension_path,
     } for plugin in plugins.get_plugins()]
     return {'plugins': plugin_info}
 
@@ -2070,6 +2068,14 @@ async def serve_dashboard(full_path: str):
     file_path = os.path.join(server_constants.DASHBOARD_DIR, full_path)
     if os.path.isfile(file_path):
         return fastapi.responses.FileResponse(file_path)
+
+    # Serve plugin catch-all page for any /plugins/* paths so client-side
+    # routing can bootstrap correctly.
+    if full_path == 'plugins' or full_path.startswith('plugins/'):
+        plugin_catchall = os.path.join(server_constants.DASHBOARD_DIR,
+                                       'plugins', '[...slug].html')
+        if os.path.isfile(plugin_catchall):
+            return fastapi.responses.FileResponse(plugin_catchall)
 
     # Serve index.html for client-side routing
     # e.g. /clusters, /jobs
