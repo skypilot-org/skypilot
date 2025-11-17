@@ -238,64 +238,104 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
     return job_ids
 
 
+def _ensure_controller_up(
+    controller: controller_utils.Controllers
+) -> 'cloud_vm_ray_backend.CloudVmRayResourceHandle':
+    """Ensure the jobs controller is up before proceeding.
+
+    If the controller is not accessible, launch it using execution.launch
+    with retry_until_up=True to ensure it comes up.
+    """
+    try:
+        handle = backend_utils.is_controller_accessible(controller=controller,
+                                                        stopped_message='')
+        return handle
+    except exceptions.ClusterNotUpError:
+        # Controller is not up, launch it
+        controller_name = controller.value.cluster_name
+        logger.info(f'{colorama.Fore.YELLOW}'
+                    f'Jobs controller {controller_name} is not up. '
+                    f'Launching it...{colorama.Style.RESET_ALL}')
+
+        # Create a minimal task to launch the controller cluster
+        # The actual controller task will be launched later
+        controller_resources = controller_utils.get_controller_resources(
+            controller=controller, task_resources=[])
+        minimal_task = task_lib.Task(
+            name='ensure_controller_up',
+            run='echo "Controller cluster is up"',
+        )
+        minimal_task.set_resources(controller_resources)
+
+        with skypilot_config.local_active_workspace_ctx(
+                skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):
+            with common.with_server_user():
+                # Launch the controller cluster with retry_until_up=True
+                # This will ensure the cluster is up before returning
+                _, handle = execution.launch(
+                    task=minimal_task,
+                    cluster_name=controller_name,
+                    retry_until_up=True,
+                    stream_logs=False,
+                    _request_name=request_names.AdminPolicyRequestName.
+                    JOBS_LAUNCH_CONTROLLER,
+                    _disable_controller_check=True)
+
+        # Verify the controller is now accessible
+        handle = backend_utils.is_controller_accessible(controller=controller,
+                                                        stopped_message='')
+        return handle
+
+
 def _submit_remotely(controller: controller_utils.Controllers,
                      dag: 'sky.Dag',
                      pool: Optional[str] = None,
                      num_jobs: int = 1) -> List[int]:
-    try:
-        local_handle = backend_utils.is_controller_accessible(
-            controller=controller, stopped_message='')
-        backend = backend_utils.get_backend_from_handle(local_handle)
-        assert isinstance(backend, backends.CloudVmRayBackend)
+    # Ensure the controller is up before trying to create job IDs
+    local_handle = _ensure_controller_up(controller)
+    backend = backend_utils.get_backend_from_handle(local_handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
 
-        # Make sure the skylet is up to date before continuing.
-        backend.check_skylet_running(local_handle)
+    # Make sure the skylet is up to date before continuing.
+    backend.check_skylet_running(local_handle)
 
-        workspace = skypilot_config.get_active_workspace(
-            force_user_workspace=True)
-        entrypoint = common_utils.get_current_command()
-        pool_hash = serve_state.get_service_hash(pool)
-        user_hash = common_utils.get_user_hash()
+    workspace = skypilot_config.get_active_workspace(force_user_workspace=True)
+    entrypoint = common_utils.get_current_command()
+    pool_hash = serve_state.get_service_hash(pool)
+    user_hash = common_utils.get_user_hash()
 
-        # Prepare task data
-        task_ids = []
-        task_names = []
-        metadata_jsons = []
-        for task_id, task in enumerate(dag.tasks):
-            task_ids.append(task_id)
-            assert task.name is not None, 'task name is not set'
-            task_names.append(task.name)
-            assert task.metadata_json is not None, 'task metadata is not set'
-            metadata_jsons.append(task.metadata_json)
+    # Prepare task data
+    task_ids = []
+    task_names = []
+    metadata_jsons = []
+    for task_id, task in enumerate(dag.tasks):
+        task_ids.append(task_id)
+        assert task.name is not None, 'task name is not set'
+        task_names.append(task.name)
+        assert task.metadata_json is not None, 'task metadata is not set'
+        metadata_jsons.append(task.metadata_json)
 
-        # Use the same resources_str for all tasks
-        resources_str = backend_utils.get_task_resources_str(
-            dag.tasks[0], is_managed_job=True)
+    # Use the same resources_str for all tasks
+    resources_str = backend_utils.get_task_resources_str(dag.tasks[0],
+                                                         is_managed_job=True)
 
-        assert dag.name is not None, 'dag name is not set'
-        job_ids = backend.set_job_info_without_job_id(
-            handle=local_handle,
-            name=dag.name,
-            workspace=workspace,
-            entrypoint=entrypoint,
-            pool=pool,
-            pool_hash=pool_hash,
-            user_hash=user_hash,
-            task_ids=task_ids,
-            task_names=task_names,
-            resources_str=resources_str,
-            metadata_jsons=metadata_jsons,
-            num_jobs=num_jobs)
-        logger.debug(f'Created {len(job_ids)} job IDs upfront: '
-                     f'{job_ids} (will use controller task ray job '
-                     f'ID as the {num_jobs}th job).')
-        return job_ids
-    except Exception as e:
-        # This will happen if the controller is not up yet. Since
-        # we are using this for jobs launch on pools the jobs
-        # controller should already be up.
-        raise ValueError('Controller not up yet could not create job'
-                         'IDs.') from e
+    assert dag.name is not None, 'dag name is not set'
+    job_ids = backend.set_job_info_without_job_id(handle=local_handle,
+                                                  name=dag.name,
+                                                  workspace=workspace,
+                                                  entrypoint=entrypoint,
+                                                  pool=pool,
+                                                  pool_hash=pool_hash,
+                                                  user_hash=user_hash,
+                                                  task_ids=task_ids,
+                                                  task_names=task_names,
+                                                  resources_str=resources_str,
+                                                  metadata_jsons=metadata_jsons,
+                                                  num_jobs=num_jobs)
+    logger.debug(f'Created {len(job_ids)} job IDs upfront: '
+                 f'{job_ids} (will use controller task ray job '
+                 f'ID as the {num_jobs}th job).')
+    return job_ids
 
 
 @timeline.event
