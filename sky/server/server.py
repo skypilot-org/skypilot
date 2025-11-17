@@ -878,6 +878,9 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
         # thread executor to avoid blocking the uvicorn event loop.
         await context_utils.to_thread(validate_dag, dag)
     except Exception as e:  # pylint: disable=broad-except
+        # Print the exception to the API server log.
+        logger.debug(f'/validate exception: {e}', exc_info=True)
+        # Set the exception stacktrace for the serialized exception.
         requests_lib.set_exception_stacktrace(e)
         raise fastapi.HTTPException(
             status_code=400, detail=exceptions.serialize_exception(e)) from e
