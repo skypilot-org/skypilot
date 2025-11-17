@@ -78,6 +78,7 @@ from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import dag_utils
+from sky.utils import env_options
 from sky.utils import perf_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
@@ -879,7 +880,8 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
         await context_utils.to_thread(validate_dag, dag)
     except Exception as e:  # pylint: disable=broad-except
         # Print the exception to the API server log.
-        logger.debug(f'/validate exception: {e}', exc_info=True)
+        if env_options.Options.SHOW_DEBUG_INFO.get():
+            logger.info(f'/validate exception:', exc_info=True)
         # Set the exception stacktrace for the serialized exception.
         requests_lib.set_exception_stacktrace(e)
         raise fastapi.HTTPException(
