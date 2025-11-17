@@ -849,7 +849,6 @@ class Task:
                 # with 'size' field
                 if 'size' in vol:
                     # This is an ephemeral volume config
-                    # Create VolumeMount with ephemeral flag
                     volume_mount = (
                         volume_lib.VolumeMount.resolve_ephemeral_config(
                             dst_path, vol))
@@ -890,6 +889,7 @@ class Task:
             if access_mode in disabled_modes:
                 raise ValueError(f'Volume {vol.volume_name} with '
                                  f'{disabled_modes[access_mode]}')
+            # Skip ephemeral volumes for topology check
             if vol.is_ephemeral:
                 continue
             # Check topology
