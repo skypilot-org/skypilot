@@ -193,7 +193,8 @@ class _RevertibleStatus:
                     self.get_status_fn().__exit__(exc_type, exc_val, exc_tb)
                     self.set_status_fn(None)
             else:
-                self.get_status_fn().update(self.previous_message)
+                if self.previous_message is not None:
+                    self.get_status_fn().update(self.previous_message)
 
     def update(self, *args, **kwargs):
         self.get_status_fn().update(*args, **kwargs)
