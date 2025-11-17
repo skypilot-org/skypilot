@@ -1,12 +1,12 @@
 # Example: Launch Jupyter Lab and auto-expose its port to Internet.
 #
 # Usage:
-#     $ sky launch -c jupyter jupyter_lab.yaml
+#     $ sky launch -c jupyter-lab-example jupyter_lab.yaml
 #     # Then look for the logs for some output like:
 #     # Jupyter Server 2.7.0 is running at:
 #     #     http://127.0.0.1:29324/lab?token=<token>
 #     # Run
-#     $ sky status -a jupyter
+#     $ sky status jupyter-lab-example --endpoints
 #     # to get the HEAD_IP of the cluster, replace the 127.0.0.1 with
 #     # the HEAD_IP and open browser for the URL.
 #     
