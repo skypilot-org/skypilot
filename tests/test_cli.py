@@ -324,16 +324,34 @@ class TestWithNoCloudEnabled:
                                        ['V100:4', '--cloud', cloud, '--all'])
             assert isinstance(result.exception, SystemExit)
 
-    def test_show_gpus_non_gpu_accelerator(self, monkeypatch):
+    def test_show_gpus_trainium_and_inferentia(self, monkeypatch):
         """Trainium should be returned even though it is not a GPU."""
         mock_api_server_calls(monkeypatch)
 
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(command.show_gpus, ['Trainium'])
 
+        result = cli_runner.invoke(command.show_gpus, ['Trainium'])
         assert result.exit_code == 0
         assert 'Trainium' in result.stdout
-        assert 'Resources \'Trainium\' not found' not in result.stdout
+        assert 'trn1.2xlarge' in result.stdout
+        assert 'trn1.32xlarge' in result.stdout
+        assert 'trn1n.32xlarge' in result.stdout
+        assert 'Resources \'Trainium\' not found in cloud' not in result.stdout
+
+        result = cli_runner.invoke(command.show_gpus, ['Trainium2'])
+        assert result.exit_code == 0
+        assert 'Trainium2' in result.stdout
+        assert 'trn2.48xlarge' in result.stdout
+        assert 'Resources \'Trainium2\' not found in cloud' in result.stdout
+
+        result = cli_runner.invoke(command.show_gpus, ['Inferentia'])
+        assert result.exit_code == 0
+        assert 'Inferentia' in result.stdout
+        assert 'inf2.xlarge' in result.stdout
+        assert 'inf2.8xlarge' in result.stdout
+        assert 'inf2.24xlarge' in result.stdout
+        assert 'inf2.48xlarge' in result.stdout
+        assert 'Resources \'Inferentia\' not found in cloud' not in result.stdout
 
     def test_k8s_alias_check(self, monkeypatch):
         mock_api_server_calls(monkeypatch)
