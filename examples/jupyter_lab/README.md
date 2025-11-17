@@ -1,17 +1,19 @@
-# Run JupyterLab on SkyPilot
+# Run Jupyter Lab on SkyPilot
 
 Run a personal Jupyter Lab server on a SkyPilot cluster.
+
+![Jupyter Lab Web UI](https://i.imgur.com/CP3hQnq.png "Jupyter Lab Web UI")
 
 ## Launch with CLI
 
 Launch a Jupyter Lab cluster with the command:
 
-` ``bash
+```bash
 sky launch -c jupyter-lab-example jupyter_lab.yaml`
-` ``
+```
 
 Look for the following lines in the output for the link to the web UI.
-```
+```bash
 Jupyter Server x.x.x is running at:
      http://127.0.0.1:29324/lab?token=<token>
 ```
@@ -29,7 +31,7 @@ Launch a Jupyter Lab cluster with the command:
 `JUPYTER_PASSWORD=jupyter-password python launch_jupyter_lab.py`
 
 Look for the following output for the link to the web UI.
-```
+```bash
 JupyterLab will be available at http://xx.xx.xx.xx:29324
 ```
 
