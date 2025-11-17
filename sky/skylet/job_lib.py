@@ -390,33 +390,17 @@ def add_job(job_name: str,
     """Atomically reserve the next available job id for the user."""
     assert _DB is not None
     job_submitted_at = time.time()
-    
+    # job_id will autoincrement with the null value
     if int(constants.SKYLET_VERSION) >= 28:
-        # Create multiple job IDs using bulk insert        
-        # Prepare data for bulk insert - create list of tuples with same data 
-        # repeated
-        insert_data = [
+        _DB.cursor.execute(
+            'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?, null)',  # pylint: disable=line-too-long
             (job_name, username, job_submitted_at, JobStatus.INIT.value,
-            run_timestamp, None, resources_str, metadata)] * num_jobs
-        
-        # Insert all jobs at once using executemany (more efficient than 
-        # individual inserts)
-        _DB.cursor.executemany(
-            'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?, null)', # pylint: disable=line-too-long
-            insert_data)
+             run_timestamp, None, resources_str, metadata))
     else:
-        # Create multiple job IDs using bulk insert        
-        # Prepare data for bulk insert - create list of tuples with same data
-        # repeated
-        insert_data = [
+        _DB.cursor.execute(
+            'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?)',  # pylint: disable=line-too-long
             (job_name, username, job_submitted_at, JobStatus.INIT.value,
-            run_timestamp, None, resources_str, metadata)] * num_jobs
-        
-        # Insert all jobs at once using executemany (more efficient than
-        # individual inserts)
-        _DB.cursor.executemany(
-            'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?)', # pylint: disable=line-too-long
-            insert_data)
+             run_timestamp, None, resources_str, metadata))
     _DB.conn.commit()
     rows = _DB.cursor.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
                               (run_timestamp,))
