@@ -9,6 +9,7 @@ AI Applications
    Batch Inference with vLLM <pools_batch_inference>
    Image Vector Database <vector_database>
    RedisVL Vector Search <redisvl-vector-search>
+   Streamlit Web Apps <streamlit>
    Tabby: Coding Assistant <tabby>
    LocalGPT: Chat with PDF <localgpt>
    Stable Diffusion <stable_diffusion>
