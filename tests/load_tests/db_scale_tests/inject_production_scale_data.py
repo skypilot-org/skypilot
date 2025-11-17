@@ -80,7 +80,6 @@ class ProductionScaleGenerator(SampleBasedGenerator):
                 current_time - random.uniform(0, 7 * 24 * 3600))  # Last 7 days
             cluster['status_updated_at'] = int(
                 current_time - random.uniform(0, 24 * 3600))  # Last day
-            cluster['user_hash'] = self._get_random_user_hash()
 
             # Update handle with new cluster name if handle exists
             if cluster.get('handle'):
@@ -114,7 +113,6 @@ class ProductionScaleGenerator(SampleBasedGenerator):
             cluster[
                 'name'] = f"prod-hist-recent-{i+1:06d}-{uuid.uuid4().hex[:8]}"
             cluster['cluster_hash'] = str(uuid.uuid4())
-            cluster['user_hash'] = self._get_random_user_hash()
 
             days_ago_seconds = random.randint(1 * 24 * 60 * 60,
                                               30 * 24 * 60 * 60)
@@ -132,7 +130,6 @@ class ProductionScaleGenerator(SampleBasedGenerator):
             cluster[
                 'name'] = f"prod-hist-medium-{i+1:06d}-{uuid.uuid4().hex[:8]}"
             cluster['cluster_hash'] = str(uuid.uuid4())
-            cluster['user_hash'] = self._get_random_user_hash()
 
             days_ago_seconds = random.randint(30 * 24 * 60 * 60,
                                               90 * 24 * 60 * 60)
@@ -149,7 +146,6 @@ class ProductionScaleGenerator(SampleBasedGenerator):
 
             cluster['name'] = f"prod-hist-old-{i+1:06d}-{uuid.uuid4().hex[:8]}"
             cluster['cluster_hash'] = str(uuid.uuid4())
-            cluster['user_hash'] = self._get_random_user_hash()
 
             days_ago_seconds = random.randint(90 * 24 * 60 * 60,
                                               365 * 24 * 60 * 60)
