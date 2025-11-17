@@ -53,7 +53,12 @@ cleanup() {
     echo "Cleaning up..."
     if [ -f "$JOB_ID_FILE" ]; then
         JOB_ID=$(cat "$JOB_ID_FILE" 2>/dev/null || echo "1")
-        python "$INJECT_SCRIPT" --cleanup --managed-job-id "$JOB_ID" || true
+        CLEANUP_ARGS=(--cleanup --managed-job-id "$JOB_ID")
+        # Pass SQL URL if PostgreSQL was used
+        if [ -n "$SKYPILOT_DB_CONNECTION_URI" ]; then
+            CLEANUP_ARGS+=(--sql-url "$SKYPILOT_DB_CONNECTION_URI")
+        fi
+        python "$INJECT_SCRIPT" "${CLEANUP_ARGS[@]}" || true
         rm -f "$JOB_ID_FILE"
     fi
     sky jobs cancel -a -y || true
