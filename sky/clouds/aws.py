@@ -25,7 +25,7 @@ from sky.adaptors import common
 from sky.catalog import common as catalog_common
 from sky.clouds.utils import aws_utils
 from sky.skylet import constants
-from sky.utils import annotations
+from sky.utils import annotations, env_options
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -39,6 +39,8 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
     from sky.utils import status_lib
     from sky.utils import volume as volume_lib
+    import mypy_boto3_ec2
+    from mypy_boto3_ec2 import type_defs as ec2_type_defs
 
 logger = sky_logging.init_logger(__name__)
 
@@ -477,6 +479,51 @@ class AWS(clouds.Cloud):
         return image_id_str
 
     @classmethod
+    def _describe_image_with_retry(
+        cls,
+        image_id: str,
+        region: str,
+        log_context: str,
+    ) -> Optional['ec2_type_defs.ImageTypeDef']:
+        image_not_found_message = (
+            f'Image {image_id!r} not found in AWS region {region} - '
+            f'can\'t get {log_context}.\n\n'
+            f'To find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
+            'Example: ami-0729d913a335efca7')
+        max_retries = 3
+        for iteration in range(1, max_retries + 1):
+            try:
+                client = aws.client('ec2', region_name=region)
+                image_info = client.describe_images(ImageIds=[image_id]).get(
+                    'Images', [])
+                if not image_info:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(image_not_found_message)
+                image = image_info[0]
+                return image
+            except (aws.botocore_exceptions().NoCredentialsError,
+                    aws.botocore_exceptions().ProfileNotFound) as e:
+                # The caller will fall back to its own default value when we
+                # return None. Mention that explicitly in the shared log line.
+                logger.debug(
+                    f'Failed to get {log_context} for {image_id} in region '
+                    f'{region}: {e}. Using default value.')
+                return None
+            except aws.botocore_exceptions().ClientError as e:
+                # This shared log message replaces two attribute-specific
+                # messages (image size/root device) for simplicity.
+                logger.debug(
+                    f'Failed to describe image {image_id!r} in region '
+                    f'{region}: {e}')
+                if iteration == max_retries:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(image_not_found_message) from None
+            # linear backoff starting from 0.5 seconds
+            time.sleep(iteration * 0.5)
+        # Should never reach here, but keep type checker happy.
+        raise RuntimeError('Unreachable')
+
+    @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         if image_id.startswith('skypilot:'):
             return DEFAULT_AMI_GB
@@ -488,40 +535,17 @@ class AWS(clouds.Cloud):
         if image_size is not None:
             return float(image_size)
         # if not found in cache, query the cloud
-        image_not_found_message = (
-            f'Image {image_id!r} not found in AWS region {region}.\n'
-            f'\nTo find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
-            'Example: ami-0729d913a335efca7')
-        max_retries = 3
-        for iteration in range(1, max_retries + 1):
-            try:
-                client = aws.client('ec2', region_name=region)
-                image_info = client.describe_images(ImageIds=[image_id]).get(
-                    'Images', [])
-                if not image_info:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(image_not_found_message)
-                image_size = image_info[0]['BlockDeviceMappings'][0]['Ebs'][
-                    'VolumeSize']
-                break
-            except (aws.botocore_exceptions().NoCredentialsError,
-                    aws.botocore_exceptions().ProfileNotFound) as e:
-                logger.debug(
-                    f'Failed to get image size for {image_id} in region {region}: {e}'
-                )
-                # Fallback to default image size if no credentials are available.
-                # The credentials issue will be caught when actually provisioning
-                # the instance and appropriate errors will be raised there.
-                return DEFAULT_AMI_GB
-            except aws.botocore_exceptions().ClientError as e:
-                logger.debug(
-                    f'Failed to get image size for {image_id} in region {region}: {e}'
-                )
-                if iteration == max_retries:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(image_not_found_message) from None
-            # linear backoff starting from 0.5 seconds
-            time.sleep(iteration * 0.5)
+        image = cls._describe_image_with_retry(
+            image_id,
+            region,
+            log_context='image size',
+        )
+        if image is None:
+            # Fallback to default image size if no credentials are available.
+            # The credentials issue will be caught when actually provisioning
+            # the instance and appropriate errors will be raised there.
+            return DEFAULT_AMI_GB
+        image_size = image['BlockDeviceMappings'][0]['Ebs']['VolumeSize']
         # cache the result for a day.
         # AMIs are immutable, so we can cache the result for a long time.
         # While AMIs can be deleted, if the AMI is deleted before cache expiration,
@@ -557,45 +581,19 @@ class AWS(clouds.Cloud):
             f'Image {image_id!r} not found in AWS region {region}.\n'
             f'To find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
             'Example: ami-0729d913a335efca7')
-        max_retries = 3
-        for iteration in range(1, max_retries + 1):
-            try:
-                client = aws.client('ec2', region_name=region)
-                image_info = client.describe_images(ImageIds=[image_id]).get(
-                    'Images', [])
-                if not image_info:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(image_not_found_message)
-                image = image_info[0]
-                if 'RootDeviceName' not in image:
-                    logger.debug(f'Image {image_id!r} does not have a root '
-                                 f'device name. '
-                                 f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
-                    return DEFAULT_ROOT_DEVICE_NAME
-                root_device_name = image['RootDeviceName']
-                break
-            except (aws.botocore_exceptions().NoCredentialsError,
-                    aws.botocore_exceptions().ProfileNotFound) as e:
-                # Fallback to default root device name if no credentials are
-                # available.
-                # The credentials issue will be caught when actually provisioning
-                # the instance and appropriate errors will be raised there.
-                logger.debug(f'Failed to get image root device name for '
-                             f'{image_id} in region {region}: {e}. '
-                             f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
-                return DEFAULT_ROOT_DEVICE_NAME
-            except aws.botocore_exceptions().ClientError as e:
-                logger.debug(f'Failed to get image root device name for '
-                             f'{image_id} in region {region}: {e}.')
-                if iteration == max_retries:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(image_not_found_message) from None
-            # linear backoff starting from 0.5 seconds
-            time.sleep(iteration * 0.5)
-        # cache the result for a day.
-        # Root device names are immutable, so we can cache the result for a long time.
-        # While AMIs can be deleted, if the AMI is deleted before cache expiration,
-        # the actual VM launch still fails.
+        image = cls._describe_image_with_retry(
+            image_id,
+            region,
+            log_context='image root device name',
+        )
+        if image is None:
+            return DEFAULT_ROOT_DEVICE_NAME
+        if 'RootDeviceName' not in image:
+            logger.debug(f'Image {image_id!r} does not have a root '
+                         f'device name. '
+                         f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
+            return DEFAULT_ROOT_DEVICE_NAME
+        root_device_name = image['RootDeviceName']
         day_in_seconds = 60 * 60 * 24  # 1 day, 60s * 60m * 24h
         try:
             kv_cache.add_or_update_cache_entry(kv_cache_key, root_device_name,
