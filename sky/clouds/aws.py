@@ -25,8 +25,9 @@ from sky.adaptors import common
 from sky.catalog import common as catalog_common
 from sky.clouds.utils import aws_utils
 from sky.skylet import constants
-from sky.utils import annotations, env_options
+from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import env_options
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import rich_utils
@@ -35,12 +36,12 @@ from sky.utils import ux_utils
 from sky.utils.db import kv_cache
 
 if typing.TYPE_CHECKING:
+    from mypy_boto3_ec2 import type_defs as ec2_type_defs
+
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
     from sky.utils import status_lib
     from sky.utils import volume as volume_lib
-    import mypy_boto3_ec2
-    from mypy_boto3_ec2 import type_defs as ec2_type_defs
 
 logger = sky_logging.init_logger(__name__)
 
@@ -496,11 +497,12 @@ class AWS(clouds.Cloud):
                 client = aws.client('ec2', region_name=region)
                 response = client.describe_images(ImageIds=[image_id])
                 metadata = response['ResponseMetadata']
-                debug_message = ('describe_images response:\n'
-                             f'  status code: {metadata["HTTPStatusCode"]}\n'
-                             f'  retry attempts: {metadata["RetryAttempts"]}'
-                             f'  len(images): {len(response["Images"])}'
-                             f'  next token: {metadata.get("NextToken")}')
+                debug_message = (
+                    'describe_images response:\n'
+                    f'  status code: {metadata["HTTPStatusCode"]}\n'
+                    f'  retry attempts: {metadata["RetryAttempts"]}\n'
+                    f'  len(images): {len(response["Images"])}\n'
+                    f'  next token: {metadata.get("NextToken")}')
                 logger.debug(debug_message)
                 image_info = response['Images']
                 if not image_info:
@@ -521,9 +523,8 @@ class AWS(clouds.Cloud):
             except aws.botocore_exceptions().ClientError as e:
                 # This shared log message replaces two attribute-specific
                 # messages (image size/root device) for simplicity.
-                logger.debug(
-                    f'Failed to describe image {image_id!r} in region '
-                    f'{region}: {e}')
+                logger.debug(f'Failed to describe image {image_id!r} in region '
+                             f'{region}: {e}')
                 if iteration == max_retries:
                     with ux_utils.print_exception_no_traceback():
                         if env_options.Options.SHOW_DEBUG_INFO.get():
@@ -531,7 +532,7 @@ class AWS(clouds.Cloud):
                             # Note: the ClientError's exception message should
                             # include most useful info:
                             # https://github.com/boto/botocore/blob/260a8b91cedae895165984d2102bcbc487de3027/botocore/exceptions.py#L518-L532
-                            additional_info = f'  ClientError: {e}'
+                            additional_info = f'\n  ClientError: {e}'
                             logger.debug(additional_info)
                             image_not_found_message += additional_info
                         raise ValueError(image_not_found_message) from None
@@ -594,10 +595,6 @@ class AWS(clouds.Cloud):
         if root_device_name is not None:
             return root_device_name
         # if not found in cache, query the cloud
-        image_not_found_message = (
-            f'Image {image_id!r} not found in AWS region {region}.\n'
-            f'To find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
-            'Example: ami-0729d913a335efca7')
         image = cls._describe_image_with_retry(
             image_id,
             region,
