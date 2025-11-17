@@ -54,29 +54,8 @@ else
     kubectl_cmd_base="kubectl exec \"$resource_type/$resource_name\" -n \"$namespace\" --context=\"$context\" --"
 fi
 
-# Check if rsync is available, if not wait. Rsync installation happens 
-# asynchronously during pod startup, so we need to wait for it to be available.
-wait_for_rsync() {
-    # Check if rsync is available.
-    if timeout 5s bash -c "eval \"$kubectl_cmd_base\" which rsync" >/dev/null 2>&1 </dev/null; then
-        echo "Worked on first check" >&2
-        return 0
-    fi
-    
-    # If not available, wait 60 seconds for installation to complete
-    echo "rsync not found, waiting 60s for installation to complete..." >&2
-    sleep 60
-    
-    # Check again after waiting
-    if timeout 5s bash -c "eval \"$kubectl_cmd_base\" which rsync >/dev/null 2>&1 </dev/null"; then
-        echo "Worked on second check" >&2
-        return 0
-    fi
-    
-    echo "Error: rsync not available after waiting 60s, package installation is either slow or failed.." >&2
-    return 1
-}
-wait_for_rsync
-
-# Insert -i flag before the -- separator and execute
-eval "${kubectl_cmd_base% --} -i -- \"\$@\""
+# Execute command on remote pod, waiting for rsync to be available first.
+# The waiting happens on the remote pod, not locally, which is more efficient
+# and reliable than polling from the local machine.
+# We wrap the command in a bash script that waits for rsync, then execs the original command.
+eval "${kubectl_cmd_base% --} -i -- bash -c 'until which rsync >/dev/null 2>&1; do sleep 0.5; done; exec \"\$@\"' -- \"\$@\""
