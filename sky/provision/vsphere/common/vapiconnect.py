@@ -88,6 +88,6 @@ def create_unverified_session(session, suppress_warning=True):
     """
     session.verify = False
     if suppress_warning:
-        requests.packages.urllib3.disable_warnings(
-            InsecureRequestWarning)  # type: ignore[attr-defined]  # noqa: E501
+        # Suppress unverified https request warnings
+        requests.packages.urllib3.disable_warnings(InsecureRequestWarning)  # type: ignore[attr-defined]  # noqa: E501
     return session
