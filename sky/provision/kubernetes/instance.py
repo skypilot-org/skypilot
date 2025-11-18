@@ -275,7 +275,7 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
 
                 # Emit the error message without logging prefixes for better UX.
                 tmp_handler = sky_logging.EnvAwareHandler(sys.stdout)
-                tmp_handler.flush = sys.stdout.flush  # type: ignore[method-assign]
+                tmp_handler.flush = sys.stdout.flush  # type: ignore
                 tmp_handler.setFormatter(sky_logging.NO_PREFIX_FORMATTER)
                 tmp_handler.setLevel(sky_logging.ERROR)
                 prev_propagate = logger.propagate
@@ -540,7 +540,8 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
             # Get the reason and write to cluster events before
             # the pod gets completely deleted from the API.
             termination_reason = _get_pod_termination_reason(pod, cluster_name)
-            logger.warning(f'Pod {pod.metadata.name} terminated: {termination_reason}')
+            logger.warning(
+                f'Pod {pod.metadata.name} terminated: {termination_reason}')
             raise config_lib.KubernetesError(
                 f'Pod {pod.metadata.name} has terminated or failed '
                 f'unexpectedly. Run `sky logs --provision {cluster_name}` '
