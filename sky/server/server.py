@@ -799,7 +799,8 @@ async def kubernetes_node_info(
 
 @app.get('/status_kubernetes')
 async def status_kubernetes(request: fastapi.Request) -> None:
-    """Gets Kubernetes status."""
+    """[Experimental] Get all SkyPilot resources (including from other '
+    'users) in the current Kubernetes context."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.STATUS_KUBERNETES,
