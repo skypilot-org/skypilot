@@ -36,7 +36,6 @@ class TestGetImageRootDeviceName:
             'ResponseMetadata': {
                 'HTTPStatusCode': 200,
                 'RetryAttempts': 0,
-                'Images': 1,
                 'NextToken': None,
             },
         }
@@ -59,7 +58,6 @@ class TestGetImageRootDeviceName:
             'ResponseMetadata': {
                 'HTTPStatusCode': 200,
                 'RetryAttempts': 0,
-                'Images': 1,
                 'NextToken': None,
             },
         }
@@ -149,7 +147,6 @@ class TestGetImageRootDeviceName:
             'ResponseMetadata': {
                 'HTTPStatusCode': 200,
                 'RetryAttempts': 0,
-                'Images': 0,
                 'NextToken': None,
             },
         }
@@ -200,7 +197,6 @@ class TestGetImageSize:
             'ResponseMetadata': {
                 'HTTPStatusCode': 200,
                 'RetryAttempts': 0,
-                'Images': 1,
                 'NextToken': None,
             },
         }
@@ -317,7 +313,6 @@ class TestGetImageSize:
             'ResponseMetadata': {
                 'HTTPStatusCode': 200,
                 'RetryAttempts': 0,
-                'Images': 0,
                 'NextToken': None,
             },
         }
@@ -502,7 +497,6 @@ class TestEfaHelpers:
             'ResponseMetadata': {
                 'HTTPStatusCode': 200,
                 'RetryAttempts': 0,
-                'Images': 0,
                 'NextToken': None,
             },
         }
@@ -517,7 +511,6 @@ class TestEfaHelpers:
             'ResponseMetadata': {
                 'HTTPStatusCode': 200,
                 'RetryAttempts': 0,
-                'Images': 0,
                 'NextToken': None,
             },
         }
@@ -543,7 +536,6 @@ class TestEfaHelpers:
             'ResponseMetadata': {
                 'HTTPStatusCode': 200,
                 'RetryAttempts': 0,
-                'Images': 2,
                 'NextToken': None,
             },
         }
