@@ -3,8 +3,6 @@ import time
 from typing import Any, Dict, List, Optional
 import uuid
 
-from nebius.aio.service_error import RequestError
-
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import nebius
@@ -375,7 +373,7 @@ def launch(cluster_name_on_cloud: str,
                 f'({nebius.MAX_RETRIES_TO_INSTANCE_READY * POLL_INTERVAL}'
                 f' seconds) while waiting for instance {instance_name}'
                 f' to be ready.')
-    except RequestError as e:
+    except nebius.nebius_request_error() as e:
         # Handle ResourceExhausted quota limit error. In this case, we need to
         # clean up the disk as VM creation failed and we can't proceed.
         logger.warning(f'Failed to launch instance {instance_name}: {e}')

@@ -321,6 +321,14 @@ def botocore_exceptions():
     return exceptions
 
 
+@common.load_lazy_modules(_LAZY_MODULES)
+def nebius_request_error():
+    """Nebius exception request error."""
+    # pylint: disable=import-outside-toplevel
+    from nebius.aio.service_error import RequestError
+    return RequestError
+
+
 def get_credential_file_paths() -> List[str]:
     """Get the list of credential file paths based on current configuration."""
     paths = {
