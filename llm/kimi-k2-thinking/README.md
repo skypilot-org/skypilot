@@ -15,7 +15,7 @@ This recipe shows how to run Kimi K2 Thinking with reasoning capabilities on you
 ## Prerequisites
 
 - Check that you have installed SkyPilot ([docs](https://docs.skypilot.co/en/latest/getting-started/installation.html)).
-- Check that `sky check` shows clouds or Kubernetes are enabled.
+- Check that `sky check` shows clouds or Kubernetes is enabled.
 - **Note**: This model requires 8x H200 or H20 GPUs.
 
 ## Run Kimi K2 Thinking (Low Latency Mode)
