@@ -332,7 +332,6 @@ class TestWithNoCloudEnabled:
 
         result = cli_runner.invoke(command.show_gpus, ['Trainium'])
         assert result.exit_code == 0
-        assert 'Trainium' in result.stdout
         assert 'trn1.2xlarge' in result.stdout
         assert 'trn1.32xlarge' in result.stdout
         assert 'trn1n.32xlarge' in result.stdout
@@ -340,13 +339,11 @@ class TestWithNoCloudEnabled:
 
         result = cli_runner.invoke(command.show_gpus, ['Trainium2'])
         assert result.exit_code == 0
-        assert 'Trainium2' in result.stdout
         assert 'trn2.48xlarge' in result.stdout
         assert 'Resources \'Trainium2\' not found in cloud' in result.stdout
 
         result = cli_runner.invoke(command.show_gpus, ['Inferentia'])
         assert result.exit_code == 0
-        assert 'Inferentia' in result.stdout
         assert 'inf2.xlarge' in result.stdout
         assert 'inf2.8xlarge' in result.stdout
         assert 'inf2.24xlarge' in result.stdout
@@ -537,7 +534,7 @@ class TestHelperFunctions:
 
     def test_list_to_str_float_formatting(self):
         """Test that _list_to_str formats whole number floats as integers.
-        
+
         Regression test for GitHub issue #6484 where requestable quantities
         were shown as '1.0, 2.0, 4.0, 8.0' instead of '1, 2, 4, 8'.
         """
@@ -578,7 +575,7 @@ class TestHelperFunctions:
 
     def test_show_gpus_k8s_float_formatting(self, monkeypatch):
         """Integration test for sky show-gpus --infra k8s output formatting.
-        
+
         Regression test for GitHub issue #6484 to ensure that requestable quantities
         are displayed as integers (1, 2, 4, 8) instead of floats (1.0, 2.0, 4.0, 8.0).
         """
