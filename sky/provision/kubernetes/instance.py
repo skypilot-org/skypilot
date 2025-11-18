@@ -275,6 +275,7 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
 
                 # Emit the error message without logging prefixes for better UX.
                 tmp_handler = sky_logging.EnvAwareHandler(sys.stdout)
+                # type: ignore[method-assign]
                 tmp_handler.flush = sys.stdout.flush
                 tmp_handler.setFormatter(sky_logging.NO_PREFIX_FORMATTER)
                 tmp_handler.setLevel(sky_logging.ERROR)
@@ -554,7 +555,7 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                     for container in container_statuses)):
             return True, None
 
-        reason = None
+        reason: Optional[str] = None
         if pod.status.phase == 'Pending':
             pending_reason = _get_pod_pending_reason(context, namespace,
                                                      pod.metadata.name)
@@ -630,7 +631,7 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                                                         _NUM_THREADS)
 
         all_pods_running = True
-        pending_reasons_count = {}
+        pending_reasons_count: Dict[str, int] = {}
         for is_running, pending_reason in pod_statuses:
             if not is_running:
                 all_pods_running = False

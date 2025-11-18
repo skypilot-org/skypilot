@@ -1883,11 +1883,17 @@ class PodValidator:
 
         if isinstance(klass, str):
             if klass.startswith('list['):
-                sub_kls = re.match(r'list\[(.*)\]', klass).group(1)
+                match = re.match(r'list\[(.*)\]', klass)
+                if match is None:
+                    raise ValueError(f'Invalid list type format: {klass}')
+                sub_kls = match.group(1)
                 return [cls.__validate(sub_data, sub_kls) for sub_data in data]
 
             if klass.startswith('dict('):
-                sub_kls = re.match(r'dict\(([^,]*), (.*)\)', klass).group(2)
+                match = re.match(r'dict\(([^,]*), (.*)\)', klass)
+                if match is None:
+                    raise ValueError(f'Invalid dict type format: {klass}')
+                sub_kls = match.group(2)
                 return {k: cls.__validate(v, sub_kls) for k, v in data.items()}
 
             # convert str to class
