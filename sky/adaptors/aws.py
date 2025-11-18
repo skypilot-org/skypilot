@@ -100,6 +100,15 @@ def _thread_local_lru_cache(maxsize=32):
             # which we can now apply and immediately call.
             return local_cache.get_cache()(*args, **kwargs)
 
+        def cache_info():
+            return local_cache.get_cache().cache_info()
+
+        def cache_clear():
+            local_cache.get_cache().cache_clear()
+
+        wrapper.cache_info = cache_info
+        wrapper.cache_clear = cache_clear
+
         return wrapper
 
     return decorator
