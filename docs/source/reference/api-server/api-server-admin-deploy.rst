@@ -767,6 +767,27 @@ For detailed setup instructions (including how to set up external Prometheus and
 * :ref:`GPU Metrics Setup <api-server-gpu-metrics-setup>`
 
 
+Optional: Set up server-side debug logging
+------------------------------------------
+
+Debug logging can be turned on for individual requests by setting the
+``SKYPILOT_DEBUG`` environment variable to ``1`` when submitting a request, e.g.
+
+.. code-block:: bash
+
+    SKYPILOT_DEBUG=1 sky status
+
+To turn on debug logging for all requests, set
+``SKYPILOT_SERVER_ENABLE_REQUEST_DEBUG_LOGGING`` to ``true`` in the Helm values:
+
+.. code-block:: bash
+
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+      --namespace $NAMESPACE \
+      --reuse-values \
+      --set-string 'apiService.extraEnvs[0].name=SKYPILOT_SERVER_ENABLE_REQUEST_DEBUG_LOGGING' \
+      --set-string 'apiService.extraEnvs[0].value=true'
+
 
 Upgrade the API server
 -----------------------
