@@ -46,7 +46,8 @@ class RiftClient:
     def __init__(self, api_key: Optional[str] = None):
         self.server_address = CLOUDRIFT_SERVER_ADDRESS
         self.public_api_root = os.path.join(CLOUDRIFT_SERVER_ADDRESS, 'api/v1')
-        self.internal_api_root = os.path.join(CLOUDRIFT_SERVER_ADDRESS, 'internal')
+        self.internal_api_root = os.path.join(CLOUDRIFT_SERVER_ADDRESS,
+                                              'internal')
         self.api_key = api_key if api_key else os.getenv('CLOUDRIFT_API_KEY')
 
     def validate_api_key(self) -> bool:
@@ -117,7 +118,8 @@ class RiftClient:
             if 'Ubuntu' not in recipe_name:
                 continue
 
-            url = recipe['details'].get('VirtualMachine', {}).get('image_url', None)
+            url = recipe['details'].get('VirtualMachine',
+                                        {}).get('image_url', None)
             version_match = re.search(r'.* (\d+\.\d+)', recipe_name)
             if url and version_match and version_match.group(1):
                 ubuntu_version = version.parse(version_match.group(1))
@@ -129,7 +131,8 @@ class RiftClient:
 
         return None
 
-    def deploy_instance(self, instance_type: str, cluster_name: str, name: str, ssh_keys: List[str]) -> List[str]:
+    def deploy_instance(self, instance_type: str, cluster_name: str, name: str,
+                        ssh_keys: List[str]) -> List[str]:
         image_url = self.get_vm_image_url()
         if not image_url:
             raise RuntimeError('No suitable VM image found.')

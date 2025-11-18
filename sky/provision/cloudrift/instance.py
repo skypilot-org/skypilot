@@ -49,7 +49,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     pending_status = ['Initializing']
     while True:
-        instances_dict = _filter_instances(cluster_name_on_cloud, pending_status)
+        instances_dict = _filter_instances(cluster_name_on_cloud,
+                                           pending_status)
         if not instances_dict:
             break
 
@@ -57,9 +58,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             instance.get('status') for instance in instances_dict.values()
         ]
 
-        logger.info(
-            f'Waiting for {len(instances_dict)} instances to be ready: '
-            f'{instance_statuses}'
+        logger.info(f'Waiting for {len(instances_dict)} instances to be ready: '
+                    f'{instance_statuses}'
         )
 
         time.sleep(constants.POLL_INTERVAL)
@@ -75,19 +75,15 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     if to_start_count < 0:
         raise RuntimeError(
             f'Cluster {cluster_name_on_cloud} already has '
-            f'{len(exist_instances)} nodes, but {config.count} are required.'
-        )
+            f'{len(exist_instances)} nodes, but {config.count} are required.')
 
     if to_start_count == 0:
         if head_instance is None:
             raise RuntimeError(
-                f'Cluster {cluster_name_on_cloud} has no head node.'
-            )
+                f'Cluster {cluster_name_on_cloud} has no head node.')
 
-        logger.info(
-            f'Cluster {cluster_name_on_cloud} already has '
-            f'{len(exist_instances)} nodes, no need to start more.'
-        )
+        logger.info(f'Cluster {cluster_name_on_cloud} already has '
+                    f'{len(exist_instances)} nodes, no need to start more.')
 
         return common.ProvisionRecord(
             provider_name='CloudRift',
@@ -203,8 +199,7 @@ def terminate_instances(
 
     cloudrift_client = utils.get_cloudrift_client()
     exist_instances = _filter_instances(
-        cluster_name_on_cloud, status_filters=['Active', "Initializing"]
-    )
+        cluster_name_on_cloud, status_filters=['Active', "Initializing"])
 
     for instance_id in exist_instances:
         logger.info(f'Terminating instance {instance_id}')
@@ -290,14 +285,13 @@ def query_instances(
     }
 
     for instance_name, instance_meta in instances.items():
-        status = instance_meta.get('status')
-
+        status = status_map.get(instance_meta['status'])
         # Skip terminated instances if non_terminated_only is True
-        if non_terminated_only and status == 'terminated':
+        if non_terminated_only and status is None:
             continue
 
         # Convert the status to the SkyPilot status
-        statuses[instance_name] = (status_map.get(status), None)
+        statuses[instance_name] = (status, None)
 
     return statuses
 
