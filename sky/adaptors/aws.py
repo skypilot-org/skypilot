@@ -70,17 +70,26 @@ _MAX_ATTEMPT_FOR_CREATION = 5
 
 
 class _ThreadLocalLRUCache(threading.local):
+    """Thread-local storage for _thread_local_lru_cache decorator."""
 
-    def __init__(self, maxsize=32):
+    def __init__(self, func, maxsize=32):
         super().__init__()
-        self.cache = annotations.lru_cache(scope='request', maxsize=maxsize)
+        self.func = func
+        self.maxsize = maxsize
+
+    def get_cache(self):
+        if not hasattr(self, 'cache'):
+            self.cache = annotations.lru_cache(scope='request',
+                                               maxsize=self.maxsize)(self.func)
+        return self.cache
 
 
 def _thread_local_lru_cache(maxsize=32):
-    # Create thread-local storage for the LRU cache
-    local_cache = _ThreadLocalLRUCache(maxsize)
 
     def decorator(func):
+        # Create thread-local storage for the LRU cache
+        local_cache = _ThreadLocalLRUCache(func, maxsize)
+
         # We can't apply the lru_cache here, because this runs at import time
         # so we will always have the main thread's cache.
 
@@ -89,7 +98,7 @@ def _thread_local_lru_cache(maxsize=32):
             # We are within the actual function call, which may be on a thread,
             # so local_cache.cache will return the correct thread-local cache,
             # which we can now apply and immediately call.
-            return local_cache.cache(func)(*args, **kwargs)
+            return local_cache.get_cache()(*args, **kwargs)
 
         return wrapper
 
