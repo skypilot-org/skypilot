@@ -3,9 +3,9 @@ service:
     path: /health
     initial_delay_seconds: 150
   replica_policy:
-    min_replicas: 5
-    max_replicas: 5
-    base_ondemand_fallback_replicas: 1
+    min_replicas: 10
+    max_replicas: 10
+    base_ondemand_fallback_replicas: 2
 
 resources:
   ports: 8081

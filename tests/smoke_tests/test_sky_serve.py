@@ -959,37 +959,37 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
         f' sleep 5; s=$(sky serve status {name}); '
         '  echo "$s"; '
         'done')
-    four_spot_up_cmd = _check_replica_in_status(name, [(4, True, 'READY')])
-    update_check = [f'until ({four_spot_up_cmd}); do sleep 5; done; sleep 15;']
+    eight_spot_up_cmd = _check_replica_in_status(name, [(8, True, 'READY')])
+    update_check = [f'until ({eight_spot_up_cmd}); do sleep 5; done; sleep 15;']
     if mode == 'rolling':
         # Check rolling update, it will terminate one of the old on-demand
-        # instances, once there are 4 spot instance ready.
+        # instances, once there are 8 spot instance ready.
         update_check += [
             _check_replica_in_status(
-                name, [(1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
-                       (1, False, 'SHUTTING_DOWN'), (1, False, 'READY')]) +
+                name, [(2, False, _SERVICE_LAUNCHING_STATUS_REGEX),
+                       (2, False, 'SHUTTING_DOWN'), (2, False, 'READY')]) +
             _check_service_version(name, "1,2"),
         ]
         # The two old on-demand instances will be in READY or SHUTTING_DOWN
         # status after autoscale.
-        TWO_OLD_ON_DEMAND_INSTANCES_STATUS_AFTER_AUTOSCALE = r'READY\|SHUTTING_DOWN'
+        FOUR_OLD_ON_DEMAND_INSTANCES_STATUS_AFTER_AUTOSCALE = r'READY\|SHUTTING_DOWN'
     else:
         # Check blue green update, it will keep both old on-demand instances
-        # running, once there are 4 spot instance ready.
+        # running, once there are 8 spot instance ready.
         update_check += [
             _check_replica_in_status(
-                name, [(1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
-                       (2, False, 'READY')]) +
+                name, [(2, False, _SERVICE_LAUNCHING_STATUS_REGEX),
+                       (4, False, 'READY')]) +
             _check_service_version(name, "1"),
         ]
         # The two old on-demand instances will be in READY status
         # after autoscale update.
-        TWO_OLD_ON_DEMAND_INSTANCES_STATUS_AFTER_AUTOSCALE = 'READY'
+        FOUR_OLD_ON_DEMAND_INSTANCES_STATUS_AFTER_AUTOSCALE = 'READY'
     test = smoke_tests_utils.Test(
         f'test-skyserve-new-autoscaler-update-{mode}',
         [
             f'sky serve up -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/update/new_autoscaler_before.yaml',
-            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=4) +
             _check_service_version(name, "1"),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             's=$(curl $endpoint); echo "$s"; echo "$s" | grep "Hi, SkyPilot here"',
@@ -998,16 +998,16 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             'sleep 90',
             wait_until_no_pending,
             _check_replica_in_status(name, [
-                (4, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
-                (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
-                (2, False, TWO_OLD_ON_DEMAND_INSTANCES_STATUS_AFTER_AUTOSCALE)
+                (8, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
+                (2, False, _SERVICE_LAUNCHING_STATUS_REGEX),
+                (4, False, FOUR_OLD_ON_DEMAND_INSTANCES_STATUS_AFTER_AUTOSCALE)
             ]),
             *update_check,
-            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=5),
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=10),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'curl $endpoint | grep "Hi, SkyPilot here"',
-            _check_replica_in_status(name, [(4, True, 'READY'),
-                                            (1, False, 'READY')]),
+            _check_replica_in_status(name, [(8, True, 'READY'),
+                                            (2, False, 'READY')]),
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,

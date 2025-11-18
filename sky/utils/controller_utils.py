@@ -1354,10 +1354,9 @@ def _get_number_of_services(pool: bool) -> int:
 
 @annotations.lru_cache(scope='request')
 def _get_request_parallelism(pool: bool) -> int:
+    # NOTE(dev): One smoke test depends on this value.
     # tests/smoke_tests/test_sky_serve.py::test_skyserve_new_autoscaler_update
-    # assumes 4 concurrent launches. We force this patch here.
-    if env_options.Options.RUNNING_IN_BUILDKITE.get():
-        return 4
+    # assumes 8 concurrent launches.
     # Limitation per service x number of services
     return (LAUNCHES_PER_WORKER * POOL_JOBS_RESOURCES_RATIO *
             _get_number_of_services(pool))
@@ -1370,9 +1369,6 @@ def can_provision(pool: bool) -> bool:
 
 
 def can_start_new_process(pool: bool) -> bool:
-    # In test env, we allow unlimited number of services.
-    if env_options.Options.RUNNING_IN_BUILDKITE.get():
-        return True
     return serve_state.get_num_services() < _get_number_of_services(pool)
 
 
