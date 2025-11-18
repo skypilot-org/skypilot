@@ -1,6 +1,5 @@
-"""
-Use SkyPilot to launch a cluster or a service to serve the vector database.
-"""
+"""Use SkyPilot to launch a cluster or a service
+to serve the vector database."""
 
 #!/usr/bin/env python3
 
@@ -11,12 +10,15 @@ from sky.serve.client import sdk as serve_sdk
 
 _SERVICE_NAME = 'vectordb-serve'
 
+
 def main():
     parser = argparse.ArgumentParser(
-        description='Launch a cluster or a service to serve the vector database')
-    parser.add_argument('--serve',
-                        action='store_true',
-                        help='Launch with sky serve. If false, launch a cluster.')
+        description='Launch a cluster or a service to serve the vector database'
+    )
+    parser.add_argument(
+        '--serve',
+        action='store_true',
+        help='Launch with sky serve. If false, launch a cluster.')
     args = parser.parse_args()
 
     # Load the task template
@@ -40,11 +42,12 @@ def main():
     sky.stream_and_get(req_id)
     if args.serve:
         serve_status = sky.get(serve_sdk.status(service_names=_SERVICE_NAME))
-        endpoint = serve_status[0]["endpoint"]
+        endpoint = serve_status[0]['endpoint']
     else:
         cluster_status = sky.get(sky.endpoints(cluster=_SERVICE_NAME))
         endpoint = cluster_status[int(port)]
     print(f'endpoint: {endpoint}')
+
 
 if __name__ == '__main__':
     main()
