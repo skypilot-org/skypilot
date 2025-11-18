@@ -1163,9 +1163,11 @@ def get_latest_version_with_min_replicas(
     return active_versions[-1] if active_versions else None
 
 
-def _process_line(line: str,
-                  cluster_name: str,
-                  stop_on_eof: bool = False) -> Iterator[str]:
+def _process_line(
+        line: str,
+        cluster_name: str,
+        stop_on_eof: bool = False,
+        expanded_provision_logs: Optional[set] = None) -> Iterator[str]:
     # The line might be directing users to view logs, like
     # `✓ Cluster launched: new-http.  View logs at: *.log`
     # We should tail the detailed logs for user.
@@ -1180,6 +1182,14 @@ def _process_line(line: str,
     log_prompt = re.match(_SKYPILOT_LOG_PATTERN, line)
 
     def _stream_provision_path(p: pathlib.Path) -> Iterator[str]:
+        # Check if this provision log has already been expanded
+        if expanded_provision_logs is not None:
+            resolved_path = str(p.resolve())
+            if resolved_path in expanded_provision_logs:
+                # Already expanded, skip to avoid duplicate expansion
+                return
+            expanded_provision_logs.add(resolved_path)
+
         try:
             with open(p, 'r', newline='', encoding='utf-8') as f:
                 # Exit if >10s without new content to avoid hanging when INIT
@@ -1251,9 +1261,15 @@ def _follow_logs_with_provision_expanding(
     Yields:
         Log lines, including expanded content from referenced provision logs.
     """
+    # Track which provision logs have already been expanded to avoid duplicates
+    expanded_provision_logs: set = set()
 
     def process_line(line: str) -> Iterator[str]:
-        yield from _process_line(line, cluster_name, stop_on_eof=stop_on_eof)
+        yield from _process_line(
+            line,
+            cluster_name,
+            stop_on_eof=stop_on_eof,
+            expanded_provision_logs=expanded_provision_logs)
 
     return log_utils.follow_logs(file,
                                  should_stop=should_stop,
@@ -1279,11 +1295,15 @@ def _capped_follow_logs_with_provision_expanding(
         Log lines, including expanded content from referenced provision logs.
     """
     all_lines: Deque[str] = collections.deque(maxlen=line_cap)
+    # Track which provision logs have already been expanded to avoid duplicates
+    expanded_provision_logs: set = set()
 
     for line in log_list:
-        for processed in _process_line(line=line,
-                                       cluster_name=cluster_name,
-                                       stop_on_eof=False):
+        for processed in _process_line(
+                line=line,
+                cluster_name=cluster_name,
+                stop_on_eof=False,
+                expanded_provision_logs=expanded_provision_logs):
             all_lines.append(processed)
 
     yield from all_lines
