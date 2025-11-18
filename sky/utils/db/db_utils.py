@@ -429,30 +429,41 @@ def get_engine(
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
     if conn_string:
+        async_log = 'sync'
         if async_engine:
+            async_log = 'async'
             conn_string = conn_string.replace('postgresql://',
                                               'postgresql+asyncpg://')
-            # This is an AsyncEngine, instead of a (normal, synchronous) Engine,
-            # so we should not put it in the cache. Instead, just return.
-            return sqlalchemy_async.create_async_engine(
-                conn_string, poolclass=sqlalchemy.NullPool)
         with _db_creation_lock:
             if conn_string not in _postgres_engine_cache:
-                logger.debug('Creating a new postgres engine with '
+                logger.debug(f'Creating a new postgres {async_log} engine with '
                              f'maximum {_max_connections} connections')
                 if _max_connections == 0:
-                    _postgres_engine_cache[conn_string] = (
-                        sqlalchemy.create_engine(
-                            conn_string, poolclass=sqlalchemy.pool.NullPool))
+                    kw_args = {'poolclass': sqlalchemy.NullPool}
+                    if async_engine:
+                        _postgres_engine_cache[conn_string] = (
+                            sqlalchemy_async.create_async_engine(
+                                conn_string, **kw_args))
+                    else:
+                        _postgres_engine_cache[conn_string] = (
+                            sqlalchemy.create_engine(conn_string, **kw_args))
                 else:
-                    _postgres_engine_cache[conn_string] = (
-                        sqlalchemy.create_engine(
-                            conn_string,
-                            poolclass=sqlalchemy.pool.QueuePool,
-                            pool_size=_max_connections,
-                            max_overflow=max(0, 5 - _max_connections),
-                            pool_pre_ping=True,
-                            pool_recycle=1800))
+                    kw_args = {
+                        'pool_size': _max_connections,
+                        'max_overflow': max(0, 5 - _max_connections),
+                        'pool_pre_ping': True,
+                        'pool_recycle': 1800
+                    }
+                    if async_engine:
+                        kw_args[
+                            'poolclass'] = sqlalchemy.pool.AsyncAdaptedQueuePool
+                        _postgres_engine_cache[conn_string] = (
+                            sqlalchemy_async.create_async_engine(
+                                conn_string, **kw_args))
+                    else:
+                        kw_args['poolclass'] = sqlalchemy.pool.QueuePool
+                        _postgres_engine_cache[conn_string] = (
+                            sqlalchemy.create_engine(conn_string, **kw_args))
             engine = _postgres_engine_cache[conn_string]
     else:
         assert db_name is not None, 'db_name must be provided for SQLite'
