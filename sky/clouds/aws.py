@@ -492,6 +492,7 @@ class AWS(clouds.Cloud):
             f'To find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
             'Example: ami-0729d913a335efca7')
         max_retries = 3
+        debug_message = 'no describe_images response'
         for iteration in range(1, max_retries + 1):
             try:
                 client = aws.client('ec2', region_name=region)
@@ -523,8 +524,8 @@ class AWS(clouds.Cloud):
             except aws.botocore_exceptions().ClientError as e:
                 # This shared log message replaces two attribute-specific
                 # messages (image size/root device) for simplicity.
-                logger.debug(f'Failed to describe image {image_id!r} in region '
-                             f'{region}: {e}')
+                logger.debug(f'Failed to get {log_context} for image '
+                             f'{image_id!r} in region {region}: {e}')
                 if iteration == max_retries:
                     with ux_utils.print_exception_no_traceback():
                         if env_options.Options.SHOW_DEBUG_INFO.get():
@@ -532,9 +533,9 @@ class AWS(clouds.Cloud):
                             # Note: the ClientError's exception message should
                             # include most useful info:
                             # https://github.com/boto/botocore/blob/260a8b91cedae895165984d2102bcbc487de3027/botocore/exceptions.py#L518-L532
-                            additional_info = f'\n  ClientError: {e}'
+                            additional_info = f'  ClientError: {e}'
                             logger.debug(additional_info)
-                            image_not_found_message += additional_info
+                            image_not_found_message += '\n' + additional_info
                         raise ValueError(image_not_found_message) from None
             # linear backoff starting from 0.5 seconds
             time.sleep(iteration * 0.5)
