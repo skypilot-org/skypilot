@@ -379,7 +379,7 @@ class TestBackwardCompatibility:
             return smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=job_name,
                 job_status=status,
-                timeout=600 if generic_cloud == 'kubernetes' else 300)
+                timeout=1200 if generic_cloud == 'kubernetes' else 300)
 
         blocking_seconds_for_cancel_job = 2000 if generic_cloud == 'kubernetes' else 1000
 
@@ -475,6 +475,20 @@ class TestBackwardCompatibility:
         # Combine all commands
         current_commands = common_initial_commands + version_specific_commands
 
+        # Check that for a 4GB memory jobs controller, there is only one controller process spawned.
+        # This is a regression test for https://github.com/skypilot-org/skypilot/pull/7278
+        # and https://github.com/skypilot-org/skypilot/pull/7494
+        check_controller_process_count = (
+            's=$(sky status -u) && echo "$s" && '
+            'jobs_controller=$(echo "$s" | grep -oE \'sky-jobs-controller-[0-9a-f]+\' | head -n1) && '
+            'if [ -z "$jobs_controller" ]; then echo "ERROR: jobs controller not found in sky status"; exit 1; fi && '
+            'echo "Jobs controller: $jobs_controller" && '
+            'num_controllers=$(ssh $jobs_controller "pgrep -f msky\\.jobs\\.controller | wc -l") && '
+            'if [ -z "$num_controllers" ]; then echo "ERROR: failed to get controller process count"; exit 1; fi && '
+            'echo "Controller process count: $num_controllers" && '
+            'if [ "$num_controllers" -ne 1 ]; then echo "ERROR: num_controllers is $num_controllers, expected 1"; exit 1; fi'
+        )
+
         commands = [
             *self._switch_to_base(
                 # Cover jobs launched in the old version and ran to terminal states
@@ -500,6 +514,7 @@ class TestBackwardCompatibility:
                                 [sky.ManagedJobStatus.RUNNING]),
             ),
             *self._switch_to_current(*current_commands),
+            check_controller_process_count,
         ]
         teardown = f'{self.ACTIVATE_CURRENT} && sky jobs cancel -n {managed_job_name}* -y'
         self.run_compatibility_test(managed_job_name, commands, teardown)
@@ -563,7 +578,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
             f'sky jobs launch -d --infra {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} -n {job_name} "echo hello world; sleep 60"',
             # No restart on switch to current, cli in current, server in base, verify cli works with different version of sky server
-            f'{self.ACTIVATE_CURRENT} && sky api status',
+            f'{self.ACTIVATE_CURRENT} && sky api status -l none',
             f'{self.ACTIVATE_CURRENT} && sky api info',
             f'{self.ACTIVATE_CURRENT} && {self._wait_for_managed_job_status(job_name, [sky.ManagedJobStatus.RUNNING])}',
             f'{self.ACTIVATE_CURRENT} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {job_name} | grep RUNNING',
@@ -571,9 +586,9 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && {self._wait_for_managed_job_status(job_name, [sky.ManagedJobStatus.SUCCEEDED])}',
             f'{self.ACTIVATE_CURRENT} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {job_name} | grep SUCCEEDED',
             # cluster launch/exec test
-            f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} &&'
-            f'sky launch --infra {generic_cloud} -y -c {cluster_name} "echo hello world; sleep 60"',
+            f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART}',
             # No restart on switch to current, cli in current, server in base
+            f'{self.ACTIVATE_CURRENT} && sky launch --infra {generic_cloud} -y -c {cluster_name} "echo hello world; sleep 60"',
             f'{self.ACTIVATE_CURRENT} && result="$(sky queue {cluster_name})"; echo "$result"',
             f'{self.ACTIVATE_CURRENT} && result="$(sky logs {cluster_name} 1 --status)"; echo "$result"',
             f'{self.ACTIVATE_CURRENT} && result="$(sky logs {cluster_name} 1)"; echo "$result"; echo "$result" | grep "hello world"',
@@ -655,9 +670,9 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && {self._wait_for_managed_job_status(job_name, [sky.ManagedJobStatus.SUCCEEDED])}',
             f'{self.ACTIVATE_BASE} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {job_name} | grep SUCCEEDED',
             # cluster launch/exec test
-            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} &&'
-            f'sky launch --infra {generic_cloud} -y -c {cluster_name} "echo hello world; sleep 60"',
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART}',
             # No restart on switch to base, cli in base, server in current
+            f'{self.ACTIVATE_BASE} && sky launch --infra {generic_cloud} -y -c {cluster_name} "echo hello world; sleep 60"',
             f'{self.ACTIVATE_BASE} && result="$(sky queue {cluster_name})"; echo "$result"',
             f'{self.ACTIVATE_BASE} && result="$(sky logs {cluster_name} 1 --status)"; echo "$result"',
             f'{self.ACTIVATE_BASE} && result="$(sky logs {cluster_name} 1)"; echo "$result"; echo "$result" | grep "hello world"',

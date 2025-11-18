@@ -81,9 +81,12 @@ def request_body_env_vars() -> dict:
     env_vars[constants.USER_ENV_VAR] = common_utils.get_current_user_name()
     env_vars[
         usage_constants.USAGE_RUN_ID_ENV_VAR] = usage_lib.messages.usage.run_id
+    if not common.is_api_server_local():
+        # Used in job controller, for local API server, keep the
+        # SKYPILOT_CONFIG env var to use the config for the managed job.
+        env_vars.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
     # Remove the path to config file, as the config content is included in the
     # request body and will be merged with the config on the server side.
-    env_vars.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
     env_vars.pop(skypilot_config.ENV_VAR_GLOBAL_CONFIG, None)
     env_vars.pop(skypilot_config.ENV_VAR_PROJECT_CONFIG, None)
     # Remove the config related env vars, as the client config override
@@ -319,6 +322,8 @@ class StatusBody(RequestBody):
     # Only return fields that are needed for the
     # dashboard / CLI summary response
     summary_response: bool = False
+    # Include the cluster handle in the response
+    include_handle: bool = True
 
 
 class StartBody(RequestBody):
@@ -363,9 +368,10 @@ class CancelBody(RequestBody):
         return kwargs
 
 
-class ClusterNameBody(RequestBody):
+class ProvisionLogsBody(RequestBody):
     """Cluster node."""
     cluster_name: str
+    worker: Optional[int] = None
 
 
 class ClusterJobBody(RequestBody):
@@ -466,6 +472,7 @@ class VolumeApplyBody(RequestBody):
     size: Optional[str] = None
     config: Optional[Dict[str, Any]] = None
     labels: Optional[Dict[str, str]] = None
+    use_existing: Optional[bool] = None
 
 
 class VolumeDeleteBody(RequestBody):
@@ -485,8 +492,8 @@ class VolumeValidateBody(RequestBody):
     infra: Optional[str] = None
     size: Optional[str] = None
     labels: Optional[Dict[str, str]] = None
-    resource_name: Optional[str] = None
     config: Optional[Dict[str, Any]] = None
+    use_existing: Optional[bool] = None
 
 
 class EndpointsBody(RequestBody):
@@ -541,6 +548,9 @@ class JobsQueueV2Body(RequestBody):
     page: Optional[int] = None
     limit: Optional[int] = None
     statuses: Optional[List[str]] = None
+    # The fields to return in the response.
+    # Refer to the fields in the `class ManagedJobRecord` in `response.py`
+    fields: Optional[List[str]] = None
 
 
 class JobsCancelBody(RequestBody):
@@ -573,6 +583,8 @@ class RequestStatusBody(pydantic.BaseModel):
     """The request body for the API request status endpoint."""
     request_ids: Optional[List[str]] = None
     all_status: bool = False
+    limit: Optional[int] = None
+    fields: Optional[List[str]] = None
 
 
 class ServeUpBody(RequestBody):

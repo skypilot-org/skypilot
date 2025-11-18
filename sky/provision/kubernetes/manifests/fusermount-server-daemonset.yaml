@@ -23,8 +23,7 @@ spec:
         effect: NoExecute
       containers:
       - name: server
-        # TODO(aylei): version strategy of our addon images
-        image: berkeleyskypilot/fusermount-server:latest
+        image: berkeleyskypilot/fusermount-server:0.2.1
         securityContext:
           privileged: true
         volumeMounts:

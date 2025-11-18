@@ -32,11 +32,13 @@ from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import oauth as oauth_lib
 from sky.jobs import scheduler
+from sky.jobs import utils as managed_job_utils
 from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import rest
 from sky.server import versions
 from sky.server.requests import payloads
+from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -98,6 +100,9 @@ def reload_config() -> None:
     skypilot_config.safe_reload_config()
 
 
+# The overloads are not comprehensive - e.g. get_result Literal[False] could be
+# specified to return None. We can add more overloads if needed. To do that see
+# https://github.com/python/mypy/issues/8634#issuecomment-609411104
 @typing.overload
 def stream_response(request_id: None,
                     response: 'requests.Response',
@@ -112,7 +117,16 @@ def stream_response(request_id: server_common.RequestId[T],
                     response: 'requests.Response',
                     output_stream: Optional['io.TextIOBase'] = None,
                     resumable: bool = False,
-                    get_result: bool = True) -> T:
+                    get_result: Literal[True] = True) -> T:
+    ...
+
+
+@typing.overload
+def stream_response(request_id: server_common.RequestId[T],
+                    response: 'requests.Response',
+                    output_stream: Optional['io.TextIOBase'] = None,
+                    resumable: bool = False,
+                    get_result: bool = True) -> Optional[T]:
     ...
 
 
@@ -368,6 +382,16 @@ def workspaces() -> server_common.RequestId[Dict[str, Any]]:
     return server_common.get_request_id(response)
 
 
+def _raise_exception_object_on_client(e: BaseException) -> None:
+    """Raise the exception object on the client."""
+    if env_options.Options.SHOW_DEBUG_INFO.get():
+        stacktrace = getattr(e, 'stacktrace', str(e))
+        logger.error('=== Traceback on SkyPilot API Server ===\n'
+                     f'{stacktrace}')
+    with ux_utils.print_exception_no_traceback():
+        raise e
+
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
@@ -408,9 +432,8 @@ def validate(
     response = server_common.make_authenticated_request(
         'POST', '/validate', json=json.loads(body.model_dump_json()))
     if response.status_code == 400:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.deserialize_exception(
-                response.json().get('detail'))
+        _raise_exception_object_on_client(
+            exceptions.deserialize_exception(response.json().get('detail')))
 
 
 @usage_lib.entrypoint
@@ -591,7 +614,10 @@ def launch(
         down=down,
         dryrun=dryrun)
     with admin_policy_utils.apply_and_use_config_in_current_request(
-            dag, request_options=request_options, at_client_side=True) as dag:
+            dag,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            request_options=request_options,
+            at_client_side=True) as dag:
         return _launch(
             dag,
             cluster_name,
@@ -913,6 +939,7 @@ def tail_logs(
 @annotations.client_api
 @rest.retry_transient_errors()
 def tail_provision_logs(cluster_name: str,
+                        worker: Optional[int] = None,
                         follow: bool = True,
                         tail: int = 0,
                         output_stream: Optional['io.TextIOBase'] = None) -> int:
@@ -920,17 +947,31 @@ def tail_provision_logs(cluster_name: str,
 
     Args:
         cluster_name: name of the cluster.
+        worker: worker id in multi-node cluster.
+             If None, stream the logs of the head node.
         follow: follow the logs.
         tail: lines from end to tail.
         output_stream: optional stream to write logs.
     Returns:
         Exit code 0 on streaming success; raises on HTTP error.
     """
-    body = payloads.ClusterNameBody(cluster_name=cluster_name)
+    body = payloads.ProvisionLogsBody(cluster_name=cluster_name)
+
+    if worker is not None:
+        remote_api_version = versions.get_remote_api_version()
+        if remote_api_version is not None and remote_api_version >= 21:
+            if worker < 1:
+                raise ValueError('Worker must be a positive integer.')
+            body.worker = worker
+        else:
+            raise exceptions.APINotSupportedError(
+                'Worker node provision logs are not supported in your API '
+                'server. Please upgrade to a newer API server to use it.')
     params = {
         'follow': str(follow).lower(),
         'tail': tail,
     }
+
     response = server_common.make_authenticated_request(
         'POST',
         '/provision_logs',
@@ -939,13 +980,21 @@ def tail_provision_logs(cluster_name: str,
         stream=True,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None))
+    # Check for HTTP errors before streaming the response
+    if response.status_code != 200:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.CommandError(response.status_code,
+                                          'tail_provision_logs',
+                                          'Failed to stream provision logs',
+                                          response.text)
+
     # Log request is idempotent when tail is 0, thus can resume previous
     # streaming point on retry.
     # request_id=None here because /provision_logs does not create an async
     # request. Instead, it streams a plain file from the server. This does NOT
     # violate the stream_response doc warning about None in multi-user
-    # environments: we are not asking stream_response to select “the latest
-    # request”. We already have the HTTP response to stream; request_id=None
+    # environments: we are not asking stream_response to select "the latest
+    # request". We already have the HTTP response to stream; request_id=None
     # merely disables the follow-up GET. It is also necessary for --no-follow
     # to return cleanly after printing the tailed lines. If we provided a
     # non-None request_id here, the get(request_id) in stream_response(
@@ -1977,12 +2026,7 @@ def get(request_id: server_common.RequestId[T]) -> T:
     error = request_task.get_error()
     if error is not None:
         error_obj = error['object']
-        if env_options.Options.SHOW_DEBUG_INFO.get():
-            stacktrace = getattr(error_obj, 'stacktrace', str(error_obj))
-            logger.error('=== Traceback on SkyPilot API Server ===\n'
-                         f'{stacktrace}')
-        with ux_utils.print_exception_no_traceback():
-            raise error_obj
+        _raise_exception_object_on_client(error_obj)
     if request_task.status == requests_lib.RequestStatus.CANCELLED:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.RequestCancelled(
@@ -2064,16 +2108,16 @@ def stream_and_get(
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None),
         stream=True)
+    if response.status_code in [404, 400]:
+        detail = response.json().get('detail')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClientError(f'Failed to stream logs: {detail}')
     stream_request_id: Optional[server_common.RequestId[
         T]] = server_common.get_stream_request_id(response)
     if request_id is not None and stream_request_id is not None:
         assert request_id == stream_request_id
     if request_id is None:
         request_id = stream_request_id
-    if response.status_code in [404, 400]:
-        detail = response.json().get('detail')
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClientError(f'Failed to stream logs: {detail}')
     elif response.status_code != 200:
         # TODO(syang): handle the case where the requestID is not provided
         # see https://github.com/skypilot-org/skypilot/issues/6549
@@ -2158,7 +2202,9 @@ def _local_api_server_running(kill: bool = False) -> bool:
 def api_status(
     request_ids: Optional[List[Union[server_common.RequestId[T], str]]] = None,
     # pylint: disable=redefined-builtin
-    all_status: bool = False
+    all_status: bool = False,
+    limit: Optional[int] = None,
+    fields: Optional[List[str]] = None,
 ) -> List[payloads.RequestPayload]:
     """Lists all requests.
 
@@ -2167,6 +2213,8 @@ def api_status(
             If None, all requests are queried.
         all_status: Whether to list all finished requests as well. This argument
             is ignored if request_ids is not None.
+        limit: The number of requests to show. If None, show all requests.
+        fields: The fields to get. If None, get all fields.
 
     Returns:
         A list of request payloads.
@@ -2175,8 +2223,12 @@ def api_status(
         logger.info('SkyPilot API server is not running.')
         return []
 
-    body = payloads.RequestStatusBody(request_ids=request_ids,
-                                      all_status=all_status)
+    body = payloads.RequestStatusBody(
+        request_ids=request_ids,
+        all_status=all_status,
+        limit=limit,
+        fields=fields,
+    )
     response = server_common.make_authenticated_request(
         'GET',
         '/api/status',
@@ -2295,29 +2347,32 @@ def api_stop() -> None:
                 f'Cannot kill the API server at {server_url} because it is not '
                 f'the default SkyPilot API server started locally.')
 
-    try:
-        with open(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH),
-                  'r',
-                  encoding='utf-8') as f:
-            pids = f.read().split('\n')[:-1]
-            for pid in pids:
-                if subprocess_utils.is_process_alive(int(pid.strip())):
-                    subprocess_utils.kill_children_processes(
-                        parent_pids=[int(pid.strip())], force=True)
-        os.remove(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH))
-    except FileNotFoundError:
-        # its fine we will create it
-        pass
-    except Exception as e:  # pylint: disable=broad-except
-        # in case we get perm issues or something is messed up, just ignore it
-        # and assume the process is dead
-        logger.error(f'Error looking at job controller pid file: {e}')
-        pass
+    # Acquire the api server creation lock to prevent multiple processes from
+    # stopping and starting the API server at the same time.
+    with filelock.FileLock(
+            os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
+        try:
+            records = scheduler.get_controller_process_records()
+            if records is not None:
+                for record in records:
+                    try:
+                        if managed_job_utils.controller_process_alive(
+                                record, quiet=False):
+                            subprocess_utils.kill_children_processes(
+                                parent_pids=[record.pid], force=True)
+                    except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                        continue
+                os.remove(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH))
+        except FileNotFoundError:
+            # its fine we will create it
+            pass
+        except Exception as e:  # pylint: disable=broad-except
+            # in case we get perm issues or something is messed up, just ignore
+            # it and assume the process is dead
+            logger.error(f'Error looking at job controller pid file: {e}')
+            pass
 
-    found = _local_api_server_running(kill=True)
-
-    # Remove the database for requests.
-    server_common.clear_local_api_server_database()
+        found = _local_api_server_running(kill=True)
 
     if found:
         logger.info(f'{colorama.Fore.GREEN}SkyPilot API server stopped.'

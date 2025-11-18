@@ -460,8 +460,8 @@ def get_volume_schema():
                 'type': 'string',
                 'pattern': constants.MEMORY_SIZE_PATTERN,
             },
-            'resource_name': {
-                'type': 'string',
+            'use_existing': {
+                'type': 'boolean',
             },
             'config': {
                 'type': 'object',
@@ -1043,7 +1043,7 @@ class RemoteIdentityOptions(enum.Enum):
 
 def get_default_remote_identity(cloud: str) -> str:
     """Get the default remote identity for the specified cloud."""
-    if cloud == 'kubernetes':
+    if cloud in ('kubernetes', 'ssh'):
         return RemoteIdentityOptions.SERVICE_ACCOUNT.value
     return RemoteIdentityOptions.LOCAL_CREDENTIALS.value
 
@@ -1070,24 +1070,15 @@ _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
     },
 }
 
-_CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
-    'networking': {
-        'type': 'string',
-        'case_insensitive_enum': [
-            type.value for type in kubernetes_enums.KubernetesNetworkingMode
-        ],
-    },
-    'ports': {
-        'type': 'string',
-        'case_insensitive_enum': [
-            type.value for type in kubernetes_enums.KubernetesPortMode
-        ],
-    },
+_CONTEXT_CONFIG_SCHEMA_MINIMAL = {
     'pod_config': {
         'type': 'object',
         'required': [],
         # Allow arbitrary keys since validating pod spec is hard
         'additionalProperties': True,
+    },
+    'provision_timeout': {
+        'type': 'integer',
     },
     'custom_metadata': {
         'type': 'object',
@@ -1103,9 +1094,23 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             }]
         },
     },
-    'provision_timeout': {
-        'type': 'integer',
+}
+
+_CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
+    # TODO(kevin): Remove 'networking' in v0.13.0.
+    'networking': {
+        'type': 'string',
+        'case_insensitive_enum': [
+            type.value for type in kubernetes_enums.KubernetesNetworkingMode
+        ],
     },
+    'ports': {
+        'type': 'string',
+        'case_insensitive_enum': [
+            type.value for type in kubernetes_enums.KubernetesPortMode
+        ],
+    },
+    **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
     'autoscaler': {
         'type': 'string',
         'case_insensitive_enum': [
@@ -1153,6 +1158,12 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
     },
     'remote_identity': {
         'type': 'string',
+    },
+    'post_provision_runcmd': {
+        'type': 'array',
+        'items': {
+            'type': 'string'
+        },
     }
 }
 
@@ -1189,7 +1200,13 @@ def get_config_schema():
                         'consolidation_mode': {
                             'type': 'boolean',
                             'default': False,
-                        }
+                        },
+                        'controller_logs_gc_retention_hours': {
+                            'type': 'integer',
+                        },
+                        'task_logs_gc_retention_hours': {
+                            'type': 'integer',
+                        },
                     },
                 },
                 'bucket': {
@@ -1331,10 +1348,15 @@ def get_config_schema():
             'additionalProperties': False,
             'properties': {
                 'allowed_contexts': {
-                    'type': 'array',
-                    'items': {
+                    'oneOf': [{
+                        'type': 'array',
+                        'items': {
+                            'type': 'string',
+                        },
+                    }, {
                         'type': 'string',
-                    },
+                        'pattern': '^all$'
+                    }]
                 },
                 'context_configs': {
                     'type': 'object',
@@ -1364,12 +1386,22 @@ def get_config_schema():
                         'type': 'string',
                     },
                 },
-                'pod_config': {
+                'context_configs': {
                     'type': 'object',
                     'required': [],
-                    # Allow arbitrary keys since validating pod spec is hard
-                    'additionalProperties': True,
+                    'properties': {},
+                    # Properties are ssh cluster names, which are the
+                    # kubernetes context names without `ssh-` prefix.
+                    'additionalProperties': {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
+                        },
+                    },
                 },
+                **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
             }
         },
         'oci': {
@@ -1586,10 +1618,10 @@ def get_config_schema():
 
     allowed_workspace_cloud_names = list(constants.ALL_CLOUDS) + ['cloudflare']
     # Create pattern for not supported clouds, i.e.
-    # all clouds except gcp, kubernetes, ssh
+    # all clouds except aws, gcp, kubernetes, ssh, nebius
     not_supported_clouds = [
         cloud for cloud in allowed_workspace_cloud_names
-        if cloud.lower() not in ['gcp', 'kubernetes', 'ssh', 'nebius']
+        if cloud.lower() not in ['aws', 'gcp', 'kubernetes', 'ssh', 'nebius']
     ]
     not_supported_cloud_regex = '|'.join(not_supported_clouds)
     workspaces_schema = {
@@ -1600,7 +1632,8 @@ def get_config_schema():
             'type': 'object',
             'additionalProperties': False,
             'patternProperties': {
-                # Pattern for non-GCP clouds - only allows 'disabled' property
+                # Pattern for clouds with no workspace-specific config -
+                # only allow 'disabled' property.
                 f'^({not_supported_cloud_regex})$': {
                     'type': 'object',
                     'additionalProperties': False,
@@ -1635,6 +1668,18 @@ def get_config_schema():
                     },
                     'additionalProperties': False,
                 },
+                'aws': {
+                    'type': 'object',
+                    'properties': {
+                        'profile': {
+                            'type': 'string'
+                        },
+                        'disabled': {
+                            'type': 'boolean'
+                        },
+                    },
+                    'additionalProperties': False,
+                },
                 'ssh': {
                     'type': 'object',
                     'required': [],
@@ -1656,10 +1701,15 @@ def get_config_schema():
                     'required': [],
                     'properties': {
                         'allowed_contexts': {
-                            'type': 'array',
-                            'items': {
+                            'oneOf': [{
+                                'type': 'array',
+                                'items': {
+                                    'type': 'string',
+                                },
+                            }, {
                                 'type': 'string',
-                            },
+                                'pattern': '^all$'
+                            }]
                         },
                         'disabled': {
                             'type': 'boolean'

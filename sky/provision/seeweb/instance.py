@@ -9,7 +9,6 @@ import subprocess
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from sky import authentication as auth
 from sky import sky_logging
 from sky.adaptors import seeweb as seeweb_adaptor
 from sky.provision import common
@@ -17,6 +16,7 @@ from sky.provision.common import ClusterInfo
 from sky.provision.common import InstanceInfo
 from sky.provision.common import ProvisionConfig
 from sky.provision.common import ProvisionRecord
+from sky.utils import auth_utils
 from sky.utils import command_runner  # Unified SSH helper
 from sky.utils import common_utils
 from sky.utils import status_lib
@@ -75,7 +75,7 @@ class SeewebNodeProvider:
         if self.config and self.config.authentication_config:
             key_path = self.config.authentication_config.get('ssh_private_key')
         if not key_path:
-            key_path, _ = auth.get_or_generate_keys()
+            key_path, _ = auth_utils.get_or_generate_keys()
         return os.path.expanduser(key_path)
 
     # ------------------------------------------------------------------ #
@@ -410,6 +410,11 @@ class SeewebNodeProvider:
                 'gpu_label': self.config.node_config.get('gpu_label', ''),
             })
 
+        # Add user_customize if present (Seeweb Cloud Script)
+        if 'user_customize' in self.config.node_config:
+            payload['user_customize'] = self.config.node_config[
+                'user_customize']
+
         # Build the request object expected by ecsapi
         server_create_request_cls = (
             seeweb_adaptor.ecsapi.ServerCreateRequest  # type: ignore
@@ -661,7 +666,7 @@ def _ping_server_standalone(server_ip: str) -> bool:
 def _check_ssh_ready_standalone(server_ip: str) -> bool:
     """Check that SSH is available on the server (standalone version)."""
     try:
-        private_key_path, _ = auth.get_or_generate_keys()
+        private_key_path, _ = auth_utils.get_or_generate_keys()
         private_key_path = os.path.expanduser(private_key_path)
         ssh_user = 'ecuser'
         result = subprocess.run([

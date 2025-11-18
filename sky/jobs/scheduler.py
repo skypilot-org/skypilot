@@ -49,7 +49,7 @@ import pathlib
 import shutil
 import sys
 import typing
-from typing import Set
+from typing import List, Optional, Set
 import uuid
 
 import filelock
@@ -63,7 +63,8 @@ from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
 from sky.server import config as server_config
 from sky.skylet import constants
-from sky.utils import common_utils
+from sky.utils import annotations
+from sky.utils import controller_utils
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
@@ -91,20 +92,94 @@ JOB_MEMORY_MB = 400
 LAUNCHES_PER_WORKER = 8
 # this can probably be increased to around 300-400 but keeping it lower to just
 # to be safe
-JOBS_PER_WORKER = 200
-
-# keep 1GB reserved after the controllers
-MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB = 2048
-
-CURRENT_HASH = os.path.expanduser('~/.sky/wheels/current_sky_wheel_hash')
-
+MAX_JOBS_PER_WORKER = 200
+# Maximum number of controllers that can be running. Hard to handle more than
+# 512 launches at once.
+MAX_CONTROLLERS = 512 // LAUNCHES_PER_WORKER
+# Limit the number of jobs that can be running at once on the entire jobs
+# controller cluster. It's hard to handle cancellation of more than 2000 jobs at
+# once.
+# TODO(cooperc): Once we eliminate static bottlenecks (e.g. sqlite), remove this
+# hardcoded max limit.
+MAX_TOTAL_RUNNING_JOBS = 2000
 # Maximum values for above constants. There will start to be lagging issues
 # at these numbers already.
 # JOB_MEMORY_MB = 200
 # LAUNCHES_PER_WORKER = 16
 # JOBS_PER_WORKER = 400
 
+# keep 2GB reserved after the controllers
+MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB = 2048
 
+CURRENT_HASH = os.path.expanduser('~/.sky/wheels/current_sky_wheel_hash')
+
+
+def _parse_controller_pid_entry(
+        entry: str) -> Optional[state.ControllerPidRecord]:
+    entry = entry.strip()
+    if not entry:
+        return None
+    # The entry should be like <pid>,<started_at>
+    # pid is an integer, started_at is a float
+    # For backwards compatibility, we also support just <pid>
+    entry_parts = entry.split(',')
+    if len(entry_parts) == 2:
+        [raw_pid, raw_started_at] = entry_parts
+    elif len(entry_parts) == 1:
+        # Backwards compatibility, pre-#7847
+        # TODO(cooperc): Remove for 0.13.0
+        raw_pid = entry_parts[0]
+        raw_started_at = None
+    else:
+        # Unknown format
+        return None
+
+    try:
+        pid = int(raw_pid)
+    except ValueError:
+        return None
+
+    started_at: Optional[float] = None
+    if raw_started_at:
+        try:
+            started_at = float(raw_started_at)
+        except ValueError:
+            started_at = None
+    return state.ControllerPidRecord(pid=pid, started_at=started_at)
+
+
+def get_controller_process_records(
+) -> Optional[List[state.ControllerPidRecord]]:
+    """Return recorded controller processes if the file can be read."""
+    if not os.path.exists(JOB_CONTROLLER_PID_PATH):
+        # If the file doesn't exist, it means the controller server is not
+        # running, so we return an empty list
+        return []
+    try:
+        with open(JOB_CONTROLLER_PID_PATH, 'r', encoding='utf-8') as f:
+            lines = f.read().splitlines()
+    except (FileNotFoundError, OSError):
+        return None
+
+    records: List[state.ControllerPidRecord] = []
+    for line in lines:
+        record = _parse_controller_pid_entry(line)
+        if record is not None:
+            records.append(record)
+    return records
+
+
+def _append_controller_pid_record(pid: int,
+                                  started_at: Optional[float]) -> None:
+    # Note: started_at is a float, but converting to a string will not lose any
+    # precision. See https://docs.python.org/3/tutorial/floatingpoint.html and
+    # https://github.com/python/cpython/issues/53583
+    entry = str(pid) if started_at is None else f'{pid},{started_at}'
+    with open(JOB_CONTROLLER_PID_PATH, 'a', encoding='utf-8') as f:
+        f.write(entry + '\n')
+
+
+@annotations.lru_cache(scope='global')
 def get_number_of_controllers() -> int:
     """Returns the number of controllers that should be running.
 
@@ -123,7 +198,7 @@ def get_number_of_controllers() -> int:
     consolidation_mode = skypilot_config.get_nested(
         ('jobs', 'controller', 'consolidation_mode'), default_value=False)
 
-    total_memory_mb = common_utils.get_mem_size_gb() * 1024
+    total_memory_mb = controller_utils.get_controller_mem_size_gb() * 1024
     if consolidation_mode:
         config = server_config.compute_server_config(deploy=True, quiet=True)
 
@@ -136,13 +211,16 @@ def get_number_of_controllers() -> int:
                     config.short_worker_config.burstable_parallelism) * \
             server_config.SHORT_WORKER_MEM_GB * 1024
 
-        return max(1, int((total_memory_mb - used) // JOB_MEMORY_MB))
+        return min(MAX_CONTROLLERS,
+                   max(1, int((total_memory_mb - used) // JOB_MEMORY_MB)))
     else:
-        return max(
-            1,
-            int((total_memory_mb - MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB) /
-                ((LAUNCHES_PER_WORKER * server_config.LONG_WORKER_MEM_GB) * 1024
-                 + JOB_MEMORY_MB)))
+        return min(
+            MAX_CONTROLLERS,
+            max(
+                1,
+                int((total_memory_mb - MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB) /
+                    ((LAUNCHES_PER_WORKER * server_config.LONG_WORKER_MEM_GB) *
+                     1024 + JOB_MEMORY_MB))))
 
 
 def start_controller() -> None:
@@ -154,11 +232,12 @@ def start_controller() -> None:
     logs_dir = os.path.expanduser(
         managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
     os.makedirs(logs_dir, exist_ok=True)
-    log_path = os.path.join(logs_dir, f'controller_{uuid.uuid4()}.log')
+    controller_uuid = str(uuid.uuid4())
+    log_path = os.path.join(logs_dir, f'controller_{controller_uuid}.log')
 
     activate_python_env_cmd = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
     run_controller_cmd = (f'{sys.executable} -u -m'
-                          'sky.jobs.controller')
+                          f'sky.jobs.controller {controller_uuid}')
 
     run_cmd = (f'{activate_python_env_cmd}'
                f'{run_controller_cmd}')
@@ -166,36 +245,21 @@ def start_controller() -> None:
     logger.info(f'Running controller with command: {run_cmd}')
 
     pid = subprocess_utils.launch_new_process_tree(run_cmd, log_output=log_path)
-    with open(JOB_CONTROLLER_PID_PATH, 'a', encoding='utf-8') as f:
-        f.write(str(pid) + '\n')
+    pid_started_at = psutil.Process(pid).create_time()
+    _append_controller_pid_record(pid, pid_started_at)
 
 
-def get_alive_controllers() -> typing.Optional[int]:
-    if not os.path.exists(JOB_CONTROLLER_PID_PATH):
-        # if the file doesn't exist, it means the controller server is not
-        # running, so we return 0
+def get_alive_controllers() -> Optional[int]:
+    records = get_controller_process_records()
+    if records is None:
+        # If we cannot read the file reliably, avoid starting extra controllers.
+        return None
+    if not records:
         return 0
 
-    try:
-        with open(JOB_CONTROLLER_PID_PATH, 'r', encoding='utf-8') as f:
-            pids = f.read().split('\n')[:-1]
-    except OSError:
-        # if the file is corrupted, or any issues with reading it, we just
-        # return None to be safe and not over start
-        return None
-
     alive = 0
-    for pid in pids:
-        try:
-            # TODO(luca) there is a chance that the process that is alive is
-            # not the same controller process. a better solution is to also
-            # include a random UUID with each controller and store that in the
-            # db as well/in the command that spawns it.
-            if subprocess_utils.is_process_alive(int(pid.strip())):
-                alive += 1
-        except ValueError:
-            # if the pid is not an integer, let's assume it's alive to not
-            # over start new processes
+    for record in records:
+        if managed_job_utils.controller_process_alive(record, quiet=False):
             alive += 1
     return alive
 
@@ -249,6 +313,7 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
 
             if started > 0:
                 logger.info(f'Started {started} controllers')
+
     except filelock.Timeout:
         # If we can't get the lock, just exit. The process holding the lock
         # should launch any pending jobs.
@@ -265,22 +330,35 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
 
     The user hash should be set (e.g. via SKYPILOT_USER_ID) before calling this.
     """
-    controller_pid = state.get_job_controller_pid(job_id)
-    if controller_pid is not None:
+    controller_process = state.get_job_controller_process(job_id)
+    if controller_process is not None:
         # why? TODO(cooperc): figure out why this is needed, fix it, and remove
-        if managed_job_utils.controller_process_alive(controller_pid, job_id):
+        if managed_job_utils.controller_process_alive(controller_process,
+                                                      job_id):
             # This can happen when HA recovery runs for some reason but the job
             # controller is still alive.
             logger.warning(f'Job {job_id} is still alive, skipping submission')
             maybe_start_controllers(from_scheduler=True)
             return
 
-    state.scheduler_set_waiting(job_id, dag_yaml_path,
-                                original_user_yaml_path, env_file_path,
-                                common_utils.get_user_hash(), priority)
+    with open(dag_yaml_path, 'r', encoding='utf-8') as dag_file:
+        dag_yaml_content = dag_file.read()
+    with open(original_user_yaml_path, 'r',
+              encoding='utf-8') as original_user_yaml_file:
+        original_user_yaml_content = original_user_yaml_file.read()
+    with open(env_file_path, 'r', encoding='utf-8') as env_file:
+        env_file_content = env_file.read()
+    logger.debug(f'Storing job {job_id} file contents in database '
+                 f'(DAG bytes={len(dag_yaml_content)}, '
+                 f'original user yaml bytes={len(original_user_yaml_content)}, '
+                 f'env bytes={len(env_file_content)}).')
+    state.scheduler_set_waiting(job_id, dag_yaml_content,
+                                original_user_yaml_content, env_file_content,
+                                priority)
     if state.get_ha_recovery_script(job_id) is None:
         # the run command is just the command that called scheduler
-        run = (f'{sys.executable} -m sky.jobs.scheduler {dag_yaml_path} '
+        run = (f'source {env_file_path} && '
+               f'{sys.executable} -m sky.jobs.scheduler {dag_yaml_path} '
                f'--job-id {job_id} --env-file {env_file_path} '
                f'--user-yaml-path {original_user_yaml_path} '
                f'--priority {priority}')
@@ -294,7 +372,6 @@ async def scheduled_launch(
     starting: Set[int],
     starting_lock: asyncio.Lock,
     starting_signal: asyncio.Condition,
-    job_logger: 'logging.Logger',
 ):
     """Launch as part of an ongoing job.
 
@@ -332,10 +409,10 @@ async def scheduled_launch(
             starting_count = len(starting)
             if starting_count < LAUNCHES_PER_WORKER:
                 break
-            job_logger.info('Too many jobs starting, waiting for a slot')
+            logger.info('Too many jobs starting, waiting for a slot')
             await starting_signal.wait()
 
-    job_logger.info(f'Starting job {job_id}')
+    logger.info(f'Starting job {job_id}')
 
     async with starting_lock:
         starting.add(job_id)

@@ -18,7 +18,7 @@ file_mounts:
   /mount_public_azure:
     source: https://azureopendatastorage.blob.core.windows.net/nyctlc
     mode: MOUNT
-  
+
   # Multiple mount points for Azure
   /mount_public_azure_2:
     source: https://azureopendatastorage.blob.core.windows.net/nyctlc
@@ -30,20 +30,21 @@ file_mounts:
     name: {{storage_name}}
     source: ~/tmp-workdir
     mode: {% if only_mount | default(false) %}MOUNT{% else %}COPY{% endif %}
+    {% if store_type is defined %}store: {{store_type}}{% endif %}
 
   # Mounting private buckets in COPY mode with a list of files as source
   /mount_private_copy_lof:
     name: {{storage_name}}
     source: ['~/tmp-workdir/tmp file', '~/tmp-workdir/tmp file2']
     mode: {% if only_mount | default(false) %}MOUNT{% else %}COPY{% endif %}
+    {% if store_type is defined %}store: {{store_type}}{% endif %}
 
-  {% if include_private_mount | default(True) %}
   # Mounting private buckets in MOUNT mode
   /mount_private_mount:
     name: {{storage_name}}
     source: ~/tmp-workdir
     mode: MOUNT
-  {% endif %}
+    {% if store_type is defined %}store: {{store_type}}{% endif %}
 
   # Mounting private buckets in MOUNT_CACHED mode
   {% if include_mount_cached | default(False) %}
@@ -51,7 +52,15 @@ file_mounts:
     name: {{storage_name}}
     source: ~/tmp-workdir
     mode: MOUNT_CACHED
+    {% if store_type is defined %}store: {{store_type}}{% endif %}
   {% endif %}
+
+  # Mounting empty workdir
+  /mount_empty_workdir:
+    name: {{empty_storage_name}}
+    source: ~/empty-workdir
+    mode: MOUNT
+    {% if store_type is defined %}store: {{store_type}}{% endif %}
 
 run: |
   set -ex
@@ -73,19 +82,15 @@ run: |
   ls -ltr /mount_private_copy/tmp\ file
   ls -ltr /mount_private_copy_lof/tmp\ file
   ls -ltr /mount_private_copy_lof/tmp\ file2
-  {% if include_private_mount | default(True) %}
   ls -ltr /mount_private_mount/foo
   ls -ltr /mount_private_mount/tmp\ file
-  {% endif %}
 
   # Symlinks are not copied to buckets
   ! ls /mount_private_copy/circle-link
-  {% if include_private_mount | default(True) %}
   ! ls /mount_private_mount/circle-link
 
   # Write to private bucket in MOUNT mode should pass
   echo "hello" > /mount_private_mount/hello.txt
-  {% endif %}
 
   {% if include_mount_cached | default(False) %}
   # Check private bucket contents

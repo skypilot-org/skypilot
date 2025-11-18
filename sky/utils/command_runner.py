@@ -14,6 +14,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import log_lib
+from sky.utils import auth_utils
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import control_master_utils
@@ -649,6 +650,8 @@ class SSHCommandRunner(CommandRunner):
         self.disable_control_master = (
             disable_control_master or
             control_master_utils.should_disable_control_master())
+        # ensure the ssh key files are created from the database
+        auth_utils.create_ssh_key_files_from_db(ssh_private_key)
         if docker_user is not None:
             assert port is None or port == 22, (
                 f'port must be None or 22 for docker_user, got {port}.')
@@ -962,8 +965,16 @@ class KubernetesCommandRunner(CommandRunner):
         kubectl_args = [
             '--pod-running-timeout', f'{connect_timeout}s', '-n', self.namespace
         ]
+        # The same logic to either set `--context` to the k8s context where
+        # the sky cluster is hosted, or `--kubeconfig` to /dev/null for
+        # in-cluster k8s is used below in the `run()` method.
         if self.context:
             kubectl_args += ['--context', self.context]
+        # If context is none, it means the cluster is hosted on in-cluster k8s.
+        # In this case, we need to set KUBECONFIG to /dev/null to avoid looking
+        # for the cluster in whatever active context is set in the kubeconfig.
+        else:
+            kubectl_args += ['--kubeconfig', '/dev/null']
         local_port, remote_port = port_forward[0]
         local_port_str = f'{local_port}' if local_port is not None else ''
 
@@ -1284,7 +1295,11 @@ class SlurmCommandRunner(SSHCommandRunner):
             partition: The logical set of grouped compute nodes.
             job_id: The provisioned long-running job ID.
         """
-        super().__init__(node, ssh_user, ssh_private_key, ssh_proxy_command=ssh_proxy_command, **kwargs)
+        super().__init__(node,
+                         ssh_user,
+                         ssh_private_key,
+                         ssh_proxy_command=ssh_proxy_command,
+                         **kwargs)
         self.cluster_name = cluster_name
         self.partition = partition
         self.job_id = job_id

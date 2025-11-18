@@ -77,8 +77,13 @@ class APIHealthResponse(ResponseBaseModel):
     version: str = ''
     version_on_disk: str = ''
     commit: str = ''
+    # Whether basic auth on api server is enabled
     basic_auth_enabled: bool = False
     user: Optional[models.User] = None
+    # Whether service account token is enabled
+    service_account_token_enabled: bool = False
+    # Whether basic auth on ingress is enabled
+    ingress_basic_auth_enabled: bool = False
 
 
 class StatusResponse(ResponseBaseModel):
@@ -90,7 +95,7 @@ class StatusResponse(ResponseBaseModel):
     # This is an internally facing field anyway, so it's less
     # of a problem that it's not typed.
     handle: Optional[Any] = None
-    last_use: str
+    last_use: Optional[str] = None
     status: status_lib.ClusterStatus
     autostop: int
     to_down: bool
@@ -98,11 +103,8 @@ class StatusResponse(ResponseBaseModel):
     # metadata is a JSON, so we use Any here.
     metadata: Optional[Dict[str, Any]] = None
     cluster_hash: str
-    # pydantic cannot generate the pydantic-core schema for
-    # storage_mounts_metadata, so we use Any here.
-    storage_mounts_metadata: Optional[Dict[str, Any]] = None
     cluster_ever_up: bool
-    status_updated_at: int
+    status_updated_at: Optional[int] = None
     user_hash: str
     user_name: str
     config_hash: Optional[str] = None
@@ -160,6 +162,8 @@ class StorageRecord(ResponseBaseModel):
 # and therefore can be non-optional.
 class ManagedJobRecord(ResponseBaseModel):
     """A single managed job record."""
+    # The job_id in the spot table
+    task_job_id: Optional[int] = pydantic.Field(None, alias='_job_id')
     job_id: Optional[int] = None
     task_id: Optional[int] = None
     job_name: Optional[str] = None
@@ -187,6 +191,7 @@ class ManagedJobRecord(ResponseBaseModel):
     entrypoint: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
     controller_pid: Optional[int] = None
+    controller_pid_started_at: Optional[float] = None
     dag_yaml_path: Optional[str] = None
     env_file_path: Optional[str] = None
     last_recovered_at: Optional[float] = None
@@ -198,3 +203,24 @@ class ManagedJobRecord(ResponseBaseModel):
     current_cluster_name: Optional[str] = None
     job_id_on_pool_cluster: Optional[int] = None
     accelerators: Optional[Dict[str, int]] = None
+
+
+class VolumeRecord(ResponseBaseModel):
+    """A single volume record."""
+    name: str
+    type: str
+    launched_at: int
+    cloud: str
+    region: Optional[str] = None
+    zone: Optional[str] = None
+    size: Optional[str] = None
+    config: Dict[str, Any]
+    name_on_cloud: str
+    user_hash: str
+    user_name: str
+    workspace: str
+    last_attached_at: Optional[int] = None
+    last_use: Optional[str] = None
+    status: Optional[str] = None
+    usedby_pods: List[str]
+    usedby_clusters: List[str]

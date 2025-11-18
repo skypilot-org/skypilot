@@ -33,13 +33,10 @@ provider:
     networking_mode: {{k8s_networking_mode}}
 
     # We use internal IPs since we set up a port-forward between the kubernetes
-    # cluster and the local machine, or directly use NodePort to reach the
-    # head node.
+    # cluster and the local machine.
     use_internal_ips: true
 
     timeout: {{timeout}}
-
-    ssh_jump_image: {{k8s_ssh_jump_image}}
 
     # Namespace used to host SkyPilot system components, such as fuse device
     # manager.
@@ -212,7 +209,9 @@ provider:
         metadata:
           labels:
             parent: skypilot
+            # TODO (kyuds): remove this label for v0.12.0, as skypilot-cluster label is deprecated in favor of skypilot-cluster-name.
             skypilot-cluster: {{cluster_name_on_cloud}}
+            skypilot-cluster-name: {{cluster_name_on_cloud}}
             skypilot-user: {{ user }}
           name: {{cluster_name_on_cloud}}-head-ssh
         spec:
@@ -230,7 +229,9 @@ provider:
         metadata:
             labels:
               parent: skypilot
+              # TODO (kyuds): remove this label for v0.12.0, as skypilot-cluster label is deprecated in favor of skypilot-cluster-name.
               skypilot-cluster: {{cluster_name_on_cloud}}
+              skypilot-cluster-name: {{cluster_name_on_cloud}}
               skypilot-user: {{ user }}
             # NOTE: If you're running multiple Ray clusters with services
             # on one Kubernetes cluster, they must have unique service
@@ -250,7 +251,9 @@ provider:
         metadata:
           labels:
             parent: skypilot
+            # TODO (kyuds): remove this label for v0.12.0, as skypilot-cluster label is deprecated in favor of skypilot-cluster-name.
             skypilot-cluster: {{cluster_name_on_cloud}}
+            skypilot-cluster-name: {{cluster_name_on_cloud}}
             skypilot-user: {{ user }}
           name: {{cluster_name_on_cloud}}-worker{{ worker_id }}
         spec:
@@ -275,9 +278,8 @@ available_node_types:
         labels:
             parent: skypilot
             # component will be set for the head node pod to be the same as the head node service selector above if a
+            # TODO (kyuds): remove this label for v0.11.0, as skypilot-cluster label is deprecated in favor of skypilot-cluster-name.
             skypilot-cluster: {{cluster_name_on_cloud}}
-            # Identifies the SSH jump pod used by this pod. Used in life cycle management of the ssh jump pod.
-            skypilot-ssh-jump: {{k8s_ssh_jump_name}}
             skypilot-user: {{ user }}
             # Custom tags for the pods
             {%- for label_key, label_value in labels.items() %}
@@ -444,9 +446,6 @@ available_node_types:
         # object store. If you do not provide this, Ray will fall back to
         # /tmp which cause slowdowns if is not a shared memory volume.
         volumes:
-        - name: secret-volume
-          secret:
-            secretName: {{k8s_ssh_key_secret_name}}
         - name: dshm
           emptyDir:
             medium: Memory
@@ -640,6 +639,18 @@ available_node_types:
           command: ["/bin/bash", "-c", "--"]
           args:
             - |
+              # Set -x to print the commands and their arguments as they are executed.
+              # Useful for debugging.
+              set -x
+
+              # Execute user-provided post-provision runcmd
+              # before any of the SkyPilot setup commands.
+              {%- if runcmd %}
+              {%- for cmd in runcmd %}
+              {{cmd}}
+              {%- endfor %}
+              {%- endif %}
+
               # Helper function to conditionally use sudo
               # TODO(zhwu): consolidate the two prefix_cmd and sudo replacements
               prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
@@ -869,7 +880,9 @@ available_node_types:
                 $(prefix_cmd) mkdir -p ~/.ssh;
                 $(prefix_cmd) chown -R $(whoami) ~/.ssh;
                 $(prefix_cmd) chmod 700 ~/.ssh;
-                $(prefix_cmd) cat /etc/secret-volume/ssh-publickey* > ~/.ssh/authorized_keys;
+                $(prefix_cmd) cat > ~/.ssh/authorized_keys <<'SKYPILOT_SSH_KEY_EOF'
+              skypilot:ssh_public_key_content
+              SKYPILOT_SSH_KEY_EOF
                 $(prefix_cmd) chmod 644 ~/.ssh/authorized_keys;
                 $(prefix_cmd) service ssh restart;
                 $(prefix_cmd) sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;
@@ -914,7 +927,7 @@ available_node_types:
                 # unset PYTHONPATH in case the user provided docker image set it.
                 # ~/.sky/python_path is seeded by conda_installation_commands
                 VIRTUAL_ENV=~/skypilot-runtime UV_SYSTEM_PYTHON=false env -u PYTHONPATH ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
-                  $(cat ~/.sky/python_path) -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
+                  env -u PYTHONPATH $(cat ~/.sky/python_path) -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
                 }
                 touch /tmp/ray_skypilot_installation_complete
                 echo "=== Ray and skypilot installation completed ==="
@@ -1062,7 +1075,7 @@ available_node_types:
                 # Also, skip the jobs that are waiting to be scheduled as those does not have a controller process running.
                 # For SkyServe, this will be None and every service will be recovered. This is because SkyServe
                 # will delete the service from the database after it is terminated so everything in the database is running.
-                ALL_IN_PROGRESS_JOBS=$({{sky_python_cmd}} -c "from sky.jobs import state; jobs = state.get_managed_jobs(); print(' '.join({str(job['job_id']) for job in jobs if job['schedule_state'] not in [state.ManagedJobScheduleState.DONE, state.ManagedJobScheduleState.WAITING]}) if jobs else None)")
+                ALL_IN_PROGRESS_JOBS=$({{sky_python_cmd}} -c "from sky.jobs import state; jobs, _ = state.get_managed_jobs_with_filters(fields=['job_id', 'schedule_state']); print(' '.join({str(job['job_id']) for job in jobs if job['schedule_state'] not in [state.ManagedJobScheduleState.DONE, state.ManagedJobScheduleState.WAITING]}) if jobs else None)")
                 if [ "$ALL_IN_PROGRESS_JOBS" != "None" ]; then
                   read -ra ALL_IN_PROGRESS_JOBS_SEQ <<< "$ALL_IN_PROGRESS_JOBS"
                 fi
@@ -1092,6 +1105,8 @@ available_node_types:
 
               touch {{k8s_high_availability_deployment_volume_mount_path}}/k8s_container_ready
               {% endif %}
+              # Set +x to stop printing the commands and their arguments as they are executed.
+              set +x
 
               trap : TERM INT; log_tail || sleep infinity & wait
 
@@ -1105,9 +1120,6 @@ available_node_types:
           # object store. If you do not provide this, Ray will fall back to
           # /tmp which cause slowdowns if is not a shared memory volume.
           volumeMounts:
-          - name: secret-volume
-            readOnly: true
-            mountPath: "/etc/secret-volume"
           - mountPath: /dev/shm
             name: dshm
           {% if k8s_enable_gpudirect_tcpx %}
@@ -1355,6 +1367,7 @@ setup_commands:
     echo "=== Ray and skypilot dependencies installation completed in $(($end_epoch - $start_epoch)) secs ===";
     start_epoch=$(date +%s);
     {{ skypilot_wheel_installation_commands }}
+    {{ copy_skypilot_templates_commands }}
     end_epoch=$(date +%s);
     echo "=== Skypilot wheel installation completed in $(($end_epoch - $start_epoch)) secs ===";
     start_epoch=$(date +%s);

@@ -1,11 +1,12 @@
 """SDK functions for managed jobs."""
 import json
 import typing
-from typing import Any, Dict, List
+from typing import List
 
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
+from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import versions
 from sky.server.requests import payloads
@@ -73,6 +74,7 @@ def apply(volume: volume_lib.Volume) -> server_common.RequestId[None]:
         size=volume.size,
         config=volume.config,
         labels=volume.labels,
+        use_existing=volume.use_existing,
     )
     response = server_common.make_authenticated_request(
         'POST', '/volumes/apply', json=json.loads(body.model_dump_json()))
@@ -99,10 +101,10 @@ def validate(volume: volume_lib.Volume) -> None:
         name=volume.name,
         volume_type=volume.type,
         infra=volume.infra,
-        resource_name=volume.resource_name,
         size=volume.size,
         config=volume.config,
         labels=volume.labels,
+        use_existing=volume.use_existing,
     )
     response = server_common.make_authenticated_request(
         'POST', '/volumes/validate', json=json.loads(body.model_dump_json()))
@@ -116,7 +118,7 @@ def validate(volume: volume_lib.Volume) -> None:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def ls() -> server_common.RequestId[List[Dict[str, Any]]]:
+def ls() -> server_common.RequestId[List[responses.VolumeRecord]]:
     """Lists all volumes.
 
     Returns:

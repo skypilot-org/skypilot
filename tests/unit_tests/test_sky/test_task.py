@@ -875,3 +875,70 @@ def test_resolve_volumes_with_envs_dict():
     }
     t = task.Task.from_yaml_config(config)
     assert t._volumes == {'/mnt': {'name': 'vol1_suffix'}}
+
+
+def test_resources_to_config():
+    """Test the functionality of converting resources to 
+    its respective yaml config."""
+    t = task.Task()
+    resource1 = resources_lib.Resources(cloud='aws',
+                                        region='us-west1',
+                                        zone='a')
+    t.resources = [resource1]
+    # get the resource config
+    assert t.get_resource_config() == resource1.to_yaml_config()
+
+    t.resources = [resource1, resource1]
+    # two identical resources should be combined into a single resource
+    assert t.get_resource_config() == resource1.to_yaml_config()
+
+    t.resources = {resource1, resource1}
+    # two identical resources should be combined into a single resource
+    assert t.get_resource_config() == resource1.to_yaml_config()
+
+    resource2 = resources_lib.Resources(cloud='aws',
+                                        region='us-west1',
+                                        zone='a',
+                                        memory='10GB')
+    t.resources = [resource1, resource2]
+    # the common config should be factored out
+    common_config = resources_lib.Resources(cloud='aws',
+                                            region='us-west1',
+                                            zone='a').to_yaml_config()
+    returned_config = t.get_resource_config()
+    ordered = returned_config.pop('ordered')
+    assert returned_config == common_config
+    assert len(ordered) == 2
+    # the first resource should be empty, because all fields
+    # are the same as the common config
+    assert ordered[0] == {}
+    # the second resource should have the modified memory
+    assert float(ordered[1]['memory']) == 10.0
+
+
+def test_task_resource_config_modification():
+    """Test the functionality of modifying resource config."""
+    t = task.Task()
+    resource1 = resources_lib.Resources(cloud='aws',
+                                        region='us-west1',
+                                        zone='a')
+    resource2 = resource1.copy(memory='10GB')
+    t.resources = [resource1, resource2]
+
+    # get the resource config
+    resource_config = t.get_resource_config()
+    assert len(resource_config['ordered']) == 2
+
+    # Modify one of the ordered resources, this should modify the resource1
+    resource_config['ordered'][0]['memory'] = '20GB'
+    t.set_resources(resource_config)
+    # check that resource1 is modified
+    assert float(t.resources[0].memory) == 20.0
+    assert float(t.resources[1].memory) == 10.0
+
+    # Modify the autostop config for all resources
+    # by changing the base config.
+    resource_config['autostop'] = {'idle_minutes': 10}
+    t.set_resources(resource_config)
+    assert t.resources[0].autostop_config.idle_minutes == 10
+    assert t.resources[1].autostop_config.idle_minutes == 10

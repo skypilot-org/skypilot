@@ -32,6 +32,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.metrics import utils as metrics_lib
 from sky.skylet import constants
+from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import registry
@@ -342,6 +343,10 @@ def initialize_and_get_db() -> sqlalchemy.engine.Engine:
 
         # return engine
         _SQLALCHEMY_ENGINE = engine
+        # Cache the result of _sqlite_supports_returning()
+        # ahead of time, as it won't change throughout
+        # the lifetime of the engine.
+        _sqlite_supports_returning()
         return _SQLALCHEMY_ENGINE
 
 
@@ -372,19 +377,51 @@ def _init_db(func):
     return wrapper
 
 
+@annotations.lru_cache(scope='global', maxsize=1)
+def _sqlite_supports_returning() -> bool:
+    """Check if SQLite (3.35.0+) and SQLAlchemy (2.0+) support RETURNING.
+
+    See https://sqlite.org/lang_returning.html and
+    https://docs.sqlalchemy.org/en/20/dialects/sqlite.html#insert-update-delete-returning  # pylint: disable=line-too-long
+    """
+    sqlalchemy_version_parts = sqlalchemy.__version__.split('.')
+    assert len(sqlalchemy_version_parts) >= 1, \
+        f'Invalid SQLAlchemy version: {sqlalchemy.__version__}'
+    sqlalchemy_major = int(sqlalchemy_version_parts[0])
+    if sqlalchemy_major < 2:
+        return False
+
+    assert _SQLALCHEMY_ENGINE is not None
+    if (_SQLALCHEMY_ENGINE.dialect.name !=
+            db_utils.SQLAlchemyDialect.SQLITE.value):
+        return False
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        result = session.execute(sqlalchemy.text('SELECT sqlite_version()'))
+        version_str = result.scalar()
+        version_parts = version_str.split('.')
+        assert len(version_parts) >= 2, \
+            f'Invalid version string: {version_str}'
+        major, minor = int(version_parts[0]), int(version_parts[1])
+        return (major > 3) or (major == 3 and minor >= 35)
+
+
 @_init_db
 @metrics_lib.time_me
-def add_or_update_user(user: models.User,
-                       allow_duplicate_name: bool = True) -> bool:
+def add_or_update_user(
+    user: models.User,
+    allow_duplicate_name: bool = True,
+    return_user: bool = False
+) -> typing.Union[bool, typing.Tuple[bool, models.User]]:
     """Store the mapping from user hash to user name for display purposes.
 
     Returns:
-        Boolean: whether the user is newly added
+        If return_user=False: bool (whether the user is newly added)
+        If return_user=True: Tuple[bool, models.User]
     """
     assert _SQLALCHEMY_ENGINE is not None
 
     if user.name is None:
-        return False
+        return (False, user) if return_user else False
 
     # Set created_at if not already set
     created_at = user.created_at
@@ -396,7 +433,7 @@ def add_or_update_user(user: models.User,
             existing_user = session.query(user_table).filter(
                 user_table.c.name == user.name).first()
             if existing_user is not None:
-                return False
+                return (False, user) if return_user else False
 
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
@@ -410,24 +447,57 @@ def add_or_update_user(user: models.User,
                                     name=user.name,
                                     password=user.password,
                                     created_at=created_at)
+            use_returning = return_user and _sqlite_supports_returning()
+            if use_returning:
+                insert_stmnt = insert_stmnt.returning(
+                    user_table.c.id,
+                    user_table.c.name,
+                    user_table.c.password,
+                    user_table.c.created_at,
+                )
             result = session.execute(insert_stmnt)
 
-            # Check if the INSERT actually inserted a row
-            was_inserted = result.rowcount > 0
+            row = None
+            if use_returning:
+                # With RETURNING, check if we got a row back.
+                row = result.fetchone()
+                was_inserted = row is not None
+            else:
+                # Without RETURNING, use rowcount.
+                was_inserted = result.rowcount > 0
 
             if not was_inserted:
                 # User existed, so update it (but don't update created_at)
+                update_values = {user_table.c.name: user.name}
                 if user.password:
-                    session.query(user_table).filter_by(id=user.id).update({
-                        user_table.c.name: user.name,
-                        user_table.c.password: user.password
-                    })
-                else:
-                    session.query(user_table).filter_by(id=user.id).update(
-                        {user_table.c.name: user.name})
+                    update_values[user_table.c.password] = user.password
+
+                update_stmnt = sqlalchemy.update(user_table).where(
+                    user_table.c.id == user.id).values(update_values)
+                if use_returning:
+                    update_stmnt = update_stmnt.returning(
+                        user_table.c.id, user_table.c.name,
+                        user_table.c.password, user_table.c.created_at)
+
+                result = session.execute(update_stmnt)
+                if use_returning:
+                    row = result.fetchone()
 
             session.commit()
-            return was_inserted
+
+            if return_user:
+                if row is None:
+                    # row=None means the sqlite used has no RETURNING support,
+                    # so we need to do a separate query
+                    row = session.query(user_table).filter_by(
+                        id=user.id).first()
+                updated_user = models.User(id=row.id,
+                                           name=row.name,
+                                           password=row.password,
+                                           created_at=row.created_at)
+                return was_inserted, updated_user
+            else:
+                return was_inserted
 
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
@@ -452,6 +522,9 @@ def add_or_update_user(user: models.User,
             upsert_stmnt = insert_stmnt.on_conflict_do_update(
                 index_elements=[user_table.c.id], set_=set_).returning(
                     user_table.c.id,
+                    user_table.c.name,
+                    user_table.c.password,
+                    user_table.c.created_at,
                     # This will be True for INSERT, False for UPDATE
                     sqlalchemy.literal_column('(xmax = 0)').label('was_inserted'
                                                                  ))
@@ -459,10 +532,17 @@ def add_or_update_user(user: models.User,
             result = session.execute(upsert_stmnt)
             row = result.fetchone()
 
-            ret = bool(row.was_inserted) if row else False
+            was_inserted = bool(row.was_inserted) if row else False
             session.commit()
 
-            return ret
+            if return_user:
+                updated_user = models.User(id=row.id,
+                                           name=row.name,
+                                           password=row.password,
+                                           created_at=row.created_at)
+                return was_inserted, updated_user
+            else:
+                return was_inserted
         else:
             raise ValueError('Unsupported database dialect')
 
@@ -1065,6 +1145,42 @@ def get_handle_from_cluster_name(
     return pickle.loads(row.handle)
 
 
+@_init_db
+@metrics_lib.time_me
+def get_handles_from_cluster_names(
+        cluster_names: Set[str]
+) -> Dict[str, Optional['backends.ResourceHandle']]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(cluster_table.c.name,
+                             cluster_table.c.handle).filter(
+                                 cluster_table.c.name.in_(cluster_names)).all()
+        return {
+            row.name: pickle.loads(row.handle) if row is not None else None
+            for row in rows
+        }
+
+
+@_init_db
+@metrics_lib.time_me
+def get_cluster_name_to_handle_map(
+    is_managed: Optional[bool] = None,
+) -> Dict[str, Optional['backends.ResourceHandle']]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        query = session.query(cluster_table.c.name, cluster_table.c.handle)
+        if is_managed is not None:
+            query = query.filter(cluster_table.c.is_managed == int(is_managed))
+        rows = query.all()
+    name_to_handle = {}
+    for row in rows:
+        if row.handle and len(row.handle) > 0:
+            name_to_handle[row.name] = pickle.loads(row.handle)
+        else:
+            name_to_handle[row.name] = None
+    return name_to_handle
+
+
 @_init_db_async
 @metrics_lib.time_me
 async def get_status_from_cluster_name_async(
@@ -1478,41 +1594,31 @@ def get_cluster_from_name(
         include_user_info: bool = True,
         summary_response: bool = False) -> Optional[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
+    query_fields = [
+        cluster_table.c.name,
+        cluster_table.c.launched_at,
+        cluster_table.c.handle,
+        cluster_table.c.last_use,
+        cluster_table.c.status,
+        cluster_table.c.autostop,
+        cluster_table.c.to_down,
+        cluster_table.c.owner,
+        cluster_table.c.metadata,
+        cluster_table.c.cluster_hash,
+        cluster_table.c.cluster_ever_up,
+        cluster_table.c.status_updated_at,
+        cluster_table.c.user_hash,
+        cluster_table.c.config_hash,
+        cluster_table.c.workspace,
+        cluster_table.c.is_managed,
+    ]
+    if not summary_response:
+        query_fields.extend([
+            cluster_table.c.last_creation_yaml,
+            cluster_table.c.last_creation_command,
+        ])
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        if summary_response:
-            query = session.query(
-                cluster_table.c.name, cluster_table.c.launched_at,
-                cluster_table.c.handle, cluster_table.c.last_use,
-                cluster_table.c.status, cluster_table.c.autostop,
-                cluster_table.c.to_down, cluster_table.c.owner,
-                cluster_table.c.metadata, cluster_table.c.cluster_hash,
-                cluster_table.c.storage_mounts_metadata,
-                cluster_table.c.cluster_ever_up,
-                cluster_table.c.status_updated_at, cluster_table.c.user_hash,
-                cluster_table.c.config_hash, cluster_table.c.workspace,
-                cluster_table.c.is_managed)
-        else:
-            query = session.query(
-                cluster_table.c.name,
-                cluster_table.c.launched_at,
-                cluster_table.c.handle,
-                cluster_table.c.last_use,
-                cluster_table.c.status,
-                cluster_table.c.autostop,
-                cluster_table.c.to_down,
-                cluster_table.c.owner,
-                cluster_table.c.metadata,
-                cluster_table.c.cluster_hash,
-                cluster_table.c.storage_mounts_metadata,
-                cluster_table.c.cluster_ever_up,
-                cluster_table.c.status_updated_at,
-                cluster_table.c.user_hash,
-                cluster_table.c.config_hash,
-                cluster_table.c.workspace,
-                cluster_table.c.is_managed,
-                # extra fields compared to above query
-                cluster_table.c.last_creation_yaml,
-                cluster_table.c.last_creation_command)
+        query = session.query(*query_fields)
         row = query.filter_by(name=cluster_name).first()
     if row is None:
         return None
@@ -1535,8 +1641,6 @@ def get_cluster_from_name(
         'owner': _load_owner(row.owner),
         'metadata': json.loads(row.metadata),
         'cluster_hash': row.cluster_hash,
-        'storage_mounts_metadata': _load_storage_mounts_metadata(
-            row.storage_mounts_metadata),
         'cluster_ever_up': bool(row.cluster_ever_up),
         'status_updated_at': row.status_updated_at,
         'workspace': row.workspace,
@@ -1593,41 +1697,34 @@ def get_clusters(
     # we treat it as belonging to the current user.
     current_user_hash = common_utils.get_user_hash()
     assert _SQLALCHEMY_ENGINE is not None
+    query_fields = [
+        cluster_table.c.name,
+        cluster_table.c.launched_at,
+        cluster_table.c.handle,
+        cluster_table.c.status,
+        cluster_table.c.autostop,
+        cluster_table.c.to_down,
+        cluster_table.c.cluster_hash,
+        cluster_table.c.cluster_ever_up,
+        cluster_table.c.user_hash,
+        cluster_table.c.workspace,
+        user_table.c.name.label('user_name'),
+    ]
+    if not summary_response:
+        query_fields.extend([
+            cluster_table.c.last_creation_yaml,
+            cluster_table.c.last_creation_command,
+            cluster_table.c.config_hash,
+            cluster_table.c.owner,
+            cluster_table.c.metadata,
+            cluster_table.c.last_use,
+            cluster_table.c.status_updated_at,
+        ])
+    if not exclude_managed_clusters:
+        query_fields.append(cluster_table.c.is_managed)
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        if summary_response:
-            query = session.query(
-                cluster_table.c.name, cluster_table.c.launched_at,
-                cluster_table.c.handle, cluster_table.c.last_use,
-                cluster_table.c.status, cluster_table.c.autostop,
-                cluster_table.c.to_down, cluster_table.c.owner,
-                cluster_table.c.metadata, cluster_table.c.cluster_hash,
-                cluster_table.c.storage_mounts_metadata,
-                cluster_table.c.cluster_ever_up,
-                cluster_table.c.status_updated_at, cluster_table.c.user_hash,
-                cluster_table.c.config_hash, cluster_table.c.workspace,
-                cluster_table.c.is_managed)
-        else:
-            query = session.query(
-                cluster_table.c.name,
-                cluster_table.c.launched_at,
-                cluster_table.c.handle,
-                cluster_table.c.last_use,
-                cluster_table.c.status,
-                cluster_table.c.autostop,
-                cluster_table.c.to_down,
-                cluster_table.c.owner,
-                cluster_table.c.metadata,
-                cluster_table.c.cluster_hash,
-                cluster_table.c.storage_mounts_metadata,
-                cluster_table.c.cluster_ever_up,
-                cluster_table.c.status_updated_at,
-                cluster_table.c.user_hash,
-                cluster_table.c.config_hash,
-                cluster_table.c.workspace,
-                cluster_table.c.is_managed,
-                # extra fields compared to above query
-                cluster_table.c.last_creation_yaml,
-                cluster_table.c.last_creation_command)
+        query = session.query(*query_fields).outerjoin(
+            user_table, cluster_table.c.user_hash == user_table.c.id)
         if exclude_managed_clusters:
             query = query.filter(cluster_table.c.is_managed == int(False))
         if workspaces_filter is not None:
@@ -1650,55 +1747,50 @@ def get_clusters(
         rows = query.all()
     records = []
 
-    # get user hash for each row
-    row_to_user_hash = {}
-    for row in rows:
-        user_hash = (row.user_hash
-                     if row.user_hash is not None else current_user_hash)
-        row_to_user_hash[row.cluster_hash] = user_hash
-
-    # get all users needed for the rows at once
-    user_hashes = set(row_to_user_hash.values())
-    user_hash_to_user = get_users(user_hashes)
+    # Check if we need to fetch the current user's name,
+    # for backwards compatibility, if user_hash is None.
+    current_user_name = None
+    needs_current_user = any(row.user_hash is None for row in rows)
+    if needs_current_user:
+        current_user = get_user(current_user_hash)
+        current_user_name = (current_user.name
+                             if current_user is not None else None)
 
     # get last cluster event for each row
-    cluster_hashes = set(row_to_user_hash.keys())
     if not summary_response:
+        cluster_hashes = {row.cluster_hash for row in rows}
         last_cluster_event_dict = _get_last_cluster_event_multiple(
             cluster_hashes, ClusterEventType.STATUS_CHANGE)
 
-    # get user for each row
     for row in rows:
-        user_hash = row_to_user_hash[row.cluster_hash]
-        user = user_hash_to_user.get(user_hash, None)
-        user_name = user.name if user is not None else None
         # TODO: use namedtuple instead of dict
         record = {
             'name': row.name,
             'launched_at': row.launched_at,
             'handle': pickle.loads(row.handle),
-            'last_use': row.last_use,
             'status': status_lib.ClusterStatus[row.status],
             'autostop': row.autostop,
             'to_down': bool(row.to_down),
-            'owner': _load_owner(row.owner),
-            'metadata': json.loads(row.metadata),
             'cluster_hash': row.cluster_hash,
-            'storage_mounts_metadata': _load_storage_mounts_metadata(
-                row.storage_mounts_metadata),
             'cluster_ever_up': bool(row.cluster_ever_up),
-            'status_updated_at': row.status_updated_at,
-            'user_hash': user_hash,
-            'user_name': user_name,
+            'user_hash': (row.user_hash
+                          if row.user_hash is not None else current_user_hash),
+            'user_name': (row.user_name
+                          if row.user_name is not None else current_user_name),
             'workspace': row.workspace,
-            'is_managed': bool(row.is_managed),
-            'config_hash': row.config_hash,
+            'is_managed': False
+                          if exclude_managed_clusters else bool(row.is_managed),
         }
         if not summary_response:
             record['last_creation_yaml'] = row.last_creation_yaml
             record['last_creation_command'] = row.last_creation_command
             record['last_event'] = last_cluster_event_dict.get(
                 row.cluster_hash, None)
+            record['config_hash'] = row.config_hash
+            record['owner'] = _load_owner(row.owner)
+            record['metadata'] = json.loads(row.metadata)
+            record['last_use'] = row.last_use
+            record['status_updated_at'] = row.status_updated_at
 
         records.append(record)
     return records
@@ -2479,11 +2571,22 @@ def _set_cluster_yaml_from_file(cluster_yaml_path: str,
     # on the local file system and migrate it to the database.
     # TODO(syang): remove this check once we have a way to migrate the
     # cluster from file to database. Remove on v0.12.0.
-    if cluster_yaml_path is not None and os.path.exists(cluster_yaml_path):
-        with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
-            yaml_str = f.read()
-        set_cluster_yaml(cluster_name, yaml_str)
-        return yaml_str
+    if cluster_yaml_path is not None:
+        # First try the exact path
+        path_to_read = None
+        if os.path.exists(cluster_yaml_path):
+            path_to_read = cluster_yaml_path
+        # Fallback: try with .debug suffix (when debug logging was enabled)
+        # Debug logging causes YAML files to be saved with .debug suffix
+        # but the path stored in the handle doesn't include it
+        debug_path = cluster_yaml_path + '.debug'
+        if os.path.exists(debug_path):
+            path_to_read = debug_path
+        if path_to_read is not None:
+            with open(path_to_read, 'r', encoding='utf-8') as f:
+                yaml_str = f.read()
+            set_cluster_yaml(cluster_name, yaml_str)
+            return yaml_str
     return None
 
 

@@ -48,6 +48,8 @@ Below is the configuration syntax and some example values. See detailed explanat
       :ref:`autostop <config-yaml-jobs-controller-autostop>`:
         idle_minutes: 10
         down: false  # use with caution!
+      :ref:`controller_logs_gc_retention_hours <config-yaml-jobs-controller-controller-logs-gc-retention-hours>`: 24 * 7
+      :ref:`task_logs_gc_retention_hours <config-yaml-jobs-controller-task-logs-gc-retention-hours>`: 24 * 7
 
   :ref:`docker <config-yaml-docker>`:
     :ref:`run_options <config-yaml-docker-run-options>`:
@@ -86,6 +88,8 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`dws <config-yaml-kubernetes-dws>`:
       enabled: true
       max_run_duration: 10m
+    :ref:`post_provision_runcmd <config-yaml-kubernetes-post-provision-runcmd>`:
+      - echo "hello world!"
     :ref:`context_configs <config-yaml-kubernetes-context-configs>`:
       context1:
         pod_config:
@@ -96,6 +100,19 @@ Below is the configuration syntax and some example values. See detailed explanat
         remote_identity: my-k8s-service-account
 
   :ref:`ssh <config-yaml-ssh>`:
+    # See :ref:`kubernetes.pod_config <config-yaml-kubernetes-pod-config>` for more details.
+    pod_config: ...
+    # See :ref:`kubernetes.provision_timeout <config-yaml-kubernetes-provision-timeout>` for more details.
+    provision_timeout: ...
+    # Specifying above fields but for a specific context.
+    context_configs:
+      node-pool-1:
+        pod_config:
+          metadata:
+            labels:
+              my-label: my-value
+      node-pool-2:
+        provision_timeout: 3600
     :ref:`allowed_node_pools <config-yaml-ssh-allowed-node-pools>`:
       - node-pool-1
       - node-pool-2
@@ -381,6 +398,66 @@ Example:
         # Default values:
         idle_minutes: 10  # Set time to idle autostop/autodown.
         down: false  # Terminate instead of stopping. Caution: setting this to true will cause logs to be lost and could lead to resource leaks if SkyPilot crashes.
+
+
+.. _config-yaml-jobs-controller-controller-logs-gc-retention-hours:
+
+``jobs.controller.controller_logs_gc_retention_hours``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Retention period for controller logs in hours (optional). Set to a negative
+value to disable controller logs garbage collection.
+
+Controller logs GC will automatically delete old controller logs from the
+job controller to reclaim disk space.
+
+Default: ``168`` (7 days).
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      # Keep controller logs for 24 hours (1 day)
+      controller_logs_gc_retention_hours: 24
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      # Disable controller logs GC (keep all logs indefinitely)
+      controller_logs_gc_retention_hours: -1
+
+
+.. _config-yaml-jobs-controller-task-logs-gc-retention-hours:
+
+``jobs.controller.task_logs_gc_retention_hours``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Retention period for task logs in hours (optional). Set to a negative value
+to disable task logs garbage collection.
+
+Task logs GC will automatically delete old task logs from the job controller
+to reclaim disk space.
+
+Default: ``168`` (7 days).
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      # Keep task logs for 48 hours (2 days)
+      task_logs_gc_retention_hours: 48
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      # Disable task logs GC (keep all logs indefinitely)
+      task_logs_gc_retention_hours: -1
 
 
 .. _config-yaml-allowed-clouds:
@@ -1132,6 +1209,17 @@ List of allowed Kubernetes contexts (optional).
 
 List of context names that SkyPilot is allowed to use.
 
+If you want all available contexts to be allowed, set it to 'all' like this:
+
+.. code-block:: yaml
+
+  kubernetes:
+    allowed_contexts: all
+
+
+You can also set ``SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS`` environment variable to ``"true"``
+for the same effect. Configuration option overrides the environment variable if set.
+
 .. _config-yaml-kubernetes-custom-metadata:
 
 ``kubernetes.custom_metadata``
@@ -1221,6 +1309,17 @@ Example:
                 medium: Memory
                 sizeLimit: 3Gi
 
+By default, SkyPilot automatically creates a single container named ``ray-node`` in the Pod. While you typically don't need to explicitly set the container name, if you do specify ``pod_config.spec.containers[0].name``, it must be set to ``ray-node``:
+
+.. code-block:: yaml
+
+  kubernetes:
+    pod_config:
+      spec:
+        containers:
+          - name: ray-node
+            ...
+
 .. _config-yaml-kubernetes-kueue:
 
 ``kubernetes.kueue``
@@ -1268,6 +1367,28 @@ Example:
     dws:
       enabled: true
       max_run_duration: 10m
+
+.. _config-yaml-kubernetes-post-provision-runcmd:
+
+``kubernetes.post_provision_runcmd``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Run commands during the instance initialization phase (optional).
+
+This is executed before any of the SkyPilot runtime setup commands, which is useful for doing any setup that must happen right after the instance starts, such as:
+
+- Configuring system settings
+- Installing certificates
+
+Each item is a string.
+
+Example:
+
+.. code-block:: yaml
+
+  kubernetes:
+    post_provision_runcmd:
+      - echo "hello world!"
 
 .. _config-yaml-kubernetes-context-configs:
 
