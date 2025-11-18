@@ -28,6 +28,7 @@ This is informed by the following boto3 docs:
 
 # pylint: disable=import-outside-toplevel
 
+import functools
 import logging
 import threading
 import time
@@ -78,7 +79,21 @@ class _ThreadLocalLRUCache(threading.local):
 def _thread_local_lru_cache(maxsize=32):
     # Create thread-local storage for the LRU cache
     local_cache = _ThreadLocalLRUCache(maxsize)
-    return local_cache.cache
+
+    def decorator(func):
+        # We can't apply the lru_cache here, because this runs at import time
+        # so we will always have the main thread's cache.
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            # We are within the actual function call, which may be on a thread,
+            # so local_cache.cache will return the correct thread-local cache,
+            # which we can now apply and immediately call.
+            return local_cache.cache(func)(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 def _assert_kwargs_builtin_type(kwargs):
