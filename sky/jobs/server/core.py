@@ -12,9 +12,11 @@ import colorama
 
 from sky import backends
 from sky import core
+from sky import dag as dag_lib
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
+from sky import optimizer
 from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
@@ -243,43 +245,56 @@ def _ensure_controller_up(
 ) -> 'cloud_vm_ray_backend.CloudVmRayResourceHandle':
     """Ensure the jobs controller is up before proceeding.
 
-    If the controller is not accessible, launch it using execution.launch
-    with retry_until_up=True to ensure it comes up.
+    If the controller is not accessible, provision it (bring up the cluster)
+    without launching a job. This avoids creating a cluster job ID that would
+    interfere with the ID space from the controller's perspective.
     """
     try:
         handle = backend_utils.is_controller_accessible(controller=controller,
                                                         stopped_message='')
         return handle
     except exceptions.ClusterNotUpError:
-        # Controller is not up, launch it
+        # Controller is not up, provision it (bring up the cluster)
         controller_name = controller.value.cluster_name
         logger.info(f'{colorama.Fore.YELLOW}'
                     f'Jobs controller {controller_name} is not up. '
-                    f'Launching it...{colorama.Style.RESET_ALL}')
+                    f'Provisioning it...{colorama.Style.RESET_ALL}')
 
-        # Create a minimal task to launch the controller cluster
-        # The actual controller task will be launched later
-        controller_resources = controller_utils.get_controller_resources(
+        # Create a minimal task for provisioning the controller cluster
+        # We only use this for its resources, not to execute a job
+        controller_resources_set = controller_utils.get_controller_resources(
             controller=controller, task_resources=[])
         minimal_task = task_lib.Task(
             name='ensure_controller_up',
             run='echo "Controller cluster is up"',
         )
-        minimal_task.set_resources(controller_resources)
+        minimal_task.set_resources(controller_resources_set)
+
+        # Optimize the task to make resources launchable (fills in missing
+        # fields like region/zone)
+        with dag_lib.Dag() as dag:
+            dag.add(minimal_task)
+        dag = optimizer.Optimizer.optimize(dag,
+                                           minimize=common.OptimizeTarget.COST,
+                                           quiet=True)
+        minimal_task = dag.tasks[0]
+        assert minimal_task.best_resources is not None, minimal_task
 
         with skypilot_config.local_active_workspace_ctx(
                 skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):
             with common.with_server_user():
-                # Launch the controller cluster with retry_until_up=True
-                # This will ensure the cluster is up before returning
-                _, handle = execution.launch(
+                # Only provision the cluster, don't execute a job
+                # This brings up the cluster without creating a Ray job ID
+                backend = backends.CloudVmRayBackend()
+                # Use the optimized Resources object for provisioning
+                handle, _ = backend.provision(
                     task=minimal_task,
+                    to_provision=minimal_task.best_resources,
+                    dryrun=False,
+                    stream_logs=False,
                     cluster_name=controller_name,
                     retry_until_up=True,
-                    stream_logs=False,
-                    _request_name=request_names.AdminPolicyRequestName.
-                    JOBS_LAUNCH_CONTROLLER,
-                    _disable_controller_check=True)
+                    skip_unnecessary_provisioning=False)
 
         # Verify the controller is now accessible
         handle = backend_utils.is_controller_accessible(controller=controller,
