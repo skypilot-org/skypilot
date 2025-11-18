@@ -2,6 +2,7 @@
 # TODO(zhwu): maybe use file based status instead of database, so
 # that we can easily switch to a s3-based storage.
 import asyncio
+import collections
 import enum
 import functools
 import ipaddress
@@ -106,6 +107,9 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('name', sqlalchemy.Text),
     sqlalchemy.Column('schedule_state', sqlalchemy.Text),
     sqlalchemy.Column('controller_pid', sqlalchemy.Integer,
+                      server_default=None),
+    sqlalchemy.Column('controller_pid_started_at',
+                      sqlalchemy.Float,
                       server_default=None),
     sqlalchemy.Column('dag_yaml_path', sqlalchemy.Text),
     sqlalchemy.Column('env_file_path', sqlalchemy.Text),
@@ -350,6 +354,7 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'job_name': r.get('name'),  # from job_info table
         'schedule_state': r.get('schedule_state'),
         'controller_pid': r.get('controller_pid'),
+        'controller_pid_started_at': r.get('controller_pid_started_at'),
         # the _path columns are for backwards compatibility, use the _content
         # columns instead
         'dag_yaml_path': r.get('dag_yaml_path'),
@@ -705,6 +710,12 @@ class ManagedJobScheduleState(enum.Enum):
         return enum_to_protobuf[self]
 
 
+ControllerPidRecord = collections.namedtuple('ControllerPidRecord', [
+    'pid',
+    'started_at',
+])
+
+
 # === Status transition functions ===
 @_init_db
 def set_job_info_without_job_id(name: str, workspace: str, entrypoint: str,
@@ -918,7 +929,14 @@ def set_failed(
 
 @_init_db
 def set_pending_cancelled(job_id: int):
-    """Set the job as pending cancelled, if it is in non-terminal states."""
+    """Set the job as cancelled, if it is PENDING and WAITING/INACTIVE.
+
+    This may fail if the job is not PENDING, e.g. another process has changed
+    its state in the meantime.
+
+    Returns:
+        True if the job was cancelled, False otherwise.
+    """
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         # Subquery to get the spot_job_ids that match the joined condition
@@ -1137,13 +1155,58 @@ def get_latest_task_id_status(
 
 
 @_init_db
-def get_job_controller_pid(job_id: int) -> Optional[int]:
+def get_job_controller_process(job_id: int) -> Optional[ControllerPidRecord]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        pid = session.execute(
-            sqlalchemy.select(job_info_table.c.controller_pid).where(
-                job_info_table.c.spot_job_id == job_id)).fetchone()
-        return pid[0] if pid else None
+        row = session.execute(
+            sqlalchemy.select(
+                job_info_table.c.controller_pid,
+                job_info_table.c.controller_pid_started_at).where(
+                    job_info_table.c.spot_job_id == job_id)).fetchone()
+        if row is None or row[0] is None:
+            return None
+        pid = row[0]
+        if pid < 0:
+            # Between #7051 and #7847, the controller pid was negative to
+            # indicate a controller process that can handle multiple jobs.
+            pid = -pid
+        return ControllerPidRecord(pid=pid, started_at=row[1])
+
+
+@_init_db
+def is_legacy_controller_process(job_id: int) -> bool:
+    """Check if the controller process is a legacy single-job controller process
+
+    After #7051, the controller process pid is negative to indicate a new
+    multi-job controller process.
+    After #7847, the controller process pid is changed back to positive, but
+    controller_pid_started_at will also be set.
+    """
+    # TODO(cooperc): Remove this function for 0.13.0
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.execute(
+            sqlalchemy.select(
+                job_info_table.c.controller_pid,
+                job_info_table.c.controller_pid_started_at).where(
+                    job_info_table.c.spot_job_id == job_id)).fetchone()
+        if row is None:
+            raise ValueError(f'Job {job_id} not found')
+        if row[0] is None:
+            # Job is from before #4485, so controller_pid is not set
+            # This is a legacy single-job controller process (running in ray!)
+            return True
+        started_at = row[1]
+        if started_at is not None:
+            # controller_pid_started_at is only set after #7847, so we know this
+            # must be a non-legacy multi-job controller process.
+            return False
+        pid = row[0]
+        if pid < 0:
+            # Between #7051 and #7847, the controller pid was negative to
+            # indicate a non-legacy multi-job controller process.
+            return False
+        return True
 
 
 def get_status(job_id: int) -> Optional[ManagedJobStatus]:
@@ -1798,7 +1861,8 @@ def get_nonterminal_job_ids_by_pool(pool: str,
 
 
 @_init_db_async
-async def get_waiting_job_async(pid: int) -> Optional[Dict[str, Any]]:
+async def get_waiting_job_async(
+        pid: int, pid_started_at: float) -> Optional[Dict[str, Any]]:
     """Get the next job that should transition to LAUNCHING.
 
     Selects the highest-priority WAITING or ALIVE_WAITING job and atomically
@@ -1816,9 +1880,6 @@ async def get_waiting_job_async(pid: int) -> Optional[Dict[str, Any]]:
         select_query = sqlalchemy.select(
             job_info_table.c.spot_job_id,
             job_info_table.c.schedule_state,
-            job_info_table.c.dag_yaml_path,
-            job_info_table.c.env_file_path,
-            job_info_table.c.controller_pid,
             job_info_table.c.pool,
         ).where(
             job_info_table.c.schedule_state.in_([
@@ -1837,10 +1898,7 @@ async def get_waiting_job_async(pid: int) -> Optional[Dict[str, Any]]:
 
         job_id = waiting_job_row[0]
         current_state = ManagedJobScheduleState(waiting_job_row[1])
-        dag_yaml_path = waiting_job_row[2]
-        env_file_path = waiting_job_row[3]
-        controller_pid = waiting_job_row[4]
-        pool = waiting_job_row[5]
+        pool = waiting_job_row[2]
 
         # Update the job state to LAUNCHING
         update_result = await session.execute(
@@ -1852,6 +1910,7 @@ async def get_waiting_job_async(pid: int) -> Optional[Dict[str, Any]]:
                     job_info_table.c.schedule_state:
                         ManagedJobScheduleState.LAUNCHING.value,
                     job_info_table.c.controller_pid: pid,
+                    job_info_table.c.controller_pid_started_at: pid_started_at,
                 }))
 
         if update_result.rowcount != 1:
@@ -1864,10 +1923,6 @@ async def get_waiting_job_async(pid: int) -> Optional[Dict[str, Any]]:
 
         return {
             'job_id': job_id,
-            'schedule_state': current_state,
-            'dag_yaml_path': dag_yaml_path,
-            'env_file_path': env_file_path,
-            'old_pid': controller_pid,
             'pool': pool,
         }
 
@@ -2362,6 +2417,7 @@ def reset_jobs_for_recovery() -> None:
              ManagedJobScheduleState.DONE.value),
         ).update({
             job_info_table.c.controller_pid: None,
+            job_info_table.c.controller_pid_started_at: None,
             job_info_table.c.schedule_state:
                 (ManagedJobScheduleState.WAITING.value)
         })

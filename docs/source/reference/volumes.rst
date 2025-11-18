@@ -50,6 +50,9 @@ Quickstart
      type: k8s-pvc
      infra: kubernetes  # or k8s or k8s/context
      size: 10Gi
+     # If the PVC already exists, set `use_existing` to true and
+     # set the `name` to the existing PVC name
+     # use_existing: true
      labels:
        key: value
      config:
@@ -269,6 +272,9 @@ Quickstart
      type: runpod-network-volume
      infra: runpod/CA/CA-MTL-1  # DataCenterId (zone)
      size: 100Gi                # GiB
+     # If the RunPod network volume already exists, set `use_existing` to true and
+     # set the `name` to the existing RunPod network volume name
+     # use_existing: true
 
 2. Create the volume with ``sky volumes apply runpod-volume.yaml``:
 

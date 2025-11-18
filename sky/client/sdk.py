@@ -32,6 +32,7 @@ from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import oauth as oauth_lib
 from sky.jobs import scheduler
+from sky.jobs import utils as managed_job_utils
 from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import rest
@@ -381,6 +382,16 @@ def workspaces() -> server_common.RequestId[Dict[str, Any]]:
     return server_common.get_request_id(response)
 
 
+def _raise_exception_object_on_client(e: BaseException) -> None:
+    """Raise the exception object on the client."""
+    if env_options.Options.SHOW_DEBUG_INFO.get():
+        stacktrace = getattr(e, 'stacktrace', str(e))
+        logger.error('=== Traceback on SkyPilot API Server ===\n'
+                     f'{stacktrace}')
+    with ux_utils.print_exception_no_traceback():
+        raise e
+
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
@@ -421,9 +432,8 @@ def validate(
     response = server_common.make_authenticated_request(
         'POST', '/validate', json=json.loads(body.model_dump_json()))
     if response.status_code == 400:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.deserialize_exception(
-                response.json().get('detail'))
+        _raise_exception_object_on_client(
+            exceptions.deserialize_exception(response.json().get('detail')))
 
 
 @usage_lib.entrypoint
@@ -2016,12 +2026,7 @@ def get(request_id: server_common.RequestId[T]) -> T:
     error = request_task.get_error()
     if error is not None:
         error_obj = error['object']
-        if env_options.Options.SHOW_DEBUG_INFO.get():
-            stacktrace = getattr(error_obj, 'stacktrace', str(error_obj))
-            logger.error('=== Traceback on SkyPilot API Server ===\n'
-                         f'{stacktrace}')
-        with ux_utils.print_exception_no_traceback():
-            raise error_obj
+        _raise_exception_object_on_client(error_obj)
     if request_task.status == requests_lib.RequestStatus.CANCELLED:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.RequestCancelled(
@@ -2347,15 +2352,17 @@ def api_stop() -> None:
     with filelock.FileLock(
             os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
         try:
-            with open(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH),
-                      'r',
-                      encoding='utf-8') as f:
-                pids = f.read().split('\n')[:-1]
-                for pid in pids:
-                    if subprocess_utils.is_process_alive(int(pid.strip())):
-                        subprocess_utils.kill_children_processes(
-                            parent_pids=[int(pid.strip())], force=True)
-            os.remove(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH))
+            records = scheduler.get_controller_process_records()
+            if records is not None:
+                for record in records:
+                    try:
+                        if managed_job_utils.controller_process_alive(
+                                record, quiet=False):
+                            subprocess_utils.kill_children_processes(
+                                parent_pids=[record.pid], force=True)
+                    except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                        continue
+                os.remove(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH))
         except FileNotFoundError:
             # its fine we will create it
             pass

@@ -9,6 +9,7 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import sdk
+from sky.jobs import utils as jobs_utils
 from sky.schemas.api import responses
 from sky.serve.client import impl
 from sky.server import common as server_common
@@ -84,6 +85,9 @@ def launch(
         raise click.UsageError('Cannot specify num_jobs without pool.')
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
+    if pool is not None:
+        jobs_utils.validate_pool_job(dag, pool)
+
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag,
             request_name=request_names.AdminPolicyRequestName.JOBS_LAUNCH,
