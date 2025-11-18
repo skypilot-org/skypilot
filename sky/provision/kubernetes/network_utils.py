@@ -66,10 +66,8 @@ def fill_loadbalancer_template(namespace: str, context: Optional[str],
 
     with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
-    cloud_str = 'kubernetes'
-    if context is not None and context.startswith('ssh-'):
-        cloud_str = 'ssh'
-        context = context[len('ssh-'):]
+    context, cloud_str = kubernetes_utils.get_cleaned_context_and_cloud_str(
+        context)
     annotations = skypilot_config.get_effective_region_config(
         cloud=cloud_str,
         region=context,
@@ -105,10 +103,8 @@ def fill_ingress_template(namespace: str, context: Optional[str],
             f'Template "{_INGRESS_TEMPLATE_NAME}" does not exist.')
     with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
-    cloud_str = 'kubernetes'
-    if context is not None and context.startswith('ssh-'):
-        cloud_str = 'ssh'
-        context = context[len('ssh-'):]
+    context, cloud_str = kubernetes_utils.get_cleaned_context_and_cloud_str(
+        context)
     annotations = skypilot_config.get_effective_region_config(
         cloud=cloud_str,
         region=context,

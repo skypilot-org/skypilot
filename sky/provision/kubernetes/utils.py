@@ -2721,11 +2721,7 @@ def combine_metadata_fields(cluster_yaml_obj: Dict[str, Any],
     Obeys the same add or update semantics as combine_pod_config_fields().
     """
     merged_cluster_yaml_obj = copy.deepcopy(cluster_yaml_obj)
-
-    cloud_str = 'kubernetes'
-    if context is not None and context.startswith('ssh-'):
-        cloud_str = 'ssh'
-        context = context[len('ssh-'):]
+    context, cloud_str = get_cleaned_context_and_cloud_str(context)
 
     # Get custom_metadata from global config
     custom_metadata = skypilot_config.get_effective_region_config(
@@ -2794,10 +2790,7 @@ def merge_custom_metadata(
 
     Merge is done in-place, so return is not required
     """
-    cloud_str = 'kubernetes'
-    if context is not None and context.startswith('ssh-'):
-        cloud_str = 'ssh'
-        context = context[len('ssh-'):]
+    context, cloud_str = get_cleaned_context_and_cloud_str(context)
 
     # Get custom_metadata from global config
     custom_metadata = skypilot_config.get_effective_region_config(
@@ -3739,3 +3732,13 @@ def should_exclude_pod_from_gpu_allocation(pod) -> bool:
         return True
 
     return False
+
+
+def get_cleaned_context_and_cloud_str(
+        context: Optional[str]) -> Tuple[Optional[str], str]:
+    """Return the cleaned context and relevant cloud string from a context."""
+    cloud_str = 'kubernetes'
+    if context is not None and context.startswith('ssh-'):
+        cloud_str = 'ssh'
+        context = context[len('ssh-'):]
+    return context, cloud_str
