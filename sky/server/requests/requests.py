@@ -1041,11 +1041,15 @@ async def _add_or_update_request_no_lock_async(request: Request):
                                        request.to_row())
 
 
-def set_request_failed(request_id: str, e: BaseException) -> None:
-    """Set a request to failed and populate the error message."""
+def set_exception_stacktrace(e: BaseException) -> None:
     with ux_utils.enable_traceback():
         stacktrace = traceback.format_exc()
     setattr(e, 'stacktrace', stacktrace)
+
+
+def set_request_failed(request_id: str, e: BaseException) -> None:
+    """Set a request to failed and populate the error message."""
+    set_exception_stacktrace(e)
     with update_request(request_id) as request_task:
         assert request_task is not None, request_id
         request_task.status = RequestStatus.FAILED
@@ -1058,9 +1062,7 @@ def set_request_failed(request_id: str, e: BaseException) -> None:
 @asyncio_utils.shield
 async def set_request_failed_async(request_id: str, e: BaseException) -> None:
     """Set a request to failed and populate the error message."""
-    with ux_utils.enable_traceback():
-        stacktrace = traceback.format_exc()
-    setattr(e, 'stacktrace', stacktrace)
+    set_exception_stacktrace(e)
     async with filelock.AsyncFileLock(request_lock_path(request_id)):
         request_task = await _get_request_no_lock_async(request_id)
         assert request_task is not None, request_id
