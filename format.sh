@@ -50,12 +50,14 @@ YAPF_EXCLUDES=(
     '--exclude' 'build/**'
     '--exclude' 'sky/skylet/providers/ibm/**'
     '--exclude' 'sky/schemas/generated/**'
+    '--exclude' 'tests/unit_tests/test_sky/backends/testdata/**'
 )
 
 ISORT_YAPF_EXCLUDES=(
     '--sg' 'build/**'
     '--sg' 'sky/skylet/providers/ibm/**'
     '--sg' 'sky/schemas/generated/**'
+    '--sg' 'tests/unit_tests/test_sky/backends/testdata/**'
 )
 
 BLACK_INCLUDES=(
