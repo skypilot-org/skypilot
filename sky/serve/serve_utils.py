@@ -1183,10 +1183,10 @@ def _process_line(
 
     def _stream_provision_path(p: pathlib.Path) -> Iterator[str]:
         # Check if this provision log has already been expanded
+        # to avoid duplicate expansion
         if expanded_provision_logs is not None:
             resolved_path = str(p.resolve())
             if resolved_path in expanded_provision_logs:
-                # Already expanded, skip to avoid duplicate expansion
                 return
             expanded_provision_logs.add(resolved_path)
 
@@ -1261,7 +1261,6 @@ def _follow_logs_with_provision_expanding(
     Yields:
         Log lines, including expanded content from referenced provision logs.
     """
-    # Track which provision logs have already been expanded to avoid duplicates
     expanded_provision_logs: set = set()
 
     def process_line(line: str) -> Iterator[str]:
@@ -1295,7 +1294,6 @@ def _capped_follow_logs_with_provision_expanding(
         Log lines, including expanded content from referenced provision logs.
     """
     all_lines: Deque[str] = collections.deque(maxlen=line_cap)
-    # Track which provision logs have already been expanded to avoid duplicates
     expanded_provision_logs: set = set()
 
     for line in log_list:
