@@ -674,7 +674,7 @@ def update(
         f'{ux_utils.RESET_BOLD}to check the latest status.')
 
     if pool:
-        logs_cmd = f'sky jobs pool logs {service_name} <worker_id>'
+        logs_cmd = f'`sky jobs pool logs {service_name} <worker_id>`'
         logger.info(
             ux_utils.finishing_message(
                 f'Successfully updated {noun} {service_name!r} '
