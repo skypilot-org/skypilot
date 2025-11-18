@@ -66,13 +66,15 @@ def fill_loadbalancer_template(namespace: str, context: Optional[str],
 
     with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
+    context, cloud_str = kubernetes_utils.get_cleaned_context_and_cloud_str(
+        context)
     annotations = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
+        cloud=cloud_str,
         region=context,
         keys=('custom_metadata', 'annotations'),
         default_value={})
     labels = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
+        cloud=cloud_str,
         region=context,
         keys=('custom_metadata', 'labels'),
         default_value={})
@@ -101,13 +103,15 @@ def fill_ingress_template(namespace: str, context: Optional[str],
             f'Template "{_INGRESS_TEMPLATE_NAME}" does not exist.')
     with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
+    context, cloud_str = kubernetes_utils.get_cleaned_context_and_cloud_str(
+        context)
     annotations = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
+        cloud=cloud_str,
         region=context,
         keys=('custom_metadata', 'annotations'),
         default_value={})
     labels = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
+        cloud=cloud_str,
         region=context,
         keys=('custom_metadata', 'labels'),
         default_value={})

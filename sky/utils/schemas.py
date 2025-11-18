@@ -1080,6 +1080,20 @@ _CONTEXT_CONFIG_SCHEMA_MINIMAL = {
     'provision_timeout': {
         'type': 'integer',
     },
+    'custom_metadata': {
+        'type': 'object',
+        'required': [],
+        # Allow arbitrary keys since validating metadata is hard
+        'additionalProperties': True,
+        # Disallow 'name' and 'namespace' keys in this dict
+        'not': {
+            'anyOf': [{
+                'required': ['name']
+            }, {
+                'required': ['namespace']
+            }]
+        },
+    },
 }
 
 _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
@@ -1097,20 +1111,6 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         ],
     },
     **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
-    'custom_metadata': {
-        'type': 'object',
-        'required': [],
-        # Allow arbitrary keys since validating metadata is hard
-        'additionalProperties': True,
-        # Disallow 'name' and 'namespace' keys in this dict
-        'not': {
-            'anyOf': [{
-                'required': ['name']
-            }, {
-                'required': ['namespace']
-            }]
-        },
-    },
     'autoscaler': {
         'type': 'string',
         'case_insensitive_enum': [
@@ -1158,6 +1158,12 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
     },
     'remote_identity': {
         'type': 'string',
+    },
+    'post_provision_runcmd': {
+        'type': 'array',
+        'items': {
+            'type': 'string'
+        },
     }
 }
 

@@ -28,6 +28,7 @@ This is informed by the following boto3 docs:
 
 # pylint: disable=import-outside-toplevel
 
+import functools
 import logging
 import threading
 import time
@@ -69,16 +70,51 @@ _MAX_ATTEMPT_FOR_CREATION = 5
 
 
 class _ThreadLocalLRUCache(threading.local):
+    """Thread-local storage for _thread_local_lru_cache decorator."""
 
-    def __init__(self, maxsize=32):
+    def __init__(self, func, maxsize=32):
         super().__init__()
-        self.cache = annotations.lru_cache(scope='request', maxsize=maxsize)
+        self.func = func
+        self.maxsize = maxsize
+
+    def get_cache(self):
+        if not hasattr(self, 'cache'):
+            self.cache = annotations.lru_cache(scope='request',
+                                               maxsize=self.maxsize)(self.func)
+        return self.cache
 
 
 def _thread_local_lru_cache(maxsize=32):
-    # Create thread-local storage for the LRU cache
-    local_cache = _ThreadLocalLRUCache(maxsize)
-    return local_cache.cache
+
+    def decorator(func):
+        # Create thread-local storage for the LRU cache
+        local_cache = _ThreadLocalLRUCache(func, maxsize)
+
+        # We can't apply the lru_cache here, because this runs at import time
+        # so we will always have the main thread's cache.
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            # We are within the actual function call, which may be on a thread,
+            # so local_cache.cache will return the correct thread-local cache,
+            # which we can now apply and immediately call.
+            return local_cache.get_cache()(*args, **kwargs)
+
+        def cache_info():
+            # Note that this will only give the cache info for the current
+            # thread's cache.
+            return local_cache.get_cache().cache_info()
+
+        def cache_clear():
+            # Note that this will only clear the cache for the current thread.
+            local_cache.get_cache().cache_clear()
+
+        wrapper.cache_info = cache_info
+        wrapper.cache_clear = cache_clear
+
+        return wrapper
+
+    return decorator
 
 
 def _assert_kwargs_builtin_type(kwargs):
