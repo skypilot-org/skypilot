@@ -2721,9 +2721,11 @@ def combine_metadata_fields(cluster_yaml_obj: Dict[str, Any],
     Obeys the same add or update semantics as combine_pod_config_fields().
     """
     merged_cluster_yaml_obj = copy.deepcopy(cluster_yaml_obj)
+    context, cloud_str = get_cleaned_context_and_cloud_str(context)
+
     # Get custom_metadata from global config
     custom_metadata = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
+        cloud=cloud_str,
         region=context,
         keys=('custom_metadata',),
         default_value={})
@@ -2731,7 +2733,7 @@ def combine_metadata_fields(cluster_yaml_obj: Dict[str, Any],
     # Get custom_metadata from task-level config overrides
     override_custom_metadata = config_utils.get_cloud_config_value_from_dict(
         dict_config=cluster_config_overrides,
-        cloud='kubernetes',
+        cloud=cloud_str,
         region=context,
         keys=('custom_metadata',),
         default_value={})
@@ -2788,9 +2790,11 @@ def merge_custom_metadata(
 
     Merge is done in-place, so return is not required
     """
+    context, cloud_str = get_cleaned_context_and_cloud_str(context)
+
     # Get custom_metadata from global config
     custom_metadata = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
+        cloud=cloud_str,
         region=context,
         keys=('custom_metadata',),
         default_value={})
@@ -2799,7 +2803,7 @@ def merge_custom_metadata(
     if cluster_config_overrides is not None:
         override_custom_metadata = config_utils.get_cloud_config_value_from_dict(
             dict_config=cluster_config_overrides,
-            cloud='kubernetes',
+            cloud=cloud_str,
             region=context,
             keys=('custom_metadata',),
             default_value={})
@@ -3728,3 +3732,13 @@ def should_exclude_pod_from_gpu_allocation(pod) -> bool:
         return True
 
     return False
+
+
+def get_cleaned_context_and_cloud_str(
+        context: Optional[str]) -> Tuple[Optional[str], str]:
+    """Return the cleaned context and relevant cloud string from a context."""
+    cloud_str = 'kubernetes'
+    if context is not None and context.startswith('ssh-'):
+        cloud_str = 'ssh'
+        context = context[len('ssh-'):]
+    return context, cloud_str
