@@ -101,9 +101,12 @@ def _thread_local_lru_cache(maxsize=32):
             return local_cache.get_cache()(*args, **kwargs)
 
         def cache_info():
+            # Note that this will only give the cache info for the current
+            # thread's cache.
             return local_cache.get_cache().cache_info()
 
         def cache_clear():
+            # Note that this will only clear the cache for the current thread.
             local_cache.get_cache().cache_clear()
 
         wrapper.cache_info = cache_info
