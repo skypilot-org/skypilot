@@ -2179,15 +2179,14 @@ if __name__ == '__main__':
     logger.info(f'Max db connections: {max_db_connections}')
 
     # Reserve memory for jobs and serve/pool controller in consolidation mode.
-    reserved_memory_mb = None
-    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
-        reserved_memory_mb = float(
-            controller_utils.MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB)
-        # For jobs controller, we need to reserve for both jobs and
-        # pool controller.
-        if not os.environ.get(constants.IS_SKYPILOT_SERVE_CONTROLLER):
-            reserved_memory_mb *= (1. +
-                                   controller_utils.POOL_JOBS_RESOURCES_RATIO)
+    reserved_memory_mb = (
+        controller_utils.compute_memory_reserved_for_controllers(
+            reserve_for_controllers=os.environ.get(
+                constants.OVERRIDE_CONSOLIDATION_MODE) is not None,
+            # For jobs controller, we need to reserve for both jobs and
+            # pool controller.
+            reserve_extra_for_pool=not os.environ.get(
+                constants.IS_SKYPILOT_SERVE_CONTROLLER)))
 
     config = server_config.compute_server_config(
         cmd_args.deploy,

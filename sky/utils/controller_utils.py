@@ -1272,10 +1272,19 @@ MAX_CONTROLLERS = 512 // LAUNCHES_PER_WORKER
 MAX_TOTAL_RUNNING_JOBS = 2000
 
 
+def compute_memory_reserved_for_controllers(
+        reserve_for_controllers: bool, reserve_extra_for_pool: bool) -> float:
+    reserved_memory_mb = 0.0
+    if reserve_for_controllers:
+        reserved_memory_mb = float(MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB)
+        if reserve_extra_for_pool:
+            reserved_memory_mb *= (1. + POOL_JOBS_RESOURCES_RATIO)
+    return reserved_memory_mb
+
+
 def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
-    controller_reserved = float(MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB)
-    if pool:
-        controller_reserved *= (1. + POOL_JOBS_RESOURCES_RATIO)
+    controller_reserved = compute_memory_reserved_for_controllers(
+        reserve_for_controllers=True, reserve_extra_for_pool=pool)
     total_memory_mb = (common_utils.get_mem_size_gb() * 1024 -
                        controller_reserved)
     if not consolidation_mode:
