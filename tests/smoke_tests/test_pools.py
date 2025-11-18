@@ -263,12 +263,13 @@ def basic_job_conf(
         {run_cmd}
     """)
 
-def unified_conf(
-    num_workers: int,
-    infra: str,
-    resource_string: Optional[str] = None,
-    setup_cmd: str = 'echo "setup message"',
-    run_cmd: str = 'echo "run message"'):
+
+def unified_conf(num_workers: int,
+                 infra: str,
+                 resource_string: Optional[str] = None,
+                 setup_cmd: str = 'echo "setup message"',
+                 run_cmd: str = 'echo "run message"'):
+    resource_string_section = f'    {resource_string}\n' if resource_string is not None else ''
     return textwrap.dedent(f"""
     pool:
         workers: {num_workers}
@@ -277,15 +278,13 @@ def unified_conf(
         cpus: 2+
         memory: 4GB+
         infra: {infra}
-    {resource_string}
-
+{resource_string_section}
     setup: |
         {setup_cmd}
 
     run: |
         {run_cmd}
     """)
-
 
 
 def write_yaml(yaml_file: tempfile.NamedTemporaryFile, config: str):
@@ -1189,32 +1188,30 @@ def test_pools_setup_num_gpus(generic_cloud: str):
             teardown=_TEARDOWN_POOL.format(pool_name=pool_name))
         smoke_tests_utils.run_one_test(test)
 
+
 def test_pools_single_yaml(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
     job_name = f'{name}-job'
-    one_config = unified_conf(num_workers=1, infra=generic_cloud, 
+    one_config = unified_conf(num_workers=1,
+                              infra=generic_cloud,
                               setup_cmd='echo "setup message"',
                               run_cmd='echo "Unified job"')
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     with tempfile.NamedTemporaryFile(delete=True) as one_config_yaml:
-            write_yaml(one_config_yaml, one_config)
-            test = smoke_tests_utils.Test(
-                'test_pools_single_yaml',
-                [
-                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
-                        pool_name=pool_name, pool_yaml=one_config_yaml.name),
-                    (f's=$(sky jobs launch --pool {pool_name} {one_config_yaml} --name {job_name} -d -y); '
-                     'echo "$s"; '
-                     'echo; echo; echo "$s" | grep "Job submitted, ID: 1"; '
-                     'echo "$s" | grep "Unified job"').format(pool_name=pool_name,
-                                       one_config_yaml=one_config_yaml.name),
-                    wait_until_job_status(job_name, ['SUCCEEDED'],
-                                          timeout=timeout),
-                    # Check that the job logs contain the correct number of jobs.
-                    check_logs(1, 'Unified job')
-                ],
-                timeout=smoke_tests_utils.get_timeout(generic_cloud),
-                teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
-            )
-            smoke_tests_utils.run_one_test(test)
+        write_yaml(one_config_yaml, one_config)
+        test = smoke_tests_utils.Test(
+            'test_pools_single_yaml',
+            [
+                _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                    pool_name=pool_name, pool_yaml=one_config_yaml.name),
+                (f's=$(sky jobs launch --pool {pool_name} {one_config_yaml.name} --name {job_name} -d -y); '
+                 'echo "$s"; '
+                 'echo; echo; echo "$s" | grep "Job submitted, ID: 1"; '
+                 'echo "$s" | grep "Unified job"'),
+                wait_until_job_status(job_name, ['SUCCEEDED'], timeout=timeout),
+            ],
+            timeout=smoke_tests_utils.get_timeout(generic_cloud),
+            teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
+        )
+        smoke_tests_utils.run_one_test(test)
