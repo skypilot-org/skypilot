@@ -164,7 +164,7 @@ def get_workspace_profile() -> Optional[str]:
     return skypilot_config.get_workspace_cloud('aws').get('profile', None)
 
 
-# The LRU cache needs to be thread-local to avoid multiple threads sharing the
+# The TTL cache needs to be thread-local to avoid multiple threads sharing the
 # same session object, which is not guaranteed to be thread-safe.
 @_thread_local_ttl_cache()
 def session(check_credentials: bool = True, profile: Optional[str] = None):
