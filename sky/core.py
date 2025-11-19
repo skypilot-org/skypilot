@@ -1358,7 +1358,7 @@ def realtime_slurm_gpu_availability(
             # Tuple[Dict[str, List[InstanceTypeInfo]], Dict[str, int],
             # Dict[str, int]]
             # (qtys_map, total_capacity, total_available)
-            qtys_map, total_capacity, total_available = (
+            accelerator_counts, total_capacity, total_available = (
                 catalog.list_accelerator_realtime(
                     gpus_only=True,  # Ensure we only query for GPUs
                     name_filter=name_filter,
@@ -1383,59 +1383,17 @@ def realtime_slurm_gpu_availability(
             raise ValueError(
                 f'Error querying Slurm GPU availability: {e}') from e
 
-        if not qtys_map:  # Check if the primary result dict is empty
-            # This condition should technically be caught by the ValueError inside
-            # list_accelerators_realtime, but double-checking here.
-            err_msg = 'No GPUs found in the Slurm cluster.'
-            if name_filter is not None or quantity_filter is not None:
-                filters = []
-                if name_filter:
-                    filters.append(f'name={name_filter!r}')
-                if quantity_filter:
-                    filters.append(f'quantity>={quantity_filter}')
-                err_msg = (
-                    f'Resource matching filters ({", ".join(filters)}) not '
-                    'found in the Slurm cluster.')
-            raise ValueError(err_msg)
-
-        # --- Process the aggregated data ---
-        # Group the InstanceTypeInfo objects by partition (region) first
-        partition_data: Dict[str, Dict[
-            str,
-            List['catalog.common.InstanceTypeInfo']]] = collections.defaultdict(
-                lambda: collections.defaultdict(list))
-
-        for gpu_type, instances in qtys_map.items():
-            for instance in instances:
-                partition = instance.region
-                if partition is None:  # Should not happen if populated correctly
-                    partition = 'unknown_partition'
-
-                partition_data[partition][gpu_type].append(instance)
-
         # --- Format the output ---
         realtime_gpu_availability_list: List[
             models.RealtimeGpuAvailability] = []
-        for partition, gpu_type_map in sorted(partition_data.items()):
-            # if partition != slurm_utils.DEFAULT_PARTITION:
-            #     logger.warning(
-            #         f'Skipping partition {partition} because it is not the default partition.'
-            #     )
-            #     continue
-            for gpu_type, instances in sorted(gpu_type_map.items()):
-                counts = sorted(
-                    list(set(inst.accelerator_count for inst in instances)))
-                # Use global capacity/available as a temporary measure
-                capacity = total_capacity.get(gpu_type, 0)
-                available = total_available.get(gpu_type, 0)
-
-                realtime_gpu_availability_list.append(
-                    models.RealtimeGpuAvailability(
-                        gpu_type,
-                        counts,
-                        capacity,
-                        available,
-                    ))
+        for gpu_type, _ in sorted(accelerator_counts.items()):
+            realtime_gpu_availability_list.append(
+                models.RealtimeGpuAvailability(
+                    gpu_type,
+                    accelerator_counts.pop(gpu_type),
+                    total_capacity[gpu_type],
+                    total_available[gpu_type],
+                ))
         return realtime_gpu_availability_list
 
     parallel_queried = subprocess_utils.run_in_parallel(

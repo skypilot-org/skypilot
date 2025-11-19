@@ -148,7 +148,6 @@ def list_accelerator_realtime(
                             case_sensitive=case_sensitive,
                             all_regions=False,
                             require_price=False))
-
     accelerator_counts: Dict[str, List[int]] = collections.defaultdict(list)
     for gpu, items in qtys_map.items():
         for item in items:
