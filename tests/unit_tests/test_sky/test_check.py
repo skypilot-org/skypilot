@@ -414,61 +414,61 @@ def test_enabled_capabilities_detection():
                     return_value=config_utils.Config()):
         # test all capabilities enabled
         with (mock.patch('sky.clouds.aws.AWS._check_compute_credentials',
-                         return_value=(True, None)),
-              mock.patch('sky.clouds.aws.AWS._check_storage_credentials',
                          return_value=(True, None))):
-            capabilities_result = sky_check.check_capabilities(
-                quiet=False,
-                verbose=True,
-                clouds=('aws',),
-                capabilities=sky_cloud.ALL_CAPABILITIES,
-                workspace=None,
-            )
-            assert capabilities_result['default'][
-                'AWS'] == sky_cloud.ALL_CAPABILITIES
+            with (mock.patch('sky.clouds.aws.AWS._check_storage_credentials',
+                             return_value=(True, None))):
+                capabilities_result = sky_check.check_capabilities(
+                    quiet=False,
+                    verbose=False,
+                    clouds=('aws',),
+                    capabilities=sky_cloud.ALL_CAPABILITIES,
+                    workspace=None,
+                )
+                assert capabilities_result['default'][
+                    'AWS'] == sky_cloud.ALL_CAPABILITIES
 
         # test compute capability enabled, storage capability disabled
         with (mock.patch('sky.clouds.aws.AWS._check_compute_credentials',
-                         return_value=(True, None)),
-              mock.patch('sky.clouds.aws.AWS._check_storage_credentials',
-                         return_value=(False, None))):
-            capabilities_result = sky_check.check_capabilities(
-                quiet=False,
-                verbose=True,
-                clouds=('aws',),
-                capabilities=sky_cloud.ALL_CAPABILITIES,
-                workspace=None,
-            )
-            assert capabilities_result['default']['AWS'] == [
-                CloudCapability.COMPUTE
-            ]
+                         return_value=(True, None))):
+            with (mock.patch('sky.clouds.aws.AWS._check_storage_credentials',
+                             return_value=(False, None))):
+                capabilities_result = sky_check.check_capabilities(
+                    quiet=False,
+                    verbose=False,
+                    clouds=('aws',),
+                    capabilities=sky_cloud.ALL_CAPABILITIES,
+                    workspace=None,
+                )
+                assert capabilities_result['default']['AWS'] == [
+                    CloudCapability.COMPUTE
+                ]
 
         # test compute capability disabled, storage capability enabled
         with (mock.patch('sky.clouds.aws.AWS._check_compute_credentials',
-                         return_value=(False, None)),
-              mock.patch('sky.clouds.aws.AWS._check_storage_credentials',
-                         return_value=(True, None))):
-            capabilities_result = sky_check.check_capabilities(
-                quiet=False,
-                verbose=True,
-                clouds=('aws',),
-                capabilities=sky_cloud.ALL_CAPABILITIES,
-                workspace=None,
-            )
-            assert capabilities_result['default']['AWS'] == [
-                CloudCapability.STORAGE
-            ]
+                         return_value=(False, None))):
+            with (mock.patch('sky.clouds.aws.AWS._check_storage_credentials',
+                             return_value=(True, None))):
+                capabilities_result = sky_check.check_capabilities(
+                    quiet=False,
+                    verbose=False,
+                    clouds=('aws',),
+                    capabilities=sky_cloud.ALL_CAPABILITIES,
+                    workspace=None,
+                )
+                assert capabilities_result['default']['AWS'] == [
+                    CloudCapability.STORAGE
+                ]
 
         # test both capabilities disabled
         with (mock.patch('sky.clouds.aws.AWS._check_compute_credentials',
-                         return_value=(False, None)),
-              mock.patch('sky.clouds.aws.AWS._check_storage_credentials',
                          return_value=(False, None))):
-            capabilities_result = sky_check.check_capabilities(
-                quiet=False,
-                verbose=True,
-                clouds=('aws',),
-                capabilities=sky_cloud.ALL_CAPABILITIES,
-                workspace=None,
-            )
-            assert 'AWS' not in capabilities_result['default']
+            with (mock.patch('sky.clouds.aws.AWS._check_storage_credentials',
+                             return_value=(False, None))):
+                capabilities_result = sky_check.check_capabilities(
+                    quiet=False,
+                    verbose=False,
+                    clouds=('aws',),
+                    capabilities=sky_cloud.ALL_CAPABILITIES,
+                    workspace=None,
+                )
+                assert 'AWS' not in capabilities_result['default']
