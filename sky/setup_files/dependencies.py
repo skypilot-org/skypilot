@@ -84,6 +84,7 @@ install_requires = [
     'bcrypt==4.0.1',
     'pyjwt',
     'gitpython',
+    'paramiko',
     'types-paramiko',
     'alembic',
     'aiohttp',

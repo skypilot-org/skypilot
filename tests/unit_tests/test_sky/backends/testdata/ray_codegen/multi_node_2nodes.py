@@ -2,6 +2,8 @@ import functools
 import getpass
 import hashlib
 import io
+import copy
+import multiprocessing
 import os
 import pathlib
 import selectors

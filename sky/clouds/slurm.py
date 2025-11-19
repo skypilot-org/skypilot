@@ -9,13 +9,13 @@ from paramiko.config import SSHConfig
 from sky import catalog
 from sky import clouds
 from sky import sky_logging
+from sky.adaptors import slurm
 from sky.provision.slurm import utils as slurm_utils
-from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
-from sky.utils import volume as volume_lib
 from sky.utils import subprocess_utils
+from sky.utils import volume as volume_lib
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -52,8 +52,11 @@ class Slurm(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_utils.Resources'
+        cls,
+        resources: 'resources_utils.Resources',
+        region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        del region  # unused
         # logger.critical('[BYPASS] Check Slurm's unsupported features...')
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
@@ -66,8 +69,7 @@ class Slurm(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
-        inst = slurm_utils.SlurmInstanceType.from_instance_type(
-            instance_type)
+        inst = slurm_utils.SlurmInstanceType.from_instance_type(instance_type)
         return inst.cpus, inst.memory
 
     @classmethod
@@ -101,11 +103,16 @@ class Slurm(clouds.Cloud):
         return existing_clusters
 
     @classmethod
-    def regions_with_offering(cls, instance_type: Optional[str],
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[clouds.Region]:
-        del accelerators, zone, use_spot  # unused
+    def regions_with_offering(
+        cls,
+        instance_type: Optional[str],
+        accelerators: Optional[Dict[str, int]],
+        use_spot: bool,
+        region: Optional[str],
+        zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None
+    ) -> List[clouds.Region]:
+        del accelerators, zone, use_spot, resources  # unused
         existing_clusters = cls.existing_allowed_clusters()
 
         regions = []
@@ -184,11 +191,8 @@ class Slurm(clouds.Cloud):
 
     @classmethod
     def get_accelerators_from_instance_type(
-            cls, 
-            instance_type: str
-    ) -> Optional[Dict[str, Union[int, float]]]:
-        inst = slurm_utils.SlurmInstanceType.from_instance_type(
-            instance_type)
+            cls, instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
+        inst = slurm_utils.SlurmInstanceType.from_instance_type(instance_type)
         return {
             inst.accelerator_type: inst.accelerator_count
         } if (inst.accelerator_count is not None and
@@ -241,7 +245,8 @@ class Slurm(clouds.Cloud):
             'memory': str(mem),
             'accelerator_count': str(acc_count),
             'accelerator_type': acc_type,
-            'partition': slurm_utils.DEFAULT_PARTITION,
+            'slurm_cluster': cluster,
+            'slurm_partition': slurm_utils.DEFAULT_PARTITION,
             # TODO(jwj): Pass SSH config in a smarter way
             'ssh_hostname': ssh_config_dict['hostname'],
             'ssh_port': ssh_config_dict.get('port', 22),
@@ -331,17 +336,14 @@ class Slurm(clouds.Cloud):
             ssh_config_dict = ssh_config.lookup(cluster)
 
             try:
-                runner = command_runner.SlurmCommandRunner(
-                    (ssh_config_dict['hostname'], ssh_config_dict.get('port', 22)),
-                    ssh_user=ssh_config_dict['user'],
-                    ssh_private_key=ssh_config_dict['identityfile'][0],
-                    cluster_name=cluster,
-                    partition=slurm_utils.DEFAULT_PARTITION,
-                    disable_control_master=True,
+                client = slurm.SlurmClient(
+                    ssh_config_dict['hostname'],
+                    ssh_config_dict.get('port', 22),
+                    ssh_config_dict['user'],
+                    ssh_config_dict['identityfile'][0],
                     ssh_proxy_command=ssh_config_dict.get('proxycommand', None))
-                returncode, stdout, stderr = runner.run('sinfo',
-                                                        require_outputs=True)
-                subprocess_utils.handle_returncode(returncode, 'sinfo', stdout, stderr)
+                info = client.info()
+                logger.debug(f'Slurm cluster {cluster} sinfo: {info}')
                 return (True, '')
             except Exception as e:  # pylint: disable=broad-except
                 return (False, f'Credential check failed for {cluster}: '

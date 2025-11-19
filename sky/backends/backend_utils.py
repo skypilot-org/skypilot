@@ -2359,7 +2359,12 @@ def _update_cluster_status(
     # remain healthy for a while before the cloud completely preempts the VMs.
     # We have mitigated this by again first querying the VM state from the cloud
     # provider.
-    if all_nodes_up and run_ray_status_to_check_ray_cluster_healthy():
+    cloud = handle.launched_resources.cloud
+
+    # For Slurm, skip Ray health check since it doesn't use Ray.
+    should_check_ray = not isinstance(cloud, clouds.Slurm)
+    if all_nodes_up and (not should_check_ray or
+                         run_ray_status_to_check_ray_cluster_healthy()):
         # NOTE: all_nodes_up calculation is fast due to calling cloud CLI;
         # run_ray_status_to_check_all_nodes_up() is slow due to calling `ray get
         # head-ip/worker-ips`.

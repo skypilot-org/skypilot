@@ -6,15 +6,15 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from paramiko.config import SSHConfig
 
-from sky.utils import command_runner
+from sky.adaptors import slurm
+from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import timeline
-
 
 # TODO(jwj): Choose commonly used default values.
 DEFAULT_SLURM_PATH = '~/.slurm/config'
 DEFAULT_CLUSTER_NAME = "localcluster"
-DEFAULT_PARTITION = "debug"
+DEFAULT_PARTITION = "dev"
 
 # For all job states, please refer to
 # https://slurm.schedmd.com/squeue.html#SECTION_JOB-STATE-CODES.
@@ -25,6 +25,7 @@ JOB_STATES = {
     "pending",
     "running",
 }
+
 
 class SlurmInstanceType:
     """Class to represent the "Instance Type" in a Slurm cluster.
@@ -161,12 +162,20 @@ class SlurmInstanceType:
                 f'accelerator_type={self.accelerator_type!r})')
 
 
+def instance_id(job_id: str, node: str) -> str:
+    """Generates the SkyPilot-defined instance ID for Slurm.
+
+    A (job id, node) pair is unique within a Slurm cluster.
+    """
+    return f'job{job_id}-{node}'
+
+
 def get_cluster_name_from_config(provider_config: Dict[str, Any]) -> str:
     """Return the cluster name from the provider config.
 
     The concept of cluster can be mapped to a cloud region.
     """
-    return provider_config.get('cluster_name', DEFAULT_CLUSTER_NAME)
+    return provider_config.get('cluster', DEFAULT_CLUSTER_NAME)
 
 
 def get_partition_from_config(provider_config: Dict[str, Any]) -> str:
@@ -177,42 +186,9 @@ def get_partition_from_config(provider_config: Dict[str, Any]) -> str:
     return provider_config.get('partition', DEFAULT_PARTITION)
 
 
-@timeline.event
-def filter_jobs(ssh_config_dict: Dict[str, Any],
-                partition: str,
-                state_filters: Optional[List[str]] = None,
-                cluster_name: Optional[str] = None) -> List[str]:
-    """Filter Slurm jobs by job states."""
-    if state_filters is not None:
-        for state in state_filters:
-            if state not in JOB_STATES:
-                raise ValueError(f'{state} is not a valid Slurm job state.')
-    else:
-        state_filters = list(JOB_STATES)
-    job_state_str = ','.join(state_filters)
-
-    runner = command_runner.SlurmCommandRunner(
-        (ssh_config_dict['hostname'], ssh_config_dict['port']),
-        ssh_config_dict['user'],
-        ssh_config_dict['private_key'],
-        cluster_name,
-        partition,
-        disable_control_master=True,
-        ssh_proxy_command=ssh_config_dict.get('proxycommand', None))
-
-    # TODO(jwj): Keep or remove ssh_user?
-    rc, stdout, stderr = runner.run(
-        f'squeue -u {ssh_config_dict["user"]} -t {job_state_str} -h -o "%i"',
-        require_outputs=True)
-
-    job_ids = stdout.splitlines()
-
-    return job_ids
-
-
 def get_all_slurm_cluster_names() -> List[str]:
     """Get all Slurm cluster names available in the environment.
-    
+
     Returns:
         List[str]: The list of Slurm cluster names if available,
             an empty list otherwise.
@@ -220,7 +196,9 @@ def get_all_slurm_cluster_names() -> List[str]:
     try:
         ssh_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
     except Exception as e:
-        raise ValueError(f'Failed to load SSH configuration from {DEFAULT_SLURM_PATH}: {common_utils.format_exception(e)}')
+        raise ValueError(
+            f'Failed to load SSH configuration from {DEFAULT_SLURM_PATH}: {common_utils.format_exception(e)}'
+        )
 
     cluster_names = []
     for cluster in ssh_config.get_hostnames():
@@ -231,6 +209,7 @@ def get_all_slurm_cluster_names() -> List[str]:
 
     return cluster_names
 
+
 def check_instance_fits(cluster: str,
                         instance_type: str) -> Tuple[bool, Optional[str]]:
     """Check if the given instance type fits in the given cluster."""
@@ -238,24 +217,22 @@ def check_instance_fits(cluster: str,
     ssh_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
     ssh_config_dict = ssh_config.lookup(cluster)
 
-    runner = command_runner.SlurmCommandRunner(
-        (ssh_config_dict['hostname'], ssh_config_dict.get('port', 22)),
+    client = slurm.SlurmClient(
+        ssh_config_dict['hostname'],
+        ssh_config_dict.get('port', 22),
         ssh_config_dict['user'],
         ssh_config_dict['identityfile'][0],
-        cluster,
-        partition=DEFAULT_PARTITION,
-        disable_control_master=True,
-        ssh_proxy_command=ssh_config_dict.get('proxycommand', None))
-    returncode, stdout, stderr = runner.run('sinfo -N -h -o "%N %t %G"',
-                                            require_outputs=True)
-    nodes = stdout.splitlines()
+        ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+    )
+
+    nodes = client.info_nodes()
 
     s = SlurmInstanceType.from_instance_type(instance_type)
     acc_count = s.accelerator_count if s.accelerator_count else 0
     acc_type = s.accelerator_type if s.accelerator_type else None
     if acc_type is not None:
         assert acc_count is not None, (acc_type, acc_count)
-        
+
         gres_to_match = f'{acc_type}:{acc_count}'.lower()
         gpu_nodes = []
         for node in nodes:
@@ -266,23 +243,20 @@ def check_instance_fits(cluster: str,
 
             # TODO(jwj): Handle status check.
 
-
             if gres_str == gres_to_match:
                 gpu_nodes.append(node)
         if len(gpu_nodes) == 0:
             return False, f'No GPU nodes found with {acc_type}:{acc_count} on the cluster.'
 
         candidate_nodes = gpu_nodes
-        not_fit_reason_prefix = (
-            f'GPU nodes with {acc_type} do not have '
-            f'enough CPU (> {s.cpus} CPUs) and/or '
-            f'memory (> {s.memory} G). ')
+        not_fit_reason_prefix = (f'GPU nodes with {acc_type} do not have '
+                                 f'enough CPU (> {s.cpus} CPUs) and/or '
+                                 f'memory (> {s.memory} G). ')
     else:
         candidate_nodes = nodes
-        not_fit_reason_prefix = (
-            f'No nodes found with enough '
-            f'CPU (> {s.cpus} CPUs) and/or '
-            f'memory (> {s.memory} G). ')
+        not_fit_reason_prefix = (f'No nodes found with enough '
+                                 f'CPU (> {s.cpus} CPUs) and/or '
+                                 f'memory (> {s.memory} G). ')
 
     # TODO(jwj): Enable CPU and memory check.
     # fits, reason = check_cpu_mem_fits(s, candidate_nodes)

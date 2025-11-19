@@ -15,16 +15,6 @@ import textwrap
 import time
 from typing import Dict, List, Optional, Tuple, Union
 
-# Set the environment variables to avoid deduplicating logs and
-# scheduler events. This should be set in driver code, since we are
-# not using `ray job submit` anymore, and the environment variables
-# from the ray cluster is not inherited.
-os.environ['RAY_DEDUP_LOGS'] = '0'
-os.environ['RAY_SCHEDULER_EVENTS'] = '0'
-
-import ray
-import ray.util as ray_util
-
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -34,70 +24,6 @@ from sky.utils import subprocess_utils
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
 
 CANCELLED_RETURN_CODE = 137
-
-kwargs = dict()
-# Only set the `_temp_dir` to SkyPilot's ray cluster directory when
-# the directory exists for backward compatibility for the VM
-# launched before #1790.
-if os.path.exists('/tmp/ray_skypilot'):
-    kwargs['_temp_dir'] = '/tmp/ray_skypilot'
-ray.init(
-    address='auto',
-    namespace='__sky__2__',
-    log_to_driver=True,
-    **kwargs
-)
-def get_or_fail(futures, pg) -> List[int]:
-    """Wait for tasks, if any fails, cancel all unready."""
-    if not futures:
-        return [], []
-    returncodes = [1] * len(futures)
-    pids = [None] * len(futures)
-    failed = False
-    # Wait for 1 task to be ready.
-    ready = []
-    # Keep invoking ray.wait if ready is empty. This is because
-    # ray.wait with timeout=None will only wait for 10**6 seconds,
-    # which will cause tasks running for more than 12 days to return
-    # before becoming ready.
-    # (Such tasks are common in serving jobs.)
-    # Reference: https://github.com/ray-project/ray/blob/ray-2.9.3/python/ray/_private/worker.py#L2845-L2846
-
-    def handle_ready_tasks(tasks: List[ray.ObjectRef]) -> None:
-        nonlocal returncodes, pids, failed
-        for task in tasks:
-            idx = futures.index(task)
-            res = ray.get(task)
-            returncodes[idx] = res['return_code']
-            pids[idx] = res['pid']
-            if res['return_code'] != 0:
-                failed = True
-
-    while not ready:
-        ready, unready = ray.wait(futures)
-    handle_ready_tasks(ready)
-    while unready:
-        if failed:
-            for task in unready:
-                # ray.cancel without force fails to kill tasks.
-                # We use force=True to kill unready tasks.
-                ray.cancel(task, force=True)
-                # Use SIGKILL=128+9 to indicate the task is forcely
-                # killed.
-                idx = futures.index(task)
-                returncodes[idx] = CANCELLED_RETURN_CODE
-            break
-        ready, unready = ray.wait(unready)
-        handle_ready_tasks(ready)
-    # Remove the placement group after all tasks are done, so that
-    # the next job can be scheduled on the released resources
-    # immediately.
-    ray_util.remove_placement_group(pg)
-    sys.stdout.flush()
-    return returncodes, pids
-
-run_fn = None
-futures = []
 
 class _ProcessingArgs:
     """Arguments for processing logs."""
@@ -421,145 +347,96 @@ def run_bash_command_with_log_and_return_pid(
                                             stream_logs, with_ray)
     return {'return_code': return_code, 'pid': os.getpid()}
 
-run_bash_command_with_log = run_bash_command_with_log
-run_bash_command_with_log_and_return_pid =                 ray.remote(run_bash_command_with_log_and_return_pid)
+run_fn = None
 if hasattr(autostop_lib, 'set_last_active_time_to_now'):
     autostop_lib.set_last_active_time_to_now()
 
 job_lib.set_status(2, job_lib.JobStatus.PENDING)
-pg = ray_util.placement_group([{"CPU": 4.0, "GPU": 1.0}], 'STRICT_SPREAD')
 plural = 's' if 1 > 1 else ''
 node_str = f'1 node{plural}'
 message = ('[2m├── [0m[2m'
-            'Waiting for task resources on '
+           'Waiting for task resources on '
            f'{node_str}.[0m')
 print(message, flush=True)
-# FIXME: This will print the error message from autoscaler if
-# it is waiting for other task to finish. We should hide the
-# error message.
-ray.get(pg.ready())
+
 print('\x1b[2m└── \x1b[0mJob started. Streaming logs... \x1b[2m(Ctrl-C to exit log streaming; job will not be killed)\x1b[0m', flush=True)
-
 setup_cmd = 'pip install torch'
-_SETUP_CPUS = 0.0001
-# The setup command will be run as a ray task with num_cpus=_SETUP_CPUS as the
-# requirement; this means Ray will set CUDA_VISIBLE_DEVICES to an empty string.
-# We unset it so that user setup command may properly use this env var.
+# Unset CUDA_VISIBLE_DEVICES so setup can properly use this env var
 setup_cmd = 'unset CUDA_VISIBLE_DEVICES; ' + setup_cmd
-job_lib.set_status(2, job_lib.JobStatus.SETTING_UP)
 
-# The schedule_step should be called after the job status is set to non-PENDING,
-# otherwise, the scheduler will think the current job is not submitted yet, and
-# skip the scheduling step.
+job_lib.set_status(2, job_lib.JobStatus.SETTING_UP)
 job_lib.scheduler.schedule_step()
 
-# If some nodes are down and then new nodes are added after launching again,
-# the result of `ray.nodes()` will include all the nodes, so we need to get
-# the alive nodes.
-alive_nodes = [n for n in ray.nodes() if 'Alive' in n and n['Alive']]
-total_num_nodes = len(alive_nodes)
-setup_bundles = [{"CPU": _SETUP_CPUS} for _ in range(total_num_nodes)]
-setup_pg = ray.util.placement_group(setup_bundles, strategy='STRICT_SPREAD')
-setup_workers = [run_bash_command_with_log_and_return_pid \
-    .options(
-        name='setup',
-        num_cpus=_SETUP_CPUS,
-        scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy(
-            placement_group=setup_pg,
-            placement_group_bundle_index=i)
-    ) \
-    .remote(
-        setup_cmd,
-        os.path.expanduser('/sky/logs/setup.log'),
-        env_vars={'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000001-cluster-2', 'MODEL_NAME': 'resnet50', 'SKYPILOT_NUM_NODES': '1'},
-        stream_logs=True,
-        with_ray=True,
-    ) for i in range(total_num_nodes)]
-setup_returncodes, setup_pids = get_or_fail(setup_workers, setup_pg)
-success = True
-failed_workers_and_returncodes = []
-for i in range(len(setup_returncodes)):
-    returncode = setup_returncodes[i]
-    pid = setup_pids[i]
-    if pid == None:
-        pid = os.getpid()
-    if returncode != 0 and returncode != CANCELLED_RETURN_CODE:
-        success = False
-        failed_workers_and_returncodes.append((pid, returncode))
-if not success:
-    msg = f'ERROR: [31mJob 2\'s setup failed. '
-    msg += f'Failed workers: ' + ', '.join([f'(pid={pid}, returncode={returncode})' for pid, returncode in failed_workers_and_returncodes])
-    msg += f'. See error logs above for more details.[0m'
+# Run setup command on all nodes using srun
+# srun distributes across nodes automatically (single-node now, multi-node ready)
+setup_srun = f'srun --jobid=12345 --nodes=1 --ntasks-per-node=1 bash -c {shlex.quote(setup_cmd)}'
+
+setup_result = run_bash_command_with_log_and_return_pid(
+    setup_srun,
+    os.path.expanduser('/sky/logs/setup.log'),
+    env_vars={'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000001-cluster-2', 'MODEL_NAME': 'resnet50', 'SKYPILOT_NUM_NODES': '1'},
+    stream_logs=True,
+    with_ray=False,
+)
+
+# run_bash_command_with_log_and_return_pid returns dict with 'return_code' and 'pid' keys
+setup_returncode = int(setup_result.get('return_code', 1))
+setup_pid = setup_result.get('pid', os.getpid())
+
+if setup_returncode != 0:
+    msg = f'ERROR: [31mJob 2\'s setup failed with return code {setup_returncode} (pid={setup_pid}).'
+    msg += f' See error logs above for more details.[0m'
     print(msg, flush=True)
     job_lib.set_status(2, job_lib.JobStatus.FAILED_SETUP)
-    # This waits for all streaming logs to finish.
     time.sleep(1)
-    # Need this to set the job status in ray job to be FAILED.
     sys.exit(1)
 
 job_lib.set_job_started(2)
-@ray.remote
-def check_ip():
-    return ray.util.get_node_ip_address()
-gang_scheduling_id_to_ip = ray.get([
-    check_ip.options(
-            num_cpus=4.0,
-            scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy(
-                placement_group=pg,
-                placement_group_bundle_index=i
-            )).remote()
-    for i in range(pg.bundle_count)
-])
-
-cluster_ips_to_node_id = {ip: i for i, ip in enumerate(['10.0.0.1'])}
-job_ip_rank_list = sorted(gang_scheduling_id_to_ip, key=cluster_ips_to_node_id.get)
-job_ip_rank_map = {ip: i for i, ip in enumerate(job_ip_rank_list)}
-job_ip_list_str = '\n'.join(job_ip_rank_list)
+job_lib.scheduler.schedule_step()
+# Single-node execution: simplified node info
+node_ips = ['TODO']
+node_rank = 0
 
 sky_env_vars_dict = {}
-sky_env_vars_dict['SKYPILOT_NODE_IPS'] = job_ip_list_str
-sky_env_vars_dict['SKYPILOT_NUM_NODES'] = len(job_ip_rank_list)
+sky_env_vars_dict['SKYPILOT_NUM_NODES'] = 1
+sky_env_vars_dict['SKYPILOT_NODE_RANK'] = node_rank
+sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = 2
 
 sky_env_vars_dict['SKYPILOT_TASK_ID'] = 'sky-2024-11-17-00-00-00-000001-cluster-2'
 sky_env_vars_dict['MODEL_NAME'] = 'resnet50'
+log_path = os.path.expanduser(os.path.join('/sky/logs/tasks', "run.log"))
 script = 'python train.py'
 rclone_flush_script = '\n# Only waits if cached mount is enabled (RCLONE_MOUNT_CACHED_LOG_DIR is not empty)\n# findmnt alone is not enough, as some clouds (e.g. AWS on ARM64) uses\n# rclone for normal mounts as well.\nif [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ] &&            [ -d ~/.sky/rclone_log ] &&            [ "$(ls -A ~/.sky/rclone_log)" ]; then\n    flushed=0\n    # extra second on top of --vfs-cache-poll-interval to\n    # avoid race condition between rclone log line creation and this check.\n    sleep 1\n    while [ $flushed -eq 0 ]; do\n        # sleep for the same interval as --vfs-cache-poll-interval\n        sleep 10\n        flushed=1\n        for file in ~/.sky/rclone_log/*; do\n            exitcode=0\n            tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?\n            if [ $exitcode -ne 0 ]; then\n                echo "skypilot: cached mount is still uploading to remote"\n                flushed=0\n                break\n            fi\n        done\n    done\n    echo "skypilot: cached mount uploaded complete"\nfi'
+
+# If run_fn is registered, call it to generate the script dynamically
 if run_fn is not None:
-    script = run_fn(0, gang_scheduling_id_to_ip)
+    # For Slurm: pass gang_scheduling_id=0 and node_ips
+    script = run_fn(0, node_ips)
 
 if script is not None:
-    script=f'unset RAY_RAYLET_PID; {script}'
     script += rclone_flush_script
     sky_env_vars_dict['SKYPILOT_NUM_GPUS_PER_NODE'] = 1
 
-    ip = gang_scheduling_id_to_ip[0]
-    rank = job_ip_rank_map[ip]
+    # Wrap script with srun to execute within sbatch allocation
+    # srun distributes across nodes automatically (single-node now, multi-node ready)
+    # Note: srun automatically inherits GPU allocation from sbatch (via --jobid).
+    # CUDA_VISIBLE_DEVICES is set by Slurm at the sbatch level and inherited here.
+    # No need to specify --gres again since we're using all allocated GPUs.
+    srun_script = f'srun --jobid=12345 --nodes=1 --ntasks-per-node=1 bash -c {shlex.quote(script)}'
 
-    if len(cluster_ips_to_node_id) == 1: # Single-node task on single-node cluter
-        name_str = 'train_task,' if 'train_task' != None else 'task,'
-        log_path = os.path.expanduser(os.path.join('/sky/logs/tasks', 'run.log'))
-    else: # Single-node or multi-node task on multi-node cluster
-        idx_in_cluster = cluster_ips_to_node_id[ip]
-        if cluster_ips_to_node_id[ip] == 0:
-            node_name = 'head'
-        else:
-            node_name = f'worker{idx_in_cluster}'
-        name_str = f'{node_name}, rank={rank},'
-        log_path = os.path.expanduser(os.path.join('/sky/logs/tasks', f'{rank}-{node_name}.log'))
-    sky_env_vars_dict['SKYPILOT_NODE_RANK'] = rank
+    result = run_bash_command_with_log_and_return_pid(
+        srun_script,
+        log_path,
+        env_vars=sky_env_vars_dict,
+        stream_logs=True,
+        with_ray=False,
+    )
 
-    sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = 2
+    # run_bash_command_with_log_and_return_pid returns dict with 'return_code' and 'pid' keys
+    returncodes = [int(result.get('return_code', 1))]
+else:
+    returncodes = [0]
 
-    futures.append(run_bash_command_with_log_and_return_pid \
-            .options(name=name_str, num_cpus=4.0, resources={"GPU": 1.0}, num_gpus=1.0, scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy(placement_group=pg, placement_group_bundle_index=0)) \
-            .remote(
-                script,
-                log_path,
-                env_vars=sky_env_vars_dict,
-                stream_logs=True,
-                with_ray=True,
-            ))
-returncodes, _ = get_or_fail(futures, pg)
 if sum(returncodes) != 0:
     job_lib.set_status(2, job_lib.JobStatus.FAILED)
     # Schedule the next pending job immediately to make the job

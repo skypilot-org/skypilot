@@ -63,6 +63,22 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     return path
 
 
+def _is_skypilot_managed_key(key_path: str) -> bool:
+    """Check if SSH key follows SkyPilot's managed key format.
+
+    SkyPilot-managed keys follow the pattern: ~/.sky/clients/<hash>/ssh/sky-key
+    External keys (like ~/.ssh/id_rsa) do not follow this pattern.
+
+    Args:
+        key_path: Path to the SSH private key.
+
+    Returns:
+        True if the key follows SkyPilot's managed format, False otherwise.
+    """
+    parts = os.path.normpath(key_path).split(os.path.sep)
+    return len(parts) >= 2 and parts[-1] == 'sky-key' and parts[-2] == 'ssh'
+
+
 # Disable sudo for root user. This is useful when the command is running in a
 # docker container, i.e. image_id is a docker image.
 ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD = (
@@ -650,8 +666,16 @@ class SSHCommandRunner(CommandRunner):
         self.disable_control_master = (
             disable_control_master or
             control_master_utils.should_disable_control_master())
-        # ensure the ssh key files are created from the database
-        auth_utils.create_ssh_key_files_from_db(ssh_private_key)
+        # Ensure SSH key is available. For SkyPilot-managed keys, create from
+        # database. For external keys (e.g., Slurm clusters), verify existence.
+        if _is_skypilot_managed_key(ssh_private_key):
+            auth_utils.create_ssh_key_files_from_db(ssh_private_key)
+        else:
+            # Externally managed key - just verify it exists
+            expanded_key_path = os.path.expanduser(ssh_private_key)
+            if not os.path.exists(expanded_key_path):
+                raise FileNotFoundError(
+                    f'SSH private key not found: {expanded_key_path}')
         if docker_user is not None:
             assert port is None or port == 22, (
                 f'port must be None or 22 for docker_user, got {port}.')
@@ -847,7 +871,7 @@ class SSHCommandRunner(CommandRunner):
             else:
                 command += [f'> {log_path}']
             executable = '/bin/bash'
-        # logger.debug(f'Running command: {" ".join(command)}', stack_info=True)
+        logger.debug(f'Running command: {" ".join(command)}')
         return log_lib.run_with_log(' '.join(command),
                                     log_path,
                                     require_outputs=require_outputs,
@@ -868,6 +892,7 @@ class SSHCommandRunner(CommandRunner):
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
+        get_remote_home_dir: Callable[[], str] = lambda: '~',
     ) -> None:
         """Uses 'rsync' to sync 'source' to 'target'.
 
@@ -880,6 +905,8 @@ class SSHCommandRunner(CommandRunner):
             stream_logs: Stream logs to the stdout/stderr.
             max_retry: The maximum number of retries for the rsync command.
               This value should be non-negative.
+            get_remote_home_dir: A callable that returns the remote home directory.
+              Defaults to '~'.
 
         Raises:
             exceptions.CommandError: rsync command failed.
@@ -904,7 +931,8 @@ class SSHCommandRunner(CommandRunner):
                     rsh_option=rsh_option,
                     log_path=log_path,
                     stream_logs=stream_logs,
-                    max_retry=max_retry)
+                    max_retry=max_retry,
+                    get_remote_home_dir=get_remote_home_dir)
 
 
 class KubernetesCommandRunner(CommandRunner):
@@ -1253,68 +1281,61 @@ class LocalProcessCommandRunner(CommandRunner):
 class SlurmCommandRunner(SSHCommandRunner):
     """Runner for Slurm commands.
 
-    SlurmCommandRunner sends commands over an SSH connection to the Slurm controller.
+    SlurmCommandRunner sends commands over an SSH connection through the Slurm
+    controller, to the virtual instances.
     """
-
-    # For all supported user commands, please refer to
-    # https://slurm.schedmd.com/quickstart.html#arch.
-    USER_COMMANDS: List[str] = [
-        "sinfo",
-        "sbatch",
-        "squeue",
-        "srun",
-        "scancel",
-    ]
 
     def __init__(
         self,
         node: Tuple[str, int],
         ssh_user: str,
         ssh_private_key: str,
-        cluster_name: str,
-        partition: str,
-        job_id: Optional[str] = None,
-        ssh_proxy_command: Optional[str] = None,
+        *,
+        sky_dir: str,
         **kwargs,
     ):
         """Initialize SlurmCommandRunner.
 
         Example Usage:
-            runner = SlurmCommendRunner((ip, port),
+            runner = SlurmCommandRunner((ip, port),
                                         ssh_user,
                                         ssh_private_key,
-                                        clustername,
-                                        partition,
-                                        job_id)
+                                        sky_dir=sky_dir)
             runner.run('ls -l', mode=SshMode.NON_INTERACTIVE)
             runner.rsync(source, target, up=True)
 
         Args:
             node: (ip, port) The IP address and port of the remote machine.
-            cluster_name: The Slurm cluster name.
-            partition: The logical set of grouped compute nodes.
-            job_id: The provisioned long-running job ID.
+            ssh_user: SSH username.
+            ssh_private_key: Path to SSH private key.
+            sky_dir: The private directory for the SkyPilot cluster on the Slurm cluster.
+            **kwargs: Additional arguments forwarded to SSHCommandRunner (e.g., ssh_proxy_command).
         """
-        super().__init__(node,
-                         ssh_user,
-                         ssh_private_key,
-                         ssh_proxy_command=ssh_proxy_command,
-                         **kwargs)
-        self.cluster_name = cluster_name
-        self.partition = partition
-        self.job_id = job_id
+        super().__init__(node, ssh_user, ssh_private_key, **kwargs)
+        self.sky_dir = sky_dir
 
-    @property
-    def node_id(self) -> str:
-        self.vnode_id
+    def rsync(
+        self,
+        source: str,
+        target: str,
+        *,
+        up: bool,
+        log_path: str = os.devnull,
+        stream_logs: bool = True,
+        max_retry: int = 1,
+    ) -> None:
+        """Override rsync to use sky_dir as the remote home directory.
 
-    @property
-    def vnode_id(self) -> str:
-        if self.job_id is None:
-            raise ValueError(
-                f'Failed to get the Slurm virtual node ID. Please provide a valid Slurm job ID.'
-            )
-        return f'{self.cluster_name}-{self.partition}-{self.job_id}'
+        For Slurm clusters with shared home directories, we need to ensure
+        all files are synced to the isolated sky_dir, not the shared home.
+        """
+        return super().rsync(source,
+                             target,
+                             up=up,
+                             log_path=log_path,
+                             stream_logs=stream_logs,
+                             max_retry=max_retry,
+                             get_remote_home_dir=lambda: self.sky_dir)
 
     @timeline.event
     @context_utils.cancellation_guard
@@ -1330,32 +1351,9 @@ class SlurmCommandRunner(SSHCommandRunner):
             or
             A tuple of (returncode, stdout, stderr).
         """
-        orig_cmd = cmd
-
-        # NOTE(jwj): if user doesn't select a base_cmd, we use a default srun?
-        # then e.g., for setting up ray cluster, it's compatible with the original runner.run.
-        # For setting up instances, we can't force a limited set of Slurm base commands.
-        # We must allow linux bash commands here.
-        if isinstance(cmd, str):
-            cmd = cmd.split(' ')
-        base_cmd = cmd[0]
-        cmd = cmd[1:]
-        if base_cmd not in self.USER_COMMANDS:
-            # raise ValueError(
-            #     f'{base_cmd} is not an Slurm-supported user command.')
-            return super().run(orig_cmd, **kwargs)
-        else:
-            # TODO(jwj): Support multi-cluster, multi-partition operations.
-            vnode_args = [
-                f'--partition={self.partition}',
-            ]
-            self.cluster_name = None
-            if self.cluster_name:
-                vnode_args += [f'--clusters={self.cluster_name}']
-
-            # Specify the Slurm virtual instance ID
-            if self.job_id is not None:
-                vnode_args += [f'--jobid={self.job_id}']
-
-            ssh_cmd = [base_cmd, *vnode_args, *cmd]
-            return super().run(ssh_cmd, **kwargs)
+        # Override $HOME so that each SkyPilot cluster's state is isolated
+        # from one another. We rely on the assumption that ~ is exclusively
+        # used by a cluster, and in Slurm that is not the case, as $HOME
+        # could be part of a shared filesystem.
+        cmd = f'cd {self.sky_dir} && export HOME=$(pwd) && {cmd}'
+        return super().run(cmd, **kwargs)

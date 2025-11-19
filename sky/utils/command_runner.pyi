@@ -6,7 +6,7 @@ determine the return type based on the value of require_outputs.
 """
 import enum
 import typing
-from typing import Any, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 
 from typing_extensions import Literal
 
@@ -216,7 +216,8 @@ class SSHCommandRunner(CommandRunner):
               up: bool,
               log_path: str = ...,
               stream_logs: bool = ...,
-              max_retry: int = ...) -> None:
+              max_retry: int = ...,
+              get_remote_home_dir: Callable[[], str] = ...) -> None:
         ...
 
     def port_forward_command(
@@ -303,6 +304,22 @@ class KubernetesCommandRunner(CommandRunner):
             port_forward: List[Tuple[int, int]],
             connect_timeout: int = 1,
             ssh_mode: SshMode = SshMode.INTERACTIVE) -> List[str]:
+        ...
+
+
+class SlurmCommandRunner(SSHCommandRunner):
+    """Runner for Slurm commands."""
+    sky_dir: str
+
+    def __init__(
+        self,
+        node: Tuple[str, int],
+        ssh_user: str,
+        ssh_private_key: str,
+        *,
+        sky_dir: str,
+        **kwargs,
+    ) -> None:
         ...
 
 
