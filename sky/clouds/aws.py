@@ -497,16 +497,20 @@ class AWS(clouds.Cloud):
             try:
                 client = aws.client('ec2', region_name=region)
                 response = client.describe_images(ImageIds=[image_id])
-                metadata = response['ResponseMetadata']
+                # These values are not optional, but we will use .get() to avoid
+                # crashing on a malformed response from AWS.
+                metadata = response.get('ResponseMetadata', {})
+                image_info = response.get('Images')
                 debug_message = (
                     'describe_images response:\n'
-                    f'  status code: {metadata["HTTPStatusCode"]}\n'
-                    f'  retry attempts: {metadata["RetryAttempts"]}\n'
-                    f'  len(images): {len(response["Images"])}\n'
-                    f'  next token: {metadata.get("NextToken")}')
+                    f'  status code: {metadata.get("HTTPStatusCode")}\n'
+                    f'  retry attempts: {metadata.get("RetryAttempts")}\n'
+                    f'  len(images): {len(image_info) if image_info else -1}\n'
+                    f'  next token: {response.get("NextToken")}')
                 logger.debug(debug_message)
-                image_info = response['Images']
                 if not image_info:
+                    # image_info is [] (can't find image) or None (invalid
+                    # response from AWS)
                     with ux_utils.print_exception_no_traceback():
                         if env_options.Options.SHOW_DEBUG_INFO.get():
                             image_not_found_message += f'\n{debug_message}'
@@ -552,6 +556,8 @@ class AWS(clouds.Cloud):
         kv_cache_key = f'aws:ami:size:{workspace_profile}:{region}:{image_id}'
         image_size = kv_cache.get_cache_entry(kv_cache_key)
         if image_size is not None:
+            logger.debug(
+                f'Image size {image_size} found in cache {kv_cache_key}')
             return float(image_size)
         # if not found in cache, query the cloud
         image = cls._describe_image_with_retry(
@@ -594,6 +600,8 @@ class AWS(clouds.Cloud):
         kv_cache_key = f'aws:ami:root_device_name:{workspace_profile}:{region}:{image_id}'
         root_device_name = kv_cache.get_cache_entry(kv_cache_key)
         if root_device_name is not None:
+            logger.debug(f'Image root device name {root_device_name} found in '
+                         f'cache {kv_cache_key}')
             return root_device_name
         # if not found in cache, query the cloud
         image = cls._describe_image_with_retry(
