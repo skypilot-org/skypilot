@@ -287,6 +287,47 @@ fi
 
 echo "✓ sky jobs queue --all test passed (${duration}s)"
 
+# Step 8: Do a minimal sky launch to ensure API server is running
+echo "Step 8: Performing minimal sky launch to ensure API server is running..."
+MINIMAL_CLUSTER_NAME="scale-test-minimal-$$"
+if ! sky launch --infra k8s -c "$MINIMAL_CLUSTER_NAME" -y "echo 'minimal test cluster'"; then
+    echo "ERROR: Minimal sky launch failed. This indicates the API server may not be running properly."
+    echo "Please ensure the API server is running and accessible."
+    exit 1
+fi
+# Clean up immediately
+sky down "$MINIMAL_CLUSTER_NAME" -y || true
+
+# Step 9: Verify dashboard pages in browser
+echo "Step 9: Verifying dashboard pages in browser..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VERIFY_SCRIPT="${SCRIPT_DIR}/verify_dashboard_browser.py"
+
+# Get API server endpoint
+# Try to get from environment variable first, then try sky api info, then default
+API_ENDPOINT="${SKYPILOT_API_SERVER_URL:-}"
+if [ -z "$API_ENDPOINT" ]; then
+    # Try to get from sky api info command
+    API_INFO=$(sky api info 2>/dev/null || echo "")
+    if echo "$API_INFO" | grep -q "endpoint"; then
+        API_ENDPOINT=$(echo "$API_INFO" | grep -i "endpoint" | head -n1 | sed -E 's/.*[Ee]ndpoint[^:]*:\s*//' | tr -d '[:space:]')
+    fi
+fi
+# Fallback to default if still empty
+if [ -z "$API_ENDPOINT" ]; then
+    API_ENDPOINT="http://localhost:46580"
+fi
+
+echo "Using API endpoint: $API_ENDPOINT"
+
+if [ -f "$VERIFY_SCRIPT" ]; then
+    python3 "$VERIFY_SCRIPT" --endpoint "$API_ENDPOINT" --keep-open || {
+        echo "WARNING: Dashboard verification failed, but continuing..."
+    }
+else
+    echo "WARNING: Dashboard verification script not found at $VERIFY_SCRIPT, skipping browser verification"
+fi
+
 echo ""
 echo "=========================================="
 echo "All performance tests passed!"
