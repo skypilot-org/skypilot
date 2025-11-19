@@ -1387,9 +1387,11 @@ def test_skyserve_log_expansion_no_duplicates():
             'echo "Found log file: $log_file"; '
             'provision_count=$(grep -c "==================== Provisioning ====================" "$log_file" || echo "0"); '
             'echo "Provision log section count: $provision_count"; '
-            # The fix ensures the provision log is only expanded once, not hundreds of times
-            '[ "$provision_count" -eq 1 ] || { '
-            '  echo "ERROR: Provision log section appears $provision_count times (expected exactly 1)"; '
+            # The fix ensures the provision log is only expanded once, not hundreds of times.
+            # Allow up to 2 occurrences: one from expansion and one from the provision log
+            # itself appearing in the replica log (e.g., in debug mode without expansion).
+            '[ "$provision_count" -le 2 ] || { '
+            '  echo "ERROR: Provision log section appears $provision_count times (expected <= 2)"; '
             '  echo "This indicates duplicate log expansion is happening"; '
             '  exit 1; '
             '}',
