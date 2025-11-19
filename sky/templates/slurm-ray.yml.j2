@@ -76,7 +76,7 @@ setup_commands:
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
-  # TODO(jwj): Restore conda installation command.
+  # TODO(kevin): Move some stuff to skylet/constants.py
   - {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
     {%- endfor %}
@@ -89,7 +89,6 @@ setup_commands:
     sudo dpkg --configure -a;
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     {{ conda_installation_commands }}
-    # TODO(kevin): Move to skylet/constants.py
     mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
     {{ skypilot_wheel_installation_commands }}
 
