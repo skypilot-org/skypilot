@@ -109,8 +109,9 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
             return {
                 'NCCL_SOCKET_IFNAME': 'eth0',
                 'NCCL_IB_HCA': 'ibp',
-                'UCX_NET_DEVICES': ('ibp0:1,ibp1:1,ibp2:1,ibp3:1,'
-                                    'ibp4:1,ibp5:1,ibp6:1,ibp7:1')
+                # Restrict UCX to TCP to avoid unneccsary errors. NCCL doesn't use UCX
+                'UCX_TLS': 'tcp',
+                'UCX_NET_DEVICES': 'eth0',
             }
         else:
             # GCP clusters and generic clusters - environment variables are
