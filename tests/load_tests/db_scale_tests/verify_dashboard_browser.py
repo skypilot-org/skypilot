@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """
 Browser verification script for dashboard pages.
-Opens a non-headless browser to verify that clusters and jobs are loaded in the dashboard.
+Verifies that clusters and jobs are loaded in the dashboard.
 
 Usage:
-    python3 verify_dashboard_browser.py [--endpoint <endpoint>] [--wait-time <seconds>]
+    python3 verify_dashboard_browser.py [--endpoint <endpoint>] [--no-headless]
 
 Example:
-    python3 verify_dashboard_browser.py --endpoint http://localhost:46580 --wait-time 30
+    python3 verify_dashboard_browser.py --endpoint http://localhost:46580
+    python3 verify_dashboard_browser.py --endpoint http://localhost:46580 --no-headless
 """
 
 import argparse
 import logging
+import re
 import sys
 import time
 
@@ -20,7 +22,6 @@ from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 
@@ -29,7 +30,7 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
 
-def get_chrome_driver(headless: bool = False) -> webdriver.Chrome:
+def get_chrome_driver(headless: bool = True) -> webdriver.Chrome:
     """Create and return a Chrome driver with appropriate options."""
     chrome_options = Options()
 
@@ -54,7 +55,7 @@ def get_chrome_driver(headless: bool = False) -> webdriver.Chrome:
 
 def verify_jobs_page(driver: webdriver.Chrome,
                      url: str,
-                     wait_time: int = 10) -> bool:
+                     wait_time: int = 10) -> None:
     """
     Verify that the jobs page loads and shows job IDs starting with "12xxx".
 
@@ -63,8 +64,8 @@ def verify_jobs_page(driver: webdriver.Chrome,
         url: URL to navigate to
         wait_time: Maximum time to wait for page to load (default: 10s, matching sky jobs queue timeout)
 
-    Returns:
-        True if page loads successfully and shows job IDs starting with "12"
+    Raises:
+        TimeoutException: If job ID starting with "12" is not found within wait_time
     """
     logger.info(f"Navigating to jobs page: {url}")
     driver.get(url)
@@ -72,21 +73,53 @@ def verify_jobs_page(driver: webdriver.Chrome,
     logger.info(
         f"Waiting for job ID starting with '12' to appear (timeout: {wait_time}s)..."
     )
-    # Wait for a table row containing a job ID link starting with "12"
-    WebDriverWait(driver, wait_time).until(lambda d: any(
-        link.text.strip().isdigit() and link.text.strip().startswith(
-            "12") for row in d.find_elements(By.CSS_SELECTOR, "tbody tr") for
-        link in row.find_elements(By.TAG_NAME, "a") if link.text.strip()))
 
-    logger.info(
-        f"✅ Jobs page verified successfully! Found job ID starting with '12'")
-    logger.info(f"Page URL: {driver.current_url}")
-    return True
+    # Wait for a table row containing a job ID link starting with "12"
+    def find_job_id(d):
+        # First check if job ID starting with "12" exists in page source (fast check)
+        page_source = d.page_source
+        # Look for pattern like href="/dashboard/jobs/12xxx" or >12xxx<
+        if not re.search(r'(?:href=["\']/dashboard/jobs/|>)(12\d{2,})',
+                         page_source):
+            return False
+
+        # Now find the specific row with the job ID
+        rows = d.find_elements(By.CSS_SELECTOR, "tbody tr")
+        logger.info(
+            f"Checking {len(rows)} table rows for job IDs starting with '12'..."
+        )
+        for row_idx in range(1, len(rows) + 1):
+            try:
+                # Re-query rows each time to avoid stale element references
+                current_rows = d.find_elements(By.CSS_SELECTOR, "tbody tr")
+                if row_idx > len(current_rows):
+                    continue
+                row = current_rows[row_idx - 1]
+                # Get links immediately to avoid stale reference
+                links = row.find_elements(By.TAG_NAME, "a")
+                for link in links:
+                    try:
+                        link_text = link.text.strip()
+                        if link_text.isdigit() and link_text.startswith("12"):
+                            logger.info(
+                                f"Found job ID starting with '12': {link_text} in row {row_idx}"
+                            )
+                            return True
+                    except Exception:
+                        # Stale element, continue to next link
+                        continue
+            except Exception:
+                # Stale element or index out of range, continue to next row
+                continue
+        return False
+
+    WebDriverWait(driver, wait_time).until(find_job_id)
+    logger.info("✅ Jobs page verified successfully!")
 
 
 def verify_clusters_page(driver: webdriver.Chrome,
                          url: str,
-                         wait_time: int = 20) -> bool:
+                         wait_time: int = 20) -> None:
     """
     Verify that the clusters page loads and shows clusters with RUNNING status.
 
@@ -95,22 +128,55 @@ def verify_clusters_page(driver: webdriver.Chrome,
         url: URL to navigate to
         wait_time: Maximum time to wait for page to load (default: 20s, matching sky status timeout)
 
-    Returns:
-        True if page loads successfully and shows RUNNING status
+    Raises:
+        TimeoutException: If RUNNING status is not found within wait_time
     """
     logger.info(f"Navigating to clusters page: {url}")
     driver.get(url)
 
     logger.info(
         f"Waiting for RUNNING status to appear (timeout: {wait_time}s)...")
-    # Wait for a table row containing RUNNING status
-    WebDriverWait(driver,
-                  wait_time).until(lambda d: any("RUNNING" in row.text.upper(
-                  ) for row in d.find_elements(By.CSS_SELECTOR, "tbody tr")))
 
-    logger.info(f"✅ Clusters page verified successfully! Found RUNNING status")
-    logger.info(f"Page URL: {driver.current_url}")
-    return True
+    # Wait for a table row containing RUNNING status
+    def find_running_status(d):
+        # First check if RUNNING exists in page source (fast check)
+        page_source = d.page_source.upper()
+        if "RUNNING" not in page_source:
+            return False
+
+        # Now find the specific row(s) with RUNNING status
+        rows = d.find_elements(By.CSS_SELECTOR, "tbody tr")
+        logger.info(f"Checking {len(rows)} table rows for RUNNING status...")
+        for row_idx in range(1, len(rows) + 1):
+            try:
+                # Re-query rows each time to avoid stale element references
+                current_rows = d.find_elements(By.CSS_SELECTOR, "tbody tr")
+                if row_idx > len(current_rows):
+                    continue
+                row = current_rows[row_idx - 1]
+                # Get text immediately to avoid stale reference
+                row_text = row.text.upper()
+                if "RUNNING" in row_text:
+                    # Try to extract cluster name from the row (do this immediately)
+                    try:
+                        cluster_links = row.find_elements(
+                            By.CSS_SELECTOR, "a[href*='/dashboard/clusters/']")
+                        cluster_name = cluster_links[0].text.strip(
+                        ) if cluster_links else "unknown"
+                        logger.info(
+                            f"Found RUNNING status in row {row_idx} (cluster: {cluster_name})"
+                        )
+                    except Exception:
+                        # If we can't get cluster name, still log the row
+                        logger.info(f"Found RUNNING status in row {row_idx}")
+                    return True
+            except Exception:
+                # Stale element or index out of range, continue to next row
+                continue
+        return False
+
+    WebDriverWait(driver, wait_time).until(find_running_status)
+    logger.info("✅ Clusters page verified successfully!")
 
 
 def main():
@@ -122,10 +188,9 @@ def main():
         default='http://localhost:46580',
         help='SkyPilot API server endpoint (default: http://localhost:46580)')
     parser.add_argument(
-        '--keep-open',
-        '-k',
+        '--no-headless',
         action='store_true',
-        help='Keep browser open after verification (default: False)')
+        help='Run browser in non-headless mode (default: headless)')
 
     args = parser.parse_args()
 
@@ -133,60 +198,41 @@ def main():
     clusters_url = f"{endpoint}/dashboard/clusters"
     jobs_url = f"{endpoint}/dashboard/jobs"
 
-    logger.info(f"Starting dashboard verification")
-    logger.info(f"Endpoint: {endpoint}")
-    logger.info(f"Clusters URL: {clusters_url}")
-    logger.info(f"Jobs URL: {jobs_url}")
-    logger.info(f"Browser will be NON-HEADLESS (visible)")
-
     driver = None
     try:
-        # Open browser in NON-HEADLESS mode so user can see what's happening
-        driver = get_chrome_driver(headless=False)
-        logger.info("✅ Chrome driver initialized (NON-HEADLESS)")
+        driver = get_chrome_driver(headless=not args.no_headless)
 
         # Verify clusters page (20s timeout, matching sky status timeout)
-        clusters_ok = verify_clusters_page(driver, clusters_url, wait_time=20)
+        verify_clusters_page(driver, clusters_url, wait_time=20)
 
         # Wait a bit between page loads
         time.sleep(2)
 
         # Verify jobs page (10s timeout, matching sky jobs queue timeout)
-        jobs_ok = verify_jobs_page(driver, jobs_url, wait_time=10)
+        verify_jobs_page(driver, jobs_url, wait_time=10)
 
-        if clusters_ok and jobs_ok:
-            logger.info("✅ All dashboard pages verified successfully!")
+        logger.info("✅ All dashboard pages verified successfully!")
+        return 0
 
-            if args.keep_open:
-                logger.info("Browser will remain open for manual inspection...")
-                logger.info("Press Enter to close the browser...")
-                input()
-            else:
-                logger.info(
-                    "Keeping browser open for 60 seconds for manual inspection..."
-                )
-                time.sleep(60)
-
-            return 0
-        else:
-            logger.error("❌ Some dashboard pages failed to load")
-            if args.keep_open:
-                logger.info("Browser will remain open for debugging...")
-                logger.info("Press Enter to close the browser...")
-                input()
-            return 1
-
+    except TimeoutException as e:
+        logger.error(f"❌ Verification failed: {str(e)}")
+        if driver:
+            logger.error("Dumping current HTML content:")
+            print("=" * 80)
+            print(driver.page_source)
+            print("=" * 80)
+        return 1
     except Exception as e:
         logger.error(f"❌ Error during verification: {str(e)}")
-        if driver and args.keep_open:
-            logger.info("Browser will remain open for debugging...")
-            logger.info("Press Enter to close the browser...")
-            input()
+        if driver:
+            logger.error("Dumping current HTML content:")
+            print("=" * 80)
+            print(driver.page_source)
+            print("=" * 80)
         return 1
     finally:
         if driver:
             driver.quit()
-            logger.info("✅ Browser closed")
 
 
 if __name__ == "__main__":

@@ -290,11 +290,21 @@ echo "✓ sky jobs queue --all test passed (${duration}s)"
 # Step 8: Do a minimal sky launch to ensure API server is running
 echo "Step 8: Performing minimal sky launch to ensure API server is running..."
 MINIMAL_CLUSTER_NAME="scale-test-minimal-$$"
-if ! sky launch --infra k8s -c "$MINIMAL_CLUSTER_NAME" -y "echo 'minimal test cluster'"; then
+LAUNCH_OUTPUT=$(sky launch --infra k8s -c "$MINIMAL_CLUSTER_NAME" -y "echo 'minimal test cluster'" 2>&1)
+LAUNCH_EXIT_CODE=$?
+if [ $LAUNCH_EXIT_CODE -ne 0 ]; then
     echo "ERROR: Minimal sky launch failed. This indicates the API server may not be running properly."
     echo "Please ensure the API server is running and accessible."
+    echo "Launch output: $LAUNCH_OUTPUT"
     exit 1
 fi
+# Verify the echo content appears in the output
+if ! echo "$LAUNCH_OUTPUT" | grep -q "minimal test cluster"; then
+    echo "ERROR: Minimal sky launch output does not contain expected echo content 'minimal test cluster'"
+    echo "Launch output: $LAUNCH_OUTPUT"
+    exit 1
+fi
+echo "✓ Minimal sky launch verified - found expected echo content"
 # Clean up immediately
 sky down "$MINIMAL_CLUSTER_NAME" -y || true
 
@@ -321,7 +331,7 @@ fi
 echo "Using API endpoint: $API_ENDPOINT"
 
 if [ -f "$VERIFY_SCRIPT" ]; then
-    python3 "$VERIFY_SCRIPT" --endpoint "$API_ENDPOINT" --keep-open || {
+    python3 "$VERIFY_SCRIPT" --endpoint "$API_ENDPOINT" || {
         echo "WARNING: Dashboard verification failed, but continuing..."
     }
 else
