@@ -283,7 +283,8 @@ def check_instance_fits(cluster: str,
         return False, not_fit_reason_prefix
 
 
-def _get_slurm_node_info_list(slurm_cluster_name: Optional[str] = None) -> List[Dict[str, Any]]:
+def _get_slurm_node_info_list(
+        slurm_cluster_name: Optional[str] = None) -> List[Dict[str, Any]]:
     """Gathers detailed information about each node in the Slurm cluster."""
     # 1. Get node state and GRES using sinfo
     slurm_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
@@ -292,7 +293,9 @@ def _get_slurm_node_info_list(slurm_cluster_name: Optional[str] = None) -> List[
         if slurm_cluster_names:
             slurm_cluster_name = slurm_cluster_names[0]
     if slurm_cluster_name is None:
-        raise ValueError(f'No Slurm cluster name found in the {DEFAULT_SLURM_PATH} configuration.')
+        raise ValueError(
+            f'No Slurm cluster name found in the {DEFAULT_SLURM_PATH} configuration.'
+        )
     slurm_config_dict = slurm_config.lookup(slurm_cluster_name)
     logger.debug(f'Slurm config dict: {slurm_config_dict}')
     slurm_client = slurm.SlurmClient(
@@ -553,14 +556,16 @@ def _get_slurm_node_info_list(slurm_cluster_name: Optional[str] = None) -> List[
 #     return result_list
 
 
-def slurm_node_info(slurm_cluster_name: Optional[str] = None) -> List[Dict[str, Any]]:
+def slurm_node_info(
+        slurm_cluster_name: Optional[str] = None) -> List[Dict[str, Any]]:
     """Gets detailed information for each node in the Slurm cluster.
 
     Returns:
         List[Dict[str, Any]]: A list of dictionaries, each containing node info.
     """
     try:
-        node_list = _get_slurm_node_info_list(slurm_cluster_name=slurm_cluster_name)
+        node_list = _get_slurm_node_info_list(
+            slurm_cluster_name=slurm_cluster_name)
     except (RuntimeError, exceptions.NotSupportedError) as e:
         logger.debug(f'Could not retrieve Slurm node info: {e}')
         return []

@@ -798,7 +798,6 @@ async def kubernetes_node_info(
     )
 
 
-
 @app.post('/slurm_gpu_availability')
 async def slurm_gpu_availability(
     request: fastapi.Request,
@@ -815,7 +814,9 @@ async def slurm_gpu_availability(
 
 
 @app.get('/slurm_node_info')
-async def slurm_node_info(request: fastapi.Request, slurm_node_info_body: payloads.SlurmNodeInfoRequestBody) -> None:
+async def slurm_node_info(
+        request: fastapi.Request,
+        slurm_node_info_body: payloads.SlurmNodeInfoRequestBody) -> None:
     """Gets detailed information for each node in the Slurm cluster."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,

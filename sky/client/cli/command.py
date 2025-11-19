@@ -3804,7 +3804,8 @@ def show_gpus(
         total_gpu_info: Dict[str, List[int]] = collections.defaultdict(
             lambda: [0, 0])
 
-        for (slurm_cluster, availability_list) in realtime_gpu_availability_lists:
+        for (slurm_cluster,
+             availability_list) in realtime_gpu_availability_lists:
             realtime_gpu_table = log_utils.create_table(
                 ['GPU', qty_header, 'TOTAL_GPUS', free_header])
             for realtime_gpu_availability in sorted(availability_list):

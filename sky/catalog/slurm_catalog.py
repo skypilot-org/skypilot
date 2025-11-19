@@ -98,8 +98,8 @@ def list_accelerators_realtime(
         slurm_cluster = region_filter
 
     # Call the helper function to get node info
-    slurm_nodes_info = slurm_utils.slurm_node_info(slurm_cluster_name=slurm_cluster)
-
+    slurm_nodes_info = slurm_utils.slurm_node_info(
+        slurm_cluster_name=slurm_cluster)
 
     if not slurm_nodes_info:
         # Customize error message based on filters
@@ -130,7 +130,6 @@ def list_accelerators_realtime(
         node_free_gpus = node_info['free_gpus']
         partition = node_info['partition']
 
-
         # Apply name filter to the determined GPU type
         regex_flags = 0 if case_sensitive else re.IGNORECASE
         if name_filter and not re.match(
@@ -146,7 +145,6 @@ def list_accelerators_realtime(
         # mapping from node to partition does not work.
         # if partition_filter and partition != partition_filter:
         #     continue
-
 
         # Create InstanceTypeInfo objects for various GPU counts
         # Similar to Kubernetes, generate powers of 2 up to node_total_gpus

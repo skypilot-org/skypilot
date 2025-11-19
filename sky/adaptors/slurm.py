@@ -173,7 +173,9 @@ class SlurmClient:
             return node_info
 
         cmd = ['scontrol', 'show', 'node', node_name]
-        rc, node_details, _ = self._runner.run(cmd, require_outputs=True)
+        rc, node_details, _ = self._runner.run(cmd,
+                                               require_outputs=True,
+                                               stream_logs=False)
         subprocess_utils.handle_returncode(
             rc,
             cmd,
@@ -189,7 +191,9 @@ class SlurmClient:
             A list of partition info lines from 'sinfo -p -h -o "%P %t"'
         """
         cmd = ['sinfo', '-N', '-h', '-o', '%N %P']
-        rc, stdout, stderr = self._runner.run(cmd, require_outputs=True)
+        rc, stdout, stderr = self._runner.run(cmd,
+                                              require_outputs=True,
+                                              stream_logs=False)
         subprocess_utils.handle_returncode(
             rc,
             cmd,
@@ -204,7 +208,9 @@ class SlurmClient:
             A list of job info lines from 'squeue -w {node_name} -h -o "%i"'
         """
         cmd = ['squeue', '-w', node_name, '-h', '-o', '%b']
-        rc, stdout, stderr = self._runner.run(cmd, require_outputs=True)
+        rc, stdout, stderr = self._runner.run(cmd,
+                                              require_outputs=True,
+                                              stream_logs=False)
         subprocess_utils.handle_returncode(
             rc, cmd, f'Failed to get jobs for node {node_name}.', stderr=stderr)
         return stdout.splitlines()
