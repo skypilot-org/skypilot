@@ -1354,6 +1354,8 @@ def _handle_jobs_queue_request(
         str, Any]]]] = None,
     is_called_by_user: bool = False,
     only_in_progress: bool = False,
+    queue_result_version: managed_jobs.QueueResultVersion = managed_jobs.
+    QueueResultVersion.V1,
 ) -> Tuple[Optional[int], str]:
     """Get the in-progress managed jobs.
 
@@ -1368,6 +1370,7 @@ def _handle_jobs_queue_request(
         is_called_by_user: If this function is called by user directly, or an
             internal call.
         only_in_progress: If True, only return the number of in-progress jobs.
+        queue_result_version: The version of the queue result.
 
     Returns:
         A tuple of (num_in_progress_jobs, msg). If num_in_progress_jobs is None,
@@ -1403,7 +1406,7 @@ def _handle_jobs_queue_request(
             result = jobs_future.result()
             pool_status_result = pool_status_future.result()
 
-        if isinstance(result, tuple):
+        if queue_result_version.v2():
             managed_jobs_, total, status_counts, _ = result
             if only_in_progress:
                 num_in_progress_jobs = 0
@@ -1821,7 +1824,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         fields = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET
         if all_users:
             fields = fields + _USER_NAME_FIELD
-        return managed_jobs.queue(
+        return managed_jobs.get_queue(
             refresh=False,
             skip_finished=True,
             all_users=all_users,
@@ -1868,7 +1871,8 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
 
         # Get the request IDs
         if show_managed_jobs:
-            managed_jobs_queue_request_id = managed_jobs_request_future.result()
+            (managed_jobs_queue_request_id,
+             queue_result_version) = managed_jobs_request_future.result()
         if show_services:
             service_status_request_id = services_request_future.result()
         if show_pools:
@@ -1935,7 +1939,9 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     show_user=all_users,
                     max_num_jobs_to_show=_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS,
                     is_called_by_user=False,
-                    only_in_progress=True)
+                    only_in_progress=True,
+                    queue_result_version=queue_result_version,
+                )
             except KeyboardInterrupt:
                 sdk.api_cancel(managed_jobs_queue_request_id, silent=True)
                 managed_jobs_query_interrupted = True
@@ -2996,21 +3002,23 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
     assert controller is not None, controller_name
 
     status_counts: Optional[Dict[str, int]] = None
+    managed_jobs_: List[responses.ManagedJobRecord] = []
     with rich_utils.client_status(
             '[bold cyan]Checking for in-progress managed jobs and pools[/]'):
         try:
             fields = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET + _USER_NAME_FIELD
-            request_id = managed_jobs.queue(
+            request_id, queue_result_version = managed_jobs.get_queue(
                 refresh=False,
                 skip_finished=True,
                 all_users=True,
                 fields=fields,
             )
             result = sdk.stream_and_get(request_id)
-            if isinstance(result, tuple):
+            if queue_result_version.v2():
                 managed_jobs_, _, status_counts, _ = result
             else:
-                managed_jobs_ = result
+                managed_jobs_ = typing.cast(List[responses.ManagedJobRecord],
+                                            result)
             request_id_pools = managed_jobs.pool_status(pool_names=None)
             pools_ = sdk.stream_and_get(request_id_pools)
         except exceptions.ClusterNotUpError as e:
@@ -3041,17 +3049,18 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
                 }}):
                 # Check again with the consolidation mode disabled. This is to
                 # make sure there is no in-progress managed jobs.
-                request_id = managed_jobs.queue(
+                request_id, queue_result_version = managed_jobs.get_queue(
                     refresh=False,
                     skip_finished=True,
                     all_users=True,
                     fields=fields,
                 )
                 result = sdk.stream_and_get(request_id)
-                if isinstance(result, tuple):
+                if queue_result_version.v2():
                     managed_jobs_, _, status_counts, _ = result
                 else:
-                    managed_jobs_ = result
+                    managed_jobs_ = typing.cast(
+                        List[responses.ManagedJobRecord], result)
                 request_id_pools = managed_jobs.pool_status(pool_names=None)
                 pools_ = sdk.stream_and_get(request_id_pools)
 
@@ -4800,13 +4809,14 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
             fields = fields + _USER_NAME_FIELD
             if verbose:
                 fields = fields + _USER_HASH_FIELD
-        # Call both managed_jobs.queue and managed_jobs.pool_status in parallel
+        # Call both managed_jobs.get_queue and managed_jobs.pool_status
+        # in parallel
         def get_managed_jobs_queue():
-            return managed_jobs.queue(refresh=refresh,
-                                      skip_finished=skip_finished,
-                                      all_users=all_users,
-                                      limit=max_num_jobs_to_show,
-                                      fields=fields)
+            return managed_jobs.get_queue(refresh=refresh,
+                                          skip_finished=skip_finished,
+                                          all_users=all_users,
+                                          limit=max_num_jobs_to_show,
+                                          fields=fields)
 
         def get_pool_status():
             try:
@@ -4819,7 +4829,8 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
             managed_jobs_future = executor.submit(get_managed_jobs_queue)
             pool_status_future = executor.submit(get_pool_status)
 
-            managed_jobs_request_id = managed_jobs_future.result()
+            (managed_jobs_request_id,
+             queue_result_version) = managed_jobs_future.result()
             pool_status_request_id = pool_status_future.result()
 
         num_jobs, msg = _handle_jobs_queue_request(
@@ -4828,7 +4839,9 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
             show_all=verbose,
             show_user=all_users,
             max_num_jobs_to_show=max_num_jobs_to_show,
-            is_called_by_user=True)
+            is_called_by_user=True,
+            queue_result_version=queue_result_version,
+        )
     if not skip_finished:
         in_progress_only_hint = ''
     else:

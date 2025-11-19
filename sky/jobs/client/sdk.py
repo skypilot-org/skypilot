@@ -1,10 +1,12 @@
 """SDK functions for managed jobs."""
+import enum
 import json
 import typing
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import click
 
+from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
@@ -128,17 +130,39 @@ def launch(
         return server_common.get_request_id(response)
 
 
+class QueueResultVersion(enum.Enum):
+    """The version of the queue result.
+
+    V1: The old version of the queue result.
+        - job_records (List[responses.ManagedJobRecord]): A list of dicts,
+           with each dict containing the information of a job.
+    V2: The new version of the queue result.
+        - job_records (List[responses.ManagedJobRecord]): A list of dicts,
+           with each dict containing the information of a job.
+        - total (int): Total number of jobs after filter.
+        - status_counts (Dict[str, int]): Status counts after filter.
+        - total_no_filter (int): Total number of jobs before filter.
+    """
+    V1 = 'v1'
+    V2 = 'v2'
+
+    def v2(self) -> bool:
+        return self == QueueResultVersion.V2
+
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-def queue(
+def get_queue(
     refresh: bool,
     skip_finished: bool = False,
     all_users: bool = False,
     job_ids: Optional[List[int]] = None,
     limit: Optional[int] = None,
     fields: Optional[List[str]] = None,
-) -> server_common.RequestId[Union[List[responses.ManagedJobRecord], Tuple[
-        List[responses.ManagedJobRecord], int, Dict[str, int], int]]]:
+) -> Tuple[server_common.RequestId[Union[List[responses.ManagedJobRecord],
+                                         Tuple[List[responses.ManagedJobRecord],
+                                               int, Dict[str, int], int]]],
+           QueueResultVersion]:
     """Gets statuses of managed jobs.
 
     Please refer to sky.cli.job_queue for documentation.
@@ -150,6 +174,128 @@ def queue(
         job_ids: IDs of the managed jobs to show.
         limit: Number of jobs to show.
         fields: Fields to get for the managed jobs.
+
+    Returns:
+        - the request ID of the queue request
+        - the version of the queue result
+
+    Request Raises:
+        sky.exceptions.ClusterNotUpError: the jobs controller is not up or
+          does not exist.
+        RuntimeError: if failed to get the managed jobs with ssh.
+    """
+    try:
+        return typing.cast(
+            server_common.RequestId[
+                Union[List[responses.ManagedJobRecord],
+                      Tuple[List[responses.ManagedJobRecord], int,
+                            Dict[str, int], int]]],
+            queue_v2(refresh, skip_finished, all_users, job_ids, limit,
+                     fields)), QueueResultVersion.V2
+    except exceptions.APINotSupportedError:
+        return typing.cast(
+            server_common.RequestId[
+                Union[List[responses.ManagedJobRecord],
+                      Tuple[List[responses.ManagedJobRecord], int,
+                            Dict[str, int], int]]],
+            queue(refresh, skip_finished, all_users,
+                  job_ids)), QueueResultVersion.V1
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(18)
+def queue_v2(
+    refresh: bool,
+    skip_finished: bool = False,
+    all_users: bool = False,
+    job_ids: Optional[List[int]] = None,
+    limit: Optional[int] = None,
+    fields: Optional[List[str]] = None,
+) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord], int, Dict[
+        str, int], int]]:
+    """Gets statuses of managed jobs.
+
+    Please refer to sky.cli.job_queue for documentation.
+
+    Args:
+        refresh: Whether to restart the jobs controller if it is stopped.
+        skip_finished: Whether to skip finished jobs.
+        all_users: Whether to show all users' jobs.
+        job_ids: IDs of the managed jobs to show.
+        limit: Number of jobs to show.
+        fields: Fields to get for the managed jobs.
+
+    Returns:
+        The request ID of the queue request.
+
+    Request Returns:
+        job_records (List[responses.ManagedJobRecord]), total (int),
+        status_counts (Dict[str, int]), total_no_filter (int): A tuple
+        containing the job records, total number of jobs after filter,
+        status counts after filter, and total number of jobs before filter.
+
+          .. code-block:: python
+
+            [
+              {
+                'job_id': (int) job id,
+                'job_name': (str) job name,
+                'resources': (str) resources of the job,
+                'submitted_at': (float) timestamp of submission,
+                'end_at': (float) timestamp of end,
+                'job_duration': (float) duration in seconds,
+                'recovery_count': (int) Number of retries,
+                'status': (sky.jobs.ManagedJobStatus) of the job,
+                'cluster_resources': (str) resources of the cluster,
+                'region': (str) region of the cluster,
+                'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+              }
+            ],
+            total (int): Total number of jobs after filter,
+            status_counts (Dict[str, int]): Status counts after filter,
+            total_no_filter (int): Total number of jobs before filter,
+
+    Request Raises:
+        sky.exceptions.ClusterNotUpError: the jobs controller is not up or
+          does not exist.
+        RuntimeError: if failed to get the managed jobs with ssh.
+    """
+    body = payloads.JobsQueueV2Body(
+        refresh=refresh,
+        skip_finished=skip_finished,
+        all_users=all_users,
+        job_ids=job_ids,
+        limit=limit,
+        fields=fields,
+    )
+    path = '/jobs/queue/v2'
+    response = server_common.make_authenticated_request(
+        'POST',
+        path,
+        json=json.loads(body.model_dump_json()),
+        timeout=(5, None))
+    return server_common.get_request_id(response=response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+def queue(
+    refresh: bool,
+    skip_finished: bool = False,
+    all_users: bool = False,
+    job_ids: Optional[List[int]] = None
+) -> server_common.RequestId[List[responses.ManagedJobRecord]]:
+    """Gets statuses of managed jobs.
+
+    Please refer to sky.cli.job_queue for documentation.
+
+    Args:
+        refresh: Whether to restart the jobs controller if it is stopped.
+        skip_finished: Whether to skip finished jobs.
+        all_users: Whether to show all users' jobs.
+        job_ids: IDs of the managed jobs to show.
 
     Returns:
         The request ID of the queue request.
@@ -182,29 +328,15 @@ def queue(
           does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
-    remote_api_version = versions.get_remote_api_version()
-    if remote_api_version and remote_api_version >= 18:
-        body = payloads.JobsQueueV2Body(
-            refresh=refresh,
-            skip_finished=skip_finished,
-            all_users=all_users,
-            job_ids=job_ids,
-            limit=limit,
-            fields=fields,
-        )
-        path = '/jobs/queue/v2'
-    else:
-        body = payloads.JobsQueueBody(
-            refresh=refresh,
-            skip_finished=skip_finished,
-            all_users=all_users,
-            job_ids=job_ids,
-        )
-        path = '/jobs/queue'
-
+    body = payloads.JobsQueueBody(
+        refresh=refresh,
+        skip_finished=skip_finished,
+        all_users=all_users,
+        job_ids=job_ids,
+    )
     response = server_common.make_authenticated_request(
         'POST',
-        path,
+        '/jobs/queue',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None))
     return server_common.get_request_id(response=response)
