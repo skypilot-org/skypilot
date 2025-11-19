@@ -686,7 +686,7 @@ def update(
             f'to version {current_version}.',
             follow_up_message=
             f'\n{unit_noun} are updating, use {ux_utils.BOLD}{logs_cmd}'
-            f'{ux_utils.RESET_BOLD} to check.'))
+            f'{ux_utils.RESET_BOLD} to check their status.'))
 
 
 def apply(
