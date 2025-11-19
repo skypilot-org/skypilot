@@ -1369,20 +1369,15 @@ def test_skyserve_log_expansion_no_duplicates():
             f'sky serve up -n {name} -y {smoke_tests_utils.LOW_RESOURCE_ARG} tests/skyserve/log_expansion/kubernetes_docker_pull.yaml',
             # Wait until service is ready (provisioning including image pull is complete)
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
-            # Sync down the replica logs
-            f'sky serve logs {name} 1 --sync-down --no-follow',
-            # Check that provision log section appears only once (or at most a few times)
-            # The provision log section header is "==================== Provisioning ===================="
-            # Before the fix in https://github.com/skypilot-org/skypilot/pull/8002
-            # This could appear 700+ times. After the fix, it should appear only once.
-            # Find the log file in ~/sky_logs/service/{service_name}_*/
-            f'log_file=$(find ~/sky_logs/service -path "*{name}_*/replica-1.log" -type f | head -1); '
-            'if [ -z "$log_file" ]; then '
-            '  echo "Log file not found, trying alternative path..."; '
-            '  log_file=$(find ~/sky_logs -name "*replica-1.log" -type f | head -1); '
+            # Sync down the replica logs and extract the log directory from output
+            f'log_output=$(sky serve logs {name} 1 --sync-down --no-follow 2>&1); '
+            'log_dir=$(echo "$log_output" | grep "logs:" | tail -1 | awk -F "logs: " "{{print $2}}" | tr -d " "); '
+            'if [ -z "$log_dir" ]; then '
+            '  echo "ERROR: Failed to extract log directory from output: $log_output"; exit 1; '
             'fi; '
-            'if [ -z "$log_file" ]; then '
-            '  echo "ERROR: Log file not found"; exit 1; '
+            'log_file="$log_dir/replica-1.log"; '
+            'if [ ! -f "$log_file" ]; then '
+            '  echo "ERROR: Log file not found at $log_file"; exit 1; '
             'fi; '
             'echo "Found log file: $log_file"; '
             'provision_count=$(grep -c "==================== Provisioning ====================" "$log_file" || echo "0"); '
