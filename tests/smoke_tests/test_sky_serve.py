@@ -1371,7 +1371,12 @@ def test_skyserve_log_expansion_no_duplicates():
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             # Sync down the replica logs and extract the log directory from output
             f'log_output=$(sky serve logs {name} 1 --sync-down --no-follow 2>&1); '
-            'log_dir=$(echo "$log_output" | grep "logs:" | tail -1 | awk -F "logs: " "{{print $2}}" | tr -d " "); '
+            'echo "=== Log output from sky serve logs ==="; '
+            'echo "$log_output"; '
+            'echo "=== End of log output ==="; '
+            # Extract the path from the line that matches "Service <name> logs: <path>"
+            # Use sed to extract the path after "logs: " and before any color codes or newlines
+            f'log_dir=$(echo "$log_output" | sed -n "s/.*{name} logs: \\([^[:space:]]*\\).*/\\1/p" | head -1); '
             'if [ -z "$log_dir" ]; then '
             '  echo "ERROR: Failed to extract log directory from output: $log_output"; exit 1; '
             'fi; '
