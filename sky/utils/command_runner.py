@@ -1355,5 +1355,6 @@ class SlurmCommandRunner(SSHCommandRunner):
         # from one another. We rely on the assumption that ~ is exclusively
         # used by a cluster, and in Slurm that is not the case, as $HOME
         # could be part of a shared filesystem.
-        cmd = f'cd {self.sky_dir} && export HOME=$(pwd) && {cmd}'
+        cmd = ('export SKY_ORIG_HOME="${SKY_ORIG_HOME:-$HOME}" && '
+               f'cd {self.sky_dir} && export HOME=$(pwd) && {cmd}')
         return super().run(cmd, **kwargs)

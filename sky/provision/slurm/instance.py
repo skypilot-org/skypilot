@@ -79,17 +79,27 @@ def _create_jobs(region: str, cluster_name_on_cloud: str,
     # TODO(kevin): Support multi-node.
     assert num_nodes == 1
 
-    provision_script = f"""#!/bin/bash
-#SBATCH --job-name={cluster_name_on_cloud}
-#SBATCH --output={cluster_name_on_cloud}.out
-#SBATCH --error={cluster_name_on_cloud}.err
-#SBATCH --nodes={num_nodes}
-#SBATCH --cpus-per-task={int(resources['cpus'])}
-#SBATCH --mem={int(resources['memory'])}G
-#SBATCH --gres=gpu:{resources['accelerator_type'].lower()}:{resources['accelerator_count']}
-
-sleep infinity
-"""
+    accelerator_type = resources.get('accelerator_type')
+    accelerator_count_raw = resources.get('accelerator_count')
+    try:
+        accelerator_count = int(accelerator_count_raw)
+    except (TypeError, ValueError):
+        accelerator_count = 0
+    provision_lines = [
+        '#!/bin/bash',
+        f'#SBATCH --job-name={cluster_name_on_cloud}',
+        f'#SBATCH --output={cluster_name_on_cloud}.out',
+        f'#SBATCH --error={cluster_name_on_cloud}.err',
+        f'#SBATCH --nodes={num_nodes}',
+        f'#SBATCH --cpus-per-task={int(resources["cpus"])}',
+        f'#SBATCH --mem={int(resources["memory"])}G',
+    ]
+    if (accelerator_type and accelerator_type.upper() != 'NONE' and
+            accelerator_count > 0):
+        provision_lines.append(f'#SBATCH --gres=gpu:{accelerator_type.lower()}:'
+                               f'{accelerator_count}')
+    provision_lines.extend(['', 'sleep infinity'])
+    provision_script = '\n'.join(provision_lines)
 
     # To bootstrap things, we need to do it with SSHCommandRunner first.
     # SlurmCommandRunner is for after the virtual instances are created.
