@@ -52,6 +52,33 @@ def _get_workspace_allowed_clouds(workspace: str) -> List[str]:
     return config_allowed_cloud_names
 
 
+def _get_workspace_cloud_capabilities(
+        workspace: str,
+        cloud: str) -> Optional[List[sky_cloud.CloudCapability]]:
+    """Get the capabilities for a cloud in a workspace.
+
+    Returns:
+        A list of capabilities for the cloud in the workspace.
+        None if the capabilities are not explicitly specified
+        in the workspace or global config.
+        Returned value of None does not mean the cloud is disabled.
+    """
+    cloud_config = skypilot_config.get_workspace_cloud(cloud,
+                                                       workspace=workspace)
+    cloud_capabilities = cloud_config.get('capabilities', None)
+    if not cloud_capabilities:
+        # get the capabilities from the global config
+        cloud_capabilities = skypilot_config.get_nested(
+            (cloud.lower(), 'capabilities'), default_value=None)
+    if cloud_capabilities:
+        return [
+            sky_cloud.CloudCapability(capability.lower())
+            for capability in cloud_capabilities
+        ]
+    else:
+        return None
+
+
 def check_capabilities(
     quiet: bool = False,
     verbose: bool = False,
@@ -161,19 +188,15 @@ def check_capabilities(
             if cloud_disabled:
                 workspace_disabled_clouds.append(cloud)
             else:
-                cloud_capabilities = cloud_config.get('capabilities', None)
-                if not cloud_capabilities:
-                    # get the capabilities from the global config
-                    cloud_capabilities = skypilot_config.get_nested(
-                        (cloud.lower(), 'capabilities'), default_value=None)
-                if cloud_capabilities:
+                specified_capabilities = _get_workspace_cloud_capabilities(
+                    current_workspace_name, cloud)
+                if specified_capabilities:
                     # filter the capabilities to only the ones passed
                     # in as argument to this function
                     workspace_cloud_capabilities[cloud] = [
-                        sky_cloud.CloudCapability(capability.lower())
-                        for capability in cloud_capabilities
-                        if sky_cloud.CloudCapability(capability.lower()) in
-                        capabilities
+                        enabled_capability
+                        for enabled_capability in specified_capabilities
+                        if enabled_capability in capabilities
                     ]
                     # mark capabilities that are not enabled
                     # in the workspace config as disabled
