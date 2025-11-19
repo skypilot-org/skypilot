@@ -1371,23 +1371,17 @@ def test_skyserve_log_expansion_no_duplicates():
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             # Sync down the replica logs and extract the log directory from output
             f'log_output=$(sky serve logs {name} 1 --sync-down --no-follow 2>&1); '
-            'echo "=== Log output from sky serve logs ==="; '
-            'echo "$log_output"; '
-            'echo "=== End of log output ==="; '
             # Extract the path from the line that matches "Service <name> logs: <path>"
-            # The output format is: "Service <name> logs: <path>" (may have log prefixes)
-            f'log_dir=$(echo "$log_output" | grep -oE "{name} logs: [^[:space:]]+" | sed "s/{name} logs: //" | head -1); '
-            'echo "Extracted log_dir: [$log_dir]"; '
+            # The output format is: "Service <name> logs: <path>" (may have log prefixes and color codes)
+            f'log_dir=$(echo "$log_output" | grep -oE "{name} logs: [^[:space:]]+" | sed "s/{name} logs: //" | sed "s/\\x1b\\[[0-9;]*m//g" | head -1); '
             'if [ -z "$log_dir" ]; then '
-            '  echo "ERROR: Failed to extract log directory from output: $log_output"; exit 1; '
+            '  echo "ERROR: Failed to extract log directory from output: $log_output"; '
+            '  echo "Extracted log_dir: [$log_dir]"; exit 1; '
             'fi; '
             'log_file="$log_dir/replica-1.log"; '
-            'echo "Looking for log file: $log_file"; '
-            'ls -la "$log_dir" || echo "Directory listing failed"; '
             'if [ ! -f "$log_file" ]; then '
             '  echo "ERROR: Log file not found at $log_file"; exit 1; '
             'fi; '
-            'echo "Found log file: $log_file"; '
             'provision_count=$(grep -c "==================== Provisioning ====================" "$log_file" || echo "0"); '
             'echo "Provision log section count: $provision_count"; '
             # The fix ensures the provision log is only expanded once, not hundreds of times.
