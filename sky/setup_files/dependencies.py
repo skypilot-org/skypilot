@@ -205,7 +205,10 @@ cloud_dependencies: Dict[str, List[str]] = {
     # https://github.com/runpod/runpod-python/releases/tag/1.6.1
     # RunPod needs a TOML parser to read ~/.runpod/config.toml. On Python 3.11+
     # stdlib provides tomllib; on lower versions we depend on tomli explicitly.
-    'runpod': ['runpod>=1.6.1', 'tomli; python_version < "3.11"'],
+    # Instead of installing tomli conditionally, we install it explicitly.
+    # This is because the conditional installation of tomli does not work
+    # with controller package installation code.
+    'runpod': ['runpod>=1.6.1', 'tomli'],
     'fluidstack': [],  # No dependencies needed for fluidstack
     'cudo': ['cudo-compute>=0.1.10'],
     'paperspace': [],  # No dependencies needed for paperspace
