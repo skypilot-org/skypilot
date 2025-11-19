@@ -87,7 +87,15 @@ class _ThreadLocalTTLCache(threading.local):
         return self.cache
 
 
-def _thread_local_ttl_cache(maxsize=32, ttl=60 * 60):
+def _thread_local_ttl_cache(maxsize=32, ttl=60 * 55):
+    """Thread-local TTL cache decorator.
+
+    Args:
+        maxsize: Maximum size of the cache.
+        ttl: Time to live for the cache in seconds.
+             Default is 55 minutes, a bit less than 1 hour
+             default lifetime of an STS token.
+    """
 
     def decorator(func):
         # Create thread-local storage for the LRU cache
