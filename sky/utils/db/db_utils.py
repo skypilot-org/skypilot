@@ -429,9 +429,9 @@ def get_engine(
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
     if conn_string:
-        async_log = 'sync'
+        engine_type = 'sync'
         if async_engine:
-            async_log = 'async'
+            engine_type = 'async'
             conn_string = conn_string.replace('postgresql://',
                                               'postgresql+asyncpg://')
         with _db_creation_lock:
