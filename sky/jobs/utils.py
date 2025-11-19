@@ -1877,7 +1877,7 @@ def format_job_table(
     """
     jobs = collections.defaultdict(list)
     # Check if the tasks have user information from kubernetes.
-    # This is only used for sky status --kubernetes.
+    # This is only used for sky status-kubernetes.
     tasks_have_k8s_user = any([task.get('user') for task in tasks])
     if max_jobs and tasks_have_k8s_user:
         raise ValueError('max_jobs is not supported when tasks have user info.')
