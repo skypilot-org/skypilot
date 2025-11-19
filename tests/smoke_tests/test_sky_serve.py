@@ -1347,3 +1347,55 @@ def test_skyserve_ha_kill_during_shutdown():
             skypilot_config.ENV_VAR_GLOBAL_CONFIG: 'tests/skyserve/high_availability/config.yaml'
         })
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.serve
+@pytest.mark.no_remote_server
+def test_skyserve_log_expansion_no_duplicates():
+    """Test that provision log expansion doesn't happen multiple times when
+    Kubernetes is pulling Docker images.
+
+    When a Kubernetes cluster needs to pull a Docker image, rich spinner
+    updates can produce hundreds of lines matching the provision log pattern.
+    This test verifies that the provision log is only expanded once, not
+    hundreds of times.
+    """
+    name = _get_service_name()
+    test = smoke_tests_utils.Test(
+        'test-skyserve-log-expansion-no-duplicates',
+        [
+            # Launch service with Docker image that may need pulling
+            f'sky serve up -n {name} -y {smoke_tests_utils.LOW_RESOURCE_ARG} tests/skyserve/log_expansion/kubernetes_docker_pull.yaml',
+            # Wait until service is ready (provisioning including image pull is complete)
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            # Sync down the replica logs
+            f'sky serve logs {name} 1 --sync-down --no-follow',
+            # Check that provision log section appears only once (or at most a few times)
+            # The provision log section header is "==================== Provisioning ===================="
+            # Before the fix in https://github.com/skypilot-org/skypilot/pull/8002
+            # This could appear 700+ times. After the fix, it should appear only once.
+            # Find the log file in ~/sky_logs/service/{service_name}_*/
+            f'log_file=$(find ~/sky_logs/service -path "*{name}_*/replica-1.log" -type f | head -1); '
+            'if [ -z "$log_file" ]; then '
+            '  echo "Log file not found, trying alternative path..."; '
+            '  log_file=$(find ~/sky_logs -name "*replica-1.log" -type f | head -1); '
+            'fi; '
+            'if [ -z "$log_file" ]; then '
+            '  echo "ERROR: Log file not found"; exit 1; '
+            'fi; '
+            'echo "Found log file: $log_file"; '
+            'provision_count=$(grep -c "==================== Provisioning ====================" "$log_file" || echo "0"); '
+            'echo "Provision log section count: $provision_count"; '
+            # The fix ensures the provision log is only expanded once, not hundreds of times
+            '[ "$provision_count" -eq 1 ] || { '
+            '  echo "ERROR: Provision log section appears $provision_count times (expected exactly 1)"; '
+            '  echo "This indicates duplicate log expansion is happening"; '
+            '  exit 1; '
+            '}',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+    )
+    smoke_tests_utils.run_one_test(test)
