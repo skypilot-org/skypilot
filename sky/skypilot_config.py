@@ -69,6 +69,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
+from sky.usage import constants as usage_constants
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import context
@@ -150,6 +151,9 @@ _active_workspace_context = threading.local()
 _global_config_context = ConfigContext()
 
 SKYPILOT_CONFIG_LOCK_PATH = '~/.sky/locks/.skypilot_config.lock'
+
+_WARNED_DISALLOWED_KEYS_CACHE: typing.Set[Tuple[str, Tuple[str, ...]]] = set()
+_WARNED_DISALLOWED_KEYS_CACHE_LOCK = threading.Lock()
 
 
 def get_skypilot_config_lock_path() -> str:
@@ -731,12 +735,24 @@ def override_skypilot_config(
     # Only warn if there is a diff in disallowed override keys, as the client
     # use the same config file when connecting to a local server.
     if disallowed_diff_keys:
-        logger.warning(
-            f'The following keys ({json.dumps(disallowed_diff_keys)}) have '
-            'different values in the client SkyPilot config with the server '
-            'and will be ignored. Remove these keys to disable this warning. '
-            'If you want to specify it, please modify it on server side or '
-            'contact your administrator.')
+        run_id = os.environ.get(usage_constants.USAGE_RUN_ID_ENV_VAR)
+        should_warn = True
+        if run_id:
+            cache_key = (run_id, tuple(sorted(disallowed_diff_keys)))
+            with _WARNED_DISALLOWED_KEYS_CACHE_LOCK:
+                should_warn = cache_key not in _WARNED_DISALLOWED_KEYS_CACHE
+                if should_warn:
+                    if len(_WARNED_DISALLOWED_KEYS_CACHE) > 1000:
+                        _WARNED_DISALLOWED_KEYS_CACHE.clear()
+                    _WARNED_DISALLOWED_KEYS_CACHE.add(cache_key)
+
+        if should_warn:
+            logger.warning(
+                f'The following keys ({json.dumps(disallowed_diff_keys)}) have '
+                'different values in the client SkyPilot config with the server '
+                'and will be ignored. Remove these keys to disable this warning. '
+                'If you want to specify it, please modify it on server side or '
+                'contact your administrator.')
     config = original_config.get_nested(
         keys=tuple(),
         default_value=None,
