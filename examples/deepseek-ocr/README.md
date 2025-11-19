@@ -2,7 +2,7 @@
 
 This example demonstrates how to use [DeepSeek OCR](https://github.com/deepseek-ai/DeepSeek-OCR) with SkyPilot's pools feature to process large volumes of scanned documents in parallel.
 
-## Use Case
+## Use case
 
 Enterprise AI systems like RAG-based tools often struggle with scanned documents and images because traditional OCR loses document structure. DeepSeek OCR uses vision-language models to:
 - Preserve tables and multi-column layouts
@@ -17,7 +17,7 @@ This example shows how to scale DeepSeek OCR processing across multiple GPU work
 1. [Kaggle API credentials](https://www.kaggle.com/docs/api) (`~/.kaggle/kaggle.json`)
 2. S3 bucket for output storage
 
-## Running the Example
+## Running the example
 
 ### Step 1: Create the pool
 
@@ -75,9 +75,26 @@ When done, tear down the pool:
 sky jobs pool down deepseek-ocr-pool
 ```
 
-## How It Works
+## Single-node processing
 
-### Pool Configuration
+For testing or smaller datasets, you can process everything on a single node without pools. Replace the entire `run` section in the YAML with:
+
+```yaml
+run: |
+  source .venv/bin/activate
+  python process_ocr.py --start-idx 0 --end-idx -1
+```
+
+Then launch with:
+```bash
+sky launch -c deepseek-ocr-single deepseek_ocr.sky.yaml
+```
+
+Note that this will be slow!
+
+## How it works
+
+### Pool configuration
 
 The pool YAML defines:
 - **Workers**: Number of GPU instances (default: 3)
@@ -86,7 +103,7 @@ The pool YAML defines:
 - **Setup**: Runs once per worker to install dependencies and download the dataset
 - **Run**: Processes assigned chunk of images on each job
 
-### Work Distribution
+### Work distribution
 
 SkyPilot automatically distributes work using environment variables:
 - `$SKYPILOT_JOB_RANK`: Current job index (0, 1, 2, ...)

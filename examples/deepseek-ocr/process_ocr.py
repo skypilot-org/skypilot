@@ -6,8 +6,10 @@ Processes images from the Book-Scan-OCR dataset.
 import argparse
 import json
 from pathlib import Path
-from transformers import AutoModel, AutoTokenizer
+
 import torch
+from transformers import AutoModel
+from transformers import AutoTokenizer
 
 
 def main():
