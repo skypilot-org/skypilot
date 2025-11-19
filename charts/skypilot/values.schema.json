@@ -284,6 +284,9 @@
                 "gcpSecretName": {
                     "type": "string"
                 },
+                "image": {
+                    "type": "string"
+                },
                 "projectId": {
                     "type": [
                         "string",
