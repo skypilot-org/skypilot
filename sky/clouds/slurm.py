@@ -316,8 +316,21 @@ class Slurm(clouds.Cloud):
         """Returns a list of feasible resources for the given resources."""
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
+            # Check if the instance type is available in at least one cluster
+            available_regions = self.regions_with_offering(
+                resources.instance_type,
+                accelerators=None,
+                use_spot=resources.use_spot,
+                region=resources.region,
+                zone=resources.zone)
+            if not available_regions:
+                return resources_utils.FeasibleResources([], [], None)
+            
+            # Return a single resource without region set.
+            # The optimizer will call make_launchables_for_valid_region_zones()
+            # which will create one resource per region/cluster.
             resources = resources.copy(accelerators=None)
-            return ([resources], [])
+            return resources_utils.FeasibleResources([resources], [], None)
 
         def _make(instance_list):
             resource_list = []
@@ -439,3 +452,15 @@ class Slurm(clouds.Cloud):
                                       zone: Optional[str] = None) -> bool:
         return catalog.accelerator_in_region_or_zone(accelerator, acc_count,
                                                      region, zone, 'slurm')
+
+    @classmethod
+    def expand_infras(cls) -> List[str]:
+        """Returns a list of enabled SLURM clusters.
+
+        Each cluster is returned as 'Slurm/cluster-name' to be displayed
+        as a separate option in the optimizer.
+        """
+        return [
+            f'{cls.canonical_name()}/{c}'
+            for c in cls.existing_allowed_clusters(silent=True)
+        ]

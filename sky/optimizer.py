@@ -865,11 +865,12 @@ class Optimizer:
                 'use_spot': resources.use_spot
             }
 
-            # Handle special case for Kubernetes and SSH clouds
-            if isinstance(resources.cloud, clouds.Kubernetes):
+            # Handle special case for Kubernetes, SSH, and SLURM clouds
+            if isinstance(resources.cloud, (clouds.Kubernetes, clouds.Slurm)):
                 # Region for Kubernetes-like clouds (SSH, Kubernetes) is the
-                # context name, i.e. different Kubernetes clusters. We add
-                # region to the key to show all the Kubernetes clusters in the
+                # context name, i.e. different Kubernetes clusters.
+                # Region for SLURM is the cluster name.
+                # We add region to the key to show all the clusters in the
                 # optimizer table for better UX.
 
                 if resources.cloud.__class__.__name__ == 'SSH':
