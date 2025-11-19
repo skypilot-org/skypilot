@@ -91,21 +91,36 @@ def down(
 
 
 @usage_lib.entrypoint
-def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
-    """Tears down a specific replica for the given service.
+def terminate_replica(service_name: str,
+                      replica_id: int,
+                      purge: bool,
+                      failed_replicas: bool = False) -> None:
+    """Tears down a replica or all failed replicas.
+
+    Note: replica_id=-1 is used as a sentinel value to indicate
+    "all failed replicas" when failed_replicas=True.
 
     Args:
         service_name: Name of the service.
-        replica_id: ID of replica to terminate.
-        purge: Whether to terminate replicas in a failed status. These replicas
-          may lead to resource leaks, so we require the user to explicitly
-          specify this flag to make sure they are aware of this potential
-          resource leak.
+        replica_id: ID of replica to terminate. Use -1 with
+          failed_replicas=True to terminate all failed replicas.
+        purge: Whether to terminate replicas in a failed status. These
+          replicas may lead to resource leaks, so we require the user to
+          explicitly specify this flag to make sure they are aware of this
+          potential resource leak.
+        failed_replicas: If True, terminates all failed replicas instead
+          of a specific replica. replica_id must be -1 when this is True.
 
     Raises:
-        sky.exceptions.ClusterNotUpError: if the sky sere controller is not up.
-        RuntimeError: if failed to terminate the replica.
+        sky.exceptions.ClusterNotUpError: if the sky serve controller is
+          not up.
+        RuntimeError: if failed to terminate the replica(s).
+        ValueError: if the service or replica does not exist, or if
+          failed_replicas=True and replica_id is not -1.
     """
+    if failed_replicas and replica_id != -1:
+        raise ValueError('replica_id must be -1 when failed_replicas=True')
+
     handle = backend_utils.is_controller_accessible(
         controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message=
@@ -115,36 +130,56 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
     )
 
     assert isinstance(handle, backends.CloudVmRayResourceHandle)
-    use_legacy = not handle.is_grpc_enabled_with_flag
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
 
-    if not use_legacy:
-        try:
-            stdout = serve_rpc_utils.RpcRunner.terminate_replica(
-                handle, service_name, replica_id, purge)
-        except exceptions.SkyletMethodNotImplementedError:
-            use_legacy = True
-
-    if use_legacy:
-        backend = backend_utils.get_backend_from_handle(handle)
-        assert isinstance(backend, backends.CloudVmRayBackend)
-
+    # Generate code to run on the controller
+    if failed_replicas:
         code = serve_utils.ServeCodeGen.terminate_replica(
-            service_name, replica_id, purge)
+            service_name,
+            replica_id=-1,  # Sentinel value for "all failed replicas"
+            purge=purge,
+            failed_replicas=True)
+    else:
+        # For single replica termination, try gRPC first if enabled
+        use_legacy = not handle.is_grpc_enabled_with_flag
+
+        if not use_legacy:
+            try:
+                stdout = serve_rpc_utils.RpcRunner.terminate_replica(
+                    handle, service_name, replica_id, purge)
+                sky_logging.print(stdout)
+                return
+            except exceptions.SkyletMethodNotImplementedError:
+                use_legacy = True
+
+        # Use legacy codegen approach
+        code = serve_utils.ServeCodeGen.terminate_replica(service_name,
+                                                          replica_id,
+                                                          purge,
+                                                          failed_replicas=False)
+
+    try:
         returncode, stdout, stderr = backend.run_on_head(handle,
                                                          code,
                                                          require_outputs=True,
                                                          stream_logs=False,
                                                          separate_stderr=True)
 
-        try:
-            subprocess_utils.handle_returncode(
-                returncode,
-                code,
-                'Failed to terminate the replica',
-                stderr,
-                stream_logs=True)
-        except exceptions.CommandError as e:
-            raise RuntimeError(e.error_msg) from e
+        error_msg = ('Failed to terminate failed replicas'
+                     if failed_replicas else 'Failed to terminate the replica')
+        subprocess_utils.handle_returncode(returncode,
+                                           code,
+                                           error_msg,
+                                           stderr,
+                                           stream_logs=True)
+    except exceptions.FetchClusterInfoError as e:
+        raise RuntimeError(
+            'Failed to fetch controller information. The controller may be '
+            'unreachable. Please check controller status with '
+            '`sky status sky-serve-controller` and try again.') from e
+    except exceptions.CommandError as e:
+        raise RuntimeError(e.error_msg) from e
 
     sky_logging.print(stdout)
 
