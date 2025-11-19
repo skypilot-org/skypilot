@@ -1190,11 +1190,11 @@ def _process_line(
         # Without this check, the same provision log would be expanded hundreds
         # of times, creating huge log files (30M+) and making users think the
         # system is stuck in an infinite loop.
-        if streamed_provision_log_paths is not None:
-            resolved_path = str(p.resolve())
-            if resolved_path in streamed_provision_log_paths:
-                return
-            streamed_provision_log_paths.add(resolved_path)
+        # if streamed_provision_log_paths is not None:
+        #     resolved_path = str(p.resolve())
+        #     if resolved_path in streamed_provision_log_paths:
+        #         return
+        #     streamed_provision_log_paths.add(resolved_path)
 
         try:
             with open(p, 'r', newline='', encoding='utf-8') as f:
