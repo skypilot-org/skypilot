@@ -162,6 +162,10 @@ def check_capabilities(
                 workspace_disabled_clouds.append(cloud)
             else:
                 cloud_capabilities = cloud_config.get('capabilities', None)
+                if not cloud_capabilities:
+                    # get the capabilities from the global config
+                    cloud_capabilities = skypilot_config.get_nested(
+                        (cloud.lower(), 'capabilities'), default_value=None)
                 if cloud_capabilities:
                     # filter the capabilities to only the ones passed
                     # in as argument to this function

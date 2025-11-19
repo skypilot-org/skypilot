@@ -1267,6 +1267,13 @@ def get_config_schema():
                         }]
                     },
                 },
+                'capabilities': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                        'case_insensitive_enum': ['compute', 'storage']
+                    },
+                },
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
@@ -1323,6 +1330,13 @@ def get_config_schema():
                             'type': 'null',
                         }
                     ],
+                },
+                'capabilities': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                        'case_insensitive_enum': ['compute', 'storage']
+                    },
                 },
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
