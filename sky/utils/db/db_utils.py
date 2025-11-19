@@ -429,13 +429,12 @@ def get_engine(
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
     if conn_string:
-        engine_type = 'sync'
         if async_engine:
-            engine_type = 'async'
             conn_string = conn_string.replace('postgresql://',
                                               'postgresql+asyncpg://')
         with _db_creation_lock:
             if conn_string not in _postgres_engine_cache:
+                engine_type = 'sync' if not async_engine else 'async'
                 logger.debug(
                     f'Creating a new postgres {engine_type} engine with '
                     f'maximum {_max_connections} connections')
