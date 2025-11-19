@@ -351,10 +351,15 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
 
     # Read config file if SKYPILOT_CONFIG env var is set
     config_file_content: Optional[str] = None
-    config_file_path = os.environ.get(skypilot_config.ENV_VAR_SKYPILOT_CONFIG)
-    if config_file_path and os.path.exists(config_file_path):
-        with open(config_file_path, 'r', encoding='utf-8') as config_file:
-            config_file_content = config_file.read()
+    # Use .pop() to avoid the config affecting the controller process, as it may
+    # be job-specific.
+    config_file_path = os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG)
+    if config_file_path:
+        config_file_path = os.path.expanduser(config_file_path)
+        if os.path.exists(config_file_path):
+            with open(config_file_path, 'r', encoding='utf-8') as config_file:
+                config_file_content = config_file.read()
+
 
     config_bytes = (len(config_file_content) if config_file_content else 0)
     logger.debug(f'Storing job {job_id} file contents in database '
