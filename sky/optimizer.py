@@ -781,7 +781,7 @@ class Optimizer:
         def _instance_type_str(resources: 'resources_lib.Resources') -> str:
             instance_type = resources.instance_type
             assert instance_type is not None, 'Instance type must be specified'
-            if isinstance(resources.cloud, clouds.Kubernetes):
+            if isinstance(resources.cloud, (clouds.Kubernetes, clouds.Slurm)):
                 instance_type = '-'
                 if resources.use_spot:
                     instance_type = ''
