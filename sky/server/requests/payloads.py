@@ -856,3 +856,9 @@ class RequestPayload(BasePayload):
     status_msg: Optional[str] = None
     should_retry: bool = False
     finished_at: Optional[float] = None
+
+
+class SlurmGpuAvailabilityRequestBody(RequestBody):
+    """Request body for getting Slurm real-time GPU availability."""
+    name_filter: Optional[str] = None
+    quantity_filter: Optional[int] = None

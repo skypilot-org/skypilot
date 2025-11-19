@@ -49,6 +49,7 @@ from sky.metrics import utils as metrics_utils
 from sky.provision import metadata_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
+from sky.provision.slurm import slurm_utils
 from sky.serve.server import server as serve_rest
 from sky.server import common
 from sky.server import config as server_config
@@ -2042,6 +2043,34 @@ async def complete_storage_name(incomplete: str,) -> List[str]:
 async def complete_volume_name(incomplete: str,) -> List[str]:
     return await context_utils.to_thread(
         global_user_state.get_volume_names_start_with, incomplete)
+
+
+@app.post('/slurm_gpu_availability')
+async def slurm_gpu_availability(
+    request: fastapi.Request,
+    slurm_gpu_availability_body: payloads.SlurmGpuAvailabilityRequestBody
+) -> None:
+    """Gets real-time Slurm GPU availability."""
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='slurm_gpu_availability',
+        request_body=slurm_gpu_availability_body,
+        func=slurm_utils.slurm_gpu_availability,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+    )
+
+
+@app.get('/slurm_node_info')
+async def slurm_node_info(request: fastapi.Request) -> None:
+    """Gets detailed information for each node in the Slurm cluster."""
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='slurm_node_info',
+        request_body=payloads.RequestBody(),
+        func=slurm_utils.slurm_node_info,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+    )
+
 
 
 @app.get('/api/completion/api_request')
