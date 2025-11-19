@@ -770,14 +770,14 @@ For detailed setup instructions (including how to set up external Prometheus and
 Optional: Set up server-side debug logging
 ------------------------------------------
 
-Debug logging can be turned on for individual requests by setting the
+Client-side debug logging can be turned on for individual requests by setting the
 ``SKYPILOT_DEBUG`` environment variable to ``1`` when submitting a request, e.g.
 
 .. code-block:: bash
 
     SKYPILOT_DEBUG=1 sky status
 
-To turn on debug logging for all requests, set
+To enable debug logging for all requests on server side, set
 ``SKYPILOT_SERVER_ENABLE_REQUEST_DEBUG_LOGGING`` to ``true`` in the Helm values:
 
 .. code-block:: bash
@@ -788,6 +788,9 @@ To turn on debug logging for all requests, set
       --set-string 'apiService.extraEnvs[0].name=SKYPILOT_SERVER_ENABLE_REQUEST_DEBUG_LOGGING' \
       --set-string 'apiService.extraEnvs[0].value=true'
 
+
+Debug level logs for each request are saved to ``~/.sky/logs/request_debug/<request_id>.log`` on the API server.
+Server-side debug logging does not affect output seen by the clients.
 
 Upgrade the API server
 -----------------------
