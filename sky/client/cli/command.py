@@ -5463,8 +5463,8 @@ def _generate_task_with_service(
         network_tier: Optional[str],
         not_supported_cmd: str,
         pool: bool,  # pylint: disable=redefined-outer-name
-        git_url: Optional[str], #New lines
-        git_ref: Optional[str], #New lines
+        git_url: Optional[str], 
+        git_ref: Optional[str],
 ) -> task_lib.Task:
     """Generate a task with service section from a service YAML file."""
     is_yaml, _ = _check_yaml(''.join(service_yaml_args))
