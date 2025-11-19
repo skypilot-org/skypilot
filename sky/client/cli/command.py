@@ -3804,7 +3804,7 @@ def show_gpus(
         total_gpu_info: Dict[str, List[int]] = collections.defaultdict(
             lambda: [0, 0])
 
-        for (partition, availability_list) in realtime_gpu_availability_lists:
+        for (slurm_cluster, availability_list) in realtime_gpu_availability_lists:
             realtime_gpu_table = log_utils.create_table(
                 ['GPU', qty_header, 'TOTAL_GPUS', free_header])
             for realtime_gpu_availability in sorted(availability_list):
@@ -3825,7 +3825,7 @@ def show_gpus(
                 if capacity > 0:
                     total_gpu_info[gpu][0] += capacity
                     total_gpu_info[gpu][1] += available
-            realtime_gpu_infos.append((partition, realtime_gpu_table))
+            realtime_gpu_infos.append((slurm_cluster, realtime_gpu_table))
 
         # display an aggregated table for all partitions
         # if there are more than one partitions with GPUs
