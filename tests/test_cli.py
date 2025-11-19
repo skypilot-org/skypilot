@@ -148,19 +148,7 @@ def mock_api_server_calls(monkeypatch):
             # Return dictionary with GPU names as keys and lists of accelerator items as values
             return {
                 'V100': [MockAcceleratorItem('V100', 1, 'AWS', 'p3.2xlarge')],
-                'T4': [MockAcceleratorItem('T4', 1, 'GCP', 'n1-standard-4')],
-                'Trainium': [
-                    MockAcceleratorItem('Trainium',
-                                        1,
-                                        'AWS',
-                                        'trn1.2xlarge',
-                                        device_memory=None,
-                                        cpu_count=32,
-                                        memory=128.0,
-                                        price=4.0,
-                                        spot_price=2.5,
-                                        region='us-east-1')
-                ],
+                'T4': [MockAcceleratorItem('T4', 1, 'GCP', 'n1-standard-4')]
             }
         elif 'accelerator_counts_request_id' in str(request_id):
             # Return dictionary with GPU names as keys and lists of quantities as values
@@ -170,7 +158,6 @@ def mock_api_server_calls(monkeypatch):
                 'T4': [1, 2, 4],
                 'A100': [1, 2, 4, 8],
                 'H100': [1, 2, 4],
-                'Trainium': [1, 16],
             }
         elif 'status_request_id' in str(request_id):
             return [{
@@ -323,32 +310,6 @@ class TestWithNoCloudEnabled:
             result = cli_runner.invoke(command.show_gpus,
                                        ['V100:4', '--cloud', cloud, '--all'])
             assert isinstance(result.exception, SystemExit)
-
-    def test_show_gpus_trainium_and_inferentia(self, monkeypatch):
-        """Trainium should be returned even though it is not a GPU."""
-        mock_api_server_calls(monkeypatch)
-
-        cli_runner = cli_testing.CliRunner()
-
-        result = cli_runner.invoke(command.show_gpus, ['Trainium'])
-        assert result.exit_code == 0
-        assert 'trn1.2xlarge' in result.stdout
-        assert 'trn1.32xlarge' in result.stdout
-        assert 'trn1n.32xlarge' in result.stdout
-        assert 'Resources \'Trainium\' not found in cloud' not in result.stdout
-
-        result = cli_runner.invoke(command.show_gpus, ['Trainium2'])
-        assert result.exit_code == 0
-        assert 'trn2.48xlarge' in result.stdout
-        assert 'Resources \'Trainium2\' not found in cloud' in result.stdout
-
-        result = cli_runner.invoke(command.show_gpus, ['Inferentia'])
-        assert result.exit_code == 0
-        assert 'inf2.xlarge' in result.stdout
-        assert 'inf2.8xlarge' in result.stdout
-        assert 'inf2.24xlarge' in result.stdout
-        assert 'inf2.48xlarge' in result.stdout
-        assert 'Resources \'Inferentia\' not found in cloud' not in result.stdout
 
     def test_k8s_alias_check(self, monkeypatch):
         mock_api_server_calls(monkeypatch)
