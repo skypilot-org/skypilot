@@ -81,7 +81,7 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
         return count
 
     def submit(self, fn: Callable[_P, _T], *args: _P.args,
-               **kwargs: _P.kwargs) -> concurrent.futures.Future[_T]:
+               **kwargs: _P.kwargs) -> 'concurrent.futures.Future[_T]':
         with self._shutdown_lock:
             if self._shutdown:
                 raise RuntimeError(
