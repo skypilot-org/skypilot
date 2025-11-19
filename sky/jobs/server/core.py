@@ -54,6 +54,7 @@ if typing.TYPE_CHECKING:
     from google.protobuf import json_format
 
     import sky
+    from sky import resources
     from sky.schemas.generated import managed_jobsv1_pb2
 else:
     json_format = adaptors_common.LazyImport('google.protobuf.json_format')
@@ -241,13 +242,19 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
 
 
 def _ensure_controller_up(
-    controller: controller_utils.Controllers
+    controller: controller_utils.Controllers,
+    task_resources: Optional[List['resources.Resources']] = None
 ) -> 'cloud_vm_ray_backend.CloudVmRayResourceHandle':
     """Ensure the jobs controller is up before proceeding.
 
     If the controller is not accessible, provision it (bring up the cluster)
     without launching a job. This avoids creating a cluster job ID that would
     interfere with the ID space from the controller's perspective.
+
+    Args:
+        controller: The controller type to ensure is up.
+        task_resources: Optional list of task resources. If provided, the
+            controller will be launched on the same cloud as the tasks.
     """
     try:
         handle = backend_utils.is_controller_accessible(controller=controller,
@@ -262,8 +269,10 @@ def _ensure_controller_up(
 
         # Create a minimal task for provisioning the controller cluster
         # We only use this for its resources, not to execute a job
+        # Use task_resources to determine which cloud to launch the controller.
         controller_resources_set = controller_utils.get_controller_resources(
-            controller=controller, task_resources=[])
+            controller=controller,
+            task_resources=task_resources if task_resources else [])
 
         # Use the jobs controller template to ensure cloud dependencies
         # are installed.
@@ -366,7 +375,14 @@ def _submit_remotely(controller: controller_utils.Controllers,
                      pool: Optional[str] = None,
                      num_jobs: int = 1) -> List[int]:
     # Ensure the controller is up before trying to create job IDs
-    local_handle = _ensure_controller_up(controller)
+    # Use the same cloud as the tasks for the controller
+    task_resources = None
+    for task in dag.tasks:
+        if task.resources:
+            task_resources = list(task.resources)
+            break
+    local_handle = _ensure_controller_up(controller,
+                                         task_resources=task_resources)
     backend = backend_utils.get_backend_from_handle(local_handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
@@ -406,9 +422,6 @@ def _submit_remotely(controller: controller_utils.Controllers,
                                                   resources_str=resources_str,
                                                   metadata_jsons=metadata_jsons,
                                                   num_jobs=num_jobs)
-    logger.debug(f'Created {len(job_ids)} job IDs upfront: '
-                 f'{job_ids} (will use controller task ray job '
-                 f'ID as the {num_jobs}th job).')
     return job_ids
 
 
