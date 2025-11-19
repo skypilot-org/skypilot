@@ -81,7 +81,9 @@ class SlurmClient:
         if job_name is not None:
             cmd += f' -n {job_name}'
 
-        rc, stdout, stderr = self._runner.run(cmd, require_outputs=True)
+        rc, stdout, stderr = self._runner.run(cmd,
+                                              require_outputs=True,
+                                              stream_logs=False)
         subprocess_utils.handle_returncode(rc,
                                            cmd,
                                            'Failed to query Slurm jobs.',
@@ -100,7 +102,9 @@ class SlurmClient:
             CommandError: If the scancel command fails.
         """
         cmd = f'scancel -n {job_name}'
-        rc, stdout, stderr = self._runner.run(cmd, require_outputs=True)
+        rc, stdout, stderr = self._runner.run(cmd,
+                                              require_outputs=True,
+                                              stream_logs=False)
         subprocess_utils.handle_returncode(rc,
                                            cmd,
                                            f'Failed to cancel job {job_name}.',
@@ -120,7 +124,9 @@ class SlurmClient:
             CommandError: If the sinfo command fails.
         """
         cmd = 'sinfo'
-        rc, stdout, stderr = self._runner.run(cmd, require_outputs=True)
+        rc, stdout, stderr = self._runner.run(cmd,
+                                              require_outputs=True,
+                                              stream_logs=False)
         subprocess_utils.handle_returncode(
             rc, cmd, 'Failed to get Slurm cluster information.', stderr=stderr)
         return stdout
@@ -137,7 +143,9 @@ class SlurmClient:
             CommandError: If the sinfo command fails.
         """
         cmd = 'sinfo -N -h -o "%N %t %G"'
-        rc, stdout, stderr = self._runner.run(cmd, require_outputs=True)
+        rc, stdout, stderr = self._runner.run(cmd,
+                                              require_outputs=True,
+                                              stream_logs=False)
         subprocess_utils.handle_returncode(
             rc, cmd, 'Failed to get Slurm node information.', stderr=stderr)
         return stdout.splitlines()
@@ -226,7 +234,9 @@ class SlurmClient:
             f'awk -F= \'{{print $2}}\' | awk \'{{print $1}}\'); '
             f'echo "$node $ip"; '
             f'done')
-        rc, stdout, stderr = self._runner.run(cmd, require_outputs=True)
+        rc, stdout, stderr = self._runner.run(cmd,
+                                              require_outputs=True,
+                                              stream_logs=False)
         subprocess_utils.handle_returncode(
             rc, cmd, f'Failed to get nodes for job {job_id}.', stderr=stderr)
         logger.debug(f'Successfully got nodes for job {job_id}: {stdout}')
@@ -273,7 +283,9 @@ class SlurmClient:
             RuntimeError: If job ID cannot be parsed from sbatch output.
         """
         cmd = f'sbatch --partition={partition} {script_path}'
-        rc, stdout, stderr = self._runner.run(cmd, require_outputs=True)
+        rc, stdout, stderr = self._runner.run(cmd,
+                                              require_outputs=True,
+                                              stream_logs=False)
         subprocess_utils.handle_returncode(rc,
                                            cmd,
                                            'Failed to submit Slurm job.',

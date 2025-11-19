@@ -9,8 +9,10 @@ from paramiko.config import SSHConfig
 from sky import catalog
 from sky import clouds
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import slurm
 from sky.provision.slurm import utils as slurm_utils
+from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -86,18 +88,67 @@ class Slurm(clouds.Cloud):
         yield None
 
     @classmethod
-    def existing_allowed_clusters(cls) -> List[str]:
-        """Get existing allowed clusters."""
+    @annotations.lru_cache(scope='global', maxsize=1)
+    def _log_skipped_clusters_once(cls, skipped_clusters: Tuple[str,
+                                                                 ...]) -> None:
+        """Log skipped clusters for only once.
+
+        We don't directly cache the result of existing_allowed_clusters
+        as the config may update the allowed clusters.
+        """
+        if skipped_clusters:
+            logger.warning(
+                f'Slurm clusters {set(skipped_clusters)!r} specified in '
+                '"allowed_clusters" not found in ~/.slurm/config. '
+                'Ignoring these clusters.')
+
+    @classmethod
+    def existing_allowed_clusters(cls, silent: bool = False) -> List[str]:
+        """Get existing allowed clusters.
+
+        Returns clusters based on the following logic:
+        1. If 'allowed_clusters' is set to 'all' in ~/.sky/config.yaml,
+           return all clusters from ~/.slurm/config
+        2. If specific clusters are listed in 'allowed_clusters',
+           return only those that exist in ~/.slurm/config
+        3. If no configuration is specified, return all clusters
+           from ~/.slurm/config (default behavior)
+        """
         all_clusters = slurm_utils.get_all_slurm_cluster_names()
         if len(all_clusters) == 0:
             return []
 
         all_clusters = set(all_clusters)
 
-        # TOWO(jwj): Add conditions to filter existing allowed clusters if any.
+        # Workspace-level allowed_clusters should take precedence over
+        # the global allowed_clusters.
+        allowed_clusters = skypilot_config.get_workspace_cloud(
+            'slurm').get('allowed_clusters', None)
+        if allowed_clusters is None:
+            allowed_clusters = skypilot_config.get_effective_region_config(
+                cloud='slurm',
+                region=None,
+                keys=('allowed_clusters',),
+                default_value=None)
+
+        allow_all_clusters = allowed_clusters == 'all'
+        if allow_all_clusters:
+            allowed_clusters = list(all_clusters)
+
+        if allowed_clusters is None:
+            # Default to all clusters if no configuration is specified
+            allowed_clusters = list(all_clusters)
+
         existing_clusters = []
-        for cluster in all_clusters:
-            existing_clusters.append(cluster)
+        skipped_clusters = []
+        for cluster in allowed_clusters:
+            if cluster in all_clusters:
+                existing_clusters.append(cluster)
+            else:
+                skipped_clusters.append(cluster)
+
+        if not silent:
+            cls._log_skipped_clusters_once(tuple(sorted(skipped_clusters)))
 
         return existing_clusters
 
@@ -264,8 +315,21 @@ class Slurm(clouds.Cloud):
         """Returns a list of feasible resources for the given resources."""
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
+            # Check if the instance type is available in at least one cluster
+            available_regions = self.regions_with_offering(
+                resources.instance_type,
+                accelerators=None,
+                use_spot=resources.use_spot,
+                region=resources.region,
+                zone=resources.zone)
+            if not available_regions:
+                return resources_utils.FeasibleResources([], [], None)
+            
+            # Return a single resource without region set.
+            # The optimizer will call make_launchables_for_valid_region_zones()
+            # which will create one resource per region/cluster.
             resources = resources.copy(accelerators=None)
-            return ([resources], [])
+            return resources_utils.FeasibleResources([resources], [], None)
 
         def _make(instance_list):
             resource_list = []
@@ -325,11 +389,19 @@ class Slurm(clouds.Cloud):
                                                  [], None)
 
     @classmethod
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to the Slurm cluster."""
         ssh_config = SSHConfig.from_path(os.path.expanduser(CREDENTIAL_PATH))
         existing_allowed_clusters = cls.existing_allowed_clusters()
 
+        if not existing_allowed_clusters:
+            return (False, 'No SLURM clusters found in ~/.slurm/config. '
+                    'Please configure at least one SLURM cluster.')
+
+        # Check credentials for each cluster and return ctx2text mapping
+        ctx2text = {}
+        success = False
         for cluster in existing_allowed_clusters:
             # Retrieve the config options for a given SlurmctldHost name alias.
             ssh_config_dict = ssh_config.lookup(cluster)
@@ -343,10 +415,14 @@ class Slurm(clouds.Cloud):
                     ssh_proxy_command=ssh_config_dict.get('proxycommand', None))
                 info = client.info()
                 logger.debug(f'Slurm cluster {cluster} sinfo: {info}')
-                return (True, '')
+                ctx2text[cluster] = 'enabled'
+                success = True
             except Exception as e:  # pylint: disable=broad-except
-                return (False, f'Credential check failed for {cluster}: '
-                        f'{common_utils.format_exception(e)}')
+                error_msg = (f'Credential check failed: '
+                             f'{common_utils.format_exception(e)}')
+                ctx2text[cluster] = f'disabled. {error_msg}'
+
+        return success, ctx2text
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         ########
@@ -375,3 +451,15 @@ class Slurm(clouds.Cloud):
                                       zone: Optional[str] = None) -> bool:
         return catalog.accelerator_in_region_or_zone(accelerator, acc_count,
                                                      region, zone, 'slurm')
+
+    @classmethod
+    def expand_infras(cls) -> List[str]:
+        """Returns a list of enabled SLURM clusters.
+
+        Each cluster is returned as 'Slurm/cluster-name' to be displayed
+        as a separate option in the optimizer.
+        """
+        return [
+            f'{cls.canonical_name()}/{c}'
+            for c in cls.existing_allowed_clusters(silent=True)
+        ]
