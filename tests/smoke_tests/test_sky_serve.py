@@ -1375,12 +1375,15 @@ def test_skyserve_log_expansion_no_duplicates():
             'echo "$log_output"; '
             'echo "=== End of log output ==="; '
             # Extract the path from the line that matches "Service <name> logs: <path>"
-            # Use sed to extract the path after "logs: " and before any color codes or newlines
-            f'log_dir=$(echo "$log_output" | sed -n "s/.*{name} logs: \\([^[:space:]]*\\).*/\\1/p" | head -1); '
+            # The output format is: "Service <name> logs: <path>" (may have log prefixes)
+            f'log_dir=$(echo "$log_output" | grep -oE "{name} logs: [^[:space:]]+" | sed "s/{name} logs: //" | head -1); '
+            'echo "Extracted log_dir: [$log_dir]"; '
             'if [ -z "$log_dir" ]; then '
             '  echo "ERROR: Failed to extract log directory from output: $log_output"; exit 1; '
             'fi; '
             'log_file="$log_dir/replica-1.log"; '
+            'echo "Looking for log file: $log_file"; '
+            'ls -la "$log_dir" || echo "Directory listing failed"; '
             'if [ ! -f "$log_file" ]; then '
             '  echo "ERROR: Log file not found at $log_file"; exit 1; '
             'fi; '
