@@ -22,8 +22,7 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-DEFAULT_SLURM_PATH = '~/.slurm/config'
-CREDENTIAL_PATH = DEFAULT_SLURM_PATH
+CREDENTIAL_PATH = slurm_utils.DEFAULT_SLURM_PATH
 
 
 @registry.CLOUD_REGISTRY.register
@@ -220,7 +219,7 @@ class Slurm(clouds.Cloud):
         assert cluster is not None, 'No available Slurm cluster found.'
 
         # cluster is our target slurmctld host.
-        ssh_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
+        ssh_config = SSHConfig.from_path(os.path.expanduser(CREDENTIAL_PATH))
         ssh_config_dict = ssh_config.lookup(cluster)
 
         r = resources
@@ -328,7 +327,7 @@ class Slurm(clouds.Cloud):
     @classmethod
     def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to the Slurm cluster."""
-        ssh_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
+        ssh_config = SSHConfig.from_path(os.path.expanduser(CREDENTIAL_PATH))
         existing_allowed_clusters = cls.existing_allowed_clusters()
 
         for cluster in existing_allowed_clusters:

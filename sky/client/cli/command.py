@@ -3534,6 +3534,7 @@ def check(infra_list: Tuple[str],
     help=
     ('The region to use. If not specified, shows accelerators from all regions.'
     ),
+    hidden=True,
 )
 @click.option(
     '--all-regions',
@@ -3541,14 +3542,15 @@ def check(infra_list: Tuple[str],
     default=False,
     help='Show pricing and instance details for a specified accelerator across '
     'all regions and clouds.')
-@service_catalog.fallback_to_default_catalog
+@catalog.fallback_to_default_catalog
 @usage_lib.entrypoint
 def show_gpus(
         accelerator_str: Optional[str],
         all: bool,  # pylint: disable=redefined-builtin
+        infra: Optional[str],
         cloud: Optional[str],
         region: Optional[str],
-        all_regions: Optional[bool]):
+        all_regions: bool):
     """Show supported GPU/TPU/accelerators and their prices.
 
     The names and counts shown can be set in the ``accelerators`` field in task
@@ -3585,16 +3587,28 @@ def show_gpus(
 
     * ``HOST_MEM``: Memory of the host instance (VM).
 
-    * ``QTY_PER_NODE`` (Kubernetes/Slurm only): GPU quantities that can be
-      requested on a single node.
+    * ``QTY_PER_NODE`` (Kubernetes only): GPU quantities that can be requested
+      on a single node.
 
-    * ``TOTAL_GPUS`` (Kubernetes/Slurm only): Total number of GPUs available in
-      the cluster.
-
-    * ``TOTAL_FREE_GPUS`` (Kubernetes/Slurm only): Number of currently free GPUs
-      in the cluster. This is fetched in real-time and may change
-      when other users are using the cluster.
+    * ``UTILIZATION`` (Kubernetes only): Total number of GPUs free / available
+      in the Kubernetes cluster.
     """
+    cloud, region, _ = _handle_infra_cloud_region_zone_options(infra,
+                                                               cloud,
+                                                               region,
+                                                               zone=None)
+
+    # cloud and region could be '*' from _handle_infra_cloud_region_zone_options
+    # which normally indicates to
+    # _make_task_or_dag_from_entrypoint_with_overrides -> _parse_override_params
+    # to disregard the cloud and region from the YAML.
+    # In show_gpus, there is no YAML, so we need to handle the '*' value
+    # directly here. We should use None instead to indicate "any".
+    if cloud == '*':
+        cloud = None
+    if region == '*':
+        region = None
+
     # validation for the --region flag
     if region is not None and cloud is None:
         raise click.UsageError(
@@ -3618,55 +3632,74 @@ def show_gpus(
 
     # Kubernetes specific bools
     enabled_clouds = sdk.get(sdk.enabled_clouds())
-    cloud_is_kubernetes = isinstance(cloud_obj, clouds.Kubernetes)
+    cloud_is_kubernetes = isinstance(
+        cloud_obj, clouds.Kubernetes) and not isinstance(cloud_obj, clouds.SSH)
+    cloud_is_ssh = isinstance(cloud_obj, clouds.SSH)
     cloud_is_slurm = isinstance(cloud_obj, clouds.Slurm)
+
     # TODO(romilb): We should move this to the backend.
-    kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type() is not None
-    kubernetes_is_enabled = clouds.cloud_in_iterable(
-        clouds.Kubernetes(),
-        enabled_clouds,
-    )
-    slurm_is_enabled = clouds.cloud_in_iterable(
-        clouds.Slurm(),
-        enabled_clouds,
-    )
+    kubernetes_autoscaling = skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=region,
+        keys=('autoscaler',),
+        default_value=None) is not None
+    kubernetes_is_enabled = clouds.Kubernetes.canonical_name() in enabled_clouds
+    ssh_is_enabled = clouds.SSH.canonical_name() in enabled_clouds
+    slurm_is_enabled = clouds.Slurm.canonical_name() in enabled_clouds
+    query_k8s_realtime_gpu = (kubernetes_is_enabled and
+                              (cloud_name is None or cloud_is_kubernetes))
+    query_ssh_realtime_gpu = (ssh_is_enabled and
+                              (cloud_name is None or cloud_is_ssh))
 
     def _list_to_str(lst):
-        return ', '.join([str(e) for e in lst])
+
+        def format_number(n):
+            # If it's a float that's a whole number, display as int
+            if isinstance(n, float) and n.is_integer():
+                return str(int(n))
+            return str(n)
+
+        return ', '.join([format_number(n) for n in lst])
 
     # TODO(zhwu,romilb): We should move most of these kubernetes related
     # queries into the backend, especially behind the server.
     def _get_kubernetes_realtime_gpu_tables(
         context: Optional[str] = None,
         name_filter: Optional[str] = None,
-        quantity_filter: Optional[int] = None
+        quantity_filter: Optional[int] = None,
+        is_ssh: bool = False,
     ) -> Tuple[List[Tuple[str, 'prettytable.PrettyTable']],
                Optional['prettytable.PrettyTable'], List[Tuple[
                    str, 'models.KubernetesNodesInfo']]]:
         if quantity_filter:
             qty_header = 'QTY_FILTER'
-            free_header = 'FILTERED_FREE_GPUS'
         else:
             qty_header = 'REQUESTABLE_QTY_PER_NODE'
-            free_header = 'TOTAL_FREE_GPUS'
 
         realtime_gpu_availability_lists = sdk.stream_and_get(
             sdk.realtime_kubernetes_gpu_availability(
                 context=context,
                 name_filter=name_filter,
-                quantity_filter=quantity_filter))
+                quantity_filter=quantity_filter,
+                is_ssh=is_ssh))
         if not realtime_gpu_availability_lists:
-            err_msg = 'No GPUs found in any allowed Kubernetes cluster. '
-            debug_msg = 'To further debug, run: sky check '
+            # Customize message based on context
+            identity = ('SSH Node Pool'
+                        if is_ssh else 'any allowed Kubernetes cluster')
+            cloud_name = 'ssh' if is_ssh else 'kubernetes'
+            err_msg = f'No GPUs found in {identity}. '
+            debug_msg = (f'To further debug, run: sky check {cloud_name}')
             if name_filter is not None:
                 gpu_info_msg = f' {name_filter!r}'
                 if quantity_filter is not None:
                     gpu_info_msg += (' with requested quantity'
                                      f' {quantity_filter}')
                 err_msg = (f'Resources{gpu_info_msg} not found '
-                           'in any allowed Kubernetes cluster. ')
-                debug_msg = ('To show available accelerators on kubernetes,'
-                             ' run: sky show-gpus --cloud kubernetes ')
+                           f'in {identity}. ')
+                identity_short = 'SSH Node Pool' if is_ssh else 'Kubernetes'
+                debug_msg = (
+                    f'To show available accelerators in {identity_short}, '
+                    f'run: sky show-gpus --cloud {cloud_name}')
             full_err_msg = (err_msg + kubernetes_constants.NO_GPU_HELP_MESSAGE +
                             debug_msg)
             raise ValueError(full_err_msg)
@@ -3676,17 +3709,25 @@ def show_gpus(
             lambda: [0, 0])
         all_nodes_info = []
 
+        # display an aggregated table for all contexts
+        # if there are more than one contexts with GPUs.
+        def _filter_ctx(ctx: str) -> bool:
+            ctx_is_ssh = ctx and ctx.startswith('ssh-')
+            return ctx_is_ssh is is_ssh
+
+        num_filtered_contexts = 0
+
         if realtime_gpu_availability_lists:
-            if len(realtime_gpu_availability_lists[0]) != 2:
-                # TODO(kyuds): for backwards compatibility, as we add new
-                # context to the API server response in #5362. Remove this after
-                # 0.10.0.
-                realtime_gpu_availability_lists = [
-                    (context, realtime_gpu_availability_lists)
-                ]
             for (ctx, availability_list) in realtime_gpu_availability_lists:
+                if not _filter_ctx(ctx):
+                    continue
+                if is_ssh:
+                    display_ctx = common_utils.removeprefix(ctx, 'ssh-')
+                else:
+                    display_ctx = ctx
+                num_filtered_contexts += 1
                 realtime_gpu_table = log_utils.create_table(
-                    ['GPU', qty_header, 'TOTAL_GPUS', free_header])
+                    ['GPU', qty_header, 'UTILIZATION'])
                 for realtime_gpu_availability in sorted(availability_list):
                     gpu_availability = models.RealtimeGpuAvailability(
                         *realtime_gpu_availability)
@@ -3696,8 +3737,7 @@ def show_gpus(
                     realtime_gpu_table.add_row([
                         gpu_availability.gpu,
                         _list_to_str(gpu_availability.counts),
-                        gpu_availability.capacity,
-                        available_qty,
+                        f'{available_qty} of {gpu_availability.capacity} free',
                     ])
                     gpu = gpu_availability.gpu
                     capacity = gpu_availability.capacity
@@ -3706,19 +3746,17 @@ def show_gpus(
                     if capacity > 0:
                         total_gpu_info[gpu][0] += capacity
                         total_gpu_info[gpu][1] += available
-                realtime_gpu_infos.append((ctx, realtime_gpu_table))
+                realtime_gpu_infos.append((display_ctx, realtime_gpu_table))
                 # Collect node info for this context
                 nodes_info = sdk.stream_and_get(
                     sdk.kubernetes_node_info(context=ctx))
-                all_nodes_info.append((ctx, nodes_info))
-
-        # display an aggregated table for all contexts
-        # if there are more than one contexts with GPUs
-        if len(realtime_gpu_infos) > 1:
+                all_nodes_info.append((display_ctx, nodes_info))
+        if num_filtered_contexts > 1:
             total_realtime_gpu_table = log_utils.create_table(
-                ['GPU', 'TOTAL_GPUS', free_header])
+                ['GPU', 'UTILIZATION'])
             for gpu, stats in total_gpu_info.items():
-                total_realtime_gpu_table.add_row([gpu, stats[0], stats[1]])
+                total_realtime_gpu_table.add_row(
+                    [gpu, f'{stats[1]} of {stats[0]} free'])
         else:
             total_realtime_gpu_table = None
 
@@ -3802,10 +3840,11 @@ def show_gpus(
         return realtime_gpu_infos, total_realtime_gpu_table
 
     def _format_kubernetes_node_info_combined(
-            contexts_info: List[Tuple[str,
-                                      'models.KubernetesNodesInfo']]) -> str:
+            contexts_info: List[Tuple[str, 'models.KubernetesNodesInfo']],
+            cloud_str: str = 'Kubernetes',
+            context_title_str: str = 'CONTEXT') -> str:
         node_table = log_utils.create_table(
-            ['CONTEXT', 'NODE_NAME', 'GPU_NAME', 'TOTAL_GPUS', 'FREE_GPUS'])
+            [context_title_str, 'NODE', 'GPU', 'UTILIZATION'])
 
         no_permissions_str = '<no permissions>'
         hints = []
@@ -3824,10 +3863,11 @@ def show_gpus(
                     acc_type = '-'
                 node_table.add_row([
                     context_name, node_name, acc_type,
-                    node_info.total['accelerator_count'], available
+                    f'{available} of {node_info.total["accelerator_count"]} '
+                    'free'
                 ])
 
-        k8s_per_node_acc_message = ('Kubernetes per-node GPU availability')
+        k8s_per_node_acc_message = (f'{cloud_str} per-node GPU availability')
         if hints:
             k8s_per_node_acc_message += ' (' + '; '.join(hints) + ')'
 
@@ -3838,8 +3878,11 @@ def show_gpus(
 
     def _format_slurm_node_info() -> str:
         node_table = log_utils.create_table([
-            'NODE_NAME', 'PARTITION', 'STATE', 'GPU_NAME', 'TOTAL_GPUS',
-            'FREE_GPUS'
+            'NODE_NAME',
+            'PARTITION',
+            'STATE',
+            'GPU_NAME',
+            'UTILIZATION',
         ])
 
         nodes_info = sdk.stream_and_get(sdk.slurm_node_info())
@@ -3850,8 +3893,7 @@ def show_gpus(
                 node_info.get('partition', '-'),
                 node_info.get('node_state'),
                 node_info.get('gpu_type', '-'),
-                node_info.get('total_gpus', 0),
-                node_info.get('free_gpus', 0),
+                f'{node_info.get("free_gpus", 0)} of {node_info.get("total_gpus", 0)} free',
             ])
 
         slurm_per_node_msg = 'Slurm per node accelerator availability'
@@ -3863,32 +3905,133 @@ def show_gpus(
                 f'{node_table.get_string()}')
 
     def _format_kubernetes_realtime_gpu(
-            total_table: 'prettytable.PrettyTable',
+            total_table: Optional['prettytable.PrettyTable'],
             k8s_realtime_infos: List[Tuple[str, 'prettytable.PrettyTable']],
             all_nodes_info: List[Tuple[str, 'models.KubernetesNodesInfo']],
-            show_node_info: bool) -> Generator[str, None, None]:
+            show_node_info: bool, is_ssh: bool) -> Generator[str, None, None]:
+        identity = 'SSH Node Pool' if is_ssh else 'Kubernetes'
         yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
-               'Kubernetes GPUs'
-               f'{colorama.Style.RESET_ALL}\n')
+               f'{identity} GPUs'
+               f'{colorama.Style.RESET_ALL}')
         # print total table
         if total_table is not None:
-            yield from total_table.get_string()
             yield '\n'
+            yield from total_table.get_string()
+
+        ctx_name = 'SSH Node Pool' if is_ssh else 'Context'
+        ctx_column_title = 'NODE_POOL' if is_ssh else 'CONTEXT'
 
         # print individual infos.
         for (ctx, k8s_realtime_table) in k8s_realtime_infos:
+            yield '\n'
             # Print context header separately
             if ctx:
-                context_str = f'Context: {ctx}'
+                context_str = f'{ctx_name}: {ctx}'
             else:
-                context_str = 'Default Context'
+                context_str = f'Default {ctx_name}'
             yield (
                 f'{colorama.Fore.CYAN}{context_str}{colorama.Style.RESET_ALL}\n'
             )
             yield from k8s_realtime_table.get_string()
-            yield '\n'
+
         if show_node_info:
-            yield _format_kubernetes_node_info_combined(all_nodes_info)
+            yield '\n'
+            yield _format_kubernetes_node_info_combined(all_nodes_info,
+                                                        identity,
+                                                        ctx_column_title)
+
+    def _possibly_show_k8s_like_realtime(
+            is_ssh: bool = False
+    ) -> Generator[str, None, Tuple[bool, bool, str]]:
+        # If cloud is kubernetes, we want to show real-time capacity
+        k8s_messages = ''
+        print_section_titles = False
+        if (is_ssh and query_ssh_realtime_gpu or query_k8s_realtime_gpu):
+            context = region
+
+            try:
+                # If --cloud kubernetes is not specified, we want to catch
+                # the case where no GPUs are available on the cluster and
+                # print the warning at the end.
+                k8s_realtime_infos, total_table, all_nodes_info = (
+                    _get_kubernetes_realtime_gpu_tables(context, is_ssh=is_ssh))
+            except ValueError as e:
+                if not (cloud_is_kubernetes or cloud_is_ssh):
+                    # Make it a note if cloud is not kubernetes
+                    k8s_messages += 'Note: '
+                k8s_messages += str(e)
+            else:
+                print_section_titles = True
+
+                yield from _format_kubernetes_realtime_gpu(total_table,
+                                                           k8s_realtime_infos,
+                                                           all_nodes_info,
+                                                           show_node_info=True,
+                                                           is_ssh=is_ssh)
+
+            if kubernetes_autoscaling:
+                k8s_messages += ('\n' +
+                                 kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
+        if is_ssh:
+            if cloud_is_ssh:
+                if not ssh_is_enabled:
+                    yield ('SSH Node Pools are not enabled. To fix, run: '
+                           'sky check ssh ')
+                yield k8s_messages
+                return True, print_section_titles, ''
+        else:
+            if cloud_is_kubernetes:
+                if not kubernetes_is_enabled:
+                    yield ('Kubernetes is not enabled. To fix, run: '
+                           'sky check kubernetes ')
+                yield k8s_messages
+                return True, print_section_titles, ''
+        return False, print_section_titles, k8s_messages
+
+    def _possibly_show_k8s_like_realtime_for_acc(
+            name: Optional[str],
+            quantity: Optional[int],
+            is_ssh: bool = False) -> Generator[str, None, Tuple[bool, bool]]:
+        k8s_messages = ''
+        print_section_titles = False
+        if (is_ssh and query_ssh_realtime_gpu or
+                query_k8s_realtime_gpu) and not show_all:
+            print_section_titles = True
+            # TODO(romilb): Show filtered per node GPU availability here as well
+            try:
+                (k8s_realtime_infos, total_table,
+                 all_nodes_info) = _get_kubernetes_realtime_gpu_tables(
+                     context=region,
+                     name_filter=name,
+                     quantity_filter=quantity,
+                     is_ssh=is_ssh)
+
+                yield from _format_kubernetes_realtime_gpu(total_table,
+                                                           k8s_realtime_infos,
+                                                           all_nodes_info,
+                                                           show_node_info=False,
+                                                           is_ssh=is_ssh)
+            except ValueError as e:
+                # In the case of a specific accelerator, show the error message
+                # immediately (e.g., "Resources H100 not found ...")
+                yield common_utils.format_exception(e, use_bracket=True)
+            if kubernetes_autoscaling:
+                k8s_messages += ('\n' +
+                                 kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
+            yield k8s_messages
+        if is_ssh:
+            if cloud_is_ssh:
+                if not ssh_is_enabled:
+                    yield ('SSH Node Pools are not enabled. To fix, run: '
+                           'sky check ssh ')
+                return True, print_section_titles
+        else:
+            if cloud_is_kubernetes:
+                if not kubernetes_is_enabled:
+                    yield ('Kubernetes is not enabled. To fix, run: '
+                           'sky check kubernetes ')
+                return True, print_section_titles
+        return False, print_section_titles
 
     def _format_slurm_realtime_gpu(
             total_table, slurm_realtime_infos,
@@ -3903,7 +4046,7 @@ def show_gpus(
 
         # print individual infos.
         for (partition, slurm_realtime_table) in slurm_realtime_infos:
-            partition_str = f'Partition: {partition}'
+            partition_str = f'Slurm Cluster: {partition}'
             yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'{partition_str}'
                    f'{colorama.Style.RESET_ALL}\n')
@@ -3922,58 +4065,38 @@ def show_gpus(
 
         name, quantity = None, None
 
-        # Optimization - do not poll for Kubernetes/Slurm API for fetching
+        # Optimization - do not poll for Kubernetes API for fetching
         # common GPUs because that will be fetched later for the table after
         # common GPUs.
         clouds_to_list: Union[Optional[str], List[str]] = cloud_name
         if cloud_name is None:
             clouds_to_list = [
-                c for c in service_catalog.ALL_CLOUDS
-                if c not in ['kubernetes', 'slurm']
+                c for c in constants.ALL_CLOUDS
+                if c != 'kubernetes' and c != 'ssh' and c != 'slurm'
             ]
 
         k8s_messages = ''
         slurm_messages = ''
         k8s_printed = False
         if accelerator_str is None:
-            # Collect k8s/slurm related messages and print them at end
+            # Collect k8s related messages in k8s_messages and print them at end
             print_section_titles = False
-            # If cloud is kubernetes, we want to show real-time capacity
-            if kubernetes_is_enabled and (cloud_name is None or
-                                          cloud_is_kubernetes):
-                context = region
-
-                try:
-                    # If --cloud kubernetes is not specified, we want to catch
-                    # the case where no GPUs are available on the cluster and
-                    # print the warning at the end.
-                    k8s_realtime_infos, total_table, all_nodes_info = _get_kubernetes_realtime_gpu_tables(context)  # pylint: disable=line-too-long
-                except ValueError as e:
-                    if not cloud_is_kubernetes:
-                        # Make it a note if cloud is not kubernetes
-                        k8s_messages += 'Note: '
-                    k8s_messages += str(e)
-                else:
-                    print_section_titles = True
-
-                    yield from _format_kubernetes_realtime_gpu(
-                        total_table,
-                        k8s_realtime_infos,
-                        all_nodes_info,
-                        show_node_info=True)
-                    k8s_printed = True
-
-                if kubernetes_autoscaling:
-                    k8s_messages += (
-                        '\n' + kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
-            if cloud_is_kubernetes:
-                # Do not show clouds if --cloud kubernetes is specified
-                if not kubernetes_is_enabled:
-                    yield ('Kubernetes is not enabled. To fix, run: '
-                           'sky check kubernetes ')
-                yield k8s_messages
+            stop_iter = False
+            k8s_messages = ''
+            prev_print_section_titles = False
+            for is_ssh in [False, True]:
+                if prev_print_section_titles:
+                    yield '\n\n'
+                stop_iter_one, print_section_titles_one, k8s_messages_one = (
+                    yield from _possibly_show_k8s_like_realtime(is_ssh))
+                k8s_printed = True
+                stop_iter = stop_iter or stop_iter_one
+                print_section_titles = (print_section_titles or
+                                        print_section_titles_one)
+                k8s_messages += k8s_messages_one
+                prev_print_section_titles = print_section_titles_one
+            if stop_iter:
                 return
-
             # If cloud is slurm, we want to show real-time capacity
             if slurm_is_enabled and (cloud_name is None or cloud_is_slurm):
                 try:
@@ -4004,8 +4127,8 @@ def show_gpus(
                 yield slurm_messages
                 return
 
-            # For show_all, show the k8s/slurm message at the start since output
-            # is long and the user may not scroll to the end.
+            # For show_all, show the k8s message at the start since output is
+            # long and the user may not scroll to the end.
             if show_all and (k8s_messages or slurm_messages):
                 if k8s_messages:
                     yield k8s_messages
@@ -4015,7 +4138,7 @@ def show_gpus(
                     yield slurm_messages
                 yield '\n\n'
 
-            result = sdk.stream_and_get(
+            list_accelerator_counts_result = sdk.stream_and_get(
                 sdk.list_accelerator_counts(
                     gpus_only=True,
                     clouds=clouds_to_list,
@@ -4031,15 +4154,21 @@ def show_gpus(
                        f'Cloud GPUs{colorama.Style.RESET_ALL}\n')
 
             # "Common" GPUs
-            for gpu in service_catalog.get_common_gpus():
-                if gpu in result:
-                    gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
+            for gpu in catalog.get_common_gpus():
+                if gpu in list_accelerator_counts_result:
+                    gpu_table.add_row([
+                        gpu,
+                        _list_to_str(list_accelerator_counts_result.pop(gpu))
+                    ])
             yield from gpu_table.get_string()
 
             # Google TPUs
-            for tpu in service_catalog.get_tpus():
-                if tpu in result:
-                    tpu_table.add_row([tpu, _list_to_str(result.pop(tpu))])
+            for tpu in catalog.get_tpus():
+                if tpu in list_accelerator_counts_result:
+                    tpu_table.add_row([
+                        tpu,
+                        _list_to_str(list_accelerator_counts_result.pop(tpu))
+                    ])
             if tpu_table.get_string():
                 yield '\n\n'
             yield from tpu_table.get_string()
@@ -4047,7 +4176,7 @@ def show_gpus(
             # Other GPUs
             if show_all:
                 yield '\n\n'
-                for gpu, qty in sorted(result.items()):
+                for gpu, qty in sorted(list_accelerator_counts_result.items()):
                     other_table.add_row([gpu, _list_to_str(qty)])
                 yield from other_table.get_string()
                 yield '\n\n'
@@ -4082,34 +4211,19 @@ def show_gpus(
                 name, quantity = accelerator_str, None
 
         print_section_titles = False
-        if (kubernetes_is_enabled and
-            (cloud_name is None or cloud_is_kubernetes) and not show_all):
-            # Print section title if not showing all and instead a specific
-            # accelerator is requested
-            print_section_titles = True
-            # TODO(romilb): Show filtered per node GPU availability here as well
-            try:
-                (k8s_realtime_infos, total_table,
-                 all_nodes_info) = _get_kubernetes_realtime_gpu_tables(
-                     context=region, name_filter=name, quantity_filter=quantity)
-
-                yield from _format_kubernetes_realtime_gpu(total_table,
-                                                           k8s_realtime_infos,
-                                                           all_nodes_info,
-                                                           show_node_info=False)
-            except ValueError as e:
-                # In the case of a specific accelerator, show the error message
-                # immediately (e.g., "Resources H100 not found ...")
-                yield common_utils.format_exception(e, use_bracket=True)
-            if kubernetes_autoscaling:
-                k8s_messages += ('\n' +
-                                 kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
-            yield k8s_messages
-        if cloud_is_kubernetes:
-            # Do not show clouds if --cloud kubernetes is specified
-            if not kubernetes_is_enabled:
-                yield ('Kubernetes is not enabled. To fix, run: '
-                       'sky check kubernetes ')
+        stop_iter = False
+        prev_print_section_titles = False
+        for is_ssh in [False, True]:
+            if prev_print_section_titles:
+                yield '\n\n'
+            stop_iter_one, print_section_titles_one = (
+                yield from _possibly_show_k8s_like_realtime_for_acc(
+                    name, quantity, is_ssh))
+            stop_iter = stop_iter or stop_iter_one
+            print_section_titles = (print_section_titles or
+                                    print_section_titles_one)
+            prev_print_section_titles = print_section_titles_one
+        if stop_iter:
             return
 
         # Handle Slurm filtering by name and quantity
@@ -4137,10 +4251,9 @@ def show_gpus(
                 yield ('Slurm is not enabled. To fix, run: '
                        'sky check slurm ')
             return
-
         # For clouds other than Kubernetes, get the accelerator details
         # Case-sensitive
-        result = sdk.stream_and_get(
+        list_accelerators_result = sdk.stream_and_get(
             sdk.list_accelerators(gpus_only=True,
                                   name_filter=name,
                                   quantity_filter=quantity,
@@ -4150,14 +4263,14 @@ def show_gpus(
                                   all_regions=all_regions))
         # Import here to save module load speed.
         # pylint: disable=import-outside-toplevel,line-too-long
-        from sky.clouds.service_catalog import common as catalog_common
+        from sky.catalog import common as catalog_common
 
         # For each gpu name (count not included):
         #   - Group by cloud
         #   - Sort within each group by prices
         #   - Sort groups by each cloud's (min price, min spot price)
-        new_result = {}
-        for i, (gpu, items) in enumerate(result.items()):
+        new_result: Dict[str, List[catalog_common.InstanceTypeInfo]] = {}
+        for i, (gpu, items) in enumerate(list_accelerators_result.items()):
             df = pd.DataFrame([t._asdict() for t in items])
             # Determine the minimum prices for each cloud.
             min_price_df = df.groupby('cloud').agg(min_price=('price', 'min'),
@@ -4175,14 +4288,14 @@ def show_gpus(
                 for row in df.to_records(index=False)
             ]
             new_result[gpu] = sorted_dataclasses
-        result = new_result
+        list_accelerators_result = new_result
 
         if print_section_titles and not show_all:
             yield '\n\n'
             yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'Cloud GPUs{colorama.Style.RESET_ALL}\n')
 
-        if not result:
+        if not list_accelerators_result:
             quantity_str = (f' with requested quantity {quantity}'
                             if quantity else '')
             cloud_str = f' on {cloud_obj}.' if cloud_name else ' in cloud catalogs.'
@@ -4190,7 +4303,7 @@ def show_gpus(
             yield 'To show available accelerators, run: sky show-gpus --all'
             return
 
-        for i, (gpu, items) in enumerate(result.items()):
+        for i, (gpu, items) in enumerate(list_accelerators_result.items()):
             accelerator_table_headers = [
                 'GPU',
                 'QTY',

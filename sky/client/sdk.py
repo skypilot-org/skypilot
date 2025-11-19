@@ -2758,6 +2758,7 @@ def api_logout() -> None:
     logger.info(f'{colorama.Fore.GREEN}Logged out of SkyPilot API server.'
                 f'{colorama.Style.RESET_ALL}')
 
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
@@ -2778,19 +2779,19 @@ def realtime_slurm_gpu_availability(
         name_filter=name_filter,
         quantity_filter=quantity_filter,
     )
-    body_json = json.loads(body.model_dump_json())
-
-    response = requests.post(
-        f'{server_common.get_server_url()}/slurm_gpu_availability',
-        json=body_json,
-        cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/slurm_gpu_availability',
+        json=json.loads(body.model_dump_json()),
+    )
     return server_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def slurm_node_info() -> server_common.RequestId:
+def slurm_node_info(
+        slurm_cluster_name: Optional[str] = None) -> server_common.RequestId:
     """Gets the resource information for all nodes in the Slurm cluster.
 
     Returns:
@@ -2801,6 +2802,11 @@ def slurm_node_info() -> server_common.RequestId:
             for a single Slurm node (node_name, partition, node_state,
             gpu_type, total_gpus, free_gpus, vcpu_count, memory_gb).
     """
-    response = requests.get(f'{server_common.get_server_url()}/slurm_node_info',
-                            cookies=server_common.get_api_cookie_jar())
+    body = payloads.SlurmNodeInfoRequestBody(
+        slurm_cluster_name=slurm_cluster_name)
+    response = server_common.make_authenticated_request(
+        'GET',
+        '/slurm_node_info',
+        json=json.loads(body.model_dump_json()),
+    )
     return server_common.get_request_id(response)

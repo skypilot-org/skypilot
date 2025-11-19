@@ -666,6 +666,11 @@ class KubernetesNodeInfoRequestBody(RequestBody):
     context: Optional[str] = None
 
 
+class SlurmNodeInfoRequestBody(RequestBody):
+    """The request body for the slurm node info endpoint."""
+    slurm_cluster_name: Optional[str] = None
+
+
 class ListAcceleratorsBody(RequestBody):
     """The request body for the list accelerators endpoint."""
     gpus_only: bool = True

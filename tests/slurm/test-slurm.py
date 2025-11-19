@@ -67,7 +67,7 @@ def main():
         # Note: The current core.slurm_gpu_availability doesn't accept partition_filter directly.
         # It relies on the service_catalog layer to handle it.
         # We pass name and quantity filters as they might be used internally.
-        gpu_availability = sky_core.slurm_gpu_availability(
+        gpu_availability = sky_core.realtime_slurm_gpu_availability(
             name_filter=args.name_filter,
             quantity_filter=args.quantity_filter,
             # partition_filter=args.partition_filter # Pass if core function signature changes

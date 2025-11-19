@@ -14,9 +14,6 @@ import Link from 'next/link';
 // Refresh interval in milliseconds
 export const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 
-// Refresh interval in milliseconds
-export const REFRESH_INTERVAL = 30000;
-
 function capitalizeFirstWord(text) {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
