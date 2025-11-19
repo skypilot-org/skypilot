@@ -265,7 +265,7 @@ def _ensure_controller_up(
         controller_resources_set = controller_utils.get_controller_resources(
             controller=controller, task_resources=[])
 
-        # Use the jobs controller template to ensure cloud dependencies 
+        # Use the jobs controller template to ensure cloud dependencies
         # are installed.
         dag_uuid = str(uuid.uuid4())
         prefix = managed_job_constants.JOBS_TASK_YAML_PREFIX
@@ -278,11 +278,9 @@ def _ensure_controller_up(
 
         # Create minimal temporary files for template
         with tempfile.NamedTemporaryFile(
-                prefix='ensure-controller-up-',
-                mode='w',
+                prefix='ensure-controller-up-', mode='w',
                 delete=False) as f, tempfile.NamedTemporaryFile(
-                    prefix='ensure-controller-up-user-',
-                    mode='w',
+                    prefix='ensure-controller-up-user-', mode='w',
                     delete=False) as original_user_yaml_path:
             # Write minimal dag content
             minimal_dag = task_lib.Task(name='ensure_controller_up',
