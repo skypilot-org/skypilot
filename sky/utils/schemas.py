@@ -1404,6 +1404,24 @@ def get_config_schema():
                 **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
             }
         },
+        'slurm': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'allowed_clusters': {
+                    'oneOf': [{
+                        'type': 'array',
+                        'items': {
+                            'type': 'string',
+                        },
+                    }, {
+                        'type': 'string',
+                        'pattern': '^all$'
+                    }]
+                },
+            }
+        },
         'oci': {
             'type': 'object',
             'required': [],
