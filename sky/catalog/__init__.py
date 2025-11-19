@@ -149,7 +149,13 @@ def list_accelerator_realtime(
                             all_regions=False,
                             require_price=False))
 
-    return (qtys_map, total_accelerators_capacity, total_accelerators_available)
+    accelerator_counts: Dict[str, List[int]] = collections.defaultdict(list)
+    for gpu, items in qtys_map.items():
+        for item in items:
+            accelerator_counts[gpu].append(item.accelerator_count)
+        accelerator_counts[gpu] = sorted(accelerator_counts[gpu])
+    return (accelerator_counts, total_accelerators_capacity,
+            total_accelerators_available)
 
 
 def instance_type_exists(instance_type: str,
