@@ -146,7 +146,8 @@ def _list_accelerators(
 
 def validate_region_zone(
         region_name: Optional[str],
-        zone_name: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+        zone_name: Optional[str],
+        clouds: CloudFilter = None) -> Tuple[Optional[str], Optional[str]]:
     """Validates the region and zone for SSH cloud.
 
     Delegates to the Kubernetes catalog implementation but ensures
@@ -154,7 +155,7 @@ def validate_region_zone(
     """
     # Delegate to Kubernetes implementation
     region, zone = kubernetes_catalog.validate_region_zone(
-        region_name, zone_name)
+        region_name, zone_name, clouds)
 
     # Get SSH contexts
     ssh_contexts = ssh.SSH.existing_allowed_contexts()
