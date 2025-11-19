@@ -675,18 +675,18 @@ def update(
 
     if pool:
         logs_cmd = f'`sky jobs pool logs {service_name} <worker_id>`'
-        logger.info(
-            ux_utils.finishing_message(
-                f'Successfully updated {noun} {service_name!r} '
-                f'to version {current_version}.',
-                follow_up_message=
-                f'\nWorkers are updating, use {ux_utils.BOLD}{logs_cmd}'
-                f'{ux_utils.RESET_BOLD} to check.'))
+        unit_noun = 'Workers'
+
     else:
-        logger.info(
-            ux_utils.finishing_message(
-                f'Successfully updated {noun} {service_name!r} '
-                f'to version {current_version}.'))
+        logs_cmd = f'`sky serve logs {service_name} <replica_id>`'
+        unit_noun = 'Replicas'
+    logger.info(
+        ux_utils.finishing_message(
+            f'Successfully updated {noun} {service_name!r} '
+            f'to version {current_version}.',
+            follow_up_message=
+            f'\n{unit_noun} are updating, use {ux_utils.BOLD}{logs_cmd}'
+            f'{ux_utils.RESET_BOLD} to check.'))
 
 
 def apply(
