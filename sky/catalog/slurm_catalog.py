@@ -7,7 +7,6 @@ from sky.utils import resources_utils
 
 logger = sky_logging.init_logger(__name__)
 
-
 _DEFAULT_NUM_VCPUS = 2
 _DEFAULT_MEMORY_CPU_RATIO = 1
 
