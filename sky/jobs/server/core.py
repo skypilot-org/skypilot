@@ -504,9 +504,11 @@ def launch(
                     # Dump script for high availability recovery.
                     managed_job_state.set_ha_recovery_script(
                         consolidation_mode_job_id, run_script)
+                    log_dir = os.path.join(skylet_constants.SKY_LOGS_DIRECTORY,
+                                           'managed_jobs')
+                    os.makedirs(log_dir, exist_ok=True)
                     log_path = os.path.join(
-                        skylet_constants.SKY_LOGS_DIRECTORY, 'managed_jobs',
-                        f'submit-job-{consolidation_mode_job_id}.log')
+                        log_dir, f'submit-job-{consolidation_mode_job_id}.log')
                     backend.run_on_head(local_handle,
                                         run_script,
                                         log_path=log_path)
