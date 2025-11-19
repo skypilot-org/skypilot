@@ -377,7 +377,9 @@ def launch(cluster_name_on_cloud: str,
         # Handle ResourceExhausted quota limit error. In this case, we need to
         # clean up the disk as VM creation failed and we can't proceed.
         logger.warning(f'Failed to launch instance {instance_name}: {e}')
-        service.delete(nebius.compute().DeleteDiskRequest(id=disk_id))
+        service = nebius.compute().DiskServiceClient(nebius.sdk())
+        nebius.sync_call(
+            service.delete(nebius.compute().DeleteDiskRequest(id=disk_id)))
         logger.debug(f'Disk {disk_id} deleted.')
         raise e
     return instance_id

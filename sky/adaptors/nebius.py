@@ -136,7 +136,9 @@ SKY_CHECK_NAME = 'Nebius (for Nebius Object Storae)'
 
 
 def request_error():
-    return nebius.aio.service_error.RequestError
+    # pylint: disable=import-outside-toplevel
+    from nebius.aio import service_error
+    return service_error.RequestError
 
 
 def compute():
