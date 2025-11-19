@@ -109,8 +109,8 @@ def _thread_local_lru_cache(maxsize=32):
             # Note that this will only clear the cache for the current thread.
             local_cache.get_cache().cache_clear()
 
-        wrapper.cache_info = cache_info
-        wrapper.cache_clear = cache_clear
+        wrapper.cache_info = cache_info  # type: ignore[attr-defined]
+        wrapper.cache_clear = cache_clear  # type: ignore[attr-defined]
 
         return wrapper
 
