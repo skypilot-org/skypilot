@@ -1163,11 +1163,11 @@ def get_latest_version_with_min_replicas(
     return active_versions[-1] if active_versions else None
 
 
-def _process_line(line: str,
-                  cluster_name: str,
-                  stop_on_eof: bool = False,
-                  *,
-                  streamed_provision_log_paths: set) -> Iterator[str]:
+def _process_line(
+        line: str,
+        cluster_name: str,
+        stop_on_eof: bool = False,
+        streamed_provision_log_paths: Optional[set] = None) -> Iterator[str]:
     # The line might be directing users to view logs, like
     # `✓ Cluster launched: new-http.  View logs at: *.log`
     # We should tail the detailed logs for user.
@@ -1190,10 +1190,11 @@ def _process_line(line: str,
         # Without this check, the same provision log would be expanded hundreds
         # of times, creating huge log files (30M+) and making users think the
         # system is stuck in an infinite loop.
-        resolved_path = str(p.resolve())
-        if resolved_path in streamed_provision_log_paths:
-            return
-        streamed_provision_log_paths.add(resolved_path)
+        if streamed_provision_log_paths is not None:
+            resolved_path = str(p.resolve())
+            if resolved_path in streamed_provision_log_paths:
+                return
+            streamed_provision_log_paths.add(resolved_path)
 
         try:
             with open(p, 'r', newline='', encoding='utf-8') as f:
