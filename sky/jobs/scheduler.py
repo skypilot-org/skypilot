@@ -360,7 +360,6 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
             with open(config_file_path, 'r', encoding='utf-8') as config_file:
                 config_file_content = config_file.read()
 
-
     config_bytes = (len(config_file_content) if config_file_content else 0)
     logger.debug(f'Storing job {job_id} file contents in database '
                  f'(DAG bytes={len(dag_yaml_content)}, '
