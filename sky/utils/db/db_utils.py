@@ -436,8 +436,9 @@ def get_engine(
                                               'postgresql+asyncpg://')
         with _db_creation_lock:
             if conn_string not in _postgres_engine_cache:
-                logger.debug(f'Creating a new postgres {async_log} engine with '
-                             f'maximum {_max_connections} connections')
+                logger.debug(
+                    f'Creating a new postgres {engine_type} engine with '
+                    f'maximum {_max_connections} connections')
                 if _max_connections == 0:
                     kw_args = {'poolclass': sqlalchemy.NullPool}
                     if async_engine:
