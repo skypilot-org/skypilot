@@ -1341,9 +1341,11 @@ def test_autostop_wait_for_jobs(generic_cloud: str):
                 cluster_status=[sky.ClusterStatus.STOPPED],
                 timeout=autostop_timeout),
 
-            # Ensure the cluster is UP and the autostop setting is reset ('-').
-            f'sky start -y {name}',
-            f'sky status | grep {name} | grep -E "UP\s+-"',
+            # Ensure the cluster is UP.
+            # Change the autostop setting to be very high so we can test
+            # resetting it.
+            f'sky start -y {name} -i 500',
+            f'sky status | grep {name} | grep "UP"',
 
             # Ensure the job succeeded.
             f'sky exec {name} tests/test_yamls/minimal.yaml',
@@ -1361,8 +1363,10 @@ def test_autostop_wait_for_jobs(generic_cloud: str):
                 timeout=autostop_timeout),
 
             # Test restarting the idleness timer via exec:
-            f'sky start -y {name}',
-            f'sky status | grep {name} | grep -E "UP\s+-"',
+            # Change the autostop setting to be very high so we can test
+            # resetting it.
+            f'sky start -y {name} -i 500',
+            f'sky status | grep {name} | grep "UP"',
             f'sky autostop -y {name} -i 1 --wait-for jobs',  # Idleness starts counting.
             'sleep 45',  # Almost reached the threshold.
             f'sky exec {name} echo hi',  # Should restart the timer.
