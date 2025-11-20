@@ -134,15 +134,16 @@ class SlurmClient:
     def info_nodes(self) -> List[str]:
         """Get Slurm node information.
 
-        Returns node names, states, and GRES (generic resources like GPUs).
+        Returns node names, states, GRES (generic resources like GPUs),
+        and partition in a single call.
 
         Returns:
-            A list of node info lines from 'sinfo -N -h -o "%N %t %G"'
+            A list of node info lines from 'sinfo -N -h -o "%N %t %G %P"'
 
         Raises:
             CommandError: If the sinfo command fails.
         """
-        cmd = 'sinfo -N -h -o "%N %t %G"'
+        cmd = 'sinfo -N -h -o "%N %t %G %P"'
         rc, stdout, stderr = self._runner.run(cmd,
                                               require_outputs=True,
                                               stream_logs=False)

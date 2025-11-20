@@ -313,32 +313,20 @@ def _get_slurm_node_info_list(
         )
         return []
 
-    # 2. Get partition info
-    node_to_partition = {}
-    partitions = slurm_client.info_partitions()
-    logger.debug(f'Partitions: {partitions}')
-    for line in partitions:
-        parts = line.split()
-        if len(parts) >= 2:
-            node_to_partition[parts[0]] = parts[1]
-
-    # 3. Process each node
+    # 2. Process each node
     slurm_nodes_info = []
     unique_nodes_processed = set()
     gres_gpu_pattern = re.compile(r'((gpu)(?::([^:]+))?:(\d+))')
 
     for line in sinfo_output:
         parts = line.split()
-        if len(parts) < 3:
+        if len(parts) < 4:
             continue
-        node_name, state, gres_str = parts[0], parts[1], parts[2]
+        node_name, state, gres_str, partition = parts[:4]
 
         if node_name in unique_nodes_processed:
             continue
         unique_nodes_processed.add(node_name)
-
-        # Apply partition filter
-        partition = node_to_partition.get(node_name, '')
 
         # Extract GPU info from GRES
         gres_match = gres_gpu_pattern.search(gres_str)
