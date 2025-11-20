@@ -157,7 +157,10 @@ def wait_until_job_status_by_id(
     s = 'start_time=$SECONDS; '
     s += 'while true; do '
     s += f'if (( $SECONDS - $start_time > {timeout} )); then '
-    s += f'  echo "Timeout after {timeout} seconds waiting for job {job_id} to succeed"; exit 1; '
+    s += f'  echo "Timeout after {timeout} seconds waiting for job {job_id} to succeed"; '
+    s += '  echo "=== Running sky status for debugging ==="; '
+    s += '  sky status || true; '
+    s += '  exit 1; '
     s += 'fi; '
     s += f's=$(sky jobs logs --controller {job_id} --no-follow); '
     s += 'echo "$s"; '
@@ -167,6 +170,8 @@ def wait_until_job_status_by_id(
         s += 'fi; '
     for status in bad_statuses:
         s += f'if echo "$s" | grep "Job status: JobStatus.{status}"; then '
+        s += '  echo "=== Running sky status for debugging ==="; '
+        s += '  sky status || true; '
         s += '  exit 1; '
         s += 'fi; '
     s += f'echo "Waiting for job {job_id} to be in {good_statuses}..."; '
@@ -176,7 +181,7 @@ def wait_until_job_status_by_id(
 
 def check_logs(job_id: int, expected_pattern: str):
     """Check that job logs contain the expected pattern.
-    
+
     Args:
         job_id: The job ID to check logs for.
         expected_pattern: The pattern to grep for in the logs.
