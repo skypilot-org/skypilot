@@ -320,26 +320,33 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
         pass
 
 
-def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
-               env_file_path: str, priority: int) -> None:
-    """Submit an existing job to the scheduler.
+def submit_jobs(job_ids: List[int],
+                dag_yaml_path: str,
+                original_user_yaml_path: str,
+                env_file_path: str,
+                priority: int,
+                pool: Optional[str] = None) -> None:
+    """Submit multiple existing jobs to the scheduler.
 
-    This should be called after a job is created in the `spot` table as
-    PENDING. It will tell the scheduler to try and start the job controller, if
+    This should be called after jobs are created in the `spot` table as
+    PENDING. It will tell the scheduler to try and start the job controllers, if
     there are resources available.
 
     The user hash should be set (e.g. via SKYPILOT_USER_ID) before calling this.
     """
-    controller_process = state.get_job_controller_process(job_id)
-    if controller_process is not None:
-        # why? TODO(cooperc): figure out why this is needed, fix it, and remove
-        if managed_job_utils.controller_process_alive(controller_process,
-                                                      job_id):
-            # This can happen when HA recovery runs for some reason but the job
-            # controller is still alive.
-            logger.warning(f'Job {job_id} is still alive, skipping submission')
-            maybe_start_controllers(from_scheduler=True)
-            return
+    for job_id in job_ids:
+        controller_process = state.get_job_controller_process(job_id)
+        if controller_process is not None:
+            # why? TODO(cooperc): figure out why this is needed, fix it, and
+            # remove
+            if managed_job_utils.controller_process_alive(
+                    controller_process, job_id):
+                # This can happen when HA recovery runs for some reason but the
+                # job controller is still alive.
+                logger.warning(
+                    f'Job {job_id} is still alive, skipping submission')
+                maybe_start_controllers(from_scheduler=True)
+                return
 
     with open(dag_yaml_path, 'r', encoding='utf-8') as dag_file:
         dag_yaml_content = dag_file.read()
@@ -348,21 +355,27 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
         original_user_yaml_content = original_user_yaml_file.read()
     with open(env_file_path, 'r', encoding='utf-8') as env_file:
         env_file_content = env_file.read()
-    logger.debug(f'Storing job {job_id} file contents in database '
-                 f'(DAG bytes={len(dag_yaml_content)}, '
-                 f'original user yaml bytes={len(original_user_yaml_content)}, '
-                 f'env bytes={len(env_file_content)}).')
-    state.scheduler_set_waiting(job_id, dag_yaml_content,
+
+    # Submit all jobs
+    state.scheduler_set_waiting(job_ids, dag_yaml_content,
                                 original_user_yaml_content, env_file_content,
                                 priority)
-    if state.get_ha_recovery_script(job_id) is None:
-        # the run command is just the command that called scheduler
-        run = (f'source {env_file_path} && '
-               f'{sys.executable} -m sky.jobs.scheduler {dag_yaml_path} '
-               f'--job-id {job_id} --env-file {env_file_path} '
-               f'--user-yaml-path {original_user_yaml_path} '
-               f'--priority {priority}')
-        state.set_ha_recovery_script(job_id, run)
+    for job_id in job_ids:
+        logger.debug(
+            f'Storing job {job_id} file contents in database '
+            f'(DAG bytes={len(dag_yaml_content)}, '
+            f'original user yaml bytes={len(original_user_yaml_content)}, '
+            f'env bytes={len(env_file_content)}).')
+        if state.get_ha_recovery_script(job_id) is None:
+            # the run command is just the command that called scheduler
+            run = (f'source {env_file_path} && '
+                   f'{sys.executable} -m sky.jobs.scheduler {dag_yaml_path} '
+                   f'--job-id {job_id} --env-file {env_file_path} '
+                   f'--user-yaml-path {original_user_yaml_path} '
+                   f'--priority {priority}')
+            if pool is not None:
+                run += f' --pool {pool}'
+            state.set_ha_recovery_script(job_id, run)
     maybe_start_controllers(from_scheduler=True)
 
 
@@ -466,10 +479,11 @@ if __name__ == '__main__':
     parser.add_argument('--user-yaml-path',
                         type=str,
                         help='The path to the original user job yaml file.')
-    parser.add_argument('--job-id',
-                        required=True,
-                        type=int,
-                        help='Job id for the controller job.')
+    parser.add_argument(
+        '--job-id',
+        type=int,
+        nargs='+',
+        help='Job id(s) for the controller job(s). Can specify multiple.')
     parser.add_argument('--env-file',
                         type=str,
                         help='The path to the controller env file.')
@@ -486,5 +500,12 @@ if __name__ == '__main__':
         f'Job priority ({constants.MIN_PRIORITY} to {constants.MAX_PRIORITY}).'
         f' Default: {constants.DEFAULT_PRIORITY}.')
     args = parser.parse_args()
-    submit_job(args.job_id, args.dag_yaml, args.user_yaml_path, args.env_file,
-               args.priority)
+
+    all_job_ids = [args.job_id] if isinstance(args.job_id, int) else args.job_id
+
+    submit_jobs(all_job_ids,
+                args.dag_yaml,
+                args.user_yaml_path,
+                args.env_file,
+                args.priority,
+                pool=args.pool)
