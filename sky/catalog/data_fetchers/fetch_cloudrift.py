@@ -6,7 +6,6 @@ Usage:
 
 import csv
 import os
-import sys
 from typing import Dict, List
 
 # # Add the parent directory to the path so we can import sky modules

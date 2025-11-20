@@ -20,7 +20,7 @@ logger = sky_logging.init_logger(__name__)
 
 def _get_head_instance(
         instances: Dict[str, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    for instance_id, instance_meta in instances.items():
+    for _, instance_meta in instances.items():
         return instance_meta
     return None
 
@@ -130,12 +130,12 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     instances_to_wait = created_instance_ids.copy()
 
-    print("instances_to_wait", instances_to_wait)
+    print('instances_to_wait', instances_to_wait)
 
     # Wait for instances to be ready.
     for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
         instances = cloudrift_client.list_instances(cluster_name_on_cloud)
-        print("list instances", instances)
+        print('list instances', instances)
 
         for instance in instances:
             if instance.get('status') == 'Active' and instance.get(
@@ -144,8 +144,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             elif instance.get('status') != 'Initializing' and instance.get(
                     'id') in instances_to_wait:
                 raise RuntimeError(
-                    f'Failed to launch instance {instance.get("id")}'
-                )
+                    f'Failed to launch instance {instance.get("id")}')
 
         logger.info('Waiting for instances to be ready: '
                     f'({len(instances)}/{config.count}).')
@@ -195,10 +194,11 @@ def terminate_instances(
 ) -> None:
     """See sky/provision/__init__.py"""
     del provider_config  # unused
+    del worker_only
 
     cloudrift_client = utils.get_cloudrift_client()
     exist_instances = _filter_instances(
-        cluster_name_on_cloud, status_filters=['Active', "Initializing"])
+        cluster_name_on_cloud, status_filters=['Active', 'Initializing'])
 
     for instance_id in exist_instances:
         logger.info(f'Terminating instance {instance_id}')
@@ -206,6 +206,7 @@ def terminate_instances(
             cloudrift_client.terminate_instance(instance_id)
         except Exception as e:
             logger.warning(f'Failed to terminate instance {instance_id}: {e}')
+            raise e
 
 
 def get_cluster_info(
@@ -228,7 +229,7 @@ def get_cluster_info(
     running_instances = _filter_instances(cluster_name_on_cloud,
                                           ['Active', 'Initializing'])
 
-    print("running_instances", running_instances)
+    print('running_instances', running_instances)
 
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
@@ -302,6 +303,8 @@ def open_ports(
 ) -> None:
     """See sky/provision/__init__.py"""
     del provider_config  # unused
+    del ports
+    del cluster_name_on_cloud
 
     # instances = utils.filter_instances(cluster_name_on_cloud, ['running'])
     # for instance_meta in instances.values():
