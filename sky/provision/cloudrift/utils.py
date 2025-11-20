@@ -1,13 +1,13 @@
 """Utilities for CloudRift cloud provider."""
 
-from sky import sky_logging
 import os
 import re
 from typing import Any, Dict, List, Mapping, Optional, Union
 
-import requests
 from packaging import version
+import requests
 from requests import Response
+from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 
@@ -51,8 +51,7 @@ class RiftClient:
         self.api_key = api_key if api_key else os.getenv('CLOUDRIFT_API_KEY')
 
     def validate_api_key(self) -> bool:
-        """
-        Validates the API key by making a request to the server.
+        """Validates the API key by making a request to the server.
         Returns True if the API key is valid, False otherwise.
         """
         try:
@@ -86,8 +85,7 @@ class RiftClient:
         return []
 
     def get_vm_recipies(self) -> List[Dict]:
-        """
-        Retrieves a list of VM recipes from the CloudRift API.
+        """Retrieves a list of VM recipes from the CloudRift API.
         Returns a list of dictionaries containing recipe information.
         """
         recipe_group = self.list_recipies()
@@ -194,8 +192,7 @@ class RiftClient:
         return None
 
     def is_instance_ready(self, instance_id: str) -> bool:
-        """
-        Checks if the instance with the given ID is ready.
+        """Checks if the instance with the given ID is ready.
         Returns True if the instance is ready, False otherwise.
         """
         instance_info = self.get_instance_by_id(instance_id)

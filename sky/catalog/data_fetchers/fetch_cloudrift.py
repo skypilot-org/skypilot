@@ -7,12 +7,12 @@ Usage:
 import csv
 import os
 from typing import Dict, List
+from sky.provision.cloudrift.utils import get_cloudrift_client
 
 # # Add the parent directory to the path so we can import sky modules
 # sys.path.insert(
 #     0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
 
-from sky.provision.cloudrift.utils import get_cloudrift_client
 
 # Constants
 BYTES_TO_GIB = 1024 * 1024 * 1024  # 1 GiB = 1024^3 bytes
