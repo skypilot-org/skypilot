@@ -1222,3 +1222,29 @@ def test_pools_single_yaml(generic_cloud: str):
             teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
         )
         smoke_tests_utils.run_one_test(test)
+
+
+def test_double_launch(generic_cloud: str):
+    """Test that we can launch a pool with the same name twice.
+    """
+    pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        write_yaml(pool_yaml, pool_config)
+        pool_name = f'{smoke_tests_utils.get_cluster_name()}-pool'
+        test = smoke_tests_utils.Test(
+            'test_double_launch',
+            [
+                _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
+                                                      pool_yaml=pool_yaml.name),
+                wait_until_pool_ready(pool_name, timeout=timeout),
+                _TEARDOWN_POOL.format(pool_name=pool_name),
+                'sleep 60',  # Wait a little bit to ensure the pool is fully shut down.
+                _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
+                                                      pool_yaml=pool_yaml.name),
+                wait_until_pool_ready(pool_name, timeout=timeout),
+            ],
+            timeout=timeout,
+            teardown=_TEARDOWN_POOL.format(pool_name=pool_name),
+        )
+        smoke_tests_utils.run_one_test(test)
