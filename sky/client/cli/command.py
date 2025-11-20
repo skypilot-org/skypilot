@@ -3807,7 +3807,7 @@ def show_gpus(
         for (slurm_cluster,
              availability_list) in realtime_gpu_availability_lists:
             realtime_gpu_table = log_utils.create_table(
-                ['GPU', qty_header, 'TOTAL_GPUS', free_header])
+                ['GPU', qty_header, 'UTILIZATION'])
             for realtime_gpu_availability in sorted(availability_list):
                 gpu_availability = models.RealtimeGpuAvailability(
                     *realtime_gpu_availability)
@@ -3817,8 +3817,7 @@ def show_gpus(
                 realtime_gpu_table.add_row([
                     gpu_availability.gpu,
                     _list_to_str(requestable_quantities),
-                    gpu_availability.capacity,
-                    gpu_availability.available,
+                    f'{gpu_availability.available} of {gpu_availability.capacity} free',
                 ])
                 gpu = gpu_availability.gpu
                 capacity = gpu_availability.capacity
@@ -3832,9 +3831,9 @@ def show_gpus(
         # if there are more than one partitions with GPUs
         if len(realtime_gpu_infos) > 1:
             total_realtime_gpu_table = log_utils.create_table(
-                ['GPU', 'TOTAL_GPUS', free_header])
+                ['GPU', 'UTILIZATION'])
             for gpu, stats in total_gpu_info.items():
-                total_realtime_gpu_table.add_row([gpu, stats[0], stats[1]])
+                total_realtime_gpu_table.add_row([gpu, f'{stats[1]} of {stats[0]} free'])
         else:
             total_realtime_gpu_table = None
 
