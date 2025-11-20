@@ -3136,7 +3136,11 @@ def filter_pods(namespace: str,
                 context: Optional[str],
                 tag_filters: Dict[str, str],
                 status_filters: Optional[List[str]] = None) -> Dict[str, Any]:
-    """Filters pods by tags and status."""
+    """Filters pods by tags and status.
+
+    Returned dict is sorted by name, with workers sorted by their numeric suffix.
+    This ensures consistent ordering for SSH configuration and other operations.
+    """
     non_included_pod_statuses = POD_STATUSES.copy()
 
     field_selector = ''
@@ -3154,7 +3158,27 @@ def filter_pods(namespace: str,
     pods = [
         pod for pod in pod_list.items if pod.metadata.deletion_timestamp is None
     ]
-    return {pod.metadata.name: pod for pod in pods}
+
+    # Sort pods by name, with workers sorted by their numeric suffix.
+    # This ensures consistent ordering (e.g., cluster-head, cluster-worker1,
+    # worker2, worker3, ...) even when Kubernetes API returns them in
+    # arbitrary order. This works even if there were somehow pod names other
+    # than head/worker ones, but that may be overkill.
+    def get_pod_sort_key(pod):
+        name = pod.metadata.name
+        if '-worker' in name:
+            try:
+                return (1, int(name.split('-worker')[-1]))
+            except (ValueError, IndexError):
+                return (2, name)
+        elif '-head' in name:
+            return (0, name)
+        else:
+            return (2, name)
+
+    sorted_pods = sorted(pods, key=get_pod_sort_key)
+
+    return {pod.metadata.name: pod for pod in sorted_pods}
 
 
 def _remove_pod_annotation(pod: Any,
