@@ -169,6 +169,7 @@ class PostgresLock(DistributedLock):
     # pylint: disable=line-too-long
     - https://www.postgresql.org/docs/current/explicit-locking.html#ADVISORY-LOCKS
     - https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADVISORY-LOCKS
+    # TODO(cooperc): re-enable pylint line-too-long
     """
 
     def __init__(self,

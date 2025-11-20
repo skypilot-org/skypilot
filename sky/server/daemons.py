@@ -6,11 +6,13 @@ from typing import Callable
 
 from sky import sky_logging
 from sky import skypilot_config
+from sky.jobs import constants as managed_jobs_constants
 from sky.server import constants as server_constants
 from sky.server.requests import request_names
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import env_options
+from sky.utils import locks
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -126,10 +128,27 @@ def refresh_volume_status_event():
     time.sleep(server_constants.VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS)
 
 
+_managed_job_consolidation_mode_lock = None
+
+
 def managed_job_status_refresh_event():
     """Refresh the managed job status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
     from sky.jobs import utils as managed_job_utils
+
+    global _managed_job_consolidation_mode_lock
+    if _managed_job_consolidation_mode_lock is None:
+        _managed_job_consolidation_mode_lock = locks.get_lock(
+            managed_jobs_constants.CONSOLIDATION_MODE_LOCK_ID)
+
+    # Make sure the lock is acquired for this process before proceeding to do
+    # recovery. This will block if another API server is still running, but
+    # should run once it is terminated and releases the lock.
+    if not _managed_job_consolidation_mode_lock.is_locked():
+        logger.info('Acquiring the consolidation mode lock: '
+                    f'{_managed_job_consolidation_mode_lock}')
+        _managed_job_consolidation_mode_lock.acquire()
+    # We will never release the lock (until the process exits).
 
     # We run the recovery logic before starting the event loop as those two are
     # conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for details.

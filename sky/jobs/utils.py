@@ -329,7 +329,13 @@ def ha_recovery_for_consolidation_mode() -> None:
                             'Skipping recovery. Job schedule state: '
                             f'{job["schedule_state"]}\n')
                     continue
-                runner.run(script)
+                log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                                       'managed_jobs')
+                os.makedirs(log_dir, exist_ok=True)
+                log_timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+                log_path = os.path.join(
+                    log_dir, f'recover-job-{job_id}-{log_timestamp}.log')
+                runner.run(script, log_path=log_path)
                 f.write(f'Job {job_id} completed recovery at '
                         f'{datetime.now()}\n')
         f.write(f'HA recovery completed at {datetime.now()}\n')
