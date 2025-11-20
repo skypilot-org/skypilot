@@ -226,6 +226,14 @@ def _with_docker_username_for_runpod(
         for r in resources))
 
 
+def get_plaintext_envs_and_secrets(
+    envs_and_secrets: Dict[str, Union[str, SecretStr]],) -> Dict[str, str]:
+    return {
+        k: v.get_secret_value() if isinstance(v, SecretStr) else v
+        for k, v in envs_and_secrets.items()
+    }
+
+
 class Task:
     """Task: a computation to be run on the cloud."""
 
@@ -1063,11 +1071,9 @@ class Task:
         return any(r.use_spot for r in self.resources)
 
     @property
-    def envs_and_secrets(self) -> Dict[str, str]:
-        """This returns plaintext secrets."""
+    def envs_and_secrets(self) -> Dict[str, Union[str, SecretStr]]:
         envs = self.envs.copy()
-        for key, value in self.secrets.items():
-            envs[key] = value.get_secret_value()
+        envs.update(self.secrets)
         return envs
 
     def set_inputs(self, inputs: str,

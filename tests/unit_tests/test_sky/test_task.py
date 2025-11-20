@@ -1043,3 +1043,101 @@ def test_secrets_not_plaintext_after_update_secrets():
         assert not isinstance(value, str), \
             f'Secret {key} should not be a plain string'
         assert value.get_secret_value() == all_secrets[key]
+
+
+def test_secrets_not_plaintext_from_yaml_config():
+    """Test that from_yaml_config stores secrets as SecretStr objects, not plain strings."""
+    config = {
+        'run': 'echo hello',
+        'envs': {
+            'PUBLIC_VAR': 'public-value',
+            'DEBUG': 'true'
+        },
+        'secrets': {
+            'API_KEY': 'secret-api-key-123',
+            'DATABASE_PASSWORD': 'secret-password-456',
+            'JWT_SECRET': 'jwt-secret-token'
+        }
+    }
+
+    task_obj = task.Task.from_yaml_config(config)
+
+    # Verify all secrets are SecretStr instances, not plain strings
+    expected_secrets = {
+        'API_KEY': 'secret-api-key-123',
+        'DATABASE_PASSWORD': 'secret-password-456',
+        'JWT_SECRET': 'jwt-secret-token'
+    }
+    for key, value in task_obj.secrets.items():
+        assert isinstance(value, SecretStr), \
+            f'Secret {key} should be SecretStr, got {type(value)}'
+        assert not isinstance(value, str), \
+            f'Secret {key} should not be a plain string'
+        assert value.get_secret_value() == expected_secrets[key]
+
+
+def test_secrets_not_plaintext_from_yaml_str():
+    """Test that from_yaml_str stores secrets as SecretStr objects, not plain strings."""
+    yaml_str = """
+run: echo hello
+envs:
+  PUBLIC_VAR: public-value
+  DEBUG: "true"
+secrets:
+  API_KEY: secret-api-key-123
+  DATABASE_PASSWORD: secret-password-456
+  JWT_SECRET: jwt-secret-token
+"""
+
+    task_obj = task.Task.from_yaml_str(yaml_str)
+
+    # Verify all secrets are SecretStr instances, not plain strings
+    expected_secrets = {
+        'API_KEY': 'secret-api-key-123',
+        'DATABASE_PASSWORD': 'secret-password-456',
+        'JWT_SECRET': 'jwt-secret-token'
+    }
+    for key, value in task_obj.secrets.items():
+        assert isinstance(value, SecretStr), \
+            f'Secret {key} should be SecretStr, got {type(value)}'
+        assert not isinstance(value, str), \
+            f'Secret {key} should not be a plain string'
+        assert value.get_secret_value() == expected_secrets[key]
+
+
+def test_secrets_not_plaintext_from_yaml():
+    """Test that from_yaml stores secrets as SecretStr objects, not plain strings."""
+    yaml_content = """
+run: echo hello
+envs:
+  PUBLIC_VAR: public-value
+  DEBUG: "true"
+secrets:
+  API_KEY: secret-api-key-123
+  DATABASE_PASSWORD: secret-password-456
+  JWT_SECRET: jwt-secret-token
+"""
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                     delete=False) as f:
+        f.write(yaml_content)
+        f.flush()
+        yaml_path = f.name
+
+    try:
+        task_obj = task.Task.from_yaml(yaml_path)
+
+        # Verify all secrets are SecretStr instances, not plain strings
+        expected_secrets = {
+            'API_KEY': 'secret-api-key-123',
+            'DATABASE_PASSWORD': 'secret-password-456',
+            'JWT_SECRET': 'jwt-secret-token'
+        }
+        for key, value in task_obj.secrets.items():
+            assert isinstance(value, SecretStr), \
+                f'Secret {key} should be SecretStr, got {type(value)}'
+            assert not isinstance(value, str), \
+                f'Secret {key} should not be a plain string'
+            assert value.get_secret_value() == expected_secrets[key]
+    finally:
+        os.unlink(yaml_path)
