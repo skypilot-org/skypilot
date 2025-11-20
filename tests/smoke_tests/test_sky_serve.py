@@ -63,7 +63,7 @@ _SERVE_WAIT_UNTIL_READY = (
     '{{ while true; do'
     '     s=$(sky serve status {name}); echo "$s";'
     '     echo "$s" | grep -q "{replica_num}/{replica_num}" && break;'
-    '     echo "$s" | grep -q "FAILED" && exit 1;'
+    '     echo "$s" | grep -q "FAILED" && sky serve logs --controller --no-follow {name} && exit 1;'
     '     sleep 10;'
     ' done; }}; echo "Got service status $s";'
     f'sleep {serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS + 2};')
