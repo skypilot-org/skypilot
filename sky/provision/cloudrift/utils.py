@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Mapping, Optional, Union
 from packaging import version
 import requests
 from requests import Response
+
 from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)

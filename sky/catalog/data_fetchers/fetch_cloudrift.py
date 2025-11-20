@@ -7,6 +7,7 @@ Usage:
 import csv
 import os
 from typing import Dict, List
+
 from sky.provision.cloudrift.utils import get_cloudrift_client
 
 # # Add the parent directory to the path so we can import sky modules
