@@ -1855,6 +1855,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         return sdk.enabled_clouds(workspace=active_workspace, expand=True)
 
     managed_jobs_queue_request_id = None
+    queue_result_version = cli_utils.QueueResultVersion.V1
     service_status_request_id = None
     workspace_request_id = None
     pool_status_request_id = None
