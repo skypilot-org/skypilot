@@ -433,6 +433,9 @@ def get_engine(
             conn_string = conn_string.replace('postgresql://',
                                               'postgresql+asyncpg://')
         with _db_creation_lock:
+            # We use the same cache for both sync and async engines
+            # because we change the conn_string in the async case,
+            # so they would not overlap.
             if conn_string not in _postgres_engine_cache:
                 engine_type = 'sync' if not async_engine else 'async'
                 logger.debug(
