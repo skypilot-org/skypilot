@@ -134,7 +134,7 @@ def _create_jobs(region: str, cluster_name_on_cloud: str,
     logger.debug(f'Successfully submitted Slurm job {job_id} for cluster '
                  f'{cluster_name_on_cloud} with {num_nodes} nodes')
 
-    nodes, _ = client.get_job_nodes(job_id)
+    nodes, _ = client.get_job_nodes(job_id, wait=True)
     created_instance_ids = [
         slurm_utils.instance_id(job_id, node) for node in nodes
     ]
@@ -180,6 +180,7 @@ def query_instances(
     status_map = {
         'pending': status_lib.ClusterStatus.INIT,
         'running': status_lib.ClusterStatus.UP,
+        'completing': status_lib.ClusterStatus.UP,
         'completed': None,
         'cancelled': None,
         'failed': status_lib.ClusterStatus.INIT,
