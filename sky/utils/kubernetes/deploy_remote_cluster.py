@@ -134,6 +134,7 @@ def run_remote(node,
                print_output=False,
                use_shell=False):
     """Run a command on a remote machine via SSH."""
+    ssh_cmd: List[str]
     if use_ssh_config:
         # Use SSH config for connection parameters
         ssh_cmd = ['ssh', node, cmd]
@@ -153,10 +154,8 @@ def run_remote(node,
         ssh_cmd.append(f'{user}@{node}' if user else node)
         ssh_cmd.append(cmd)
 
-    if use_shell:
-        ssh_cmd = ' '.join(ssh_cmd)
-
-    process = subprocess.run(ssh_cmd,
+    subprocess_cmd = ' '.join(ssh_cmd) if use_shell else ssh_cmd
+    process = subprocess.run(subprocess_cmd,
                              capture_output=True,
                              text=True,
                              check=False,
@@ -1240,7 +1239,7 @@ def deploy_cluster(head_node,
             while ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu:' || ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu.product'; do
                 echo 'Waiting for GPU operator...'
                 sleep 5
-            done 
+            done
             echo 'GPU operator installed successfully.'
         """
         result = run_remote(head_node,
