@@ -1,12 +1,16 @@
 import os
 import tempfile
 from unittest import mock
+from unittest.mock import MagicMock
+from unittest.mock import patch
 
+from pydantic import SecretStr
 import pytest
 
 from sky import exceptions
 from sky import resources as resources_lib
 from sky import task
+from sky.utils import git
 from sky.utils import registry
 
 
@@ -942,3 +946,100 @@ def test_task_resource_config_modification():
     t.set_resources(resource_config)
     assert t.resources[0].autostop_config.idle_minutes == 10
     assert t.resources[1].autostop_config.idle_minutes == 10
+
+
+def test_secrets_not_plaintext_on_initialization():
+    """Test that secrets initialized in Task are SecretStr objects, not plain strings."""
+    secrets = {
+        'API_KEY': 'secret-api-key-123',
+        'DB_PASSWORD': 'secret-password'
+    }
+    task_obj = task.Task(run='echo hello', secrets=secrets)
+
+    # Verify all secrets are SecretStr instances, not plain strings
+    for key, value in task_obj.secrets.items():
+        assert isinstance(
+            value,
+            SecretStr), f'Secret {key} should be SecretStr, got {type(value)}'
+        assert not isinstance(value,
+                              str), f'Secret {key} should not be a plain string'
+        # Verify we can get the secret value
+        assert value.get_secret_value() == secrets[key]
+
+
+def test_secrets_not_plaintext_after_update_envs_and_secrets_from_workdir():
+    """Test that update_envs_and_secrets_from_workdir doesn't put plaintext strings in secrets."""
+    # Set up task with git workdir
+    task_obj = task.Task(name='test', run='echo hello')
+    task_obj.workdir = {
+        'url': 'https://github.com/test/repo.git',
+        'ref': 'main'
+    }
+
+    # Mock GitRepo and clone info
+    mock_clone_info = MagicMock()
+    mock_clone_info.url = 'https://github.com/test/repo.git'
+    mock_clone_info.token = 'test_token_12345'
+    mock_clone_info.ssh_key = 'test_ssh_key_content'
+
+    mock_repo_instance = MagicMock()
+    mock_repo_instance.get_repo_clone_info.return_value = mock_clone_info
+    mock_repo_instance.get_ref_type.return_value = git.GitRefType.BRANCH
+
+    with patch.dict(os.environ, {git.GIT_TOKEN_ENV_VAR: 'test_token_12345'}, clear=True), \
+         patch('sky.utils.git.GitRepo', return_value=mock_repo_instance):
+        task_obj.update_envs_and_secrets_from_workdir()
+
+    # Verify secrets are SecretStr instances, not plain strings
+    assert git.GIT_TOKEN_ENV_VAR in task_obj.secrets
+    token_secret = task_obj.secrets[git.GIT_TOKEN_ENV_VAR]
+    assert isinstance(token_secret, SecretStr), \
+        f'Git token secret should be SecretStr, got {type(token_secret)}'
+    assert not isinstance(token_secret, str), \
+        'Git token secret should not be a plain string'
+    assert token_secret.get_secret_value() == 'test_token_12345'
+
+    assert git.GIT_SSH_KEY_ENV_VAR in task_obj.secrets
+    ssh_key_secret = task_obj.secrets[git.GIT_SSH_KEY_ENV_VAR]
+    assert isinstance(ssh_key_secret, SecretStr), \
+        f'SSH key secret should be SecretStr, got {type(ssh_key_secret)}'
+    assert not isinstance(ssh_key_secret, str), \
+        'SSH key secret should not be a plain string'
+    assert ssh_key_secret.get_secret_value() == 'test_ssh_key_content'
+
+
+def test_secrets_not_plaintext_after_update_secrets():
+    """Test that update_secrets doesn't put plaintext strings in secrets."""
+    task_obj = task.Task(run='echo hello')
+
+    # Update secrets with dict
+    secrets_dict = {'API_KEY': 'secret1', 'DB_PASSWORD': 'secret2'}
+    task_obj.update_secrets(secrets_dict)
+
+    # Verify all secrets are SecretStr instances, not plain strings
+    for key, value in task_obj.secrets.items():
+        assert isinstance(value, SecretStr), \
+            f'Secret {key} should be SecretStr, got {type(value)}'
+        assert not isinstance(value, str), \
+            f'Secret {key} should not be a plain string'
+        assert value.get_secret_value() == secrets_dict[key]
+
+    # Update secrets with list of tuples
+    more_secrets = [('JWT_SECRET', 'jwt-secret'),
+                    ('REDIS_PASSWORD', 'redis-pass')]
+    task_obj.update_secrets(more_secrets)
+
+    # Verify all secrets (including newly added ones) are SecretStr instances
+    all_secrets = {
+        'API_KEY': 'secret1',
+        'DB_PASSWORD': 'secret2',
+        'JWT_SECRET': 'jwt-secret',
+        'REDIS_PASSWORD': 'redis-pass'
+    }
+    assert len(task_obj.secrets.keys()) == len(all_secrets.keys())
+    for key, value in task_obj.secrets.items():
+        assert isinstance(value, SecretStr), \
+            f'Secret {key} should be SecretStr, got {type(value)}'
+        assert not isinstance(value, str), \
+            f'Secret {key} should not be a plain string'
+        assert value.get_secret_value() == all_secrets[key]
