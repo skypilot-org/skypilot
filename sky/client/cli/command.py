@@ -187,6 +187,7 @@ def _get_cluster_records_and_set_ssh_config(
         # can still exist in the record, and we check for credentials to avoid
         # updating the SSH config for non-existent clusters.
         credentials = record['credentials']
+        ips = handle.cached_external_ips
         if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
             # Replace the proxy command to proxy through the SkyPilot API
             # server with websocket.
@@ -215,10 +216,42 @@ def _get_cluster_records_and_set_ssh_config(
                 f'{server_common.get_server_url()} '
                 f'{handle.cluster_name}\"')
             credentials['ssh_proxy_command'] = proxy_command
+        elif isinstance(handle.launched_resources.cloud, clouds.Slurm):
+            # Proxy through the controller/login node to reach the worker node.
+            if (handle.cached_internal_ips is None or
+                    not handle.cached_internal_ips):
+                logger.debug(
+                    f'Cluster {name} does not have cached internal IPs. '
+                    'Skipping SSH config update.')
+                cluster_utils.SSHConfigHelper.remove_cluster(name)
+                continue
+
+            escaped_key_path = shlex.quote(
+                cluster_utils.SSHConfigHelper.generate_local_key_file(
+                    handle.cluster_name, credentials))
+            controller_host = handle.cached_external_ips[0]
+
+            # Build jump proxy: ssh to worker via controller/login node
+            proxy_command = (
+                f'ssh -tt -i {escaped_key_path} '
+                '-o StrictHostKeyChecking=no '
+                '-o UserKnownHostsFile=/dev/null '
+                '-o IdentitiesOnly=yes '
+                '-W %h:%p '
+                f'{handle.ssh_user}@{controller_host}'
+            )
+            original_proxy = credentials.get('ssh_proxy_command')
+            if original_proxy:
+                proxy_command += f' -o ProxyCommand={shlex.quote(original_proxy)}'
+
+            credentials['ssh_proxy_command'] = proxy_command
+
+            # For Slurm, use the worker's internal IP as the SSH target
+            ips = handle.cached_internal_ips
 
         cluster_utils.SSHConfigHelper.add_cluster(
             handle.cluster_name,
-            handle.cached_external_ips,
+            ips,
             credentials,
             handle.cached_external_ssh_ports,
             handle.docker_user,
