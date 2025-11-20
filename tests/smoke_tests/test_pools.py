@@ -1224,7 +1224,7 @@ def test_pools_single_yaml(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-def test_double_launch(generic_cloud: str):
+def test_pools_double_launch(generic_cloud: str):
     """Test that we can launch a pool with the same name twice.
     """
     pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
