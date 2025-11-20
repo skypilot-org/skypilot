@@ -400,6 +400,7 @@ def _get_slurm_node_info_list(
                 f'Failed to get CPU/memory info for {node_name}: {e}')
         slurm_nodes_info.append({
             'node_name': node_name,
+            'slurm_cluster_name': slurm_cluster_name,
             'partition': partition,
             'node_state': state,
             'gpu_type': gpu_type_from_sinfo,

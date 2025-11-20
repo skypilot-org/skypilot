@@ -180,7 +180,7 @@ async function getKubernetesGPUs() {
   }
 }
 
-async function getSlurmPartitionGPUs() {
+async function getSlurmClusterGPUs() {
   try {
     const response = await fetch(`${ENDPOINT}/slurm_gpu_availability`, {
       method: 'POST', // Matches server endpoint
@@ -198,7 +198,7 @@ async function getSlurmPartitionGPUs() {
           try {
             const error = JSON.parse(data.detail.error);
             console.error(
-              'Error fetching Slurm partition GPUs:',
+              'Error fetching Slurm cluster GPUs:',
               error.message
             );
           } catch (jsonError) {
@@ -211,12 +211,12 @@ async function getSlurmPartitionGPUs() {
       return [];
     }
     const data = await fetchedData.json();
-    const partitionGPUs = data.return_value
+    const clusterGPUs = data.return_value
       ? JSON.parse(data.return_value)
       : [];
-    return partitionGPUs;
+    return clusterGPUs;
   } catch (error) {
-    console.error('Error fetching Slurm partition GPUs:', error);
+    console.error('Error fetching Slurm cluster GPUs:', error);
     return [];
   }
 }
@@ -266,25 +266,22 @@ async function getSlurmPerNodeGPUs() {
 
 export async function getSlurmServiceGPUs() {
   try {
-    const partitionGPUsRaw = await getSlurmPartitionGPUs();
+    const clusterGPUsRaw = await getSlurmClusterGPUs();
     const nodeGPUsRaw = await getSlurmPerNodeGPUs();
 
     const allSlurmGPUs = {};
-    const perPartitionSlurmGPUs = {}; // { partition: { gpu_name: ..., ... } }
-    const perNodeSlurmGPUs = {}; // { 'partition/node_name': { ... } }
+    const perClusterSlurmGPUs = {}; // Similar to perContextGPUs for Kubernetes
+    const perNodeSlurmGPUs = {}; // { 'cluster/node_name': { ... } }
 
-    // Process partition GPUs
-    // partitionGPUsRaw is expected to be like: [ [partition_name, [ [gpu_name, counts, capacity, available], ... ] ], ... ]
-    for (const partitionData of partitionGPUsRaw) {
-      const partitionName = partitionData[0];
-      const gpusInPartition = partitionData[1];
+    // Process cluster GPUs (similar to Kubernetes context GPUs)
+    // clusterGPUsRaw is expected to be like: [ [cluster_name, [ [gpu_name, counts, capacity, available], ... ] ], ... ]
+    for (const clusterData of clusterGPUsRaw) {
+      const clusterName = clusterData[0];
+      const gpusInCluster = clusterData[1];
 
-      for (const gpuRaw of gpusInPartition) {
+      for (const gpuRaw of gpusInCluster) {
         const gpuName = gpuRaw[0];
         // gpuRaw[1] is counts (list of requestable quantities), e.g., [1, 2, 4]
-        // For simplicity, we might not need all individual counts in the summary,
-        // but it's good to have if detailed view is needed later.
-        // For now, let's just store it as a string like k8s.
         const gpuRequestableQtyPerNode = gpuRaw[1].join(', ');
         const gpuTotal = gpuRaw[2]; // capacity
         const gpuFree = gpuRaw[3]; // available
@@ -301,32 +298,29 @@ export async function getSlurmServiceGPUs() {
           };
         }
 
-        // Store for perPartitionSlurmGPUs
-        // Assuming one dominant GPU type per partition for this simplified structure,
-        // or that the data structure implies this. If multiple GPU types can exist
-        // meaningfully under a single 'perPartitionSlurmGPUs[partitionName]' entry,
-        // this will need adjustment (e.g., make it an array).
-        // For now, let's create an entry for each GPU type within a partition.
-        const partitionGpuKey = `${partitionName}#${gpuName}`; // Unique key for partition-gpu combo
-        perPartitionSlurmGPUs[partitionGpuKey] = {
+        // Store for perClusterSlurmGPUs (similar to perContextGPUs)
+        const clusterGpuKey = `${clusterName}#${gpuName}`; // Unique key for cluster-gpu combo
+        perClusterSlurmGPUs[clusterGpuKey] = {
           gpu_name: gpuName,
           gpu_requestable_qty_per_node: gpuRequestableQtyPerNode,
           gpu_total: gpuTotal,
           gpu_free: gpuFree,
-          partition: partitionName,
+          cluster: clusterName,
         };
       }
     }
 
     // Process node GPUs
-    // nodeGPUsRaw is expected to be like: [ {node_name, partition, gpu_type, total_gpus, free_gpus}, ... ]
+    // nodeGPUsRaw is expected to be like: [ {node_name, slurm_cluster_name, partition, gpu_type, total_gpus, free_gpus}, ... ]
     for (const node of nodeGPUsRaw) {
-      const key = `${node.partition || 'default'}/${node.node_name}/${node.gpu_type || '-'}`;
+      const clusterName = node.slurm_cluster_name || 'default';
+      const key = `${clusterName}/${node.node_name}/${node.gpu_type || '-'}`;
       perNodeSlurmGPUs[key] = {
         node_name: node.node_name,
         gpu_name: node.gpu_type || '-', // gpu_type might be null
         gpu_total: node.total_gpus || 0,
         gpu_free: node.free_gpus || 0,
+        cluster: clusterName,
         partition: node.partition || 'default', // partition might be null
       };
     }
@@ -335,14 +329,14 @@ export async function getSlurmServiceGPUs() {
       allSlurmGPUs: Object.values(allSlurmGPUs).sort((a, b) =>
         a.gpu_name.localeCompare(b.gpu_name)
       ),
-      perPartitionSlurmGPUs: Object.values(perPartitionSlurmGPUs).sort(
+      perClusterSlurmGPUs: Object.values(perClusterSlurmGPUs).sort(
         (a, b) =>
-          a.partition.localeCompare(b.partition) ||
+          a.cluster.localeCompare(b.cluster) ||
           a.gpu_name.localeCompare(b.gpu_name)
       ),
       perNodeSlurmGPUs: Object.values(perNodeSlurmGPUs).sort(
         (a, b) =>
-          (a.partition || '').localeCompare(b.partition || '') ||
+          (a.cluster || '').localeCompare(b.cluster || '') ||
           (a.node_name || '').localeCompare(b.node_name || '') ||
           (a.gpu_name || '').localeCompare(b.gpu_name || '')
       ),
@@ -351,7 +345,7 @@ export async function getSlurmServiceGPUs() {
     console.error('Error fetching Slurm GPUs:', error);
     return {
       allSlurmGPUs: [],
-      perPartitionSlurmGPUs: [],
+      perClusterSlurmGPUs: [],
       perNodeSlurmGPUs: [],
     };
   }

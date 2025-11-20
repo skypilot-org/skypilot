@@ -32,7 +32,7 @@ export function GPUs() {
   const [perNodeGPUs, setPerNodeGPUs] = useState([]);
 
   const [allSlurmGPUs, setAllSlurmGPUs] = useState([]);
-  const [perPartitionSlurmGPUs, setPerPartitionSlurmGPUs] = useState([]);
+  const [perClusterSlurmGPUs, setPerClusterSlurmGPUs] = useState([]);
   const [perNodeSlurmGPUs, setPerNodeSlurmGPUs] = useState([]);
 
   const [selectedTab, setSelectedTab] = useState('kubernetes');
@@ -61,13 +61,13 @@ export function GPUs() {
       const slurmResponse = await getSlurmServiceGPUs();
       const {
         allSlurmGPUs: fetchedAllSlurmGPUs,
-        perPartitionSlurmGPUs: fetchedPerPartitionSlurmGPUs,
+        perClusterSlurmGPUs: fetchedPerClusterSlurmGPUs,
         perNodeSlurmGPUs: fetchedPerNodeSlurmGPUsData,
       } = slurmResponse;
       console.log('[DEBUG] Slurm API Response:', slurmResponse);
 
       setAllSlurmGPUs(fetchedAllSlurmGPUs || []);
-      setPerPartitionSlurmGPUs(fetchedPerPartitionSlurmGPUs || []);
+      setPerClusterSlurmGPUs(fetchedPerClusterSlurmGPUs || []);
       setPerNodeSlurmGPUs(fetchedPerNodeSlurmGPUsData || []);
     } catch (err) {
       console.error('Error fetching data:', err);
@@ -75,7 +75,7 @@ export function GPUs() {
       setPerContextGPUs([]);
       setPerNodeGPUs([]);
       setAllSlurmGPUs([]);
-      setPerPartitionSlurmGPUs([]);
+      setPerClusterSlurmGPUs([]);
       setPerNodeSlurmGPUs([]);
     } finally {
       setLoading(false);
@@ -89,10 +89,10 @@ export function GPUs() {
   }, [allSlurmGPUs]);
   React.useEffect(() => {
     console.log(
-      '[DEBUG] Slurm State - perPartitionSlurmGPUs:',
-      perPartitionSlurmGPUs
+      '[DEBUG] Slurm State - perClusterSlurmGPUs:',
+      perClusterSlurmGPUs
     );
-  }, [perPartitionSlurmGPUs]);
+  }, [perClusterSlurmGPUs]);
   React.useEffect(() => {
     console.log('[DEBUG] Slurm State - perNodeSlurmGPUs:', perNodeSlurmGPUs);
   }, [perNodeSlurmGPUs]);
@@ -180,31 +180,31 @@ export function GPUs() {
     }, {});
   }, [perNodeGPUs]);
 
-  const groupedPerPartitionSlurmGPUs = React.useMemo(() => {
-    if (!perPartitionSlurmGPUs) return {};
-    const grouped = perPartitionSlurmGPUs.reduce((acc, gpu) => {
-      const { partition } = gpu;
-      if (!acc[partition]) {
-        acc[partition] = [];
+  const groupedPerClusterSlurmGPUs = React.useMemo(() => {
+    if (!perClusterSlurmGPUs) return {};
+    const grouped = perClusterSlurmGPUs.reduce((acc, gpu) => {
+      const { cluster } = gpu;
+      if (!acc[cluster]) {
+        acc[cluster] = [];
       }
-      acc[partition].push(gpu);
+      acc[cluster].push(gpu);
       return acc;
     }, {});
-    console.log('[DEBUG] Grouped Slurm Partitions:', grouped);
+    console.log('[DEBUG] Grouped Slurm Clusters:', grouped);
     return grouped;
-  }, [perPartitionSlurmGPUs]);
+  }, [perClusterSlurmGPUs]);
 
   const groupedPerNodeSlurmGPUs = React.useMemo(() => {
     if (!perNodeSlurmGPUs) return {};
     const grouped = perNodeSlurmGPUs.reduce((acc, node) => {
-      const { partition } = node;
-      if (!acc[partition]) {
-        acc[partition] = [];
+      const { cluster } = node;
+      if (!acc[cluster]) {
+        acc[cluster] = [];
       }
-      acc[partition].push(node);
+      acc[cluster].push(node);
       return acc;
     }, {});
-    console.log('[DEBUG] Grouped Slurm Nodes by Partition:', grouped);
+    console.log('[DEBUG] Grouped Slurm Nodes by Cluster:', grouped);
     return grouped;
   }, [perNodeSlurmGPUs]);
 
@@ -553,7 +553,7 @@ export function GPUs() {
           ) : (
             <>
               {initialDataLoaded &&
-              (allSlurmGPUs.length > 0 || perPartitionSlurmGPUs.length > 0) ? (
+              (allSlurmGPUs.length > 0 || perClusterSlurmGPUs.length > 0) ? (
                 <Card className="mb-4">
                   <CardHeader className="p-4 pb-0">
                     <CardTitle className="text-lg font-semibold">
@@ -649,31 +649,31 @@ export function GPUs() {
                       })}
                     </div>
 
-                    {Object.keys(groupedPerPartitionSlurmGPUs).length > 0 && (
+                    {Object.keys(groupedPerClusterSlurmGPUs).length > 0 && (
                       <div className="mt-6 pt-6 border-t">
                         <h3 className="text-lg font-semibold mb-3">
-                          Per-Partition GPU Detail
+                          Per-Cluster GPU Detail
                         </h3>
                         <div
                           className={`
                             grid gap-6
-                            ${Object.keys(groupedPerPartitionSlurmGPUs).length === 1 ? 'grid-cols-1' : 'md:grid-cols-2'}
+                            ${Object.keys(groupedPerClusterSlurmGPUs).length === 1 ? 'grid-cols-1' : 'md:grid-cols-2'}
                           `}
                         >
-                          {Object.entries(groupedPerPartitionSlurmGPUs).map(
-                            ([partition, gpusInPartition]) => (
+                          {Object.entries(groupedPerClusterSlurmGPUs).map(
+                            ([cluster, gpusInCluster]) => (
                               <Card
-                                key={partition}
+                                key={cluster}
                                 className="border flex flex-col"
                               >
                                 <CardHeader className="p-4 pb-2">
                                   <CardTitle className="text-md font-normal">
-                                    Partition: {partition}
+                                    Cluster: {cluster}
                                   </CardTitle>
                                 </CardHeader>
                                 <CardContent className="p-4 pt-2">
                                   <div className="space-y-3">
-                                    {gpusInPartition.map((gpu) => {
+                                    {gpusInCluster.map((gpu) => {
                                       const usedGpus =
                                         gpu.gpu_total - gpu.gpu_free;
                                       const freePercentage =
@@ -686,7 +686,7 @@ export function GPUs() {
                                           : 0;
                                       return (
                                         <div
-                                          key={`${partition}-${gpu.gpu_name}`}
+                                          key={`${cluster}-${gpu.gpu_name}`}
                                           className="p-2 border rounded w-full mb-2"
                                         >
                                           <div className="flex justify-between items-center mb-1">
@@ -738,8 +738,8 @@ export function GPUs() {
                                     })}
                                   </div>
 
-                                  {groupedPerNodeSlurmGPUs[partition] &&
-                                    groupedPerNodeSlurmGPUs[partition].length >
+                                  {groupedPerNodeSlurmGPUs[cluster] &&
+                                    groupedPerNodeSlurmGPUs[cluster].length >
                                       0 && (
                                       <div className="mt-4 pt-3 border-t">
                                         <div className="max-h-52 overflow-y-auto">
@@ -760,10 +760,10 @@ export function GPUs() {
                                               </thead>
                                               <tbody className="bg-white divide-y divide-gray-200">
                                                 {groupedPerNodeSlurmGPUs[
-                                                  partition
+                                                  cluster
                                                 ].map((node, index) => (
                                                   <tr
-                                                    key={`${partition}-${node.node_name}-${index}`}
+                                                    key={`${cluster}-${node.node_name}-${index}`}
                                                   >
                                                     <td className="p-2 whitespace-nowrap text-gray-700">
                                                       {node.node_name}
@@ -794,7 +794,7 @@ export function GPUs() {
               ) : (
                 initialDataLoaded &&
                 allSlurmGPUs.length === 0 &&
-                perPartitionSlurmGPUs.length === 0 && (
+                perClusterSlurmGPUs.length === 0 && (
                   <Card>
                     <CardContent className="p-4">
                       <p className="text-sm text-gray-500">
