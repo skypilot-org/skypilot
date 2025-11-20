@@ -430,26 +430,22 @@ If you are using Nebius Kubernetes cluster, you can setup GPU metrics in the clu
 
 1. Install the Prometheus operator.
 
-On Nebius console, in the detail page of the Nebius Kubernetes cluster, go to ``Applications`` -> Search for ``Prometheus Operator`` -> ``Deploy`` -> Enter ``skypilot`` for the ``Namespace`` -> ``Deploy application``.
+.. code-block:: bash
 
-.. image:: ../../../images/metrics/search-prom-operator.png
-    :alt: Search for Prometheus Operator
-    :align: center
-    :width: 60%
+  helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+  helm repo update
 
-.. image:: ../../../images/metrics/deploy-prom-operator.png
-    :alt: Deploy Prometheus Operator
-    :align: center
-    :width: 60%
+  helm upgrade --install kube-prometheus prometheus-community/kube-prometheus-stack \
+    --namespace skypilot \
+    --create-namespace \
+    --set prometheus.enabled=false \
+    --set alertmanager.enabled=false \
+    --set grafana.enabled=false \
+    --set kubeStateMetrics.enabled=false \
+    --set nodeExporter.enabled=true \
+    --set prometheusOperator.enabled=true
 
-Wait for the Prometheus operator to be installed, the status badge will become ``Deployed``.
-
-.. image:: ../../../images/metrics/status-prom-operator.png
-    :alt: Status of Prometheus Operator
-    :align: center
-    :width: 60%
-
-You can also check the Pod status to verify the installation.
+You can check the Pod status to verify the installation.
 
 .. code-block:: bash
 
