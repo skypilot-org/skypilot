@@ -112,11 +112,12 @@ def _create_jobs(region: str, cluster_name_on_cloud: str,
 
     # TODO(kevin): Make this more robust and configurable.
     sky_dir = _get_sky_cluster_dir(cluster_name_on_cloud)
-    mkdir_cmd = f'mkdir -p {sky_dir}'
-    rc, _, stderr = controller_node_runner.run(mkdir_cmd, require_outputs=True)
+    # Create sky directory and .hushlogin (to suppress MOTD/login messages)
+    setup_cmd = f'mkdir -p {sky_dir} && touch {sky_dir}/.hushlogin'
+    rc, _, stderr = controller_node_runner.run(setup_cmd, require_outputs=True)
     if rc != 0:
         raise RuntimeError(f'Failed to create directory {sky_dir}: {stderr}\n'
-                           f'Command: {mkdir_cmd}\n'
+                           f'Command: {setup_cmd}\n'
                            f'Return code: {rc}')
 
     with tempfile.NamedTemporaryFile(mode='w',
