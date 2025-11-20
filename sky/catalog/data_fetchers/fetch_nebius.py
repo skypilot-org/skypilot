@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import decimal
 import json
 import logging
+import os
 import re
 from typing import Any, Dict, List, Optional
 
@@ -179,6 +180,7 @@ def _write_preset_prices(presets: List[PresetInfo], output_file: str) -> None:
         presets (List[PresetInfo]): A list of PresetInfo objects to write.
         output_file (str): The path to the output CSV file.
     """
+    os.makedirs(os.path.dirname(output_file))
     # Set up the CSV writer to output to stdout
     with open(output_file, 'w', encoding='utf-8') as out:
         header = [
