@@ -26,12 +26,14 @@ each other.
 import collections
 import concurrent.futures
 import fnmatch
+import json
 import os
 import pathlib
 import shlex
 import shutil
 import subprocess
 import sys
+import time
 import traceback
 import typing
 from typing import (Any, Callable, Dict, Generator, List, Optional, Set, Tuple,
@@ -61,12 +63,16 @@ from sky.client import sdk
 from sky.client.cli import flags
 from sky.client.cli import table_utils
 from sky.client.cli import utils as cli_utils
+from sky.jobs import utils as jobs_utils
+from sky.jobs.state import ManagedJobStatus
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import constants as server_constants
+from sky.server.requests import payloads
 from sky.server.requests import requests
+from sky.server import versions as server_versions
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -5220,7 +5226,115 @@ def jobs_pool_down(
         raise click.UsageError('Can only specify one of POOL_NAMES or --all. '
                                f'Provided {argument_str!r}.')
 
-    if not yes:
+    def _get_nonterminal_jobs(pool_name: str) -> List[Dict[str, Any]]:
+        # Get nonterminal jobs for this pool using API with pool_match filter
+        # Use direct API call to support pool_match parameter
+        remote_api_version = server_versions.get_remote_api_version()
+        if remote_api_version and remote_api_version >= 18:
+            body = payloads.JobsQueueV2Body(
+                refresh=False,
+                skip_finished=True,  # This filters out terminal jobs
+                all_users=False,
+                pool_match=pool_name,
+                limit=None,
+                fields=['job_id', 'status', 'pool'])
+            path = '/jobs/queue/v2'
+        else:
+            # Fallback to old API and filter client-side
+            body = payloads.JobsQueueBody(
+                refresh=False,
+                skip_finished=True,
+                all_users=False)
+            path = '/jobs/queue'
+        
+        response = server_common.make_authenticated_request(
+            'POST',
+            path,
+            json=json.loads(body.model_dump_json()),
+            timeout=(5, None))
+        queue_request_id = server_common.get_request_id(response)
+        jobs_result = sdk.stream_and_get(queue_request_id)
+        
+        # Handle both tuple and list responses
+        if isinstance(jobs_result, tuple):
+            jobs_list = jobs_result[0]
+        else:
+            jobs_list = jobs_result
+        
+        # Filter jobs by pool name if using old API
+        if remote_api_version is None or remote_api_version < 18:
+            pool_jobs = [
+                job for job in jobs_list
+                if job.get('pool') == pool_name and
+                not job.get('status', ManagedJobStatus.SUCCEEDED).is_terminal()
+            ]
+        else:
+            # API already filtered by pool_match, but ensure nonterminal
+            pool_jobs = [
+                job for job in jobs_list
+                if not job.get('status', ManagedJobStatus.SUCCEEDED).is_terminal()
+            ]
+        return pool_jobs
+
+    # Check for nonterminal jobs only when downing a single pool (not -a)
+    already_confirmed = False
+    if not all and pool_names and len(pool_names) == 1:
+        # For single pool, check if there are running jobs using API
+        pool_name = pool_names[0]
+        try:            
+            pool_jobs = _get_nonterminal_jobs(pool_name)
+            if pool_jobs:
+                num_jobs = len(pool_jobs)
+                job_ids = [job['job_id'] for job in pool_jobs]
+                job_ids_str = ','.join(str(job_id) for job_id in job_ids)
+                click.echo(
+                    f'{colorama.Fore.YELLOW}Pool {pool_name!r} has {num_jobs} '
+                    f'nonterminal jobs: {job_ids_str}.{colorama.Style.RESET_ALL}')
+                if not yes:
+                    should_cancel = click.confirm(
+                        'Would you like to cancel all jobs and down the pool?',
+                        default=False,
+                        abort=False,
+                        show_default=True)
+                    if not should_cancel:
+                        raise click.Abort()
+                    already_confirmed = True
+                
+                # Cancel all jobs in the pool
+                with ux_utils.spinner_message(
+                    f'Cancelling {num_jobs} jobs in pool {pool_name}...'):
+                    cancel_request_id = managed_jobs.cancel(pool=pool_name)
+                    sdk.stream_and_get(cancel_request_id)
+
+                    max_wait_time = 300  # 5 minutes max wait
+                    check_interval = 2  # Check every 2 seconds
+                    start_time = time.time()
+                    remaining_pool_jobs = _get_nonterminal_jobs(pool_name)
+                    while remaining_pool_jobs and time.time() - start_time < max_wait_time:
+                        # Check remaining jobs via API
+                        time.sleep(check_interval)
+                        remaining_pool_jobs = _get_nonterminal_jobs(pool_name)
+                        ux_utils.spinner_message(
+                            f'Waiting for {len(remaining_pool_jobs)} jobs to finish...')
+
+                    if time.time() - start_time > max_wait_time:
+                        click.echo(
+                            f'{colorama.Fore.YELLOW}Warning: Timeout waiting for '
+                            f'jobs to finish. Proceeding with pool down anyway.'
+                            f'{colorama.Style.RESET_ALL}')
+                    else:
+                        click.echo('All jobs have finished.')
+                    # Clear the line for next update
+                    click.echo('\r' + ' ' * 80 + '\r', nl=False)
+                # Ensure we're on a new line after waiting completes
+                click.echo()
+        except Exception as e:  # pylint: disable=broad-except
+            # If API call fails, log warning but continue with pool down
+            logger.warning(
+                f'Failed to check for running jobs in pool {pool_name!r}: {e}. '
+                'Proceeding with pool down.')
+
+    if not yes and not already_confirmed:
         quoted_pool_names = [f'{name!r}' for name in pool_names]
         list_pool_str = ', '.join(quoted_pool_names)
         pool_identity_str = f'pool(s) {list_pool_str}'
