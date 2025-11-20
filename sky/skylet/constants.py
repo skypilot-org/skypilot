@@ -53,12 +53,12 @@ SKY_RAY_CMD = (f'{SKY_PYTHON_CMD} $([ -s {SKY_RAY_PATH_FILE} ] && '
                f'cat {SKY_RAY_PATH_FILE} 2> /dev/null || which ray)')
 # Separate env for SkyPilot runtime dependencies.
 SKY_REMOTE_PYTHON_ENV_NAME = 'skypilot-runtime'
-SKY_SHARED_HOME = '${SKY_ORIG_HOME:-$HOME}'
-SKY_CONDA_ROOT = f'{SKY_SHARED_HOME}/miniconda3'
-SKY_REMOTE_PYTHON_ENV: str = f'{SKY_SHARED_HOME}/{SKY_REMOTE_PYTHON_ENV_NAME}'
+SKY_REMOTE_PYTHON_ENV_DIR = '${SKY_REMOTE_PYTHON_ENV_DIR:-$HOME}'
+SKY_CONDA_ROOT = f'{SKY_REMOTE_PYTHON_ENV_DIR}/miniconda3'
+SKY_REMOTE_PYTHON_ENV: str = f'{SKY_REMOTE_PYTHON_ENV_DIR}/{SKY_REMOTE_PYTHON_ENV_NAME}'
 ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
 # uv is used for venv and pip, much faster than python implementations.
-SKY_UV_INSTALL_DIR = f'"{SKY_SHARED_HOME}/.local/bin"'
+SKY_UV_INSTALL_DIR = f'"{SKY_REMOTE_PYTHON_ENV_DIR}/.local/bin"'
 # set UV_SYSTEM_PYTHON to false in case the
 # user provided docker image set it to true.
 # unset PYTHONPATH in case the user provided docker image set it.
@@ -241,7 +241,7 @@ RAY_INSTALLATION_COMMANDS = (
     #
     # Here, we add ~/.local/bin to the end of the PATH to make sure the issues
     # mentioned above are resolved.
-    f'export PATH=$PATH:{SKY_SHARED_HOME}/.local/bin; '
+    f'export PATH=$PATH:{SKY_REMOTE_PYTHON_ENV_DIR}/.local/bin; '
     # Writes ray path to file if it does not exist or the file is empty.
     f'[ -s {SKY_RAY_PATH_FILE} ] || '
     f'{{ {SKY_UV_RUN_CMD} '

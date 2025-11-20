@@ -1355,6 +1355,9 @@ class SlurmCommandRunner(SSHCommandRunner):
         # from one another. We rely on the assumption that ~ is exclusively
         # used by a cluster, and in Slurm that is not the case, as $HOME
         # could be part of a shared filesystem.
-        cmd = ('export SKY_ORIG_HOME="${SKY_ORIG_HOME:-$HOME}" && '
+        # Override SKY_REMOTE_PYTHON_ENV_DIR so that skypilot-runtime is
+        # installed to local disk instead of a shared filesystem.
+        basedir = os.path.basename(self.sky_dir)
+        cmd = (f'export SKY_REMOTE_PYTHON_ENV_DIR="/tmp/{basedir}" && '
                f'cd {self.sky_dir} && export HOME=$(pwd) && {cmd}')
         return super().run(cmd, **kwargs)
