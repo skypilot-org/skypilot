@@ -5301,8 +5301,8 @@ def jobs_pool_down(
                     already_confirmed = True
                 
                 # Cancel all jobs in the pool
-                with ux_utils.spinner_message(
-                    f'Cancelling {num_jobs} jobs in pool {pool_name}...'):
+                with rich_utils.client_status(ux_utils.spinner_message(
+                    f'Cancelling {num_jobs} jobs in pool {pool_name}...')):
                     cancel_request_id = managed_jobs.cancel(pool=pool_name)
                     sdk.stream_and_get(cancel_request_id)
 
@@ -5330,9 +5330,10 @@ def jobs_pool_down(
                 click.echo()
         except Exception as e:  # pylint: disable=broad-except
             # If API call fails, log warning but continue with pool down
-            logger.warning(
-                f'Failed to check for running jobs in pool {pool_name!r}: {e}. '
-                'Proceeding with pool down.')
+            # logger.warning(
+            #     f'Failed to check for running jobs in pool {pool_name!r}: {e}. '
+            #     'Proceeding with pool down.')
+            raise e
 
     if not yes and not already_confirmed:
         quoted_pool_names = [f'{name!r}' for name in pool_names]
