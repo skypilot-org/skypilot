@@ -64,11 +64,12 @@ async def volume_validate(
             'size': volume_validate_body.size,
             'labels': volume_validate_body.labels,
             'config': volume_validate_body.config,
-            'resource_name': volume_validate_body.resource_name,
+            'use_existing': volume_validate_body.use_existing,
         }
         volume = volume_lib.Volume.from_yaml_config(volume_config)
         volume.validate()
     except Exception as e:
+        requests_lib.set_exception_stacktrace(e)
         raise fastapi.HTTPException(status_code=400,
                                     detail=exceptions.serialize_exception(e))
 
@@ -80,6 +81,9 @@ async def volume_apply(request: fastapi.Request,
     volume_cloud = volume_apply_body.cloud
     volume_type = volume_apply_body.volume_type
     volume_config = volume_apply_body.config
+    if volume_config is None:
+        volume_config = {}
+    volume_config['use_existing'] = volume_apply_body.use_existing
 
     supported_volume_types = [
         volume_type.value for volume_type in volume_utils.VolumeType
@@ -99,8 +103,6 @@ async def volume_apply(request: fastapi.Request,
         supported_access_modes = [
             access_mode.value for access_mode in volume_utils.VolumeAccessMode
         ]
-        if volume_config is None:
-            volume_config = {}
         access_mode = volume_config.get('access_mode')
         if access_mode is None:
             volume_config['access_mode'] = (

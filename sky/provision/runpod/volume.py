@@ -32,9 +32,17 @@ def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     """
     name_on_cloud = config.name_on_cloud
     assert name_on_cloud is not None
-
-    vol_id = _try_resolve_volume_id(name_on_cloud)
-    if vol_id is None:
+    data_center_id = config.zone
+    if not data_center_id:
+        raise RuntimeError('RunPod DataCenterId is required for network '
+                           'volumes. Set the zone in the infra field.')
+    vol = _try_resolve_volume_by_name(name_on_cloud, data_center_id)
+    if vol is None:
+        use_existing = config.config.get('use_existing')
+        if use_existing:
+            raise ValueError(
+                f'RunPod network volume {name_on_cloud} does not exist while '
+                f'use_existing is True.')
         # Create new volume via REST
         size = config.size
         if size is None:
@@ -49,11 +57,7 @@ def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
                     f'{volume_lib.MIN_RUNPOD_NETWORK_VOLUME_SIZE_GB}GB.')
         except Exception as e:  # pylint: disable=broad-except
             raise RuntimeError(f'Invalid volume size {size!r}: {e}') from e
-        data_center_id = config.zone
-        if not data_center_id:
-            raise RuntimeError(
-                'RunPod DataCenterId is required to create a network '
-                'volume. Set the zone in the infra field.')
+
         payload = {
             'dataCenterId': data_center_id,
             'name': name_on_cloud,
@@ -70,7 +74,22 @@ def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
         return config
 
     # Use existing matched volume
-    config.id_on_cloud = vol_id
+    id_on_cloud = vol.get('id')
+    if id_on_cloud is None:
+        raise RuntimeError(
+            f'RunPod network volume {name_on_cloud} has no id returned.')
+    config.id_on_cloud = id_on_cloud
+    size = vol.get('size')
+    if size is not None:
+        if config.size is not None and config.size != str(size):
+            logger.warning(
+                f'RunPod network volume {name_on_cloud} has size {size} but '
+                f'config size is {config.size}, overriding the config size '
+                f'with the volume size.')
+        config.size = str(size)
+    else:
+        logger.warning(
+            f'RunPod network volume {name_on_cloud} has no size returned.')
     logger.debug(f'Using existing RunPod network volume {name_on_cloud} '
                  f'(id={config.id_on_cloud})')
     return config
@@ -81,9 +100,12 @@ def delete_volume(config: models.VolumeConfig) -> models.VolumeConfig:
        resolvable. If the volume id is not known, try to resolve it by name.
     """
     name_on_cloud = config.name_on_cloud
+    assert name_on_cloud is not None
+    data_center_id = config.zone
+    assert data_center_id is not None
     vol_id = config.id_on_cloud
     if not vol_id:
-        vol_id = _try_resolve_volume_id(name_on_cloud)
+        vol_id = _try_resolve_volume_id(name_on_cloud, data_center_id)
     if not vol_id:
         logger.warning(
             f'RunPod network volume id not found for {name_on_cloud}; '
@@ -95,12 +117,21 @@ def delete_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     return config
 
 
-def _try_resolve_volume_id(name_on_cloud: str) -> Optional[str]:
+def _try_resolve_volume_id(name_on_cloud: str,
+                           data_center_id: str) -> Optional[str]:
     vols = _list_volumes()
-    matched = next((v for v in vols if v.get('name') == name_on_cloud), None)
+    matched = next((v for v in vols if v.get('name') == name_on_cloud and
+                    v.get('dataCenterId') == data_center_id), None)
     if matched is not None:
         return matched.get('id')
     return None
+
+
+def _try_resolve_volume_by_name(
+        name_on_cloud: str, data_center_id: str) -> Optional[Dict[str, Any]]:
+    vols = _list_volumes()
+    return next((v for v in vols if v.get('name') == name_on_cloud and
+                 v.get('dataCenterId') == data_center_id), None)
 
 
 def get_volume_usedby(
@@ -114,8 +145,11 @@ def get_volume_usedby(
     """
     vol_id = config.id_on_cloud
     name_on_cloud = config.name_on_cloud
+    assert name_on_cloud is not None
+    data_center_id = config.zone
+    assert data_center_id is not None
     if vol_id is None:
-        vol_id = _try_resolve_volume_id(name_on_cloud)
+        vol_id = _try_resolve_volume_id(name_on_cloud, data_center_id)
     if vol_id is None:
         return [], []
 

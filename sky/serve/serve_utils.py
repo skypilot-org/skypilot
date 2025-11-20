@@ -402,7 +402,7 @@ def validate_service_task(task: 'sky.Task', pool: bool) -> None:
                           if task.service.dynamic_ondemand_fallback else 'spot')
     for resource in list(task.resources):
         if resource.job_recovery is not None:
-            sys_name = 'SkyServe' if not pool else 'Cluster Pool'
+            sys_name = 'SkyServe' if not pool else 'Pool'
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'job_recovery is disabled for {sys_name}. '
                                  f'{sys_name} will replenish preempted spot '
@@ -421,7 +421,7 @@ def validate_service_task(task: 'sky.Task', pool: bool) -> None:
         if len(accelerators) > 1:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Heterogeneous clusters are not supported for '
-                                 'cluster pools please specify one accelerator '
+                                 'pools please specify one accelerator '
                                  'for all workers.')
 
     # Try to create a spot placer from the task yaml. Check if the task yaml
@@ -468,7 +468,7 @@ def validate_service_task(task: 'sky.Task', pool: bool) -> None:
             if (task.service.ports is not None or
                     requested_resources.ports is not None):
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError('Cannot specify ports in a cluster pool.')
+                    raise ValueError('Cannot specify ports in a pool.')
 
 
 def generate_service_name(pool: bool = False):
@@ -696,6 +696,18 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
     return message
 
 
+def get_yaml_content(service_name: str, version: int) -> str:
+    yaml_content = serve_state.get_yaml_content(service_name, version)
+    if yaml_content is not None:
+        return yaml_content
+    # Backward compatibility for old service records that
+    # does not dump the yaml content to version database.
+    # TODO(tian): Remove this after 2 minor releases, i.e. 0.13.0.
+    latest_yaml_path = generate_task_yaml_file_name(service_name, version)
+    with open(latest_yaml_path, 'r', encoding='utf-8') as f:
+        return f.read()
+
+
 def _get_service_status(
         service_name: str,
         pool: bool,
@@ -718,21 +730,30 @@ def _get_service_status(
 
     record['pool_yaml'] = ''
     if record['pool']:
-        latest_yaml_path = generate_task_yaml_file_name(service_name,
-                                                        record['version'])
-        raw_yaml_config = yaml_utils.read_yaml(latest_yaml_path)
-        original_config = raw_yaml_config.get('_user_specified_yaml')
-        if original_config is None:
-            # Fall back to old display format.
-            original_config = raw_yaml_config
-            original_config.pop('run', None)
-            svc: Dict[str, Any] = original_config.pop('service')
-            if svc is not None:
-                svc.pop('pool', None)  # Remove pool from service config
-                original_config['pool'] = svc  # Add pool to root config
+        version = record['version']
+        try:
+            yaml_content = get_yaml_content(service_name, version)
+            raw_yaml_config = yaml_utils.read_yaml_str(yaml_content)
+        except Exception as e:  # pylint: disable=broad-except
+            # If this is a consolidation mode running without an PVC, the file
+            # might lost after an API server update (restart). In such case, we
+            # don't want it to crash the command. Fall back to an empty string.
+            logger.error(f'Failed to read YAML for service {service_name} '
+                         f'with version {version}: {e}')
+            record['pool_yaml'] = ''
         else:
-            original_config = yaml_utils.safe_load(original_config)
-        record['pool_yaml'] = yaml_utils.dump_yaml_str(original_config)
+            original_config = raw_yaml_config.get('_user_specified_yaml')
+            if original_config is None:
+                # Fall back to old display format.
+                original_config = raw_yaml_config
+                original_config.pop('run', None)
+                svc: Dict[str, Any] = original_config.pop('service')
+                if svc is not None:
+                    svc.pop('pool', None)  # Remove pool from service config
+                    original_config['pool'] = svc  # Add pool to root config
+            else:
+                original_config = yaml_utils.safe_load(original_config)
+            record['pool_yaml'] = yaml_utils.dump_yaml_str(original_config)
 
     record['target_num_replicas'] = 0
     try:
@@ -856,7 +877,7 @@ def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
         logger.error(f'Service {service_name!r} does not exist.')
         return None
     if not service_status['pool']:
-        logger.error(f'Service {service_name!r} is not a cluster pool.')
+        logger.error(f'Service {service_name!r} is not a pool.')
         return None
     with filelock.FileLock(get_service_filelock_path(service_name)):
         logger.debug(f'Get next cluster name for pool {service_name!r}')
@@ -1142,9 +1163,11 @@ def get_latest_version_with_min_replicas(
     return active_versions[-1] if active_versions else None
 
 
-def _process_line(line: str,
-                  cluster_name: str,
-                  stop_on_eof: bool = False) -> Iterator[str]:
+def _process_line(
+        line: str,
+        cluster_name: str,
+        stop_on_eof: bool = False,
+        streamed_provision_log_paths: Optional[set] = None) -> Iterator[str]:
     # The line might be directing users to view logs, like
     # `✓ Cluster launched: new-http.  View logs at: *.log`
     # We should tail the detailed logs for user.
@@ -1159,6 +1182,20 @@ def _process_line(line: str,
     log_prompt = re.match(_SKYPILOT_LOG_PATTERN, line)
 
     def _stream_provision_path(p: pathlib.Path) -> Iterator[str]:
+        # Check if this provision log has already been streamed to avoid
+        # duplicate expansion. When a Kubernetes cluster needs to pull a Docker
+        # image, rich spinner updates can produce hundreds of lines matching
+        # _SKYPILOT_PROVISION_LOG_CMD_PATTERN (e.g., "Launching (1 pod(s)
+        # pending due to Pulling)... View logs: sky logs --provision ...").
+        # Without this check, the same provision log would be expanded hundreds
+        # of times, creating huge log files (30M+) and making users think the
+        # system is stuck in an infinite loop.
+        if streamed_provision_log_paths is not None:
+            resolved_path = str(p.resolve())
+            if resolved_path in streamed_provision_log_paths:
+                return
+            streamed_provision_log_paths.add(resolved_path)
+
         try:
             with open(p, 'r', newline='', encoding='utf-8') as f:
                 # Exit if >10s without new content to avoid hanging when INIT
@@ -1230,9 +1267,14 @@ def _follow_logs_with_provision_expanding(
     Yields:
         Log lines, including expanded content from referenced provision logs.
     """
+    streamed_provision_log_paths: set = set()
 
     def process_line(line: str) -> Iterator[str]:
-        yield from _process_line(line, cluster_name, stop_on_eof=stop_on_eof)
+        yield from _process_line(
+            line,
+            cluster_name,
+            stop_on_eof=stop_on_eof,
+            streamed_provision_log_paths=streamed_provision_log_paths)
 
     return log_utils.follow_logs(file,
                                  should_stop=should_stop,
@@ -1258,11 +1300,14 @@ def _capped_follow_logs_with_provision_expanding(
         Log lines, including expanded content from referenced provision logs.
     """
     all_lines: Deque[str] = collections.deque(maxlen=line_cap)
+    streamed_provision_log_paths: set = set()
 
     for line in log_list:
-        for processed in _process_line(line=line,
-                                       cluster_name=cluster_name,
-                                       stop_on_eof=False):
+        for processed in _process_line(
+                line=line,
+                cluster_name=cluster_name,
+                stop_on_eof=False,
+                streamed_provision_log_paths=streamed_provision_log_paths):
             all_lines.append(processed)
 
     yield from all_lines

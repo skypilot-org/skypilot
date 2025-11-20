@@ -100,7 +100,7 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '25'
+SKYLET_VERSION = '26'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -242,6 +242,21 @@ RAY_INSTALLATION_COMMANDS = (
     f'[ -s {SKY_RAY_PATH_FILE} ] || '
     f'{{ {SKY_UV_RUN_CMD} '
     f'which ray > {SKY_RAY_PATH_FILE} || exit 1; }}; ')
+
+# Copy SkyPilot templates from the installed wheel to ~/sky_templates.
+# This must run after the skypilot wheel is installed.
+COPY_SKYPILOT_TEMPLATES_COMMANDS = (
+    f'{ACTIVATE_SKY_REMOTE_PYTHON_ENV}; '
+    f'{SKY_PYTHON_CMD} -c \''
+    'import sky_templates, shutil, os; '
+    'src = os.path.dirname(sky_templates.__file__); '
+    'dst = os.path.expanduser(\"~/sky_templates\"); '
+    'print(f\"Copying templates from {src} to {dst}...\"); '
+    'shutil.copytree(src, dst, dirs_exist_ok=True); '
+    'print(f\"Templates copied successfully\")\'; '
+    # Make scripts executable.
+    'find ~/sky_templates -type f ! -name "*.py" ! -name "*.md" '
+    '-exec chmod +x {} \\; ')
 
 SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     f'{SKY_UV_INSTALL_CMD};'
@@ -392,6 +407,7 @@ RCLONE_CACHE_REFRESH_INTERVAL = 10
 OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('docker', 'run_options'),
     ('nvidia_gpus', 'disable_ecc'),
+    ('ssh', 'custom_metadata'),
     ('ssh', 'pod_config'),
     ('ssh', 'provision_timeout'),
     ('kubernetes', 'custom_metadata'),

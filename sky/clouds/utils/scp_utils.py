@@ -3,7 +3,6 @@
 This module contains a set of rest api functions accessing SCP Open-API.
 """
 import base64
-import datetime
 from functools import wraps
 import hashlib
 import hmac
@@ -171,15 +170,18 @@ class SCPClient:
         self.secret_key = self._credentials['secret_key']
         self.project_id = self._credentials['project_id']
         self.client_type = 'OpenApi'
-        self.timestamp = ''
-        self.signature = ''
 
-        self.headers = {
-            'X-Cmp-AccessKey': f'{self.access_key}',
-            'X-Cmp-ClientType': f'{self.client_type}',
-            'X-Cmp-ProjectId': f'{self.project_id}',
-            'X-Cmp-Timestamp': f'{self.timestamp}',
-            'X-Cmp-Signature': f'{self.signature}'
+    def _signed_headers(self, method: str, url: str) -> dict:
+        timestamp = str(int(time.time() * 1000))
+        signature = self.get_signature(method=method,
+                                       url=url,
+                                       timestamp=timestamp)
+        return {
+            'X-Cmp-AccessKey': self.access_key,
+            'X-Cmp-ClientType': self.client_type,
+            'X-Cmp-ProjectId': self.project_id,
+            'X-Cmp-Timestamp': timestamp,
+            'X-Cmp-Signature': signature,
         }
 
     def create_instance(self, instance_config):
@@ -190,10 +192,8 @@ class SCPClient:
     @_retry
     def _get(self, url, contents_key='contents'):
         method = 'GET'
-        self.set_timestamp()
-        self.set_signature(url=url, method=method)
-
-        response = requests.get(url, headers=self.headers)
+        headers = self._signed_headers(method, url)
+        response = requests.get(url, headers=headers)
         raise_scp_error(response)
         if contents_key is not None:
             return response.json().get(contents_key, [])
@@ -203,26 +203,19 @@ class SCPClient:
     @_retry
     def _post(self, url, request_body):
         method = 'POST'
-        self.set_timestamp()
-        self.set_signature(url=url, method=method)
-
-        response = requests.post(url, json=request_body, headers=self.headers)
-
+        headers = self._signed_headers(method, url)
+        response = requests.post(url, json=request_body, headers=headers)
         raise_scp_error(response)
         return response.json()
 
     @_retry
     def _delete(self, url, request_body=None):
         method = 'DELETE'
-        self.set_timestamp()
-        self.set_signature(url=url, method=method)
+        headers = self._signed_headers(method, url)
         if request_body:
-            response = requests.delete(url,
-                                       json=request_body,
-                                       headers=self.headers)
-
+            response = requests.delete(url, json=request_body, headers=headers)
         else:
-            response = requests.delete(url, headers=self.headers)
+            response = requests.delete(url, headers=headers)
         raise_scp_error(response)
         return response.json()
 
@@ -252,12 +245,22 @@ class SCPClient:
         return True
 
     def add_security_group_rule(self, sg_id, direction,
-                                ports: Optional[List[str]]):
+                                ports: Optional[List[str]],
+                                cnt: Optional[int]) -> None:
         if ports is None:
             if direction == 'IN':
-                ports = ['22']
+                if cnt == 1:
+                    ports = ['22']
+                else:
+                    ports = ['22', '6380', '8076', '10001', '11001-11200']
             else:
-                ports = ['21', '22', '80', '443']
+                if cnt == 1:
+                    ports = ['21', '22', '80', '443']
+                else:
+                    ports = [
+                        '21', '22', '80', '443', '6380', '8076', '10001',
+                        '11001-11200'
+                    ]
         services = []
         for port in ports:
             services.append({'serviceType': 'TCP', 'serviceValue': port})
@@ -273,7 +276,9 @@ class SCPClient:
                 target_address: ['0.0.0.0/0'],
                 'ruleDescription': 'sky security group rule'
             }
-            return self._post(url, request_body)
+            self._post(url, request_body)
+        else:
+            return None
 
     def _firewall_rule_not_exist(self, firewall_id, internal_ip, direction,
                                  ports):
@@ -293,12 +298,22 @@ class SCPClient:
                 return False
         return True
 
-    def add_firewall_rule(self, firewall_id, internal_ip, direction, ports):
+    def add_firewall_rule(self, firewall_id, internal_ip, direction,
+                          ports: Optional[List[str]], cnt: Optional[int]):
         if ports is None:
             if direction == 'IN':
-                ports = ['22']
+                if cnt == 1:
+                    ports = ['22']
+                else:
+                    ports = ['22', '6380', '8076', '10001', '11001-11200']
             else:
-                ports = ['21', '22', '80', '443']
+                if cnt == 1:
+                    ports = ['21', '22', '80', '443']
+                else:
+                    ports = [
+                        '21', '22', '80', '443', '6380', '8076', '10001',
+                        '11001-11200'
+                    ]
         services = []
         for port in ports:
             services.append({'serviceType': 'TCP', 'serviceValue': port})
@@ -322,6 +337,8 @@ class SCPClient:
                 'ruleDescription': 'sky firewall rule'
             }
             return self._post(url, request_body)
+        else:
+            return None
 
     def terminate_instance(self, instance_id):
         url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers/{instance_id}'
@@ -334,12 +351,19 @@ class SCPClient:
 
     def get_catalog(self) -> Dict[str, Any]:
         """List offered instances and their availability."""
-        response = requests.get(f'{API_ENDPOINT}/instance-types',
-                                headers=self.headers)
+        url = f'{API_ENDPOINT}/instance-types'
+        headers = self._signed_headers('GET', url)
+        response = requests.get(url, headers=headers)
         raise_scp_error(response)
         return response.json().get('data', [])
 
-    def get_signature(self, method: str, url: str) -> str:
+    def get_signature(self,
+                      method: str,
+                      url: str,
+                      timestamp: Optional[str] = None) -> str:
+        if timestamp is None:
+            timestamp = str(int(time.time() * 1000))
+
         url_info = parse.urlsplit(url)
         url = (f'{url_info.scheme}://{url_info.netloc}'
                f'{parse.quote(url_info.path)}')
@@ -349,7 +373,7 @@ class SCPClient:
                     parse.parse_qs(url_info.query).items()))
             url = f'{url}?{parse.urlencode(enc_params)}'
 
-        message = method + url + self.timestamp \
+        message = method + url + timestamp \
                   + self.access_key + self.project_id + self.client_type
         message = bytes(message, 'utf-8')
         secret = bytes(self.secret_key, 'utf-8')
@@ -359,19 +383,6 @@ class SCPClient:
             'utf-8')
 
         return str(signature)
-
-    def set_timestamp(self) -> None:
-        self.timestamp = str(
-            int(
-                round(
-                    datetime.datetime.timestamp(datetime.datetime.now() -
-                                                datetime.timedelta(minutes=1)) *
-                    1000)))
-        self.headers['X-Cmp-Timestamp'] = self.timestamp
-
-    def set_signature(self, method: str, url: str) -> None:
-        self.signature = self.get_signature(url=url, method=method)
-        self.headers['X-Cmp-Signature'] = self.signature
 
     def get_nic(self, instance_id) -> List[dict]:
         url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers/{instance_id}/nics'  # pylint: disable=line-too-long

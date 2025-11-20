@@ -55,6 +55,7 @@ from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.server import metrics
+from sky.server import middleware_utils
 from sky.server import plugins
 from sky.server import state
 from sky.server import stream_utils
@@ -78,6 +79,7 @@ from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import dag_utils
+from sky.utils import env_options
 from sky.utils import perf_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
@@ -139,6 +141,7 @@ def _try_set_basic_auth_user(request: fastapi.Request):
             break
 
 
+@middleware_utils.websocket_aware
 class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle RBAC."""
 
@@ -188,6 +191,7 @@ def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
     return models.User(id=user_hash, name=user_name)
 
 
+@middleware_utils.websocket_aware
 class InitializeRequestAuthUserMiddleware(
         starlette.middleware.base.BaseHTTPMiddleware):
 
@@ -198,6 +202,7 @@ class InitializeRequestAuthUserMiddleware(
         return await call_next(request)
 
 
+@middleware_utils.websocket_aware
 class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle HTTP Basic Auth."""
 
@@ -249,6 +254,7 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+@middleware_utils.websocket_aware
 class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle Bearer Token Auth (Service Accounts)."""
 
@@ -376,6 +382,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+@middleware_utils.websocket_aware
 class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle auth proxy."""
 
@@ -550,6 +557,7 @@ class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+@middleware_utils.websocket_aware
 class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to control requests when server is shutting down."""
 
@@ -569,6 +577,7 @@ class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+@middleware_utils.websocket_aware
 class APIVersionMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to add API version to the request."""
 
@@ -795,7 +804,8 @@ async def kubernetes_node_info(
 
 @app.get('/status_kubernetes')
 async def status_kubernetes(request: fastapi.Request) -> None:
-    """Gets Kubernetes status."""
+    """[Experimental] Get all SkyPilot resources (including from other '
+    'users) in the current Kubernetes context."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.STATUS_KUBERNETES,
@@ -875,6 +885,11 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
         # thread executor to avoid blocking the uvicorn event loop.
         await context_utils.to_thread(validate_dag, dag)
     except Exception as e:  # pylint: disable=broad-except
+        # Print the exception to the API server log.
+        if env_options.Options.SHOW_DEBUG_INFO.get():
+            logger.info('/validate exception:', exc_info=True)
+        # Set the exception stacktrace for the serialized exception.
+        requests_lib.set_exception_stacktrace(e)
         raise fastapi.HTTPException(
             status_code=400, detail=exceptions.serialize_exception(e)) from e
 
