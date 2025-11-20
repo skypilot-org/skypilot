@@ -60,6 +60,11 @@ EXTERNAL_LOCAL_ENV_VARS = [
     'AWS_ACCESS_KEY_ID',
     'AWS_SECRET_ACCESS_KEY',
     'AWS_SESSION_TOKEN',
+    # Allow overriding the Azure authentication.
+    'AZURE_CLIENT_ID',
+    'AZURE_CLIENT_SECRET',
+    'AZURE_TENANT_ID',
+    'AZURE_SUBSCRIPTION_ID',
     # Allow overriding the GCP authentication.
     'GOOGLE_APPLICATION_CREDENTIALS',
     # Allow overriding the kubeconfig.

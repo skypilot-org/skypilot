@@ -2511,7 +2511,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     def _update_cluster_info(self):
         # When a cluster is on a cloud that does not support the new
         # provisioner, we should skip updating cluster_info.
-        if (self.launched_resources.cloud.PROVISIONER_VERSION >=
+        if (self.launched_resources.cloud is not None and
+                self.launched_resources.cloud.PROVISIONER_VERSION >=
                 clouds.ProvisionerVersion.SKYPILOT):
             provider_name = str(self.launched_resources.cloud).lower()
             config = {}
@@ -3657,8 +3658,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 try:
                     retry_provisioner = RetryingVmProvisioner(
                         self.log_dir,
-                        self._dag,
-                        self._optimize_target,
+                        self._dag,  # type: ignore[arg-type]
+                        self._optimize_target,  # type: ignore[arg-type]
                         self._requested_features,
                         local_wheel_path,
                         wheel_hash,

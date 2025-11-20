@@ -1117,9 +1117,11 @@ def get_latest_version_with_min_replicas(
     return active_versions[-1] if active_versions else None
 
 
-def _process_line(line: str,
-                  cluster_name: str,
-                  stop_on_eof: bool = False) -> Iterator[str]:
+def _process_line(
+        line: str,
+        cluster_name: str,
+        stop_on_eof: bool = False,
+        streamed_provision_log_paths: Optional[set] = None) -> Iterator[str]:
     # The line might be directing users to view logs, like
     # `✓ Cluster launched: new-http.  View logs at: *.log`
     # We should tail the detailed logs for user.
@@ -1134,6 +1136,20 @@ def _process_line(line: str,
     log_prompt = re.match(_SKYPILOT_LOG_PATTERN, line)
 
     def _stream_provision_path(p: pathlib.Path) -> Iterator[str]:
+        # Check if this provision log has already been streamed to avoid
+        # duplicate expansion. When a Kubernetes cluster needs to pull a Docker
+        # image, rich spinner updates can produce hundreds of lines matching
+        # _SKYPILOT_PROVISION_LOG_CMD_PATTERN (e.g., "Launching (1 pod(s)
+        # pending due to Pulling)... View logs: sky logs --provision ...").
+        # Without this check, the same provision log would be expanded hundreds
+        # of times, creating huge log files (30M+) and making users think the
+        # system is stuck in an infinite loop.
+        if streamed_provision_log_paths is not None:
+            resolved_path = str(p.resolve())
+            if resolved_path in streamed_provision_log_paths:
+                return
+            streamed_provision_log_paths.add(resolved_path)
+
         try:
             with open(p, 'r', newline='', encoding='utf-8') as f:
                 # Exit if >10s without new content to avoid hanging when INIT
@@ -1205,9 +1221,14 @@ def _follow_logs_with_provision_expanding(
     Yields:
         Log lines, including expanded content from referenced provision logs.
     """
+    streamed_provision_log_paths: set = set()
 
     def process_line(line: str) -> Iterator[str]:
-        yield from _process_line(line, cluster_name, stop_on_eof=stop_on_eof)
+        yield from _process_line(
+            line,
+            cluster_name,
+            stop_on_eof=stop_on_eof,
+            streamed_provision_log_paths=streamed_provision_log_paths)
 
     return log_utils.follow_logs(file,
                                  should_stop=should_stop,
@@ -1233,11 +1254,14 @@ def _capped_follow_logs_with_provision_expanding(
         Log lines, including expanded content from referenced provision logs.
     """
     all_lines: Deque[str] = collections.deque(maxlen=line_cap)
+    streamed_provision_log_paths: set = set()
 
     for line in log_list:
-        for processed in _process_line(line=line,
-                                       cluster_name=cluster_name,
-                                       stop_on_eof=False):
+        for processed in _process_line(
+                line=line,
+                cluster_name=cluster_name,
+                stop_on_eof=False,
+                streamed_provision_log_paths=streamed_provision_log_paths):
             all_lines.append(processed)
 
     yield from all_lines
