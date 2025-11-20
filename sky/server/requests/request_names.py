@@ -10,6 +10,8 @@ class RequestName(str, enum.Enum):
     REALTIME_KUBERNETES_GPU_AVAILABILITY = (
         'realtime_kubernetes_gpu_availability')
     KUBERNETES_NODE_INFO = 'kubernetes_node_info'
+    REALTIME_SLURM_GPU_AVAILABILITY = 'realtime_slurm_gpu_availability'
+    SLURM_NODE_INFO = 'slurm_node_info'
     STATUS_KUBERNETES = 'status_kubernetes'
     LIST_ACCELERATORS = 'list_accelerators'
     LIST_ACCELERATOR_COUNTS = 'list_accelerator_counts'

@@ -637,8 +637,11 @@ def _format_enabled_cloud(cloud_name: str,
     cloud_and_capabilities = f'{cloud_name} [{", ".join(capabilities)}]'
     title = _green_color(cloud_and_capabilities)
 
-    if cloud_name in [repr(sky_clouds.Kubernetes()), repr(sky_clouds.SSH()),
-                      repr(sky_clouds.Slurm())]:
+    if cloud_name in [
+            repr(sky_clouds.Kubernetes()),
+            repr(sky_clouds.SSH()),
+            repr(sky_clouds.Slurm())
+    ]:
         return (f'{title}' + _format_context_details(
             cloud_name, show_details=False, ctx2text=ctx2text))
     return _green_color(cloud_and_capabilities)

@@ -24,8 +24,7 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-DEFAULT_SLURM_PATH = '~/.slurm/config'
-CREDENTIAL_PATH = DEFAULT_SLURM_PATH
+CREDENTIAL_PATH = slurm_utils.DEFAULT_SLURM_PATH
 
 
 @registry.CLOUD_REGISTRY.register
@@ -91,7 +90,7 @@ class Slurm(clouds.Cloud):
     @classmethod
     @annotations.lru_cache(scope='global', maxsize=1)
     def _log_skipped_clusters_once(cls, skipped_clusters: Tuple[str,
-                                                                 ...]) -> None:
+                                                                ...]) -> None:
         """Log skipped clusters for only once.
 
         We don't directly cache the result of existing_allowed_clusters
@@ -123,8 +122,8 @@ class Slurm(clouds.Cloud):
 
         # Workspace-level allowed_clusters should take precedence over
         # the global allowed_clusters.
-        allowed_clusters = skypilot_config.get_workspace_cloud(
-            'slurm').get('allowed_clusters', None)
+        allowed_clusters = skypilot_config.get_workspace_cloud('slurm').get(
+            'allowed_clusters', None)
         if allowed_clusters is None:
             allowed_clusters = skypilot_config.get_effective_region_config(
                 cloud='slurm',
@@ -271,7 +270,7 @@ class Slurm(clouds.Cloud):
         assert cluster is not None, 'No available Slurm cluster found.'
 
         # cluster is our target slurmctld host.
-        ssh_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
+        ssh_config = SSHConfig.from_path(os.path.expanduser(CREDENTIAL_PATH))
         ssh_config_dict = ssh_config.lookup(cluster)
 
         r = resources
@@ -325,7 +324,7 @@ class Slurm(clouds.Cloud):
                 zone=resources.zone)
             if not available_regions:
                 return resources_utils.FeasibleResources([], [], None)
-            
+
             # Return a single resource without region set.
             # The optimizer will call make_launchables_for_valid_region_zones()
             # which will create one resource per region/cluster.
@@ -393,7 +392,7 @@ class Slurm(clouds.Cloud):
     def _check_compute_credentials(
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to the Slurm cluster."""
-        ssh_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
+        ssh_config = SSHConfig.from_path(os.path.expanduser(CREDENTIAL_PATH))
         existing_allowed_clusters = cls.existing_allowed_clusters()
 
         if not existing_allowed_clusters:

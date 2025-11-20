@@ -2,7 +2,7 @@
 
 import logging
 import re
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
@@ -17,7 +17,7 @@ class SlurmClient:
     def __init__(
         self,
         ssh_host: str,
-        ssh_port: int,
+        ssh_port: Union[str, int],
         ssh_user: str,
         ssh_key: str,
         ssh_proxy_command: Optional[str] = None,
@@ -148,6 +148,71 @@ class SlurmClient:
                                               stream_logs=False)
         subprocess_utils.handle_returncode(
             rc, cmd, 'Failed to get Slurm node information.', stderr=stderr)
+        return stdout.splitlines()
+
+    def node_details(self, node_name: str) -> Dict[str, str]:
+        """Get detailed Slurm node information.
+
+        Returns:
+            A dictionary of node info from 'scontrol show node {node_name}'
+        """
+
+        # Helper function to parse scontrol output (can be moved to utils if needed)
+        def _parse_scontrol_node_output(output: str) -> Dict[str, str]:
+            """Parses the key=value output of 'scontrol show node'."""
+            node_info = {}
+            # Split by space, handling values that might contain spaces if quoted
+            # This is a simplified parser; scontrol output can be complex.
+            parts = output.split()
+            for part in parts:
+                if '=' in part:
+                    key, value = part.split('=', 1)
+                    # Simple quote removal, might need refinement
+                    value = value.strip('\'"')
+                    node_info[key] = value
+            return node_info
+
+        cmd = ['scontrol', 'show', 'node', node_name]
+        rc, node_details, _ = self._runner.run(cmd,
+                                               require_outputs=True,
+                                               stream_logs=False)
+        subprocess_utils.handle_returncode(
+            rc,
+            cmd,
+            f'Failed to get detailed node information for {node_name}.',
+            stderr=node_details)
+        node_info = _parse_scontrol_node_output(node_details)
+        return node_info
+
+    def info_partitions(self) -> List[str]:
+        """Get Slurm partition information.
+
+        Returns:
+            A list of partition info lines from 'sinfo -p -h -o "%P %t"'
+        """
+        cmd = ['sinfo', '-N', '-h', '-o', '%N %P']
+        rc, stdout, stderr = self._runner.run(cmd,
+                                              require_outputs=True,
+                                              stream_logs=False)
+        subprocess_utils.handle_returncode(
+            rc,
+            cmd,
+            'Failed to get Slurm partition information.',
+            stderr=stderr)
+        return stdout.splitlines()
+
+    def get_node_jobs(self, node_name: str) -> List[str]:
+        """Get the list of jobs for a given node name.
+
+        Returns:
+            A list of job info lines from 'squeue -w {node_name} -h -o "%i"'
+        """
+        cmd = ['squeue', '-w', node_name, '-h', '-o', '%b']
+        rc, stdout, stderr = self._runner.run(cmd,
+                                              require_outputs=True,
+                                              stream_logs=False)
+        subprocess_utils.handle_returncode(
+            rc, cmd, f'Failed to get jobs for node {node_name}.', stderr=stderr)
         return stdout.splitlines()
 
     @timeline.event
