@@ -46,7 +46,6 @@ import asyncio
 import contextlib
 import os
 import pathlib
-import shutil
 import sys
 import typing
 from typing import List, Optional, Set
@@ -57,7 +56,7 @@ import filelock
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
-from sky.client import sdk
+from sky.client import common as client_common
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
@@ -68,8 +67,6 @@ from sky.utils import controller_utils
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
-    import logging
-
     import psutil
 else:
     psutil = adaptors_common.LazyImport('psutil')
@@ -226,20 +223,22 @@ def get_number_of_controllers() -> int:
 def start_controller() -> None:
     """Start the job controller process.
 
-    This requires that the env file is already set up.
+    The caller must hold the JOB_CONTROLLER_PID_LOCK.
     """
-    os.environ[constants.OVERRIDE_CONSOLIDATION_MODE] = 'true'
     logs_dir = os.path.expanduser(
         managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
     os.makedirs(logs_dir, exist_ok=True)
     controller_uuid = str(uuid.uuid4())
     log_path = os.path.join(logs_dir, f'controller_{controller_uuid}.log')
 
+    set_job_controller_env_cmd = (
+        f'export {constants.ENV_VAR_IS_SKYPILOT_JOB_CONTROLLER}=true;')
     activate_python_env_cmd = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
     run_controller_cmd = (f'{sys.executable} -u -m'
                           f'sky.jobs.controller {controller_uuid}')
 
-    run_cmd = (f'{activate_python_env_cmd}'
+    run_cmd = (f'{set_job_controller_env_cmd}'
+               f'{activate_python_env_cmd}'
                f'{run_controller_cmd}')
 
     logger.info(f'Running controller with command: {run_cmd}')
@@ -264,42 +263,141 @@ def get_alive_controllers() -> Optional[int]:
     return alive
 
 
-def maybe_start_controllers(from_scheduler: bool = False) -> None:
+def stop_controllers() -> None:
+    """Stop existing job controller processes and release job claims."""
+    # XXX(cooperc): is blocking=False okay? Could cause api_stop to raise.
+    with filelock.FileLock(JOB_CONTROLLER_PID_LOCK, blocking=False):
+        stop_controllers_no_lock()
+
+
+def stop_controllers_no_lock() -> None:
+    """Stop existing job controller processes and release job claims.
+
+    This should only be called when the job controller lock is already held.
+    """
+    try:
+        records = get_controller_process_records()
+        if records is not None:
+            for record in records:
+                try:
+                    if managed_job_utils.controller_process_alive(record,
+                                                                  quiet=False):
+                        subprocess_utils.kill_children_processes(
+                            parent_pids=[record.pid], force=True)
+                except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                    continue
+            os.remove(os.path.expanduser(JOB_CONTROLLER_PID_PATH))
+    except FileNotFoundError:
+        # its fine we will create it
+        pass
+    except Exception as e:  # pylint: disable=broad-except
+        # in case we get perm issues or something is messed up, just ignore it
+        # and assume the process is dead
+        logger.error(f'Error looking at job controller pid file: {e}')
+        pass
+    # All controllers should be dead. Remove the PIDs so
+    # that update_managed_jobs_statuses won't think they
+    # have failed.
+    state.reset_jobs_for_recovery()
+
+
+# XXX hypothesis: check_skylet_hash is true iff consolidation_mode is false
+# stop_existing_controllers is true on consolidation mode server restart (only)
+# any failure cases for this???
+def maybe_start_controllers(check_skylet_hash: bool = False,
+                            stop_existing_controllers: bool = False) -> None:
     """Start the job controller process.
+
+    Args:
+        check_skylet_hash: Whether to check if the skylet hash has changed.
+        kill_existing_controllers: Whether to kill existing controllers.
 
     If the process is already running, it will not start a new one.
     Will also add the job_id, dag_yaml_path, and env_file_path to the
     controllers list of processes.
     """
-    try:
-        with filelock.FileLock(JOB_CONTROLLER_PID_LOCK, blocking=False):
-            if from_scheduler and not managed_job_utils.is_consolidation_mode():
-                cur = pathlib.Path(CURRENT_HASH)
-                old = pathlib.Path(f'{CURRENT_HASH}.old')
+    # check_skylet_hash means we should conditionally kill existing controllers,
+    # but kill_existing_controllers means we should unconditionally kill them.
+    # We can't have both.
+    assert not (check_skylet_hash and
+                stop_existing_controllers), (check_skylet_hash,
+                                             stop_existing_controllers)
 
-                if old.exists() and cur.exists():
-                    if (old.read_text(encoding='utf-8') !=
-                            cur.read_text(encoding='utf-8')):
-                        # TODO(luca): there is a 1/2^160 chance that there will
-                        # be a collision. using a geometric distribution and
-                        # assuming one update a day, we expect a bug slightly
-                        # before the heat death of the universe. should get
-                        # this fixed before then.
-                        try:
-                            # this will stop all the controllers and the api
-                            # server.
-                            sdk.api_stop()
-                            # All controllers should be dead. Remove the PIDs so
-                            # that update_managed_jobs_statuses won't think they
-                            # have failed.
-                            state.reset_jobs_for_recovery()
-                        except Exception as e:  # pylint: disable=broad-except
-                            logger.error(f'Failed to stop the api server: {e}')
-                            pass
+    consolidation_mode = managed_job_utils.is_consolidation_mode()
+    logger.debug(f'consolidation_mode: {consolidation_mode}')
+    if consolidation_mode:
+        # The skylet hash check only makes sense on the remote jobs controller,
+        # which is a sky cluster. The API server won't have a skylet hash file.
+        check_skylet_hash = False
+
+    try:
+        # XXX(cooperc): Check if blocking=False is okay for all cases.
+        # Seems like no since we also acquire the lock in api_stop now.
+        with filelock.FileLock(JOB_CONTROLLER_PID_LOCK, blocking=False):
+            logger.debug('Got the job controller lock.')
+            logger.debug(f'check_skylet_hash: {check_skylet_hash}')
+            logger.debug(
+                f'stop_existing_controllers: {stop_existing_controllers}')
+            if check_skylet_hash:
+                # On a remote jobs controller, we need to check if the wheel
+                # hash has changed. If so, we need to stop all the controllers
+                # running the old code and restart them.
+                current_hash = os.path.expanduser(constants.CURRENT_HASH_PATH)
+
+                new_hash_file = pathlib.Path(current_hash)
+                prev_hash_file = pathlib.Path(f'{current_hash}.old')
+
+                if not new_hash_file.exists():
+                    # We should have this whenever the skypilot wheel has been
+                    # installed - see SKYPILOT_WHEEL_INSTALLATION_COMMANDS.
+                    raise RuntimeError(f'Current hash file {current_hash} does '
+                                       'not exist')
+
+                new_hash = new_hash_file.read_text(encoding='utf-8')
+
+                if prev_hash_file.exists():
+                    prev_hash = prev_hash_file.read_text(encoding='utf-8')
+
+                    logger.debug(
+                        f'prev_hash: {prev_hash}, new_hash: {new_hash}')
+
+                    # WONTDO(luca): there is a 1/2^160 chance that there will be
+                    # a collision. using a geometric distribution and assuming
+                    # one update a day, we expect a bug slightly before the heat
+                    # death of the universe. should get this fixed before then.
+                    if prev_hash != new_hash:
+                        logger.debug('Hash mismatch, stopping controllers and '
+                                     'restarting API server.')
+                        # Kill the controllers first to avoid exceptions from
+                        # the API server dying, and to avoid them restarting the
+                        # API server while we're trying to kill it.
+                        stop_controllers_no_lock()
+                        logger.debug('Stopped controllers.')
+                        # Kill the API server. Need to restart it so to pick up
+                        # the new code. Note: it can't launch any new
+                        # controllers in the mean time since we are holding the
+                        # lock.
+                        # XXX need to hold API server creation lock here
+                        killed = client_common.local_api_server_running(
+                            kill=True)
+                        if killed:
+                            logger.debug('Killed API server.')
                         else:
-                            shutil.copyfile(cur, old)
-                if not old.exists():
-                    shutil.copyfile(cur, old)
+                            logger.debug('API server is not running.')
+                        # The controllers will implicitly restart the API
+                        # server.
+                else:
+                    logger.debug('No previous hash file found.')
+
+                # Don't use shutil.copyfile in case the file was updated during
+                # restart.
+                prev_hash_file.write_text(new_hash, encoding='utf-8')
+                logger.debug(f'Wrote new hash {new_hash} to {prev_hash_file}.')
+
+            if stop_existing_controllers:
+                logger.debug('Stopping existing controllers.')
+                stop_controllers_no_lock()
+                logger.debug('Stopped controllers.')
 
             alive = get_alive_controllers()
             if alive is None:
@@ -338,7 +436,7 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
             # This can happen when HA recovery runs for some reason but the job
             # controller is still alive.
             logger.warning(f'Job {job_id} is still alive, skipping submission')
-            maybe_start_controllers(from_scheduler=True)
+            maybe_start_controllers(check_skylet_hash=True)
             return
 
     with open(dag_yaml_path, 'r', encoding='utf-8') as dag_file:
@@ -363,7 +461,7 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
                f'--user-yaml-path {original_user_yaml_path} '
                f'--priority {priority}')
         state.set_ha_recovery_script(job_id, run)
-    maybe_start_controllers(from_scheduler=True)
+    maybe_start_controllers(check_skylet_hash=True)
 
 
 @contextlib.asynccontextmanager

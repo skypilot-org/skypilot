@@ -100,7 +100,7 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '26'
+SKYLET_VERSION = '27'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -243,6 +243,8 @@ RAY_INSTALLATION_COMMANDS = (
     f'{{ {SKY_UV_RUN_CMD} '
     f'which ray > {SKY_RAY_PATH_FILE} || exit 1; }}; ')
 
+CURRENT_HASH_PATH = '~/.sky/wheels/current_sky_wheel_hash'
+
 # Copy SkyPilot templates from the installed wheel to ~/sky_templates.
 # This must run after the skypilot wheel is installed.
 COPY_SKYPILOT_TEMPLATES_COMMANDS = (
@@ -261,7 +263,7 @@ COPY_SKYPILOT_TEMPLATES_COMMANDS = (
 SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     f'{SKY_UV_INSTALL_CMD};'
     f'{{ {SKY_UV_PIP_CMD} list | grep "skypilot " && '
-    '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '  # pylint: disable=line-too-long
+    f'[ "$(cat {CURRENT_HASH_PATH})" == "{{sky_wheel_hash}}" ]; }} || '
     f'{{ {SKY_UV_PIP_CMD} uninstall skypilot; '
     # uv cannot install azure-cli normally, since it depends on pre-release
     # packages. Manually install azure-cli with the --prerelease=allow flag
@@ -276,7 +278,7 @@ SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     # Install skypilot from wheel
     f'{SKY_UV_PIP_CMD} install "$(echo ~/.sky/wheels/{{sky_wheel_hash}}/'
     f'skypilot-{_sky_version}*.whl)[{{cloud}}, remote]" && '
-    'echo "{sky_wheel_hash}" > ~/.sky/wheels/current_sky_wheel_hash || '
+    f'echo "{{sky_wheel_hash}}" > {CURRENT_HASH_PATH} || '
     'exit 1; }; ')
 
 # Install ray and skypilot on the remote cluster if they are not already
@@ -477,7 +479,7 @@ SKY_USER_FILE_PATH = '~/.sky/generated'
 # TODO(cooperc): Update all env vars to begin with SKYPILOT_ or SKYPILOT_SERVER_
 # Environment variable that is set to 'true' if this is a skypilot server.
 ENV_VAR_IS_SKYPILOT_SERVER = 'IS_SKYPILOT_SERVER'
-OVERRIDE_CONSOLIDATION_MODE = 'IS_SKYPILOT_JOB_CONTROLLER'
+ENV_VAR_IS_SKYPILOT_JOB_CONTROLLER = 'IS_SKYPILOT_JOB_CONTROLLER'
 
 # Environment variable that is set to 'true' if metrics are enabled.
 ENV_VAR_SERVER_METRICS_ENABLED = 'SKY_API_SERVER_METRICS_ENABLED'

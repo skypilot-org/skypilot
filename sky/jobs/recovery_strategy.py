@@ -404,6 +404,7 @@ class StrategyExecutor:
 
                             request_id = None
                             try:
+                                logger.debug('Launching the job...')
                                 request_id = await context_utils.to_thread(
                                     sdk.launch,
                                     self.dag,

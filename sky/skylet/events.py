@@ -22,7 +22,6 @@ from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
 from sky.utils import registry
-from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
 
@@ -105,32 +104,13 @@ class ManagedJobEvent(SkyletEvent):
             all_job_ids = managed_job_state.get_all_job_ids_by_name(None)
             if not all_job_ids:
                 logger.info('No jobs running. Stopping controllers.')
-                # TODO(cooperc): Move this to a shared function also called by
-                # sdk.api_stop(). (#7229)
-                try:
-                    records = scheduler.get_controller_process_records()
-                    if records is not None:
-                        for record in records:
-                            if managed_job_utils.controller_process_alive(
-                                    record, quiet=False):
-                                subprocess_utils.kill_children_processes(
-                                    parent_pids=[record.pid], force=True)
-                        os.remove(
-                            os.path.expanduser(
-                                scheduler.JOB_CONTROLLER_PID_PATH))
-                except Exception as e:  # pylint: disable=broad-except
-                    # in case we get perm issues or something is messed up, just
-                    # ignore it and assume the process is dead
-                    logger.error(
-                        f'Error looking at job controller pid file: {e}')
-                    pass
+                scheduler.stop_controllers()
             logger.info(f'{len(all_job_ids)} jobs running. Assuming the '
                         'indicator file hasn\'t been written yet.')
             return
 
         logger.info('=== Updating managed job status ===')
         managed_job_utils.update_managed_jobs_statuses()
-        scheduler.maybe_start_controllers()
 
 
 class ServiceUpdateEvent(SkyletEvent):

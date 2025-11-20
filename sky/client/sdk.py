@@ -32,7 +32,6 @@ from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import oauth as oauth_lib
 from sky.jobs import scheduler
-from sky.jobs import utils as managed_job_utils
 from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import rest
@@ -54,7 +53,6 @@ from sky.utils import env_options
 from sky.utils import infra_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
-from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
 from sky.utils.kubernetes import ssh_utils
@@ -2186,18 +2184,6 @@ def api_cancel(request_ids: Optional[Union[server_common.RequestId[T],
     return server_common.get_request_id(response)
 
 
-def _local_api_server_running(kill: bool = False) -> bool:
-    """Checks if the local api server is running."""
-    for process in psutil.process_iter(attrs=['pid', 'cmdline']):
-        cmdline = process.info['cmdline']
-        if cmdline and server_common.API_SERVER_CMD in ' '.join(cmdline):
-            if kill:
-                subprocess_utils.kill_children_processes(
-                    parent_pids=[process.pid], force=True)
-            return True
-    return False
-
-
 @usage_lib.entrypoint
 @annotations.client_api
 def api_status(
@@ -2220,7 +2206,8 @@ def api_status(
     Returns:
         A list of request payloads.
     """
-    if server_common.is_api_server_local() and not _local_api_server_running():
+    if server_common.is_api_server_local(
+    ) and not client_common.local_api_server_running():
         logger.info('SkyPilot API server is not running.')
         return []
 
@@ -2352,28 +2339,16 @@ def api_stop() -> None:
     # stopping and starting the API server at the same time.
     with filelock.FileLock(
             os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
-        try:
-            records = scheduler.get_controller_process_records()
-            if records is not None:
-                for record in records:
-                    try:
-                        if managed_job_utils.controller_process_alive(
-                                record, quiet=False):
-                            subprocess_utils.kill_children_processes(
-                                parent_pids=[record.pid], force=True)
-                    except (psutil.NoSuchProcess, psutil.ZombieProcess):
-                        continue
-                os.remove(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH))
-        except FileNotFoundError:
-            # its fine we will create it
-            pass
-        except Exception as e:  # pylint: disable=broad-except
-            # in case we get perm issues or something is messed up, just ignore
-            # it and assume the process is dead
-            logger.error(f'Error looking at job controller pid file: {e}')
-            pass
+        # In consolidation mode, managed job controller processes run separately
+        # from the API server. If the user calls api_stop, we should clean them
+        # up too. In general we don't expect people to be using consolidation
+        # mode with local API server, so this shouldn't happen often.
+        # TODO(cooperc): Warn the user if there are managed jobs running that
+        # could be leaked.
+        # XXX do we actually need to hold api server creation lock here?
+        scheduler.stop_controllers()
 
-        found = _local_api_server_running(kill=True)
+        found = client_common.local_api_server_running(kill=True)
 
     if found:
         logger.info(f'{colorama.Fore.GREEN}SkyPilot API server stopped.'

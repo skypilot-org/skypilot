@@ -49,6 +49,8 @@ run: |
   echo "export {{env_name}}='{{env_value}}'" >> {{remote_env_file_path}}
   {%- endfor %}
 
+  export SKYPILOT_DEBUG=1
+
   # Submit the job to the scheduler.
   # Note: The job is already in the `spot` table, marked as PENDING.
   # CloudVmRayBackend._exec_code_on_head() calls
