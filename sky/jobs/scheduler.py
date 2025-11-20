@@ -67,8 +67,6 @@ from sky.utils import controller_utils
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
-    import logging
-
     import psutil
 else:
     psutil = adaptors_common.LazyImport('psutil')
@@ -267,6 +265,7 @@ def get_alive_controllers() -> Optional[int]:
 
 def stop_controllers() -> None:
     """Stop existing job controller processes and release job claims."""
+    # XXX(cooperc): is blocking=False okay? Could cause api_stop to raise.
     with filelock.FileLock(JOB_CONTROLLER_PID_LOCK, blocking=False):
         stop_controllers_no_lock()
 
@@ -302,6 +301,9 @@ def stop_controllers_no_lock() -> None:
     state.reset_jobs_for_recovery()
 
 
+# XXX hypothesis: check_skylet_hash is true iff consolidation_mode is false
+# stop_existing_controllers is true on consolidation mode server restart (only)
+# any failure cases for this???
 def maybe_start_controllers(check_skylet_hash: bool = False,
                             stop_existing_controllers: bool = False) -> None:
     """Start the job controller process.
@@ -321,16 +323,22 @@ def maybe_start_controllers(check_skylet_hash: bool = False,
                 stop_existing_controllers), (check_skylet_hash,
                                              stop_existing_controllers)
 
+    consolidation_mode = managed_job_utils.is_consolidation_mode()
+    logger.debug(f'consolidation_mode: {consolidation_mode}')
+    if consolidation_mode:
+        # The skylet hash check only makes sense on the remote jobs controller,
+        # which is a sky cluster. The API server won't have a skylet hash file.
+        check_skylet_hash = False
+
     try:
         # XXX(cooperc): Check if blocking=False is okay for all cases.
+        # Seems like no since we also acquire the lock in api_stop now.
         with filelock.FileLock(JOB_CONTROLLER_PID_LOCK, blocking=False):
             logger.debug('Got the job controller lock.')
             logger.debug(f'check_skylet_hash: {check_skylet_hash}')
             logger.debug(
                 f'stop_existing_controllers: {stop_existing_controllers}')
-            consolidation_mode = managed_job_utils.is_consolidation_mode()
-            logger.debug(f'consolidation_mode: {consolidation_mode}')
-            if check_skylet_hash and not consolidation_mode:
+            if check_skylet_hash:
                 # On a remote jobs controller, we need to check if the wheel
                 # hash has changed. If so, we need to stop all the controllers
                 # running the old code and restart them.
@@ -340,6 +348,8 @@ def maybe_start_controllers(check_skylet_hash: bool = False,
                 prev_hash_file = pathlib.Path(f'{current_hash}.old')
 
                 if not new_hash_file.exists():
+                    # We should have this whenever the skypilot wheel has been
+                    # installed - see SKYPILOT_WHEEL_INSTALLATION_COMMANDS.
                     raise RuntimeError(f'Current hash file {current_hash} does '
                                        'not exist')
 
@@ -353,20 +363,21 @@ def maybe_start_controllers(check_skylet_hash: bool = False,
 
                     # WONTDO(luca): there is a 1/2^160 chance that there will be
                     # a collision. using a geometric distribution and assuming
-                    # one update a day, we expect a bug slightly before the
-                    # heat death of the universe. should get this fixed before
-                    # then.
+                    # one update a day, we expect a bug slightly before the heat
+                    # death of the universe. should get this fixed before then.
                     if prev_hash != new_hash:
                         logger.debug('Hash mismatch, stopping controllers and '
                                      'restarting API server.')
                         # Kill the controllers first to avoid exceptions from
-                        # the API server dying.
+                        # the API server dying, and to avoid them restarting the
+                        # API server while we're trying to kill it.
                         stop_controllers_no_lock()
                         logger.debug('Stopped controllers.')
                         # Kill the API server. Need to restart it so to pick up
                         # the new code. Note: it can't launch any new
                         # controllers in the mean time since we are holding the
                         # lock.
+                        # XXX need to hold API server creation lock here
                         killed = client_common.local_api_server_running(
                             kill=True)
                         if killed:

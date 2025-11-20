@@ -61,12 +61,12 @@ class InternalRequestDaemon:
             logger.exception(f'Error refreshing log level for {self.id}: {e}')
             return logging.DEBUG
 
-    def _run_fn(self, fn: Callable[[], None], level: int) -> int:
-        """Run the function. Returns the new log level."""
-        with ux_utils.enable_traceback(), \
-            sky_logging.set_sky_logging_levels(level):
+    def _run_fn(self, fn: Callable[[], None]) -> None:
+        """Run the function with correct logging setup, then clean up."""
+        level = self.refresh_log_level()
+        with ux_utils.enable_traceback(), sky_logging.set_sky_logging_levels(
+                level):
             sky_logging.reload_logger()
-            level = self.refresh_log_level()
             fn()
 
         # Clear request level cache after each run to avoid
@@ -79,8 +79,6 @@ class InternalRequestDaemon:
         subprocess_utils.kill_children_processes()
         common_utils.release_memory()
 
-        return level
-
     def run_event(self):
         """Run the event."""
 
@@ -88,13 +86,12 @@ class InternalRequestDaemon:
         # sent multiple times.
         os.environ[env_options.Options.DISABLE_LOGGING.env_key] = '1'
 
-        level = self.refresh_log_level()
         if self.start_fn is not None:
-            level = self._run_fn(self.start_fn, level)
+            self._run_fn(self.start_fn)
 
         while True:
             try:
-                level = self._run_fn(self.event_fn, level)
+                self._run_fn(self.event_fn)
                 logger.info(f'Refreshed. Sleeping {self.interval} seconds for '
                             'the next refresh...')
                 time.sleep(self.interval)

@@ -2345,6 +2345,7 @@ def api_stop() -> None:
         # mode with local API server, so this shouldn't happen often.
         # TODO(cooperc): Warn the user if there are managed jobs running that
         # could be leaked.
+        # XXX do we actually need to hold api server creation lock here?
         scheduler.stop_controllers()
 
         found = client_common.local_api_server_running(kill=True)
