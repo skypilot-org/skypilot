@@ -4037,10 +4037,10 @@ def show_gpus(
             total_table, slurm_realtime_infos,
             show_node_info: bool) -> Generator[str, None, None]:
         # print total table
+        yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
+                'Slurm GPUs'
+                f'{colorama.Style.RESET_ALL}\n')
         if total_table is not None:
-            yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
-                   'Slurm GPUs'
-                   f'{colorama.Style.RESET_ALL}\n')
             yield from total_table.get_string()
             yield '\n'
 
