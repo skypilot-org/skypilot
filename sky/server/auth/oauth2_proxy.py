@@ -16,6 +16,7 @@ from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky.jobs import utils as managed_job_utils
+from sky.server import middleware_utils
 from sky.server.auth import authn
 from sky.server.auth import loopback
 from sky.users import permission
@@ -36,6 +37,7 @@ OAUTH2_PROXY_BASE_URL_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL'
 OAUTH2_PROXY_ENABLED_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED'
 
 
+@middleware_utils.websocket_aware
 class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle authentication by delegating to OAuth2 Proxy."""
 

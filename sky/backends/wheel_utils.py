@@ -100,6 +100,13 @@ def _build_sky_wheel() -> pathlib.Path:
                 # modify the commit hash in the file later.
                 # Symlink other files/folders.
                 target.symlink_to(item, target_is_directory=item.is_dir())
+
+        # Symlink sky_templates directory from repo root
+        sky_templates_src = SKY_PACKAGE_PATH.parent / 'sky_templates'
+        if sky_templates_src.exists():
+            sky_templates_target = tmp_dir / 'sky_templates'
+            sky_templates_target.symlink_to(sky_templates_src,
+                                            target_is_directory=True)
         setup_files_dir = SKY_PACKAGE_PATH / 'setup_files'
 
         setup_content = (setup_files_dir / 'setup.py').read_text()
@@ -244,6 +251,17 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
         # protocol. "compare, update and clone" has to be atomic to avoid
         # race conditions.
         last_modification_time = _get_latest_modification_time(SKY_PACKAGE_PATH)
+        # Also check sky_templates directory modification time
+        sky_templates_path = SKY_PACKAGE_PATH.parent / 'sky_templates'
+        if sky_templates_path.exists():
+            sky_templates_mtime = _get_latest_modification_time(
+                sky_templates_path)
+            if (last_modification_time is not None and
+                    sky_templates_mtime is not None):
+                last_modification_time = max(last_modification_time,
+                                             sky_templates_mtime)
+            elif last_modification_time is None:
+                last_modification_time = sky_templates_mtime
         last_wheel_modification_time = _get_latest_modification_time(WHEEL_DIR)
 
         # Only build wheels if the wheel is outdated, wheel does not exist

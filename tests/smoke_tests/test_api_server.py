@@ -8,6 +8,7 @@ import time
 from typing import Dict, Generator, List, Optional, Tuple, TypeVar
 
 import pytest
+import requests
 from smoke_tests import metrics_utils
 from smoke_tests import smoke_tests_utils
 
@@ -664,9 +665,19 @@ def test_high_logs_concurrency_not_blocking_operations(generic_cloud: str,
         expected_count = 128
         while time.time() - start < 120:
             count = 0
-            for req in sky.api_status(limit=None):
-                if 'logs' in req.name and req.status == 'RUNNING':
-                    count += 1
+            # Retry on connection errors since the server might be temporarily overwhelmed
+            max_retries = 3
+            for retry in range(max_retries):
+                try:
+                    for req in sky.api_status(limit=None):
+                        if 'logs' in req.name and req.status == 'RUNNING':
+                            count += 1
+                    break  # Success, exit retry loop
+                except (requests.exceptions.ConnectionError,
+                        requests.exceptions.RequestException) as e:
+                    if retry == max_retries - 1:
+                        raise  # Re-raise on final retry
+                    time.sleep(5)  # 5 second backoff before retry
             if count >= expected_count:
                 return
             yield f'Wait enough concurrent logs requests: {count}/{expected_count}'

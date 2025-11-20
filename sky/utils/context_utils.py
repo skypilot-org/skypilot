@@ -3,9 +3,9 @@ import asyncio
 import concurrent.futures
 import contextvars
 import functools
-import io
 import multiprocessing
 import os
+import select
 import subprocess
 import sys
 import time
@@ -49,27 +49,47 @@ def hijack_sys_attrs():
 def passthrough_stream_handler(in_stream: IO[Any], out_stream: IO[Any]) -> str:
     """Passthrough the stream from the process to the output stream"""
     last_flush_time = time.time()
-    wrapped = io.TextIOWrapper(in_stream,
-                               encoding='utf-8',
-                               newline='',
-                               errors='replace',
-                               write_through=True)
+    has_unflushed_content = False
+
+    # Use poll() with timeout instead of readline() to avoid blocking.
+    # readline() blocks until a newline is available, which can take minutes
+    # for tasks that emit logs infrequently (e.g. jupyter lab server).
+    # While readline() is blocked, the timing code never executes, so buffered
+    # logs never get flushed. poll() with timeout allows us to periodically
+    # flush even when no new data is available, ensuring logs appear promptly.
+    fd = in_stream.fileno()
+    poller = select.poll()
+    poller.register(fd, select.POLLIN)
+
+    # Timeout in milliseconds for poll()
+    poll_timeout_ms = int(PASSTHROUGH_FLUSH_INTERVAL_SECONDS * 1000)
+
     while True:
-        line = wrapped.readline()
-        if line:
-            out_stream.write(line)
+        # Poll with timeout - returns when data available or timeout
+        events = poller.poll(poll_timeout_ms)
 
-            # Flush based on timeout instead of on every line
-            current_time = time.time()
-            if (current_time - last_flush_time >=
-                    PASSTHROUGH_FLUSH_INTERVAL_SECONDS):
-                out_stream.flush()
-                last_flush_time = current_time
-        else:
-            break
+        current_time = time.time()
 
+        if events:
+            # Data is available, read a chunk
+            chunk = os.read(fd, 4096)  # Read up to 4KB
+            if not chunk:
+                break  # EOF
+            out_stream.write(chunk.decode('utf-8', errors='replace'))
+            has_unflushed_content = True
+
+        # Flush only if we have unflushed content and timeout reached
+        if (has_unflushed_content and current_time - last_flush_time >=
+                PASSTHROUGH_FLUSH_INTERVAL_SECONDS):
+            out_stream.flush()
+            last_flush_time = current_time
+            has_unflushed_content = False
+
+    poller.unregister(fd)
     # Final flush to ensure all data is written
-    out_stream.flush()
+    if has_unflushed_content:
+        out_stream.flush()
+
     return ''
 
 

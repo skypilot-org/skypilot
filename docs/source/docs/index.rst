@@ -301,6 +301,7 @@ Read the research:
    Multi-Node Jobs <../running-jobs/distributed-jobs>
    Many Parallel Jobs <../running-jobs/many-jobs>
    Model Training Guide <../reference/training-guide>
+   Using a Pool of Workers <../examples/pools>
 
 .. toctree::
    :hidden:

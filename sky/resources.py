@@ -1524,7 +1524,7 @@ class Resources:
         if self.accelerators is not None:
             hourly_cost += self.cloud.accelerators_to_hourly_cost(
                 self.accelerators, self.use_spot, self._region, self._zone)
-        return hourly_cost * hours
+        return float(hourly_cost * hours)
 
     def get_accelerators_str(self) -> str:
         accelerators = self.accelerators

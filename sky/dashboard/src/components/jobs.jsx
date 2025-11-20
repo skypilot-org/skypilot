@@ -359,9 +359,9 @@ export function ManagedJobsTable({
     );
   }, [data]);
 
-  // Determine if we should show the Worker Pool column
+  // Determine if we should show the Pool column
   // Only show if there are any pools defined
-  const shouldShowWorkerPool = React.useMemo(() => {
+  const shouldShowPool = React.useMemo(() => {
     return poolsData && poolsData.length > 0;
   }, [poolsData]);
 
@@ -1005,12 +1005,12 @@ export function ManagedJobsTable({
                 >
                   Recoveries{getSortDirection('recoveries')}
                 </TableHead>
-                {shouldShowWorkerPool && (
+                {shouldShowPool && (
                   <TableHead
                     className="sortable whitespace-nowrap"
                     onClick={() => requestSort('pool')}
                   >
-                    Worker Pool{getSortDirection('pool')}
+                    Pool{getSortDirection('pool')}
                   </TableHead>
                 )}
 
@@ -1025,7 +1025,7 @@ export function ManagedJobsTable({
                     colSpan={
                       11 +
                       (shouldShowWorkspace ? 1 : 0) +
-                      (shouldShowWorkerPool ? 1 : 0)
+                      (shouldShowPool ? 1 : 0)
                     }
                     className="text-center py-6 text-gray-500"
                   >
@@ -1140,7 +1140,7 @@ export function ManagedJobsTable({
                           </NonCapitalizedTooltip>
                         </TableCell>
                         <TableCell>{item.recoveries}</TableCell>
-                        {shouldShowWorkerPool && (
+                        {shouldShowPool && (
                           <TableCell>
                             <div
                               className={
@@ -1186,7 +1186,7 @@ export function ManagedJobsTable({
                           colSpan={
                             11 +
                             (shouldShowWorkspace ? 1 : 0) +
-                            (shouldShowWorkerPool ? 1 : 0)
+                            (shouldShowPool ? 1 : 0)
                           }
                           innerRef={expandedRowRef}
                         />
@@ -1200,7 +1200,7 @@ export function ManagedJobsTable({
                     colSpan={
                       11 +
                       (shouldShowWorkspace ? 1 : 0) +
-                      (shouldShowWorkerPool ? 1 : 0)
+                      (shouldShowPool ? 1 : 0)
                     }
                     className="text-center py-6"
                   >

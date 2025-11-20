@@ -233,7 +233,6 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
         def get_acc_info(row) -> Tuple[Optional[str], float]:
             accelerator = None
             for col, info_key in [('GpuInfo', 'Gpus'),
-                                  ('InferenceAcceleratorInfo', 'Accelerators'),
                                   ('NeuronInfo', 'NeuronDevices'),
                                   ('FpgaInfo', 'Fpgas')]:
                 info = row.get(col)
@@ -287,10 +286,15 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
             if (row['InstanceType'].startswith('g6f') or
                     row['InstanceType'].startswith('gr6f')):
                 # These instance actually have only fractional GPUs, but the API
-                # returns Count: 1 under GpuInfo. We need to check the GPU
-                # memory to get the actual fraction of the GPU.
+                # returns Count: 1 or Count: 0 under GpuInfo. We need to
+                # directly check the GPU memory to get the actual fraction of
+                # the GPU. Note that TotalGpuMemoryInMiB seems unreliable here -
+                # sometimes it is unexpectedly 0.
                 # See also Standard_NV{vcpu}ads_A10_v5 support on Azure.
-                fraction = row['GpuInfo']['TotalGpuMemoryInMiB'] / L4_GPU_MEMORY
+                assert len(row['GpuInfo']['Gpus']) == 1
+                assert row['GpuInfo']['Gpus'][0]['Name'] == 'L4'
+                fraction = row['GpuInfo']['Gpus'][0]['MemoryInfo'][
+                    'SizeInMiB'] / L4_GPU_MEMORY
                 acc_count = round(fraction, 3)
             if row['InstanceType'] == 'p5.4xlarge':
                 acc_count = 1
@@ -326,9 +330,18 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
         if 'GpuInfo' not in df.columns:
             df['GpuInfo'] = np.nan
         if 'NeuronInfo' in df.columns:
+            # The AWS Neuron API uses 'NeuronDevices' instead of 'Gpus'
+            # in its dict; for consistency with GPU handling, rename key.
+            def map_neuroninfo(neuroninfo):
+                if isinstance(neuroninfo,
+                              dict) and 'NeuronDevices' in neuroninfo:
+                    # Rename 'NeuronDevices' to 'Gpus'
+                    neuroninfo = neuroninfo.copy()
+                    neuroninfo['Gpus'] = neuroninfo.pop('NeuronDevices')
+                return neuroninfo
+
+            df['NeuronInfo'] = df['NeuronInfo'].apply(map_neuroninfo)
             df['GpuInfo'] = df['GpuInfo'].fillna(df['NeuronInfo'])
-        if 'InferenceAcceleratorInfo' in df.columns:
-            df['GpuInfo'] = df['GpuInfo'].fillna(df['InferenceAcceleratorInfo'])
         df = df[USEFUL_COLUMNS]
     except Exception as e:  # pylint: disable=broad-except
         print(traceback.format_exc())

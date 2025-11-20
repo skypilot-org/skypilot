@@ -41,10 +41,7 @@ class SCP(clouds.Cloud):
     # Reference: https://cloud.samsungsds.com/openapiguide/#/docs
     #            /v2-en-virtual_server-definitions-VirtualServerCreateV3Request
     _MAX_CLUSTER_NAME_LEN_LIMIT = 28
-    # MULTI_NODE: Multi-node is not supported by the implementation yet.
-    _MULTI_NODE = 'Multi-node is not supported by the SCP Cloud yet.'
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.MULTI_NODE: _MULTI_NODE,
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
             (f'Migrating disk is currently not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.IMAGE_ID:
