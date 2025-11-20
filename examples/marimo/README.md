@@ -2,7 +2,7 @@
 
 Run a personal marimo server on a SkyPilot cluster.
 
-![marimo Web UI](https://imgur.com/a/0z51X1Q "marimo Web UI")
+![marimo Web UI](https://i.imgur.com/iLYbQ6b.png "marimo Web UI")
 
 ## Launch with CLI
 
