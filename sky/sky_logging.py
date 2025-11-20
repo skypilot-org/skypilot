@@ -211,12 +211,21 @@ def logging_enabled(logger: logging.Logger, level: int) -> bool:
 
 
 @contextlib.contextmanager
-def silent():
+def silent(should_silence: bool = True):
     """Make all sky_logging.print() and logger.{info, warning...} silent.
 
     We preserve the ERROR level logging, so that errors are
     still printed.
+
+    Args:
+        should_silence: Whether to actually suppress the logging. If False, this
+            is a no-op context manager. Provided for convenience when we want to
+            suppress logging conditionally.
     """
+    if not should_silence:
+        yield
+        return
+
     global print
     previous_level = _root_logger.level
     previous_is_silent = is_silent()
