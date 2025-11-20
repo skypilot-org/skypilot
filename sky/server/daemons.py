@@ -6,7 +6,6 @@ from typing import Callable
 
 from sky import sky_logging
 from sky import skypilot_config
-from sky.jobs import constants as managed_jobs_constants
 from sky.server import constants as server_constants
 from sky.server.requests import request_names
 from sky.utils import annotations
@@ -135,11 +134,12 @@ def managed_job_status_refresh_event():
     """Refresh the managed job status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
     from sky.jobs import utils as managed_job_utils
+    from sky.jobs import constants as managed_job_constants
 
     global _managed_job_consolidation_mode_lock
     if _managed_job_consolidation_mode_lock is None:
         _managed_job_consolidation_mode_lock = locks.get_lock(
-            managed_jobs_constants.CONSOLIDATION_MODE_LOCK_ID)
+            managed_job_constants.CONSOLIDATION_MODE_LOCK_ID)
 
     # Make sure the lock is acquired for this process before proceeding to do
     # recovery. This will block if another API server is still running, but
