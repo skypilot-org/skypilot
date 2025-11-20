@@ -38,6 +38,7 @@ class TaskCodeGen:
             import hashlib
             import io
             import copy
+            import colorama
             import multiprocessing
             import os
             import pathlib
@@ -484,6 +485,7 @@ class SlurmCodeGen(TaskCodeGen):
                 env_vars={setup_envs!r},
                 stream_logs=True,
                 with_ray=False,
+                streaming_prefix=f'{{colorama.Fore.CYAN}}(sky-cmd, pid={{{{pid}}}}){{colorama.Style.RESET_ALL}} ',
             )
 
             # run_bash_command_with_log_and_return_pid returns dict with 'return_code' and 'pid' keys
@@ -602,6 +604,7 @@ class SlurmCodeGen(TaskCodeGen):
                     env_vars=sky_env_vars_dict,
                     stream_logs=True,
                     with_ray=False,
+                    streaming_prefix=f'{{colorama.Fore.CYAN}}(sky-cmd, pid={{{{pid}}}}){{colorama.Style.RESET_ALL}} ',
                 )
 
                 # run_bash_command_with_log_and_return_pid returns dict with 'return_code' and 'pid' keys

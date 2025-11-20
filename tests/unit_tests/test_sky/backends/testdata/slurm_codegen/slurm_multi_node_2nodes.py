@@ -3,6 +3,7 @@ import getpass
 import hashlib
 import io
 import copy
+import colorama
 import multiprocessing
 import os
 import pathlib
@@ -146,7 +147,7 @@ def run_with_log(
     streaming_prefix: Optional[str] = None,
     log_cmd: bool = False,
     **kwargs,
-) -> Union[int, Tuple[int, str, str]]:
+) -> Union[int, Tuple[int, str, str], Tuple[int, int]]:
     """Runs a command and logs its output to a file.
 
     Args:
@@ -157,6 +158,8 @@ def run_with_log(
         process_stream: Whether to post-process the stdout/stderr of the
             command, such as replacing or skipping lines on the fly. If
             enabled, lines are printed only when '\r' or '\n' is found.
+        streaming_prefix: Optional prefix for each log line. Can contain {pid}
+            placeholder which will be replaced with the subprocess PID.
 
     Returns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
@@ -202,6 +205,12 @@ def run_with_log(
                 # For backward compatibility, do not specify use_kill_pg by
                 # default.
                 subprocess_utils.kill_process_daemon(proc.pid)
+
+            # Format streaming_prefix with subprocess PID if it contains {pid}
+            formatted_streaming_prefix = streaming_prefix
+            if streaming_prefix and '{pid}' in streaming_prefix:
+                formatted_streaming_prefix = streaming_prefix.format(pid=proc.pid)
+
             stdout = ''
             stderr = ''
             stdout_stream_handler = None
@@ -230,7 +239,7 @@ def run_with_log(
                     line_processor=line_processor,
                     # Replace CRLF when the output is logged to driver by ray.
                     replace_crlf=with_ray,
-                    streaming_prefix=streaming_prefix,
+                    streaming_prefix=formatted_streaming_prefix,
                 )
                 stdout_stream_handler = functools.partial(
                     _handle_io_stream,
@@ -320,7 +329,8 @@ def run_bash_command_with_log(bash_command: str,
                               log_path: str,
                               env_vars: Optional[Dict[str, str]] = None,
                               stream_logs: bool = False,
-                              with_ray: bool = False):
+                              with_ray: bool = False,
+                              streaming_prefix: Optional[str] = None):
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
                                      delete=False) as fp:
         bash_command = make_task_bash_script(bash_command, env_vars=env_vars)
@@ -335,6 +345,7 @@ def run_bash_command_with_log(bash_command: str,
                             log_path,
                             stream_logs=stream_logs,
                             with_ray=with_ray,
+                            streaming_prefix=streaming_prefix,
                             shell=True)
 
 def run_bash_command_with_log_and_return_pid(
@@ -342,9 +353,11 @@ def run_bash_command_with_log_and_return_pid(
         log_path: str,
         env_vars: Optional[Dict[str, str]] = None,
         stream_logs: bool = False,
-        with_ray: bool = False):
+        with_ray: bool = False,
+        streaming_prefix: Optional[str] = None):
     return_code = run_bash_command_with_log(bash_command, log_path, env_vars,
-                                            stream_logs, with_ray)
+                                       stream_logs, with_ray,
+                                       streaming_prefix=streaming_prefix)
     return {'return_code': return_code, 'pid': os.getpid()}
 
 run_fn = None
@@ -398,6 +411,7 @@ if script is not None:
         env_vars=sky_env_vars_dict,
         stream_logs=True,
         with_ray=False,
+        streaming_prefix=f'{colorama.Fore.CYAN}(sky-cmd, pid={{pid}}){colorama.Style.RESET_ALL} ',
     )
 
     # run_bash_command_with_log_and_return_pid returns dict with 'return_code' and 'pid' keys
@@ -441,6 +455,7 @@ if script is not None:
         env_vars=sky_env_vars_dict,
         stream_logs=True,
         with_ray=False,
+        streaming_prefix=f'{colorama.Fore.CYAN}(sky-cmd, pid={{pid}}){colorama.Style.RESET_ALL} ',
     )
 
     # run_bash_command_with_log_and_return_pid returns dict with 'return_code' and 'pid' keys
