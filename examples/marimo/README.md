@@ -1,6 +1,6 @@
 # Run marimo on SkyPilot
 
-Run a personal marimo server on a SkyPilot cluster.
+Run a personal [marimo](https://marimo.io/) server on a SkyPilot cluster.
 
 ![marimo Web UI](https://i.imgur.com/iLYbQ6b.png "marimo Web UI")
 

@@ -15,4 +15,5 @@ workdir: .
 
 setup: pip install uv
 
+# Check the docs for more options: https://docs.marimo.io/cli/#marimo-edit
 run: uvx marimo edit --port 29324 --headless --host=0.0.0.0 --token-password='secretpassword'
