@@ -3656,15 +3656,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # in if retry_until_up is set, which will kick off new "rounds"
                 # of optimization infinitely.
                 try:
-                    # Ensure _dag and _optimize_target are not None
-                    assert self._dag is not None, (
-                        '_dag must be set before provisioning')
-                    assert self._optimize_target is not None, (
-                        '_optimize_target must be set before provisioning')
                     retry_provisioner = RetryingVmProvisioner(
                         self.log_dir,
-                        self._dag,
-                        self._optimize_target,
+                        self._dag,  # type: ignore[arg-type]
+                        self._optimize_target,  # type: ignore[arg-type]
                         self._requested_features,
                         local_wheel_path,
                         wheel_hash,
