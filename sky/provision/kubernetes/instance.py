@@ -926,12 +926,8 @@ def _wait_for_deployment_pod(context,
 
 
 @timeline.event
-def _create_pods(
-    region: str,
-    cluster_name: str,
-    cluster_name_on_cloud: str,
-    config: common.ProvisionConfig,
-) -> common.ProvisionRecord:
+def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
+                 config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Create pods based on the config."""
     provider_config = config.provider_config
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
@@ -1285,12 +1281,8 @@ def _create_pods(
     )
 
 
-def run_instances(
-    region: str,
-    cluster_name: str,
-    cluster_name_on_cloud: str,
-    config: common.ProvisionConfig,
-) -> common.ProvisionRecord:
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
+                  config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
     try:
         return _create_pods(region, cluster_name, cluster_name_on_cloud, config)

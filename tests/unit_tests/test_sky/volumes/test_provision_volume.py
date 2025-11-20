@@ -307,8 +307,7 @@ class TestCreateEphemeralVolume:
             cloud, region, cluster_name, config, volume_mount)
 
         assert result is not None
-        expected_name = provision_volume._get_volume_name('/data', cluster_name)
-        assert result.name == expected_name
+        assert result.name == 'test-volume'
         assert result.path == '/data'
         assert result.volume_name_on_cloud == 'test-volume-cloud'
         assert result.volume_id_on_cloud == 'vol-12345'
@@ -427,7 +426,7 @@ class TestProvisionEphemeralVolumes:
         def mock_create_volume(cloud, region, cluster_name, config,
                                volume_mount):
             return volume_utils.VolumeInfo(
-                name=f'vol-{volume_mount.path}',
+                name=volume_mount.volume_config.name,
                 path=volume_mount.path,
                 volume_name_on_cloud=f'cloud-{volume_mount.path}',
                 volume_id_on_cloud=f'id-{volume_mount.path}')
@@ -435,25 +434,29 @@ class TestProvisionEphemeralVolumes:
         monkeypatch.setattr('sky.provision.volume._create_ephemeral_volume',
                             mock_create_volume)
 
-        result = provision_volume.provision_ephemeral_volumes(
-            cloud, region, cluster_name, config)
+        provision_volume.provision_ephemeral_volumes(cloud, region,
+                                                     cluster_name, config)
 
-        assert result is not None
-        assert len(result) == 2
-        assert result[0].path == '/data1'
-        assert result[1].path == '/data2'
+        # Check that volume infos were stored in provider_config
+        assert 'ephemeral_volume_infos' in provider_config
+        volume_infos = provider_config['ephemeral_volume_infos']
+        assert len(volume_infos) == 2
+        assert volume_infos[0].path == '/data1'
+        assert volume_infos[1].path == '/data2'
 
     def test_provision_ephemeral_volumes_no_specs(self):
         """Test provisioning when no ephemeral volume specs are provided."""
         cloud = clouds.Kubernetes()
         region = 'us-central1'
         cluster_name = 'test-cluster'
-        config = create_provision_config()
+        provider_config = {}
+        config = create_provision_config(provider_config)
 
-        result = provision_volume.provision_ephemeral_volumes(
-            cloud, region, cluster_name, config)
+        provision_volume.provision_ephemeral_volumes(cloud, region,
+                                                     cluster_name, config)
 
-        assert result is None
+        # No volume infos should be added when there are no specs
+        assert 'ephemeral_volume_infos' not in provider_config
 
     def test_provision_ephemeral_volumes_skip_none(self, monkeypatch):
         """Test that None results from _create_ephemeral_volume are skipped."""
@@ -483,7 +486,7 @@ class TestProvisionEphemeralVolumes:
             call_count[0] += 1
             if call_count[0] == 1:
                 return volume_utils.VolumeInfo(
-                    name='vol-1',
+                    name='vol1',
                     path='/data1',
                     volume_name_on_cloud='cloud-vol-1',
                     volume_id_on_cloud='id-1')
@@ -492,12 +495,14 @@ class TestProvisionEphemeralVolumes:
         monkeypatch.setattr('sky.provision.volume._create_ephemeral_volume',
                             mock_create_volume)
 
-        result = provision_volume.provision_ephemeral_volumes(
-            cloud, region, cluster_name, config)
+        provision_volume.provision_ephemeral_volumes(cloud, region,
+                                                     cluster_name, config)
 
-        assert result is not None
-        assert len(result) == 1
-        assert result[0].path == '/data1'
+        # Check that only the first volume was added (second returned None)
+        assert 'ephemeral_volume_infos' in provider_config
+        volume_infos = provider_config['ephemeral_volume_infos']
+        assert len(volume_infos) == 1
+        assert volume_infos[0].path == '/data1'
 
     def test_provision_ephemeral_volumes_preserves_original_config(
             self, monkeypatch):
@@ -541,8 +546,6 @@ class TestDeleteEphemeralVolumes:
 
     def test_delete_ephemeral_volumes_success(self, monkeypatch):
         """Test successful deletion of ephemeral volumes."""
-        cluster_name = 'test-cluster'
-
         ephemeral_volume_specs = [
             create_ephemeral_volume_spec('/data1', 'vol1', size='100Gi'),
             create_ephemeral_volume_spec('/data2', 'vol2', size='200Gi'),
@@ -554,7 +557,7 @@ class TestDeleteEphemeralVolumes:
         monkeypatch.setattr('sky.volumes.server.core.volume_delete',
                             mock_volume_delete)
 
-        provision_volume.delete_ephemeral_volumes(cluster_name, provider_config)
+        provision_volume.delete_ephemeral_volumes(provider_config)
 
         # Verify volume_delete was called with correct names
         mock_volume_delete.assert_called_once()
@@ -562,37 +565,32 @@ class TestDeleteEphemeralVolumes:
         assert len(call_kwargs['names']) == 2
         assert call_kwargs['ignore_not_found'] is True
 
-        # Volume names should match the generated names
-        expected_names = [
-            provision_volume._get_volume_name('/data1', cluster_name),
-            provision_volume._get_volume_name('/data2', cluster_name)
-        ]
+        # Volume names should match the names from the volume specs
+        expected_names = ['vol1', 'vol2']
         assert set(call_kwargs['names']) == set(expected_names)
 
     def test_delete_ephemeral_volumes_no_specs(self, monkeypatch):
         """Test deletion when no ephemeral volume specs are provided."""
-        cluster_name = 'test-cluster'
         provider_config = {}
 
         mock_volume_delete = mock.MagicMock()
         monkeypatch.setattr('sky.volumes.server.core.volume_delete',
                             mock_volume_delete)
 
-        provision_volume.delete_ephemeral_volumes(cluster_name, provider_config)
+        provision_volume.delete_ephemeral_volumes(provider_config)
 
         # volume_delete should not be called
         mock_volume_delete.assert_not_called()
 
     def test_delete_ephemeral_volumes_empty_specs(self, monkeypatch):
         """Test deletion when ephemeral volume specs list is empty."""
-        cluster_name = 'test-cluster'
         provider_config = {'ephemeral_volume_specs': []}
 
         mock_volume_delete = mock.MagicMock()
         monkeypatch.setattr('sky.volumes.server.core.volume_delete',
                             mock_volume_delete)
 
-        provision_volume.delete_ephemeral_volumes(cluster_name, provider_config)
+        provision_volume.delete_ephemeral_volumes(provider_config)
 
         # volume_delete should not be called
         mock_volume_delete.assert_not_called()
@@ -600,8 +598,6 @@ class TestDeleteEphemeralVolumes:
     def test_delete_ephemeral_volumes_preserves_original_config(
             self, monkeypatch):
         """Test that original volume specs are not modified during deletion."""
-        cluster_name = 'test-cluster'
-
         ephemeral_volume_specs = [
             create_ephemeral_volume_spec('/data', 'vol1', size='100Gi')
         ]
@@ -613,7 +609,7 @@ class TestDeleteEphemeralVolumes:
         monkeypatch.setattr('sky.volumes.server.core.volume_delete',
                             mock_volume_delete)
 
-        provision_volume.delete_ephemeral_volumes(cluster_name, provider_config)
+        provision_volume.delete_ephemeral_volumes(provider_config)
 
         # Original specs should be unchanged
         assert ephemeral_volume_specs == original_specs
