@@ -498,6 +498,22 @@ def _start(
                 controller_autostop_config.enabled):
             idle_minutes_to_autostop = controller_autostop_config.idle_minutes
             down = controller_autostop_config.down
+    else:
+        # For non-controller clusters, restore autostop configuration from
+        # database if not explicitly provided.
+        if idle_minutes_to_autostop is None:
+            cluster_record = global_user_state.get_cluster_from_name(
+                cluster_name, include_user_info=False, summary_response=True)
+            if cluster_record is not None:
+                stored_autostop = cluster_record.get('autostop', -1)
+                stored_to_down = cluster_record.get('to_down', False)
+                # Restore autostop if it was previously set (autostop >= 0)
+                if stored_autostop >= 0:
+                    idle_minutes_to_autostop = stored_autostop
+                    # Only restore 'down' if it was explicitly set and we're
+                    # restoring autostop
+                    if stored_to_down:
+                        down = stored_to_down
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
 
