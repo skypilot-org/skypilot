@@ -185,7 +185,7 @@ class DockerInitializer:
         self.docker_config = docker_config
         self.container_name = docker_config['container_name']
         self.runner = runner
-        self.home_dir = None
+        self.home_dir: Optional[str] = None
         self.initialized = False
         # podman is not fully tested yet.
         use_podman = docker_config.get('use_podman', False)
