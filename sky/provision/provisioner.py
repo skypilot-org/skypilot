@@ -61,8 +61,9 @@ def _bulk_provision(
 
     start = time.time()
 
-    ephemeral_volumes = provision_volume.provision_ephemeral_volumes(
-        cloud, region_name, cluster_name.name_on_cloud, bootstrap_config)
+    provision_volume.provision_ephemeral_volumes(cloud, region_name,
+                                                 cluster_name.name_on_cloud,
+                                                 bootstrap_config)
 
     # TODO(suquark): Should we cache the bootstrapped result?
     #  Currently it is not necessary as bootstrapping takes
@@ -73,14 +74,11 @@ def _bulk_provision(
                                            cluster_name.name_on_cloud,
                                            bootstrap_config)
 
-    provision_record = provision.run_instances(
-        provider_name,
-        region_name,
-        str(cluster_name),
-        cluster_name.name_on_cloud,
-        config=config,
-        ephemeral_volumes=ephemeral_volumes,
-    )
+    provision_record = provision.run_instances(provider_name,
+                                               region_name,
+                                               str(cluster_name),
+                                               cluster_name.name_on_cloud,
+                                               config=config)
 
     backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
     logger.debug(f'\nWaiting for instances of {cluster_name!r} to be ready...')
@@ -245,8 +243,7 @@ def teardown_cluster(cloud_name: str, cluster_name: resources_utils.ClusterName,
         provision.terminate_instances(cloud_name, cluster_name.name_on_cloud,
                                       provider_config)
         metadata_utils.remove_cluster_metadata(cluster_name.name_on_cloud)
-        provision_volume.delete_ephemeral_volumes(cluster_name.name_on_cloud,
-                                                  provider_config)
+        provision_volume.delete_ephemeral_volumes(provider_config)
     else:
         provision.stop_instances(cloud_name, cluster_name.name_on_cloud,
                                  provider_config)

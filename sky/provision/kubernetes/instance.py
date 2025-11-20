@@ -28,7 +28,6 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
-from sky.utils import volume as volume_utils
 from sky.utils.db import db_utils
 
 POLL_INTERVAL = 2
@@ -932,7 +931,6 @@ def _create_pods(
     cluster_name: str,
     cluster_name_on_cloud: str,
     config: common.ProvisionConfig,
-    ephemeral_volumes: Optional[List[volume_utils.VolumeInfo]] = None,
 ) -> common.ProvisionRecord:
     """Create pods based on the config."""
     provider_config = config.provider_config
@@ -958,6 +956,7 @@ def _create_pods(
     pod_spec['metadata']['labels'].update(
         {constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud})
 
+    ephemeral_volumes = provider_config.get('ephemeral_volume_infos')
     if ephemeral_volumes:
         for ephemeral_volume in ephemeral_volumes:
             # Update the volumes and volume mounts in the pod spec
@@ -1291,12 +1290,10 @@ def run_instances(
     cluster_name: str,
     cluster_name_on_cloud: str,
     config: common.ProvisionConfig,
-    ephemeral_volumes: Optional[List[volume_utils.VolumeInfo]] = None,
 ) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
     try:
-        return _create_pods(region, cluster_name, cluster_name_on_cloud, config,
-                            ephemeral_volumes)
+        return _create_pods(region, cluster_name, cluster_name_on_cloud, config)
     except (kubernetes.api_exception(), config_lib.KubernetesError) as e:
         e_msg = common_utils.format_exception(e).replace('\n', ' ')
         logger.warning('run_instances: Error occurred when creating pods: '

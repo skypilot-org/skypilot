@@ -1,7 +1,7 @@
 """Volume functions for provisioning and deleting ephemeral volumes."""
 
 import copy
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from sky import clouds
 from sky import global_user_state
@@ -68,12 +68,6 @@ def _resolve_pvc_volume_config(cloud: clouds.Cloud,
     return volume_config
 
 
-def _get_volume_name(path: str, cluster_name_on_cloud: str) -> str:
-    import hashlib  # disable pylint: disable=import-outside-toplevel
-    path_hash = hashlib.md5(path.encode()).hexdigest()[:6]
-    return f'{cluster_name_on_cloud}-{path_hash}'
-
-
 def _create_ephemeral_volume(
     cloud: clouds.Cloud, region: str, cluster_name_on_cloud: str,
     config: provision_common.ProvisionConfig,
@@ -101,7 +95,7 @@ def _create_ephemeral_volume(
         logger.warning(f'Skipping unsupported ephemeral volume type: '
                        f'{volume_type} for cloud {cloud}.')
         return None
-    volume_name = _get_volume_name(path, cluster_name_on_cloud)
+    volume_name = volume_config.name
     volume_server_core.volume_apply(
         name=volume_name,
         volume_type=volume_type,
@@ -132,12 +126,12 @@ def provision_ephemeral_volumes(
     region: str,
     cluster_name_on_cloud: str,
     config: provision_common.ProvisionConfig,
-) -> Optional[List[volume_utils.VolumeInfo]]:
+) -> None:
     """Provision ephemeral volumes for a cluster."""
     provider_config = config.provider_config
     ephemeral_volume_mounts = provider_config.get('ephemeral_volume_specs')
     if not ephemeral_volume_mounts:
-        return None
+        return
     volume_infos = []
     try:
         for ephemeral_volume_mount in ephemeral_volume_mounts:
@@ -149,16 +143,13 @@ def provision_ephemeral_volumes(
             if volume_info is None:
                 continue
             volume_infos.append(volume_info)
-        return volume_infos
+        provider_config['ephemeral_volume_infos'] = volume_infos
     except Exception as e:  # pylint: disable=broad-exception-caught
         logger.error(f'Failed to provision ephemeral volumes: {e}')
         raise e
 
 
-def delete_ephemeral_volumes(
-    cluster_name_on_cloud: str,
-    provider_config: Dict[str, Any],
-) -> None:
+def delete_ephemeral_volumes(provider_config: Dict[str, Any],) -> None:
     """Provision ephemeral volumes for a cluster."""
     ephemeral_volume_mounts = provider_config.get('ephemeral_volume_specs')
     if not ephemeral_volume_mounts:
@@ -167,7 +158,7 @@ def delete_ephemeral_volumes(
     for ephemeral_volume_mount in ephemeral_volume_mounts:
         mount_copy = copy.deepcopy(ephemeral_volume_mount)
         volume_mount = volume_utils.VolumeMount.from_yaml_config(mount_copy)
-        volume_name = _get_volume_name(volume_mount.path, cluster_name_on_cloud)
+        volume_name = volume_mount.volume_config.name
         ephemeral_volume_names.append(volume_name)
     volume_server_core.volume_delete(names=ephemeral_volume_names,
                                      ignore_not_found=True)

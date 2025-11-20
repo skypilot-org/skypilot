@@ -608,6 +608,11 @@ def get_expirable_clouds(
     return expirable_clouds
 
 
+def _get_volume_name(path: str, cluster_name_on_cloud: str) -> str:
+    path_hash = hashlib.md5(path.encode()).hexdigest()[:6]
+    return f'{cluster_name_on_cloud}-{path_hash}'
+
+
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
 def write_cluster_config(
@@ -880,6 +885,11 @@ def write_cluster_config(
     if volume_mounts is not None:
         for vol in volume_mounts:
             if vol.is_ephemeral:
+                volume_name = _get_volume_name(vol.path, cluster_name_on_cloud)
+                vol.volume_name = volume_name
+                vol.volume_config.cloud = repr(cloud)
+                vol.volume_config.region = region.name
+                vol.volume_config.name = volume_name
                 ephemeral_volume_mount_vars.append(vol.to_yaml_config())
             else:
                 volume_info = volume_utils.VolumeInfo(
