@@ -64,7 +64,8 @@ def _create_jobs(region: str, cluster_name_on_cloud: str,
         logger.info(f'Job {job_id} already exists for cluster '
                     f'{cluster_name_on_cloud}')
 
-        nodes, _ = client.get_job_nodes(job_id)
+        # Wait for nodes to be allocated (job might be in PENDING state)
+        nodes, _ = client.get_job_nodes(job_id, wait=True)
         return common.ProvisionRecord(provider_name='slurm',
                                       region=region,
                                       zone=None,
@@ -260,7 +261,8 @@ def get_cluster_info(
     ) == 1, f'Multiple running jobs found for cluster {cluster_name_on_cloud}: {running_jobs}'
 
     job_id = running_jobs[0]
-    nodes, node_ips = client.get_job_nodes(job_id)
+    # Running jobs should already have nodes allocated, so don't wait
+    nodes, node_ips = client.get_job_nodes(job_id, wait=False)
 
     instances = {
         f'{slurm_utils.instance_id(job_id, node)}': [
