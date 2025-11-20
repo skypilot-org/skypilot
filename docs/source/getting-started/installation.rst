@@ -560,7 +560,7 @@ Vast |community-badge|
 
 
 CloudRift |community-badge|
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 `CloudRift <https://www.cloudrift.ai/>`__ is a cloud provider that provides access go elastic GPU accelerated VMs. To configure CloudRift access, go to the `Account <https://console.cloudrift.ai/keys/>`_ page on your CloudRift console to get your **API key**. Then, run:
 

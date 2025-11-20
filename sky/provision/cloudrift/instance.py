@@ -59,8 +59,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         ]
 
         logger.info(f'Waiting for {len(instances_dict)} instances to be ready: '
-                    f'{instance_statuses}'
-        )
+                    f'{instance_statuses}')
 
         time.sleep(constants.POLL_INTERVAL)
 
