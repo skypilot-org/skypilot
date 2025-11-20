@@ -205,6 +205,12 @@ def queue_v2(
     return server_common.get_request_id(response=response)
 
 
+# Deprecated. Please use queue_v2 instead for better performance.
+# In https://github.com/skypilot-org/skypilot/pull/7695, the `queue` function
+# is updated to return new typed data for performance improvement if the API
+# server supports it, which breaks the backward compatibility.
+# In https://github.com/skypilot-org/skypilot/pull/8015, we revert the change
+# and add a new function `queue_v2` to return the new typed data.
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def queue(
