@@ -1,7 +1,6 @@
 """Lambda Cloud instance provisioning."""
 
 import time
-import typing
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
@@ -11,9 +10,6 @@ from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
-
-if typing.TYPE_CHECKING:
-    from sky.utils import volume as volume_utils
 
 POLL_INTERVAL = 1
 
@@ -72,15 +68,10 @@ def _get_private_ip(instance_info: Dict[str, Any], single_node: bool) -> str:
     return private_ip
 
 
-def run_instances(
-    region: str,
-    cluster_name: str,
-    cluster_name_on_cloud: str,
-    config: common.ProvisionConfig,
-    ephemeral_volumes: Optional[List['volume_utils.VolumeInfo']] = None,
-) -> common.ProvisionRecord:
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
+                  config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster"""
-    del cluster_name, ephemeral_volumes  # unused
+    del cluster_name  # unused
     lambda_client = _get_lambda_client()
     pending_status = ['booting']
     while True:

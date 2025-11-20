@@ -25,7 +25,6 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.utils import status_lib
-    from sky.utils import volume as volume_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -67,15 +66,10 @@ def query_instances(
 
 
 @query_utils.debug_enabled(logger)
-def run_instances(
-    region: str,
-    cluster_name: str,
-    cluster_name_on_cloud: str,
-    config: common.ProvisionConfig,
-    ephemeral_volumes: Optional[List['volume_utils.VolumeInfo']] = None,
-) -> common.ProvisionRecord:
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
+                  config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Start instances with bootstrapped configuration."""
-    del cluster_name, ephemeral_volumes  # unused
+    del cluster_name  # unused
     tags = dict(sorted(copy.deepcopy(config.tags).items()))
 
     start_time = round(time.time() * 1000)

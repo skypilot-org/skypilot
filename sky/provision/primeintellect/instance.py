@@ -1,6 +1,5 @@
 """Prime Intellect instance provisioning."""
 import time
-import typing
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import exceptions
@@ -10,9 +9,6 @@ from sky.provision.primeintellect import utils
 from sky.utils import common_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
-
-if typing.TYPE_CHECKING:
-    from sky.utils import volume as volume_utils
 
 # The maximum number of times to poll for the status of an operation.
 POLL_INTERVAL = 5
@@ -69,15 +65,10 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
 # Helper is available as utils.parse_ssh_connection.
 
 
-def run_instances(
-    region: str,
-    cluster_name: str,
-    cluster_name_on_cloud: str,
-    config: common.ProvisionConfig,
-    ephemeral_volumes: Optional[List['volume_utils.VolumeInfo']] = None,
-) -> common.ProvisionRecord:
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
+                  config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
-    del cluster_name, ephemeral_volumes  # unused
+    del cluster_name  # unused
     pending_status = [
         'PROVISIONING',
         'PENDING',

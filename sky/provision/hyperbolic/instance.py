@@ -1,15 +1,11 @@
 """Hyperbolic instance provisioning."""
 import time
-import typing
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
 from sky.provision import common
 from sky.provision.hyperbolic import utils
 from sky.utils import status_lib
-
-if typing.TYPE_CHECKING:
-    from sky.utils import volume as volume_utils
 
 PROVIDER_NAME = 'hyperbolic'
 POLL_INTERVAL = 5
@@ -68,14 +64,9 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
     return next(iter(instances.keys()))
 
 
-def run_instances(
-    region: str,
-    cluster_name: str,
-    cluster_name_on_cloud: str,
-    config: common.ProvisionConfig,
-    ephemeral_volumes: Optional[List['volume_utils.VolumeInfo']] = None,
-) -> common.ProvisionRecord:
-    del cluster_name, ephemeral_volumes  # unused
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
+                  config: common.ProvisionConfig) -> common.ProvisionRecord:
+    del cluster_name  # unused
     logger.info(f'Starting run_instances with region={region}, '
                 f'cluster={cluster_name_on_cloud}')
     logger.debug(f'Config: {config}')

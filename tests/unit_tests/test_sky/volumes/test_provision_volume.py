@@ -266,49 +266,6 @@ class TestResolvePvcVolumeConfig:
                                                         volume_config)
 
 
-class TestGetVolumeName:
-    """Test cases for _get_volume_name function."""
-
-    def test_get_volume_name_format(self):
-        """Test the format of generated volume name."""
-        path = '/data/storage'
-        cluster_name = 'test-cluster'
-
-        result = provision_volume._get_volume_name(path, cluster_name)
-
-        # Should be in format: cluster-name-hash
-        assert result.startswith('test-cluster-')
-        assert len(result.split('-')[-1]) == 6  # Hash is 6 chars
-
-    def test_get_volume_name_consistent(self):
-        """Test that same inputs generate same volume name."""
-        path = '/data/storage'
-        cluster_name = 'test-cluster'
-
-        result1 = provision_volume._get_volume_name(path, cluster_name)
-        result2 = provision_volume._get_volume_name(path, cluster_name)
-
-        assert result1 == result2
-
-    def test_get_volume_name_different_paths(self):
-        """Test that different paths generate different volume names."""
-        cluster_name = 'test-cluster'
-
-        result1 = provision_volume._get_volume_name('/data/path1', cluster_name)
-        result2 = provision_volume._get_volume_name('/data/path2', cluster_name)
-
-        assert result1 != result2
-
-    def test_get_volume_name_different_clusters(self):
-        """Test that different cluster names generate different volume names."""
-        path = '/data/storage'
-
-        result1 = provision_volume._get_volume_name(path, 'cluster1')
-        result2 = provision_volume._get_volume_name(path, 'cluster2')
-
-        assert result1 != result2
-
-
 class TestCreateEphemeralVolume:
     """Test cases for _create_ephemeral_volume function."""
 

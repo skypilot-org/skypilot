@@ -1,6 +1,5 @@
 """Nebius instance provisioning."""
 import time
-import typing
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
@@ -9,9 +8,6 @@ from sky.provision.nebius import utils
 from sky.utils import common_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
-
-if typing.TYPE_CHECKING:
-    from sky.utils import volume as volume_utils
 
 PENDING_STATUS = ['STARTING', 'DELETING', 'STOPPING']
 
@@ -69,15 +65,10 @@ def _wait_until_no_pending(region: str, cluster_name_on_cloud: str) -> None:
                            f' to be ready.')
 
 
-def run_instances(
-    region: str,
-    cluster_name: str,
-    cluster_name_on_cloud: str,
-    config: common.ProvisionConfig,
-    ephemeral_volumes: Optional[List['volume_utils.VolumeInfo']] = None,
-) -> common.ProvisionRecord:
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
+                  config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
-    del cluster_name, ephemeral_volumes  # unused
+    del cluster_name  # unused
     _wait_until_no_pending(region, cluster_name_on_cloud)
     running_instances = _filter_instances(region, cluster_name_on_cloud,
                                           ['RUNNING'])

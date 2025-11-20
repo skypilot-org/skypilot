@@ -4,7 +4,6 @@ import copy
 from multiprocessing import pool
 import re
 import time
-import typing
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Type
 
 from sky import sky_logging
@@ -17,9 +16,6 @@ from sky.provision.gcp import instance_utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import status_lib
-
-if typing.TYPE_CHECKING:
-    from sky.utils import volume as volume_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -365,15 +361,10 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
                                   created_instance_ids=created_instance_ids)
 
 
-def run_instances(
-    region: str,
-    cluster_name: str,
-    cluster_name_on_cloud: str,
-    config: common.ProvisionConfig,
-    ephemeral_volumes: Optional[List['volume_utils.VolumeInfo']] = None,
-) -> common.ProvisionRecord:
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
+                  config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
-    del cluster_name, ephemeral_volumes  # unused
+    del cluster_name  # unused
     try:
         return _run_instances(region, cluster_name_on_cloud, config)
     except gcp.http_error_exception() as e:
