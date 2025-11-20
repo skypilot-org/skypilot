@@ -47,30 +47,6 @@ async def launch(
 
 
 @usage_lib.entrypoint
-async def get_queue(
-    refresh: bool,
-    skip_finished: bool = False,
-    all_users: bool = False,
-    job_ids: Optional[List[int]] = None,
-    limit: Optional[int] = None,
-    fields: Optional[List[str]] = None,
-    stream_logs: Optional[
-        sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG
-) -> Tuple[Union[List[responses.ManagedJobRecord], Tuple[
-        List[responses.ManagedJobRecord], int, Dict[str, int], int]],
-           sdk.QueueResultVersion]:
-    """Async version of get_queue() that gets statuses of managed jobs."""
-    request_id, queue_result_version = await context_utils.to_thread(
-        sdk.get_queue, refresh, skip_finished, all_users, job_ids, limit,
-        fields)
-    if stream_logs is not None:
-        return await sdk_async._stream_and_get(  # pylint: disable=protected-access
-            request_id, stream_logs), queue_result_version
-    else:
-        return await sdk_async.get(request_id), queue_result_version
-
-
-@usage_lib.entrypoint
 async def queue_v2(
     refresh: bool,
     skip_finished: bool = False,

@@ -60,6 +60,8 @@ from sky.adaptors import common as adaptors_common
 from sky.client import sdk
 from sky.client.cli import flags
 from sky.client.cli import table_utils
+from sky.client.cli import utils as cli_utils
+from sky.jobs import utils as jobs_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
@@ -1354,7 +1356,7 @@ def _handle_jobs_queue_request(
         str, Any]]]] = None,
     is_called_by_user: bool = False,
     only_in_progress: bool = False,
-    queue_result_version: managed_jobs.QueueResultVersion = managed_jobs.
+    queue_result_version: cli_utils.QueueResultVersion = cli_utils.
     QueueResultVersion.V1,
 ) -> Tuple[Optional[int], str]:
     """Get the in-progress managed jobs.
@@ -1824,7 +1826,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         fields = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET
         if all_users:
             fields = fields + _USER_NAME_FIELD
-        return managed_jobs.get_queue(
+        return cli_utils.get_managed_job_queue(
             refresh=False,
             skip_finished=True,
             all_users=all_users,
@@ -3007,7 +3009,7 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
             '[bold cyan]Checking for in-progress managed jobs and pools[/]'):
         try:
             fields = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET + _USER_NAME_FIELD
-            request_id, queue_result_version = managed_jobs.get_queue(
+            request_id, queue_result_version = cli_utils.get_managed_job_queue(
                 refresh=False,
                 skip_finished=True,
                 all_users=True,
@@ -3049,12 +3051,13 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
                 }}):
                 # Check again with the consolidation mode disabled. This is to
                 # make sure there is no in-progress managed jobs.
-                request_id, queue_result_version = managed_jobs.get_queue(
-                    refresh=False,
-                    skip_finished=True,
-                    all_users=True,
-                    fields=fields,
-                )
+                request_id, queue_result_version = (
+                    cli_utils.get_managed_job_queue(
+                        refresh=False,
+                        skip_finished=True,
+                        all_users=True,
+                        fields=fields,
+                    ))
                 result = sdk.stream_and_get(request_id)
                 if queue_result_version.v2():
                     managed_jobs_, _, status_counts, _ = result
@@ -4809,14 +4812,14 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
             fields = fields + _USER_NAME_FIELD
             if verbose:
                 fields = fields + _USER_HASH_FIELD
-        # Call both managed_jobs.get_queue and managed_jobs.pool_status
+        # Call both cli_utils.get_managed_job_queue and managed_jobs.pool_status
         # in parallel
         def get_managed_jobs_queue():
-            return managed_jobs.get_queue(refresh=refresh,
-                                          skip_finished=skip_finished,
-                                          all_users=all_users,
-                                          limit=max_num_jobs_to_show,
-                                          fields=fields)
+            return cli_utils.get_managed_job_queue(refresh=refresh,
+                                                   skip_finished=skip_finished,
+                                                   all_users=all_users,
+                                                   limit=max_num_jobs_to_show,
+                                                   fields=fields)
 
         def get_pool_status():
             try:

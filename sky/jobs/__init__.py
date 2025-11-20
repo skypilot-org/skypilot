@@ -4,7 +4,6 @@ import pathlib
 from sky.jobs.client.sdk import cancel
 from sky.jobs.client.sdk import dashboard
 from sky.jobs.client.sdk import download_logs
-from sky.jobs.client.sdk import get_queue
 from sky.jobs.client.sdk import launch
 from sky.jobs.client.sdk import pool_apply
 from sky.jobs.client.sdk import pool_down
@@ -13,7 +12,6 @@ from sky.jobs.client.sdk import pool_sync_down_logs
 from sky.jobs.client.sdk import pool_tail_logs
 from sky.jobs.client.sdk import queue
 from sky.jobs.client.sdk import queue_v2
-from sky.jobs.client.sdk import QueueResultVersion
 from sky.jobs.client.sdk import tail_logs
 from sky.jobs.constants import JOBS_CLUSTER_NAME_PREFIX_LENGTH
 from sky.jobs.constants import JOBS_CONTROLLER_LOGS_DIR
@@ -37,13 +35,11 @@ __all__ = [
     'JOBS_CONTROLLER_LOGS_DIR',
     # Enums
     'ManagedJobStatus',
-    'QueueResultVersion',
     # Core
     'cancel',
     'launch',
     'queue',
     'queue_v2',
-    'get_queue',
     'tail_logs',
     'dashboard',
     'download_logs',

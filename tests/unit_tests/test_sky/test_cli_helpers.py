@@ -14,6 +14,7 @@ from sky import jobs as managed_jobs
 from sky.client import sdk as client_sdk
 from sky.client.cli import command
 from sky.client.cli import table_utils
+from sky.client.cli import utils as cli_utils
 from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.skylet import constants
@@ -67,7 +68,7 @@ def test_handle_jobs_queue_request_success_tuple_response():
                     max_num_jobs_to_show=10,
                     is_called_by_user=False,
                     only_in_progress=False,
-                    queue_result_version=managed_jobs.QueueResultVersion.V2,
+                    queue_result_version=cli_utils.QueueResultVersion.V2,
                 )
 
     # Verify the result
@@ -122,7 +123,7 @@ def test_handle_jobs_queue_request_success_list_response():
                     max_num_jobs_to_show=None,
                     is_called_by_user=True,
                     only_in_progress=False,
-                    queue_result_version=managed_jobs.QueueResultVersion.V1,
+                    queue_result_version=cli_utils.QueueResultVersion.V1,
                 )
 
     # Verify the result - should count unique job IDs
@@ -531,7 +532,7 @@ def test_handle_jobs_queue_request_counts_terminal_status_correctly():
                     max_num_jobs_to_show=10,
                     is_called_by_user=False,
                     only_in_progress=False,
-                    queue_result_version=managed_jobs.QueueResultVersion.V2,
+                    queue_result_version=cli_utils.QueueResultVersion.V2,
                 )
 
     # Should return the total number of jobs (5) when only_in_progress=False
@@ -592,7 +593,7 @@ def test_handle_jobs_queue_request_only_in_progress_true():
                     max_num_jobs_to_show=10,
                     is_called_by_user=False,
                     only_in_progress=True,
-                    queue_result_version=managed_jobs.QueueResultVersion.V2,
+                    queue_result_version=cli_utils.QueueResultVersion.V2,
                 )
 
     # Only RUNNING and PENDING should be counted as in-progress (non-terminal)
@@ -630,7 +631,7 @@ def test_handle_jobs_queue_request_only_in_progress_with_no_status_counts():
                     max_num_jobs_to_show=10,
                     is_called_by_user=False,
                     only_in_progress=True,
-                    queue_result_version=managed_jobs.QueueResultVersion.V2,
+                    queue_result_version=cli_utils.QueueResultVersion.V2,
                 )
 
     # Should return 0 when status_counts is None
@@ -681,7 +682,7 @@ def test_handle_jobs_queue_request_only_in_progress_all_terminal():
                     max_num_jobs_to_show=10,
                     is_called_by_user=False,
                     only_in_progress=True,
-                    queue_result_version=managed_jobs.QueueResultVersion.V2,
+                    queue_result_version=cli_utils.QueueResultVersion.V2,
                 )
 
     # Should return 0 since all jobs are terminal

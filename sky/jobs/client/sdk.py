@@ -1,12 +1,10 @@
 """SDK functions for managed jobs."""
-import enum
 import json
 import typing
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import click
 
-from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
@@ -130,78 +128,6 @@ def launch(
         return server_common.get_request_id(response)
 
 
-class QueueResultVersion(enum.Enum):
-    """The version of the queue result.
-
-    V1: The old version of the queue result.
-        - job_records (List[responses.ManagedJobRecord]): A list of dicts,
-           with each dict containing the information of a job.
-    V2: The new version of the queue result.
-        - job_records (List[responses.ManagedJobRecord]): A list of dicts,
-           with each dict containing the information of a job.
-        - total (int): Total number of jobs after filter.
-        - status_counts (Dict[str, int]): Status counts after filter.
-        - total_no_filter (int): Total number of jobs before filter.
-    """
-    V1 = 'v1'
-    V2 = 'v2'
-
-    def v2(self) -> bool:
-        return self == QueueResultVersion.V2
-
-
-@usage_lib.entrypoint
-@server_common.check_server_healthy_or_start
-def get_queue(
-    refresh: bool,
-    skip_finished: bool = False,
-    all_users: bool = False,
-    job_ids: Optional[List[int]] = None,
-    limit: Optional[int] = None,
-    fields: Optional[List[str]] = None,
-) -> Tuple[server_common.RequestId[Union[List[responses.ManagedJobRecord],
-                                         Tuple[List[responses.ManagedJobRecord],
-                                               int, Dict[str, int], int]]],
-           QueueResultVersion]:
-    """Gets statuses of managed jobs.
-
-    Please refer to sky.cli.job_queue for documentation.
-
-    Args:
-        refresh: Whether to restart the jobs controller if it is stopped.
-        skip_finished: Whether to skip finished jobs.
-        all_users: Whether to show all users' jobs.
-        job_ids: IDs of the managed jobs to show.
-        limit: Number of jobs to show.
-        fields: Fields to get for the managed jobs.
-
-    Returns:
-        - the request ID of the queue request
-        - the version of the queue result
-
-    Request Raises:
-        sky.exceptions.ClusterNotUpError: the jobs controller is not up or
-          does not exist.
-        RuntimeError: if failed to get the managed jobs with ssh.
-    """
-    try:
-        return typing.cast(
-            server_common.RequestId[
-                Union[List[responses.ManagedJobRecord],
-                      Tuple[List[responses.ManagedJobRecord], int,
-                            Dict[str, int], int]]],
-            queue_v2(refresh, skip_finished, all_users, job_ids, limit,
-                     fields)), QueueResultVersion.V2
-    except exceptions.APINotSupportedError:
-        return typing.cast(
-            server_common.RequestId[
-                Union[List[responses.ManagedJobRecord],
-                      Tuple[List[responses.ManagedJobRecord], int,
-                            Dict[str, int], int]]],
-            queue(refresh, skip_finished, all_users,
-                  job_ids)), QueueResultVersion.V1
-
-
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @versions.minimal_api_version(18)
@@ -288,6 +214,8 @@ def queue(
     job_ids: Optional[List[int]] = None
 ) -> server_common.RequestId[List[responses.ManagedJobRecord]]:
     """Gets statuses of managed jobs.
+
+    Deprecated. Please use queue_v2 instead for better performance.
 
     Please refer to sky.cli.job_queue for documentation.
 
