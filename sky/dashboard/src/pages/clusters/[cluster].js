@@ -147,12 +147,7 @@ function ClusterDetails() {
   // Function to build Grafana panel URL with filters
   const buildGrafanaMetricsUrl = (panelId) => {
     const grafanaUrl = getGrafanaUrl();
-    // Use the matched cluster name if available, otherwise fall back to the display name
-    console.log('matchedClusterName', matchedClusterName);
-    console.log(
-      'clusterData?.cluster_name_on_cloud',
-      clusterData?.cluster_name_on_cloud
-    );
+    // Use the matched cluster name if available, otherwise fall back to the cluster name on cloud
     const clusterParam =
       matchedClusterName || clusterData?.cluster_name_on_cloud;
 
