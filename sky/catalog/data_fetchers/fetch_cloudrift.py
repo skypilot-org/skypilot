@@ -13,7 +13,6 @@ from sky.provision.cloudrift.utils import get_cloudrift_client
 # sys.path.insert(
 #     0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
 
-
 # Constants
 BYTES_TO_GIB = 1024 * 1024 * 1024  # 1 GiB = 1024^3 bytes
 
