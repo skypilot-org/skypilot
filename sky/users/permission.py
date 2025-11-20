@@ -170,6 +170,7 @@ class PermissionService:
 
     def add_user_if_not_exists(self, user_id: str) -> None:
         """Add user role relationship."""
+        self._lazy_initialize()
         with _policy_lock():
             self._add_user_if_not_exists_no_lock(user_id)
 
