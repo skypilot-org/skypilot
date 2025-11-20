@@ -89,8 +89,6 @@ def _create_jobs(region: str, cluster_name_on_cloud: str,
     provision_lines = [
         '#!/bin/bash',
         f'#SBATCH --job-name={cluster_name_on_cloud}',
-        f'#SBATCH --output={cluster_name_on_cloud}.out',
-        f'#SBATCH --error={cluster_name_on_cloud}.err',
         f'#SBATCH --nodes={num_nodes}',
         f'#SBATCH --cpus-per-task={int(resources["cpus"])}',
         f'#SBATCH --mem={int(resources["memory"])}G',
