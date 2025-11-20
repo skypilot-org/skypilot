@@ -374,6 +374,7 @@ print(message, flush=True)
 
 print('\x1b[2m└── \x1b[0mJob started. Streaming logs... \x1b[2m(Ctrl-C to exit log streaming; job will not be killed)\x1b[0m', flush=True)
 setup_cmd = 'pip install torch'
+setup_cmd = 'export SKYPILOT_NODE_RANK=$SLURM_PROCID; ' + setup_cmd
 # Unset CUDA_VISIBLE_DEVICES so setup can properly use this env var
 setup_cmd = 'unset CUDA_VISIBLE_DEVICES; ' + setup_cmd
 
@@ -407,19 +408,28 @@ if setup_returncode != 0:
 
 job_lib.set_job_started(2)
 job_lib.scheduler.schedule_step()
-# Single-node execution: simplified node info
-node_ips = ['TODO']
-node_rank = 0
+result = subprocess.run(
+    ['srun', '--jobid=12345', '--nodes=1', '--ntasks=1', 
+     '--ntasks-per-node=1', 'bash', '-c', 
+     'hostname -I | awk "{print \$1}"'],
+    capture_output=True,
+    text=True,
+    check=True
+)
+discovered_ips = result.stdout.strip().split('\n')
+cluster_ips_to_node_id = {ip: i for i, ip in enumerate(None)}
+node_ips = sorted(discovered_ips, key=cluster_ips_to_node_id.get)
 
 sky_env_vars_dict = {}
 sky_env_vars_dict['SKYPILOT_NUM_NODES'] = 1
-sky_env_vars_dict['SKYPILOT_NODE_RANK'] = node_rank
 sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = 2
+sky_env_vars_dict['SKYPILOT_NODE_IPS'] = '\n'.join(node_ips)
 
 sky_env_vars_dict['SKYPILOT_TASK_ID'] = 'sky-2024-11-17-00-00-00-000001-cluster-2'
 sky_env_vars_dict['MODEL_NAME'] = 'resnet50'
 log_path = os.path.expanduser(os.path.join('/sky/logs/tasks', "run.log"))
 script = 'python train.py'
+script = 'export SKYPILOT_NODE_RANK=$SLURM_PROCID; ' + script
 rclone_flush_script = '\n# Only waits if cached mount is enabled (RCLONE_MOUNT_CACHED_LOG_DIR is not empty)\n# findmnt alone is not enough, as some clouds (e.g. AWS on ARM64) uses\n# rclone for normal mounts as well.\nif [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ] &&            [ -d ~/.sky/rclone_log ] &&            [ "$(ls -A ~/.sky/rclone_log)" ]; then\n    flushed=0\n    # extra second on top of --vfs-cache-poll-interval to\n    # avoid race condition between rclone log line creation and this check.\n    sleep 1\n    while [ $flushed -eq 0 ]; do\n        # sleep for the same interval as --vfs-cache-poll-interval\n        sleep 10\n        flushed=1\n        for file in ~/.sky/rclone_log/*; do\n            exitcode=0\n            tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?\n            if [ $exitcode -ne 0 ]; then\n                echo "skypilot: cached mount is still uploading to remote"\n                flushed=0\n                break\n            fi\n        done\n    done\n    echo "skypilot: cached mount uploaded complete"\nfi'
 
 # If run_fn is registered, call it to generate the script dynamically
