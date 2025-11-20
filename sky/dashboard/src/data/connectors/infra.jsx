@@ -204,6 +204,9 @@ export async function getWorkspaceInfrastructure() {
         allGPUs: [],
         perContextGPUs: [],
         perNodeGPUs: [],
+        allSlurmGPUs: [],
+        perClusterSlurmGPUs: [],
+        perNodeSlurmGPUs: [],
         contextStats: {},
         contextWorkspaceMap: {},
       };
@@ -331,12 +334,29 @@ export async function getWorkspaceInfrastructure() {
       console.error('Error fetching Kubernetes GPUs:', error);
     }
 
+    // Get Slurm GPU data
+    let slurmGpuData = {
+      allSlurmGPUs: [],
+      perClusterSlurmGPUs: [],
+      perNodeSlurmGPUs: [],
+    };
+    try {
+      const { getSlurmServiceGPUs } = await import('@/data/connectors/gpus');
+      slurmGpuData = await getSlurmServiceGPUs();
+      console.log('[DEBUG] Slurm GPU data in infra.jsx:', slurmGpuData);
+    } catch (error) {
+      console.error('Error fetching Slurm GPUs:', error);
+    }
+
     const finalResult = {
       workspaces: workspaceInfraData,
       allContextNames: [...new Set(allContextsAcrossWorkspaces)].sort(),
       allGPUs: gpuData.allGPUs || [],
       perContextGPUs: gpuData.perContextGPUs || [],
       perNodeGPUs: gpuData.perNodeGPUs || [],
+      allSlurmGPUs: slurmGpuData.allSlurmGPUs || [],
+      perClusterSlurmGPUs: slurmGpuData.perClusterSlurmGPUs || [],
+      perNodeSlurmGPUs: slurmGpuData.perNodeSlurmGPUs || [],
       contextStats: contextStats,
       contextWorkspaceMap: contextWorkspaceMap,
     };

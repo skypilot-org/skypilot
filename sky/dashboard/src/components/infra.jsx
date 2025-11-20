@@ -82,6 +82,7 @@ export function InfrastructureSection({
   jobsData = {},
   isJobsDataLoading = true,
   isSSH = false, // To differentiate between SSH and Kubernetes
+  isSlurm = false, // To differentiate Slurm clusters
   actionButton = null, // Optional action button for the header
   contextWorkspaceMap = {}, // Mapping of contexts to workspaces
 }) {
@@ -370,11 +371,16 @@ export function InfrastructureSection({
                           ? Object.values(groupedPerContextGPUs)
                               .flat()
                               .filter(
-                                (g) =>
-                                  g.gpu_name === gpu.gpu_name &&
-                                  (isSSH
-                                    ? g.context.startsWith('ssh-')
-                                    : !g.context.startsWith('ssh-'))
+                                (g) => {
+                                  if (g.gpu_name !== gpu.gpu_name) return false;
+                                  if (isSlurm) return true; // For Slurm, include all
+                                  // For Kubernetes/SSH, filter by context type
+                                  const contextKey = g.context || g.cluster;
+                                  if (!contextKey) return false;
+                                  return isSSH
+                                    ? contextKey.startsWith('ssh-')
+                                    : !contextKey.startsWith('ssh-');
+                                }
                               )
                               .map((g) => g.gpu_requestable_qty_per_node)
                               .filter((qty, i, arr) => arr.indexOf(qty) === i) // Unique values
@@ -1610,6 +1616,9 @@ export function GPUs() {
   const [allGPUs, setAllGPUs] = useState([]);
   const [perContextGPUs, setPerContextGPUs] = useState([]);
   const [perNodeGPUs, setPerNodeGPUs] = useState([]);
+  const [allSlurmGPUs, setAllSlurmGPUs] = useState([]);
+  const [perClusterSlurmGPUs, setPerClusterSlurmGPUs] = useState([]);
+  const [perNodeSlurmGPUs, setPerNodeSlurmGPUs] = useState([]);
   const [cloudInfraData, setCloudInfraData] = useState([]);
   const [totalClouds, setTotalClouds] = useState(0);
   const [enabledClouds, setEnabledClouds] = useState(0);
@@ -1712,6 +1721,9 @@ export function GPUs() {
           allGPUs: fetchedAllGPUs,
           perContextGPUs: fetchedPerContextGPUs,
           perNodeGPUs: fetchedPerNodeGPUs,
+          allSlurmGPUs: fetchedAllSlurmGPUs,
+          perClusterSlurmGPUs: fetchedPerClusterSlurmGPUs,
+          perNodeSlurmGPUs: fetchedPerNodeSlurmGPUs,
           contextStats: fetchedContextStats,
           contextWorkspaceMap: fetchedContextWorkspaceMap,
         } = infraData;
@@ -1721,6 +1733,9 @@ export function GPUs() {
         setAllGPUs(fetchedAllGPUs || []);
         setPerContextGPUs(fetchedPerContextGPUs || []);
         setPerNodeGPUs(fetchedPerNodeGPUs || []);
+        setAllSlurmGPUs(fetchedAllSlurmGPUs || []);
+        setPerClusterSlurmGPUs(fetchedPerClusterSlurmGPUs || []);
+        setPerNodeSlurmGPUs(fetchedPerNodeSlurmGPUs || []);
         setContextStats(fetchedContextStats || {});
         setContextWorkspaceMap(fetchedContextWorkspaceMap || {});
 
@@ -1738,6 +1753,9 @@ export function GPUs() {
         setAllGPUs([]);
         setPerContextGPUs([]);
         setPerNodeGPUs([]);
+        setAllSlurmGPUs([]);
+        setPerClusterSlurmGPUs([]);
+        setPerNodeSlurmGPUs([]);
         setContextStats({});
         setContextWorkspaceMap({});
         setAvailableWorkspaces([]);
@@ -1751,6 +1769,9 @@ export function GPUs() {
       setAllGPUs([]);
       setPerContextGPUs([]);
       setPerNodeGPUs([]);
+      setAllSlurmGPUs([]);
+      setPerClusterSlurmGPUs([]);
+      setPerNodeSlurmGPUs([]);
       setContextStats({});
       setContextWorkspaceMap({});
       setAvailableWorkspaces([]);
@@ -2101,6 +2122,41 @@ export function GPUs() {
     return allGPUs.filter((gpu) => kubeGpuNames.has(gpu.gpu_name));
   }, [allGPUs, perContextGPUs]);
 
+  // Extract Slurm cluster names from perClusterSlurmGPUs
+  const slurmClusters = React.useMemo(() => {
+    if (!perClusterSlurmGPUs || !Array.isArray(perClusterSlurmGPUs)) {
+      return [];
+    }
+    const clusters = [...new Set(perClusterSlurmGPUs.map((gpu) => gpu.cluster))];
+    return clusters.sort();
+  }, [perClusterSlurmGPUs]);
+
+  // Group perClusterSlurmGPUs by cluster
+  const groupedPerClusterSlurmGPUs = React.useMemo(() => {
+    if (!perClusterSlurmGPUs) return {};
+    return perClusterSlurmGPUs.reduce((acc, gpu) => {
+      const { cluster } = gpu;
+      if (!acc[cluster]) {
+        acc[cluster] = [];
+      }
+      acc[cluster].push(gpu);
+      return acc;
+    }, {});
+  }, [perClusterSlurmGPUs]);
+
+  // Group perNodeSlurmGPUs by cluster
+  const groupedPerNodeSlurmGPUs = React.useMemo(() => {
+    if (!perNodeSlurmGPUs) return {};
+    return perNodeSlurmGPUs.reduce((acc, node) => {
+      const { cluster } = node;
+      if (!acc[cluster]) {
+        acc[cluster] = [];
+      }
+      acc[cluster].push(node);
+      return acc;
+    }, {});
+  }, [perNodeSlurmGPUs]);
+
   // Group perNodeGPUs by context
   const groupedPerNodeGPUs = React.useMemo(() => {
     if (!perNodeGPUs) return {};
@@ -2341,6 +2397,27 @@ export function GPUs() {
     );
   };
 
+  const renderSlurmInfrastructure = () => {
+    return (
+      <InfrastructureSection
+        title="Slurm"
+        isLoading={kubeLoading}
+        isDataLoaded={kubeDataLoaded}
+        contexts={slurmClusters}
+        gpus={allSlurmGPUs}
+        groupedPerContextGPUs={groupedPerClusterSlurmGPUs}
+        groupedPerNodeGPUs={groupedPerNodeSlurmGPUs}
+        handleContextClick={handleContextClick}
+        contextStats={{}}
+        jobsData={{}}
+        isJobsDataLoading={false}
+        isSSH={false}
+        isSlurm={true}
+        contextWorkspaceMap={{}}
+      />
+    );
+  };
+
   const renderKubernetesTab = () => {
     // If a context is selected, show its details instead of the summary
     if (selectedContext) {
@@ -2370,7 +2447,16 @@ export function GPUs() {
       });
     };
 
-    // Always add all three sections (they handle their own loading/empty states)
+    // Always add all sections (they handle their own loading/empty states)
+
+    // Add Slurm section (always show) - Priority 1 to show at top
+    const slurmHasActivity = slurmClusters.length > 0;
+    sections.push({
+      name: 'Slurm',
+      render: renderSlurmInfrastructure,
+      hasActivity: slurmHasActivity,
+      priority: 1, // Slurm gets priority 1 within same activity level
+    });
 
     // Add Kubernetes section (always show)
     // Kubernetes section is active if there are any contexts available (similar to Cloud logic)
@@ -2379,7 +2465,7 @@ export function GPUs() {
       name: 'Kubernetes',
       render: renderKubernetesInfrastructure,
       hasActivity: kubeHasActivity,
-      priority: 1, // Kubernetes gets priority 1 within same activity level
+      priority: 2, // Kubernetes gets priority 2 within same activity level
     });
 
     // Add Cloud section (always show)
@@ -2389,7 +2475,7 @@ export function GPUs() {
       name: 'Cloud',
       render: renderCloudInfrastructure,
       hasActivity: cloudHasActivity,
-      priority: 2, // Cloud gets priority 2 within same activity level
+      priority: 3, // Cloud gets priority 3 within same activity level
     });
 
     // Add SSH section (always show)
@@ -2399,7 +2485,7 @@ export function GPUs() {
       name: 'SSH Node Pool',
       render: renderSSHNodePoolInfrastructure,
       hasActivity: sshHasActivity,
-      priority: 3, // SSH gets priority 3 within same activity level
+      priority: 4, // SSH gets priority 4 within same activity level
     });
 
     // Dynamic sorting: enabled/active sections move to front automatically
