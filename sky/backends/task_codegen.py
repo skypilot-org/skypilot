@@ -321,28 +321,29 @@ class SlurmCodeGen(TaskCodeGen):
         # Set initial job status
         self._add_job_status_pending(job_id)
 
-    def _add_node_discovery(self, num_nodes: int) -> None:
+    def _add_node_discovery(self, num_nodes: int, stable_cluster_internal_ips: List[str]) -> None:
         """Add code for discovering Slurm nodes.
-
-        For single-node (current): Just creates placeholder variables.
-        For multi-node (future): Parse SLURM_NODELIST, build IP maps, handle ranks.
 
         Args:
             num_nodes: Number of nodes in the task
+            stable_cluster_internal_ips: Pre-fetched cluster IPs for sorting
         """
         self._num_nodes = num_nodes
 
-        if num_nodes == 1:
-            # Single-node: Simple stub
-            self._code.append(
-                textwrap.dedent(f"""\
-                # Single-node execution: simplified node info
-                node_ips = ['TODO']
-                node_rank = 0
-                """))
-        else:
-            raise NotImplementedError(
-                'Multi-node execution is not supported yet.')
+        self._code.append(
+            textwrap.dedent(f"""\
+            result = subprocess.run(
+                ['srun', '--jobid={self._slurm_job_id}', '--nodes={num_nodes}', '--ntasks={num_nodes}', 
+                 '--ntasks-per-node=1', 'bash', '-c', 
+                 'hostname -I | awk "{{print \\$1}}"'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            discovered_ips = result.stdout.strip().split('\\n')
+            cluster_ips_to_node_id = {{ip: i for i, ip in enumerate({stable_cluster_internal_ips!r})}}
+            node_ips = sorted(discovered_ips, key=cluster_ips_to_node_id.get)
+            """))
 
     def _get_log_path_code(self, log_dir: str, num_nodes: int) -> str:
         """Generate code for determining log path.
@@ -388,16 +389,10 @@ class SlurmCodeGen(TaskCodeGen):
             textwrap.dedent(f"""\
             sky_env_vars_dict = {{}}
             sky_env_vars_dict['{constants.SKYPILOT_NUM_NODES}'] = {num_nodes}
-            sky_env_vars_dict['{constants.SKYPILOT_NODE_RANK}'] = node_rank
             sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = {self.job_id}
+            sky_env_vars_dict['{constants.SKYPILOT_NODE_IPS}'] = '\\n'.join(node_ips)
             """)
         ]
-
-        # Add SKYPILOT_NODE_IPS for multi-node
-        if num_nodes > 1:
-            sky_env_vars_dict_str.append(
-                f"sky_env_vars_dict['{constants.SKYPILOT_NODE_IPS}'] = '\\n'.join(node_ips)"
-            )
 
         if env_vars:
             sky_env_vars_dict_str.extend(f'sky_env_vars_dict[{k!r}] = {v!r}'
@@ -469,6 +464,7 @@ class SlurmCodeGen(TaskCodeGen):
         self._code += [
             textwrap.dedent(f"""\
             setup_cmd = {setup_cmd!r}
+            setup_cmd = 'export SKYPILOT_NODE_RANK=$SLURM_PROCID; ' + setup_cmd
             # Unset CUDA_VISIBLE_DEVICES so setup can properly use this env var
             setup_cmd = 'unset CUDA_VISIBLE_DEVICES; ' + setup_cmd
 
@@ -564,7 +560,7 @@ class SlurmCodeGen(TaskCodeGen):
         assert self._has_prologue, 'Call add_prologue() before add_slurm_task().'
 
         # Add node discovery (extensible for multi-node)
-        self._add_node_discovery(num_nodes)
+        self._add_node_discovery(num_nodes, stable_cluster_internal_ips)
 
         # Build environment variables using helper
         sky_env_vars_dict_str = self._build_env_vars_code(env_vars, num_nodes)
@@ -580,6 +576,7 @@ class SlurmCodeGen(TaskCodeGen):
             log_path_code,
             textwrap.dedent(f"""\
             script = {bash_script!r}
+            script = 'export SKYPILOT_NODE_RANK=$SLURM_PROCID; ' + script
             rclone_flush_script = {rclone_flush_script!r}
 
             # If run_fn is registered, call it to generate the script dynamically
