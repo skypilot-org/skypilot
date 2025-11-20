@@ -438,7 +438,7 @@ If you are using Nebius Kubernetes cluster, you can setup GPU metrics in the clu
   helm upgrade --install kube-prometheus prometheus-community/kube-prometheus-stack \
     --namespace skypilot \
     --create-namespace \
-    --set prometheus.enabled=false \
+    --set prometheus.enabled=true \
     --set alertmanager.enabled=false \
     --set grafana.enabled=false \
     --set kubeStateMetrics.enabled=false \
