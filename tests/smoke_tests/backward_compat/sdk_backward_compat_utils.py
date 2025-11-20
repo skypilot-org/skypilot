@@ -2,7 +2,6 @@ import click
 
 import sky
 from sky.client import sdk
-from sky.client.cli import utils as cli_utils
 from sky.jobs.client import sdk as jobs_sdk
 from sky.utils import registry
 
@@ -88,7 +87,7 @@ def managed_job_logs(job_name: str) -> None:
 
 @cli.command()
 def managed_job_queue() -> None:
-    request_id = cli_utils.get_managed_job_queue(refresh=True)
+    request_id = jobs_sdk.queue(refresh=True)
     records = sdk.stream_and_get(request_id)
     print(records)
 
