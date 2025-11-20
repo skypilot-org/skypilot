@@ -267,12 +267,6 @@ def is_consolidation_mode(on_api_restart: bool = False) -> bool:
 
 def ha_recovery_for_consolidation_mode() -> None:
     """Recovery logic for HA mode."""
-    # Touch the signal file here to avoid conflict with
-    # update_managed_jobs_statuses. Although we run this first and then start
-    # the deamon, this function is also called in cancel_jobs_by_id.
-    signal_file = pathlib.Path(
-        constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE).expanduser()
-    signal_file.touch()
     # No setup recovery is needed in consolidation mode, as the API server
     # already has all runtime installed. Directly start jobs recovery here.
     # Refers to sky/templates/kubernetes-ray.yml.j2 for more details.
@@ -340,7 +334,6 @@ def ha_recovery_for_consolidation_mode() -> None:
                         f'{datetime.now()}\n')
         f.write(f'HA recovery completed at {datetime.now()}\n')
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
-    signal_file.unlink()
 
 
 def validate_pool_job(dag: 'dag_lib.Dag', pool: str) -> None:

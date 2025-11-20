@@ -271,6 +271,22 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
     Will also add the job_id, dag_yaml_path, and env_file_path to the
     controllers list of processes.
     """
+    # In consolidation mode, during rolling update, two API servers may be
+    # running. If we are on the new API server, and we haven't finished the
+    # recovery process, we should avoid starting new controllers. The old API
+    # server/consolidated jobs controller could run update_managed_jobs_statuses
+    # and if there are jobs running on the new API server, the old one will not
+    # see the corresponding processes and may mark them as FAILED_CONTROLLER.
+    if from_scheduler and managed_job_utils.is_consolidation_mode(
+    ) and os.path.exists(
+            os.path.expanduser(
+                constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE)):
+        logger.warning('Existing jobs are still being recovered, so we can\'t '
+                       'start new controllers yet. This may be due to an API '
+                       'server update in progress.\n'
+                       'Your job has been submitted, but may not start until '
+                       'the recovery completes.')
+        return
     try:
         with filelock.FileLock(JOB_CONTROLLER_PID_LOCK, blocking=False):
             if from_scheduler and not managed_job_utils.is_consolidation_mode():

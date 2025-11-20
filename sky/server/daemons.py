@@ -2,12 +2,15 @@
 import dataclasses
 import os
 import time
+import typing
 from typing import Callable
 
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import common as adaptors_common
 from sky.server import constants as server_constants
 from sky.server.requests import request_names
+from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import env_options
@@ -15,6 +18,11 @@ from sky.utils import locks
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    import pathlib
+else:
+    pathlib = adaptors_common.LazyImport('pathlib')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -133,26 +141,47 @@ _managed_job_consolidation_mode_lock = None
 def managed_job_status_refresh_event():
     """Refresh the managed job status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
-    from sky.jobs import utils as managed_job_utils
     from sky.jobs import constants as managed_job_constants
+    from sky.jobs import utils as managed_job_utils
 
     global _managed_job_consolidation_mode_lock
     if _managed_job_consolidation_mode_lock is None:
         _managed_job_consolidation_mode_lock = locks.get_lock(
             managed_job_constants.CONSOLIDATION_MODE_LOCK_ID)
 
-    # Make sure the lock is acquired for this process before proceeding to do
-    # recovery. This will block if another API server is still running, but
-    # should run once it is terminated and releases the lock.
-    if not _managed_job_consolidation_mode_lock.is_locked():
-        logger.info('Acquiring the consolidation mode lock: '
-                    f'{_managed_job_consolidation_mode_lock}')
-        _managed_job_consolidation_mode_lock.acquire()
-    # We will never release the lock (until the process exits).
+    # Touch the signal file here to avoid conflict with
+    # update_managed_jobs_statuses. Although we run
+    # ha_recovery_for_consolidation_mode before checking the job statuses
+    # (events.ManagedJobEvent), update_managed_jobs_statuses is also called in
+    # cancel_jobs_by_id.
+    # We also need to make sure that new controllers are not started until we
+    # acquire the consolidation mode lock, since if we have controllers on both
+    # the new and old API server during a rolling update, calling
+    # update_managed_jobs_statuses on the old API server could lead to
+    # FAILED_CONTROLLER.
+    signal_file = pathlib.Path(
+        constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE).expanduser()
+    try:
+        signal_file.touch()
 
-    # We run the recovery logic before starting the event loop as those two are
-    # conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for details.
-    managed_job_utils.ha_recovery_for_consolidation_mode()
+        # Make sure the lock is acquired for this process before proceeding to
+        # do recovery. This will block if another API server is still running,
+        # but should proceed once it is terminated and releases the lock.
+        if not _managed_job_consolidation_mode_lock.is_locked():
+            logger.info('Acquiring the consolidation mode lock: '
+                        f'{_managed_job_consolidation_mode_lock}')
+            _managed_job_consolidation_mode_lock.acquire()
+        # We will never release the lock (until the process exits).
+
+        # We run the recovery logic before checking the job statuses as those
+        # two are conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for
+        # details.
+        managed_job_utils.ha_recovery_for_consolidation_mode()
+    finally:
+        # Now, we should be sure that this is the only API server, we have
+        # started the new controllers and unclaimed all the jobs, and we are
+        # ready to update the job statuses.
+        signal_file.unlink()
 
     # After recovery, we start the event loop.
     from sky.skylet import events
