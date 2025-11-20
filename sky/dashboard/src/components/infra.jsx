@@ -134,10 +134,14 @@ export function InfrastructureSection({
                 {safeContexts.length === 1
                   ? isSSH
                     ? 'pool'
-                    : 'context'
+                    : isSlurm
+                      ? 'cluster'
+                      : 'context'
                   : isSSH
                     ? 'pools'
-                    : 'contexts'}
+                    : isSlurm
+                      ? 'clusters'
+                      : 'contexts'}
               </span>
             </div>
             {actionButton}
@@ -149,7 +153,7 @@ export function InfrastructureSection({
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="p-3 text-left font-medium text-gray-600 w-1/4">
-                        {isSSH ? 'Node Pool' : 'Context'}
+                        Name
                       </th>
                       <th className="p-3 text-left font-medium text-gray-600 w-1/8">
                         Clusters
