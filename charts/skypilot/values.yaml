@@ -271,6 +271,36 @@ ingress:
   # Host to exclusively accept traffic from (optional) - will respond to all host requests if not set
   # @schema type: [string, null]
   host: null
+  ## -----------------------------------------------------------------------------
+  ## Adding support for multiple hosts and backend services
+  ##
+  ## This replaces the legacy single 'ingress.host' key.
+  ## Each item in the list defines:
+  ##   - a hostname (DNS name)
+  ##   - one or more backend services (paths)
+  ##
+  ## Example:
+  ## hosts:
+  ##   - host: null
+  ##     paths:
+  ##       - path: /
+  ##         serviceName: skypilot-api-service
+  ##         servicePort: 80
+  ##         - path: /grafana
+  ##           serviceName: skypilot-grafana
+  ##           servicePort: 80
+  ##     - host: mlflow.company.com
+  ##       paths:
+  ##         - path: /
+  ##           serviceName: mlflow-tracking
+  ##           servicePort: 5000
+  ##
+  ## Notes:
+  ## - All hosts will share the same TLS certificate (see annotations below).
+  ## - Paths are defined per host; each path routes to a Kubernetes Service.
+  ## - You can mix multiple paths per host (e.g. /grafana → grafana service).
+  ## - To keep backward compatibility, you can still define a single host.
+  ## -----------------------------------------------------------------------------
   # The base path of API server, you may use different path to expose multiple API server through a unified ingress-controller
   path: '/'
   # Ingress class name (for newer Kubernetes versions)

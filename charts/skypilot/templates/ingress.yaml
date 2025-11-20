@@ -60,16 +60,35 @@ spec:
   {{- if $useNewIngressClass }}
   ingressClassName: {{ .Values.ingress.ingressClassName }}
   {{- end }}
+
   rules:
-  - host: {{ .Values.ingress.host }}
-    http:
-      paths:
-      {{- /* TODO(aylei): check whether this works for ingress-controllers other than nginx */}}
-      - pathType: {{ if eq .Values.ingress.path "/" }}Prefix{{ else }}ImplementationSpecific{{ end }}
-        path: {{ .Values.ingress.path }}{{ if ne .Values.ingress.path "/" }}(/|$)(.*){{ end }}
-        backend:
-          service:
-            name: {{ .Release.Name }}-api-service
-            port:
-              number: 80
+  {{- if .Values.ingress.hosts }}
+    {{- /* --- Multi-host mode --- */}}
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | default "null" }}
+      http:
+        paths:
+        {{- range .paths }}
+        - pathType: {{ if eq .path "/" }}Prefix{{ else }}ImplementationSpecific{{ end }}
+          path: {{ .path }}
+          backend:
+            service:
+              name: {{ printf "%s-%s" $.Release.Namespace .serviceName }}
+              port:
+                number: {{ .servicePort }}
+        {{- end }}
+    {{- end }}
+  {{- else }}
+    {{- /* --- Backward compatibility (single-host mode) --- */}}
+    - host: {{ .Values.ingress.host | default "null" }}
+      http:
+        paths:
+          - pathType: {{ if eq .Values.ingress.path "/" }}Prefix{{ else }}ImplementationSpecific{{ end }}
+            path: {{ .Values.ingress.path | default "/" }}{{ if and .Values.ingress.path (ne .Values.ingress.path "/") }}(/|$)(.*){{ end }}
+            backend:
+              service:
+                name: {{ .Release.Name }}-api-service
+                port:
+                  number: 80
+  {{- end }}
 {{- end }}
