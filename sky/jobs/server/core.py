@@ -35,6 +35,7 @@ from sky.schemas.api import responses
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.serve.server import impl
+from sky.server.requests import request_names
 from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
@@ -237,7 +238,8 @@ def launch(
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
-    dag, mutated_user_config = admin_policy_utils.apply(dag)
+    dag, mutated_user_config = admin_policy_utils.apply(
+        dag, request_name=request_names.AdminPolicyRequestName.JOBS_LAUNCH)
     dag.resolve_and_validate_volumes()
     if not dag.is_chain():
         with ux_utils.print_exception_no_traceback():
@@ -394,6 +396,7 @@ def launch(
             for task_ in dag_copy.tasks:
                 if job_rank is not None:
                     task_.update_envs({'SKYPILOT_JOB_RANK': str(job_rank)})
+                if num_jobs is not None:
                     task_.update_envs({'SKYPILOT_NUM_JOBS': str(num_jobs)})
 
             dag_utils.dump_chain_dag_to_yaml(dag_copy, f.name)
@@ -465,12 +468,15 @@ def launch(
                     # intermediate bucket and newly created bucket should be in
                     # workspace A.
                     if consolidation_mode_job_id is None:
-                        return execution.launch(task=controller_task,
-                                                cluster_name=controller_name,
-                                                stream_logs=stream_logs,
-                                                retry_until_up=True,
-                                                fast=True,
-                                                _disable_controller_check=True)
+                        return execution.launch(
+                            task=controller_task,
+                            cluster_name=controller_name,
+                            stream_logs=stream_logs,
+                            retry_until_up=True,
+                            fast=True,
+                            _request_name=request_names.AdminPolicyRequestName.
+                            JOBS_LAUNCH_CONTROLLER,
+                            _disable_controller_check=True)
                     # Manually launch the scheduler in consolidation mode.
                     local_handle = backend_utils.is_controller_accessible(
                         controller=controller, stopped_message='')

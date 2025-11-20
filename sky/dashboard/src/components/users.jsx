@@ -1344,23 +1344,29 @@ function UsersTable({
         if (showLoading) setIsLoading(false);
 
         // Step 2: Load clusters and jobs in background and update counts
-        const [clustersData, managedJobsResponse] = await Promise.all([
-          dashboardCache.get(getClusters),
-          dashboardCache.get(getManagedJobs, [
-            {
-              allUsers: true,
-              skipFinished: true,
-              fields: [
-                'user_hash',
-                'status',
-                'accelerators',
-                'job_name',
-                'job_id',
-                'infra',
-              ],
-            },
-          ]),
-        ]);
+        let clustersData = [];
+        let managedJobsResponse = { jobs: [] };
+        try {
+          [clustersData, managedJobsResponse] = await Promise.all([
+            dashboardCache.get(getClusters),
+            dashboardCache.get(getManagedJobs, [
+              {
+                allUsers: true,
+                skipFinished: true,
+                fields: [
+                  'user_hash',
+                  'status',
+                  'accelerators',
+                  'job_name',
+                  'job_id',
+                  'infra',
+                ],
+              },
+            ]),
+          ]);
+        } catch (error) {
+          console.error('Error fetching clusters and managed jobs:', error);
+        }
 
         const jobsData = managedJobsResponse.jobs || [];
 
@@ -2172,7 +2178,7 @@ function UsersTable({
                     </span>
                   ) : (
                     <Link
-                      href={`/clusters?user=${encodeURIComponent(user.userId)}`}
+                      href={`/clusters?property=user&operator=%3A&value=${encodeURIComponent(user.username)}`}
                       className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
                         user.clusterCount > 0
                           ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 hover:text-blue-700'
@@ -2192,7 +2198,7 @@ function UsersTable({
                     </span>
                   ) : (
                     <Link
-                      href={`/jobs?user=${encodeURIComponent(user.userId)}`}
+                      href={`/jobs?property=user&operator=%3A&value=${encodeURIComponent(user.username)}`}
                       className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
                         user.jobCount > 0
                           ? 'bg-green-100 text-green-600 hover:bg-green-200 hover:text-green-700'
@@ -2340,16 +2346,28 @@ function ServiceAccountTokensView({
       setTokens(tokensData || []);
 
       // Step 2: Fetch clusters and jobs data in parallel
-      const [clustersResponse, jobsResponse] = await Promise.all([
-        dashboardCache.get(getClusters),
-        dashboardCache.get(getManagedJobs, [
-          {
-            allUsers: true,
-            skipFinished: true,
-            fields: ['user_hash', 'status', 'accelerators', 'job_id', 'infra'],
-          },
-        ]),
-      ]);
+      let clustersResponse = [];
+      let jobsResponse = { jobs: [] };
+      try {
+        [clustersResponse, jobsResponse] = await Promise.all([
+          dashboardCache.get(getClusters),
+          dashboardCache.get(getManagedJobs, [
+            {
+              allUsers: true,
+              skipFinished: true,
+              fields: [
+                'user_hash',
+                'status',
+                'accelerators',
+                'job_id',
+                'infra',
+              ],
+            },
+          ]),
+        ]);
+      } catch (error) {
+        console.error('Error fetching clusters and managed jobs:', error);
+      }
 
       const clustersData = clustersResponse || [];
       const jobsData = jobsResponse?.jobs || [];
@@ -2713,7 +2731,7 @@ function ServiceAccountTokensView({
                     </TableCell>
                     <TableCell>
                       <Link
-                        href={`/clusters?user=${encodeURIComponent(token.service_account_user_id)}`}
+                        href={`/clusters?property=user&operator=%3A&value=${encodeURIComponent(token.service_account_name)}`}
                         className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
                           token.clusterCount > 0
                             ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 hover:text-blue-700'
@@ -2726,7 +2744,7 @@ function ServiceAccountTokensView({
                     </TableCell>
                     <TableCell>
                       <Link
-                        href={`/jobs?user=${encodeURIComponent(token.service_account_user_id)}`}
+                        href={`/jobs?property=user&operator=%3A&value=${encodeURIComponent(token.service_account_name)}`}
                         className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
                           token.jobCount > 0
                             ? 'bg-green-100 text-green-600 hover:bg-green-200 hover:text-green-700'

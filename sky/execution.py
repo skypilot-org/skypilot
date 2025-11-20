@@ -16,6 +16,7 @@ from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
 from sky.backends import backend_utils
+from sky.server.requests import request_names
 from sky.skylet import autostop_lib
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
@@ -116,8 +117,10 @@ def _execute(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     skip_unnecessary_provisioning: bool = False,
+    *,  #keyword only separator
     # Internal only:
     # pylint: disable=invalid-name
+    _request_name: request_names.AdminPolicyRequestName,
     _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
@@ -187,6 +190,7 @@ def _execute(
                 idle_minutes_to_autostop = resource.autostop_config.idle_minutes
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag,
+            request_name=_request_name,
             request_options=admin_policy.RequestOptions(
                 cluster_name=cluster_name,
                 idle_minutes_to_autostop=idle_minutes_to_autostop,
@@ -535,12 +539,15 @@ def launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
+    *,  #keyword only separator
     # Internal only:
     # pylint: disable=invalid-name
     _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
+    _request_name: request_names.AdminPolicyRequestName = request_names.
+    AdminPolicyRequestName.CLUSTER_LAUNCH,
     job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -707,7 +714,12 @@ def launch(
         _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,
+        _request_name=_request_name,
         job_logger=job_logger)
+
+
+# needed for backward compatibility. Remove by v0.10.7 or v0.11.0
+cluster_launch = launch
 
 
 @usage_lib.entrypoint
@@ -794,4 +806,5 @@ def exec(  # pylint: disable=redefined-builtin
         ],
         cluster_name=cluster_name,
         job_logger=job_logger,
+        _request_name=request_names.AdminPolicyRequestName.CLUSTER_EXEC,
     )

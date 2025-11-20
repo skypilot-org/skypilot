@@ -45,7 +45,7 @@ class TestVolume:
         """Test Volume._adjust_config with no size."""
         volume = volume_lib.Volume(name='test',
                                    type='k8s-pvc',
-                                   resource_name='test-pvc')
+                                   use_existing=True)
         volume._adjust_config()
         assert volume.size is None
 
@@ -84,25 +84,25 @@ class TestVolume:
                                    infra='kubernetes')
         volume.validate()  # Should not raise
 
-    def test_volume_validate_valid_with_resource_name(self):
-        """Test Volume.validate with valid resource_name."""
+    def test_volume_validate_valid_with_use_existing(self):
+        """Test Volume.validate with use_existing."""
         volume = volume_lib.Volume(name='test',
                                    type='k8s-pvc',
                                    infra='kubernetes',
-                                   resource_name='existing-pvc')
+                                   use_existing=True)
         volume.validate()  # Should not raise
 
     def test_volume_validate_valid_with_both(self):
-        """Test Volume.validate with both size and resource_name."""
+        """Test Volume.validate with both size and use_existing."""
         volume = volume_lib.Volume(name='test',
                                    type='k8s-pvc',
                                    size='100Gi',
                                    infra='kubernetes',
-                                   resource_name='existing-pvc')
+                                   use_existing=True)
         volume.validate()  # Should not raise
 
-    def test_volume_validate_missing_size_and_resource_name(self):
-        """Test Volume.validate with missing size and resource_name."""
+    def test_volume_validate_missing_size_and_use_existing(self):
+        """Test Volume.validate with missing size and use_existing."""
         volume = volume_lib.Volume(name='test', type='k8s-pvc', size=None)
         with pytest.raises(ValueError) as exc_info:
             volume.validate()
@@ -160,13 +160,13 @@ class TestVolume:
         volume = volume_lib.Volume(name='test', type='k8s-pvc', size='100Gi')
         volume.validate_size()  # Should not raise
 
-        # Test with resource_name instead of size
+        # Test with use_existing instead of size
         volume = volume_lib.Volume(name='test',
                                    type='k8s-pvc',
-                                   resource_name='existing-pvc')
+                                   use_existing=True)
         volume.validate_size()  # Should not raise
 
-        # Test with neither size nor resource_name
+        # Test with neither size nor use_existing
         volume = volume_lib.Volume(name='test', type='k8s-pvc')
         with pytest.raises(ValueError) as exc_info:
             volume.validate_size()
@@ -217,7 +217,7 @@ class TestVolume:
                 'key': 'value'
             },
             'size': '100Gi',
-            'resource_name': 'existing-pvc',
+            'use_existing': True,
             'config': {
                 'access_mode': 'ReadWriteMany'
             }
@@ -230,7 +230,7 @@ class TestVolume:
         assert volume.infra == 'k8s'
         assert volume.labels == {'key': 'value'}
         assert volume.size == '100'
-        assert volume.resource_name == 'existing-pvc'
+        assert volume.use_existing == True
         assert volume.config == {'access_mode': 'ReadWriteMany'}
         # Should be PVC subclass
         assert type(volume).__name__ in ('PVCVolume',)
@@ -241,7 +241,7 @@ class TestVolume:
                                    type='k8s-pvc',
                                    infra='k8s',
                                    size='100Gi',
-                                   resource_name='existing-pvc',
+                                   use_existing=True,
                                    labels={'key': 'value'},
                                    config={'access_mode': 'ReadWriteMany'})
 
@@ -260,7 +260,7 @@ class TestVolume:
                 'key': 'value'
             },
             'size': '100',
-            'resource_name': 'existing-pvc',
+            'use_existing': True,
             'config': {
                 'access_mode': 'ReadWriteMany'
             },
@@ -287,7 +287,7 @@ class TestVolume:
                 'labels': {
                     'key': 'value'
                 },
-                'resource_name': 'existing-pvc'
+                'use_existing': True
             },
             {
                 'name': 'test-volume',
@@ -591,7 +591,7 @@ class TestVolume:
         volume = volume_lib.Volume.from_yaml_config(cfg)
         with pytest.raises(ValueError) as exc_info:
             volume.validate()
-        assert 'RunPod DataCenterId is required to create a network volume' in str(
+        assert 'RunPod DataCenterId is required for network volumes' in str(
             exc_info.value)
 
     def test_runpod_volume_min_size_enforced(self, monkeypatch):

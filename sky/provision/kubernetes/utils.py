@@ -109,8 +109,9 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
             return {
                 'NCCL_SOCKET_IFNAME': 'eth0',
                 'NCCL_IB_HCA': 'ibp',
-                'UCX_NET_DEVICES': ('ibp0:1,ibp1:1,ibp2:1,ibp3:1,'
-                                    'ibp4:1,ibp5:1,ibp6:1,ibp7:1')
+                # Restrict UCX to TCP to avoid unneccsary errors. NCCL doesn't use UCX
+                'UCX_TLS': 'tcp',
+                'UCX_NET_DEVICES': 'eth0',
             }
         else:
             # GCP clusters and generic clusters - environment variables are
@@ -2687,26 +2688,22 @@ def combine_pod_config_fields(
     merged_cluster_yaml_obj = copy.deepcopy(cluster_yaml_obj)
     # We don't use override_configs in `get_effective_region_config`, as merging
     # the pod config requires special handling.
-    if isinstance(cloud, clouds.SSH):
-        kubernetes_config = skypilot_config.get_effective_region_config(
-            cloud='ssh', region=None, keys=('pod_config',), default_value={})
-        override_pod_config = config_utils.get_cloud_config_value_from_dict(
-            dict_config=cluster_config_overrides,
-            cloud='ssh',
-            keys=('pod_config',),
-            default_value={})
-    else:
-        kubernetes_config = skypilot_config.get_effective_region_config(
-            cloud='kubernetes',
-            region=context,
-            keys=('pod_config',),
-            default_value={})
-        override_pod_config = config_utils.get_cloud_config_value_from_dict(
-            dict_config=cluster_config_overrides,
-            cloud='kubernetes',
-            region=context,
-            keys=('pod_config',),
-            default_value={})
+    cloud_str = 'ssh' if isinstance(cloud, clouds.SSH) else 'kubernetes'
+    context_str = context
+    if isinstance(cloud, clouds.SSH) and context is not None:
+        assert context.startswith('ssh-'), 'SSH context must start with "ssh-"'
+        context_str = context[len('ssh-'):]
+    kubernetes_config = skypilot_config.get_effective_region_config(
+        cloud=cloud_str,
+        region=context_str,
+        keys=('pod_config',),
+        default_value={})
+    override_pod_config = config_utils.get_cloud_config_value_from_dict(
+        dict_config=cluster_config_overrides,
+        cloud=cloud_str,
+        region=context_str,
+        keys=('pod_config',),
+        default_value={})
     config_utils.merge_k8s_configs(kubernetes_config, override_pod_config)
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.
@@ -2725,9 +2722,11 @@ def combine_metadata_fields(cluster_yaml_obj: Dict[str, Any],
     Obeys the same add or update semantics as combine_pod_config_fields().
     """
     merged_cluster_yaml_obj = copy.deepcopy(cluster_yaml_obj)
+    context, cloud_str = get_cleaned_context_and_cloud_str(context)
+
     # Get custom_metadata from global config
     custom_metadata = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
+        cloud=cloud_str,
         region=context,
         keys=('custom_metadata',),
         default_value={})
@@ -2735,7 +2734,7 @@ def combine_metadata_fields(cluster_yaml_obj: Dict[str, Any],
     # Get custom_metadata from task-level config overrides
     override_custom_metadata = config_utils.get_cloud_config_value_from_dict(
         dict_config=cluster_config_overrides,
-        cloud='kubernetes',
+        cloud=cloud_str,
         region=context,
         keys=('custom_metadata',),
         default_value={})
@@ -2792,9 +2791,11 @@ def merge_custom_metadata(
 
     Merge is done in-place, so return is not required
     """
+    context, cloud_str = get_cleaned_context_and_cloud_str(context)
+
     # Get custom_metadata from global config
     custom_metadata = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
+        cloud=cloud_str,
         region=context,
         keys=('custom_metadata',),
         default_value={})
@@ -2803,7 +2804,7 @@ def merge_custom_metadata(
     if cluster_config_overrides is not None:
         override_custom_metadata = config_utils.get_cloud_config_value_from_dict(
             dict_config=cluster_config_overrides,
-            cloud='kubernetes',
+            cloud=cloud_str,
             region=context,
             keys=('custom_metadata',),
             default_value={})
@@ -3301,13 +3302,13 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
 
     try:
         pods = kubernetes.core_api(context).list_pod_for_all_namespaces(
-            label_selector='skypilot-cluster',
+            label_selector=provision_constants.TAG_SKYPILOT_CLUSTER_NAME,
             _request_timeout=kubernetes.API_TIMEOUT).items
     except kubernetes.max_retry_error():
         raise exceptions.ResourcesUnavailableError(
             'Timed out trying to get SkyPilot pods from Kubernetes cluster. '
             'Please check if the cluster is healthy and retry. To debug, run: '
-            'kubectl get pods --selector=skypilot-cluster --all-namespaces'
+            'kubectl get pods --selector=skypilot-cluster-name --all-namespaces'
         ) from None
     return pods
 
@@ -3444,7 +3445,8 @@ def process_skypilot_pods(
     serve_controllers: List[KubernetesSkyPilotClusterInfo] = []
 
     for pod in pods:
-        cluster_name_on_cloud = pod.metadata.labels.get('skypilot-cluster')
+        cluster_name_on_cloud = pod.metadata.labels.get(
+            provision_constants.TAG_SKYPILOT_CLUSTER_NAME)
         cluster_name = cluster_name_on_cloud.rsplit(
             '-', 1
         )[0]  # Remove the user hash to get cluster name (e.g., mycluster-2ea4)
@@ -3731,3 +3733,13 @@ def should_exclude_pod_from_gpu_allocation(pod) -> bool:
         return True
 
     return False
+
+
+def get_cleaned_context_and_cloud_str(
+        context: Optional[str]) -> Tuple[Optional[str], str]:
+    """Return the cleaned context and relevant cloud string from a context."""
+    cloud_str = 'kubernetes'
+    if context is not None and context.startswith('ssh-'):
+        cloud_str = 'ssh'
+        context = context[len('ssh-'):]
+    return context, cloud_str

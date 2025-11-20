@@ -74,29 +74,16 @@ To serve the constructed database, you expose an API endpoint that other applica
 
 To serve the constructed database: 
 ```
-sky launch -c vecdb_serve serve_vectordb.yaml
+python3 serve_vectordb.py
 ```
 which runs the hosted vector database service. Alternatively, you can run 
 ```
-sky serve up serve_vectordb.yaml -n vectordb
+python3 serve_vectordb.py --serve
 ```
 This will deploy your vector database as a service on a cloud instance and allow you to interact with it via a public endpoint. Sky Serve facilitates automatic health checks and scaling of the service.
 
 
-To query the constructed database, 
-
-If you run through `sky launch`, use 
-```
-sky status --ip vecdb_serve
-```
-deployed cluster. 
-
-If you run through `sky serve`, you may run
-```
-sky serve status vectordb --endpoint
-```
-
-to get the endpoint address of the service. 
+Use endpoint address of the service printed by the above script to query the constructed database. 
 
 <p align="center">
 <img src="https://i.imgur.com/KONQ4wd.png" alt="Image Search Website" style="width: 70%;">

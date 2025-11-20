@@ -27,6 +27,7 @@ from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.serve import service
 from sky.serve import spot_placer
+from sky.server.requests import request_names
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -59,7 +60,7 @@ ProcessStatus = common_utils.ProcessStatus
 # TODO(tian): Combine this with
 # sky/spot/recovery_strategy.py::StrategyExecutor::launch
 def launch_cluster(replica_id: int,
-                   service_task_yaml_path: str,
+                   yaml_content: str,
                    cluster_name: str,
                    resources_override: Optional[Dict[str, Any]] = None,
                    retry_until_up: bool = True,
@@ -79,9 +80,7 @@ def launch_cluster(replica_id: int,
                     f'{cluster_name} with resources override: '
                     f'{resources_override}')
     try:
-        config = yaml_utils.read_yaml(
-            os.path.expanduser(service_task_yaml_path))
-        task = task_lib.Task.from_yaml_config(config)
+        task = task_lib.Task.from_yaml_str(yaml_content)
         if resources_override is not None:
             resources = task.resources
             overrided_resources = [
@@ -107,6 +106,8 @@ def launch_cluster(replica_id: int,
             execution.launch(task,
                              cluster_name,
                              retry_until_up=retry_until_up,
+                             _request_name=request_names.AdminPolicyRequestName.
+                             SERVE_LAUNCH_REPLICA,
                              _is_launched_by_sky_serve_controller=True)
             logger.info(f'Replica cluster {cluster_name} launched.')
         except (exceptions.InvalidClusterNameError,
@@ -175,9 +176,9 @@ def terminate_cluster(cluster_name: str,
             time.sleep(gap_seconds)
 
 
-def _get_resources_ports(service_task_yaml_path: str) -> str:
+def _get_resources_ports(yaml_content: str) -> str:
     """Get the resources ports used by the task."""
-    task = task_lib.Task.from_yaml(service_task_yaml_path)
+    task = task_lib.Task.from_yaml_str(yaml_content)
     # Already checked all ports are valid in sky.serve.core.up
     assert task.resources, task
     assert task.service is not None, task
@@ -187,7 +188,7 @@ def _get_resources_ports(service_task_yaml_path: str) -> str:
     return task.service.ports
 
 
-def _should_use_spot(service_task_yaml_path: str,
+def _should_use_spot(yaml_content: str,
                      resource_override: Optional[Dict[str, Any]]) -> bool:
     """Get whether the task should use spot."""
     if resource_override is not None:
@@ -195,7 +196,7 @@ def _should_use_spot(service_task_yaml_path: str,
         if use_spot_override is not None:
             assert isinstance(use_spot_override, bool)
             return use_spot_override
-    task = task_lib.Task.from_yaml(service_task_yaml_path)
+    task = task_lib.Task.from_yaml_str(yaml_content)
     spot_use_resources = [
         resources for resources in task.resources if resources.use_spot
     ]
@@ -625,8 +626,8 @@ class ReplicaInfo:
 class ReplicaManager:
     """Each replica manager monitors one service."""
 
-    def __init__(self, service_name: str,
-                 spec: 'service_spec.SkyServiceSpec') -> None:
+    def __init__(self, service_name: str, spec: 'service_spec.SkyServiceSpec',
+                 version: int) -> None:
         self.lock = threading.Lock()
         self._next_replica_id: int = 1
         self._service_name: str = service_name
@@ -642,9 +643,9 @@ class ReplicaManager:
                     f'Readiness header keys: {header_keys}')
 
         # Newest version among the currently provisioned and launched replicas
-        self.latest_version: int = serve_constants.INITIAL_VERSION
+        self.latest_version: int = version
         # Oldest version among the currently provisioned and launched replicas
-        self.least_recent_version: int = serve_constants.INITIAL_VERSION
+        self.least_recent_version: int = version
 
     def _consecutive_failure_threshold_timeout(self) -> int:
         """The timeout for the consecutive failure threshold in seconds.
@@ -689,10 +690,10 @@ class SkyPilotReplicaManager(ReplicaManager):
     """
 
     def __init__(self, service_name: str, spec: 'service_spec.SkyServiceSpec',
-                 service_task_yaml_path: str) -> None:
-        super().__init__(service_name, spec)
-        self.service_task_yaml_path = service_task_yaml_path
-        task = task_lib.Task.from_yaml(service_task_yaml_path)
+                 version: int) -> None:
+        super().__init__(service_name, spec, version)
+        self.yaml_content = serve_state.get_yaml_content(service_name, version)
+        task = task_lib.Task.from_yaml_str(self.yaml_content)
         self._spot_placer: Optional[spot_placer.SpotPlacer] = (
             spot_placer.SpotPlacer.from_task(spec, task))
         # TODO(tian): Store launch/down pid in the replica table, to make the
@@ -769,8 +770,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             self._service_name, replica_id)
         log_file_name = serve_utils.generate_replica_launch_log_file_name(
             self._service_name, replica_id)
-        use_spot = _should_use_spot(self.service_task_yaml_path,
-                                    resources_override)
+        use_spot = _should_use_spot(self.yaml_content, resources_override)
         retry_until_up = True
         location = None
         if use_spot and self._spot_placer is not None:
@@ -798,10 +798,10 @@ class SkyPilotReplicaManager(ReplicaManager):
                 launch_cluster,
                 log_file_name,
             ).run,
-            args=(replica_id, self.service_task_yaml_path, cluster_name,
+            args=(replica_id, self.yaml_content, cluster_name,
                   resources_override, retry_until_up),
         )
-        replica_port = _get_resources_ports(self.service_task_yaml_path)
+        replica_port = _get_resources_ports(self.yaml_content)
 
         info = ReplicaInfo(replica_id, cluster_name, replica_port, use_spot,
                            location, self.latest_version, resources_override)
@@ -1140,12 +1140,12 @@ class SkyPilotReplicaManager(ReplicaManager):
         if self.least_recent_version < current_least_recent_version:
             for version in range(self.least_recent_version,
                                  current_least_recent_version):
-                task_yaml = serve_utils.generate_task_yaml_file_name(
+                yaml_content = serve_utils.get_yaml_content(
                     self._service_name, version)
                 # Delete old version metadata.
                 serve_state.delete_version(self._service_name, version)
                 # Delete storage buckets of older versions.
-                service.cleanup_storage(task_yaml)
+                service.cleanup_storage(yaml_content)
             # newest version will be cleaned in serve down
             self.least_recent_version = current_least_recent_version
 
@@ -1386,11 +1386,9 @@ class SkyPilotReplicaManager(ReplicaManager):
             logger.error(f'Invalid version: {version}, '
                          f'latest version: {self.latest_version}')
             return
-        service_task_yaml_path = serve_utils.generate_task_yaml_file_name(
-            self._service_name, version)
-        serve_state.add_or_update_version(self._service_name, version, spec)
+        yaml_content = serve_state.get_yaml_content(self._service_name, version)
         self.latest_version = version
-        self.service_task_yaml_path = service_task_yaml_path
+        self.yaml_content = yaml_content
         self._update_mode = update_mode
 
         # Reuse all replicas that have the same config as the new version
@@ -1398,8 +1396,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         # the latest version. This can significantly improve the speed
         # for updating an existing service with only config changes to the
         # service specs, e.g. scale down the service.
-        new_config = yaml_utils.read_yaml(
-            os.path.expanduser(service_task_yaml_path))
+        new_config = yaml_utils.safe_load(yaml_content)
         # Always create new replicas and scale down old ones when file_mounts
         # are not empty.
         if new_config.get('file_mounts', None) != {}:
@@ -1412,11 +1409,9 @@ class SkyPilotReplicaManager(ReplicaManager):
         for info in replica_infos:
             if info.version < version and not info.is_terminal:
                 # Assume user does not change the yaml file on the controller.
-                old_service_task_yaml_path = (
-                    serve_utils.generate_task_yaml_file_name(
-                        self._service_name, info.version))
-                old_config = yaml_utils.read_yaml(
-                    os.path.expanduser(old_service_task_yaml_path))
+                old_yaml_content = serve_state.get_yaml_content(
+                    self._service_name, info.version)
+                old_config = yaml_utils.safe_load(old_yaml_content)
                 for key in ['service', 'pool', '_user_specified_yaml']:
                     old_config.pop(key, None)
                 # Bump replica version if all fields except for service are

@@ -22,6 +22,7 @@
 # Change cloud for generic tests to aws
 # > pytest tests/smoke_tests/test_managed_job.py --generic-cloud aws
 import io
+import os
 import pathlib
 import re
 import tempfile
@@ -850,7 +851,7 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
 @pytest.mark.no_dependency  # Storage tests required full dependency installed
 def test_managed_jobs_storage(generic_cloud: str):
     """Test storage with managed job"""
-    timeout = 215
+    timeout = 500
     low_resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
     name = smoke_tests_utils.get_cluster_name()
     yaml_str = pathlib.Path(
@@ -1654,4 +1655,24 @@ def test_managed_jobs_logs_gc(generic_cloud: str):
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=20 * 60,
     )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency
+@pytest.mark.kubernetes
+def test_large_production_performance(request):
+    if not smoke_tests_utils.is_in_buildkite_env():
+        pytest.skip('Skipping test: requires db modification, run only in '
+                    'Buildkite.')
+
+    test = smoke_tests_utils.Test(
+        name='test-large-production-performance',
+        commands=[
+            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}=tests/test_yamls/consolidation_mode_config.yaml && '
+            f'sky api stop || true && sky api start',
+            f'bash tests/load_tests/db_scale_tests/test_large_production_performance.sh',
+        ],
+        timeout=15 * 60,  # 15 minutes for data injection and testing
+        teardown=f'sky api stop')
     smoke_tests_utils.run_one_test(test)

@@ -60,6 +60,7 @@ from sky.adaptors import common as adaptors_common
 from sky.client import sdk
 from sky.client.cli import flags
 from sky.client.cli import table_utils
+from sky.jobs import utils as jobs_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
@@ -1116,7 +1117,7 @@ def launch(
     if task.service is not None:
         noun = 'pool' if task.service.pool else 'service'
         capnoun = noun.capitalize()
-        sysname = 'Jobs Worker Pool' if task.service.pool else 'SkyServe'
+        sysname = 'Pool' if task.service.pool else 'SkyServe'
         cmd = 'sky jobs pool apply' if task.service.pool else 'sky serve up'
         logger.info(
             f'{colorama.Fore.YELLOW}{capnoun} section will be ignored when '
@@ -1567,35 +1568,6 @@ def _handle_services_request(
     return num_services, msg
 
 
-def _status_kubernetes(show_all: bool):
-    """Show all SkyPilot resources in the current Kubernetes context.
-
-    Args:
-        show_all (bool): Show all job information (e.g., start time, failures).
-    """
-    all_clusters, unmanaged_clusters, all_jobs, context = (sdk.stream_and_get(
-        sdk.status_kubernetes()))
-    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-               f'Kubernetes cluster state (context: {context})'
-               f'{colorama.Style.RESET_ALL}')
-    status_utils.show_kubernetes_cluster_status_table(unmanaged_clusters,
-                                                      show_all)
-    if all_jobs:
-        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                   f'Managed jobs'
-                   f'{colorama.Style.RESET_ALL}')
-        msg = table_utils.format_job_table(all_jobs,
-                                           show_all=show_all,
-                                           show_user=False)
-        click.echo(msg)
-    if any(['sky-serve-controller' in c.cluster_name for c in all_clusters]):
-        # TODO: Parse serve controllers and show services separately.
-        #  Currently we show a hint that services are shown as clusters.
-        click.echo(f'\n{colorama.Style.DIM}Hint: SkyServe replica pods are '
-                   'shown in the "SkyPilot clusters" section.'
-                   f'{colorama.Style.RESET_ALL}')
-
-
 def _show_endpoint(query_clusters: Optional[List[str]],
                    cluster_records: List[responses.StatusResponse], ip: bool,
                    endpoints: bool, endpoint: Optional[int]) -> None:
@@ -1722,15 +1694,7 @@ def _show_enabled_infra(
               default=True,
               is_flag=True,
               required=False,
-              help='Also show cluster pools, if any.')
-@click.option(
-    '--kubernetes',
-    '--k8s',
-    default=False,
-    is_flag=True,
-    required=False,
-    help='[Experimental] Show all SkyPilot resources (including from other '
-    'users) in the current Kubernetes context.')
+              help='Also show pools, if any.')
 @click.argument('clusters',
                 required=False,
                 type=str,
@@ -1742,8 +1706,8 @@ def _show_enabled_infra(
 # pylint: disable=redefined-builtin
 def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
            endpoint: Optional[int], show_managed_jobs: bool,
-           show_services: bool, show_pools: bool, kubernetes: bool,
-           clusters: List[str], all_users: bool):
+           show_services: bool, show_pools: bool, clusters: List[str],
+           all_users: bool):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -1806,9 +1770,6 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
       or for autostop-enabled clusters, use ``--refresh`` to query the latest
       cluster statuses from the cloud providers.
     """
-    if kubernetes:
-        _status_kubernetes(verbose)
-        return
     # Do not show job queue if user specifies clusters, and if user
     # specifies --ip or --endpoint(s).
     show_managed_jobs = show_managed_jobs and not any([clusters, ip, endpoints])
@@ -2069,6 +2030,35 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                      f'{colorama.Style.RESET_ALL}')
     if hints:
         click.echo('\n' + '\n'.join(hints))
+
+
+@cli.command(hidden=True)
+@flags.config_option(expose_value=False)
+@flags.verbose_option()
+def status_kubernetes(verbose: bool):
+    """[Experimental] Show all SkyPilot resources (including from other '
+    'users) in the current Kubernetes context."""
+    all_clusters, unmanaged_clusters, all_jobs, context = (sdk.stream_and_get(
+        sdk.status_kubernetes()))
+    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+               f'Kubernetes cluster state (context: {context})'
+               f'{colorama.Style.RESET_ALL}')
+    status_utils.show_kubernetes_cluster_status_table(unmanaged_clusters,
+                                                      show_all=verbose)
+    if all_jobs:
+        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Managed jobs'
+                   f'{colorama.Style.RESET_ALL}')
+        msg = table_utils.format_job_table(all_jobs,
+                                           show_all=verbose,
+                                           show_user=False)
+        click.echo(msg)
+    if any(['sky-serve-controller' in c.cluster_name for c in all_clusters]):
+        # TODO: Parse serve controllers and show services separately.
+        #  Currently we show a hint that services are shown as clusters.
+        click.echo(f'\n{colorama.Style.DIM}Hint: SkyServe replica pods are '
+                   'shown in the "SkyPilot clusters" section.'
+                   f'{colorama.Style.RESET_ALL}')
 
 
 @cli.command()
@@ -4297,6 +4287,12 @@ cli.add_command(volumes, name='volume')
               required=False,
               type=str,
               help='Volume size. Override the size defined in the YAML.')
+@click.option(
+    '--use-existing/--no-use-existing',
+    required=False,
+    default=None,
+    help='Whether to use an existing volume. Override the use_existing '
+    'defined in the YAML.')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -4311,6 +4307,7 @@ def volumes_apply(
         infra: Optional[str],
         type: Optional[str],  # pylint: disable=redefined-builtin
         size: Optional[str],
+        use_existing: Optional[bool],
         yes: bool,
         async_call: bool):
     """Apply a volume.
@@ -4324,6 +4321,10 @@ def volumes_apply(
         \b
         # Apply a volume from a command.
         sky volumes apply --name pvc1 --infra k8s --type k8s-pvc --size 100Gi
+        \b
+        # Apply a volume with existing PVC `pvc2` from a command.
+        sky volumes apply --name pvc2 --infra k8s --type k8s-pvc --size 100Gi
+        --use-existing
     """
     # pylint: disable=import-outside-toplevel
     from sky.volumes import volume as volume_lib
@@ -4342,7 +4343,8 @@ def volumes_apply(
                     f'{entrypoint_str!r} needs to be a YAML file')
         if yaml_config is not None:
             volume_config_dict = yaml_config.copy()
-    override_config = _build_volume_override_config(name, infra, type, size)
+    override_config = _build_volume_override_config(name, infra, type, size,
+                                                    use_existing)
     volume_config_dict.update(override_config)
 
     # Create Volume instance
@@ -4373,11 +4375,15 @@ def volumes_apply(
                      f'{colorama.Style.RESET_ALL}')
 
 
-def _build_volume_override_config(name: Optional[str], infra: Optional[str],
-                                  volume_type: Optional[str],
-                                  size: Optional[str]) -> Dict[str, str]:
+def _build_volume_override_config(
+    name: Optional[str],
+    infra: Optional[str],
+    volume_type: Optional[str],
+    size: Optional[str],
+    use_existing: Optional[bool],
+) -> Dict[str, Any]:
     """Parse the volume override config."""
-    override_config = {}
+    override_config: Dict[str, Any] = {}
     if name is not None:
         override_config['name'] = name
     if infra is not None:
@@ -4386,6 +4392,8 @@ def _build_volume_override_config(name: Optional[str], infra: Optional[str],
         override_config['type'] = volume_type
     if size is not None:
         override_config['size'] = size
+    if use_existing is not None:
+        override_config['use_existing'] = use_existing
     return override_config
 
 
@@ -4633,18 +4641,7 @@ def jobs_launch(
         click.secho(f'Submitting to pool {colorama.Fore.CYAN}{pool!r}'
                     f'{colorama.Style.RESET_ALL} with {colorama.Fore.CYAN}'
                     f'{num_job_int}{colorama.Style.RESET_ALL} job{plural}.')
-        print_setup_fm_warning = False
-        for task_ in dag.tasks:
-            if (task_.setup is not None or task_.file_mounts or
-                    task_.storage_mounts):
-                print_setup_fm_warning = True
-                break
-        if print_setup_fm_warning:
-            click.secho(
-                f'{colorama.Fore.YELLOW}setup/file_mounts/storage_mounts'
-                ' will be ignored when submit jobs to pool. To update a pool, '
-                f'please use `sky jobs pool apply {pool} new-pool.yaml`. '
-                f'{colorama.Style.RESET_ALL}')
+        jobs_utils.validate_pool_job(dag, pool)
 
     # Optimize info is only show if _need_confirmation.
     if not yes:
@@ -5017,8 +5014,8 @@ def pool():
               type=click.Choice([m.value for m in serve_lib.UpdateMode],
                                 case_sensitive=False),
               required=False,
-              help=('Update mode. If "rolling", cluster pool will be updated '
-                    'with rolling update. If "blue_green", cluster pool will '
+              help=('Update mode. If "rolling", pool will be updated '
+                    'with rolling update. If "blue_green", pool will '
                     'be updated with blue-green update. This option is only '
                     'valid when the pool is already running.'))
 @click.option('--workers',
@@ -5058,7 +5055,7 @@ def jobs_pool_apply(
     yes: bool,
     async_call: bool,
 ):
-    """Either apply a config to a cluster pool for managed jobs submission
+    """Either apply a config to a pool for managed jobs submission
     or update the number of workers in the pool. One of POOL_YAML or --workers
     must be provided.
     Config:
@@ -5140,7 +5137,7 @@ def jobs_pool_apply(
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def jobs_pool_status(verbose: bool, pool_names: List[str]):
-    """Show statuses of cluster pools.
+    """Show statuses of pools.
 
     Show detailed statuses of one or more pools. If POOL_NAME is not
     provided, show all pools' status.
@@ -5499,7 +5496,7 @@ def _generate_task_with_service(
     if task.service.pool:
         if task.service.ports is not None or ports:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('Cannot specify ports in a cluster pool.')
+                raise ValueError('Cannot specify ports in a pool.')
         return task
 
     # NOTE(yi): we only allow one service port now.

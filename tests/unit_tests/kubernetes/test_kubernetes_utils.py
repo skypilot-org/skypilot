@@ -1151,3 +1151,765 @@ def test_coreweave_autoscaler():
 
     # Test that CoreweaveAutoscaler cannot query backend (like other simple autoscalers)
     assert CoreweaveAutoscaler.can_query_backend == False
+
+
+def test_combine_pod_config_fields_ssh_cloud():
+    """Test combine_pod_config_fields with SSH cloud and context handling."""
+    from sky import clouds
+    from sky.utils import config_utils
+
+    # Create a basic cluster YAML object
+    cluster_yaml_obj = {
+        'available_node_types': {
+            'ray_head_default': {
+                'node_config': {
+                    'spec': {
+                        'containers': [{
+                            'name': 'ray',
+                            'image': 'rayproject/ray:nightly'
+                        }]
+                    }
+                }
+            }
+        }
+    }
+
+    # Test 1: SSH cloud without context
+    ssh_cloud = clouds.SSH()
+    cluster_config_overrides = {}
+
+    with patch('sky.skypilot_config.get_effective_region_config',
+               return_value={}):
+        result = utils.combine_pod_config_fields(cluster_yaml_obj,
+                                                 cluster_config_overrides,
+                                                 cloud=ssh_cloud)
+        assert result is not None
+        assert 'available_node_types' in result
+
+    # Test 2: SSH cloud with context (should strip "ssh-" prefix)
+    ssh_context = 'ssh-my-cluster'
+    pod_config_for_context = {
+        'spec': {
+            'imagePullSecrets': [{
+                'name': 'my-secret'
+            }]
+        }
+    }
+
+    with patch('sky.skypilot_config.get_effective_region_config'
+              ) as mock_get_config:
+        mock_get_config.return_value = pod_config_for_context
+        result = utils.combine_pod_config_fields(cluster_yaml_obj,
+                                                 cluster_config_overrides,
+                                                 cloud=ssh_cloud,
+                                                 context=ssh_context)
+
+        # Verify that get_effective_region_config was called with 'ssh' cloud
+        # and context without the "ssh-" prefix
+        mock_get_config.assert_called_once_with(cloud='ssh',
+                                                region='my-cluster',
+                                                keys=('pod_config',),
+                                                default_value={})
+
+        # Verify the pod config was merged
+        node_config = result['available_node_types']['ray_head_default'][
+            'node_config']
+        assert 'imagePullSecrets' in node_config['spec']
+        assert node_config['spec']['imagePullSecrets'][0]['name'] == 'my-secret'
+
+    # Test 3: SSH cloud with context that doesn't start with "ssh-" should raise assertion
+    invalid_context = 'my-cluster'
+    with pytest.raises(AssertionError,
+                       match='SSH context must start with "ssh-"'):
+        utils.combine_pod_config_fields(cluster_yaml_obj,
+                                        cluster_config_overrides,
+                                        cloud=ssh_cloud,
+                                        context=invalid_context)
+
+
+def test_combine_pod_config_fields_kubernetes_cloud():
+    """Test combine_pod_config_fields with Kubernetes cloud."""
+    from sky import clouds
+
+    # Create a basic cluster YAML object
+    cluster_yaml_obj = {
+        'available_node_types': {
+            'ray_head_default': {
+                'node_config': {
+                    'spec': {
+                        'containers': [{
+                            'name': 'ray',
+                            'image': 'rayproject/ray:nightly'
+                        }]
+                    }
+                }
+            }
+        }
+    }
+
+    # Test with Kubernetes cloud and context
+    k8s_cloud = clouds.Kubernetes()
+    k8s_context = 'my-k8s-cluster'
+    cluster_config_overrides = {}
+    pod_config_for_context = {'spec': {'nodeSelector': {'gpu': 'true'}}}
+
+    with patch('sky.skypilot_config.get_effective_region_config'
+              ) as mock_get_config:
+        mock_get_config.return_value = pod_config_for_context
+        result = utils.combine_pod_config_fields(cluster_yaml_obj,
+                                                 cluster_config_overrides,
+                                                 cloud=k8s_cloud,
+                                                 context=k8s_context)
+
+        # Verify that get_effective_region_config was called with 'kubernetes' cloud
+        # and the context as-is
+        mock_get_config.assert_called_once_with(cloud='kubernetes',
+                                                region=k8s_context,
+                                                keys=('pod_config',),
+                                                default_value={})
+
+        # Verify the pod config was merged
+        node_config = result['available_node_types']['ray_head_default'][
+            'node_config']
+        assert 'nodeSelector' in node_config['spec']
+        assert node_config['spec']['nodeSelector']['gpu'] == 'true'
+
+
+def test_ssh_cloud_uses_ssh_config_for_provision_timeout():
+    """Test that SSH cloud uses 'ssh' cloud name for provision_timeout config lookup."""
+    from sky import clouds
+    from sky.utils import config_utils
+
+    # Create SSH and Kubernetes cloud instances
+    ssh_cloud = clouds.SSH()
+    k8s_cloud = clouds.Kubernetes()
+
+    # Verify that _REPR is set correctly
+    assert ssh_cloud._REPR == 'SSH'
+    assert k8s_cloud._REPR == 'Kubernetes'
+
+    # Create a config dictionary with both ssh and kubernetes provision_timeout
+    config_dict = {
+        'ssh': {
+            'provision_timeout': 7200,
+            'context_configs': {
+                'my-cluster': {
+                    'provision_timeout': 9000
+                }
+            }
+        },
+        'kubernetes': {
+            'provision_timeout': 3600,
+            'context_configs': {
+                'k8s-cluster': {
+                    'provision_timeout': 5400
+                }
+            }
+        }
+    }
+
+    # Test SSH cloud retrieves from 'ssh' config
+    ssh_timeout = config_utils.get_cloud_config_value_from_dict(
+        dict_config=config_dict,
+        cloud='ssh',
+        region=None,
+        keys=('provision_timeout',),
+        default_value=600)
+    assert ssh_timeout == 7200
+
+    # Test SSH cloud retrieves context-specific timeout
+    ssh_context_timeout = config_utils.get_cloud_config_value_from_dict(
+        dict_config=config_dict,
+        cloud='ssh',
+        region='my-cluster',
+        keys=('provision_timeout',),
+        default_value=600)
+    assert ssh_context_timeout == 9000
+
+    # Test Kubernetes cloud retrieves from 'kubernetes' config
+    k8s_timeout = config_utils.get_cloud_config_value_from_dict(
+        dict_config=config_dict,
+        cloud='kubernetes',
+        region=None,
+        keys=('provision_timeout',),
+        default_value=600)
+    assert k8s_timeout == 3600
+
+    # Test Kubernetes cloud retrieves context-specific timeout
+    k8s_context_timeout = config_utils.get_cloud_config_value_from_dict(
+        dict_config=config_dict,
+        cloud='kubernetes',
+        region='k8s-cluster',
+        keys=('provision_timeout',),
+        default_value=600)
+    assert k8s_context_timeout == 5400
+
+
+def test_ssh_cloud_context_stripping():
+    """Test that SSH cloud contexts have 'ssh-' prefix stripped when looking up config."""
+    from sky import clouds
+    from sky.utils import config_utils
+
+    ssh_cloud = clouds.SSH()
+
+    # SSH contexts are prefixed with 'ssh-', but the config uses the name without prefix
+    ssh_context = 'ssh-my-cluster'
+    expected_config_key = 'my-cluster'
+
+    config_dict = {
+        'ssh': {
+            'context_configs': {
+                'my-cluster': {  # Config uses name without 'ssh-' prefix
+                    'provision_timeout': 9000,
+                    'pod_config': {
+                        'metadata': {
+                            'labels': {
+                                'team': 'ml'
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    # When combine_pod_config_fields receives 'ssh-my-cluster' context,
+    # it should strip the 'ssh-' prefix and look up 'my-cluster' in the config
+    timeout = config_utils.get_cloud_config_value_from_dict(
+        dict_config=config_dict,
+        cloud='ssh',
+        region=expected_config_key,  # Uses stripped name
+        keys=('provision_timeout',),
+        default_value=600)
+    assert timeout == 9000
+
+    pod_config = config_utils.get_cloud_config_value_from_dict(
+        dict_config=config_dict,
+        cloud='ssh',
+        region=expected_config_key,
+        keys=('pod_config',),
+        default_value={})
+    assert pod_config == {'metadata': {'labels': {'team': 'ml'}}}
+
+
+def test_ssh_config_does_not_leak_to_kubernetes():
+    """Test that SSH pod_config does not leak to Kubernetes cloud."""
+    from sky import clouds
+    from sky.utils import config_utils
+
+    # Config with both SSH and Kubernetes sections
+    config_dict = {
+        'ssh': {
+            'pod_config': {
+                'metadata': {
+                    'labels': {
+                        'source': 'ssh-config',
+                        'ssh-only': 'true'
+                    }
+                }
+            },
+            'provision_timeout': 7200
+        },
+        'kubernetes': {
+            'pod_config': {
+                'metadata': {
+                    'labels': {
+                        'source': 'kubernetes-config',
+                        'k8s-only': 'true'
+                    }
+                }
+            },
+            'provision_timeout': 3600
+        }
+    }
+
+    # Kubernetes cloud should ONLY get kubernetes config
+    k8s_pod_config = config_utils.get_cloud_config_value_from_dict(
+        dict_config=config_dict,
+        cloud='kubernetes',
+        region=None,
+        keys=('pod_config',),
+        default_value={})
+
+    # Verify it got kubernetes config, NOT ssh config
+    assert k8s_pod_config['metadata']['labels']['source'] == 'kubernetes-config'
+    assert 'k8s-only' in k8s_pod_config['metadata']['labels']
+    assert 'ssh-only' not in k8s_pod_config['metadata']['labels'], \
+        "SSH config should NOT leak to Kubernetes"
+
+    # Kubernetes provision_timeout should be from kubernetes config
+    k8s_timeout = config_utils.get_cloud_config_value_from_dict(
+        dict_config=config_dict,
+        cloud='kubernetes',
+        region=None,
+        keys=('provision_timeout',),
+        default_value=600)
+    assert k8s_timeout == 3600, "Should get Kubernetes timeout, not SSH timeout"
+
+
+def test_kubernetes_config_does_not_leak_to_ssh():
+    """Test that Kubernetes pod_config does not leak to SSH cloud."""
+    from sky import clouds
+    from sky.utils import config_utils
+
+    # Config with both SSH and Kubernetes sections
+    config_dict = {
+        'ssh': {
+            'pod_config': {
+                'metadata': {
+                    'labels': {
+                        'source': 'ssh-config',
+                        'ssh-only': 'true'
+                    }
+                }
+            },
+            'provision_timeout': 7200
+        },
+        'kubernetes': {
+            'pod_config': {
+                'metadata': {
+                    'labels': {
+                        'source': 'kubernetes-config',
+                        'k8s-only': 'true'
+                    }
+                }
+            },
+            'provision_timeout': 3600
+        }
+    }
+
+    # SSH cloud should ONLY get ssh config
+    ssh_pod_config = config_utils.get_cloud_config_value_from_dict(
+        dict_config=config_dict,
+        cloud='ssh',
+        region=None,
+        keys=('pod_config',),
+        default_value={})
+
+    # Verify it got ssh config, NOT kubernetes config
+    assert ssh_pod_config['metadata']['labels']['source'] == 'ssh-config'
+    assert 'ssh-only' in ssh_pod_config['metadata']['labels']
+    assert 'k8s-only' not in ssh_pod_config['metadata']['labels'], \
+        "Kubernetes config should NOT leak to SSH"
+
+    # SSH provision_timeout should be from ssh config
+    ssh_timeout = config_utils.get_cloud_config_value_from_dict(
+        dict_config=config_dict,
+        cloud='ssh',
+        region=None,
+        keys=('provision_timeout',),
+        default_value=600)
+    assert ssh_timeout == 7200, "Should get SSH timeout, not Kubernetes timeout"
+
+
+def test_ssh_and_kubernetes_context_configs_isolated():
+    """Test that SSH and Kubernetes context configs are completely isolated."""
+    from sky import clouds
+    from sky.utils import config_utils
+
+    # Config with context_configs for both clouds
+    config_dict = {
+        'ssh': {
+            'context_configs': {
+                'my-cluster': {
+                    'pod_config': {
+                        'metadata': {
+                            'labels': {
+                                'from': 'ssh-context-config'
+                            }
+                        }
+                    },
+                    'provision_timeout': 9000
+                }
+            }
+        },
+        'kubernetes': {
+            'context_configs': {
+                'my-cluster': {  # Same context name as SSH
+                    'pod_config': {
+                        'metadata': {
+                            'labels': {
+                                'from': 'k8s-context-config'
+                            }
+                        }
+                    },
+                    'provision_timeout': 5400
+                }
+            }
+        }
+    }
+
+    # SSH should only get SSH context config
+    ssh_pod_config = config_utils.get_cloud_config_value_from_dict(
+        dict_config=config_dict,
+        cloud='ssh',
+        region='my-cluster',
+        keys=('pod_config',),
+        default_value={})
+    assert ssh_pod_config['metadata']['labels']['from'] == 'ssh-context-config', \
+        "SSH should get SSH context config"
+    assert ssh_pod_config['metadata']['labels']['from'] != 'k8s-context-config', \
+        "SSH should NOT get Kubernetes context config (no leakage)"
+
+    ssh_timeout = config_utils.get_cloud_config_value_from_dict(
+        dict_config=config_dict,
+        cloud='ssh',
+        region='my-cluster',
+        keys=('provision_timeout',),
+        default_value=600)
+    assert ssh_timeout == 9000, \
+        "SSH should get SSH provision_timeout"
+    assert ssh_timeout != 5400, \
+        "SSH should NOT get Kubernetes provision_timeout (no leakage)"
+
+    # Kubernetes should only get Kubernetes context config
+    k8s_pod_config = config_utils.get_cloud_config_value_from_dict(
+        dict_config=config_dict,
+        cloud='kubernetes',
+        region='my-cluster',
+        keys=('pod_config',),
+        default_value={})
+    assert k8s_pod_config['metadata']['labels']['from'] == 'k8s-context-config', \
+        "Kubernetes should get Kubernetes context config"
+    assert k8s_pod_config['metadata']['labels']['from'] != 'ssh-context-config', \
+        "Kubernetes should NOT get SSH context config (no leakage)"
+
+    k8s_timeout = config_utils.get_cloud_config_value_from_dict(
+        dict_config=config_dict,
+        cloud='kubernetes',
+        region='my-cluster',
+        keys=('provision_timeout',),
+        default_value=600)
+    assert k8s_timeout == 5400, \
+        "Kubernetes should get Kubernetes provision_timeout"
+    assert k8s_timeout != 9000, \
+        "Kubernetes should NOT get SSH provision_timeout (no leakage)"
+
+
+def test_context_configs_no_leakage_between_ssh_and_kubernetes():
+    """Test that context_configs with same context name don't leak across clouds.
+
+    This is a critical test ensuring that when both SSH and Kubernetes have
+    context_configs for the same context name (e.g., 'my-cluster'), they are
+    completely isolated and don't leak into each other.
+    """
+    from sky.utils import config_utils
+
+    # Both SSH and Kubernetes have context_configs for 'my-cluster'
+    # with DIFFERENT values that should NOT leak
+    config_dict = {
+        'ssh': {
+            'context_configs': {
+                'my-cluster': {
+                    'pod_config': {
+                        'metadata': {
+                            'labels': {
+                                'cloud': 'ssh',
+                                'ssh-only-label': 'ssh-value'
+                            }
+                        }
+                    },
+                    'provision_timeout': 7200
+                }
+            }
+        },
+        'kubernetes': {
+            'context_configs': {
+                'my-cluster': {  # SAME context name!
+                    'pod_config': {
+                        'metadata': {
+                            'labels': {
+                                'cloud': 'kubernetes',
+                                'k8s-only-label': 'k8s-value'
+                            }
+                        }
+                    },
+                    'provision_timeout': 3600
+                }
+            }
+        }
+    }
+
+    # Test SSH lookup for 'my-cluster'
+    ssh_result = config_utils.get_cloud_config_value_from_dict(
+        dict_config=config_dict,
+        cloud='ssh',
+        region='my-cluster',
+        keys=('pod_config',),
+        default_value={})
+
+    # SSH should have SSH labels
+    assert ssh_result['metadata']['labels']['cloud'] == 'ssh'
+    assert 'ssh-only-label' in ssh_result['metadata']['labels']
+    assert ssh_result['metadata']['labels']['ssh-only-label'] == 'ssh-value'
+
+    # SSH should NOT have Kubernetes labels (no leakage)
+    assert 'k8s-only-label' not in ssh_result['metadata']['labels'], \
+        "Kubernetes labels should NOT leak into SSH context_configs"
+    assert ssh_result['metadata']['labels']['cloud'] != 'kubernetes', \
+        "Kubernetes cloud label should NOT leak into SSH context_configs"
+
+    # Test Kubernetes lookup for 'my-cluster'
+    k8s_result = config_utils.get_cloud_config_value_from_dict(
+        dict_config=config_dict,
+        cloud='kubernetes',
+        region='my-cluster',
+        keys=('pod_config',),
+        default_value={})
+
+    # Kubernetes should have Kubernetes labels
+    assert k8s_result['metadata']['labels']['cloud'] == 'kubernetes'
+    assert 'k8s-only-label' in k8s_result['metadata']['labels']
+    assert k8s_result['metadata']['labels']['k8s-only-label'] == 'k8s-value'
+
+    # Kubernetes should NOT have SSH labels (no leakage)
+    assert 'ssh-only-label' not in k8s_result['metadata']['labels'], \
+        "SSH labels should NOT leak into Kubernetes context_configs"
+    assert k8s_result['metadata']['labels']['cloud'] != 'ssh', \
+        "SSH cloud label should NOT leak into Kubernetes context_configs"
+
+    # Test provision_timeout isolation
+    ssh_timeout = config_utils.get_cloud_config_value_from_dict(
+        dict_config=config_dict,
+        cloud='ssh',
+        region='my-cluster',
+        keys=('provision_timeout',),
+        default_value=600)
+    assert ssh_timeout == 7200, "SSH should get SSH timeout"
+    assert ssh_timeout != 3600, "SSH should NOT get Kubernetes timeout"
+
+    k8s_timeout = config_utils.get_cloud_config_value_from_dict(
+        dict_config=config_dict,
+        cloud='kubernetes',
+        region='my-cluster',
+        keys=('provision_timeout',),
+        default_value=600)
+    assert k8s_timeout == 3600, "Kubernetes should get Kubernetes timeout"
+    assert k8s_timeout != 7200, "Kubernetes should NOT get SSH timeout"
+
+
+def test_combine_pod_config_fields_ssh_and_kubernetes_isolation():
+    """Test that combine_pod_config_fields maintains isolation between SSH and Kubernetes."""
+    from unittest.mock import patch
+
+    from sky import clouds
+
+    # Create basic cluster YAML
+    cluster_yaml_obj = {
+        'available_node_types': {
+            'ray_head_default': {
+                'node_config': {
+                    'spec': {
+                        'containers': [{
+                            'name': 'ray',
+                            'image': 'rayproject/ray:nightly'
+                        }]
+                    }
+                }
+            }
+        }
+    }
+
+    # SSH cloud with SSH context
+    ssh_cloud = clouds.SSH()
+    ssh_context = 'ssh-test-cluster'
+
+    # Kubernetes cloud with regular context
+    k8s_cloud = clouds.Kubernetes()
+    k8s_context = 'k8s-test-cluster'
+
+    # Mock config that has DIFFERENT pod_configs for SSH vs Kubernetes
+    ssh_pod_config = {'spec': {'nodeSelector': {'ssh-node': 'true'}}}
+    k8s_pod_config = {'spec': {'nodeSelector': {'k8s-node': 'true'}}}
+
+    # Test SSH cloud gets SSH config
+    with patch('sky.skypilot_config.get_effective_region_config'
+              ) as mock_get_config:
+        mock_get_config.return_value = ssh_pod_config
+
+        result = utils.combine_pod_config_fields(cluster_yaml_obj, {},
+                                                 cloud=ssh_cloud,
+                                                 context=ssh_context)
+
+        # Verify SSH pod config was used
+        node_config = result['available_node_types']['ray_head_default'][
+            'node_config']
+        assert 'nodeSelector' in node_config['spec']
+        assert node_config['spec']['nodeSelector']['ssh-node'] == 'true'
+        assert 'k8s-node' not in node_config['spec']['nodeSelector'], \
+            "Kubernetes config leaked to SSH!"
+
+        # Verify get_effective_region_config was called with 'ssh'
+        mock_get_config.assert_called_with(cloud='ssh',
+                                           region='test-cluster',
+                                           keys=('pod_config',),
+                                           default_value={})
+
+    # Test Kubernetes cloud gets Kubernetes config
+    with patch('sky.skypilot_config.get_effective_region_config'
+              ) as mock_get_config:
+        mock_get_config.return_value = k8s_pod_config
+
+        result = utils.combine_pod_config_fields(cluster_yaml_obj, {},
+                                                 cloud=k8s_cloud,
+                                                 context=k8s_context)
+
+        # Verify Kubernetes pod config was used
+        node_config = result['available_node_types']['ray_head_default'][
+            'node_config']
+        assert 'nodeSelector' in node_config['spec']
+        assert node_config['spec']['nodeSelector']['k8s-node'] == 'true'
+        assert 'ssh-node' not in node_config['spec']['nodeSelector'], \
+            "SSH config leaked to Kubernetes!"
+
+        # Verify get_effective_region_config was called with 'kubernetes'
+        mock_get_config.assert_called_with(cloud='kubernetes',
+                                           region=k8s_context,
+                                           keys=('pod_config',),
+                                           default_value={})
+
+
+def test_hardcoded_kubernetes_functions_not_used_during_ssh_provisioning():
+    """Test that functions hardcoding cloud='kubernetes' would fail
+    for SSH if called."""
+
+    from unittest.mock import patch
+
+    from sky.utils import config_utils
+
+    # Setup: Config with DIFFERENT custom_metadata for SSH vs Kubernetes
+    config_dict = {
+        'ssh': {
+            'custom_metadata': {
+                'metadata': {
+                    'labels': {
+                        'source': 'ssh-config'
+                    }
+                }
+            }
+        },
+        'kubernetes': {
+            'custom_metadata': {
+                'metadata': {
+                    'labels': {
+                        'source': 'k8s-config'
+                    }
+                }
+            }
+        }
+    }
+
+    # Simulate what would happen if merge_custom_metadata was called
+    # during SSH provisioning with an SSH context
+    ssh_context = 'ssh-my-cluster'
+
+    with patch('sky.skypilot_config.get_effective_region_config') as mock_get:
+        # Mock to return based on cloud parameter
+        def get_config_side_effect(cloud,
+                                   region,
+                                   keys,
+                                   default_value=None,
+                                   override_configs=None):
+            if cloud == 'kubernetes' and keys == ('custom_metadata',):
+                return config_dict['kubernetes']['custom_metadata']
+            elif cloud == 'ssh' and keys == ('custom_metadata',):
+                return config_dict['ssh']['custom_metadata']
+            return default_value
+
+        mock_get.side_effect = get_config_side_effect
+
+        # Call merge_custom_metadata with SSH context
+        original_metadata = {}
+
+        # This currently calls get_effective_region_config with cloud='ssh'
+        utils.merge_custom_metadata(original_metadata, context=ssh_context)
+
+        # Verify it was called with 'ssh'
+        calls = mock_get.call_args_list
+        custom_metadata_calls = [
+            c for c in calls if c[1].get('keys') == ('custom_metadata',)
+        ]
+
+        assert len(custom_metadata_calls) >= 1
+        assert custom_metadata_calls[0][1]['cloud'] == 'ssh', \
+            "custom_metadata should use SSH cloud"
+
+
+def test_combine_pod_config_fields_and_metadata_uses_correct_cloud():
+    """Test that combine_pod_config_fields_and_metadata uses correct cloud for both parts.
+
+    This function calls:
+    1. combine_pod_config_fields
+    2. combine_metadata_fields
+
+    This test verifies that both configs are handled properly by their respective clouds.
+    """
+    from unittest.mock import patch
+
+    from sky import clouds
+
+    cluster_yaml = {
+        'provider': {
+            'autoscaler_service_account': {
+                'metadata': {}
+            },
+            'autoscaler_role': {
+                'metadata': {}
+            },
+            'autoscaler_role_binding': {
+                'metadata': {}
+            },
+            'services': []
+        },
+        'available_node_types': {
+            'ray_head_default': {
+                'node_config': {
+                    'spec': {
+                        'containers': [{
+                            'name': 'ray'
+                        }]
+                    },
+                    'metadata': {}
+                }
+            }
+        }
+    }
+
+    ssh_cloud = clouds.SSH()
+    ssh_context = 'ssh-test-cluster'
+
+    with patch('sky.skypilot_config.get_effective_region_config'
+              ) as mock_get_config:
+        config_calls = []
+
+        def track_calls(cloud,
+                        region,
+                        keys,
+                        default_value=None,
+                        override_configs=None):
+            config_calls.append({'cloud': cloud, 'keys': keys})
+            return default_value or {}
+
+        mock_get_config.side_effect = track_calls
+
+        # Call the combined function
+        result = utils.combine_pod_config_fields_and_metadata(
+            cluster_yaml, {}, cloud=ssh_cloud, context=ssh_context)
+
+        # Check calls to get_effective_region_config
+        pod_config_calls = [
+            c for c in config_calls if c['keys'] == ('pod_config',)
+        ]
+        custom_metadata_calls = [
+            c for c in config_calls if c['keys'] == ('custom_metadata',)
+        ]
+
+        # pod_config should use 'ssh'
+        assert len(pod_config_calls) >= 1
+        assert pod_config_calls[0]['cloud'] == 'ssh', \
+            "pod_config should use SSH cloud"
+
+        # custom_metadata should use 'ssh'
+        assert len(custom_metadata_calls) >= 1
+        assert custom_metadata_calls[0]['cloud'] == 'ssh', \
+            "custom_metadata should use SSH cloud"
