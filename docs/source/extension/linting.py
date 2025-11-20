@@ -89,6 +89,7 @@ MULTI_WORD_TERMS = {
     'Cloudflare Zero Trust',
     'CoreWeave Object Storage',
     'Prometheus Operator',
+    'Node Exporter',
 }
 
 

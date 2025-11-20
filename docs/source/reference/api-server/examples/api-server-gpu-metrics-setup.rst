@@ -24,10 +24,10 @@ requirements:
   port ``9400``.  Most GPU Operator installations already deploy DCGM-Exporter for you.
 * `Node Exporter <https://prometheus.io/docs/guides/node-exporter/>`_ is running on the cluster and exposes metrics on port ``9100``. This is required only if you want to monitor the CPU and Memory metrics.
 
-Installing the Prometheus Operator
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Installing the Prometheus Operator and Node Exporter
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The Prometheus Operator is necessary for the DCGM-Exporter to start properly. It can be
+The Prometheus Operator is necessary for the DCGM-Exporter to start properly. The Prometheus Operator and Node Exporter can be
 deployed using the prometheus community helm chart:
 
 .. code-block:: bash
