@@ -126,7 +126,7 @@ def _create_jobs(region: str, cluster_name_on_cloud: str,
         f.flush()
         src_path = f.name
         tgt_path = f'{sky_dir}/provision.sh'
-        controller_node_runner.rsync(src_path, tgt_path, up=True)
+        controller_node_runner.rsync(src_path, tgt_path, up=True, stream_logs=False)
 
     job_id = client.submit_job(partition, cluster_name_on_cloud, tgt_path)
     logger.debug(f'Successfully submitted Slurm job {job_id} for cluster '
