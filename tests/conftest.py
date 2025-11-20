@@ -1,9 +1,11 @@
 import fcntl
 import os
+import pathlib
 import shutil
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 from typing import List, Optional, Tuple
@@ -18,6 +20,7 @@ from sky import cloud_stores
 from sky import sky_logging
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import context_utils
 
 # Initialize logger at the top level
 logger = sky_logging.init_logger(__name__)
@@ -29,12 +32,15 @@ from common_test_fixtures import enable_all_clouds
 from common_test_fixtures import mock_aws_backend
 from common_test_fixtures import mock_client_requests
 from common_test_fixtures import mock_controller_accessible
+from common_test_fixtures import mock_execute_in_coroutine
 from common_test_fixtures import mock_job_table_no_job
 from common_test_fixtures import mock_job_table_one_job
 from common_test_fixtures import mock_queue
 from common_test_fixtures import mock_redirect_log_file
 from common_test_fixtures import mock_services_no_service
+from common_test_fixtures import mock_services_no_service_grpc
 from common_test_fixtures import mock_services_one_service
+from common_test_fixtures import mock_services_one_service_grpc
 from common_test_fixtures import mock_stream_utils
 from common_test_fixtures import reset_global_state
 from common_test_fixtures import skyignore_dir
@@ -60,8 +66,9 @@ from sky.server import common as server_common
 # --managed-jobs.
 all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci', 'do',
-    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod',
-    'vast', 'nebius', 'hyperbolic', 'seeweb'
+    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace',
+    'primeintellect', 'runpod', 'vast', 'nebius', 'hyperbolic', 'seeweb',
+    'shadeform', 'coreweave'
 ]
 default_clouds_to_run = ['aws', 'azure']
 
@@ -83,12 +90,15 @@ cloud_to_pytest_keyword = {
     'fluidstack': 'fluidstack',
     'cudo': 'cudo',
     'paperspace': 'paperspace',
+    'primeintellect': 'primeintellect',
     'do': 'do',
     'vast': 'vast',
     'runpod': 'runpod',
     'nebius': 'nebius',
     'hyperbolic': 'hyperbolic',
-    'seeweb': 'seeweb'
+    'shadeform': 'shadeform',
+    'seeweb': 'seeweb',
+    'coreweave': 'coreweave',
 }
 
 
@@ -213,6 +223,20 @@ def pytest_addoption(parser):
         help=
         'Use existing cluster for backend integration tests instead of creating a new one',
     )
+    parser.addoption(
+        '--dependency',
+        type=str,
+        nargs='?',
+        const='',
+        default='all',
+        help=
+        ('Dependency for client-side package install. '
+         'E.g., --dependency=aws runs pip install "skypilot[aws]" on client. '
+         '--dependency=aws,azure runs pip install "skypilot[aws,azure]" on client. '
+         '--dependency (no value) installs base package only (no extras) on client. '
+         'This only affects client side; server side always installs all dependencies. '
+         'Only works in Buildkite CI; ignored if run locally.'),
+    )
 
 
 def pytest_configure(config):
@@ -238,13 +262,22 @@ def pytest_configure(config):
 
     pytest.terminate_on_failure = config.getoption('--terminate-on-failure')
 
+    # Disable parallelism for smoke tests only to save memory in Buildkite.
+    # Check if any of the test paths are under smoke_tests/
+    if hasattr(config, 'args') and config.args:
+        is_smoke_test = any('smoke_tests' in str(arg) for arg in config.args)
+        if is_smoke_test and smoke_tests_utils.is_in_buildkite_env():
+            # Override xdist settings to disable parallelism
+            config.option.numprocesses = 0
+            config.option.dist = 'no'
+
 
 def _get_cloud_to_run(config) -> List[str]:
     cloud_to_run = []
 
     for cloud in all_clouds_in_smoke_tests:
         if config.getoption(f'--{cloud}'):
-            if cloud == 'cloudflare':
+            if cloud in ['cloudflare', 'coreweave']:
                 cloud_to_run.append(default_clouds_to_run[0])
             else:
                 cloud_to_run.append(cloud)
@@ -279,6 +312,8 @@ def pytest_collection_modifyitems(config, items):
     skip_marks['resource_heavy'] = pytest.mark.skip(
         reason=
         'skip tests not marked as resource_heavy if --resource-heavy is set')
+    skip_marks['no_dependency'] = pytest.mark.skip(
+        reason='skip tests marked as no_dependency if --dependency is set')
     for cloud in all_clouds_in_smoke_tests:
         skip_marks[cloud] = pytest.mark.skip(
             reason=f'tests for {cloud} is skipped, try setting --{cloud}')
@@ -306,6 +341,8 @@ def pytest_collection_modifyitems(config, items):
                 # Need to check both conditions as the first default cloud is
                 # added to cloud_to_run when tested for cloudflare
                 if config.getoption('--cloudflare') and cloud == 'cloudflare':
+                    continue
+                if config.getoption('--coreweave') and cloud == 'coreweave':
                     continue
                 item.add_marker(skip_marks[cloud])
 
@@ -338,6 +375,10 @@ def pytest_collection_modifyitems(config, items):
             has_api_server, _ = _get_and_check_env_file(env_file)
             if has_api_server and 'no_remote_server' in marks:
                 item.add_marker(skip_marks['no_remote_server'])
+        # Skip tests marked as no_dependency if --dependency is set
+        if 'no_dependency' in marks and config.getoption(
+                '--dependency') != 'all':
+            item.add_marker(skip_marks['no_dependency'])
 
     # Check if tests need to be run serially for Kubernetes and Lambda Cloud
     # We run Lambda Cloud tests serially because Lambda Cloud rate limits its
@@ -439,6 +480,13 @@ def generic_cloud(request) -> str:
     return _generic_cloud(request.config)
 
 
+@pytest.fixture
+def hijack_sys_attrs(request):
+    # Make skypilot context work in smoke test client side.
+    context_utils.hijack_sys_attrs()
+    yield
+
+
 @pytest.fixture(scope='session', autouse=True)
 def setup_policy_server(request, tmp_path_factory):
     """Setup policy server for restful policy testing."""
@@ -465,8 +513,9 @@ def setup_policy_server(request, tmp_path_factory):
         return
 
     # get the temp directory shared by all workers
-    root_tmp_dir = tmp_path_factory.getbasetemp().parent
+    root_tmp_dir = tmp_path_factory.getbasetemp().parent / 'policy_server'
 
+    pathlib.Path(root_tmp_dir).mkdir(parents=True, exist_ok=True)
     fn = root_tmp_dir / 'policy_server.txt'
     policy_server_url = ''
     # Reference count and pid for cleanup
@@ -486,24 +535,52 @@ def setup_policy_server(request, tmp_path_factory):
 
     def wait_server(port: int, timeout: int = 60):
         start_time = time.time()
+        success_count = 0
         while time.time() - start_time < timeout:
             try:
                 socket.create_connection(('127.0.0.1', port), timeout=1).close()
-                return True
+                success_count += 1
+                if success_count > 5:
+                    return True
             except (socket.error, OSError):
-                time.sleep(0.5)
+                pass
+            time.sleep(0.5)
         raise RuntimeError(f"Policy server not available after {timeout}s")
 
     try:
         policy_server_url: Optional[str] = None
         with filelock.FileLock(str(fn) + ".lock"):
+            launch_server = True
             if fn.is_file():
                 ref_count(1)
                 policy_server_url = fn.read_text().strip()
-            else:
+                print(
+                    f'Using existing policy server {policy_server_url}, file: {fn}',
+                    file=sys.stderr,
+                    flush=True)
+                port = int(policy_server_url.split(':')[2])
+                # Healthz check the running server
+                try:
+                    wait_server(port)
+                    # The server is running, reuse it
+                    launch_server = False
+                except RuntimeError:
+                    # There is a broken state from previous crashed test, recover it
+                    print(
+                        f'Policy server {policy_server_url} is not running, launching new server',
+                        file=sys.stderr,
+                        flush=True)
+                    pathlib.Path(counter_file).unlink(missing_ok=True)
+                    launch_server = True
+
+            if launch_server:
                 # Launch the policy server
                 port = common_utils.find_free_port(start_port=10000)
                 policy_server_url = f'http://127.0.0.1:{port}'
+                print(
+                    f'Launching policy server {policy_server_url}, file: {fn}',
+                    file=sys.stderr,
+                    flush=True)
                 server_process = subprocess.Popen([
                     'python', 'tests/admin_policy/no_op_server.py', '--host',
                     '0.0.0.0', '--port',
@@ -522,11 +599,12 @@ def setup_policy_server(request, tmp_path_factory):
     finally:
         with filelock.FileLock(str(fn) + ".lock"):
             count = ref_count(-1)
-            if count == 0:
+            if count <= 0:
                 # All workers are done, run post cleanup.
                 pid = pid_file.read_text().strip()
                 if pid:
                     os.kill(int(pid), signal.SIGKILL)
+                pathlib.Path(fn).unlink(missing_ok=True)
 
 
 @pytest.fixture(scope='session', autouse=True)
@@ -624,8 +702,10 @@ def setup_docker_container(request):
         # Use create_and_setup_new_container to create and start the container
         docker_utils.create_and_setup_new_container(
             target_container_name=docker_utils.get_container_name(),
-            host_port=docker_utils.get_host_port(),
-            container_port=46580,
+            api_server_host_port=docker_utils.get_api_server_host_port(),
+            api_server_container_port=46580,
+            metrics_host_port=docker_utils.get_metrics_host_port(),
+            metrics_container_port=9090,
             username=default_user)
 
         logger.info(f'Container {docker_utils.get_container_name()} started')

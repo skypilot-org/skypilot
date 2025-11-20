@@ -142,8 +142,10 @@ class SSHCommandRunner(CommandRunner):
         ssh_user: str,
         ssh_private_key: str,
         ssh_control_name: Optional[str] = ...,
+        ssh_proxy_command: Optional[str] = ...,
         docker_user: Optional[str] = ...,
         disable_control_master: Optional[bool] = ...,
+        port_forward_execute_remote_command: Optional[bool] = ...,
     ) -> None:
         ...
 
@@ -196,6 +198,15 @@ class SSHCommandRunner(CommandRunner):
             source_bashrc: bool = ...,
             skip_lines: int = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
+        ...
+
+    def ssh_base_command(
+        self,
+        *,
+        ssh_mode: SshMode,
+        port_forward: Optional[List[Tuple[int, int]]],
+        connect_timeout: Optional[int],
+    ) -> List[str]:
         ...
 
     def rsync(self,

@@ -2,7 +2,7 @@
 import base64
 import pickle
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from sky import jobs as managed_jobs
 from sky import models
@@ -56,10 +56,10 @@ def decode_status(
     clusters = return_value
     response = []
     for cluster in clusters:
-        cluster['handle'] = decode_and_unpickle(cluster['handle'])
+        # handle may not always be present in the response.
+        if 'handle' in cluster and cluster['handle'] is not None:
+            cluster['handle'] = decode_and_unpickle(cluster['handle'])
         cluster['status'] = status_lib.ClusterStatus(cluster['status'])
-        cluster['storage_mounts_metadata'] = decode_and_unpickle(
-            cluster['storage_mounts_metadata'])
         if 'is_managed' not in cluster:
             cluster['is_managed'] = False
         response.append(responses.StatusResponse.model_validate(cluster))
@@ -72,7 +72,7 @@ def decode_status_kubernetes(
                         List[Dict[str, Any]], Optional[str]]
 ) -> Tuple[List[kubernetes_utils.KubernetesSkyPilotClusterInfoPayload],
            List[kubernetes_utils.KubernetesSkyPilotClusterInfoPayload],
-           List[Dict[str, Any]], Optional[str]]:
+           List[responses.ManagedJobRecord], Optional[str]]:
     (encoded_all_clusters, encoded_unmanaged_clusters, all_jobs,
      context) = return_value
     all_clusters = []
@@ -85,6 +85,7 @@ def decode_status_kubernetes(
         cluster['status'] = status_lib.ClusterStatus(cluster['status'])
         unmanaged_clusters.append(
             kubernetes_utils.KubernetesSkyPilotClusterInfoPayload(**cluster))
+    all_jobs = [responses.ManagedJobRecord(**job) for job in all_jobs]
     return all_clusters, unmanaged_clusters, all_jobs, context
 
 
@@ -101,11 +102,11 @@ def decode_start(return_value: str) -> 'backends.CloudVmRayResourceHandle':
 
 
 @register_decoders('queue')
-def decode_queue(return_value: List[dict],) -> List[Dict[str, Any]]:
+def decode_queue(return_value: List[dict],) -> List[responses.ClusterJobRecord]:
     jobs = return_value
     for job in jobs:
         job['status'] = job_lib.JobStatus(job['status'])
-    return jobs
+    return [responses.ClusterJobRecord.model_validate(job) for job in jobs]
 
 
 @register_decoders('jobs.queue')
@@ -115,21 +116,35 @@ def decode_jobs_queue(return_value: List[dict],) -> List[Dict[str, Any]]:
 
 
 @register_decoders('jobs.queue_v2')
-def decode_jobs_queue_v2(return_value) -> List[Dict[str, Any]]:
+def decode_jobs_queue_v2(
+    return_value
+) -> Union[Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int],
+           List[responses.ManagedJobRecord]]:
     """Decode jobs queue response.
 
-    Supports legacy list, or a dict {jobs, total}.
-    - Returns list[job]
+    Supports legacy list, or a dict {jobs, total, total_no_filter,
+    status_counts}.
+
+    - Returns either list[job] or tuple(list[job], total, status_counts,
+      total_no_filter)
     """
-    # Case 1: dict shape {jobs, total}
-    if isinstance(return_value, dict) and 'jobs' in return_value:
+    # Case 1: dict shape {jobs, total, total_no_filter, status_counts}
+    if isinstance(return_value, dict):
         jobs = return_value.get('jobs', [])
+        total = return_value.get('total', len(jobs))
+        total_no_filter = return_value.get('total_no_filter', total)
+        status_counts = return_value.get('status_counts', {})
+        for job in jobs:
+            job['status'] = managed_jobs.ManagedJobStatus(job['status'])
+        jobs = [responses.ManagedJobRecord(**job) for job in jobs]
+        return jobs, total, status_counts, total_no_filter
     else:
         # Case 2: legacy list
         jobs = return_value
-    for job in jobs:
-        job['status'] = managed_jobs.ManagedJobStatus(job['status'])
-    return jobs
+        for job in jobs:
+            job['status'] = managed_jobs.ManagedJobStatus(job['status'])
+        jobs = [responses.ManagedJobRecord(**job) for job in jobs]
+        return jobs
 
 
 def _decode_serve_status(
@@ -181,14 +196,24 @@ def decode_list_accelerators(
 
 @register_decoders('storage_ls')
 def decode_storage_ls(
-        return_value: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return_value: List[Dict[str, Any]]) -> List[responses.StorageRecord]:
     for storage_info in return_value:
         storage_info['status'] = status_lib.StorageStatus(
             storage_info['status'])
         storage_info['store'] = [
             storage.StoreType(store) for store in storage_info['store']
         ]
-    return return_value
+    return [
+        responses.StorageRecord(**storage_info) for storage_info in return_value
+    ]
+
+
+@register_decoders('volume_list')
+def decode_volume_list(
+        return_value: List[Dict[str, Any]]) -> List[responses.VolumeRecord]:
+    return [
+        responses.VolumeRecord(**volume_info) for volume_info in return_value
+    ]
 
 
 @register_decoders('job_status')

@@ -6,7 +6,11 @@ import time
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
+import pytest
+
+from sky import resources
 from sky import task
+from sky.backends import cloud_vm_ray_backend
 from sky.backends.cloud_vm_ray_backend import CloudVmRayResourceHandle
 from sky.backends.cloud_vm_ray_backend import SSHTunnelInfo
 
@@ -346,7 +350,7 @@ class TestCloudVmRayBackendGetGrpcChannel:
 
             with patch.object(handle, '_get_skylet_ssh_tunnel', side_effect=mock_get_tunnel_side_effect), \
                 patch.object(handle, '_open_and_update_skylet_tunnel', side_effect=mock_open_tunnel), \
-                patch('grpc.insecure_channel', side_effect=lambda addr: addr), \
+                patch('grpc.insecure_channel', side_effect=lambda addr, options: addr), \
                 patch('socket.socket') as mock_socket:
 
                 mock_socket.return_value.__enter__.return_value.connect.side_effect = socket_connect_side_effect
@@ -398,7 +402,7 @@ class TestCloudVmRayBackendGetGrpcChannel:
         ) == num_processes, f"Expected {num_processes} results, got {len(results)}"
         # All processes should get the same channel (localhost:10000).
         for item in results:
-            assert item == f'localhost:{self.INITIAL_TUNNEL_PORT}', f"Process {i} failed: {item}"
+            assert item == f'localhost:{self.INITIAL_TUNNEL_PORT}', f"Failed: {item}"
 
         assert tunnel_creation_count.value == 1, f"Expected tunnel to be created exactly once, but was created {tunnel_creation_count.value} times"
 
@@ -434,3 +438,107 @@ class TestCloudVmRayBackendGetGrpcChannel:
                 i] == f'localhost:{self.INITIAL_TUNNEL_PORT + 1}', f"Process {i} failed: {results[i]}"
 
         assert tunnel_creation_count.value == 2, f"Expected tunnel to be created exactly once, but was created {tunnel_creation_count.value} times"
+
+    def test_setup_num_gpus(self, monkeypatch):
+        """Test setup num GPUs."""
+        test_task = task.Task(resources=resources.Resources(
+            accelerators={'A100': 8}))
+        monkeypatch.setattr(CloudVmRayResourceHandle, '__init__',
+                            lambda self, *args, **kwargs: None)
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        assert backend._get_num_gpus(test_task) == 8
+
+
+class TestIsMessageTooLong:
+    """Tests for _is_message_too_long function."""
+
+    @pytest.mark.parametrize(
+        'returncode,message,expected',
+        [
+            # Valid matches with correct returncode
+            (255, 'too long', True),
+            (255, 'Argument list too long', True),
+            (1, 'request-uri too large', True),
+            (1, '414 Request-URI Too Large', True),
+            (1, 'request header fields too large', True),
+            (1, '431 Request Header Fields Too Large', True),
+            # CloudFlare 400 Bad Request patterns
+            (1, '400 bad request', True),
+            (1, '400 Bad request', True),
+            (1, '400 Bad Request', True),
+            (1,
+             'error: unable to upgrade connection: <html><body><h1>400 Bad request</h1>',
+             True),
+            # Case insensitivity
+            (255, 'TOO LONG', True),
+            (1, 'REQUEST HEADER FIELDS TOO LARGE', True),
+            (1, '400 BAD REQUEST', True),
+            # Wrong returncode
+            (1, 'too long', False),
+            (255, 'request-uri too large', False),
+            (127, 'too long', False),
+            (255, '400 bad request', False),
+            # Wrong message
+            (255, 'command not found', False),
+            (1, 'some other error', False),
+            (1, 'unable to upgrade connection', False),
+            # Empty output
+            (255, '', False),
+        ])
+    def test_detection_with_output(self, returncode, message, expected):
+        """Test message detection with various returncode/message combinations."""
+        assert cloud_vm_ray_backend._is_message_too_long(
+            returncode, output=message) == expected
+
+    def test_detection_with_file_path(self, tmp_path):
+        """Test detection when reading from file."""
+        log_file = tmp_path / "test.log"
+        log_file.write_text("Error: command too long")
+        assert cloud_vm_ray_backend._is_message_too_long(
+            255, file_path=str(log_file))
+
+        log_file.write_text("431 Request Header Fields Too Large")
+        assert cloud_vm_ray_backend._is_message_too_long(
+            1, file_path=str(log_file))
+
+    def test_file_read_error_returns_true(self, tmp_path):
+        """Test that file read errors return True for safety."""
+        # Non-existent file
+        assert cloud_vm_ray_backend._is_message_too_long(
+            255, file_path="/nonexistent/file.log")
+
+        # Unreadable file
+        log_file = tmp_path / "unreadable.log"
+        log_file.write_text("content")
+        log_file.chmod(0o000)
+        try:
+            assert cloud_vm_ray_backend._is_message_too_long(
+                255, file_path=str(log_file))
+        finally:
+            log_file.chmod(0o644)
+
+    def test_requires_either_output_or_file_path(self):
+        """Test that function requires either output or file_path."""
+        with pytest.raises(AssertionError):
+            cloud_vm_ray_backend._is_message_too_long(255)
+        with pytest.raises(AssertionError):
+            cloud_vm_ray_backend._is_message_too_long(255,
+                                                      output="test",
+                                                      file_path="/tmp/test")
+
+    def test_partial_match_in_long_output(self):
+        """Test that partial matches in longer messages are detected."""
+        long_output = """Error executing command on remote server:
+        bash: /usr/bin/ssh: Argument list too long
+        Failed to run setup script"""
+        assert cloud_vm_ray_backend._is_message_too_long(255,
+                                                         output=long_output)
+
+        http_error = "<html><h1>414 Request-URI Too Large</h1></html>"
+        assert cloud_vm_ray_backend._is_message_too_long(1, output=http_error)
+
+    def test_multiple_patterns_match_by_returncode(self):
+        """Test that returncode determines which pattern to match."""
+        mixed = "too long and request-uri too large"
+        assert cloud_vm_ray_backend._is_message_too_long(255, output=mixed)
+        assert cloud_vm_ray_backend._is_message_too_long(1, output=mixed)

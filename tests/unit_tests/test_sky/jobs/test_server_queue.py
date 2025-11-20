@@ -200,7 +200,10 @@ class TestQueue:
                 return 0, code, ''
 
         class DummyHandle:
-            pass
+
+            @property
+            def is_grpc_enabled_with_flag(self) -> bool:
+                return False
 
         def fake_maybe_restart_controller(refresh, stopped_message,
                                           spinner_message):
@@ -220,7 +223,7 @@ class TestQueue:
 
         def fake_get_job_table(skip_finished, accessible_workspaces, job_ids,
                                workspace_match, name_match, pool_match, page,
-                               limit, user_hashes, statuses):
+                               limit, user_hashes, statuses, fields):
             # Return a payload containing all args for the loader to consume
             return {
                 'skip_finished': skip_finished,
@@ -233,6 +236,7 @@ class TestQueue:
                 'limit': limit,
                 'user_hashes': user_hashes,
                 'statuses': statuses,
+                'fields': fields,
             }
 
         def fake_load_managed_job_queue(payload):
@@ -627,8 +631,71 @@ class TestDumpManagedJobQueue:
                             jobs: List[Dict[str, Any]]):
         """Patch dependencies for dump_managed_job_queue."""
 
-        def fake_get_managed_jobs():
-            return jobs
+        def fake_get_managed_jobs_total():
+            return len(jobs)
+
+        def _apply_pre_filters(base_jobs: List[Dict[str, Any]],
+                               accessible_workspaces, job_ids, user_hashes,
+                               skip_finished):
+            result = list(base_jobs)
+            if accessible_workspaces is not None:
+                accessible = set(accessible_workspaces)
+                result = [j for j in result if j.get('workspace') in accessible]
+            if job_ids is not None:
+                job_id_set = set(job_ids)
+                result = [j for j in result if j.get('job_id') in job_id_set]
+            if user_hashes is not None:
+                user_hash_set = set(user_hashes)
+                result = [
+                    j for j in result if j.get('user_hash') in user_hash_set
+                ]
+            if skip_finished:
+                result = [j for j in result if not j['status'].is_terminal()]
+            return result
+
+        def fake_get_managed_jobs_with_filters(fields, job_ids,
+                                               accessible_workspaces,
+                                               workspace_match, name_match,
+                                               pool_match, user_hashes,
+                                               statuses, skip_finished, page,
+                                               limit):
+            # Apply pre-filters aligned with utils.get_managed_job_queue
+            prefiltered = _apply_pre_filters(jobs, accessible_workspaces,
+                                             job_ids, user_hashes,
+                                             skip_finished)
+
+            # Apply name/workspace/pool/statuses + pagination via shared helper
+            filtered, total, _ = jobs_utils.filter_jobs(prefiltered,
+                                                        workspace_match,
+                                                        name_match,
+                                                        pool_match,
+                                                        page,
+                                                        limit,
+                                                        statuses=statuses)
+            return filtered, total
+
+        def fake_get_status_count_with_filters(fields, job_ids,
+                                               accessible_workspaces,
+                                               workspace_match, name_match,
+                                               pool_match, user_hashes,
+                                               skip_finished):
+            # Compute status counts after applying non-paginated filters
+            prefiltered = _apply_pre_filters(jobs, accessible_workspaces,
+                                             job_ids, user_hashes,
+                                             skip_finished)
+            _, _, status_counts = jobs_utils.filter_jobs(prefiltered,
+                                                         workspace_match,
+                                                         name_match,
+                                                         pool_match,
+                                                         page=None,
+                                                         limit=None)
+            return status_counts
+
+        def fake_get_managed_jobs_highest_priority():
+            if not jobs:
+                return skylet_constants.MIN_PRIORITY
+            return max(
+                j.get('priority', skylet_constants.MIN_PRIORITY) for j in jobs)
 
         def fake_get_pool_from_job_id(job_id):
             return None
@@ -643,8 +710,18 @@ class TestDumpManagedJobQueue:
             return None
 
         # Patch the dependencies
-        monkeypatch.setattr(jobs_utils.managed_job_state, 'get_managed_jobs',
-                            fake_get_managed_jobs)
+        monkeypatch.setattr(jobs_utils.managed_job_state,
+                            'get_managed_jobs_total',
+                            fake_get_managed_jobs_total)
+        monkeypatch.setattr(jobs_utils.managed_job_state,
+                            'get_managed_jobs_with_filters',
+                            fake_get_managed_jobs_with_filters)
+        monkeypatch.setattr(jobs_utils.managed_job_state,
+                            'get_status_count_with_filters',
+                            fake_get_status_count_with_filters)
+        monkeypatch.setattr(jobs_utils.managed_job_state,
+                            'get_managed_jobs_highest_priority',
+                            fake_get_managed_jobs_highest_priority)
         monkeypatch.setattr(jobs_utils.managed_job_state,
                             'get_pool_from_job_id', fake_get_pool_from_job_id)
         monkeypatch.setattr(jobs_utils.managed_job_state,

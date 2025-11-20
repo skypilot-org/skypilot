@@ -241,9 +241,12 @@ Following tabs describe how to configure credentials for different clouds on the
     .. tab-item:: AWS
         :sync: aws-creds-tab
 
-        Make sure you have the access key id and secret access key.
+        We use static credentials to authenticate with AWS. Once you have the credentials, create a Kubernetes secret to store it.
+        We support two different options for AWS credentials.
 
-        Create a Kubernetes secret with your AWS credentials:
+        **Option 1: Single profile (default)**
+
+        Use this if you only need a single set of AWS credentials. Create a Kubernetes secret with your AWS access key and secret key:
 
         .. code-block:: bash
 
@@ -254,7 +257,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
         Replace ``YOUR_ACCESS_KEY_ID`` and ``YOUR_SECRET_ACCESS_KEY`` with your actual AWS credentials.
 
-        Enable AWS credentials by setting ``awsCredentials.enabled=true`` and ``awsCredentials.awsSecretName=aws-credentials`` in the Helm values file.
+        Enable it by setting ``awsCredentials.enabled=true`` in the Helm values file.
 
         .. code-block:: bash
 
@@ -264,11 +267,32 @@ Following tabs describe how to configure credentials for different clouds on the
                 --reuse-values \
                 --set awsCredentials.enabled=true
 
+        **Option 2: Multiple profiles (for multiple workspaces)**
+
+        Use this if you need different AWS profiles for different workspaces. Create a Kubernetes secret from your AWS credentials file:
+
+        .. code-block:: bash
+
+            kubectl create secret generic aws-credentials \
+              --namespace $NAMESPACE \
+              --from-file=credentials=$HOME/.aws/credentials
+
+        Enable it by setting ``awsCredentials.enabled=true`` and ``awsCredentials.useCredentialsFile=true`` in the Helm values file.
+
+        .. code-block:: bash
+
+            # --reuse-values keeps the Helm chart values set in the previous step
+            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                --namespace $NAMESPACE \
+                --reuse-values \
+                --set awsCredentials.enabled=true \
+                --set awsCredentials.useCredentialsFile=true
+
         .. dropdown:: Use existing AWS credentials
 
             You can also set the following values to use a secret that already contains your AWS credentials:
 
-            .. code-block::bash
+            .. code-block:: bash
 
                 # TODO: replace with your secret name and keys in the secret
                 helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
@@ -278,6 +302,18 @@ Following tabs describe how to configure credentials for different clouds on the
                     --set awsCredentials.awsSecretName=your_secret_name \
                     --set awsCredentials.accessKeyIdKeyName=aws_access_key_id \
                     --set awsCredentials.secretAccessKeyKeyName=aws_secret_access_key
+
+            Or if using credentials file:
+
+            .. code-block:: bash
+
+                # TODO: replace with your secret name
+                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set awsCredentials.enabled=true \
+                    --set awsCredentials.useCredentialsFile=true \
+                    --set awsCredentials.awsSecretName=your_secret_name
 
     .. tab-item:: GCP
         :sync: gcp-creds-tab
@@ -534,11 +570,11 @@ Following tabs describe how to configure credentials for different clouds on the
               --namespace $NAMESPACE \
               --from-file=r2.credentials=$HOME/.cloudflare/r2.credentials
               --from-file=accountid=$HOME/.cloudflare/accountid
-        
+
         When installing or upgrading the Helm chart, enable Cloudflare R2 credentials by setting :ref:`r2Credentials.enabled <helm-values-r2credentials-enabled>` and :ref:`r2Credentials.r2SecretName <helm-values-r2credentials-r2secretname>`:
-        
+
         .. code-block:: bash
-        
+
             # --reuse-values keeps the Helm chart values set in the previous step
             helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
@@ -594,7 +630,7 @@ If a persistent DB is not specified, the API server uses a Kubernetes persistent
     **Option 2: Set the DB connection URI via Kubernetes secret**
 
     (available on nightly version 20250626 and later)
-    
+
     Create a Kubernetes secret that contains the DB connection URI:
 
     .. code-block:: bash
@@ -602,7 +638,7 @@ If a persistent DB is not specified, the API server uses a Kubernetes persistent
         kubectl create secret generic skypilot-db-connection-uri \
           --namespace $NAMESPACE \
           --from-literal connection_string=postgresql://<username>:<password>@<host>:<port>/<database>
-    
+
 
     When installing or upgrading the Helm chart, set the ``dbConnectionUri`` to the secret name:
 
@@ -683,6 +719,14 @@ To modify your SkyPilot config, use the SkyPilot dashboard: ``http://<api-server
 
         ``apiService.config`` will be IGNORED during an ``helm upgrade`` if there is an existing config, due to the potential accidental loss of existing config. Use the SkyPilot dashboard instead.
 
+    .. note::
+
+        If remote database is configured (by setting either
+        :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>`
+        or :ref:`apiService.dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>`),
+        Skypilot configuration cannot be specified in the helm chart.
+        Use the dashboard once the API server is deployed to set the config.
+
 Optional: Set up GPU monitoring and metrics
 -------------------------------------------
 
@@ -723,6 +767,30 @@ For detailed setup instructions (including how to set up external Prometheus and
 * :ref:`GPU Metrics Setup <api-server-gpu-metrics-setup>`
 
 
+Optional: Set up server-side debug logging
+------------------------------------------
+
+Client-side debug logging can be turned on for individual requests by setting the
+``SKYPILOT_DEBUG`` environment variable to ``1`` when submitting a request, e.g.
+
+.. code-block:: bash
+
+    SKYPILOT_DEBUG=1 sky status
+
+To enable debug logging for all requests on server side, set
+``SKYPILOT_SERVER_ENABLE_REQUEST_DEBUG_LOGGING`` to ``true`` in the Helm values:
+
+.. code-block:: bash
+
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+      --namespace $NAMESPACE \
+      --reuse-values \
+      --set-string 'apiService.extraEnvs[0].name=SKYPILOT_SERVER_ENABLE_REQUEST_DEBUG_LOGGING' \
+      --set-string 'apiService.extraEnvs[0].value=true'
+
+
+Debug level logs for each request are saved to ``~/.sky/logs/request_debug/<request_id>.log`` on the API server.
+Server-side debug logging does not affect output seen by the clients.
 
 Upgrade the API server
 -----------------------
@@ -915,7 +983,7 @@ To reuse an existing ingress controller, you can set :ref:`ingress-nginx.enabled
 
     # The first API server, with niginx-ingress controller deployed
     # It is assumed that the first API server is already deployed. If it is not deployed yet,
-    # add neccessary values instead of specifying --reuse-values
+    # add necessary values instead of specifying --reuse-values
     helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
         --namespace $NAMESPACE \
         --reuse-values \

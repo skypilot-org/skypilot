@@ -262,7 +262,7 @@ def _validate_consolidation_mode_config(current_is_consolidation_mode: bool,
     controller = controller_utils.get_controller_for_pool(pool).value
     if current_is_consolidation_mode:
         controller_cn = controller.cluster_name
-        if global_user_state.get_cluster_from_name(controller_cn) is not None:
+        if global_user_state.cluster_with_name_exists(controller_cn):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.InconsistentConsolidationModeError(
                     f'{colorama.Fore.RED}Consolidation mode for '
@@ -397,11 +397,27 @@ def validate_service_task(task: 'sky.Task', pool: bool) -> None:
                           if task.service.dynamic_ondemand_fallback else 'spot')
     for resource in list(task.resources):
         if resource.job_recovery is not None:
-            sys_name = 'SkyServe' if not pool else 'Cluster Pool'
+            sys_name = 'SkyServe' if not pool else 'Pool'
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'job_recovery is disabled for {sys_name}. '
                                  f'{sys_name} will replenish preempted spot '
                                  f'with {policy_description} instances.')
+
+    if pool:
+        accelerators = set()
+        for resource in task.resources:
+            if resource.accelerators is not None:
+                if isinstance(resource.accelerators, str):
+                    accelerators.add(resource.accelerators)
+                elif isinstance(resource.accelerators, dict):
+                    accelerators.update(resource.accelerators.keys())
+                elif isinstance(resource.accelerators, list):
+                    accelerators.update(resource.accelerators)
+        if len(accelerators) > 1:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Heterogeneous clusters are not supported for '
+                                 'pools please specify one accelerator '
+                                 'for all workers.')
 
     # Try to create a spot placer from the task yaml. Check if the task yaml
     # is valid for spot placer.
@@ -447,7 +463,7 @@ def validate_service_task(task: 'sky.Task', pool: bool) -> None:
             if (task.service.ports is not None or
                     requested_resources.ports is not None):
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError('Cannot specify ports in a cluster pool.')
+                    raise ValueError('Cannot specify ports in a pool.')
 
 
 def generate_service_name(pool: bool = False):
@@ -675,6 +691,18 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
     return message
 
 
+def get_yaml_content(service_name: str, version: int) -> str:
+    yaml_content = serve_state.get_yaml_content(service_name, version)
+    if yaml_content is not None:
+        return yaml_content
+    # Backward compatibility for old service records that
+    # does not dump the yaml content to version database.
+    # TODO(tian): Remove this after 2 minor releases, i.e. 0.13.0.
+    latest_yaml_path = generate_task_yaml_file_name(service_name, version)
+    with open(latest_yaml_path, 'r', encoding='utf-8') as f:
+        return f.read()
+
+
 def _get_service_status(
         service_name: str,
         pool: bool,
@@ -697,21 +725,30 @@ def _get_service_status(
 
     record['pool_yaml'] = ''
     if record['pool']:
-        latest_yaml_path = generate_task_yaml_file_name(service_name,
-                                                        record['version'])
-        raw_yaml_config = yaml_utils.read_yaml(latest_yaml_path)
-        original_config = raw_yaml_config.get('_user_specified_yaml')
-        if original_config is None:
-            # Fall back to old display format.
-            original_config = raw_yaml_config
-            original_config.pop('run', None)
-            svc: Dict[str, Any] = original_config.pop('service')
-            if svc is not None:
-                svc.pop('pool', None)  # Remove pool from service config
-                original_config['pool'] = svc  # Add pool to root config
+        version = record['version']
+        try:
+            yaml_content = get_yaml_content(service_name, version)
+            raw_yaml_config = yaml_utils.read_yaml_str(yaml_content)
+        except Exception as e:  # pylint: disable=broad-except
+            # If this is a consolidation mode running without an PVC, the file
+            # might lost after an API server update (restart). In such case, we
+            # don't want it to crash the command. Fall back to an empty string.
+            logger.error(f'Failed to read YAML for service {service_name} '
+                         f'with version {version}: {e}')
+            record['pool_yaml'] = ''
         else:
-            original_config = yaml_utils.safe_load(original_config)
-        record['pool_yaml'] = yaml_utils.dump_yaml_str(original_config)
+            original_config = raw_yaml_config.get('_user_specified_yaml')
+            if original_config is None:
+                # Fall back to old display format.
+                original_config = raw_yaml_config
+                original_config.pop('run', None)
+                svc: Dict[str, Any] = original_config.pop('service')
+                if svc is not None:
+                    svc.pop('pool', None)  # Remove pool from service config
+                    original_config['pool'] = svc  # Add pool to root config
+            else:
+                original_config = yaml_utils.safe_load(original_config)
+            record['pool_yaml'] = yaml_utils.dump_yaml_str(original_config)
 
     record['target_num_replicas'] = 0
     try:
@@ -740,8 +777,8 @@ def _get_service_status(
     return record
 
 
-def get_service_status_encoded(service_names: Optional[List[str]],
-                               pool: bool) -> str:
+def get_service_status_pickled(service_names: Optional[List[str]],
+                               pool: bool) -> List[Dict[str, str]]:
     service_statuses: List[Dict[str, str]] = []
     if service_names is None:
         # Get all service names
@@ -754,14 +791,34 @@ def get_service_status_encoded(service_names: Optional[List[str]],
             k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
             for k, v in service_status.items()
         })
-    service_statuses = sorted(service_statuses, key=lambda x: x['name'])
+    return sorted(service_statuses, key=lambda x: x['name'])
+
+
+# TODO (kyuds): remove when serve codegen is removed
+def get_service_status_encoded(service_names: Optional[List[str]],
+                               pool: bool) -> str:
     # We have to use payload_type here to avoid the issue of
     # message_utils.decode_payload() not being able to correctly decode the
     # message with <sky-payload> tags.
+    service_statuses = get_service_status_pickled(service_names, pool)
     return message_utils.encode_payload(service_statuses,
                                         payload_type='service_status')
 
 
+def unpickle_service_status(
+        payload: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    service_statuses: List[Dict[str, Any]] = []
+    for service_status in payload:
+        if not isinstance(service_status, dict):
+            raise ValueError(f'Invalid service status: {service_status}')
+        service_statuses.append({
+            k: pickle.loads(base64.b64decode(v))
+            for k, v in service_status.items()
+        })
+    return service_statuses
+
+
+# TODO (kyuds): remove when serve codegen is removed
 def load_service_status(payload: str) -> List[Dict[str, Any]]:
     try:
         service_statuses_encoded = message_utils.decode_payload(
@@ -773,22 +830,16 @@ def load_service_status(payload: str) -> List[Dict[str, Any]]:
             service_statuses_encoded = message_utils.decode_payload(payload)
         else:
             raise
-    service_statuses: List[Dict[str, Any]] = []
-    for service_status in service_statuses_encoded:
-        if not isinstance(service_status, dict):
-            raise ValueError(f'Invalid service status: {service_status}')
-        service_statuses.append({
-            k: pickle.loads(base64.b64decode(v))
-            for k, v in service_status.items()
-        })
-    return service_statuses
+    return unpickle_service_status(service_statuses_encoded)
 
 
+# TODO (kyuds): remove when serve codegen is removed
 def add_version_encoded(service_name: str) -> str:
     new_version = serve_state.add_version(service_name)
     return message_utils.encode_payload(new_version)
 
 
+# TODO (kyuds): remove when serve codegen is removed
 def load_version_string(payload: str) -> str:
     return message_utils.decode_payload(payload)
 
@@ -821,7 +872,7 @@ def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
         logger.error(f'Service {service_name!r} does not exist.')
         return None
     if not service_status['pool']:
-        logger.error(f'Service {service_name!r} is not a cluster pool.')
+        logger.error(f'Service {service_name!r} is not a pool.')
         return None
     with filelock.FileLock(get_service_filelock_path(service_name)):
         logger.debug(f'Get next cluster name for pool {service_name!r}')
@@ -877,8 +928,8 @@ def _terminate_failed_services(
     # replicas, so we don't need to try again here.
     for replica_info in serve_state.get_replica_infos(service_name):
         # TODO(tian): Refresh latest status of the cluster.
-        if global_user_state.get_cluster_from_name(
-                replica_info.cluster_name) is not None:
+        if global_user_state.cluster_with_name_exists(
+                replica_info.cluster_name):
             remaining_replica_clusters.append(f'{replica_info.cluster_name!r}')
         serve_state.remove_replica(service_name, replica_info.replica_id)
 
@@ -994,6 +1045,8 @@ def wait_service_registration(service_name: str, job_id: int,
     Returns:
         Encoded load balancer port assigned to the service.
     """
+    # TODO (kyuds): when codegen is fully deprecated, return the lb port
+    # as an int directly instead of encoding it.
     start_time = time.time()
     setup_completed = False
     noun = 'pool' if pool else 'service'
@@ -1105,17 +1158,17 @@ def get_latest_version_with_min_replicas(
     return active_versions[-1] if active_versions else None
 
 
-def _process_line(line: str,
-                  cluster_name: str,
-                  stop_on_eof: bool = False) -> Iterator[str]:
+def _process_line(
+        line: str,
+        cluster_name: str,
+        stop_on_eof: bool = False,
+        streamed_provision_log_paths: Optional[set] = None) -> Iterator[str]:
     # The line might be directing users to view logs, like
     # `✓ Cluster launched: new-http.  View logs at: *.log`
     # We should tail the detailed logs for user.
     def cluster_is_up() -> bool:
-        cluster_record = global_user_state.get_cluster_from_name(cluster_name)
-        if cluster_record is None:
-            return False
-        return cluster_record['status'] == status_lib.ClusterStatus.UP
+        status = global_user_state.get_status_from_cluster_name(cluster_name)
+        return status == status_lib.ClusterStatus.UP
 
     provision_api_log_prompt = re.match(_SKYPILOT_PROVISION_API_LOG_PATTERN,
                                         line)
@@ -1124,6 +1177,20 @@ def _process_line(line: str,
     log_prompt = re.match(_SKYPILOT_LOG_PATTERN, line)
 
     def _stream_provision_path(p: pathlib.Path) -> Iterator[str]:
+        # Check if this provision log has already been streamed to avoid
+        # duplicate expansion. When a Kubernetes cluster needs to pull a Docker
+        # image, rich spinner updates can produce hundreds of lines matching
+        # _SKYPILOT_PROVISION_LOG_CMD_PATTERN (e.g., "Launching (1 pod(s)
+        # pending due to Pulling)... View logs: sky logs --provision ...").
+        # Without this check, the same provision log would be expanded hundreds
+        # of times, creating huge log files (30M+) and making users think the
+        # system is stuck in an infinite loop.
+        if streamed_provision_log_paths is not None:
+            resolved_path = str(p.resolve())
+            if resolved_path in streamed_provision_log_paths:
+                return
+            streamed_provision_log_paths.add(resolved_path)
+
         try:
             with open(p, 'r', newline='', encoding='utf-8') as f:
                 # Exit if >10s without new content to avoid hanging when INIT
@@ -1195,9 +1262,14 @@ def _follow_logs_with_provision_expanding(
     Yields:
         Log lines, including expanded content from referenced provision logs.
     """
+    streamed_provision_log_paths: set = set()
 
     def process_line(line: str) -> Iterator[str]:
-        yield from _process_line(line, cluster_name, stop_on_eof=stop_on_eof)
+        yield from _process_line(
+            line,
+            cluster_name,
+            stop_on_eof=stop_on_eof,
+            streamed_provision_log_paths=streamed_provision_log_paths)
 
     return log_utils.follow_logs(file,
                                  should_stop=should_stop,
@@ -1223,11 +1295,14 @@ def _capped_follow_logs_with_provision_expanding(
         Log lines, including expanded content from referenced provision logs.
     """
     all_lines: Deque[str] = collections.deque(maxlen=line_cap)
+    streamed_provision_log_paths: set = set()
 
     for line in log_list:
-        for processed in _process_line(line=line,
-                                       cluster_name=cluster_name,
-                                       stop_on_eof=False):
+        for processed in _process_line(
+                line=line,
+                cluster_name=cluster_name,
+                stop_on_eof=False,
+                streamed_provision_log_paths=streamed_provision_log_paths):
             all_lines.append(processed)
 
     yield from all_lines
@@ -1306,10 +1381,6 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
                 if not line.endswith('\n'):
                     line += '\n'
                 print(line, end='', flush=True)
-        return ''
-
-    # For pools, we don't stream the job logs as the run section is ignored.
-    if pool:
         return ''
 
     backend = backends.CloudVmRayBackend()
@@ -1519,8 +1590,15 @@ def _format_replica_table(replica_records: List[Dict[str, Any]], show_all: bool,
             'handle']
         if replica_handle is not None:
             infra = replica_handle.launched_resources.infra.formatted_str()
-            resources_str = resources_utils.get_readable_resources_repr(
-                replica_handle, simplify=not show_all)
+            simplified = not show_all
+            resources_str_simple, resources_str_full = (
+                resources_utils.get_readable_resources_repr(
+                    replica_handle, simplified_only=simplified))
+            if simplified:
+                resources_str = resources_str_simple
+            else:
+                assert resources_str_full is not None
+                resources_str = resources_str_full
 
         replica_values = [
             service_name,
@@ -1541,6 +1619,7 @@ def _format_replica_table(replica_records: List[Dict[str, Any]], show_all: bool,
 
 
 # =========================== CodeGen for Sky Serve ===========================
+# TODO (kyuds): deprecate and remove serve codegen entirely.
 
 
 # TODO(tian): Use REST API instead of SSH in the future. This codegen pattern

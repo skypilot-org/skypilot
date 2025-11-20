@@ -1,6 +1,5 @@
 """Task: a coarse-grained stage in an application."""
 import collections
-import inspect
 import json
 import os
 import re
@@ -28,10 +27,6 @@ from sky.utils import volume as volume_lib
 from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
-
-# A lambda generating commands (node rank_i, node addrs -> cmd_i).
-CommandGen = Callable[[int, List[str]], Optional[str]]
-CommandOrCommandGen = Union[str, CommandGen]
 
 _VALID_NAME_REGEX = '[a-zA-Z0-9]+(?:[._-]{1,2}[a-zA-Z0-9]+)*'
 _VALID_NAME_DESCR = ('ASCII characters and may contain lowercase and'
@@ -236,7 +231,7 @@ class Task:
         name: Optional[str] = None,
         *,
         setup: Optional[Union[str, List[str]]] = None,
-        run: Optional[Union[CommandOrCommandGen, List[str]]] = None,
+        run: Optional[Union[str, List[str]]] = None,
         envs: Optional[Dict[str, str]] = None,
         secrets: Optional[Dict[str, str]] = None,
         workdir: Optional[Union[str, Dict[str, Any]]] = None,
@@ -349,7 +344,7 @@ class Task:
         self._volumes = volumes or {}
 
         # concatenate commands if given as list
-        def _concat(commands):
+        def _concat(commands: Optional[Union[str, List[str]]]) -> Optional[str]:
             if isinstance(commands, list):
                 return '\n'.join(commands)
             return commands
@@ -447,42 +442,9 @@ class Task:
 
     def validate_run(self):
         """Validates if the run command is valid."""
-        if callable(self.run):
-            run_sig = inspect.signature(self.run)
-            # Check that run is a function with 2 arguments.
-            if len(run_sig.parameters) != 2:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(_RUN_FN_CHECK_FAIL_MSG.format(run_sig))
-
-            type_list = [int, List[str]]
-            # Check annotations, if exists
-            for i, param in enumerate(run_sig.parameters.values()):
-                if param.annotation != inspect.Parameter.empty:
-                    if param.annotation != type_list[i]:
-                        with ux_utils.print_exception_no_traceback():
-                            raise ValueError(
-                                _RUN_FN_CHECK_FAIL_MSG.format(run_sig))
-
-            # Check self containedness.
-            run_closure = inspect.getclosurevars(self.run)
-            if run_closure.nonlocals:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'run command generator must be self contained. '
-                        f'Found nonlocals: {run_closure.nonlocals}')
-            if run_closure.globals:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'run command generator must be self contained. '
-                        f'Found globals: {run_closure.globals}')
-            if run_closure.unbound:
-                # Do not raise an error here. Import statements, which are
-                # allowed, will be considered as unbounded.
-                pass
-        elif self.run is not None and not isinstance(self.run, str):
+        if self.run is not None and not isinstance(self.run, str):
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('run must be either a shell script (str) or '
-                                 f'a command generator ({CommandGen}). '
+                raise ValueError('run must be a shell script (str). '
                                  f'Got {type(self.run)}')
 
     def expand_and_validate_file_mounts(self):
@@ -647,6 +609,10 @@ class Task:
         # Fill in any Task.envs into workdir
         if config.get('workdir') is not None:
             config['workdir'] = _fill_in_env_vars(config['workdir'],
+                                                  env_and_secrets)
+
+        if config.get('volumes') is not None:
+            config['volumes'] = _fill_in_env_vars(config['volumes'],
                                                   env_and_secrets)
 
         task = Task(
@@ -831,16 +797,27 @@ class Task:
             #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
             # to raise errors on duplicate keys.
             user_specified_yaml = f.read()
-            config = yaml_utils.safe_load(user_specified_yaml)
+            return Task.from_yaml_str(user_specified_yaml)
+
+    @staticmethod
+    def from_yaml_str(yaml_str: str) -> 'Task':
+        """Initializes a task from a task YAML string.
+
+        Example:
+            .. code-block:: python
+
+                task = sky.Task.from_yaml_str('yaml_str')
+        """
+        config = yaml_utils.safe_load(yaml_str)
 
         if isinstance(config, str):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('YAML loaded as str, not as dict. '
-                                 f'Is it correct? Path: {yaml_path}')
+                                 f'Is it correct? content:\n{yaml_str}')
 
         if config is None:
             config = {}
-        config['_user_specified_yaml'] = user_specified_yaml
+        config['_user_specified_yaml'] = yaml_str
         return Task.from_yaml_config(config)
 
     def resolve_and_validate_volumes(self) -> None:
@@ -1126,7 +1103,7 @@ class Task:
     def set_resources(
         self, resources: Union['resources_lib.Resources',
                                List['resources_lib.Resources'],
-                               Set['resources_lib.Resources']]
+                               Set['resources_lib.Resources'], Dict[str, Any]]
     ) -> 'Task':
         """Sets the required resources to execute this task.
 
@@ -1140,7 +1117,9 @@ class Task:
         Returns:
           self: The current task, with resources set.
         """
-        if isinstance(resources, resources_lib.Resources):
+        if isinstance(resources, dict):
+            resources = resources_lib.Resources.from_yaml_config(resources)
+        elif isinstance(resources, resources_lib.Resources):
             resources = {resources}
         # TODO(woosuk): Check if the resources are None.
         self.resources = _with_docker_login_config(resources, self.envs,
@@ -1167,6 +1146,10 @@ class Task:
 
         self.set_resources(type(self.resources)(new_resources_list))
         return self
+
+    def get_resource_config(self) -> Dict[str, Any]:
+        return _resources_to_config(self.resources,
+                                    factor_out_common_fields=True)
 
     @property
     def service(self) -> Optional[service_spec.SkyServiceSpec]:
@@ -1548,6 +1531,16 @@ class Task:
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })
+                elif store_type is storage_lib.StoreType.COREWEAVE:
+                    if storage.source is not None and not isinstance(
+                            storage.source,
+                            list) and storage.source.startswith('cw://'):
+                        blob_path = storage.source
+                    else:
+                        blob_path = 'cw://' + storage.name
+                    self.update_file_mounts({
+                        mnt_path: blob_path,
+                    })
                 else:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Storage Type {store_type} '
@@ -1684,16 +1677,7 @@ class Task:
 
         add_if_not_none('name', self.name)
 
-        tmp_resource_config: Union[Dict[str, Union[str, int]],
-                                   Dict[str, List[Dict[str, Union[str, int]]]]]
-        if len(self.resources) > 1:
-            resource_list = []
-            for r in self.resources:
-                resource_list.append(r.to_yaml_config())
-            key = 'ordered' if isinstance(self.resources, list) else 'any_of'
-            tmp_resource_config = {key: resource_list}
-        else:
-            tmp_resource_config = list(self.resources)[0].to_yaml_config()
+        tmp_resource_config = _resources_to_config(self.resources)
 
         add_if_not_none('resources', tmp_resource_config)
 
@@ -1806,3 +1790,47 @@ class Task:
         else:
             s += '\n  resources: default instances'
         return s
+
+
+def _resources_to_config(
+        resources: Union[List['resources_lib.Resources'],
+                         Set['resources_lib.Resources']],
+        factor_out_common_fields: bool = False) -> Dict[str, Any]:
+    if len(resources) > 1:
+        resource_list: List[Dict[str, Union[str, int]]] = []
+        for r in resources:
+            resource_list.append(r.to_yaml_config())
+        group_key = 'ordered' if isinstance(resources, list) else 'any_of'
+        if factor_out_common_fields:
+            return _factor_out_common_resource_fields(resource_list, group_key)
+        return {group_key: resource_list}
+    else:
+        return list(resources)[0].to_yaml_config()
+
+
+def _factor_out_common_resource_fields(configs: List[Dict[str, Union[str,
+                                                                     int]]],
+                                       group_key: str) -> Dict[str, Any]:
+    """Factors out the fields that are common to all resources."""
+    return_config: Dict[str, Any] = configs[0].copy()
+    if len(configs) > 1:
+        for config in configs[1:]:
+            for key, value in config.items():
+                if key in return_config and return_config[key] != value:
+                    del return_config[key]
+    num_empty_configs = 0
+    for config in configs:
+        keys_to_delete = []
+        for key, value in config.items():
+            if key in return_config:
+                keys_to_delete.append(key)
+        for key in keys_to_delete:
+            del config[key]
+        if not config:
+            num_empty_configs += 1
+
+    if num_empty_configs == len(configs):
+        return return_config
+    if len(configs) > 0:
+        return_config[group_key] = configs
+    return return_config

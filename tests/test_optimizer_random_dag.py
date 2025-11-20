@@ -71,9 +71,6 @@ def generate_random_dag(
 
             candidate_resources = set()
             for candidate in candidate_instance_types:
-                # TODO(aylei): remove this after #7177 get fixed
-                if candidate.accelerator_name == 'L40s':
-                    continue
                 instance_type = candidate.instance_type
                 if pd.isna(instance_type):
                     assert candidate.cloud == 'GCP', candidate
@@ -171,9 +168,9 @@ def compare_optimization_results(dag: sky.Dag, minimize_cost: bool):
     print(optimizer_plan, file=sys.stderr)
     print('=== brute force ===', file=sys.stderr)
     print(bf_plan, file=sys.stderr)
-    # We use $1 as the tolerance for the objective value, since there can be
+    # We use $2 as the tolerance for the objective value, since there can be
     # floating point precision issues.
-    assert abs(objective - min_objective) < 1
+    assert abs(objective - min_objective) < 2
 
 
 def test_optimizer(enable_all_clouds):

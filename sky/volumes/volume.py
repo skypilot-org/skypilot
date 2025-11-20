@@ -25,7 +25,7 @@ class Volume:
             infra: Optional[str] = None,
             size: Optional[str] = None,
             labels: Optional[Dict[str, str]] = None,
-            resource_name: Optional[str] = None,
+            use_existing: Optional[bool] = None,
             config: Optional[Dict[str, Any]] = None):
         """Initialize a Volume instance.
 
@@ -35,6 +35,7 @@ class Volume:
             infra: Infrastructure specification
             size: Volume size
             labels: Volume labels
+            use_existing: Whether to use an existing volume
             config: Additional configuration
         """
         self.name = name
@@ -42,7 +43,7 @@ class Volume:
         self.infra = infra
         self.size = size
         self.labels = labels or {}
-        self.resource_name = resource_name
+        self.use_existing = use_existing
         self.config = config or {}
 
         self.cloud: Optional[str] = None
@@ -70,17 +71,16 @@ class Volume:
                              infra=config.get('infra'),
                              size=config.get('size'),
                              labels=config.get('labels'),
-                             resource_name=config.get('resource_name'),
+                             use_existing=config.get('use_existing'),
                              config=config.get('config', {}))
         if vt == volume_lib.VolumeType.RUNPOD_NETWORK_VOLUME:
-            return RunpodNetworkVolume(
-                name=config.get('name'),
-                type=vol_type_val,
-                infra=config.get('infra'),
-                size=config.get('size'),
-                labels=config.get('labels'),
-                resource_name=config.get('resource_name'),
-                config=config.get('config', {}))
+            return RunpodNetworkVolume(name=config.get('name'),
+                                       type=vol_type_val,
+                                       infra=config.get('infra'),
+                                       size=config.get('size'),
+                                       labels=config.get('labels'),
+                                       use_existing=config.get('use_existing'),
+                                       config=config.get('config', {}))
 
         raise ValueError(f'Invalid volume type: {vol_type_val}')
 
@@ -92,7 +92,7 @@ class Volume:
             'infra': self.infra,
             'size': self.size,
             'labels': self.labels,
-            'resource_name': self.resource_name,
+            'use_existing': self.use_existing,
             'config': self.config,
             'cloud': self.cloud,
             'region': self.region,
@@ -100,7 +100,7 @@ class Volume:
         }
 
     def _normalize_config(self) -> None:
-        """Adjust and validate the config."""
+        """Normalize and validate the config."""
         # Validate schema
         common_utils.validate_schema(self.to_yaml_config(),
                                      schemas.get_volume_schema(),
@@ -115,8 +115,17 @@ class Volume:
         self.region = infra_info.region
         self.zone = infra_info.zone
 
-        # Validate the volume config
-        self._validate_config()
+        # Set cloud from volume type if not specified
+        cloud_obj_from_type = VOLUME_TYPE_TO_CLOUD.get(
+            volume_lib.VolumeType(self.type))
+        if self.cloud:
+            cloud_obj = registry.CLOUD_REGISTRY.from_str(self.cloud)
+            assert cloud_obj is not None
+            if not cloud_obj.is_same_cloud(cloud_obj_from_type):
+                raise ValueError(
+                    f'Invalid cloud {self.cloud} for volume type {self.type}')
+        else:
+            self.cloud = str(cloud_obj_from_type)
 
     def _adjust_config(self) -> None:
         """Adjust the volume config (e.g., parse size)."""
@@ -132,42 +141,40 @@ class Volume:
         except ValueError as e:
             raise ValueError(f'Invalid size {self.size}: {e}') from e
 
-    def _validate_config(self) -> None:
-        """Validate the volume config."""
-        cloud_obj_from_type = VOLUME_TYPE_TO_CLOUD.get(
-            volume_lib.VolumeType(self.type))
-        if self.cloud:
-            cloud_obj = registry.CLOUD_REGISTRY.from_str(self.cloud)
-            assert cloud_obj is not None
-            if not cloud_obj.is_same_cloud(cloud_obj_from_type):
-                raise ValueError(
-                    f'Invalid cloud {self.cloud} for volume type {self.type}')
-        else:
-            self.cloud = str(cloud_obj_from_type)
-            cloud_obj = cloud_obj_from_type
-            assert cloud_obj is not None
+    def validate(self, skip_cloud_compatibility: bool = False) -> None:
+        """Validates the volume."""
+        self.validate_name()
+        self.validate_size()
+        if not skip_cloud_compatibility:
+            self.validate_cloud_compatibility()
+        # Extra, type-specific validations
+        self._validate_config_extra()
 
-        self.region, self.zone = cloud_obj.validate_region_zone(
-            self.region, self.zone)
+    def validate_name(self) -> None:
+        """Validates if the volume name is set."""
+        assert self.name is not None, 'Volume name must be set'
 
-        # Name must be set by factory before validation.
-        assert self.name is not None
+    def validate_size(self) -> None:
+        """Validates that size is specified for new volumes."""
+        if not self.use_existing and not self.size:
+            raise ValueError('Size is required for new volumes. '
+                             'Please specify the size in the YAML file or '
+                             'use the --size flag.')
+
+    def validate_cloud_compatibility(self) -> None:
+        """Validates region, zone, name, labels with the cloud."""
+        cloud_obj = registry.CLOUD_REGISTRY.from_str(self.cloud)
+        assert cloud_obj is not None
+
         valid, err_msg = cloud_obj.is_volume_name_valid(self.name)
         if not valid:
             raise ValueError(f'Invalid volume name: {err_msg}')
 
-        if not self.resource_name and not self.size:
-            raise ValueError('Size is required for new volumes. '
-                             'Please specify the size in the YAML file or '
-                             'use the --size flag.')
         if self.labels:
             for key, value in self.labels.items():
                 valid, err_msg = cloud_obj.is_label_valid(key, value)
                 if not valid:
                     raise ValueError(f'{err_msg}')
-
-        # Extra, type-specific validations
-        self._validate_config_extra()
 
     # Hook methods for subclasses
     def _validate_config_extra(self) -> None:
@@ -187,7 +194,7 @@ class RunpodNetworkVolume(Volume):
     """RunPod Network Volume."""
 
     def _validate_config_extra(self) -> None:
-        if self.size is not None:
+        if not self.use_existing and self.size is not None:
             try:
                 size_int = int(self.size)
                 if size_int < volume_lib.MIN_RUNPOD_NETWORK_VOLUME_SIZE_GB:
@@ -198,8 +205,7 @@ class RunpodNetworkVolume(Volume):
                 raise ValueError(f'Invalid volume size {self.size!r}: '
                                  f'{e}') from e
         if not self.zone:
-            raise ValueError(
-                'RunPod DataCenterId is required to create a network '
-                'volume. Set the zone in the infra field.')
+            raise ValueError('RunPod DataCenterId is required for network '
+                             'volumes. Set the zone in the infra field.')
 
         return

@@ -68,9 +68,10 @@ def _get_private_ip(instance_info: Dict[str, Any], single_node: bool) -> str:
     return private_ip
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster"""
+    del cluster_name  # unused
     lambda_client = _get_lambda_client()
     pending_status = ['booting']
     while True:
@@ -231,9 +232,10 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
+    retry_if_missing: bool = False,
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
-    del cluster_name  # unused
+    del cluster_name, retry_if_missing  # unused
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     instances = _filter_instances(cluster_name_on_cloud, None)
 

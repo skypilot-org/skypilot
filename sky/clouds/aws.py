@@ -1,6 +1,7 @@
 """Amazon Web Services."""
 import enum
 import fnmatch
+import functools
 import hashlib
 import json
 import os
@@ -8,7 +9,10 @@ import re
 import subprocess
 import time
 import typing
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
+from typing import (Any, Callable, Dict, Iterator, List, Literal, Optional, Set,
+                    Tuple, TypeVar, Union)
+
+from typing_extensions import ParamSpec
 
 from sky import catalog
 from sky import clouds
@@ -23,13 +27,17 @@ from sky.clouds.utils import aws_utils
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import env_options
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils.db import kv_cache
 
 if typing.TYPE_CHECKING:
+    from mypy_boto3_ec2 import type_defs as ec2_type_defs
+
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
     from sky.utils import status_lib
@@ -112,6 +120,37 @@ _EFA_DOCKER_RUN_OPTIONS = [
 # TODO(hailong): may need to update the version later.
 _EFA_IMAGE_NAME = 'Deep Learning Base OSS Nvidia Driver GPU AMI' \
 ' (Ubuntu 22.04) 20250808'
+
+# For functions that needs caching per AWS profile.
+_AWS_PROFILE_SCOPED_FUNC_CACHE_SIZE = 5
+
+T = TypeVar('T')
+P = ParamSpec('P')
+
+
+def aws_profile_aware_lru_cache(*lru_cache_args,
+                                scope: Literal['global', 'request'] = 'request',
+                                **lru_cache_kwargs) -> Callable:
+    """Similar to annotations.lru_cache, but automatically includes the
+    AWS profile (if set in the workspace config) in the cache key.
+    """
+
+    def decorator(func: Callable[P, T]) -> Callable[P, T]:
+
+        @annotations.lru_cache(scope, *lru_cache_args, **lru_cache_kwargs)
+        def cached_impl(aws_profile, *args, **kwargs):
+            del aws_profile  # Only used as part of the cache key.
+            return func(*args, **kwargs)
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            aws_profile = aws.get_workspace_profile()
+            return cached_impl(aws_profile, *args, **kwargs)
+
+        wrapper.cache_clear = cached_impl.cache_clear  # type: ignore[attr-defined]
+        return wrapper
+
+    return decorator
 
 
 def _is_efa_instance_type(instance_type: str) -> bool:
@@ -264,7 +303,9 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         unsupported_features = {}
         if resources.use_spot:
@@ -306,10 +347,15 @@ class AWS(clouds.Cloud):
     #### Regions/Zones ####
 
     @classmethod
-    def regions_with_offering(cls, instance_type: str,
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[clouds.Region]:
+    def regions_with_offering(
+        cls,
+        instance_type: str,
+        accelerators: Optional[Dict[str, int]],
+        use_spot: bool,
+        region: Optional[str],
+        zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None,
+    ) -> List[clouds.Region]:
         del accelerators  # unused
         regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'aws')
@@ -387,7 +433,8 @@ class AWS(clouds.Cloud):
             if acc_name == 'K80':
                 image_id = catalog.get_image_id_from_tag(
                     _DEFAULT_GPU_K80_IMAGE_ID, region_name, clouds='aws')
-            if acc_name in ['Trainium', 'Inferentia']:
+            if acc_name.startswith('Trainium') or acc_name.startswith(
+                    'Inferentia'):
                 image_id = catalog.get_image_id_from_tag(
                     _DEFAULT_NEURON_IMAGE_ID, region_name, clouds='aws')
         if image_id is not None:
@@ -433,71 +480,155 @@ class AWS(clouds.Cloud):
         return image_id_str
 
     @classmethod
+    def _describe_image_with_retry(
+        cls,
+        image_id: str,
+        region: str,
+        log_context: str,
+    ) -> Optional['ec2_type_defs.ImageTypeDef']:
+        image_not_found_message = (
+            f'Image {image_id!r} not found in AWS region {region} - '
+            f'can\'t get {log_context}.\n\n'
+            f'To find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
+            'Example: ami-0729d913a335efca7')
+        max_retries = 3
+        debug_message = 'no describe_images response'
+        for iteration in range(1, max_retries + 1):
+            try:
+                client = aws.client('ec2', region_name=region)
+                response = client.describe_images(ImageIds=[image_id])
+                # These values are not optional, but we will use .get() to avoid
+                # crashing on a malformed response from AWS.
+                metadata = response.get('ResponseMetadata', {})
+                image_info = response.get('Images')
+                debug_message = (
+                    'describe_images response:\n'
+                    f'  status code: {metadata.get("HTTPStatusCode")}\n'
+                    f'  retry attempts: {metadata.get("RetryAttempts")}\n'
+                    f'  len(images): {len(image_info) if image_info else -1}\n'
+                    f'  next token: {response.get("NextToken")}')
+                logger.debug(debug_message)
+                if not image_info:
+                    # image_info is [] (can't find image) or None (invalid
+                    # response from AWS)
+                    with ux_utils.print_exception_no_traceback():
+                        if env_options.Options.SHOW_DEBUG_INFO.get():
+                            image_not_found_message += f'\n{debug_message}'
+                        raise ValueError(image_not_found_message)
+                image = image_info[0]
+                return image
+            except (aws.botocore_exceptions().NoCredentialsError,
+                    aws.botocore_exceptions().ProfileNotFound) as e:
+                # The caller will fall back to its own default value when we
+                # return None. Mention that explicitly in the shared log line.
+                logger.debug(
+                    f'Failed to get {log_context} for {image_id} in region '
+                    f'{region}: {e}. Using default value.')
+                return None
+            except aws.botocore_exceptions().ClientError as e:
+                # This shared log message replaces two attribute-specific
+                # messages (image size/root device) for simplicity.
+                logger.debug(f'Failed to get {log_context} for image '
+                             f'{image_id!r} in region {region}: {e}')
+                if iteration == max_retries:
+                    with ux_utils.print_exception_no_traceback():
+                        if env_options.Options.SHOW_DEBUG_INFO.get():
+                            image_not_found_message += f'\n{debug_message}'
+                            # Note: the ClientError's exception message should
+                            # include most useful info:
+                            # https://github.com/boto/botocore/blob/260a8b91cedae895165984d2102bcbc487de3027/botocore/exceptions.py#L518-L532
+                            additional_info = f'  ClientError: {e}'
+                            logger.debug(additional_info)
+                            image_not_found_message += '\n' + additional_info
+                        raise ValueError(image_not_found_message) from None
+            # linear backoff starting from 0.5 seconds
+            time.sleep(iteration * 0.5)
+        # Should never reach here, but keep type checker happy.
+        raise RuntimeError('Unreachable')
+
+    @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         if image_id.startswith('skypilot:'):
             return DEFAULT_AMI_GB
         assert region is not None, (image_id, region)
-        image_not_found_message = (
-            f'Image {image_id!r} not found in AWS region {region}.\n'
-            f'\nTo find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
-            'Example: ami-0729d913a335efca7')
-        try:
-            client = aws.client('ec2', region_name=region)
-            image_info = client.describe_images(ImageIds=[image_id]).get(
-                'Images', [])
-            if not image_info:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(image_not_found_message)
-            image_size = image_info[0]['BlockDeviceMappings'][0]['Ebs'][
-                'VolumeSize']
-        except (aws.botocore_exceptions().NoCredentialsError,
-                aws.botocore_exceptions().ProfileNotFound):
+        # first try the cache
+        workspace_profile = aws.get_workspace_profile()
+        kv_cache_key = f'aws:ami:size:{workspace_profile}:{region}:{image_id}'
+        image_size = kv_cache.get_cache_entry(kv_cache_key)
+        if image_size is not None:
+            logger.debug(
+                f'Image size {image_size} found in cache {kv_cache_key}')
+            return float(image_size)
+        # if not found in cache, query the cloud
+        image = cls._describe_image_with_retry(
+            image_id,
+            region,
+            log_context='image size',
+        )
+        if image is None:
             # Fallback to default image size if no credentials are available.
             # The credentials issue will be caught when actually provisioning
             # the instance and appropriate errors will be raised there.
             return DEFAULT_AMI_GB
-        except aws.botocore_exceptions().ClientError:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(image_not_found_message) from None
+        image_size = image['BlockDeviceMappings'][0]['Ebs']['VolumeSize']
+        # cache the result for a day.
+        # AMIs are immutable, so we can cache the result for a long time.
+        # While AMIs can be deleted, if the AMI is deleted before cache expiration,
+        # the actual VM launch still fails.
+        day_in_seconds = 60 * 60 * 24  # 1 day, 60s * 60m * 24h
+        try:
+            kv_cache.add_or_update_cache_entry(kv_cache_key, str(image_size),
+                                               time.time() + day_in_seconds)
+        except Exception as e:  # pylint: disable=broad-except
+            # Catch the error and continue.
+            # Failure to cache the result is not critical to the
+            # success of this function.
+            logger.debug(
+                f'Failed to cache image size for {image_id} in region {region}: {e}'
+            )
         return image_size
 
     @classmethod
-    @annotations.lru_cache(scope='request', maxsize=1)
+    @aws_profile_aware_lru_cache(scope='request',
+                                 maxsize=_AWS_PROFILE_SCOPED_FUNC_CACHE_SIZE)
     def get_image_root_device_name(cls, image_id: str,
                                    region: Optional[str]) -> str:
         if image_id.startswith('skypilot:'):
             return DEFAULT_ROOT_DEVICE_NAME
         assert region is not None, (image_id, region)
-        image_not_found_message = (
-            f'Image {image_id!r} not found in AWS region {region}.\n'
-            f'To find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
-            'Example: ami-0729d913a335efca7')
-        try:
-            client = aws.client('ec2', region_name=region)
-            image_info = client.describe_images(ImageIds=[image_id]).get(
-                'Images', [])
-            if not image_info:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(image_not_found_message)
-            image = image_info[0]
-            if 'RootDeviceName' not in image:
-                logger.warning(f'Image {image_id!r} does not have a root '
-                               f'device name. '
-                               f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
-                return DEFAULT_ROOT_DEVICE_NAME
-            return image['RootDeviceName']
-        except (aws.botocore_exceptions().NoCredentialsError,
-                aws.botocore_exceptions().ProfileNotFound):
-            # Fallback to default root device name if no credentials are
-            # available.
-            # The credentials issue will be caught when actually provisioning
-            # the instance and appropriate errors will be raised there.
-            logger.warning(f'No credentials available for region {region}. '
-                           f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
+        workspace_profile = aws.get_workspace_profile()
+        kv_cache_key = f'aws:ami:root_device_name:{workspace_profile}:{region}:{image_id}'
+        root_device_name = kv_cache.get_cache_entry(kv_cache_key)
+        if root_device_name is not None:
+            logger.debug(f'Image root device name {root_device_name} found in '
+                         f'cache {kv_cache_key}')
+            return root_device_name
+        # if not found in cache, query the cloud
+        image = cls._describe_image_with_retry(
+            image_id,
+            region,
+            log_context='image root device name',
+        )
+        if image is None:
             return DEFAULT_ROOT_DEVICE_NAME
-        except aws.botocore_exceptions().ClientError:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(image_not_found_message) from None
+        if 'RootDeviceName' not in image:
+            logger.debug(f'Image {image_id!r} does not have a root '
+                         f'device name. '
+                         f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
+            return DEFAULT_ROOT_DEVICE_NAME
+        root_device_name = image['RootDeviceName']
+        day_in_seconds = 60 * 60 * 24  # 1 day, 60s * 60m * 24h
+        try:
+            kv_cache.add_or_update_cache_entry(kv_cache_key, root_device_name,
+                                               time.time() + day_in_seconds)
+        except Exception as e:  # pylint: disable=broad-except
+            # Catch the error and continue.
+            # Failure to cache the result is not critical to the
+            # success of this function.
+            logger.debug(
+                f'Failed to cache image root device name for {image_id} in region {region}: {e}'
+            )
+        return root_device_name
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -788,8 +919,9 @@ class AWS(clouds.Cloud):
         return cls._check_credentials()
 
     @classmethod
-    @annotations.lru_cache(scope='request',
-                           maxsize=1)  # Cache since getting identity is slow.
+    # Cache since getting identity is slow.
+    @aws_profile_aware_lru_cache(scope='request',
+                                 maxsize=_AWS_PROFILE_SCOPED_FUNC_CACHE_SIZE)
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to AWS."""
 
@@ -924,9 +1056,16 @@ class AWS(clouds.Cloud):
         return AWSIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
-    @annotations.lru_cache(scope='request', maxsize=1)
+    @aws_profile_aware_lru_cache(scope='request',
+                                 maxsize=_AWS_PROFILE_SCOPED_FUNC_CACHE_SIZE)
     def _aws_configure_list(cls) -> Optional[bytes]:
-        proc = subprocess.run('aws configure list',
+        cmd = 'aws configure list'
+        # Profile takes precedence over default configs.
+        profile = aws.get_workspace_profile()
+        if profile is not None:
+            # If profile does not exist, we will get returncode 255.
+            cmd += f' --profile {profile}'
+        proc = subprocess.run(cmd,
                               shell=True,
                               check=False,
                               stdout=subprocess.PIPE,
@@ -936,8 +1075,9 @@ class AWS(clouds.Cloud):
         return proc.stdout
 
     @classmethod
-    @annotations.lru_cache(scope='request',
-                           maxsize=1)  # Cache since getting identity is slow.
+    # Cache since getting identity is slow.
+    @aws_profile_aware_lru_cache(scope='request',
+                                 maxsize=_AWS_PROFILE_SCOPED_FUNC_CACHE_SIZE)
     def _sts_get_caller_identity(cls) -> Optional[List[List[str]]]:
         try:
             sts = aws.client('sts', check_credentials=False)
@@ -999,7 +1139,8 @@ class AWS(clouds.Cloud):
                     f'Invalid AWS configuration.\n'
                     f'  Reason: {common_utils.format_exception(e, use_bracket=True)}.'
                 ) from None
-        except aws.botocore_exceptions().TokenRetrievalError:
+        except aws.botocore_exceptions().TokenRetrievalError as e:
+            logger.debug(f'Failed to get AWS caller identity: {e}.')
             # This is raised when the access token is expired, which mainly
             # happens when the user is using temporary credentials or SSO
             # login.
@@ -1018,8 +1159,9 @@ class AWS(clouds.Cloud):
         return [user_ids]
 
     @classmethod
-    @annotations.lru_cache(scope='request',
-                           maxsize=1)  # Cache since getting identity is slow.
+    # Cache since getting identity is slow.
+    @aws_profile_aware_lru_cache(scope='request',
+                                 maxsize=_AWS_PROFILE_SCOPED_FUNC_CACHE_SIZE)
     def get_user_identities(cls) -> Optional[List[List[str]]]:
         """Returns a [UserId, Account] list that uniquely identifies the user.
 
@@ -1114,6 +1256,7 @@ class AWS(clouds.Cloud):
         # provider of the cluster to be launched in this function and make sure
         # the cluster will not be used for launching clusters in other clouds,
         # e.g. jobs controller.
+
         if self._current_identity_type(
         ) != AWSIdentityType.SHARED_CREDENTIALS_FILE:
             return {}
@@ -1123,7 +1266,8 @@ class AWS(clouds.Cloud):
             if os.path.exists(os.path.expanduser(f'~/.aws/{filename}'))
         }
 
-    @annotations.lru_cache(scope='request', maxsize=1)
+    @aws_profile_aware_lru_cache(scope='request',
+                                 maxsize=_AWS_PROFILE_SCOPED_FUNC_CACHE_SIZE)
     def can_credential_expire(self) -> bool:
         identity_type = self._current_identity_type()
         return (identity_type is not None and

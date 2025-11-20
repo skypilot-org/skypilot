@@ -1244,9 +1244,9 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum by (node) ((1 - (node_memory_MemAvailable_bytes{node=~\"$host\"} / node_memory_MemTotal_bytes{node=~\"$host\"})))",
+          "expr": "sum by (node, cluster) ((1 - (node_memory_MemAvailable_bytes{node=~\"$host\", cluster=~\"$cluster\"} / node_memory_MemTotal_bytes{node=~\"$host\", cluster=~\"$cluster\"})))",
           "instant": false,
-          "legendFormat": "__auto",
+          "legendFormat": "{{node}}",
           "range": true,
           "refId": "A"
         }
@@ -1349,9 +1349,9 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "(1 - avg by (node) (rate(node_cpu_seconds_total{mode=\"idle\", node=~\"$host\"}[2m])))",
+          "expr": "(1 - avg by (node, cluster) (rate(node_cpu_seconds_total{mode=\"idle\", node=~\"$host\", cluster=~\"$cluster\"}[2m])))",
           "instant": false,
-          "legendFormat": "__auto",
+          "legendFormat": "{{node}}",
           "range": true,
           "refId": "A"
         }

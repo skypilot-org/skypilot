@@ -188,7 +188,7 @@ class SkyServiceSpec:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Cannot specify `replica_policy` for cluster '
                                  'pool. Only `workers: <num>` is supported '
-                                 'for cluster pool now.')
+                                 'for pool now.')
 
         simplified_policy_section = config.get('replicas', None)
         workers_config = config.get('workers', None)
@@ -198,7 +198,7 @@ class SkyServiceSpec:
                                  ' Please use one of them.')
         if simplified_policy_section is not None and pool_config:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('Cannot specify `replicas` for cluster pool. '
+                raise ValueError('Cannot specify `replicas` for pool. '
                                  'Please use `workers` instead.')
         if simplified_policy_section is None:
             simplified_policy_section = workers_config
@@ -266,14 +266,13 @@ class SkyServiceSpec:
         return SkyServiceSpec(**service_config)
 
     @staticmethod
-    def from_yaml(yaml_path: str) -> 'SkyServiceSpec':
-        with open(os.path.expanduser(yaml_path), 'r', encoding='utf-8') as f:
-            config = yaml_utils.safe_load(f)
+    def from_yaml_str(yaml_str: str) -> 'SkyServiceSpec':
+        config = yaml_utils.safe_load(yaml_str)
 
         if isinstance(config, str):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('YAML loaded as str, not as dict. '
-                                 f'Is it correct? Path: {yaml_path}')
+                                 f'Is it correct? content:\n{yaml_str}')
 
         if config is None:
             config = {}
@@ -281,9 +280,15 @@ class SkyServiceSpec:
         if 'service' not in config:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Service YAML must have a "service" section. '
-                                 f'Is it correct? Path: {yaml_path}')
+                                 f'Is it correct? content:\n{yaml_str}')
 
         return SkyServiceSpec.from_yaml_config(config['service'])
+
+    @staticmethod
+    def from_yaml(yaml_path: str) -> 'SkyServiceSpec':
+        with open(os.path.expanduser(yaml_path), 'r', encoding='utf-8') as f:
+            yaml_content = f.read()
+        return SkyServiceSpec.from_yaml_str(yaml_content)
 
     def to_yaml_config(self) -> Dict[str, Any]:
         config: Dict[str, Any] = {}
@@ -506,3 +511,36 @@ class SkyServiceSpec:
         if not hasattr(self, '_pool'):
             return False
         return bool(self._pool)
+
+    def copy(self, **override) -> 'SkyServiceSpec':
+        return SkyServiceSpec(
+            readiness_path=override.pop('readiness_path', self._readiness_path),
+            initial_delay_seconds=override.pop('initial_delay_seconds',
+                                               self._initial_delay_seconds),
+            readiness_timeout_seconds=override.pop(
+                'readiness_timeout_seconds', self._readiness_timeout_seconds),
+            min_replicas=override.pop('min_replicas', self._min_replicas),
+            max_replicas=override.pop('max_replicas', self._max_replicas),
+            num_overprovision=override.pop('num_overprovision',
+                                           self._num_overprovision),
+            ports=override.pop('ports', self._ports),
+            target_qps_per_replica=override.pop('target_qps_per_replica',
+                                                self._target_qps_per_replica),
+            post_data=override.pop('post_data', self._post_data),
+            tls_credential=override.pop('tls_credential', self._tls_credential),
+            readiness_headers=override.pop('readiness_headers',
+                                           self._readiness_headers),
+            dynamic_ondemand_fallback=override.pop(
+                'dynamic_ondemand_fallback', self._dynamic_ondemand_fallback),
+            base_ondemand_fallback_replicas=override.pop(
+                'base_ondemand_fallback_replicas',
+                self._base_ondemand_fallback_replicas),
+            spot_placer=override.pop('spot_placer', self._spot_placer),
+            upscale_delay_seconds=override.pop('upscale_delay_seconds',
+                                               self._upscale_delay_seconds),
+            downscale_delay_seconds=override.pop('downscale_delay_seconds',
+                                                 self._downscale_delay_seconds),
+            load_balancing_policy=override.pop('load_balancing_policy',
+                                               self._load_balancing_policy),
+            pool=override.pop('pool', self._pool),
+        )

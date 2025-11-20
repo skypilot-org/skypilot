@@ -1,6 +1,6 @@
 # Serve Kimi-K2 with SkyPilot and vLLM.
 # Uses multi-node serving with tensor parallelism and pipeline parallelism.
-# 
+#
 # Usage:
 #   HF_TOKEN=xxx sky launch kimi-k2.yaml -c kimi-k2 --secret HF_TOKEN
 #   HF_TOKEN=xxx sky serve up kimi-k2.yaml -n kimi-k2 --secret HF_TOKEN
@@ -27,20 +27,11 @@ setup: |
 run: |
   echo "Starting Ray..."
   sudo chmod 777 -R /var/tmp
-  HEAD_IP=`echo "$SKYPILOT_NODE_IPS" | head -n1`
-  if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
-    ps aux | grep ray | grep 6379 &> /dev/null || ray start --head --disable-usage-stats --port 6379
-    sleep 5
-  else
-    sleep 5
-    ps aux | grep ray | grep 6379 &> /dev/null || ray start --address $HEAD_IP:6379 --disable-usage-stats
-    # Add sleep to after `ray start` to give ray enough time to daemonize
-    sleep 5
-  fi
 
-  sleep 10
-  echo "Ray cluster started"
-  ray status
+  # This script is only available on skypilot-nightly>=1.0.0.dev20251114
+  # If you are using an older version, you can copy and paste the script from:
+  # https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster
+  ~/sky_templates/ray/start_cluster
 
   echo 'Starting vllm api server...'
 

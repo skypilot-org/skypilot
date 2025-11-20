@@ -46,6 +46,9 @@ class SkyletEvent:
                       EVENT_CHECKING_INTERVAL_SECONDS))
         self._n = 0
 
+    def start(self):
+        pass
+
     def run(self):
         self._n = (self._n + 1) % self._event_interval
         if self._n % self._event_interval == 0:
@@ -73,6 +76,20 @@ class JobSchedulerEvent(SkyletEvent):
 class ManagedJobEvent(SkyletEvent):
     """Skylet event for updating and scheduling managed jobs."""
     EVENT_INTERVAL_SECONDS = 300
+
+    def start(self):
+        cpus_env_var = os.environ.get('SKYPILOT_POD_CPU_CORE_LIMIT')
+        if cpus_env_var is not None:
+            with open(os.path.expanduser(constants.CONTROLLER_K8S_CPU_FILE),
+                      'w',
+                      encoding='utf-8') as f:
+                f.write(cpus_env_var)
+        memory_env_var = os.environ.get('SKYPILOT_POD_MEMORY_GB_LIMIT')
+        if memory_env_var is not None:
+            with open(os.path.expanduser(constants.CONTROLLER_K8S_MEMORY_FILE),
+                      'w',
+                      encoding='utf-8') as f:
+                f.write(memory_env_var)
 
     def _run(self):
         if not os.path.exists(
@@ -284,8 +301,15 @@ class AutostopEvent(SkyletEvent):
         cluster_name_on_cloud = cluster_config['cluster_name']
         is_cluster_multinode = cluster_config['max_workers'] > 0
 
+        # Clear AWS credentials from environment to force boto3 to use IAM
+        # role attached to the instance (lowest priority in credential chain).
+        # This allows the cluster to stop/terminate itself using its IAM role.
         os.environ.pop('AWS_ACCESS_KEY_ID', None)
         os.environ.pop('AWS_SECRET_ACCESS_KEY', None)
+        os.environ.pop('AWS_SESSION_TOKEN', None)
+        # Point boto3 to /dev/null to skip reading credentials from files.
+        os.environ['AWS_SHARED_CREDENTIALS_FILE'] = '/dev/null'
+        os.environ['AWS_CONFIG_FILE'] = '/dev/null'
 
         # Stop the ray autoscaler to avoid scaling up, during
         # stopping/terminating of the cluster.

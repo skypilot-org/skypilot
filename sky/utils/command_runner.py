@@ -14,6 +14,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import log_lib
+from sky.utils import auth_utils
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import control_master_utils
@@ -649,18 +650,36 @@ class SSHCommandRunner(CommandRunner):
         self.disable_control_master = (
             disable_control_master or
             control_master_utils.should_disable_control_master())
+        # ensure the ssh key files are created from the database
+        auth_utils.create_ssh_key_files_from_db(ssh_private_key)
         if docker_user is not None:
             assert port is None or port == 22, (
                 f'port must be None or 22 for docker_user, got {port}.')
-            # Already checked in resources
-            assert ssh_proxy_command is None, (
-                'ssh_proxy_command is not supported when using docker.')
+            # When connecting via docker, the outer SSH hop points to the
+            # container's sshd (localhost). Preserve the user proxy for the
+            # inner hop that reaches the host VM, and clear the outer proxy to
+            # avoid forwarding localhost through the jump host.
+            inner_proxy_command = ssh_proxy_command
+            inner_proxy_port = port or 22
+            self._ssh_proxy_command = None
             self.ip = 'localhost'
             self.ssh_user = docker_user
             self.port = constants.DEFAULT_DOCKER_PORT
+            if inner_proxy_command is not None:
+                # Replace %h/%p placeholders with actual host values, since the
+                # final destination from the perspective of the user proxy is
+                # the host VM (ip, inner_proxy_port).
+                inner_proxy_command = inner_proxy_command.replace('%h', ip)
+                inner_proxy_command = inner_proxy_command.replace(
+                    '%p', str(inner_proxy_port))
             self._docker_ssh_proxy_command = lambda ssh: ' '.join(
-                ssh + ssh_options_list(ssh_private_key, None
-                                      ) + ['-W', '%h:%p', f'{ssh_user}@{ip}'])
+                ssh + ssh_options_list(ssh_private_key,
+                                       None,
+                                       ssh_proxy_command=inner_proxy_command,
+                                       port=inner_proxy_port,
+                                       disable_control_master=self.
+                                       disable_control_master) +
+                ['-W', '%h:%p', f'{ssh_user}@{ip}'])
         else:
             self.ip = ip
             self.ssh_user = ssh_user
@@ -945,8 +964,16 @@ class KubernetesCommandRunner(CommandRunner):
         kubectl_args = [
             '--pod-running-timeout', f'{connect_timeout}s', '-n', self.namespace
         ]
+        # The same logic to either set `--context` to the k8s context where
+        # the sky cluster is hosted, or `--kubeconfig` to /dev/null for
+        # in-cluster k8s is used below in the `run()` method.
         if self.context:
             kubectl_args += ['--context', self.context]
+        # If context is none, it means the cluster is hosted on in-cluster k8s.
+        # In this case, we need to set KUBECONFIG to /dev/null to avoid looking
+        # for the cluster in whatever active context is set in the kubeconfig.
+        else:
+            kubectl_args += ['--kubeconfig', '/dev/null']
         local_port, remote_port = port_forward[0]
         local_port_str = f'{local_port}' if local_port is not None else ''
 

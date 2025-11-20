@@ -453,6 +453,8 @@ class TestVolumeCore:
         mock_cloud.max_cluster_name_length.return_value = 63
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
+        mock_cloud.validate_region_zone.return_value = ('us-east-1',
+                                                        'us-east-1a')
         monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
                             mock_cloud_registry)
 
@@ -508,6 +510,8 @@ class TestVolumeCore:
         mock_cloud.max_cluster_name_length.return_value = 63
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
+        mock_cloud.validate_region_zone.return_value = ('us-east-1',
+                                                        'us-east-1a')
         monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
                             mock_cloud_registry)
 
@@ -547,6 +551,8 @@ class TestVolumeCore:
         mock_cloud.max_cluster_name_length.return_value = 63
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
+        mock_cloud.validate_region_zone.return_value = ('us-east-1',
+                                                        'us-east-1a')
         monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
                             mock_cloud_registry)
 
@@ -652,3 +658,74 @@ class TestVolumeCore:
         mock_filelock.assert_called()
         instance = mock_filelock.return_value
         assert instance.__enter__.called
+
+    def test_volume_apply_with_use_existing(self, monkeypatch):
+        """Test volume_apply with use_existing=True to register existing volume."""
+        # Mock cloud registry
+        mock_cloud = mock.MagicMock()
+        mock_cloud.max_cluster_name_length.return_value = 63
+        mock_cloud_registry = mock.MagicMock()
+        mock_cloud_registry.from_str.return_value = mock_cloud
+        mock_cloud.validate_region_zone.return_value = ('us-east-1',
+                                                        'us-east-1a')
+        mock_cloud.__str__.return_value = 'aws'
+        monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
+                            mock_cloud_registry)
+
+        # Mock common_utils.make_cluster_name_on_cloud
+        mock_make_name = mock.MagicMock(return_value='test-volume-123')
+        monkeypatch.setattr(
+            'sky.volumes.server.core.common_utils.make_cluster_name_on_cloud',
+            mock_make_name)
+
+        # Mock global_user_state
+        mock_get_volume_by_name = mock.MagicMock(
+            return_value=None)  # Volume doesn't exist
+        monkeypatch.setattr(global_user_state, 'get_volume_by_name',
+                            mock_get_volume_by_name)
+
+        mock_add_volume = mock.MagicMock()
+        monkeypatch.setattr(global_user_state, 'add_volume', mock_add_volume)
+
+        # Mock provision.apply_volume
+        mock_provision_apply = mock.MagicMock(return_value=mock.MagicMock())
+        monkeypatch.setattr(provision, 'apply_volume', mock_provision_apply)
+
+        # Mock filelock
+        mock_filelock = mock.MagicMock()
+        monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
+                            mock_filelock)
+
+        # Mock uuid (should not be called when use_existing=True)
+        mock_uuid = mock.MagicMock()
+        mock_uuid.uuid4.return_value = '1234567890abcdef'
+        monkeypatch.setattr('sky.volumes.server.core.uuid', mock_uuid)
+
+        # Call the function with use_existing=True
+        volume_name = 'my-existing-volume'
+        core.volume_apply(name=volume_name,
+                          volume_type='k8s-pvc',
+                          cloud='k8s',
+                          region='us-east-1',
+                          zone='us-east-1a',
+                          size='100Gi',
+                          config={'storage_class': 'gp2'},
+                          use_existing=True)
+
+        # Verify calls
+        mock_cloud_registry.from_str.assert_called_once_with('k8s')
+        mock_get_volume_by_name.assert_called_once_with(volume_name)
+        mock_provision_apply.assert_called_once()
+        mock_add_volume.assert_called_once()
+
+        # Verify that make_cluster_name_on_cloud was NOT called
+        # when use_existing=True
+        mock_make_name.assert_not_called()
+
+        # Verify that uuid.uuid4 was NOT called when use_existing=True
+        mock_uuid.uuid4.assert_not_called()
+
+        # Verify that the VolumeConfig was created with name_on_cloud = name
+        call_args = mock_provision_apply.call_args
+        config_arg = call_args[0][1]  # Second positional argument is the config
+        assert config_arg.name_on_cloud == volume_name

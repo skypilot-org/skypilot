@@ -7,9 +7,9 @@ from typing import Callable, Optional
 from sky import sky_logging
 from sky import skypilot_config
 from sky.server import constants as server_constants
+from sky.server.requests import request_names
 from sky.skylet import constants
 from sky.utils import annotations
-from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import subprocess_utils
@@ -28,7 +28,7 @@ class InternalRequestDaemon:
     """Internal daemon that runs an event in the background."""
 
     id: str
-    name: str
+    name: request_names.RequestName
     event_fn: Callable[[], None]
     interval: int
     start_fn: Optional[Callable[[], None]] = None
@@ -42,9 +42,11 @@ class InternalRequestDaemon:
         try:
             # Refresh config within the while loop.
             # Since this is a long running daemon,
-            # reload_config_for_new_request()
+            # reload_for_new_request()
             # is not called in between the event runs.
-            skypilot_config.safe_reload_config()
+            # We don't need to grab the lock here because each of the daemons
+            # run in their own process and thus have their own request context.
+            skypilot_config.reload_config()
             # Get the configured log level for the daemon inside the event loop
             # in case the log level changes after the API server is started.
             level_str = skypilot_config.get_nested(
@@ -110,13 +112,13 @@ class InternalRequestDaemon:
 def refresh_cluster_status_event():
     """Periodically refresh the cluster status."""
     # pylint: disable=import-outside-toplevel
-    from sky import core
+    from sky.backends import backend_utils
 
     logger.info('=== Refreshing cluster status ===')
     # This periodically refresh will hold the lock for the cluster being
     # refreshed, but it is OK because other operations will just wait for
     # the lock and get the just refreshed status without refreshing again.
-    core.status(refresh=common.StatusRefreshMode.FORCE, all_users=True)
+    backend_utils.refresh_cluster_records()
 
 
 def refresh_volume_status_event():
@@ -215,32 +217,33 @@ INTERNAL_REQUEST_DAEMONS = [
     # cluster being stopped or down when `sky status -r` is called.
     InternalRequestDaemon(
         id='skypilot-status-refresh-daemon',
-        name='status-refresh',
+        name=request_names.RequestName.REQUEST_DAEMON_STATUS_REFRESH,
         event_fn=refresh_cluster_status_event,
         interval=server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS,
         default_log_level='DEBUG'),
     # Volume status refresh daemon to update the volume status periodically.
     InternalRequestDaemon(
         id='skypilot-volume-status-refresh-daemon',
-        name='volume-refresh',
+        name=request_names.RequestName.REQUEST_DAEMON_VOLUME_REFRESH,
         event_fn=refresh_volume_status_event,
         interval=server_constants.VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS),
     InternalRequestDaemon(
         id='managed-job-status-refresh-daemon',
-        name='managed-job-status-refresh',
+        name=request_names.RequestName.
+        REQUEST_DAEMON_MANAGED_JOB_STATUS_REFRESH,
         event_fn=managed_job_status_refresh_event,
         start_fn=managed_job_status_start_event,
         interval=server_constants.MANAGED_JOB_REFRESH_DAEMON_INTERVAL_SECONDS,
         should_skip=should_skip_managed_job_status_refresh),
     InternalRequestDaemon(
         id='sky-serve-status-refresh-daemon',
-        name='sky-serve-status-refresh',
+        name=request_names.RequestName.REQUEST_DAEMON_SKY_SERVE_STATUS_REFRESH,
         event_fn=sky_serve_status_refresh_event,
         interval=server_constants.SKY_SERVE_REFRESH_DAEMON_INTERVAL_SECONDS,
         should_skip=should_skip_sky_serve_status_refresh),
     InternalRequestDaemon(
         id='pool-status-refresh-daemon',
-        name='pool-status-refresh',
+        name=request_names.RequestName.REQUEST_DAEMON_POOL_STATUS_REFRESH,
         event_fn=pool_status_refresh_event,
         interval=server_constants.SKY_SERVE_REFRESH_DAEMON_INTERVAL_SECONDS,
         should_skip=should_skip_pool_status_refresh),

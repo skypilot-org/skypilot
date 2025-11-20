@@ -16,23 +16,29 @@ Git and GitHub
 How to clone private GitHub repositories in a job?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Currently, SkyPilot does not support secret management or SSH agent forwarding to your sky clusters.
-You will need to use `file_mounts` to sync your Github SSH private key to your sky cluster.
+Use ``workdir`` to clone private GitHub repositories in a job.
 
 .. code-block:: yaml
 
   # your_task.yaml
-  file_mounts:
-    ~/.ssh/id_rsa: ~/.ssh/your-ssh-private-key
-
-  setup: |
-    chmod 600 ~/.ssh/id_rsa
-    git clone git@github.com:your-proj/your-repo.git
+  workdir:
+    url: git@github.com:your-proj/your-repo.git
+    ref: main
 
   run: |
     cd your-repo
     git pull
 
+**Authentication**:
+
+*For HTTPS URLs*: Set the ``GIT_TOKEN`` environment variable. SkyPilot will automatically use this token for authentication.
+
+*For SSH/SCP URLs*: SkyPilot will attempt to authenticate using SSH keys in the following order:
+
+1. SSH key specified by the ``GIT_SSH_KEY_PATH`` environment variable
+2. SSH key configured in ``~/.ssh/config`` for the git host
+3. Default SSH key at ``~/.ssh/id_rsa``
+4. Default SSH key at ``~/.ssh/id_ed25519`` (if ``~/.ssh/id_rsa`` does not exist)
 
 How to ensure my workdir's ``.git`` is synced up for managed spot jobs?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -145,33 +151,33 @@ By default, SkyPilot supports most global regions on AWS and only supports the U
 
 .. code-block:: bash
 
-  version=$(python -c 'import sky; print(sky.clouds.service_catalog.constants.CATALOG_SCHEMA_VERSION)')
+  version=$(python -c 'import sky; print( sky.skylet.constants.CATALOG_SCHEMA_VERSION)')
   mkdir -p ~/.sky/catalogs/${version}
   cd ~/.sky/catalogs/${version}
   # GCP
   pip install lxml
   # Fetch U.S. regions for GCP
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp
+  python -m sky.catalog.data_fetchers.fetch_gcp
   # Fetch the specified zones for GCP
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp --zones northamerica-northeast1-a us-east1-b us-east1-c
+  python -m sky.catalog.data_fetchers.fetch_gcp --zones northamerica-northeast1-a us-east1-b us-east1-c
   # Fetch U.S. zones for GCP, excluding the specified zones
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp --exclude us-east1-a us-east1-b
+  python -m sky.catalog.data_fetchers.fetch_gcp --exclude us-east1-a us-east1-b
   # Fetch all regions for GCP
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp --all-regions
+  python -m sky.catalog.data_fetchers.fetch_gcp --all-regions
   # Run in single-threaded mode. This is useful when multiple processes don't work well with the GCP client due to SSL issues.
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp --single-threaded
+  python -m sky.catalog.data_fetchers.fetch_gcp --single-threaded
 
   # Azure
   # Fetch U.S. regions for Azure
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_azure
+  python -m sky.catalog.data_fetchers.fetch_azure
   # Fetch all regions for Azure
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_azure --all-regions
+  python -m sky.catalog.data_fetchers.fetch_azure --all-regions
   # Run in single-threaded mode. This is useful when multiple processes don't work well with the Azure client due to SSL issues.
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_azure --single-threaded
+  python -m sky.catalog.data_fetchers.fetch_azure --single-threaded
   # Fetch the specified regions for Azure
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_azure --regions japaneast australiaeast uksouth
+  python -m sky.catalog.data_fetchers.fetch_azure --regions japaneast australiaeast uksouth
   # Fetch U.S. regions for Azure, excluding the specified regions
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_azure --exclude centralus eastus
+  python -m sky.catalog.data_fetchers.fetch_azure --exclude centralus eastus
 
 To make your managed spot jobs potentially use all global regions, please log into the spot controller with ``ssh sky-spot-controller-<hash>``
 (the full name can be found in ``sky status``), and run the commands above.

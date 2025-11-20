@@ -1,5 +1,7 @@
+import configparser
 import contextlib
 import enum
+import functools
 import inspect
 import json
 import os
@@ -8,8 +10,10 @@ import shlex
 import subprocess
 import sys
 import tempfile
-from typing import (Any, Dict, Generator, List, NamedTuple, Optional, Sequence,
-                    Set, Tuple)
+import traceback
+from types import MethodType
+from typing import (Any, BinaryIO, Callable, Dict, Generator, List, NamedTuple,
+                    Optional, Sequence, Set, Tuple, Union)
 import uuid
 
 import colorama
@@ -51,9 +55,9 @@ SCP_TYPE = '--infra scp'
 SCP_GPU_V100 = '--gpus V100-32GB'
 
 STORAGE_SETUP_COMMANDS = [
-    'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir',
-    r'touch ~/tmp-workdir/tmp\ file', r'touch ~/tmp-workdir/tmp\ file2',
-    'touch ~/tmp-workdir/foo',
+    'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir', 'rm -rf ~/empty-workdir',
+    'mkdir -p ~/empty-workdir', r'touch ~/tmp-workdir/tmp\ file',
+    r'touch ~/tmp-workdir/tmp\ file2', 'touch ~/tmp-workdir/foo',
     '[ ! -e ~/tmp-workdir/circle-link ] && ln -s ~/tmp-workdir/ ~/tmp-workdir/circle-link || true',
     'touch ~/.ssh/id_rsa.pub'
 ]
@@ -115,6 +119,12 @@ WAIT_FOR_API = (
     'sleep 1; done')
 
 SKY_API_RESTART = f'sky api stop || true && sky api start && {WAIT_FOR_API}'
+
+AWS_GET_INSTANCE_ID = (
+    '`aws ec2 describe-instances --region {region} --filters '
+    'Name=tag:ray-cluster-name,Values={name_on_cloud} '
+    '--query Reservations[].Instances[].InstanceId '
+    '--output text`')
 
 # Cluster functions
 _ALL_JOB_STATUSES = "|".join([status.value for status in sky.JobStatus])
@@ -323,12 +333,19 @@ class Test(NamedTuple):
     name: str
     # Each command is executed serially.  If any failed, the remaining commands
     # are not run and the test is treated as failed.
-    commands: List[str]
+    # Command can either be:
+    # - bash script (str), will be called as a subprocess via Popen.
+    # - a python Callable, will be executed directly. This is useful for testing
+    #   our python SDK in smoke test. The Callable can be generator to yield logs
+    #   that reflects current test status.
+    commands: List[Union[str, Callable[[], None]]]
     teardown: Optional[str] = None
     # Timeout for each command in seconds.
     timeout: int = DEFAULT_CMD_TIMEOUT
     # Environment variables to set for each command.
     env: Optional[Dict[str, str]] = None
+    # Config dictionary to override the skypilot config.
+    config_dict: Optional[Dict[str, Any]] = None
 
     def echo(self, message: str):
         # pytest's xdist plugin captures stdout; print to stderr so that the
@@ -425,6 +442,8 @@ def override_sky_config(
         env_dict[constants.SKY_API_SERVER_URL_ENV_VAR] = endpoint
         # Clear the get_server_url cache
         server_common.get_server_url.cache_clear()
+        # Clear the is_api_server_local cache
+        server_common.is_api_server_local.cache_clear()
         echo(
             f'Overriding API server endpoint: '
             f'{override_sky_config_dict.get_nested(("api_server", "endpoint"), "UNKNOWN")}'
@@ -471,10 +490,62 @@ def override_sky_config(
     temp_config_file.flush()
     # Update the environment variable to use the temporary file
     env_dict[skypilot_config.ENV_VAR_GLOBAL_CONFIG] = temp_config_file.name
+    if (env_before_override is not None and
+            skypilot_config.ENV_VAR_GLOBAL_CONFIG in env_before_override):
+        env_dict[skypilot_config.ENV_VAR_GLOBAL_CONFIG +
+                 '_ORIGINAL'] = env_before_override[
+                     skypilot_config.ENV_VAR_GLOBAL_CONFIG]
     yield temp_config_file
     if env_before_override is not None:
         os.environ.clear()
         os.environ.update(env_before_override)
+
+
+def _resolve_callable(func):
+    seen = set()
+    while True:
+        if id(func) in seen:
+            break
+        seen.add(id(func))
+        if isinstance(func, functools.partial):
+            func = func.func
+            continue
+        if isinstance(func, MethodType):
+            func = func.__func__
+            continue
+        if (hasattr(func, '__call__') and not inspect.isfunction(func) and
+                not inspect.ismethod(func)):
+            func = func.__call__
+            continue
+        break
+    return func
+
+
+def get_callable_source(func):
+    target = _resolve_callable(func)
+    try:
+        src = inspect.getsource(target)
+    except (OSError, TypeError, IOError):
+        return None, None, None
+    try:
+        file = inspect.getsourcefile(target) or inspect.getfile(target)
+    except Exception:
+        file = None
+    try:
+        _, lineno = inspect.getsourcelines(target)
+    except Exception:
+        lineno = None
+    return file, lineno, src
+
+
+def ensure_iterable_result(func):
+    result = func()
+    if inspect.isgenerator(result):
+        return result
+    elif result is None:
+        return []
+    else:
+        return [result]
 
 
 def run_one_test(test: Test, check_sky_status: bool = True) -> None:
@@ -502,8 +573,24 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
     if test.env:
         env_dict.update(test.env)
 
-    with override_sky_config(test, env_dict):
+    with override_sky_config(test, env_dict, config_dict=test.config_dict):
         for command in test.commands:
+            if callable(command):
+                try:
+                    write(f'+ callable: {command!r}\n')
+                    flush()
+                    for output in ensure_iterable_result(command):
+                        write(str(output) + '\n')
+                        flush()
+                except Exception as e:
+                    file, lineno, src = get_callable_source(command)
+                    error_in_callable = f'Error executing callable command: {e} at {file}:{lineno}\ncode: {src}\ntraceback: {traceback.format_exc()}'
+                    test.echo(error_in_callable)
+                    write(error_in_callable + '\n')
+                    flush()
+                    proc.returncode = 1
+                    break
+                continue
             write(f'+ {command}\n')
             flush()
             proc = subprocess.Popen(
@@ -545,13 +632,28 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
             test.echo(msg)
             write(msg)
 
+        if proc.returncode and not is_remote_server_test():
+            test.echo('=== Sky API Server Log (last 100 lines) ===')
+            # Read the log file directly and echo it
+            log_path = os.path.expanduser('~/.sky/api_server/server.log')
+            if os.path.exists(log_path):
+                with open(log_path, 'r') as f:
+                    lines = f.readlines()
+                    # Get last 100 lines
+                    last_lines = lines[-100:] if len(lines) > 100 else lines
+                    for line in last_lines:
+                        test.echo(line.rstrip())
+            else:
+                test.echo(f'Server log file not found: {log_path}')
+            test.echo('=== End of Sky API Server Log ===')
+
         if (proc.returncode == 0 or
                 pytest.terminate_on_failure) and test.teardown is not None:
             subprocess_utils.run(
                 test.teardown,
                 stdout=subprocess_out,
                 stderr=subprocess.STDOUT,
-                timeout=10 * 60,  # 10 mins
+                timeout=20 * 60,  # 20 mins
                 shell=True,
                 env=env_dict,
             )
@@ -644,6 +746,8 @@ VALIDATE_LAUNCH_OUTPUT = (
     # ├── To submit a job:            sky exec test yaml_file
     # ├── To stop the cluster:        sky stop test
     # └── To teardown the cluster:    sky down test
+    # Reset s to remove any line with FutureWarning
+    's=$(echo "$s" | grep -v "FutureWarning") && '
     'echo "$s" && echo "==Validating launching==" && '
     'echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
     'echo "$s" && echo "==Validating setup output==" && '
@@ -662,6 +766,12 @@ VALIDATE_LAUNCH_OUTPUT = (
     'echo "$s" | grep -A 5 "Job finished (status: SUCCEEDED)" | '
     'grep "Job ID:" && '
     'echo "$s" | grep -A 1 "Useful Commands" | grep "Job ID:"')
+
+VALIDATE_LAUNCH_OUTPUT_NO_PG_CONN_CLOSED_ERROR = (
+    VALIDATE_LAUNCH_OUTPUT +
+    ' && echo "==Validating no pg conn closed error==" && '
+    '! echo "$s" | grep -i "psycopg2.InterfaceError: connection already closed"'
+)
 
 _CLOUD_CMD_CLUSTER_NAME_SUFFIX = '-cloud-cmd'
 
@@ -741,6 +851,39 @@ def down_cluster_for_cloud_cmd(test_cluster_name: str,
         return 'true'
     else:
         return f'sky down -y {cluster_name}'
+
+
+def extract_default_aws_credentials():
+    """Extract default AWS credentials from credentials file or environment variables.
+
+    Returns:
+        Tuple of (access_key_id, secret_access_key) or (None, None) if not found.
+    """
+    # Try environment variables first
+    access_key = os.environ.get('AWS_ACCESS_KEY_ID')
+    secret_key = os.environ.get('AWS_SECRET_ACCESS_KEY')
+    if access_key and secret_key:
+        return access_key, secret_key
+
+    # Try credentials file
+    credentials_path = os.path.expanduser('~/.aws/credentials')
+    if os.path.exists(credentials_path):
+        parser = configparser.ConfigParser()
+        try:
+            parser.read(credentials_path)
+            if 'default' in parser.sections():
+                access_key = parser.get('default',
+                                        'aws_access_key_id',
+                                        fallback=None)
+                secret_key = parser.get('default',
+                                        'aws_secret_access_key',
+                                        fallback=None)
+                if access_key and secret_key:
+                    return access_key.strip(), secret_key.strip()
+        except configparser.Error:
+            pass
+
+    return None, None
 
 
 def _increase_initial_delay_seconds(original_cmd: str,
@@ -830,9 +973,22 @@ def get_api_server_url() -> str:
     return server_common.get_server_url()
 
 
+def get_metrics_server_url() -> str:
+    """Get the metrics server URL in the test environment."""
+    if is_remote_server_test():
+        return docker_utils.get_metrics_endpoint_inside_docker()
+    return 'http://127.0.0.1:9090'
+
+
 def is_non_docker_remote_api_server() -> bool:
     if is_remote_server_test():
         return 'host.docker.internal' not in get_api_server_url()
+    return False
+
+
+def is_docker_remote_api_server() -> bool:
+    if is_remote_server_test():
+        return 'host.docker.internal' in get_api_server_url()
     return False
 
 
@@ -994,3 +1150,14 @@ def get_enabled_cloud_storages() -> List[clouds.Cloud]:
                     pass
         return enabled_clouds
     return [clouds.AWS()]
+
+
+def write_blob(file: BinaryIO, total_size: int):
+    """Create a large file."""
+    chunk_size = 1024 * 1024  # 1MB chunks
+    for _ in range(total_size // chunk_size):
+        file.write(os.urandom(chunk_size))
+    remaining_size = total_size % chunk_size
+    if remaining_size > 0:
+        file.write(os.urandom(remaining_size))
+    file.flush()

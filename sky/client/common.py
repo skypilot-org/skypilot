@@ -14,9 +14,6 @@ from typing import Dict, Generator, Iterable
 import uuid
 import zipfile
 
-import colorama
-import filelock
-
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.client import service_account_auth
@@ -47,8 +44,10 @@ logger = sky_logging.init_logger(__name__)
 _DOWNLOAD_CHUNK_BYTES = 8192
 # The chunk size for the zip file to be uploaded to the API server. We split
 # the zip file into chunks to avoid network issues for large request body that
-# can be caused by NGINX's client_max_body_size.
-_UPLOAD_CHUNK_BYTES = 512 * 1024 * 1024
+# can be caused by NGINX's client_max_body_size or Cloudflare's upload limit.
+# As of 09/25/2025, the upload limit for Cloudflare's free plan is 100MiB:
+# https://developers.cloudflare.com/support/troubleshooting/http-status-codes/4xx-client-error/error-413/
+_UPLOAD_CHUNK_BYTES = 100 * 1024 * 1024
 
 FILE_UPLOAD_LOGS_DIR = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                     'file_uploads')
@@ -84,6 +83,14 @@ def download_logs_from_api_server(
             remote_machine_prefix,
             local_machine_prefix) for remote_path in paths_on_api_server
     }
+    # Check if any local log directories already exist before downloading
+    for local_path in remote2local_path_dict.values():
+        expanded_path = os.path.expanduser(local_path)
+        if os.path.exists(expanded_path):
+            logger.warning(
+                f'Log directory {local_path} already exists. '
+                f'This may overwrite logs from a previous cluster with the '
+                f'same name and job ID.')
     body = payloads.DownloadBody(folder_paths=list(paths_on_api_server),)
     response = server_common.make_authenticated_request(
         'POST',
@@ -407,29 +414,3 @@ def local_api_server_running(kill: bool = False) -> bool:
                     parent_pids=[process.pid], force=True)
             return True
     return False
-
-
-def kill_api_server() -> None:
-    # We hold the lock to prevent a new API server from starting up while we
-    # are killing the old one.
-    lock = os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)
-
-    try:
-        # Force unlock.
-        os.remove(lock)
-    except FileNotFoundError:
-        # This is preferred over `if os.path.exists(lock)` as it is more atomic.
-        pass
-
-    with filelock.FileLock(lock):
-        found = local_api_server_running(kill=True)
-
-        if not found:
-            logger.info('SkyPilot API server is not running.')
-            return
-
-        # Remove the database for requests.
-        server_common.clear_local_api_server_database()
-
-        logger.info(f'{colorama.Fore.GREEN}SkyPilot API server stopped.'
-                    f'{colorama.Style.RESET_ALL}')

@@ -3,11 +3,11 @@ import os
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from sky import authentication as auth
 from sky import exceptions
 from sky import sky_logging
 from sky.provision import common
 from sky.provision.fluidstack import fluidstack_utils as utils
+from sky.utils import auth_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import status_lib
@@ -27,7 +27,7 @@ logger = sky_logging.init_logger(__name__)
 def get_internal_ip(node_info: Dict[str, Any]) -> None:
     node_info['internal_ip'] = node_info['ip_address']
 
-    private_key_path, _ = auth.get_or_generate_keys()
+    private_key_path, _ = auth_utils.get_or_generate_keys()
     runner = command_runner.SSHCommandRunner(
         (node_info['ip_address'], 22),
         ssh_user='ubuntu',
@@ -78,10 +78,10 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
     return head_instance_id
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
-
+    del cluster_name  # unused
     pending_status = ['pending', 'provisioning']
     while True:
         instances = _filter_instances(cluster_name_on_cloud, pending_status)
@@ -291,9 +291,10 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
+    retry_if_missing: bool = False,
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
-    del cluster_name  # unused
+    del cluster_name, retry_if_missing  # unused
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     instances = _filter_instances(cluster_name_on_cloud, None)
     instances = _filter_instances(cluster_name_on_cloud, None)

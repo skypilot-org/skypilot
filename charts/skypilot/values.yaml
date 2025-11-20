@@ -50,8 +50,10 @@ apiService:
   terminationGracePeriodSeconds: 60
 
   # Set ~/.sky/config.yaml content on the API server
-  # Updating this value will not restart the API server but it will take tens of seconds to take effect on the API server.
-  # You can verify config updates on the server by exec-ing into the pod and running `cat ~/.sky/config.yaml`
+  # This value is IGNORED during an helm upgrade if there is an existing config
+  # due to the potential accidental loss of existing config. Use the SkyPilot dashboard to update the config.
+  # If remote database is configured (either via dbConnectionSecretName or dbConnectionString), config must be null.
+  # In such case, you can add the config via the dashboard once the API server is deployed.
   # Refer to https://docs.skypilot.co/en/latest/reference/config.html for more details.
   # @schema type: [string, null]
   config: null
@@ -76,6 +78,7 @@ apiService:
   # If configured, SkyPilot uses the external database to store states instead of the SQLite database.
   # Refer to https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html#optional-back-the-api-server-with-a-persistent-database and https://docs.skypilot.co/en/latest/reference/architecture/state.html for more details.
   # If either this field or dbConnectionString is set, config must be null.
+  # To specify a config, use the dashboard once the API server is deployed.
   # @schema type: [string, null]
   dbConnectionSecretName: null
   # Set the DB connection string directly. This is a shortcut for setting the DB connection string in a secret.
@@ -149,6 +152,21 @@ apiService:
 
   # [Internal] Enable developer mode for SkyPilot
   skypilotDev: false
+
+  # Configure how to manage API server logs
+  logs:
+    retention:
+      # Whether to enable log retention
+      enabled: true
+      # The size of the log file to retain
+      size: 10M
+
+  # Image pull secrets for the API server pod
+  # @schema type: [array, null]; item: object
+  imagePullSecrets: null
+  # Image pull policy for the API server pod
+  # @schema type: [string, null]
+  imagePullPolicy: Always
 
 # Authentication configuration for the API server
 # Refer to https://docs.skypilot.co/en/latest/reference/auth.html for more details.
@@ -347,6 +365,9 @@ ingress-nginx:
         service.beta.kubernetes.io/port_443_health-probe_protocol: "TCP"
         service.beta.kubernetes.io/port_80_health-probe_protocol: "TCP"
     config:
+      use-gzip: "true"
+      gzip-level: 5
+      gzip-min-length: 1000
       http-snippet: |
         map $http_upgrade $connection_upgrade {
             default upgrade;
@@ -441,10 +462,16 @@ awsCredentials:
   enabled: false
   # Name of the secret containing the aws credentials. Only used if enabled is true.
   awsSecretName: aws-credentials
+
+  # Set to true to mount a complete AWS credentials file with multiple profiles.
+  # This is required for using different AWS profiles with different workspaces.
+  useCredentialsFile: false
+
   # Key name used to set AWS_ACCESS_KEY_ID.
   accessKeyIdKeyName: aws_access_key_id
   # Key name used to set AWS_SECRET_ACCESS_KEY.
   secretAccessKeyKeyName: aws_secret_access_key
+
 
 gcpCredentials:
   enabled: false
@@ -508,6 +535,11 @@ runtimeClassName:
 # Refer to https://github.com/prometheus-community/helm-charts/blob/main/charts/prometheus/values.yaml for available values.
 # @schema skipProperties:true
 prometheus:
+  # By default, the API server will be annotated with well-known annotations (prometheus.io/*) to be discovered by prometheus.
+  # Set this to true will remove the well-known annotations and use a dedicated scrape config instead, which can be helpful when
+  # you do not want the API server to be discovered by other prometheus instances.
+  # @schema type: [boolean, null]
+  useDedicatedScrapeConfig: false
   enabled: false
   # Keep the installation minimal by default. If you want to monitor more resources other than the API server,
   # it is recommended to install and manage prometheus separately.
@@ -522,15 +554,58 @@ prometheus:
     - job_name: 'skypilot-api-server-gpu-metrics'
       static_configs:
         # Use the API service created by this Helm chart
-        - targets: ['{{ .Release.Name }}-api-service.{{ .Release.Namespace }}.svc.cluster.local:80']
+        - targets: ['{{ .Release.Name }}-api-service.{{ .Release.Namespace }}.svc.cluster.local:9090']
       metrics_path: '/gpu-metrics'
       scrape_interval: 15s
       scrape_timeout: 10s
       # Add labels to identify these metrics
+      metric_relabel_configs:
+      - action: replace
+        source_labels: [node, Hostname]
+        regex: ;(.+)
+        target_label: node
+        replacement: $1
+    {{ if .Values.useDedicatedScrapeConfig }}
+    - job_name: 'skypilot-api-server-metrics'
+      honor_labels: true
+      kubernetes_sd_configs:
+        - role: pod
+          namespaces:
+            names:
+            - '{{ .Release.Namespace }}'
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_annotation_skypilot_co_scrape]
+          action: keep
+          regex: true
+        - source_labels: [__meta_kubernetes_pod_annotation_skypilot_co_path]
+          action: replace
+          target_label: __metrics_path__
+          regex: (.+)
+        - source_labels: [__meta_kubernetes_pod_annotation_skypilot_co_port, __meta_kubernetes_pod_ip]
+          action: replace
+          regex: (\d+);((([0-9]+?)(\.|$)){4})
+          replacement: $2:$1
+          target_label: __address__
+        - action: labelmap
+          regex: __meta_kubernetes_pod_label_(.+)
+        - source_labels: [__meta_kubernetes_namespace]
+          action: replace
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          action: replace
+          target_label: pod
+        - source_labels: [__meta_kubernetes_pod_phase]
+          regex: Pending|Succeeded|Failed|Completed
+          action: drop
+        - source_labels: [__meta_kubernetes_pod_node_name]
+          action: replace
+          target_label: node
+    {{ end}}
   kube-state-metrics:
     enabled: true
+    # TODO (kyuds): remove skypilot-cluster label in v0.11.0; deprecated in favor of skypilot-cluster-name.
     metricLabelsAllowlist:
-      - pods=[skypilot-cluster]
+      - pods=[skypilot-cluster,skypilot-cluster-name]
   prometheus-node-exporter:
     enabled: false
   prometheus-pushgateway:
@@ -543,6 +618,11 @@ prometheus:
 # @schema skipProperties:true
 grafana:
   enabled: false
+  # Use Recreate strategy to avoid PVC mount conflicts during upgrades
+  # Since Grafana uses ReadWriteOnce PVC, RollingUpdate would fail when
+  # trying to mount the same PVC on two pods simultaneously
+  deploymentStrategy:
+    type: Recreate
   persistence:
     enabled: true
     size: 10Gi
@@ -561,7 +641,10 @@ grafana:
     enableAuthedIngress: true
     path: "/grafana"
     ingressClassName: nginx
-    hosts: null
+    # @schema type: [array]; item: string
+    # If you set hosts to null, the Grafana Helm chart will use its default value ([chart-example.local]).
+    # To match all hosts, set hosts to an empty array ([]).
+    hosts: []
   grafana.ini:
     server:
       domain: localhost

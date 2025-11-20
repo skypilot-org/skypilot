@@ -38,14 +38,21 @@ and look in for the logs for some output like:
         http://127.0.0.1:8888/lab?token=<token>
 
 
-To get the public IP address of the head node of the cluster, run :code:`sky status --ip jupyter`:
+To get the endpoint URL for the exposed port, run :code:`sky status --endpoint 8888 jupyter`:
 
 .. code-block:: console
 
-    $ sky status --ip jupyter
-    35.223.97.21
+    $ sky status --endpoint 8888 jupyter
+    http://35.223.97.21:8888
 
-In the jupyter server URL, replace :code:`127.0.0.1` with the public IP from :code:`sky status --ip jupyter` and open the URL in your browser.
+You can then directly open this URL in your browser, replacing the token with the one from the jupyter server logs.
+
+Alternatively, you can view all exposed endpoints at once using :code:`sky status --endpoints jupyter`:
+
+.. code-block:: console
+
+    $ sky status --endpoints jupyter
+    8888: http://35.223.97.21:8888
 
 If you want to expose multiple ports, you can specify a list of ports or port ranges in the :code:`resources` section:
 
@@ -57,7 +64,7 @@ If you want to expose multiple ports, you can specify a list of ports or port ra
         - 10020-10040
         - 20000-20010
 
-SkyPilot also support opening ports through the CLI:
+SkyPilot also supports opening ports through the CLI:
 
 .. code-block:: console
 

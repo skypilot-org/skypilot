@@ -56,6 +56,13 @@ import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { NonCapitalizedTooltip } from '@/components/utils';
 import { Card } from '@/components/ui/card';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 // Set the refresh interval to align with other pages
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
@@ -216,8 +223,8 @@ export function InfrastructureSection({
                       // Get workspace information for this context
                       const workspaces = contextWorkspaceMap[context] || [];
                       const workspaceDisplay =
-                        workspaces.length > 0
-                          ? ` (${workspaces.join(', ')})`
+                        workspaces.length > 1
+                          ? ` (workspaces: ${workspaces.join(', ')})`
                           : '';
 
                       return (
@@ -309,22 +316,7 @@ export function InfrastructureSection({
                                 <CircularProgress size={16} />
                               </div>
                             ) : (
-                              <span
-                                className={
-                                  totalGpus === 0 && nodes.length === 0
-                                    ? 'text-gray-400'
-                                    : ''
-                                }
-                                title={
-                                  totalGpus === 0 && nodes.length === 0
-                                    ? 'Context may be unavailable or timed out'
-                                    : ''
-                                }
-                              >
-                                {totalGpus === 0 && nodes.length === 0
-                                  ? '0*'
-                                  : totalGpus}
-                              </span>
+                              totalGpus
                             )}
                           </td>
                         </tr>
@@ -1770,8 +1762,14 @@ export function GPUs() {
   const fetchManagedJobsData = async (forceRefresh) => {
     try {
       const jobsData = forceRefresh
-        ? await getManagedJobs({ allUsers: true })
-        : await dashboardCache.get(getManagedJobs, [{ allUsers: true }]);
+        ? await getManagedJobs({
+            allUsers: true,
+            skipFinished: true,
+            fields: ['cloud', 'region'],
+          })
+        : await dashboardCache.get(getManagedJobs, [
+            { allUsers: true, skipFinished: true, fields: ['cloud', 'region'] },
+          ]);
       const jobs = jobsData?.jobs || [];
       setSshAndKubeJobsData(await getContextJobs(jobs));
       setSshAndKubeJobsDataLoading(false);
@@ -1897,13 +1895,17 @@ export function GPUs() {
     };
 
     initializeData();
-  }, [fetchData]); // Include fetchData dependency
+  }, []);
 
   // Effect for interval refresh.
   useEffect(() => {
     let isCurrent = true;
     const interval = setInterval(() => {
-      if (isCurrent && refreshDataRef.current) {
+      if (
+        isCurrent &&
+        refreshDataRef.current &&
+        window.document.visibilityState === 'visible'
+      ) {
         // Calls the latest fetchData from the ref, with showLoadingIndicators: false
         refreshDataRef.current({ showLoadingIndicators: false });
       }
@@ -1932,7 +1934,9 @@ export function GPUs() {
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getClusters);
-    dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
+    dashboardCache.invalidate(getManagedJobs, [
+      { allUsers: true, skipFinished: true, fields: ['cloud', 'region'] },
+    ]);
     dashboardCache.invalidate(getWorkspaceInfrastructure);
     dashboardCache.invalidate(getCloudInfrastructure, [false]);
     dashboardCache.invalidate(getSSHNodePools);
@@ -1999,6 +2003,51 @@ export function GPUs() {
     },
     [selectedWorkspace, contextWorkspaceMap]
   );
+
+  // Get enabled clouds for the selected workspace
+  const workspaceEnabledClouds = React.useMemo(() => {
+    if (selectedWorkspace === 'all') {
+      // Return all unique clouds across all workspaces
+      const allCloudsSet = new Set();
+      Object.values(workspaceInfrastructure).forEach((wsData) => {
+        if (wsData.clouds && Array.isArray(wsData.clouds)) {
+          wsData.clouds.forEach((cloud) => {
+            // Extract base cloud name (e.g., 'aws' from 'aws', 'kubernetes' from 'kubernetes/context')
+            const baseCloud = cloud.toLowerCase().split('/')[0];
+            allCloudsSet.add(baseCloud);
+          });
+        }
+      });
+      return Array.from(allCloudsSet);
+    } else {
+      // Return clouds for the selected workspace only
+      const wsData = workspaceInfrastructure[selectedWorkspace];
+      if (!wsData || !wsData.clouds || !Array.isArray(wsData.clouds)) {
+        return [];
+      }
+      const cloudsSet = new Set();
+      wsData.clouds.forEach((cloud) => {
+        const baseCloud = cloud.toLowerCase().split('/')[0];
+        cloudsSet.add(baseCloud);
+      });
+      return Array.from(cloudsSet);
+    }
+  }, [selectedWorkspace, workspaceInfrastructure]);
+
+  // Filter cloud infrastructure data based on selected workspace
+  const filteredCloudInfraData = React.useMemo(() => {
+    if (!cloudInfraData || cloudInfraData.length === 0) {
+      return [];
+    }
+    return cloudInfraData.filter((cloud) => {
+      return workspaceEnabledClouds.includes(cloud.name.toLowerCase());
+    });
+  }, [cloudInfraData, workspaceEnabledClouds]);
+
+  // Calculate enabled clouds count for the selected workspace
+  const filteredEnabledCloudsCount = React.useMemo(() => {
+    return filteredCloudInfraData.length;
+  }, [filteredCloudInfraData]);
 
   // Separate SSH contexts from Kubernetes contexts using allKubeContextNames
   const sshContexts = React.useMemo(() => {
@@ -2079,14 +2128,21 @@ export function GPUs() {
   const handleContextClick = (context) => {
     setSelectedContext(context);
     // Use push instead of replace for proper browser history
-    router.push(`/infra/${encodeURIComponent(context)}`);
+    const targetPath = `/infra/${encodeURIComponent(context)}`;
+    // Only navigate if we're not already on the target path
+    if (router.asPath !== targetPath) {
+      router.push(targetPath);
+    }
   };
 
   // Handler to go back to main view
   const handleBackClick = () => {
     setSelectedContext(null);
     // Use push instead of replace for proper browser history
-    router.push('/infra');
+    // Only navigate if we're not already on the infra page
+    if (router.asPath !== '/infra') {
+      router.push('/infra');
+    }
   };
 
   // Render context details
@@ -2154,12 +2210,14 @@ export function GPUs() {
           <div className="flex items-center mb-4">
             <h3 className="text-lg font-semibold">Cloud</h3>
             <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
-              {enabledClouds} of {totalClouds} enabled
+              {filteredEnabledCloudsCount} of {totalClouds} enabled
             </span>
           </div>
-          {!cloudInfraData || cloudInfraData.length === 0 ? (
+          {!filteredCloudInfraData || filteredCloudInfraData.length === 0 ? (
             <p className="text-sm text-gray-500">
-              No enabled clouds available.
+              {selectedWorkspace === 'all'
+                ? 'No enabled clouds available.'
+                : `No enabled clouds for workspace "${selectedWorkspace}".`}
             </p>
           ) : (
             <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
@@ -2178,7 +2236,7 @@ export function GPUs() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {cloudInfraData.map((cloud) => {
+                  {filteredCloudInfraData.map((cloud) => {
                     // Check if cloud data is complete
                     const hasCompleteData =
                       cloudDataLoaded &&
@@ -2411,25 +2469,25 @@ export function GPUs() {
           {/* Workspace Selector */}
           {availableWorkspaces.length > 0 && (
             <div className="flex items-center mr-4">
-              <label
-                htmlFor="workspace-selector"
-                className="text-sm font-medium text-gray-700 mr-2"
-              >
+              <label className="text-sm font-medium text-gray-700 mr-2">
                 Workspace:
               </label>
-              <select
-                id="workspace-selector"
+              <Select
                 value={selectedWorkspace}
-                onChange={(e) => setSelectedWorkspace(e.target.value)}
-                className="px-3 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-sky-blue focus:border-transparent"
+                onValueChange={setSelectedWorkspace}
               >
-                <option value="all">All Workspaces</option>
-                {availableWorkspaces.map((workspace) => (
-                  <option key={workspace} value={workspace}>
-                    {workspace}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger className="w-40 h-8 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Workspaces</SelectItem>
+                  {availableWorkspaces.map((workspace) => (
+                    <SelectItem key={workspace} value={workspace}>
+                      {workspace}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           )}
 

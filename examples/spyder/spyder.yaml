@@ -1,0 +1,11 @@
+resources:
+  cpus: 8
+  memory: 16+
+
+setup: |
+  conda create -c conda-forge -n spyder-env -y spyder numpy scipy pandas matplotlib sympy cython
+
+run: |
+  conda activate spyder-env
+  python -m spyder_kernels.console
+  
