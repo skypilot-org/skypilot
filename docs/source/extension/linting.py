@@ -88,6 +88,7 @@ MULTI_WORD_TERMS = {
     'Prime Intellect',
     'Cloudflare Zero Trust',
     'CoreWeave Object Storage',
+    'Prometheus Operator',
 }
 
 
