@@ -155,7 +155,7 @@ class FileLock(DistributedLock):
         common_utils.remove_file_if_exists(self.lock_path)
 
     def is_locked(self) -> bool:
-        return self._filelock.is_locked()
+        return self._filelock.is_locked
 
 
 class PostgresLock(DistributedLock):
