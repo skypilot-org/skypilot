@@ -60,7 +60,8 @@ spec:
   {{- if $useNewIngressClass }}
   ingressClassName: {{ .Values.ingress.ingressClassName }}
   {{- end }}
-  {{- if .Values.ingress.tls.enabled | default false }}
+  {{- $tls := .Values.ingress.tls | default dict }}
+  {{- if $tls.enabled | default false }}
   tls:
   - hosts:
     - {{ .Values.ingress.host }}

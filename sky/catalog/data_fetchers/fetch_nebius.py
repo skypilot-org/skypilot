@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import decimal
 import json
 import logging
+import os
 import re
 from typing import Any, Dict, List, Optional
 
@@ -22,8 +23,6 @@ TIMEOUT = 10
 PARENT_ID_TEMPLATE = 'project-{}public-images'
 ACCELERATOR_MANUFACTURER = 'NVIDIA'
 
-VRAM = {'L40S': 49152, 'H100': 81920, 'H200': 144384, 'B200': 184320}
-
 
 @dataclass
 class PresetInfo:
@@ -38,6 +37,7 @@ class PresetInfo:
         platform_name (str): The name of the platform the preset belongs to.
         gpu (int): The number of GPUs in the preset.
         vcpu (int): The number of virtual CPUs in the preset.
+        gpu_memory_gibibytes (int): size of gpu memory in GiB.
         memory_gib (int): The amount of memory in GiB in the preset.
         accelerator_manufacturer (str | None): The manufacturer of the
             accelerator (e.g., "NVIDIA"), or None if no accelerator.
@@ -54,6 +54,7 @@ class PresetInfo:
     platform_name: str
     gpu: int
     vcpu: int
+    gpu_memory_gibibytes: int
     memory_gib: int
     accelerator_manufacturer: Optional[str]
     accelerator_name: Optional[str]
@@ -157,6 +158,7 @@ def _estimate_platforms(platforms: List[Any], parent_id: str,
                 platform_name=platform_name,
                 gpu=preset.resources.gpu_count or 0,
                 vcpu=preset.resources.vcpu_count,
+                gpu_memory_gibibytes=platform.spec.gpu_memory_gibibytes,
                 memory_gib=preset.resources.memory_gibibytes,
                 accelerator_manufacturer=ACCELERATOR_MANUFACTURER
                 if platform_name.startswith('gpu-') else '',
@@ -178,6 +180,7 @@ def _write_preset_prices(presets: List[PresetInfo], output_file: str) -> None:
         presets (List[PresetInfo]): A list of PresetInfo objects to write.
         output_file (str): The path to the output CSV file.
     """
+    os.makedirs(os.path.dirname(output_file))
     # Set up the CSV writer to output to stdout
     with open(output_file, 'w', encoding='utf-8') as out:
         header = [
@@ -193,23 +196,23 @@ def _write_preset_prices(presets: List[PresetInfo], output_file: str) -> None:
         ]
         writer = csv.DictWriter(out, fieldnames=header)
         writer.writeheader()
-
+        # logger.info(presets)
         for preset in sorted(presets,
                              key=lambda x:
                              (bool(x.gpu), x.region, x.platform_name, x.vcpu)):
             gpu_info = ''
             if preset.gpu > 0 and preset.accelerator_name:
+                vram = preset.gpu_memory_gibibytes * 1024
                 gpu_info_dict = {
                     'Gpus': [{
                         'Name': preset.accelerator_name,
                         'Manufacturer': preset.accelerator_manufacturer,
                         'Count': preset.gpu,
                         'MemoryInfo': {
-                            'SizeInMiB': VRAM.get(preset.accelerator_name, 0)
+                            'SizeInMiB': vram
                         },
                     }],
-                    'TotalGpuMemoryInMiB': VRAM.get(preset.accelerator_name, 0)
-                                           * preset.gpu,
+                    'TotalGpuMemoryInMiB': vram * preset.gpu,
                 }
                 gpu_info = json.dumps(gpu_info_dict).replace('"', '\'')
 
