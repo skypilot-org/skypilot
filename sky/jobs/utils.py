@@ -39,7 +39,6 @@ from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import annotations
-from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import controller_utils
