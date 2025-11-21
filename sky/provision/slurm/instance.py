@@ -22,10 +22,13 @@ POLL_INTERVAL_SECONDS = 2
 _TIMEOUT_SECONDS_FOR_JOB_TERMINATION = 60
 
 
-def _get_sky_cluster_dir(cluster_name_on_cloud: str) -> str:
+def _sky_cluster_home_dir(cluster_name_on_cloud: str) -> str:
     """Returns the SkyPilot cluster's home directory path on the Slurm cluster."""
     return f'~/sky/{cluster_name_on_cloud}'
 
+def _skypilot_runtime_dir(cluster_name_on_cloud: str) -> str:
+    """Returns the SkyPilot runtime directory path on the Slurm cluster."""
+    return f'/tmp/{cluster_name_on_cloud}'
 
 @timeline.event
 def _create_virtual_instance(region: str, cluster_name_on_cloud: str,
@@ -129,7 +132,7 @@ def _create_virtual_instance(region: str, cluster_name_on_cloud: str,
                                f'{accelerator_count}')
 
     # Create sky directory and .hushlogin as part of the provision script
-    sky_dir = _get_sky_cluster_dir(cluster_name_on_cloud)
+    sky_dir = _sky_cluster_home_dir(cluster_name_on_cloud)
     provision_lines.extend([
         '',
         f'mkdir -p {sky_dir}',
@@ -219,8 +222,8 @@ def query_instances(
             continue
 
         jobs = client.query_jobs(
-            state_filters=[state],
-            job_name=cluster_name_on_cloud,
+            cluster_name_on_cloud,
+            [state],
         )
 
         for job_id in jobs:
@@ -271,8 +274,8 @@ def get_cluster_info(
 
     # Find running job for this cluster
     running_jobs = client.query_jobs(
-        state_filters=['running'],
-        job_name=cluster_name_on_cloud,
+        cluster_name_on_cloud,
+        ['running'],
     )
 
     if not running_jobs:
@@ -300,7 +303,7 @@ def get_cluster_info(
                 external_ip=ssh_host,
                 ssh_port=ssh_port,
                 tags={
-                    'sky_dir': _get_sky_cluster_dir(cluster_name_on_cloud),
+                    constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud,
                     'job_id': job_id,
                 },
             )
@@ -356,6 +359,20 @@ def terminate_instances(
 
     client.cancel_jobs_by_name(cluster_name_on_cloud)
 
+    # Clean up the sky directory.
+    sky_dir = _sky_cluster_home_dir(cluster_name_on_cloud)
+    skypilot_runtime_dir = _skypilot_runtime_dir(cluster_name_on_cloud)
+    controller_node_runner = command_runner.SSHCommandRunner(
+        (ssh_host, ssh_port),
+        ssh_user,
+        ssh_key,
+        ssh_proxy_command=ssh_proxy_command,
+    )
+    cleanup_cmd = f'rm -rf {sky_dir} {skypilot_runtime_dir}'
+    rc, _, stderr = controller_node_runner.run(cleanup_cmd, require_outputs=True)
+    if rc != 0:
+        logger.warning(f'Failed to clean up {sky_dir} and {skypilot_runtime_dir}: {stderr}')
+
 
 def open_ports(
     cluster_name_on_cloud: str,
@@ -386,8 +403,10 @@ def get_command_runners(
         # No running job found
         return []
 
-    job_id = cluster_info.get_head_instance().tags.get('job_id', None)
-    # There can only be one InstanceInfo per instance_id, so we can just get the first one.
+    cluster_name_on_cloud = cluster_info.get_head_instance().tags.get(constants.TAG_SKYPILOT_CLUSTER_NAME, None)
+    assert cluster_name_on_cloud is not None, cluster_info
+
+    # There can only be one InstanceInfo per instance_id.
     instances = [
         instance_infos[0] for instance_infos in cluster_info.instances.values()
     ]
@@ -397,7 +416,8 @@ def get_command_runners(
     runners = [
         command_runner.SlurmCommandRunner(
             (instance_info.external_ip, instance_info.ssh_port),
-            sky_dir=instance_info.tags.get('sky_dir', None),
+            sky_dir=_sky_cluster_home_dir(cluster_name_on_cloud),
+            skypilot_runtime_dir=_skypilot_runtime_dir(cluster_name_on_cloud),
             **credentials) for instance_info in instances
     ]
 

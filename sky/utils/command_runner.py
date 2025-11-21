@@ -1292,6 +1292,7 @@ class SlurmCommandRunner(SSHCommandRunner):
         ssh_private_key: str,
         *,
         sky_dir: str,
+        skypilot_runtime_dir: str,
         **kwargs,
     ):
         """Initialize SlurmCommandRunner.
@@ -1300,7 +1301,8 @@ class SlurmCommandRunner(SSHCommandRunner):
             runner = SlurmCommandRunner((ip, port),
                                         ssh_user,
                                         ssh_private_key,
-                                        sky_dir=sky_dir)
+                                        sky_dir=sky_dir,
+                                        skypilot_runtime_dir=skypilot_runtime_dir)
             runner.run('ls -l', mode=SshMode.NON_INTERACTIVE)
             runner.rsync(source, target, up=True)
 
@@ -1309,10 +1311,12 @@ class SlurmCommandRunner(SSHCommandRunner):
             ssh_user: SSH username.
             ssh_private_key: Path to SSH private key.
             sky_dir: The private directory for the SkyPilot cluster on the Slurm cluster.
+            skypilot_runtime_dir: The directory for the SkyPilot runtime on the Slurm cluster.
             **kwargs: Additional arguments forwarded to SSHCommandRunner (e.g., ssh_proxy_command).
         """
         super().__init__(node, ssh_user, ssh_private_key, **kwargs)
         self.sky_dir = sky_dir
+        self.skypilot_runtime_dir = skypilot_runtime_dir
 
     def rsync(
         self,
@@ -1357,7 +1361,6 @@ class SlurmCommandRunner(SSHCommandRunner):
         # could be part of a shared filesystem.
         # Override SKY_REMOTE_PYTHON_ENV_DIR so that skypilot-runtime is
         # installed to local disk instead of a shared filesystem.
-        basedir = os.path.basename(self.sky_dir)
-        cmd = (f'export SKY_REMOTE_PYTHON_ENV_DIR="/tmp/{basedir}" && '
+        cmd = (f'export SKY_REMOTE_PYTHON_ENV_DIR="{self.skypilot_runtime_dir}" && '
                f'cd {self.sky_dir} && export HOME=$(pwd) && {cmd}')
         return super().run(cmd, **kwargs)
