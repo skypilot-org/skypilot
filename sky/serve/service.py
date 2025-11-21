@@ -29,7 +29,6 @@ from sky.serve import serve_utils
 from sky.skylet import constants as skylet_constants
 from sky.utils import auth_utils
 from sky.utils import common_utils
-from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import subprocess_utils
 from sky.utils import thread_utils
@@ -424,6 +423,4 @@ if __name__ == '__main__':
     # We start process with 'spawn', because 'fork' could result in weird
     # behaviors; 'spawn' is also cross-platform.
     multiprocessing.set_start_method('spawn', force=True)
-    # Hijack sys.stdout/stderr to be context aware.
-    context_utils.hijack_sys_attrs()
     _start(args.service_name, args.task_yaml, args.job_id, args.entrypoint)

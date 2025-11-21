@@ -119,8 +119,7 @@ def launch_cluster(replica_id: int,
             logger.info(f'Replica cluster {cluster_name} launch requested '
                         f'with request_id: {request_id}.')
             replica_to_request_id[replica_id] = request_id
-            with open(log_file, 'a', encoding='utf-8') as f:
-                sdk.stream_and_get(request_id, output_stream=f)
+            sdk.stream_and_get(request_id)
             logger.info(f'Replica cluster {cluster_name} launched.')
         except (exceptions.InvalidClusterNameError,
                 exceptions.NoCloudAccessError,
@@ -168,6 +167,8 @@ def terminate_cluster(cluster_name: str,
     assert ctx is not None, 'Context is not initialized'
     ctx.redirect_log(pathlib.Path(log_file))
 
+    logger.info(f'Terminating replica cluster {cluster_name} with '
+                f'replica_drain_delay_seconds: {replica_drain_delay_seconds}')
     time.sleep(replica_drain_delay_seconds)
     retry_cnt = 0
     backoff = common_utils.Backoff()
@@ -175,9 +176,10 @@ def terminate_cluster(cluster_name: str,
         retry_cnt += 1
         try:
             usage_lib.messages.usage.set_internal()
+            logger.info(f'Sending down request to cluster {cluster_name}')
             request_id = sdk.down(cluster_name)
-            with open(log_file, 'a', encoding='utf-8') as f:
-                sdk.stream_and_get(request_id, output_stream=f)
+            sdk.stream_and_get(request_id)
+            logger.info(f'Replica cluster {cluster_name} terminated.')
             return
         except ValueError:
             # The cluster is already terminated.
