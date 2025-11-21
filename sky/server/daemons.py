@@ -171,6 +171,7 @@ def managed_job_status_refresh_event():
             logger.info('Acquiring the consolidation mode lock: '
                         f'{_managed_job_consolidation_mode_lock}')
             _managed_job_consolidation_mode_lock.acquire()
+            logger.info('Lock acquired!')
         # We will never release the lock (until the process exits).
 
         # We run the recovery logic before checking the job statuses as those
