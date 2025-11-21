@@ -957,7 +957,7 @@ class ControllerManager:
                                          value)
 
                     # Restore config file if needed
-                    file_content_utils.restore_job_config_file(job_id, env_vars)
+                    file_content_utils.restore_job_config_file(job_id)
 
                     skypilot_config.reload_config()
                 else:  # pragma: no cover - defensive

@@ -81,7 +81,7 @@ def get_job_env_content(job_id: int) -> Optional[str]:
     return None
 
 
-def restore_job_config_file(job_id: int, env_vars: dict) -> None:
+def restore_job_config_file(job_id: int) -> None:
     """Restore config file from database if SKYPILOT_CONFIG is set.
 
     This reads the config file content from the database and writes it to the
@@ -94,9 +94,8 @@ def restore_job_config_file(job_id: int, env_vars: dict) -> None:
 
     Args:
         job_id: The job ID
-        env_vars: Dictionary of environment variables (from dotenv)
     """
-    config_path = env_vars.get(skypilot_config.ENV_VAR_SKYPILOT_CONFIG)
+    config_path = os.environ.get(skypilot_config.ENV_VAR_SKYPILOT_CONFIG)
     if not config_path:
         # No config file for this job
         return
