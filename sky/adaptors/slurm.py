@@ -236,7 +236,7 @@ class SlurmClient:
         if rc != 0:
             # Job may not exist
             return None
-        
+
         state = stdout.strip()
         return state if state else None
 
@@ -255,42 +255,47 @@ class SlurmClient:
         import time
         start_time = time.time()
         last_state = None
-        
+
         while time.time() - start_time < timeout:
             state = self.get_job_state(job_id)
-            
+
             if state != last_state:
                 logger.debug(f'Job {job_id} state: {state}')
                 last_state = state
-            
+
             if state is None:
                 raise RuntimeError(
-                    f'Job {job_id} not found. It may have been cancelled or failed.')
-            
+                    f'Job {job_id} not found. It may have been cancelled or failed.'
+                )
+
             if state in ('COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT'):
                 raise RuntimeError(
-                    f'Job {job_id} terminated with state {state} before nodes were allocated.')
-            
+                    f'Job {job_id} terminated with state {state} before nodes were allocated.'
+                )
+
             # Check if nodes are allocated by trying to get node list
             cmd = f'squeue -j {job_id} -o %N -h'
             rc, stdout, stderr = self._runner.run(cmd,
                                                   require_outputs=True,
                                                   stream_logs=False)
-            
+
             if rc == 0 and stdout.strip():
                 # Nodes are allocated
-                logger.debug(f'Job {job_id} has nodes allocated: {stdout.strip()}')
+                logger.debug(
+                    f'Job {job_id} has nodes allocated: {stdout.strip()}')
                 return
-            
+
             # Wait before checking again
             time.sleep(2)
-        
+
         raise TimeoutError(
             f'Job {job_id} did not get nodes allocated within {timeout} seconds. '
             f'Last state: {last_state}')
 
     @timeline.event
-    def get_job_nodes(self, job_id: str, wait: bool = True) -> Tuple[List[str], List[str]]:
+    def get_job_nodes(self,
+                      job_id: str,
+                      wait: bool = True) -> Tuple[List[str], List[str]]:
         """Get the list of nodes and their IPs for a given job ID.
 
         The ordering is guaranteed to be stable for the lifetime of the job.
@@ -311,7 +316,7 @@ class SlurmClient:
         # Wait for nodes to be allocated if requested
         if wait:
             self.wait_for_job_nodes(job_id)
-        
+
         cmd = (
             f'squeue -j {job_id} -o %N -h | tr \',\' \'\\n\' | '
             f'while read node; do '

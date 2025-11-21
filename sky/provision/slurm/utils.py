@@ -246,7 +246,7 @@ def check_instance_fits(cluster: str,
         gres_to_match = f'{acc_type}:{acc_count}'.lower()
         gpu_nodes = []
         for node in nodes:
-            node_name, node_state, gres_str = node.split()
+            _, _, gres_str, _ = node.split()
             # gres_str is like 'gpu:acc_type:acc_count'
             gres_list = gres_str.split(':')
             gres_str = ':'.join(gres_list[1:]).lower()
@@ -337,7 +337,7 @@ def _get_slurm_node_info_list(
             try:
                 total_gpus = int(gres_match.group(4))
                 gpu_type_from_sinfo = (gres_match.group(3).upper()
-                                      if gres_match.group(3) else 'GPU')
+                                       if gres_match.group(3) else 'GPU')
             except ValueError:
                 logger.warning(
                     f'Could not parse GPU count from GRES for {node_name}.')

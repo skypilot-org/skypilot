@@ -321,7 +321,8 @@ class SlurmCodeGen(TaskCodeGen):
         # Set initial job status
         self._add_job_status_pending(job_id)
 
-    def _add_node_discovery(self, num_nodes: int, stable_cluster_internal_ips: List[str]) -> None:
+    def _add_node_discovery(self, num_nodes: int,
+                            stable_cluster_internal_ips: List[str]) -> None:
         """Add code for discovering Slurm nodes.
 
         Args:
@@ -333,8 +334,8 @@ class SlurmCodeGen(TaskCodeGen):
         self._code.append(
             textwrap.dedent(f"""\
             result = subprocess.run(
-                ['srun', '--jobid={self._slurm_job_id}', '--nodes={num_nodes}', '--ntasks={num_nodes}', 
-                 '--ntasks-per-node=1', 'bash', '-c', 
+                ['srun', '--jobid={self._slurm_job_id}', '--nodes={num_nodes}', '--ntasks={num_nodes}',
+                 '--ntasks-per-node=1', 'bash', '-c',
                  'hostname -I | awk "{{print \\$1}}"'],
                 capture_output=True,
                 text=True,
@@ -473,7 +474,7 @@ class SlurmCodeGen(TaskCodeGen):
 
             # Run setup command on all nodes using srun
             # srun distributes across nodes automatically (single-node now, multi-node ready)
-            setup_srun = f'srun --jobid={self._slurm_job_id} --nodes={num_nodes} --ntasks-per-node=1 bash -c {{shlex.quote(setup_cmd)}}'
+            setup_srun = f'srun --unbuffered --jobid={self._slurm_job_id} --nodes={num_nodes} --ntasks-per-node=1 bash -c {{shlex.quote(setup_cmd)}}'
 
             setup_result = run_bash_command_with_log_and_return_pid(
                 setup_srun,
@@ -593,7 +594,7 @@ class SlurmCodeGen(TaskCodeGen):
                 # Note: srun automatically inherits GPU allocation from sbatch (via --jobid).
                 # CUDA_VISIBLE_DEVICES is set by Slurm at the sbatch level and inherited here.
                 # No need to specify --gres again since we're using all allocated GPUs.
-                srun_script = f'srun --jobid={self._slurm_job_id} --nodes={num_nodes} --ntasks-per-node=1 bash -c {{shlex.quote(script)}}'
+                srun_script = f'srun --unbuffered --jobid={self._slurm_job_id} --nodes={num_nodes} --ntasks-per-node=1 bash -c {{shlex.quote(script)}}'
 
                 result = run_bash_command_with_log_and_return_pid(
                     srun_script,
