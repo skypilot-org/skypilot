@@ -18,3 +18,6 @@ Next, run this command to get the endpoint to connect to over the browser:
 sky status marimo-example --endpoints
 ```
 
+## Customization
+
+The `marimo.yaml` file can be customized to change the port, password, and other options. Check the [docs](https://docs.marimo.io/cli/#marimo-edit) for more information.

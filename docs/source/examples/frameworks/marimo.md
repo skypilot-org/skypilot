@@ -1,1 +1,1 @@
-../../../examples/marimo/README.md
+../../generated-examples/marimo.md
