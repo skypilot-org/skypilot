@@ -220,25 +220,24 @@ def test_minimal_with_git_workdir(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_runpod
 def test_minimal_with_git_workdir_docker(generic_cloud: str):
-    disk_size_param, validate_launch_output = smoke_tests_utils.get_disk_size_and_validate_launch_output(
-        generic_cloud)
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'minimal_with_git_workdir',
         [
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --image-id docker:ubuntu:20.04 --git-url https://github.com/skypilot-org/skypilot.git --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {disk_size_param} tests/test_yamls/minimal.yaml) && {validate_launch_output}',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --image-id docker:ubuntu:20.04 --git-url https://github.com/skypilot-org/skypilot.git --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             # Output validation done.
             f'sky logs {name} 1 --status',
             f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',  # Equivalent.
             # Check the current branch
             f'sky exec {name} \'git status | grep master || exit 1\'',
             # Checkout to releases/0.10.0
-            f'SKYPILOT_DEBUG=0 sky launch -y -c {name} --image-id docker:ubuntu:20.04 --git-url https://github.com/skypilot-org/skypilot.git --git-ref releases/0.10.0 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {disk_size_param} tests/test_yamls/minimal.yaml',
+            f'SKYPILOT_DEBUG=0 sky launch -y -c {name} --image-id docker:ubuntu:20.04 --git-url https://github.com/skypilot-org/skypilot.git --git-ref releases/0.10.0 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
             # Check the current branch
             f'sky exec {name} \'git status | grep "releases/0\.10\.0" || exit 1\'',
             # Checkout to default branch
-            f'SKYPILOT_DEBUG=0 sky launch -y -c {name} --image-id docker:ubuntu:20.04 --git-url https://github.com/skypilot-org/skypilot.git --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {disk_size_param} tests/test_yamls/minimal.yaml',
+            f'SKYPILOT_DEBUG=0 sky launch -y -c {name} --image-id docker:ubuntu:20.04 --git-url https://github.com/skypilot-org/skypilot.git --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
             # Check the current branch
             f'sky exec {name} \'git status | grep master || exit 1\'',
             # Checkout to releases/0.10.0
