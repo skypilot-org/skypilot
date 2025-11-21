@@ -64,22 +64,12 @@ class SlurmClient:
         Raises:
             CommandError: If the squeue command fails.
         """
-        if state_filters is None:
-            state_filters = [
-                'pending', 'running', 'completed', 'cancelled', 'failed'
-            ]
-
-        job_state_str = ','.join(state_filters)
-
-        # Build squeue command
-        # -u: filter by user
-        # -t: filter by state
-        # -h: no header
-        # -n: filter by job name (if provided)
-        # -o: output format (job ID only)
-        cmd = f'squeue -u {self.ssh_user} -t {job_state_str} -h -o "%i"'
+        cmd = f'squeue --me -h -o "%i"'
+        if state_filters is not None:
+            state_filters_str = ','.join(state_filters)
+            cmd += f' --states {state_filters_str}'
         if job_name is not None:
-            cmd += f' -n {job_name}'
+            cmd += f' --name {job_name}'
 
         rc, stdout, stderr = self._runner.run(cmd,
                                               require_outputs=True,
@@ -101,7 +91,7 @@ class SlurmClient:
         Raises:
             CommandError: If the scancel command fails.
         """
-        cmd = f'scancel -n {job_name}'
+        cmd = f'scancel --name {job_name}'
         rc, stdout, stderr = self._runner.run(cmd,
                                               require_outputs=True,
                                               stream_logs=False)
@@ -143,7 +133,7 @@ class SlurmClient:
         Raises:
             CommandError: If the sinfo command fails.
         """
-        cmd = 'sinfo -N -h -o "%N %t %G %P"'
+        cmd = 'sinfo -h --Node -o "%N %t %G %P"'
         rc, stdout, stderr = self._runner.run(cmd,
                                               require_outputs=True,
                                               stream_logs=False)
@@ -173,7 +163,7 @@ class SlurmClient:
                     node_info[key] = value
             return node_info
 
-        cmd = ['scontrol', 'show', 'node', node_name]
+        cmd = f'scontrol show node {node_name}'
         rc, node_details, _ = self._runner.run(cmd,
                                                require_outputs=True,
                                                stream_logs=False)
@@ -191,7 +181,7 @@ class SlurmClient:
         Returns:
             A list of partition info lines from 'sinfo -p -h -o "%P %t"'
         """
-        cmd = ['sinfo', '-N', '-h', '-o', '%N %P']
+        cmd = 'sinfo -h --Nodes -o "%N %P"'
         rc, stdout, stderr = self._runner.run(cmd,
                                               require_outputs=True,
                                               stream_logs=False)
@@ -208,7 +198,7 @@ class SlurmClient:
         Returns:
             A list of job info lines from 'squeue -w {node_name} -h -o "%i"'
         """
-        cmd = ['squeue', '-w', node_name, '-h', '-o', '%b']
+        cmd = f'squeue --me -h --nodelist {node_name} -o "%b"'
         rc, stdout, stderr = self._runner.run(cmd,
                                               require_outputs=True,
                                               stream_logs=False)
@@ -229,7 +219,7 @@ class SlurmClient:
         Raises:
             CommandError: If the squeue command fails.
         """
-        cmd = f'squeue -j {job_id} -h -o "%T"'
+        cmd = f'squeue --me -h --jobs {job_id} -o "%T"'
         rc, stdout, stderr = self._runner.run(cmd,
                                               require_outputs=True,
                                               stream_logs=False)
@@ -274,7 +264,7 @@ class SlurmClient:
                 )
 
             # Check if nodes are allocated by trying to get node list
-            cmd = f'squeue -j {job_id} -o %N -h'
+            cmd = f'squeue --me -h --jobs {job_id} -o "%N"'
             rc, stdout, stderr = self._runner.run(cmd,
                                                   require_outputs=True,
                                                   stream_logs=False)
@@ -318,7 +308,7 @@ class SlurmClient:
             self.wait_for_job_nodes(job_id)
 
         cmd = (
-            f'squeue -j {job_id} -o %N -h | tr \',\' \'\\n\' | '
+            f'squeue --me -h --jobs {job_id} -o "%N" | tr \',\' \'\\n\' | '
             f'while read node; do '
             # TODO(kevin): Use json output for more robust parsing.
             f'ip=$(scontrol show node=$node | grep NodeAddr= | '
