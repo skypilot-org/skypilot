@@ -23,7 +23,11 @@ builtin cd "$ROOT" || exit 1
 
 YAPF_VERSION=$(yapf --version | awk '{print $2}')
 PYLINT_VERSION=$(pylint --version | head -n 1 | awk '{print $2}')
-PYLINT_QUOTES_VERSION=$(pip list | grep pylint-quotes | awk '{print $2}')
+PIP_LIST_CMD="pip list"
+if ! command -v pip >/dev/null 2>&1; then
+    PIP_LIST_CMD="uv pip list"
+fi
+PYLINT_QUOTES_VERSION=$($PIP_LIST_CMD | awk '/pylint-quotes/ {print $2}')
 MYPY_VERSION=$(mypy --version | awk '{print $2}')
 BLACK_VERSION=$(black --version | head -n 1 | awk '{print $2}')
 
