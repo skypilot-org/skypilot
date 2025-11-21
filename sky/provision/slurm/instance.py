@@ -17,6 +17,12 @@ from sky.utils import timeline
 
 logger = sky_logging.init_logger(__name__)
 
+SHARED_SKY_DIRECTORY_NAME = '.sky_clusters'
+# TODO(kevin): This assumes $HOME is in a shared filesystem.
+# We should probably make it configurable, and add a check
+# during sky check.
+SHARED_ROOT_SKY_DIRECTORY = f'~/{SHARED_SKY_DIRECTORY_NAME}'
+
 POLL_INTERVAL_SECONDS = 2
 # Default KillWait is 30 seconds, so we add some buffer time here.
 _TIMEOUT_SECONDS_FOR_JOB_TERMINATION = 60
@@ -24,15 +30,18 @@ _TIMEOUT_SECONDS_FOR_JOB_TERMINATION = 60
 
 def _sky_cluster_home_dir(cluster_name_on_cloud: str) -> str:
     """Returns the SkyPilot cluster's home directory path on the Slurm cluster."""
-    return f'~/sky/{cluster_name_on_cloud}'
+    return f'{SHARED_ROOT_SKY_DIRECTORY}/{cluster_name_on_cloud}'
+
 
 def _skypilot_runtime_dir(cluster_name_on_cloud: str) -> str:
     """Returns the SkyPilot runtime directory path on the Slurm cluster."""
     return f'/tmp/{cluster_name_on_cloud}'
 
+
 @timeline.event
-def _create_virtual_instance(region: str, cluster_name_on_cloud: str,
-                 config: common.ProvisionConfig) -> common.ProvisionRecord:
+def _create_virtual_instance(
+        region: str, cluster_name_on_cloud: str,
+        config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Creates a Slurm virtual instance from the config.
 
     A Slurm virtual instance is created by submitting a long-running
@@ -79,10 +88,10 @@ def _create_virtual_instance(region: str, cluster_name_on_cloud: str,
         # TODO(kevin): Automatically handle this, following the suggestions in
         # https://slurm.schedmd.com/troubleshoot.html#completing
         raise RuntimeError(f'Found {len(completing_jobs)} jobs still in '
-                     'completing state after '
-                     f'{_TIMEOUT_SECONDS_FOR_JOB_TERMINATION}s. '
-                     'This is typically due to non-killable processes '
-                     'associated with the job.')
+                           'completing state after '
+                           f'{_TIMEOUT_SECONDS_FOR_JOB_TERMINATION}s. '
+                           'This is typically due to non-killable processes '
+                           'associated with the job.')
 
     # Check if job already exists
     existing_jobs = client.query_jobs(
@@ -90,12 +99,14 @@ def _create_virtual_instance(region: str, cluster_name_on_cloud: str,
         ['pending', 'running'],
     )
     if existing_jobs:
-        if len(existing_jobs) > 1:
-            logger.warning(f'Multiple jobs found with name {cluster_name_on_cloud}: {existing_jobs}. '
-                           'This is likely a resource leak.')
+        assert len(
+            existing_jobs
+        ) == 1, f'Multiple jobs found with name {cluster_name_on_cloud}: {existing_jobs}'
 
         job_id = existing_jobs[0]
-        logger.debug(f'Job with name {cluster_name_on_cloud} already exists (JOBID: {job_id})')
+        logger.debug(
+            f'Job with name {cluster_name_on_cloud} already exists (JOBID: {job_id})'
+        )
 
         # Wait for nodes to be allocated (job might be in PENDING state)
         nodes, _ = client.get_job_nodes(job_id, wait=True)
@@ -122,20 +133,31 @@ def _create_virtual_instance(region: str, cluster_name_on_cloud: str,
     provision_lines = [
         '#!/bin/bash',
         f'#SBATCH --job-name={cluster_name_on_cloud}',
+        # By default stdout and stderr will be written to $HOME/slurm-%j.out
+        # (because we invoke sbatch from $HOME)
+        # Redirect elsewhere to not pollute the home directory.
+        # Note: The output of the batch step does not contain any
+        # useful logs typically, since we just do a sleep infinity.
+        f'#SBATCH --output={SHARED_SKY_DIRECTORY_NAME}/slurm-%j.out',
+        f'#SBATCH --error={SHARED_SKY_DIRECTORY_NAME}/slurm-%j.out',
         f'#SBATCH --nodes={num_nodes}',
         f'#SBATCH --cpus-per-task={int(resources["cpus"])}',
         f'#SBATCH --mem={int(resources["memory"])}G',
     ]
-    if (accelerator_type and accelerator_type.upper() != 'NONE' and
+    if (accelerator_type is not None and accelerator_type.upper() != 'NONE' and
             accelerator_count > 0):
         provision_lines.append(f'#SBATCH --gres=gpu:{accelerator_type.lower()}:'
                                f'{accelerator_count}')
 
-    # Create sky directory and .hushlogin as part of the provision script
     sky_dir = _sky_cluster_home_dir(cluster_name_on_cloud)
     provision_lines.extend([
         '',
+        # Create sky directory for the cluster.
+        # TODO(kevin): Since this is run inside the sbatch script, failures
+        # will not be surfaced in a synchronous way. We should add a check
+        # to verify the creation of the directory.
         f'mkdir -p {sky_dir}',
+        # Suppress login messages.
         f'touch {sky_dir}/.hushlogin',
         'sleep infinity',
     ])
@@ -158,7 +180,10 @@ def _create_virtual_instance(region: str, cluster_name_on_cloud: str,
         f.flush()
         src_path = f.name
         tgt_path = f'/tmp/sky_provision_{cluster_name_on_cloud}.sh'
-        controller_node_runner.rsync(src_path, tgt_path, up=True, stream_logs=False)
+        controller_node_runner.rsync(src_path,
+                                     tgt_path,
+                                     up=True,
+                                     stream_logs=False)
 
     job_id = client.submit_job(partition, cluster_name_on_cloud, tgt_path)
     logger.debug(f'Successfully submitted Slurm job {job_id} for cluster '
@@ -369,9 +394,12 @@ def terminate_instances(
         ssh_proxy_command=ssh_proxy_command,
     )
     cleanup_cmd = f'rm -rf {sky_dir} {skypilot_runtime_dir}'
-    rc, _, stderr = controller_node_runner.run(cleanup_cmd, require_outputs=True)
+    rc, _, stderr = controller_node_runner.run(cleanup_cmd,
+                                               require_outputs=True)
     if rc != 0:
-        logger.warning(f'Failed to clean up {sky_dir} and {skypilot_runtime_dir}: {stderr}')
+        logger.warning(
+            f'Failed to clean up {sky_dir} and {skypilot_runtime_dir}: {stderr}'
+        )
 
 
 def open_ports(
@@ -403,7 +431,8 @@ def get_command_runners(
         # No running job found
         return []
 
-    cluster_name_on_cloud = cluster_info.get_head_instance().tags.get(constants.TAG_SKYPILOT_CLUSTER_NAME, None)
+    cluster_name_on_cloud = cluster_info.get_head_instance().tags.get(
+        constants.TAG_SKYPILOT_CLUSTER_NAME, None)
     assert cluster_name_on_cloud is not None, cluster_info
 
     # There can only be one InstanceInfo per instance_id.
