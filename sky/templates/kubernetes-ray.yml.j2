@@ -646,6 +646,15 @@ available_node_types:
               # Set -x to print the commands and their arguments as they are executed.
               # Useful for debugging.
               set -x
+
+              # Execute user-provided post-provision runcmd
+              # before any of the SkyPilot setup commands.
+              {%- if runcmd %}
+              {%- for cmd in runcmd %}
+              {{cmd}}
+              {%- endfor %}
+              {%- endif %}
+
               # Helper function to conditionally use sudo
               # TODO(zhwu): consolidate the two prefix_cmd and sudo replacements
               prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }

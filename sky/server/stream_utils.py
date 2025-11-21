@@ -160,9 +160,10 @@ async def log_streamer(
                                                   polling_interval):
                     yield chunk
 
-    # head node provision logs
+    # api server request logs (if request_id is provided) or
+    # head node provision logs (if cluster_name is provided)
     else:
-        assert log_path is not None, (request_id, log_path)
+        assert log_path is not None, (request_id, cluster_name)
         async with aiofiles.open(log_path, 'rb') as f:
             async for chunk in _tail_log_file(f, request_id, plain_logs, tail,
                                               follow, cluster_name,

@@ -303,7 +303,8 @@ class Popen(subprocess.Popen):
             # Pass a copy of current context.environ to avoid race condition
             # when the context is updated after the Popen is created.
             env = os.environ.copy()
-        super().__init__(*args, env=env, **kwargs)
+        super().__init__(*args, env=env,
+                         **kwargs)  # type: ignore[call-overload]
 
 
 P = ParamSpec('P')

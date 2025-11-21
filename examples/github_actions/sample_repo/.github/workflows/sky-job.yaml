@@ -1,0 +1,225 @@
+name: "Launch SkyPilot Job"
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_yaml_path:
+        description: "Path to the task YAML file"
+        required: true
+        type: string
+      commit_to_run:
+        description: "The full commit hash to run the job against (required for manual runs)."
+        required: true
+        type: string
+  push:
+    branches: [main]
+
+
+env:
+  RUN_NAME_PREFIX: "gh-actions"
+  DEFAULT_TASK_YAML_PATH: "tasks/train.yaml"
+
+jobs:
+  launch-skypilot-job:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout specific commit for dispatch
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.commit_to_run }}
+          fetch-depth: 1
+
+      - name: Checkout full history for push
+        if: github.event_name == 'push'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Determine PR Number for Push Events
+        id: pr_info
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          # Expects commit message to be in format "commit message (#123)"
+          PR_FROM_COMMIT=$(git log -1 --pretty=format:"%s" | sed -n 's/.*(#\([0-9][0-9]*\)).*/\1/p')
+          echo "Extracted PR number from commit message (if any): $PR_FROM_COMMIT"
+          echo "### Extracted PR number from commit message (if any): $PR_FROM_COMMIT" >> $GITHUB_STEP_SUMMARY
+          echo "pr_number_for_name_generation=${PR_FROM_COMMIT}" >> $GITHUB_OUTPUT
+
+      - name: Generate Job Name
+        id: generate_job_name
+        shell: bash
+        run: |
+          # Generate a unique name for the SkyPilot job.
+          # The name has format of github-actions.<pr_number>.<commit_hash_short>.<timestamp>
+          # If PR number is not found (e.g. for manual dispatch), the name is in the format of
+          # github-actions.<branch_name>.<commit_hash_short>.<timestamp>
+          set -eo pipefail
+          TIMESTAMP=$(date -u +"%Y%m%d_%H%M%S")
+          # SHORT_COMMIT_HASH is derived from the actual checked-out HEAD.
+          # This HEAD is set by the conditional 'Checkout code' steps:
+          # - For 'push', it's the trigger commit.
+          # - For 'workflow_dispatch', it's github.event.inputs.commit_to_run.
+          SHORT_COMMIT_HASH=$(git rev-parse --short HEAD)
+
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            # Manual dispatch: run name is github.sky.<short_hash>.<timestamp>
+            if [ -z "${{ github.event.inputs.commit_to_run }}" ]; then
+              echo "Error: commit_to_run is required for workflow_dispatch and was not provided."
+              exit 1
+            fi
+            # Sanity check that checked-out commit matches the input
+            INPUT_SHORT_HASH=$(echo "${{ github.event.inputs.commit_to_run }}" | cut -c1-7)
+            if [ "$SHORT_COMMIT_HASH" != "$INPUT_SHORT_HASH" ]; then
+                echo "Warning: Checked out HEAD's short hash ($SHORT_COMMIT_HASH) does not match input commit_to_run's short hash ($INPUT_SHORT_HASH). Using checked out HEAD."
+            fi
+            RUN_NAME_BASE="${{ env.RUN_NAME_PREFIX }}"
+            FINAL_RUN_NAME="$RUN_NAME_BASE.$SHORT_COMMIT_HASH.$TIMESTAMP"
+            echo "Manual dispatch: Using commit ($SHORT_COMMIT_HASH). Run name: $FINAL_RUN_NAME"
+
+          elif [ "${{ github.event_name }}" == "push" ]; then
+            # Push event: run name includes PR number (if found) or branch name.
+            PR_NUMBER_FROM_COMMIT="${{ steps.pr_info.outputs.pr_number_for_name_generation || '' }}"
+
+            if [ -n "$PR_NUMBER_FROM_COMMIT" ]; then
+              RUN_NAME_BASE="${{ env.RUN_NAME_PREFIX }}.pr${PR_NUMBER_FROM_COMMIT}"
+              echo "Push event: Using PR #$PR_NUMBER_FROM_COMMIT in run name base: $RUN_NAME_BASE"
+            else
+              BRANCH_NAME_RAW=$(git rev-parse --abbrev-ref HEAD)
+              BRANCH_NAME_SANITIZED=$(echo "$BRANCH_NAME_RAW" | sed 's/[^a-zA-Z0-9_-]/-/g')
+              RUN_NAME_BASE="${{ env.RUN_NAME_PREFIX }}.${BRANCH_NAME_SANITIZED}"
+              echo "Push event: Using branch name '$BRANCH_NAME_SANITIZED' in run name base: $RUN_NAME_BASE (PR number not found in commit)"
+            fi
+            FINAL_RUN_NAME="$RUN_NAME_BASE.$SHORT_COMMIT_HASH.$TIMESTAMP"
+            echo "Push event: Run name: $FINAL_RUN_NAME"
+          else
+            echo "Error: Unhandled event type ${{ github.event_name }}"
+            exit 1
+          fi
+
+          echo "Generated job name for SkyPilot: $FINAL_RUN_NAME"
+          echo "job_name=$FINAL_RUN_NAME" >> $GITHUB_OUTPUT
+          echo "### Generated job name: $FINAL_RUN_NAME" >> $GITHUB_STEP_SUMMARY
+
+      - name: Launch SkyPilot Job via Custom Action
+        id: skylaunch
+        uses: ./.github/actions/launch-skypilot-job
+        with:
+          task_yaml_path: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.task_yaml_path || env.DEFAULT_TASK_YAML_PATH }}
+          job_name: ${{ steps.generate_job_name.outputs.job_name }}
+          commit_sha: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.commit_to_run || github.sha }}
+          skypilot_api_url: ${{ secrets.SKYPILOT_API_URL }}
+          skypilot_service_account_token: ${{ secrets.SKYPILOT_SERVICE_ACCOUNT_TOKEN }}
+
+      - name: Extract SkyPilot Request ID
+        id: extract_request_id
+        shell: bash
+        run: |
+          # Extract the request ID from the launch output
+          # Looking for pattern like "Submitted sky.jobs.launch request: c01f1273-4610-4949-8f1c-e24365ad0330"
+          REQUEST_ID=$(echo "${{ steps.skylaunch.outputs.launch_output }}" | grep -oP 'Submitted sky.jobs.launch request: \K[a-f0-9-]+' || true)
+
+          if [ -z "$REQUEST_ID" ]; then
+            # Try alternate extraction method from stored output
+            REQUEST_ID=$(cat /tmp/skypilot_launch_output.txt 2>/dev/null | grep -oP 'Submitted sky.jobs.launch request: \K[a-f0-9-]+' || true)
+          fi
+
+          if [ -n "$REQUEST_ID" ]; then
+            echo "Extracted request ID: $REQUEST_ID"
+            echo "request_id=$REQUEST_ID" >> $GITHUB_OUTPUT
+            echo "request_id_short=$(echo $REQUEST_ID | cut -c1-8)" >> $GITHUB_OUTPUT
+            echo '### SkyPilot Request ID $REQUEST_ID extracted' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Could not extract request ID from launch output"
+            echo "request_id=" >> $GITHUB_OUTPUT
+            echo "request_id_short=" >> $GITHUB_OUTPUT
+            echo '### SkyPilot Request ID not found in logs' >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Get SkyPilot Job ID
+        id: get_job_id
+        if: steps.extract_request_id.outputs.request_id != ''
+        shell: bash
+        run: |
+          set +e  # Don't exit on error
+
+          # Wait a bit for the job to be submitted
+          sleep 5
+
+          # Get the logs and extract the job ID
+          echo "Getting logs for request: ${{ steps.extract_request_id.outputs.request_id_short }}"
+          LOG_OUTPUT=$(sky api logs ${{ steps.extract_request_id.outputs.request_id_short }} 2>&1 | tail -20)
+
+          # Extract job ID from pattern like "Job submitted, ID: 4700"
+          JOB_ID=$(echo "$LOG_OUTPUT" | grep -oP 'Job submitted, ID: \K\d+' || true)
+
+          if [ -n "$JOB_ID" ]; then
+            echo "Extracted SkyPilot Job ID: $JOB_ID"
+            echo "job_id=$JOB_ID" >> $GITHUB_OUTPUT
+            echo '### SkyPilot Job ID $JOB_ID launched' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Could not extract Job ID from logs"
+            echo "Log output was:"
+            echo "$LOG_OUTPUT"
+            echo "job_id=" >> $GITHUB_OUTPUT
+            echo '### SkyPilot Job ID not found in logs' >> $GITHUB_STEP_SUMMARY
+          fi
+
+          set -e
+
+      - name: Check if slack secrets are set
+        id: check_slack_secrets
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.SLACK_BOT_TOKEN }}" ] || [ -z "${{ secrets.SLACK_CHANNEL_ID }}" ]; then
+            echo "slack_secrets_set=False" >> $GITHUB_OUTPUT
+          else
+            echo "slack_secrets_set=True" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate Run Information for Slack
+        id: generate_slack_message
+        if: steps.check_slack_secrets.outputs.slack_secrets_set == 'True'
+        shell: bash
+        run: |
+          MESSAGE_TEXT="Skypilot job ${{ steps.get_job_id.outputs.job_id }} triggered by: ${{ github.event_name }}"
+          MESSAGE_BLOCK="$MESSAGE_TEXT\nSkyPilot Job Name: ${{ steps.generate_job_name.outputs.job_name }}"
+
+          if [ -n "${{ steps.get_job_id.outputs.job_id }}" ]; then
+            MESSAGE_BLOCK="$MESSAGE_BLOCK\n✅ SkyPilot Job ID: ${{ steps.get_job_id.outputs.job_id }}"
+            MESSAGE_BLOCK="$MESSAGE_BLOCK\n📝 View logs: sky jobs logs ${{ steps.get_job_id.outputs.job_id }}"
+            MESSAGE_BLOCK="$MESSAGE_BLOCK\n🔗 View job: ${{ secrets.SKYPILOT_API_URL }}/dashboard/jobs/${{ steps.get_job_id.outputs.job_id }}"
+          elif [ -n "${{ steps.extract_request_id.outputs.request_id_short }}" ]; then
+            MESSAGE_BLOCK="$MESSAGE_BLOCK\n⏳ Request ID: ${{ steps.extract_request_id.outputs.request_id_short }}"
+            MESSAGE_BLOCK="$MESSAGE_BLOCK\n📝 Get job ID: sky api logs ${{ steps.extract_request_id.outputs.request_id_short }}"
+          else
+            MESSAGE_BLOCK="$MESSAGE_BLOCK\nJob ID / Request ID not found"
+          fi
+
+          echo "message_text=$MESSAGE_TEXT" >> $GITHUB_OUTPUT
+          echo "message_block=$MESSAGE_BLOCK" >> $GITHUB_OUTPUT
+          echo $MESSAGE_BLOCK
+          echo "$MESSAGE_BLOCK" >> $GITHUB_STEP_SUMMARY
+
+      - name: Notify Slack channel
+        uses: slackapi/slack-github-action@v2.0.0
+        if: steps.check_slack_secrets.outputs.slack_secrets_set == 'True'
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "${{ secrets.SLACK_CHANNEL_ID }}",
+              "text": "${{ steps.generate_slack_message.outputs.message_text }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "${{ steps.generate_slack_message.outputs.message_block }}"
+                  }
+                }
+              ]
+            }

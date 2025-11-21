@@ -48,8 +48,16 @@ fi
 
 if [ -z "$context" ] || [ "$context_lower" = "none" ]; then
     # If context is none, it means we are using incluster auth. In this case,
-    # use need to set KUBECONFIG to /dev/null to avoid using kubeconfig file.
-    kubectl exec -i "$resource_type/$resource_name" -n "$namespace" --kubeconfig=/dev/null -- "$@"
+    # we need to set KUBECONFIG to /dev/null to avoid using kubeconfig file.
+    kubectl_cmd_base="kubectl exec \"$resource_type/$resource_name\" -n \"$namespace\" --kubeconfig=/dev/null --"
 else
-    kubectl exec -i "$resource_type/$resource_name" -n "$namespace" --context="$context" -- "$@"
+    kubectl_cmd_base="kubectl exec \"$resource_type/$resource_name\" -n \"$namespace\" --context=\"$context\" --"
 fi
+
+# Execute command on remote pod, waiting for rsync to be available first.
+# The waiting happens on the remote pod, not locally, which is more efficient
+# and reliable than polling from the local machine.
+# We wrap the command in a bash script that waits for rsync, then execs the original command.
+# Timeout after MAX_WAIT_TIME_SECONDS seconds.
+MAX_WAIT_TIME_SECONDS=300
+eval "${kubectl_cmd_base% --} -i -- bash -c 'count=0; max_count=$MAX_WAIT_TIME_SECONDS*2; until which rsync >/dev/null 2>&1; do if [ \$count -ge \$max_count ]; then echo \"Error when trying to rsync files to kubernetes cluster. Package installation may have failed.\" >&2; exit 1; fi; sleep 0.5; count=\$((count+1)); done; exec \"\$@\"' -- \"\$@\""

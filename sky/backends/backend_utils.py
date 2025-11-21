@@ -1008,8 +1008,8 @@ def write_cluster_config(
                 'volume_mounts': volume_mount_vars,
                 'ephemeral_volume_mounts': ephemeral_volume_mount_vars,
 
-                # runcmd to append to the cloud-init cloud config passed to the
-                # machine's UserData. This is currently only used by AWS.
+                # runcmd to run before any of the SkyPilot runtime setup commands.
+                # This is currently only used by AWS and Kubernetes.
                 'runcmd': runcmd,
             }),
         output_path=tmp_yaml_path)

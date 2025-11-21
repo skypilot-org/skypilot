@@ -60,7 +60,6 @@ from sky.adaptors import common as adaptors_common
 from sky.client import sdk
 from sky.client.cli import flags
 from sky.client.cli import table_utils
-from sky.jobs import utils as jobs_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
@@ -1568,35 +1567,6 @@ def _handle_services_request(
     return num_services, msg
 
 
-def _status_kubernetes(show_all: bool):
-    """Show all SkyPilot resources in the current Kubernetes context.
-
-    Args:
-        show_all (bool): Show all job information (e.g., start time, failures).
-    """
-    all_clusters, unmanaged_clusters, all_jobs, context = (sdk.stream_and_get(
-        sdk.status_kubernetes()))
-    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-               f'Kubernetes cluster state (context: {context})'
-               f'{colorama.Style.RESET_ALL}')
-    status_utils.show_kubernetes_cluster_status_table(unmanaged_clusters,
-                                                      show_all)
-    if all_jobs:
-        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                   f'Managed jobs'
-                   f'{colorama.Style.RESET_ALL}')
-        msg = table_utils.format_job_table(all_jobs,
-                                           show_all=show_all,
-                                           show_user=False)
-        click.echo(msg)
-    if any(['sky-serve-controller' in c.cluster_name for c in all_clusters]):
-        # TODO: Parse serve controllers and show services separately.
-        #  Currently we show a hint that services are shown as clusters.
-        click.echo(f'\n{colorama.Style.DIM}Hint: SkyServe replica pods are '
-                   'shown in the "SkyPilot clusters" section.'
-                   f'{colorama.Style.RESET_ALL}')
-
-
 def _show_endpoint(query_clusters: Optional[List[str]],
                    cluster_records: List[responses.StatusResponse], ip: bool,
                    endpoints: bool, endpoint: Optional[int]) -> None:
@@ -1724,14 +1694,6 @@ def _show_enabled_infra(
               is_flag=True,
               required=False,
               help='Also show pools, if any.')
-@click.option(
-    '--kubernetes',
-    '--k8s',
-    default=False,
-    is_flag=True,
-    required=False,
-    help='[Experimental] Show all SkyPilot resources (including from other '
-    'users) in the current Kubernetes context.')
 @click.argument('clusters',
                 required=False,
                 type=str,
@@ -1743,8 +1705,8 @@ def _show_enabled_infra(
 # pylint: disable=redefined-builtin
 def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
            endpoint: Optional[int], show_managed_jobs: bool,
-           show_services: bool, show_pools: bool, kubernetes: bool,
-           clusters: List[str], all_users: bool):
+           show_services: bool, show_pools: bool, clusters: List[str],
+           all_users: bool):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -1807,9 +1769,6 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
       or for autostop-enabled clusters, use ``--refresh`` to query the latest
       cluster statuses from the cloud providers.
     """
-    if kubernetes:
-        _status_kubernetes(verbose)
-        return
     # Do not show job queue if user specifies clusters, and if user
     # specifies --ip or --endpoint(s).
     show_managed_jobs = show_managed_jobs and not any([clusters, ip, endpoints])
@@ -2070,6 +2029,35 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                      f'{colorama.Style.RESET_ALL}')
     if hints:
         click.echo('\n' + '\n'.join(hints))
+
+
+@cli.command(hidden=True)
+@flags.config_option(expose_value=False)
+@flags.verbose_option()
+def status_kubernetes(verbose: bool):
+    """[Experimental] Show all SkyPilot resources (including from other '
+    'users) in the current Kubernetes context."""
+    all_clusters, unmanaged_clusters, all_jobs, context = (sdk.stream_and_get(
+        sdk.status_kubernetes()))
+    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+               f'Kubernetes cluster state (context: {context})'
+               f'{colorama.Style.RESET_ALL}')
+    status_utils.show_kubernetes_cluster_status_table(unmanaged_clusters,
+                                                      show_all=verbose)
+    if all_jobs:
+        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Managed jobs'
+                   f'{colorama.Style.RESET_ALL}')
+        msg = table_utils.format_job_table(all_jobs,
+                                           show_all=verbose,
+                                           show_user=False)
+        click.echo(msg)
+    if any(['sky-serve-controller' in c.cluster_name for c in all_clusters]):
+        # TODO: Parse serve controllers and show services separately.
+        #  Currently we show a hint that services are shown as clusters.
+        click.echo(f'\n{colorama.Style.DIM}Hint: SkyServe replica pods are '
+                   'shown in the "SkyPilot clusters" section.'
+                   f'{colorama.Style.RESET_ALL}')
 
 
 @cli.command()
@@ -4652,7 +4640,19 @@ def jobs_launch(
         click.secho(f'Submitting to pool {colorama.Fore.CYAN}{pool!r}'
                     f'{colorama.Style.RESET_ALL} with {colorama.Fore.CYAN}'
                     f'{num_job_int}{colorama.Style.RESET_ALL} job{plural}.')
-        jobs_utils.validate_pool_job(dag, pool)
+        print_setup_fm_warning = False
+        for task_ in dag.tasks:
+            if (task_.setup is not None or task_.file_mounts or
+                    task_.storage_mounts):
+                print_setup_fm_warning = True
+                break
+        if print_setup_fm_warning:
+            click.secho(
+                f'{colorama.Fore.YELLOW}Setup, file mounts, and storage mounts'
+                ' will be ignored when submitting jobs to pool. To update a '
+                f'pool, please use `sky jobs pool apply {pool} new-pool.yaml`. '
+                f'{colorama.Style.RESET_ALL}')
+        print_setup_fm_warning = False
 
     # Optimize info is only show if _need_confirmation.
     if not yes:

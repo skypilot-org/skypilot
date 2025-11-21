@@ -3,6 +3,7 @@
 import functools
 from typing import Callable, Literal, TypeVar
 
+import cachetools
 from typing_extensions import ParamSpec
 
 # Whether the current process is a SkyPilot API server process.
@@ -50,6 +51,27 @@ def lru_cache(scope: Literal['global', 'request'], *lru_cache_args,
         else:
             cached_func = functools.lru_cache(*lru_cache_args,
                                               **lru_cache_kwargs)(func)
+            _FUNCTIONS_NEED_RELOAD_CACHE.append(cached_func)
+            return cached_func
+
+    return decorator
+
+
+def ttl_cache(scope: Literal['global', 'request'], *ttl_cache_args,
+              **ttl_cache_kwargs) -> Callable:
+    """TTLCache decorator for functions.
+
+    This decorator allows us to track which functions need to be reloaded for a
+    new request using the scope argument.
+    """
+
+    def decorator(func: Callable[P, T]) -> Callable[P, T]:
+        if scope == 'global':
+            return cachetools.cached(
+                cachetools.TTLCache(*ttl_cache_args, **ttl_cache_kwargs))(func)
+        else:
+            cached_func = cachetools.cached(
+                cachetools.TTLCache(*ttl_cache_args, **ttl_cache_kwargs))(func)
             _FUNCTIONS_NEED_RELOAD_CACHE.append(cached_func)
             return cached_func
 
