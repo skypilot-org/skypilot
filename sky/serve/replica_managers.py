@@ -68,6 +68,8 @@ def launch_cluster(replica_id: int,
                    cluster_name: str,
                    log_file: str,
                    replica_to_request_id: thread_utils.ThreadSafeDict[int, str],
+                   replica_to_launch_cancelled: thread_utils.ThreadSafeDict[
+                       int, bool],
                    resources_override: Optional[Dict[str, Any]] = None,
                    retry_until_up: bool = True,
                    max_retry: int = 3) -> None:
@@ -84,6 +86,7 @@ def launch_cluster(replica_id: int,
     ctx = context.get()
     assert ctx is not None, 'Context is not initialized'
     ctx.redirect_log(pathlib.Path(log_file))
+
     if resources_override is not None:
         logger.info(f'Scaling up replica (id: {replica_id}) cluster '
                     f'{cluster_name} with resources override: '
@@ -106,11 +109,21 @@ def launch_cluster(replica_id: int,
         raise RuntimeError(
             f'Failed to launch the sky serve replica cluster {cluster_name} '
             'due to failing to initialize sky.Task from yaml file.') from e
+
+    def _check_is_cancelled() -> bool:
+        is_cancelled = replica_to_launch_cancelled.get(replica_id, False)
+        if is_cancelled:
+            logger.info(f'Replica {replica_id} launch cancelled.')
+            replica_to_launch_cancelled.pop(replica_id)
+        return is_cancelled
+
     retry_cnt = 0
     backoff = common_utils.Backoff(_RETRY_INIT_GAP_SECONDS)
     while True:
         retry_cnt += 1
         try:
+            if _check_is_cancelled():
+                return
             usage_lib.messages.usage.set_internal()
             request_id = sdk.launch(task,
                                     cluster_name,
@@ -144,14 +157,27 @@ def launch_cluster(replica_id: int,
         else:  # No exception, the launch succeeds.
             return
 
+        # Cleanup the request id and the failed cluster.
+        replica_to_request_id.pop(replica_id)
+        # If it is cancelled, no need to terminate the cluster. It will be
+        # handled by the termination thread.
+        if _check_is_cancelled():
+            return
         terminate_cluster(cluster_name, log_file=log_file)
+
         if retry_cnt >= max_retry:
             raise RuntimeError('Failed to launch the sky serve replica cluster '
                                f'{cluster_name} after {max_retry} retries.')
+
         gap_seconds = backoff.current_backoff()
         logger.info('Retrying to launch the sky serve replica cluster '
                     f'in {gap_seconds:.1f} seconds.')
-        time.sleep(gap_seconds)
+        start_backoff = time.time()
+        # Check if it is cancelled every 0.1 seconds.
+        while time.time() - start_backoff < gap_seconds:
+            if _check_is_cancelled():
+                return
+            time.sleep(0.1)
 
 
 # TODO(tian): Combine this with
@@ -725,6 +751,8 @@ class SkyPilotReplicaManager(ReplicaManager):
             int, thread_utils.SafeThread] = thread_utils.ThreadSafeDict()
         self._replica_to_request_id: thread_utils.ThreadSafeDict[
             int, str] = thread_utils.ThreadSafeDict()
+        self._replica_to_launch_cancelled: thread_utils.ThreadSafeDict[
+            int, bool] = thread_utils.ThreadSafeDict()
         self._down_thread_pool: thread_utils.ThreadSafeDict[
             int, thread_utils.SafeThread] = thread_utils.ThreadSafeDict()
 
@@ -817,7 +845,8 @@ class SkyPilotReplicaManager(ReplicaManager):
         t = thread_utils.SafeThread(
             target=launch_cluster,
             args=(replica_id, self.yaml_content, cluster_name, log_file_name,
-                  self._replica_to_request_id, resources_override,
+                  self._replica_to_request_id,
+                  self._replica_to_launch_cancelled, resources_override,
                   retry_until_up),
         )
         replica_port = _get_resources_ports(self.yaml_content)
@@ -908,21 +937,16 @@ class SkyPilotReplicaManager(ReplicaManager):
                                               info)
             launch_thread = self._launch_thread_pool[replica_id]
             if launch_thread.is_alive():
-                request_id_found = False
-                # Should found immediately but add a 1 second timeout
-                # to avoid blocking the thread.
-                for _ in range(10):
+                self._replica_to_launch_cancelled[replica_id] = True
+                while True:
+                    # Launch request id found. cancel it.
                     if replica_id in self._replica_to_request_id:
-                        request_id_found = True
+                        request_id = self._replica_to_request_id[replica_id]
+                        sdk.api_cancel(request_id)
+                        break
+                    if replica_id not in self._replica_to_launch_cancelled:
                         break
                     time.sleep(0.1)
-                if request_id_found:
-                    request_id = self._replica_to_request_id[replica_id]
-                    sdk.api_cancel(request_id)
-                else:
-                    logger.error(f'Launch thread for replica {replica_id} '
-                                 'is not found in the replica to request id '
-                                 'dictionary. skip api cancel here.')
                 launch_thread.join()
             logger.info(f'Interrupted launch thread for replica {replica_id} '
                         'and deleted the cluster.')

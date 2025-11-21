@@ -1,7 +1,7 @@
 """Utility functions for threads."""
 
 import threading
-from typing import Any, Dict, Generic, Optional, TypeVar
+from typing import Any, Dict, Generic, Optional, overload, TypeVar
 
 from sky.utils import common_utils
 
@@ -69,6 +69,22 @@ class ThreadSafeDict(Generic[KeyType, ValueType]):
     def values(self):
         with self._lock:
             return self._dict.values()
+
+    @overload
+    def get(self, key: KeyType, default: ValueType) -> ValueType:
+        ...
+
+    @overload
+    def get(self,
+            key: KeyType,
+            default: Optional[ValueType] = None) -> Optional[ValueType]:
+        ...
+
+    def get(self,
+            key: KeyType,
+            default: Optional[ValueType] = None) -> Optional[ValueType]:
+        with self._lock:
+            return self._dict.get(key, default)
 
     def pop(self, key: KeyType) -> Optional[ValueType]:
         with self._lock:
