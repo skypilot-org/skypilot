@@ -888,6 +888,21 @@ Example:
       - echo "hello world!"
       - [ls, -l, /]
 
+``aws.capabilities``
+~~~~~~~~~~~~~~~~~~~~
+
+Capabilities to enable for AWS. Used to enable specific features of AWS
+(e.g. only use AWS for S3 but not for launching VMs)
+
+Default: ``['compute', 'storage']``.
+
+Example:
+
+.. code-block:: yaml
+
+  aws:
+    capabilities:
+      - storage
 
 .. _config-yaml-gcp:
 
@@ -1134,6 +1149,24 @@ Placement policy for GCP instances. This setting controls how instances are phys
 When `gcp.enable_gpu_direct` is enabled, the placement policy is automatically set to `compact` to ensure optimal communication performance. If `gcp.enable_gpu_direct` is disabled, no default placement policy is applied.
 
 Refer to the `GCP documentation <https://cloud.google.com/compute/docs/instances/placement-policies-overview>`_ for more information on placement policies.
+
+``gcp.capabilities``
+~~~~~~~~~~~~~~~~~~~~
+
+Capabilities to enable for the GCP.
+
+Used to enable specific features of GCP
+(e.g. only use GCP for GCS but not for launching VMs)
+
+Default: ``['compute', 'storage']``.
+
+Example:
+
+.. code-block:: yaml
+
+  gcp:
+    capabilities:
+      - storage
 
 .. _config-yaml-azure:
 

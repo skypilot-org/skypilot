@@ -75,8 +75,7 @@ def _get_workspace_cloud_capabilities(
             sky_cloud.CloudCapability(capability.lower())
             for capability in cloud_capabilities
         ]
-    else:
-        return None
+    return None
 
 
 def check_capabilities(
