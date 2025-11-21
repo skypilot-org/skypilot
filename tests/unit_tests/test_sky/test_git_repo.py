@@ -518,6 +518,7 @@ class TestGitRepo:
         assert repo.git_token == 'test_token'
         assert repo.git_ssh_key_path == '/path/to/key'
         assert repo._parsed_url is not None
+        assert repo._parsed_url.add_suffix
 
     def test_git_repo_init_defaults(self):
         """Test GitRepo initialization with default values."""
@@ -527,6 +528,7 @@ class TestGitRepo:
         assert repo.ref == 'main'
         assert repo.git_token is None
         assert repo.git_ssh_key_path is None
+        assert repo._parsed_url.add_suffix
 
     def test_parse_git_url_https(self):
         """Test parsing HTTPS git URL."""
@@ -537,6 +539,7 @@ class TestGitRepo:
         assert repo._parsed_url.protocol == 'https'
         assert repo._parsed_url.user is None
         assert repo._parsed_url.port is None
+        assert repo._parsed_url.add_suffix
 
     def test_parse_git_url_https_with_port(self):
         """Test parsing HTTPS git URL with port."""
@@ -548,6 +551,7 @@ class TestGitRepo:
         assert repo._parsed_url.protocol == 'https'
         assert repo._parsed_url.user is None
         assert repo._parsed_url.port == 8080
+        assert repo._parsed_url.add_suffix
 
     def test_parse_git_url_https_with_user(self):
         """Test parsing HTTPS git URL with user."""
@@ -558,6 +562,7 @@ class TestGitRepo:
         assert repo._parsed_url.protocol == 'https'
         assert repo._parsed_url.user == 'user'
         assert repo._parsed_url.port is None
+        assert repo._parsed_url.add_suffix
 
     def test_parse_git_url_ssh_full(self):
         """Test parsing SSH git URL in full format."""
@@ -568,6 +573,7 @@ class TestGitRepo:
         assert repo._parsed_url.protocol == 'ssh'
         assert repo._parsed_url.user == 'git'
         assert repo._parsed_url.port is None
+        assert repo._parsed_url.add_suffix
 
     def test_parse_git_url_ssh_full_with_port(self):
         """Test parsing SSH git URL in full format with port."""
@@ -578,6 +584,7 @@ class TestGitRepo:
         assert repo._parsed_url.protocol == 'ssh'
         assert repo._parsed_url.user == 'git'
         assert repo._parsed_url.port == 2222
+        assert repo._parsed_url.add_suffix
 
     def test_parse_git_url_ssh_scp_format(self):
         """Test parsing SSH git URL in SCP format."""
@@ -588,6 +595,7 @@ class TestGitRepo:
         assert repo._parsed_url.protocol == 'ssh'
         assert repo._parsed_url.user == 'git'
         assert repo._parsed_url.port is None
+        assert repo._parsed_url.add_suffix
 
     def test_parse_git_url_without_git_suffix(self):
         """Test parsing git URL without .git suffix."""
@@ -596,6 +604,7 @@ class TestGitRepo:
         assert repo._parsed_url.host == 'github.com'
         assert repo._parsed_url.path == 'user/repo'
         assert repo._parsed_url.protocol == 'https'
+        assert not repo._parsed_url.add_suffix
 
     def test_parse_git_url_invalid_empty_path(self):
         """Test parsing git URL with empty path raises error."""
