@@ -212,7 +212,7 @@ python "$INJECT_SCRIPT" "${INJECT_ARGS[@]}"
 
 # Step 5: Test sky status performance
 echo "Step 5: Testing sky status performance..."
-echo "Expected: Show '12501 RUNNING' or '12501 STARTING' or '12501 PENDING' and finish within 20 seconds"
+echo "Expected: Show '12501 RUNNING' or '12501 STARTING' or '12501 PENDING' and finish within 15 seconds"
 time_start=$(date +%s)
 STATUS_OUTPUT=$(timeout 60 sky status 2>&1 || true)
 time_end=$(date +%s)
@@ -226,8 +226,8 @@ if ! echo "$STATUS_OUTPUT" | grep -qE "12501.*(RUNNING|STARTING|PENDING)"; then
     exit 1
 fi
 
-if [ $duration -gt 20 ]; then
-    echo "ERROR: sky status took ${duration}s, expected <= 20s"
+if [ $duration -gt 15 ]; then
+    echo "ERROR: sky status took ${duration}s, expected <= 15s"
     exit 1
 fi
 
@@ -262,7 +262,7 @@ echo "✓ sky jobs queue test passed (${duration}s)"
 
 # Step 7: Test sky jobs queue --all performance
 echo "Step 7: Testing sky jobs queue --all performance..."
-echo "Expected: Last job ID 1 and finish within 30 seconds"
+echo "Expected: Last job ID 1 and finish within 20 seconds"
 time_start=$(date +%s)
 QUEUE_ALL_OUTPUT=$(timeout 60 sky jobs queue --all 2>&1 || true)
 time_end=$(date +%s)
@@ -280,8 +280,8 @@ if [ "$LAST_JOB_ID_ALL" != "1" ]; then
     exit 1
 fi
 
-if [ $duration -gt 30 ]; then
-    echo "ERROR: sky jobs queue --all took ${duration}s, expected <= 30s"
+if [ $duration -gt 20 ]; then
+    echo "ERROR: sky jobs queue --all took ${duration}s, expected <= 20s"
     exit 1
 fi
 
