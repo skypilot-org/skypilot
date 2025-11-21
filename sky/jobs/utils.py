@@ -266,7 +266,12 @@ def is_consolidation_mode(on_api_restart: bool = False) -> bool:
 
 
 def ha_recovery_for_consolidation_mode() -> None:
-    """Recovery logic for HA mode."""
+    """Recovery logic for consolidation mode.
+
+    This should only be called from the managed-job-status-refresh-daemon, due
+    so that we have correct ordering recovery -> controller start -> job status
+    updates. This also should ensure correct operation during a rolling update.
+    """
     # No setup recovery is needed in consolidation mode, as the API server
     # already has all runtime installed. Directly start jobs recovery here.
     # Refers to sky/templates/kubernetes-ray.yml.j2 for more details.

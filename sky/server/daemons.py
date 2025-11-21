@@ -1,4 +1,5 @@
 """Internal server daemons that run in the background."""
+import atexit
 import dataclasses
 import os
 import time
@@ -138,6 +139,18 @@ def refresh_volume_status_event():
 _managed_job_consolidation_mode_lock = None
 
 
+# Attempt to gracefully release the lock when the process exits.
+# If this fails, it's okay, the lock will be released when the process dies.
+def _release_managed_job_consolidation_mode_lock() -> None:
+    global _managed_job_consolidation_mode_lock
+    if _managed_job_consolidation_mode_lock is not None:
+        _managed_job_consolidation_mode_lock.release()
+        _managed_job_consolidation_mode_lock = None
+
+
+atexit.register(_release_managed_job_consolidation_mode_lock)
+
+
 def managed_job_status_refresh_event():
     """Refresh the managed job status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
@@ -172,7 +185,10 @@ def managed_job_status_refresh_event():
                         f'{_managed_job_consolidation_mode_lock}')
             _managed_job_consolidation_mode_lock.acquire()
             logger.info('Lock acquired!')
-        # We will never release the lock (until the process exits).
+        # We don't explicitly release the lock until the process exits.
+        # Even if _release_managed_job_consolidation_mode_lock is not called,
+        # the lock should be released when the process dies (either due to the
+        # advisory file lock being released or the postgres session dying).
 
         # We run the recovery logic before checking the job statuses as those
         # two are conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for

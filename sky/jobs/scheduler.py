@@ -281,11 +281,11 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
     ) and os.path.exists(
             os.path.expanduser(
                 constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE)):
-        logger.warning('Existing jobs are still being recovered, so we can\'t '
-                       'start new controllers yet. This may be due to an API '
-                       'server update in progress.\n'
-                       'Your job has been submitted, but may not start until '
-                       'the recovery completes.')
+        # This could happen during an API server rolling update, or during
+        # normal running while managed-job-status-refresh-daemon is running. In
+        # either case, the controllers should be already started or will be
+        # started by the recovery process.
+        logger.info('Recovery is still in progress, skipping controller start.')
         return
     try:
         with filelock.FileLock(JOB_CONTROLLER_PID_LOCK, blocking=False):
