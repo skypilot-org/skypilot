@@ -48,15 +48,15 @@ class SlurmClient:
 
     def query_jobs(
         self,
-        state_filters: Optional[List[str]] = None,
         job_name: Optional[str] = None,
+        state_filters: Optional[List[str]] = None,
     ) -> List[str]:
         """Query Slurm jobs by state and optional name.
 
         Args:
+            job_name: Optional job name to filter by.
             state_filters: List of job states to filter by (e.g., ['running', 'pending']).
                            If None, returns jobs in all states.
-            job_name: Optional job name to filter by.
 
         Returns:
             List of job IDs matching the filters.
@@ -82,16 +82,19 @@ class SlurmClient:
         job_ids = stdout.strip().splitlines()
         return job_ids
 
-    def cancel_job(self, job_name: str) -> None:
-        """Cancel a Slurm job by name.
+    def cancel_jobs_by_name(self, job_name: str, signal: Optional[str] = None) -> None:
+        """Cancel Slurm job(s) by name.
 
         Args:
-            job_name: Name of the job to cancel.
+            job_name: Name of the job(s) to cancel.
+            signal: Optional signal to send to the job(s).
 
         Raises:
             CommandError: If the scancel command fails.
         """
         cmd = f'scancel --name {job_name}'
+        if signal is not None:
+            cmd += f' --signal {signal}'
         rc, stdout, stderr = self._runner.run(cmd,
                                               require_outputs=True,
                                               stream_logs=False)
@@ -264,6 +267,7 @@ class SlurmClient:
                 raise RuntimeError(
                     f'Job {job_id} terminated with state {state} before nodes were allocated.'
                 )
+            # TODO(kevin): Log reason for pending.
 
             # Check if nodes are allocated by trying to get node list
             cmd = f'squeue -h --jobs {job_id} -o "%N"'

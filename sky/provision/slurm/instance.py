@@ -1,8 +1,8 @@
 """Slurm instance provisioning."""
 
-import collections
 import re
 import tempfile
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
@@ -17,6 +17,10 @@ from sky.utils import timeline
 
 logger = sky_logging.init_logger(__name__)
 
+POLL_INTERVAL_SECONDS = 2
+# Default KillWait is 30 seconds, so we add some buffer time here.
+_TIMEOUT_SECONDS_FOR_JOB_TERMINATION = 60
+
 
 def _get_sky_cluster_dir(cluster_name_on_cloud: str) -> str:
     """Returns the SkyPilot cluster's home directory path on the Slurm cluster."""
@@ -24,11 +28,12 @@ def _get_sky_cluster_dir(cluster_name_on_cloud: str) -> str:
 
 
 @timeline.event
-def _create_jobs(region: str, cluster_name_on_cloud: str,
+def _create_virtual_instance(region: str, cluster_name_on_cloud: str,
                  config: common.ProvisionConfig) -> common.ProvisionRecord:
-    """Create Slurm virtual instances based on the config.
+    """Creates a Slurm virtual instance from the config.
 
-    A Slurm virtual instance is created by submitting a long-running job.
+    A Slurm virtual instance is created by submitting a long-running
+    job with sbatch, to mimic a cloud VM.
     """
     provider_config = config.provider_config
     ssh_config_dict = provider_config['ssh']
@@ -47,22 +52,47 @@ def _create_jobs(region: str, cluster_name_on_cloud: str,
         ssh_proxy_command=ssh_proxy_command,
     )
 
+    # COMPLETING state occurs when a job is being terminated - during this phase,
+    # slurmd sends SIGTERM to tasks, waits for KillWait period, sends SIGKILL if
+    # needed, runs epilog scripts, and notifies slurmctld. This typically happens
+    # when a previous job with the same name is being cancelled or has finished.
+    # Jobs can get stuck in COMPLETING if epilog scripts hang or tasks don't
+    # respond to signals, so we wait with a timeout.
+    completing_jobs = client.query_jobs(
+        cluster_name_on_cloud,
+        ['completing'],
+    )
+    start_time = time.time()
+    while (completing_jobs and
+           time.time() - start_time < _TIMEOUT_SECONDS_FOR_JOB_TERMINATION):
+        logger.debug(f'Found {len(completing_jobs)} completing jobs. '
+                     f'Waiting for them to finish: {completing_jobs}')
+        time.sleep(POLL_INTERVAL_SECONDS)
+        completing_jobs = client.query_jobs(
+            cluster_name_on_cloud,
+            ['completing'],
+        )
+    if completing_jobs:
+        # TODO(kevin): Automatically handle this, following the suggestions in
+        # https://slurm.schedmd.com/troubleshoot.html#completing
+        raise RuntimeError(f'Found {len(completing_jobs)} jobs still in '
+                     'completing state after '
+                     f'{_TIMEOUT_SECONDS_FOR_JOB_TERMINATION}s. '
+                     'This is typically due to non-killable processes '
+                     'associated with the job.')
+
     # Check if job already exists
     existing_jobs = client.query_jobs(
-        ['pending', 'running'],
         cluster_name_on_cloud,
+        ['pending', 'running'],
     )
-
     if existing_jobs:
         if len(existing_jobs) > 1:
-            raise RuntimeError(
-                f'Multiple jobs found with name "{cluster_name_on_cloud}": '
-                f'{existing_jobs}. This indicates a resource leak. '
-                'Use "sky down" to terminate the cluster.')
+            logger.warning(f'Multiple jobs found with name {cluster_name_on_cloud}: {existing_jobs}. '
+                           'This is likely a resource leak.')
 
         job_id = existing_jobs[0]
-        logger.info(f'Job {job_id} already exists for cluster '
-                    f'{cluster_name_on_cloud}')
+        logger.debug(f'Job with name {cluster_name_on_cloud} already exists (JOBID: {job_id})')
 
         # Wait for nodes to be allocated (job might be in PENDING state)
         nodes, _ = client.get_job_nodes(job_id, wait=True)
@@ -203,7 +233,7 @@ def query_instances(
 def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Run instances for the given cluster (Slurm in this case)."""
-    return _create_jobs(region, cluster_name_on_cloud, config)
+    return _create_virtual_instance(region, cluster_name_on_cloud, config)
 
 
 def wait_instances(region: str, cluster_name_on_cloud: str,
@@ -325,7 +355,7 @@ def terminate_instances(
         ssh_proxy_command=ssh_proxy_command,
     )
 
-    client.cancel_job(cluster_name_on_cloud)
+    client.cancel_jobs_by_name(cluster_name_on_cloud)
 
 
 def open_ports(
