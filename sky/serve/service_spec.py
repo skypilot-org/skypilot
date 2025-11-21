@@ -266,14 +266,13 @@ class SkyServiceSpec:
         return SkyServiceSpec(**service_config)
 
     @staticmethod
-    def from_yaml(yaml_path: str) -> 'SkyServiceSpec':
-        with open(os.path.expanduser(yaml_path), 'r', encoding='utf-8') as f:
-            config = yaml_utils.safe_load(f)
+    def from_yaml_str(yaml_str: str) -> 'SkyServiceSpec':
+        config = yaml_utils.safe_load(yaml_str)
 
         if isinstance(config, str):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('YAML loaded as str, not as dict. '
-                                 f'Is it correct? Path: {yaml_path}')
+                                 f'Is it correct? content:\n{yaml_str}')
 
         if config is None:
             config = {}
@@ -281,9 +280,15 @@ class SkyServiceSpec:
         if 'service' not in config:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Service YAML must have a "service" section. '
-                                 f'Is it correct? Path: {yaml_path}')
+                                 f'Is it correct? content:\n{yaml_str}')
 
         return SkyServiceSpec.from_yaml_config(config['service'])
+
+    @staticmethod
+    def from_yaml(yaml_path: str) -> 'SkyServiceSpec':
+        with open(os.path.expanduser(yaml_path), 'r', encoding='utf-8') as f:
+            yaml_content = f.read()
+        return SkyServiceSpec.from_yaml_str(yaml_content)
 
     def to_yaml_config(self) -> Dict[str, Any]:
         config: Dict[str, Any] = {}

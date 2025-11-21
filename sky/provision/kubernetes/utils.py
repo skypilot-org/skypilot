@@ -109,8 +109,9 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
             return {
                 'NCCL_SOCKET_IFNAME': 'eth0',
                 'NCCL_IB_HCA': 'ibp',
-                'UCX_NET_DEVICES': ('ibp0:1,ibp1:1,ibp2:1,ibp3:1,'
-                                    'ibp4:1,ibp5:1,ibp6:1,ibp7:1')
+                # Restrict UCX to TCP to avoid unneccsary errors. NCCL doesn't use UCX
+                'UCX_TLS': 'tcp',
+                'UCX_NET_DEVICES': 'eth0',
             }
         else:
             # GCP clusters and generic clusters - environment variables are
@@ -1883,11 +1884,17 @@ class PodValidator:
 
         if isinstance(klass, str):
             if klass.startswith('list['):
-                sub_kls = re.match(r'list\[(.*)\]', klass).group(1)
+                match = re.match(r'list\[(.*)\]', klass)
+                if match is None:
+                    raise ValueError(f'Invalid list type format: {klass}')
+                sub_kls = match.group(1)
                 return [cls.__validate(sub_data, sub_kls) for sub_data in data]
 
             if klass.startswith('dict('):
-                sub_kls = re.match(r'dict\(([^,]*), (.*)\)', klass).group(2)
+                match = re.match(r'dict\(([^,]*), (.*)\)', klass)
+                if match is None:
+                    raise ValueError(f'Invalid dict type format: {klass}')
+                sub_kls = match.group(2)
                 return {k: cls.__validate(v, sub_kls) for k, v in data.items()}
 
             # convert str to class
@@ -2721,9 +2728,11 @@ def combine_metadata_fields(cluster_yaml_obj: Dict[str, Any],
     Obeys the same add or update semantics as combine_pod_config_fields().
     """
     merged_cluster_yaml_obj = copy.deepcopy(cluster_yaml_obj)
+    context, cloud_str = get_cleaned_context_and_cloud_str(context)
+
     # Get custom_metadata from global config
     custom_metadata = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
+        cloud=cloud_str,
         region=context,
         keys=('custom_metadata',),
         default_value={})
@@ -2731,7 +2740,7 @@ def combine_metadata_fields(cluster_yaml_obj: Dict[str, Any],
     # Get custom_metadata from task-level config overrides
     override_custom_metadata = config_utils.get_cloud_config_value_from_dict(
         dict_config=cluster_config_overrides,
-        cloud='kubernetes',
+        cloud=cloud_str,
         region=context,
         keys=('custom_metadata',),
         default_value={})
@@ -2788,9 +2797,11 @@ def merge_custom_metadata(
 
     Merge is done in-place, so return is not required
     """
+    context, cloud_str = get_cleaned_context_and_cloud_str(context)
+
     # Get custom_metadata from global config
     custom_metadata = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
+        cloud=cloud_str,
         region=context,
         keys=('custom_metadata',),
         default_value={})
@@ -2799,7 +2810,7 @@ def merge_custom_metadata(
     if cluster_config_overrides is not None:
         override_custom_metadata = config_utils.get_cloud_config_value_from_dict(
             dict_config=cluster_config_overrides,
-            cloud='kubernetes',
+            cloud=cloud_str,
             region=context,
             keys=('custom_metadata',),
             default_value={})
@@ -3728,3 +3739,13 @@ def should_exclude_pod_from_gpu_allocation(pod) -> bool:
         return True
 
     return False
+
+
+def get_cleaned_context_and_cloud_str(
+        context: Optional[str]) -> Tuple[Optional[str], str]:
+    """Return the cleaned context and relevant cloud string from a context."""
+    cloud_str = 'kubernetes'
+    if context is not None and context.startswith('ssh-'):
+        cloud_str = 'ssh'
+        context = context[len('ssh-'):]
+    return context, cloud_str

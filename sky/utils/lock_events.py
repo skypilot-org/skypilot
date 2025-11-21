@@ -20,17 +20,17 @@ class DistributedLockEvent:
             f'[DistributedLock.hold]:{lock_id}')
 
     def acquire(self):
-        was_locked = self._lock.is_locked
+        was_locked = self._lock.is_locked  # type: ignore[truthy-function]
         with timeline.Event(f'[DistributedLock.acquire]:{self._lock_id}'):
             self._lock.acquire()
-        if not was_locked and self._lock.is_locked:
+        if not was_locked and self._lock.is_locked:  # type: ignore[truthy-function]  # pylint: disable=line-too-long
             # start holding the lock after initial acquiring
             self._hold_lock_event.begin()
 
     def release(self):
-        was_locked = self._lock.is_locked
+        was_locked = self._lock.is_locked  # type: ignore[truthy-function]
         self._lock.release()
-        if was_locked and not self._lock.is_locked:
+        if was_locked and not self._lock.is_locked:  # type: ignore[truthy-function]  # pylint: disable=line-too-long
             # stop holding the lock after initial releasing
             self._hold_lock_event.end()
 

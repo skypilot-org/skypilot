@@ -27,4 +27,4 @@ run: |
     --collection-name clip_embeddings \
     --persist-dir /vectordb/chroma \
     --embeddings-dir /clip_embeddings \
-    --batch-size 1000 
+    --batch-size 1000

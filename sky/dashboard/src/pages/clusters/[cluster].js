@@ -147,8 +147,9 @@ function ClusterDetails() {
   // Function to build Grafana panel URL with filters
   const buildGrafanaMetricsUrl = (panelId) => {
     const grafanaUrl = getGrafanaUrl();
-    // Use the matched cluster name if available, otherwise fall back to the display name
-    const clusterParam = matchedClusterName || clusterData?.cluster || '$__all';
+    // Use the matched cluster name if available, otherwise fall back to the cluster name on cloud
+    const clusterParam =
+      matchedClusterName || clusterData?.cluster_name_on_cloud;
 
     return `${grafanaUrl}/d-solo/skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics?orgId=1&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&timezone=browser&var-cluster=${encodeURIComponent(clusterParam)}&var-node=$__all&var-gpu=$__all&theme=light&panelId=${panelId}&__feature.dashboardSceneSolo`;
   };

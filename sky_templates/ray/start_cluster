@@ -63,10 +63,15 @@ else
     VERSION_SPEC=""
 fi
 
-uv pip install "ray[default]${VERSION_SPEC}" || uv pip install --system "ray[default]${VERSION_SPEC}"
+# Pin click<8.3.0 to avoid incompatibility with Ray on Python 3.10
+# click 8.3.0 and 8.3.1 breaks Ray CLI due to deepcopy issues with sentinel values
+# See: https://github.com/ray-project/ray/issues/56747
+# TODO(kevin): Remove this once the issue is fixed in a future click release
+RAY_INSTALL_SPEC="ray[default]${VERSION_SPEC} click<8.3.0"
+uv pip install ${RAY_INSTALL_SPEC} || uv pip install --system ${RAY_INSTALL_SPEC}
 
 # Verify Ray is working
-if ! run_ray --version &> /dev/null; then
+if ! run_ray --version > /dev/null; then
     echo -e "${RED}Error: Failed to install Ray.${NC}"
     exit 1
 fi
