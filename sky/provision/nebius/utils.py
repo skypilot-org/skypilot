@@ -373,9 +373,12 @@ def launch(cluster_name_on_cloud: str,
                 f'({nebius.MAX_RETRIES_TO_INSTANCE_READY * POLL_INTERVAL}'
                 f' seconds) while waiting for instance {instance_name}'
                 f' to be ready.')
-    except nebius.nebius_request_error() as e:
+    except nebius.request_error() as e:
         # Handle ResourceExhausted quota limit error. In this case, we need to
         # clean up the disk as VM creation failed and we can't proceed.
+        # It cannot be handled by the caller (provisioner)'s teardown logic,
+        # as we cannot retrieve the disk id, after the instance creation
+        # fails
         logger.warning(f'Failed to launch instance {instance_name}: {e}')
         service = nebius.compute().DiskServiceClient(nebius.sdk())
         nebius.sync_call(
