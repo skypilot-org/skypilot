@@ -219,7 +219,9 @@ class SlurmClient:
         Raises:
             CommandError: If the squeue command fails.
         """
-        cmd = f'squeue --me -h --jobs {job_id} -o "%T"'
+        # Use --only-job-state since we only need the job state.
+        # This reduces the work required by slurmctld.
+        cmd = f'squeue -h --only-job-state --jobs {job_id} -o "%T"'
         rc, stdout, stderr = self._runner.run(cmd,
                                               require_outputs=True,
                                               stream_logs=False)
@@ -264,7 +266,7 @@ class SlurmClient:
                 )
 
             # Check if nodes are allocated by trying to get node list
-            cmd = f'squeue --me -h --jobs {job_id} -o "%N"'
+            cmd = f'squeue -h --jobs {job_id} -o "%N"'
             rc, stdout, stderr = self._runner.run(cmd,
                                                   require_outputs=True,
                                                   stream_logs=False)
@@ -308,7 +310,7 @@ class SlurmClient:
             self.wait_for_job_nodes(job_id)
 
         cmd = (
-            f'squeue --me -h --jobs {job_id} -o "%N" | tr \',\' \'\\n\' | '
+            f'squeue -h --jobs {job_id} -o "%N" | tr \',\' \'\\n\' | '
             f'while read node; do '
             # TODO(kevin): Use json output for more robust parsing.
             f'ip=$(scontrol show node=$node | grep NodeAddr= | '
