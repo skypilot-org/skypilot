@@ -119,9 +119,7 @@ def _get_credentials_path() -> str:
             raise FileNotFoundError(f'{_AWS_CONFIG_FILE_ENV_VAR}={cred_path},'
                                     ' but the file does not exist.')
         return cred_path
-    if not os.path.isfile(os.path.expanduser(_DEFAULT_AWS_CONFIG_PATH)):
-        # Fallback to the default config path.
-        raise FileNotFoundError(_DEFAULT_AWS_CONFIG_PATH)
+    # Fallback to the default config path.
     return _DEFAULT_AWS_CONFIG_PATH
 
 
