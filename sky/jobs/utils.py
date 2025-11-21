@@ -274,7 +274,6 @@ def ha_recovery_for_consolidation_mode() -> None:
     # No setup recovery is needed in consolidation mode, as the API server
     # already has all runtime installed. Directly start jobs recovery here.
     # Refers to sky/templates/kubernetes-ray.yml.j2 for more details.
-    runner = command_runner.LocalProcessCommandRunner()
     scheduler.maybe_start_controllers()
     with open(constants.HA_PERSISTENT_RECOVERY_LOG_PATH.format('jobs_'),
               'a',
@@ -307,49 +306,29 @@ def ha_recovery_for_consolidation_mode() -> None:
                             managed_job_state.ControllerPidRecord(
                                 pid=controller_pid,
                                 started_at=controller_pid_started_at), job_id):
-                        f.write(f'Controller pid {controller_pid} for '
-                                f'job {job_id} is still running. '
-                                'Skipping recovery.\n')
+                        message = (f'Controller pid {controller_pid} for '
+                                   f'job {job_id} is still running. '
+                                   'Skipping recovery.\n')
+                        logger.debug(message)
+                        f.write(message)
                         continue
                 except Exception:  # pylint: disable=broad-except
                     # _controller_process_alive may raise if psutil fails; we
                     # should not crash the recovery logic because of this.
-                    f.write('Error checking controller pid '
-                            f'{controller_pid} for job {job_id}\n')
+                    message = ('Error checking controller pid '
+                               f'{controller_pid} for job {job_id}\n')
+                    logger.warning(message, exc_info=True)
+                    f.write(message)
 
             if job['schedule_state'] not in [
                     managed_job_state.ManagedJobScheduleState.DONE,
                     managed_job_state.ManagedJobScheduleState.WAITING,
             ]:
-                script = managed_job_state.get_ha_recovery_script(job_id)
-                if script is None:
-                    f.write(f'Job {job_id}\'s recovery script does not exist. '
-                            'Skipping recovery. Job schedule state: '
-                            f'{job["schedule_state"]}\n')
-                    continue
-                log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
-                                       'managed_jobs')
-                os.makedirs(log_dir, exist_ok=True)
-                log_timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-                log_path = os.path.join(
-                    log_dir, f'recover-job-{job_id}-{log_timestamp}.log')
-                returncode = runner.run(script, log_path=log_path)
-                if returncode != 0:
-                    logger.error(f'Failed to recover {job_id} - setting to '
-                                 'FAILED_CONTROLLER.')
-                    f.write(f'Failed to recover {job_id} - setting to '
-                            'FAILED_CONTROLLER.\n')
-                    managed_job_state.set_failed(
-                        job_id=job_id,
-                        task_id=None,
-                        failure_type=(managed_job_state.ManagedJobStatus.
-                                      FAILED_CONTROLLER),
-                        failure_reason=('Recovery script exited with code '
-                                        f'{returncode}'),
-                    )
-                    scheduler.job_done(job_id, idempotent=True)
-                f.write(f'Job {job_id} completed recovery at '
-                        f'{datetime.now()}\n')
+                managed_job_state.reset_job_for_recovery(job_id)
+                message = (f'Job {job_id} completed recovery at '
+                           f'{datetime.now()}\n')
+                logger.info(message)
+                f.write(message)
         f.write(f'HA recovery completed at {datetime.now()}\n')
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
 
@@ -544,7 +523,6 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         This function should not throw any exception. If it fails, it will
         capture the error message, and log/return it.
         """
-        managed_job_state.remove_ha_recovery_script(job_id)
         error_msg = None
         tasks = managed_job_state.get_managed_job_tasks(job_id)
         for task in tasks:

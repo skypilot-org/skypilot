@@ -501,9 +501,6 @@ def launch(
                         for k, v in controller_task.envs.items()
                     ]
                     run_script = '\n'.join(env_cmds + [run_script])
-                    # Dump script for high availability recovery.
-                    managed_job_state.set_ha_recovery_script(
-                        consolidation_mode_job_id, run_script)
                     log_dir = os.path.join(skylet_constants.SKY_LOGS_DIRECTORY,
                                            'managed_jobs')
                     os.makedirs(log_dir, exist_ok=True)
