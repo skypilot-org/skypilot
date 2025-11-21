@@ -319,9 +319,12 @@ def ha_recovery_for_consolidation_mode() -> None:
                     logger.warning(message, exc_info=True)
                     f.write(message)
 
+            # Controller process is not set or not alive.
             if job['schedule_state'] not in [
                     managed_job_state.ManagedJobScheduleState.DONE,
                     managed_job_state.ManagedJobScheduleState.WAITING,
+                    # INACTIVE job may be mid-submission, don't set to WAITING.
+                    managed_job_state.ManagedJobScheduleState.INACTIVE,
             ]:
                 managed_job_state.reset_job_for_recovery(job_id)
                 message = (f'Job {job_id} completed recovery at '

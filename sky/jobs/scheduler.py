@@ -353,7 +353,8 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
                                                       job_id):
             # This can happen when HA recovery runs for some reason but the job
             # controller is still alive.
-            logger.warning(f'Job {job_id} is still alive, skipping submission')
+            logger.warning(f'Job {job_id} is still alive with controller '
+                           f'{controller_process}, skipping submission')
             maybe_start_controllers(from_scheduler=True)
             return
 
