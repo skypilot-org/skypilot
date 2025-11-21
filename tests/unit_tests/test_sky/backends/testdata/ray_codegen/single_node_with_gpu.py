@@ -444,7 +444,7 @@ pg = ray_util.placement_group([{"CPU": 4.0, "GPU": 1.0}], 'STRICT_SPREAD')
 plural = 's' if 1 > 1 else ''
 node_str = f'1 node{plural}'
 message = ('[2m├── [0m[2m'
-            'Waiting for task resources on '
+           'Waiting for task resources on '
            f'{node_str}.[0m')
 print(message, flush=True)
 # FIXME: This will print the error message from autoscaler if
@@ -452,7 +452,6 @@ print(message, flush=True)
 # error message.
 ray.get(pg.ready())
 print('\x1b[2m└── \x1b[0mJob started. Streaming logs... \x1b[2m(Ctrl-C to exit log streaming; job will not be killed)\x1b[0m', flush=True)
-
 setup_cmd = 'pip install torch'
 _SETUP_CPUS = 0.0001
 # The setup command will be run as a ray task with num_cpus=_SETUP_CPUS as the

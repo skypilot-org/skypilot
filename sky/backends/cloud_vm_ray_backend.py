@@ -530,26 +530,16 @@ class RayCodeGen(task_codegen.TaskCodeGen):
                     **gpu_dict,
                 })
 
-        streaming_message = (
-            f'{ux_utils.INDENT_LAST_SYMBOL}Job started. Streaming logs... '
-            f'{colorama.Style.DIM}(Ctrl-C to exit log streaming; job will not '
-            f'be killed){colorama.Style.RESET_ALL}')
-        self._code += [
-            textwrap.dedent(f"""\
-                pg = ray_util.placement_group({json.dumps(bundles)}, 'STRICT_SPREAD')
-                plural = 's' if {num_nodes} > 1 else ''
-                node_str = f'{num_nodes} node{{plural}}'
-                message = ('{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}'
-                            'Waiting for task resources on '
-                           f'{{node_str}}.{colorama.Style.RESET_ALL}')
-                print(message, flush=True)
-                # FIXME: This will print the error message from autoscaler if
-                # it is waiting for other task to finish. We should hide the
-                # error message.
-                ray.get(pg.ready())
-                print({streaming_message!r}, flush=True)
-                """)
-        ]
+        self._code.append(
+            f'pg = ray_util.placement_group({json.dumps(bundles)}, \'STRICT_SPREAD\')')
+        self._add_waiting_for_resources_msg(num_nodes)
+        self._code.append(
+            textwrap.dedent("""\
+            # FIXME: This will print the error message from autoscaler if
+            # it is waiting for other task to finish. We should hide the
+            # error message.
+            ray.get(pg.ready())"""))
+        self._add_job_started_msg()
 
         job_id = self.job_id
         if setup_cmd is not None:
@@ -652,8 +642,7 @@ class RayCodeGen(task_codegen.TaskCodeGen):
             resources_dict: Dict[str, float],
             log_dir: str,
             env_vars: Optional[Dict[str, str]] = None,
-            gang_scheduling_id: int = 0,
-            stable_cluster_internal_ips: Optional[List[str]] = None) -> None:
+            gang_scheduling_id: int = 0) -> None:
         """Generates code for a ray remote task that runs a bash command.
         """
         assert self._has_gang_scheduling, (
@@ -669,23 +658,15 @@ class RayCodeGen(task_codegen.TaskCodeGen):
         options = []
         options.append(f'num_cpus={task_cpu_demand}')
 
+        acc_name, acc_count = self._get_accelerator_details(resources_dict)
         num_gpus = 0.0
-        if resources_dict:
-            assert len(resources_dict) == 1, (
-                'There can only be one type of accelerator per instance. '
-                f'Found: {resources_dict}.')
-            num_gpus = list(resources_dict.values())[0]
+        if acc_name is not None:
+            assert resources_dict, ('There can only be one type of accelerator '
+                                    'per instance.')
             options.append(f'resources={json.dumps(resources_dict)}')
-
-            resources_key = list(resources_dict.keys())[0]
             if not accelerator_registry.is_schedulable_non_gpu_accelerator(
-                    resources_key):
-                # `num_gpus` should be empty when the accelerator is not GPU.
-                # FIXME: use a set of GPU types, instead of 'tpu' in the key.
-
-                # Passing this ensures that the Ray remote task gets
-                # CUDA_VISIBLE_DEVICES set correctly.  If not passed, that flag
-                # would be force-set to empty by Ray.
+                    acc_name):
+                num_gpus = acc_count
                 options.append(f'num_gpus={num_gpus}')
         options.append(
             'scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy('  # pylint: disable=line-too-long
@@ -6316,8 +6297,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             task_name=task.name,
             resources_dict=backend_utils.get_task_demands_dict(task),
             log_dir=log_dir,
-            env_vars=task_env_vars,
-            stable_cluster_internal_ips=internal_ips)
+            env_vars=task_env_vars)
 
         codegen.add_epilogue()
 
@@ -6394,8 +6374,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                              task_name=task.name,
                              resources_dict=resources_dict,
                              log_dir=log_dir,
-                             env_vars=task_env_vars,
-                             stable_cluster_internal_ips=internal_ips)
+                             env_vars=task_env_vars)
 
         codegen.add_epilogue()
         # TODO(zhanghao): Add help info for downloading logs.

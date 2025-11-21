@@ -371,20 +371,19 @@ message = ('[2m├── [0m[2m'
            'Waiting for task resources on '
            f'{node_str}.[0m')
 print(message, flush=True)
-
 print('\x1b[2m└── \x1b[0mJob started. Streaming logs... \x1b[2m(Ctrl-C to exit log streaming; job will not be killed)\x1b[0m', flush=True)
 job_lib.set_job_started(3)
 job_lib.scheduler.schedule_step()
 result = subprocess.run(
-    ['srun', '--jobid=67890', '--nodes=1', '--ntasks=1', 
-     '--ntasks-per-node=1', 'bash', '-c', 
+    ['srun', '--jobid=67890', '--nodes=1', '--ntasks=1',
+     '--ntasks-per-node=1', 'bash', '-c',
      'hostname -I | awk "{print \$1}"'],
     capture_output=True,
     text=True,
     check=True
 )
 discovered_ips = result.stdout.strip().split('\n')
-cluster_ips_to_node_id = {ip: i for i, ip in enumerate(None)}
+cluster_ips_to_node_id = {ip: i for i, ip in enumerate(['10.0.0.1', '10.0.0.2'])}
 node_ips = sorted(discovered_ips, key=cluster_ips_to_node_id.get)
 
 sky_env_vars_dict = {}
@@ -412,7 +411,7 @@ if script is not None:
     # Note: srun automatically inherits GPU allocation from sbatch (via --jobid).
     # CUDA_VISIBLE_DEVICES is set by Slurm at the sbatch level and inherited here.
     # No need to specify --gres again since we're using all allocated GPUs.
-    srun_script = f'srun --jobid=67890 --nodes=1 --ntasks-per-node=1 bash -c {shlex.quote(script)}'
+    srun_script = f'srun --unbuffered --jobid=67890 --nodes=1 --ntasks-per-node=1 bash -c {shlex.quote(script)}'
 
     result = run_bash_command_with_log_and_return_pid(
         srun_script,
@@ -429,15 +428,15 @@ else:
     returncodes = [0]
 
 result = subprocess.run(
-    ['srun', '--jobid=67890', '--nodes=1', '--ntasks=1', 
-     '--ntasks-per-node=1', 'bash', '-c', 
+    ['srun', '--jobid=67890', '--nodes=1', '--ntasks=1',
+     '--ntasks-per-node=1', 'bash', '-c',
      'hostname -I | awk "{print \$1}"'],
     capture_output=True,
     text=True,
     check=True
 )
 discovered_ips = result.stdout.strip().split('\n')
-cluster_ips_to_node_id = {ip: i for i, ip in enumerate(None)}
+cluster_ips_to_node_id = {ip: i for i, ip in enumerate(['10.0.0.1', '10.0.0.2'])}
 node_ips = sorted(discovered_ips, key=cluster_ips_to_node_id.get)
 
 sky_env_vars_dict = {}
@@ -465,7 +464,7 @@ if script is not None:
     # Note: srun automatically inherits GPU allocation from sbatch (via --jobid).
     # CUDA_VISIBLE_DEVICES is set by Slurm at the sbatch level and inherited here.
     # No need to specify --gres again since we're using all allocated GPUs.
-    srun_script = f'srun --jobid=67890 --nodes=1 --ntasks-per-node=1 bash -c {shlex.quote(script)}'
+    srun_script = f'srun --unbuffered --jobid=67890 --nodes=1 --ntasks-per-node=1 bash -c {shlex.quote(script)}'
 
     result = run_bash_command_with_log_and_return_pid(
         srun_script,

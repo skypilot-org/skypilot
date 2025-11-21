@@ -1,13 +1,15 @@
 """Code generator for task execution on Ray and Slurm backends."""
 
 import inspect
+import math
 import textwrap
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import colorama
 
 from sky.skylet import constants
 from sky.skylet import log_lib
+from sky.utils import accelerator_registry
 from sky.utils import ux_utils
 
 
@@ -99,6 +101,43 @@ class TaskCodeGen:
         """Set job status to SETTING_UP."""
         self._code.append(
             f'job_lib.set_status({job_id!r}, job_lib.JobStatus.SETTING_UP)')
+
+    def _add_waiting_for_resources_msg(self, num_nodes: int) -> None:
+        """Add standardized waiting-for-resources message."""
+        self._code.append(
+            textwrap.dedent(f"""\
+            plural = 's' if {num_nodes} > 1 else ''
+            node_str = f'{num_nodes} node{{plural}}'
+            message = ('{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}'
+                       'Waiting for task resources on '
+                       f'{{node_str}}.{colorama.Style.RESET_ALL}')
+            print(message, flush=True)"""))
+
+    def _add_job_started_msg(self) -> None:
+        """Add standardized job-started streaming message."""
+        streaming_message = (
+            f'{ux_utils.INDENT_LAST_SYMBOL}Job started. Streaming logs... '
+            f'{colorama.Style.DIM}(Ctrl-C to exit log streaming; job will not '
+            f'be killed){colorama.Style.RESET_ALL}')
+        self._code.append(f'print({streaming_message!r}, flush=True)')
+
+    def _get_accelerator_details(
+        self,
+        resources_dict: Dict[str, float],
+    ) -> Tuple[Optional[str], float]:
+        """Return accelerator name and count from resources, if any."""
+        resources_copy = resources_dict.copy()
+        resources_copy.pop('CPU', None)
+
+        if not resources_copy:
+            return None, 0.0
+
+        assert len(resources_copy) == 1, (
+            'There can only be one type of accelerator per instance. '
+            f'Found: {resources_copy}.')
+
+        acc_name, acc_count = list(resources_copy.items())[0]
+        return acc_name, float(acc_count)
 
     def _add_scheduler_schedule_step(self) -> None:
         """Schedule the next pending job."""
@@ -211,7 +250,6 @@ class TaskCodeGen:
         log_dir: str,
         env_vars: Optional[Dict[str, str]] = None,
         gang_scheduling_id: int = 0,
-        stable_cluster_internal_ips: Optional[List[str]] = None,
     ) -> None:
         """Add task execution code.
 
@@ -222,7 +260,6 @@ class TaskCodeGen:
             log_dir: Directory for task logs
             env_vars: Optional environment variables to set
             gang_scheduling_id: ID for gang scheduling coordination (multi-node)
-            stable_cluster_internal_ips: Stable internal IPs (for interface compatibility)
         """
         raise NotImplementedError
 
@@ -284,6 +321,7 @@ class SlurmCodeGen(TaskCodeGen):
         super().__init__()
         self._slurm_job_id = slurm_job_id
         self._num_nodes = 1  # Track for future multi-node support
+        self._stable_cluster_internal_ips = []  # Store for use in add_task()
 
     def add_prologue(self, job_id: int) -> None:
         """Initialize Slurm executor without Ray.
@@ -415,25 +453,11 @@ class SlurmCodeGen(TaskCodeGen):
         For Slurm, this handles setup command execution using srun.
         resources_dict is accepted but not used (Slurm uses sbatch allocation).
         """
-        # Print the marker message that tail_logs expects
-        # This allows log streaming to work properly
-        # Must match LOG_FILE_START_STREAMING_AT in log_lib.py
-        self._code.append(
-            textwrap.dedent(f"""\
-            plural = 's' if {num_nodes} > 1 else ''
-            node_str = f'{num_nodes} node{{plural}}'
-            message = ('{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}'
-                       'Waiting for task resources on '
-                       f'{{node_str}}.{colorama.Style.RESET_ALL}')
-            print(message, flush=True)
-            """))
+        # Store for later use in add_task()
+        self._stable_cluster_internal_ips = stable_cluster_internal_ips
 
-        # Print streaming message after setup/gang scheduling is complete
-        streaming_message = (
-            f'{ux_utils.INDENT_LAST_SYMBOL}Job started. Streaming logs... '
-            f'{colorama.Style.DIM}(Ctrl-C to exit log streaming; job will not '
-            f'be killed){colorama.Style.RESET_ALL}')
-        self._code.append(f'print({streaming_message!r}, flush=True)')
+        self._add_waiting_for_resources_msg(num_nodes)
+        self._add_job_started_msg()
 
         if setup_cmd is not None:
             self._add_slurm_task_setup_impl(num_nodes, env_vars, setup_cmd,
@@ -510,7 +534,6 @@ class SlurmCodeGen(TaskCodeGen):
         log_dir: str,
         env_vars: Optional[Dict[str, str]] = None,
         gang_scheduling_id: int = 0,
-        stable_cluster_internal_ips: Optional[List[str]] = None,
     ) -> None:
         """Unified interface: Add task execution.
 
@@ -523,19 +546,15 @@ class SlurmCodeGen(TaskCodeGen):
         num_nodes = getattr(self, '_num_nodes', 1)
         env_vars = env_vars or {}
 
-        # Extract GPU count from resources_dict
-        # Remove 'CPU' as it's not needed for GPU count
-        resources_dict_copy = resources_dict.copy()
-        resources_dict_copy.pop('CPU', None)
-
+        acc_name, acc_count = self._get_accelerator_details(resources_dict)
         num_gpus = 0
-        if resources_dict_copy:
-            # Extract GPU count (similar to Ray's logic)
-            num_gpus = int(list(resources_dict_copy.values())[0])
+        if (acc_name is not None and
+                not accelerator_registry.is_schedulable_non_gpu_accelerator(
+                    acc_name)):
+            num_gpus = int(math.ceil(acc_count))
 
         self._add_slurm_task_impl(bash_script, num_nodes, env_vars, log_dir,
-                                  task_name, stable_cluster_internal_ips,
-                                  num_gpus)
+                                  task_name, num_gpus)
 
     def _add_slurm_task_impl(
         self,
@@ -544,7 +563,6 @@ class SlurmCodeGen(TaskCodeGen):
         env_vars: Dict[str, str],
         log_dir: str,
         task_name: Optional[str] = None,
-        stable_cluster_internal_ips: Optional[List[str]] = None,
         num_gpus: int = 0,
     ) -> None:
         """Add task execution using srun.
@@ -555,13 +573,12 @@ class SlurmCodeGen(TaskCodeGen):
             env_vars: Environment variables to set
             log_dir: Directory for task logs
             task_name: Optional task name for logging
-            stable_cluster_internal_ips: Stable IPs for multi-node coordination (future)
             num_gpus: Number of GPUs per node (for SKYPILOT_NUM_GPUS_PER_NODE)
         """
         assert self._has_prologue, 'Call add_prologue() before add_slurm_task().'
 
         # Add node discovery (extensible for multi-node)
-        self._add_node_discovery(num_nodes, stable_cluster_internal_ips)
+        self._add_node_discovery(num_nodes, self._stable_cluster_internal_ips)
 
         # Build environment variables using helper
         sky_env_vars_dict_str = self._build_env_vars_code(env_vars, num_nodes)
