@@ -156,10 +156,8 @@ def queue_v2(
         The request ID of the queue request.
 
     Request Returns:
-
         job_records (List[responses.ManagedJobRecord]): A list of dicts, with each dict
           containing the information of a job.
-
 
           .. code-block:: python
 
@@ -178,7 +176,7 @@ def queue_v2(
                 'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
                 'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
               }
-            ],
+            ]
         total (int): Total number of jobs after filter,
         status_counts (Dict[str, int]): Status counts after filter,
         total_no_filter (int): Total number of jobs before filter,
