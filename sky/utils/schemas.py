@@ -1051,6 +1051,16 @@ def get_default_remote_identity(cloud: str) -> str:
     return RemoteIdentityOptions.LOCAL_CREDENTIALS.value
 
 
+_CAPABILITIES_SCHEMA = {
+    'capabilities': {
+        'type': 'array',
+        'items': {
+            'type': 'string',
+            'case_insensitive_enum': ['compute', 'storage']
+        },
+    }
+}
+
 _REMOTE_IDENTITY_SCHEMA = {
     'remote_identity': {
         'type': 'string',
@@ -1270,6 +1280,7 @@ def get_config_schema():
                         }]
                     },
                 },
+                **_CAPABILITIES_SCHEMA,
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
@@ -1327,6 +1338,7 @@ def get_config_schema():
                         }
                     ],
                 },
+                **_CAPABILITIES_SCHEMA,
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
@@ -1667,7 +1679,8 @@ def get_config_schema():
                         },
                         'disabled': {
                             'type': 'boolean'
-                        }
+                        },
+                        **_CAPABILITIES_SCHEMA,
                     },
                     'additionalProperties': False,
                 },
@@ -1680,6 +1693,7 @@ def get_config_schema():
                         'disabled': {
                             'type': 'boolean'
                         },
+                        **_CAPABILITIES_SCHEMA,
                     },
                     'additionalProperties': False,
                 },
