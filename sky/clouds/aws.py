@@ -112,8 +112,17 @@ T = TypeVar('T')
 P = ParamSpec('P')
 
 
-def get_credentials_path() -> str:
-    return os.getenv(_AWS_CONFIG_FILE_ENV_VAR, _DEFAULT_AWS_CONFIG_PATH)
+def _get_credentials_path() -> str:
+    cred_path = os.getenv(_AWS_CONFIG_FILE_ENV_VAR, None)
+    if cred_path is not None:
+        if not os.path.isfile(os.path.expanduser(cred_path)):
+            raise FileNotFoundError(f'{_AWS_CONFIG_FILE_ENV_VAR}={cred_path},'
+                                    ' but the file does not exist.')
+        return cred_path
+    if not os.path.isfile(os.path.expanduser(_DEFAULT_AWS_CONFIG_PATH)):
+        # Fallback to the default config path.
+        raise FileNotFoundError(_DEFAULT_AWS_CONFIG_PATH)
+    return _DEFAULT_AWS_CONFIG_PATH
 
 
 def aws_profile_aware_lru_cache(*lru_cache_args,
@@ -985,7 +994,7 @@ class AWS(clouds.Cloud):
         except exceptions.CloudUserIdentityError as e:
             return False, None, str(e)
 
-        credentials_path = get_credentials_path()
+        credentials_path = _get_credentials_path()
         static_credential_exists = os.path.isfile(
             os.path.expanduser(credentials_path))
         hints = None
@@ -1297,7 +1306,7 @@ class AWS(clouds.Cloud):
         # TODO(skypilot): This also means we leave open a bug for AWS SSO users that
         # use multiple clouds. The non-AWS nodes will have neither the credential
         # file nor the ability to understand AWS IAM.
-        credentials_path = os.path.expanduser(get_credentials_path())
+        credentials_path = os.path.expanduser(_get_credentials_path())
         if os.path.exists(credentials_path):
             return {
                 # Upload to the default config location on remote cluster.
