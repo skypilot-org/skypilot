@@ -127,7 +127,15 @@ def _create_virtual_instance(region: str, cluster_name_on_cloud: str,
             accelerator_count > 0):
         provision_lines.append(f'#SBATCH --gres=gpu:{accelerator_type.lower()}:'
                                f'{accelerator_count}')
-    provision_lines.extend(['', 'sleep infinity'])
+
+    # Create sky directory and .hushlogin as part of the provision script
+    sky_dir = _get_sky_cluster_dir(cluster_name_on_cloud)
+    provision_lines.extend([
+        '',
+        f'mkdir -p {sky_dir}',
+        f'touch {sky_dir}/.hushlogin',
+        'sleep infinity',
+    ])
     provision_script = '\n'.join(provision_lines)
 
     # To bootstrap things, we need to do it with SSHCommandRunner first.
@@ -139,23 +147,14 @@ def _create_virtual_instance(region: str, cluster_name_on_cloud: str,
         ssh_proxy_command=ssh_proxy_command,
     )
 
-    # TODO(kevin): Make this more robust and configurable.
-    sky_dir = _get_sky_cluster_dir(cluster_name_on_cloud)
-    # Create sky directory and .hushlogin (to suppress MOTD/login messages)
-    setup_cmd = f'mkdir -p {sky_dir} && touch {sky_dir}/.hushlogin'
-    rc, _, stderr = controller_node_runner.run(setup_cmd, require_outputs=True)
-    if rc != 0:
-        raise RuntimeError(f'Failed to create directory {sky_dir}: {stderr}\n'
-                           f'Command: {setup_cmd}\n'
-                           f'Return code: {rc}')
-
+    # Rsync the provision script to a temporary location on the controller node
     with tempfile.NamedTemporaryFile(mode='w',
                                      prefix='sky_provision_',
                                      delete=True) as f:
         f.write(provision_script)
         f.flush()
         src_path = f.name
-        tgt_path = f'{sky_dir}/provision.sh'
+        tgt_path = f'/tmp/sky_provision_{cluster_name_on_cloud}.sh'
         controller_node_runner.rsync(src_path, tgt_path, up=True, stream_logs=False)
 
     job_id = client.submit_job(partition, cluster_name_on_cloud, tgt_path)
