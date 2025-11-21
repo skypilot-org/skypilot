@@ -50,6 +50,7 @@ _JOB_STATUS_FETCH_INTERVAL = 30
 _PROCESS_POOL_REFRESH_INTERVAL = 20
 _RETRY_INIT_GAP_SECONDS = 60
 _DEFAULT_DRAIN_SECONDS = 120
+_WAIT_LAUNCH_THREAD_TIMEOUT_SECONDS = 15
 
 # TODO(tian): Backward compatibility. Remove this after 3 minor release, i.e.
 # 0.13.0. We move the ProcessStatus to common_utils.ProcessStatus in #6666, but
@@ -939,6 +940,8 @@ class SkyPilotReplicaManager(ReplicaManager):
             launch_thread = self._launch_thread_pool[replica_id]
             if launch_thread.is_alive():
                 self._replica_to_launch_cancelled[replica_id] = True
+                start_wait_time = time.time()
+                timeout_reached = False
                 while True:
                     # Launch request id found. cancel it.
                     if replica_id in self._replica_to_request_id:
@@ -948,10 +951,28 @@ class SkyPilotReplicaManager(ReplicaManager):
                     if replica_id not in self._replica_to_launch_cancelled:
                         # Indicates that the cancellation was received.
                         break
+                    if not launch_thread.is_alive():
+                        # It's possible that the launch thread immediately
+                        # finished after we check. Exit the loop now.
+                        break
+                    if (time.time() - start_wait_time >
+                            _WAIT_LAUNCH_THREAD_TIMEOUT_SECONDS):
+                        timeout_reached = True
+                        break
                     time.sleep(0.1)
+                if timeout_reached:
+                    logger.warning(
+                        'Failed to cancel launch request for replica '
+                        f'{replica_id} after '
+                        f'{_WAIT_LAUNCH_THREAD_TIMEOUT_SECONDS} seconds. '
+                        'Force waiting the launch thread to finish.')
+                else:
+                    logger.info('Interrupted launch thread for replica '
+                                f'{replica_id} and deleted the cluster.')
                 launch_thread.join()
-            logger.info(f'Interrupted launch thread for replica {replica_id} '
-                        'and deleted the cluster.')
+            else:
+                logger.info(f'Launch thread for replica {replica_id} '
+                            'already finished. Delete the cluster now.')
             self._launch_thread_pool.pop(replica_id)
             self._replica_to_request_id.pop(replica_id)
 
