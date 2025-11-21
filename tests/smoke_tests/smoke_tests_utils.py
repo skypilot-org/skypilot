@@ -74,16 +74,16 @@ LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG = {
     'jobs': {
         'controller': {
             'resources': {
-                'cpus': '2+',
-                'memory': '4+'
+                'cpus': '4+',
+                'memory': '16+'
             }
         }
     },
     'serve': {
         'controller': {
             'resources': {
-                'cpus': '2+',
-                'memory': '4+'
+                'cpus': '4+',
+                'memory': '16+'
             }
         }
     }
