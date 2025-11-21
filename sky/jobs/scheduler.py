@@ -271,6 +271,22 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
     Will also add the job_id, dag_yaml_path, and env_file_path to the
     controllers list of processes.
     """
+    # In consolidation mode, during rolling update, two API servers may be
+    # running. If we are on the new API server, and we haven't finished the
+    # recovery process, we should avoid starting new controllers. The old API
+    # server/consolidated jobs controller could run update_managed_jobs_statuses
+    # and if there are jobs running on the new API server, the old one will not
+    # see the corresponding processes and may mark them as FAILED_CONTROLLER.
+    if from_scheduler and managed_job_utils.is_consolidation_mode(
+    ) and os.path.exists(
+            os.path.expanduser(
+                constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE)):
+        # This could happen during an API server rolling update, or during
+        # normal running while managed-job-status-refresh-daemon is running. In
+        # either case, the controllers should be already started or will be
+        # started by the recovery process.
+        logger.info('Recovery is still in progress, skipping controller start.')
+        return
     try:
         with filelock.FileLock(JOB_CONTROLLER_PID_LOCK, blocking=False):
             if from_scheduler and not managed_job_utils.is_consolidation_mode():
@@ -337,7 +353,8 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
                                                       job_id):
             # This can happen when HA recovery runs for some reason but the job
             # controller is still alive.
-            logger.warning(f'Job {job_id} is still alive, skipping submission')
+            logger.warning(f'Job {job_id} is still alive with controller '
+                           f'{controller_process}, skipping submission')
             maybe_start_controllers(from_scheduler=True)
             return
 
@@ -348,21 +365,25 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
         original_user_yaml_content = original_user_yaml_file.read()
     with open(env_file_path, 'r', encoding='utf-8') as env_file:
         env_file_content = env_file.read()
+
+    # Read config file if SKYPILOT_CONFIG env var is set
+    config_file_content: Optional[str] = None
+    config_file_path = os.environ.get(skypilot_config.ENV_VAR_SKYPILOT_CONFIG)
+    if config_file_path:
+        config_file_path = os.path.expanduser(config_file_path)
+        if os.path.exists(config_file_path):
+            with open(config_file_path, 'r', encoding='utf-8') as config_file:
+                config_file_content = config_file.read()
+
+    config_bytes = (len(config_file_content) if config_file_content else 0)
     logger.debug(f'Storing job {job_id} file contents in database '
                  f'(DAG bytes={len(dag_yaml_content)}, '
                  f'original user yaml bytes={len(original_user_yaml_content)}, '
-                 f'env bytes={len(env_file_content)}).')
+                 f'env bytes={len(env_file_content)}, '
+                 f'config bytes={config_bytes}).')
     state.scheduler_set_waiting(job_id, dag_yaml_content,
                                 original_user_yaml_content, env_file_content,
-                                priority)
-    if state.get_ha_recovery_script(job_id) is None:
-        # the run command is just the command that called scheduler
-        run = (f'source {env_file_path} && '
-               f'{sys.executable} -m sky.jobs.scheduler {dag_yaml_path} '
-               f'--job-id {job_id} --env-file {env_file_path} '
-               f'--user-yaml-path {original_user_yaml_path} '
-               f'--priority {priority}')
-        state.set_ha_recovery_script(job_id, run)
+                                config_file_content, priority)
     maybe_start_controllers(from_scheduler=True)
 
 
