@@ -55,6 +55,7 @@ import uuid
 import filelock
 
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import sdk
 from sky.jobs import constants as managed_job_constants
