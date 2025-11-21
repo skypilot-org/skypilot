@@ -574,7 +574,7 @@ def kill_requests(request_ids: Optional[List[str]] = None,
     return _kill_requests(request_ids=expanded_request_ids, user_id=user_id)
 
 
-# needed for backward compatibility. Remove by v0.10.7 or v0.11.0
+# needed for backward compatibility. Remove by v0.10.7 or v0.12.0
 # and rename kill_requests to kill_requests_with_prefix.
 kill_requests_with_prefix = kill_requests
 
