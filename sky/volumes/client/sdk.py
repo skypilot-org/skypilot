@@ -74,6 +74,7 @@ def apply(volume: volume_lib.Volume) -> server_common.RequestId[None]:
         size=volume.size,
         config=volume.config,
         labels=volume.labels,
+        use_existing=volume.use_existing,
     )
     response = server_common.make_authenticated_request(
         'POST', '/volumes/apply', json=json.loads(body.model_dump_json()))
@@ -100,10 +101,10 @@ def validate(volume: volume_lib.Volume) -> None:
         name=volume.name,
         volume_type=volume.type,
         infra=volume.infra,
-        resource_name=volume.resource_name,
         size=volume.size,
         config=volume.config,
         labels=volume.labels,
+        use_existing=volume.use_existing,
     )
     response = server_common.make_authenticated_request(
         'POST', '/volumes/validate', json=json.loads(body.model_dump_json()))

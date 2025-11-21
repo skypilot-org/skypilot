@@ -123,6 +123,18 @@ def _get_service_record(
     return service_statuses[0]
 
 
+def _maybe_display_run_warning(task: 'task_lib.Task') -> None:
+    # We do not block the user from creating a pool with a run section
+    # in order to enable using the same yaml for pool creation
+    # and job submission. But we want to make it clear that 'run' will not
+    # be respected here.
+    if task.run is not None:
+        logger.warning(
+            f'{colorama.Fore.YELLOW} Pool creation does not support the '
+            '`run` section. Creating the pool while ignoring the '
+            f'`run` section.{colorama.Style.RESET_ALL}')
+
+
 def up(
     task: 'task_lib.Task',
     service_name: Optional[str] = None,
@@ -160,16 +172,8 @@ def up(
     task = dag.tasks[0]
     assert task.service is not None
     if pool:
-        # Prevent pool creation from having a run section. Allowing this would
-        # not cause any issues, but we want to provide a consistent experience
-        # to the user by making it clear that 'setup' runs during creation
-        # and 'run' runs during job submission.
-        if task.run is not None:
-            raise ValueError(
-                'Pool creation does not support the `run` section. '
-                'During creation the goal is to setup the '
-                'environment the jobs will run in.')
-        # Use dummy run script for cluster pool.
+        _maybe_display_run_warning(task)
+        # Use dummy run script for pool.
         task.run = serve_constants.POOL_DUMMY_RUN_COMMAND
 
     with rich_utils.safe_status(
@@ -513,40 +517,16 @@ def update(
                     f'{workers} is not supported. Ignoring the update.')
 
         # Load the existing task configuration from the service's YAML file
-        latest_yaml_path = serve_utils.generate_task_yaml_file_name(
-            service_name, service_record['version'], expand_user=False)
+        yaml_content = service_record['yaml_content']
 
-        logger.debug('Loading existing task configuration from '
-                     f'{latest_yaml_path} to create a new modified task.')
-
-        # Get the path locally.
-        with tempfile.NamedTemporaryFile(
-                prefix=f'service-task-{service_name}-',
-                mode='w',
-        ) as service_file:
-            try:
-                backend.download_file(handle, latest_yaml_path,
-                                      service_file.name)
-            except exceptions.CommandError as e:
-                raise RuntimeError(
-                    f'Failed to download the old task configuration from '
-                    f'{latest_yaml_path}: {e.error_msg}') from e
-
-            # Load the existing task configuration
-            existing_config = yaml_utils.read_yaml(service_file.name)
-            task = task_lib.Task.from_yaml_config(existing_config)
+        # Load the existing task configuration
+        task = task_lib.Task.from_yaml_str(yaml_content)
 
         if task.service is None:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError('No service configuration found in '
                                    f'existing {noun} {service_name!r}')
         task.set_service(task.service.copy(min_replicas=workers))
-
-        # Clear the run section for pools before validation, since pool updates
-        # should only update the number of workers, not the run command. But
-        # the run command will have bee set to a dummy command during creation.
-        if pool:
-            task.run = None
 
     task.validate()
     serve_utils.validate_service_task(task, pool=pool)
@@ -561,15 +541,8 @@ def update(
         task, request_name=request_names.AdminPolicyRequestName.SERVE_UPDATE)
     task = dag.tasks[0]
     if pool:
-        # Prevent pool creation from having a run section. Allowing this would
-        # not cause any issues, but we want to provide a consistent experience
-        # to the user by making it clear that 'setup' runs during creation
-        # and 'run' runs during job submission.
-        if task.run is not None:
-            raise ValueError('Pool update does not support the `run` section. '
-                             'During update the goal is to setup the '
-                             'environment the jobs will run in.')
-        # Use dummy run script for cluster pool.
+        _maybe_display_run_warning(task)
+        # Use dummy run script for pool.
         task.run = serve_constants.POOL_DUMMY_RUN_COMMAND
 
     assert task.service is not None
@@ -691,10 +664,20 @@ def update(
         f'Please use {ux_utils.BOLD}{cmd} {service_name} '
         f'{ux_utils.RESET_BOLD}to check the latest status.')
 
+    if pool:
+        logs_cmd = f'`sky jobs pool logs {service_name} <worker_id>`'
+        unit_noun = 'Workers'
+
+    else:
+        logs_cmd = f'`sky serve logs {service_name} <replica_id>`'
+        unit_noun = 'Replicas'
     logger.info(
         ux_utils.finishing_message(
             f'Successfully updated {noun} {service_name!r} '
-            f'to version {current_version}.'))
+            f'to version {current_version}.',
+            follow_up_message=
+            f'\n{unit_noun} are updating, use {ux_utils.BOLD}{logs_cmd}'
+            f'{ux_utils.RESET_BOLD} to check their status.'))
 
 
 def apply(

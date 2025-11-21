@@ -93,6 +93,7 @@ def test_minimal(generic_cloud: str):
             f'sky logs {name} 9 | grep "hi test"',
             f'sky exec {name} && exit 1 || true',
             f'sky exec -c {name} && exit 1 || true',
+            f's=$(sky cost-report --all) && echo $s && echo $s | grep {name} && echo $s | grep "Total Cost"',
         ],
         f'sky down -y {name}',
         smoke_tests_utils.get_timeout(generic_cloud),
@@ -526,7 +527,6 @@ def test_gcp_stale_job_manual_restart():
 
 # ---------- Check Sky's environment variables; workdir. ----------
 @pytest.mark.no_fluidstack  # Requires amazon S3
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
@@ -551,7 +551,6 @@ def test_env_check(generic_cloud: str):
 
 
 # ---------- CLI logs ----------
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_logs instead.
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet.
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
@@ -1018,9 +1017,9 @@ def test_kubernetes_context_failover(unreachable_context):
                 f'sky launch -y -c {name}-5 --cpus 1 echo hi',
                 # switch back to kind-skypilot where GPU cluster is launched
                 f'kubectl config use-context kind-skypilot',
-                # test if sky status --kubernetes shows H100
-                f'sky status --kubernetes | grep H100 || '
-                '{ echo "sky status --kubernetes does not show H100." && exit 1; }',
+                # test if sky status-kubernetes shows H100
+                f'sky status-kubernetes | grep H100 || '
+                '{ echo "sky status-kubernetes does not show H100." && exit 1; }',
             ],
             f'sky down -y {name}-1 {name}-3 {name}-5',
             env={

@@ -947,6 +947,8 @@ def write_cluster_config(
                         '{sky_wheel_hash}',
                         wheel_hash).replace('{cloud}',
                                             str(cloud).lower()),
+                'copy_skypilot_templates_commands':
+                    constants.COPY_SKYPILOT_TEMPLATES_COMMANDS,
                 # Port of Ray (GCS server).
                 # Ray's default port 6379 is conflicted with Redis.
                 'ray_port': constants.SKY_REMOTE_RAY_PORT,
@@ -990,8 +992,8 @@ def write_cluster_config(
                 # Volume mounts
                 'volume_mounts': volume_mount_vars,
 
-                # runcmd to append to the cloud-init cloud config passed to the
-                # machine's UserData. This is currently only used by AWS.
+                # runcmd to run before any of the SkyPilot runtime setup commands.
+                # This is currently only used by AWS and Kubernetes.
                 'runcmd': runcmd,
             }),
         output_path=tmp_yaml_path)

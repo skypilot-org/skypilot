@@ -12,6 +12,7 @@ name: batch-classify
 
 run: |
   echo "Starting classification job (rank ${SKYPILOT_JOB_RANK} of ${SKYPILOT_NUM_JOBS})"
+  source .venv/bin/activate
   
   # Run the classification script
   # Note: If you don't have cloud storage, change --output-dir to ~/sky_workdir

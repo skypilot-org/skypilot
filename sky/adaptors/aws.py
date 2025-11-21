@@ -28,6 +28,7 @@ This is informed by the following boto3 docs:
 
 # pylint: disable=import-outside-toplevel
 
+import functools
 import logging
 import threading
 import time
@@ -68,17 +69,63 @@ version = 1
 _MAX_ATTEMPT_FOR_CREATION = 5
 
 
-class _ThreadLocalLRUCache(threading.local):
+class _ThreadLocalTTLCache(threading.local):
+    """Thread-local storage for _thread_local_lru_cache decorator."""
 
-    def __init__(self, maxsize=32):
+    def __init__(self, func, maxsize: int, ttl: int):
         super().__init__()
-        self.cache = annotations.lru_cache(scope='request', maxsize=maxsize)
+        self.func = func
+        self.maxsize = maxsize
+        self.ttl = ttl
+
+    def get_cache(self):
+        if not hasattr(self, 'cache'):
+            self.cache = annotations.ttl_cache(scope='request',
+                                               maxsize=self.maxsize,
+                                               ttl=self.ttl,
+                                               timer=time.time)(self.func)
+        return self.cache
 
 
-def _thread_local_lru_cache(maxsize=32):
-    # Create thread-local storage for the LRU cache
-    local_cache = _ThreadLocalLRUCache(maxsize)
-    return local_cache.cache
+def _thread_local_ttl_cache(maxsize=32, ttl=60 * 55):
+    """Thread-local TTL cache decorator.
+
+    Args:
+        maxsize: Maximum size of the cache.
+        ttl: Time to live for the cache in seconds.
+             Default is 55 minutes, a bit less than 1 hour
+             default lifetime of an STS token.
+    """
+
+    def decorator(func):
+        # Create thread-local storage for the LRU cache
+        local_cache = _ThreadLocalTTLCache(func, maxsize, ttl)
+
+        # We can't apply the lru_cache here, because this runs at import time
+        # so we will always have the main thread's cache.
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            # We are within the actual function call, which may be on a thread,
+            # so local_cache.cache will return the correct thread-local cache,
+            # which we can now apply and immediately call.
+            return local_cache.get_cache()(*args, **kwargs)
+
+        def cache_info():
+            # Note that this will only give the cache info for the current
+            # thread's cache.
+            return local_cache.get_cache().cache_info()
+
+        def cache_clear():
+            # Note that this will only clear the cache for the current thread.
+            local_cache.get_cache().cache_clear()
+
+        wrapper.cache_info = cache_info  # type: ignore[attr-defined]
+        wrapper.cache_clear = cache_clear  # type: ignore[attr-defined]
+
+        return wrapper
+
+    return decorator
 
 
 def _assert_kwargs_builtin_type(kwargs):
@@ -125,9 +172,9 @@ def get_workspace_profile() -> Optional[str]:
     return skypilot_config.get_workspace_cloud('aws').get('profile', None)
 
 
-# The LRU cache needs to be thread-local to avoid multiple threads sharing the
+# The TTL cache needs to be thread-local to avoid multiple threads sharing the
 # same session object, which is not guaranteed to be thread-safe.
-@_thread_local_lru_cache()
+@_thread_local_ttl_cache()
 def session(check_credentials: bool = True, profile: Optional[str] = None):
     """Create an AWS session.
 

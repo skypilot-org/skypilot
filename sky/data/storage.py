@@ -115,10 +115,10 @@ def _is_storage_cloud_enabled(cloud_name: str,
     if cloud_name in enabled_storage_cloud_names:
         return True
     if try_fix_with_sky_check:
-        # TODO(zhwu): Only check the specified cloud to speed up.
         sky_check.check_capability(
             sky_cloud.CloudCapability.STORAGE,
             quiet=True,
+            clouds=[cloud_name],
             workspace=skypilot_config.get_active_workspace())
         return _is_storage_cloud_enabled(cloud_name,
                                          try_fix_with_sky_check=False)
@@ -755,6 +755,11 @@ class Storage(object):
                         previous_store_type = store_type
                     else:
                         new_store_type = store_type
+                if previous_store_type is None or new_store_type is None:
+                    # This should not happen if the condition above is true,
+                    # but add check for type safety
+                    raise exceptions.StorageBucketCreateError(
+                        f'Bucket {self.name} has inconsistent store types.')
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketCreateError(
                         f'Bucket {self.name} was previously created for '
@@ -785,8 +790,8 @@ class Storage(object):
                                                source=self.source,
                                                mode=self.mode)
 
-            for store in input_stores:
-                self.add_store(store)
+            for store_type in input_stores:
+                self.add_store(store_type)
 
             if self.source is not None:
                 # If source is a pre-existing bucket, connect to the bucket
@@ -801,10 +806,11 @@ class Storage(object):
                     elif self.source.startswith('oci://'):
                         self.add_store(StoreType.OCI)
 
-                    store_type = StoreType.find_s3_compatible_config_by_prefix(
-                        self.source)
-                    if store_type:
-                        self.add_store(store_type)
+                    s3_compatible_store_type: Optional[StoreType] = (
+                        StoreType.find_s3_compatible_config_by_prefix(
+                            self.source))
+                    if s3_compatible_store_type:
+                        self.add_store(s3_compatible_store_type)
 
     def get_bucket_sub_path_prefix(self, blob_path: str) -> str:
         """Adds the bucket sub path prefix to the blob path."""
@@ -3686,6 +3692,9 @@ class IBMCosStore(AbstractStore):
           StorageBucketGetError: If fetching existing bucket fails
           StorageInitError: If general initialization fails.
         """
+        if self.region is None:
+            raise exceptions.StorageInitError(
+                'Region must be specified for IBM COS store.')
         self.client = ibm.get_cos_client(self.region)
         self.s3_resource = ibm.get_cos_resource(self.region)
         self.bucket, is_new_bucket = self._get_bucket()

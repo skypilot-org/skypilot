@@ -660,3 +660,92 @@ class TestGetManagedJobQueue:
 
         # Verify that generate_managed_job_cluster_name was called
         assert generated_cluster_name == 'my_task-42'
+
+
+class TestControllerProcessAlive:
+
+    def test_controller_process_alive_matches_start_time(self, monkeypatch):
+        """Process considered alive when start time matches recorded value."""
+        expected_pid = 1234
+        expected_start = 1700000000.0
+
+        class _FakeProcess:
+
+            def __init__(self, pid):
+                assert pid == expected_pid
+
+            def create_time(self):
+                return expected_start
+
+            def cmdline(self):
+                return ['python', '-m', 'sky.jobs.controller']
+
+            def is_running(self):
+                return True
+
+        monkeypatch.setattr(jobs_utils.psutil, 'Process', _FakeProcess)
+        record = managed_job_state.ControllerPidRecord(
+            pid=expected_pid, started_at=expected_start)
+        assert jobs_utils.controller_process_alive(record, legacy_job_id=42)
+
+    def test_controller_process_alive_mismatched_start_time(self, monkeypatch):
+        """Process considered dead when start time does not match."""
+        expected_pid = 5678
+        recorded_start = 1700000000.0
+        actual_start = recorded_start + 5.0
+
+        class _FakeProcess:
+
+            def __init__(self, pid):
+                assert pid == expected_pid
+
+            def create_time(self):
+                return actual_start
+
+            def cmdline(self):
+                return ['python', '-m', 'sky.jobs.controller']
+
+            def is_running(self):
+                return True
+
+        monkeypatch.setattr(jobs_utils.psutil, 'Process', _FakeProcess)
+        record = managed_job_state.ControllerPidRecord(
+            pid=expected_pid, started_at=recorded_start)
+        assert (jobs_utils.controller_process_alive(record, legacy_job_id=42) is
+                False)
+
+    def test_controller_process_alive_fallback_requires_keyword(
+            self, monkeypatch):
+        """Without start time, fallback relies on command keywords."""
+        expected_pid = 2468
+        monkeypatch.setattr(jobs_utils.psutil, 'pid_exists',
+                            lambda pid: pid == expected_pid)
+
+        class _KeywordProcess:
+
+            def __init__(self, pid):
+                assert pid == expected_pid
+
+            def create_time(self):
+                return 1700000000.0
+
+            def cmdline(self):
+                return ['python', '-m', 'sky.jobs.controller']
+
+            def is_running(self):
+                return True
+
+        monkeypatch.setattr(jobs_utils.psutil, 'Process', _KeywordProcess)
+        record = managed_job_state.ControllerPidRecord(pid=expected_pid,
+                                                       started_at=None)
+        assert (jobs_utils.controller_process_alive(record, legacy_job_id=42) is
+                True)
+
+        class _NoKeywordProcess(_KeywordProcess):
+
+            def cmdline(self):
+                return ['python', '-m', 'some.other.module']
+
+        monkeypatch.setattr(jobs_utils.psutil, 'Process', _NoKeywordProcess)
+        assert (jobs_utils.controller_process_alive(record, legacy_job_id=42) is
+                False)

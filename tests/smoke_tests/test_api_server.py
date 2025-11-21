@@ -193,7 +193,8 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
                         sky.ManagedJobStatus.STARTING,
                         sky.ManagedJobStatus.RUNNING
                     ],
-                    timeout=60),
+                    timeout=600
+                    if smoke_tests_utils.is_remote_server_test() else 60),
             ]),
             *set_user(
                 user_2,
@@ -207,7 +208,8 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
                             sky.ManagedJobStatus.STARTING,
                             sky.ManagedJobStatus.RUNNING
                         ],
-                        timeout=60),
+                        timeout=600
+                        if smoke_tests_utils.is_remote_server_test() else 60),
                     # Should only cancel user_2's job.
                     'sky jobs cancel -y --all',
                     smoke_tests_utils.

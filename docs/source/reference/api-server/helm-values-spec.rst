@@ -77,6 +77,8 @@ Below is the available helm value keys and the default value of each key:
       :ref:`retention <helm-values-apiService-logs-retention>`:
         :ref:`enabled <helm-values-apiService-logs-retention-enabled>`: false
         :ref:`size <helm-values-apiService-logs-retention-size>`: 10M
+    :ref:`imagePullSecrets <helm-values-apiService-imagePullSecrets>`: null
+    :ref:`imagePullPolicy <helm-values-apiService-imagePullPolicy>`: Always
 
   :ref:`auth <helm-values-auth>`:
     :ref:`oauth <helm-values-auth-oauth>`:
@@ -128,6 +130,8 @@ Below is the available helm value keys and the default value of each key:
       :ref:`redis-url <helm-values-ingress-oauth2-proxy-redis-url>`: null
       :ref:`cookie-refresh <helm-values-ingress-oauth2-proxy-cookie-refresh>`: null
       :ref:`cookie-expire <helm-values-ingress-oauth2-proxy-cookie-expire>`: null
+    :ref:`tls <helm-values-ingress-tls>`:
+      :ref:`enabled <helm-values-ingress-tls-enabled>`: false
 
   :ref:`ingress-nginx <helm-values-ingress-nginx>`:
     :ref:`enabled <helm-values-ingress-nginx-enabled>`: true
@@ -282,6 +286,35 @@ To use a nightly build, find the desired nightly version on `pypi <https://pypi.
   apiService:
     # Replace 1.0.0.devYYYYMMDD with the desired nightly version
     image: berkeleyskypilot/skypilot-nightly:1.0.0.devYYYYMMDD
+
+.. _helm-values-apiService-imagePullSecrets:
+
+``apiService.imagePullSecrets``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+List of Kubernetes ``imagePullSecrets`` objects to attach to the API server pods. Set this when the API server image is hosted in a private registry so the pods can authenticate during pulls.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    imagePullSecrets:
+      - name: my-registry-credentials
+
+.. _helm-values-apiService-imagePullPolicy:
+
+``apiService.imagePullPolicy``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Image pull policy applied to the API server containers. Accepts the standard Kubernetes values (``Always``, ``IfNotPresent``, ``Never``). Use ``IfNotPresent`` when caching images locally is preferred.
+
+Default: ``"Always"``
+
+.. code-block:: yaml
+
+  apiService:
+    imagePullPolicy: Always
 
 .. _helm-values-apiService-upgradeStrategy:
 
@@ -1446,6 +1479,34 @@ Default: ``null``
   ingress:
     oauth2-proxy:
       cookie-expire: 86400  # 24 hours
+
+.. _helm-values-ingress-tls:
+
+``ingress.tls``
+^^^^^^^^^^^^^^^
+TLS configuration for the ingress controller. When setting to ``true``, TLS will be enabled. User can either provide their own TLS secret with a name ``<release-name>-tls-secrets`` or use ``cert-manager`` to automatically manage TLS certificates.
+
+Default: ``false``
+
+Example with TLS enabled using `cert-manager <https://cert-manager.io/docs/>`_:
+
+.. code-block:: yaml
+
+  ingress:
+    enabled: true
+    host: skypilot.example.com
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt
+      kubernetes.io/ingress.allow-http: "false"
+    tls:
+      enabled: true
+
+.. _helm-values-ingress-tls-enabled:
+
+``ingress.tls.enabled``
+'''''''''''''''''''''''
+
+Enable TLS for the ingress. When enabled, either cert-manager annotation should be provided or a TLS secret with name ``<release-name>-tls-secrets`` should be created in the namespace.
 
 .. _helm-values-ingress-nginx:
 
