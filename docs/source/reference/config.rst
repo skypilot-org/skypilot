@@ -133,6 +133,8 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`remote_identity <config-yaml-aws-remote-identity>`: LOCAL_CREDENTIALS
     :ref:`post_provision_runcmd <config-yaml-aws-post-provision-runcmd>`:
       - echo "hello world!"
+    :ref:`capabilities <config-yaml-aws-capabilities>`:
+      - storage
 
   :ref:`gcp <config-yaml-gcp>`:
     :ref:`labels <config-yaml-gcp-labels>`:
@@ -152,6 +154,8 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`enable_gvnic <config-yaml-gcp-enable-gvnic>`: false
     :ref:`enable_gpu_direct <config-yaml-gcp-enable-gpu-direct>`: false
     :ref:`placement_policy <config-yaml-gcp-placement-policy>`: compact
+    :ref:`capabilities <config-yaml-gcp-capabilities>`:
+      - storage
 
   :ref:`azure <config-yaml-azure>`:
     :ref:`resource_group_vm <config-yaml-azure-resource-group-vm>`: user-resource-group-name
@@ -888,6 +892,8 @@ Example:
       - echo "hello world!"
       - [ls, -l, /]
 
+.. _config-yaml-aws-capabilities:
+
 ``aws.capabilities``
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -1149,6 +1155,8 @@ Placement policy for GCP instances. This setting controls how instances are phys
 When `gcp.enable_gpu_direct` is enabled, the placement policy is automatically set to `compact` to ensure optimal communication performance. If `gcp.enable_gpu_direct` is disabled, no default placement policy is applied.
 
 Refer to the `GCP documentation <https://cloud.google.com/compute/docs/instances/placement-policies-overview>`_ for more information on placement policies.
+
+.. _config-yaml-gcp-capabilities:
 
 ``gcp.capabilities``
 ~~~~~~~~~~~~~~~~~~~~
