@@ -3,6 +3,7 @@ import dataclasses
 import functools
 from multiprocessing import pool as mp_pool
 import os
+import pathlib
 import threading
 import time
 import traceback
@@ -29,6 +30,7 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
+from sky.utils import context
 from sky.utils import controller_utils
 from sky.utils import env_options
 from sky.utils import resources_utils
@@ -59,6 +61,8 @@ ProcessStatus = common_utils.ProcessStatus
 
 # TODO(tian): Combine this with
 # sky/spot/recovery_strategy.py::StrategyExecutor::launch
+# Use context.contextual to enable per-launch output redirection.
+@context.contextual
 def launch_cluster(replica_id: int,
                    yaml_content: str,
                    cluster_name: str,
@@ -77,14 +81,13 @@ def launch_cluster(replica_id: int,
             or some error happened before provisioning and will happen again
             if retry.
     """
-    # Use a different logger for each replica to avoid logging to the same file.
-    launch_logger = sky_logging.init_logger(
-        f'{__name__}.launch_cluster.{cluster_name}')
-    launch_logger = sky_logging.configure_log_file(launch_logger, log_file)
+    ctx = context.get()
+    assert ctx is not None, 'Context is not initialized'
+    ctx.redirect_log(pathlib.Path(log_file))
     if resources_override is not None:
-        launch_logger.info(f'Scaling up replica (id: {replica_id}) cluster '
-                           f'{cluster_name} with resources override: '
-                           f'{resources_override}')
+        logger.info(f'Scaling up replica (id: {replica_id}) cluster '
+                    f'{cluster_name} with resources override: '
+                    f'{resources_override}')
     try:
         task = task_lib.Task.from_yaml_str(yaml_content)
         if resources_override is not None:
@@ -95,12 +98,11 @@ def launch_cluster(replica_id: int,
             task.set_resources(type(resources)(overrided_resources))
         task.update_envs({serve_constants.REPLICA_ID_ENV_VAR: str(replica_id)})
 
-        launch_logger.info(f'Launching replica (id: {replica_id}) cluster '
-                           f'{cluster_name} with resources: {task.resources}')
+        logger.info(f'Launching replica (id: {replica_id}) cluster '
+                    f'{cluster_name} with resources: {task.resources}')
     except Exception as e:  # pylint: disable=broad-except
-        launch_logger.error(
-            'Failed to construct task object from yaml file with '
-            f'error {common_utils.format_exception(e)}')
+        logger.error('Failed to construct task object from yaml file with '
+                     f'error {common_utils.format_exception(e)}')
         raise RuntimeError(
             f'Failed to launch the sky serve replica cluster {cluster_name} '
             'due to failing to initialize sky.Task from yaml file.') from e
@@ -119,12 +121,12 @@ def launch_cluster(replica_id: int,
             replica_to_request_id[replica_id] = request_id
             with open(log_file, 'a', encoding='utf-8') as f:
                 sdk.stream_and_get(request_id, output_stream=f)
-            launch_logger.info(f'Replica cluster {cluster_name} launched.')
+            logger.info(f'Replica cluster {cluster_name} launched.')
         except (exceptions.InvalidClusterNameError,
                 exceptions.NoCloudAccessError,
                 exceptions.ResourcesMismatchError) as e:
-            launch_logger.error('Failure happened before provisioning. '
-                                f'{common_utils.format_exception(e)}')
+            logger.error('Failure happened before provisioning. '
+                         f'{common_utils.format_exception(e)}')
             raise RuntimeError('Failed to launch the sky serve replica '
                                f'cluster {cluster_name}.') from e
         except exceptions.ResourcesUnavailableError as e:
@@ -133,42 +135,39 @@ def launch_cluster(replica_id: int,
                     for err in e.failover_history):
                 raise RuntimeError('Failed to launch the sky serve replica '
                                    f'cluster {cluster_name}.') from e
-            launch_logger.info(
-                'Failed to launch the sky serve replica cluster with '
-                f'error: {common_utils.format_exception(e)})')
+            logger.info('Failed to launch the sky serve replica cluster with '
+                        f'error: {common_utils.format_exception(e)})')
         except Exception as e:  # pylint: disable=broad-except
-            launch_logger.info(
-                'Failed to launch the sky serve replica cluster with '
-                f'error: {common_utils.format_exception(e)})')
+            logger.info('Failed to launch the sky serve replica cluster with '
+                        f'error: {common_utils.format_exception(e)})')
             with ux_utils.enable_traceback():
-                launch_logger.info(f'  Traceback: {traceback.format_exc()}')
+                logger.info(f'  Traceback: {traceback.format_exc()}')
         else:  # No exception, the launch succeeds.
             return
 
-        terminate_cluster(cluster_name,
-                          log_file=log_file,
-                          down_logger=launch_logger)
+        terminate_cluster(cluster_name, log_file=log_file)
         if retry_cnt >= max_retry:
             raise RuntimeError('Failed to launch the sky serve replica cluster '
                                f'{cluster_name} after {max_retry} retries.')
         gap_seconds = backoff.current_backoff()
-        launch_logger.info('Retrying to launch the sky serve replica cluster '
-                           f'in {gap_seconds:.1f} seconds.')
+        logger.info('Retrying to launch the sky serve replica cluster '
+                    f'in {gap_seconds:.1f} seconds.')
         time.sleep(gap_seconds)
 
 
 # TODO(tian): Combine this with
 # sky/spot/recovery_strategy.py::terminate_cluster
+@context.contextual
 def terminate_cluster(cluster_name: str,
                       log_file: str,
                       replica_drain_delay_seconds: int = 0,
-                      down_logger: Optional['logging.Logger'] = None,
                       max_retry: int = 3) -> None:
     """Terminate the sky serve replica cluster."""
-    if down_logger is None:
-        down_logger = sky_logging.init_logger(
-            f'{__name__}.terminate_cluster.{cluster_name}')
-        down_logger = sky_logging.configure_log_file(down_logger, log_file)
+    # Setup logging redirection.
+    ctx = context.get()
+    assert ctx is not None, 'Context is not initialized'
+    ctx.redirect_log(pathlib.Path(log_file))
+
     time.sleep(replica_drain_delay_seconds)
     retry_cnt = 0
     backoff = common_utils.Backoff()
@@ -182,7 +181,7 @@ def terminate_cluster(cluster_name: str,
             return
         except ValueError:
             # The cluster is already terminated.
-            down_logger.info(
+            logger.info(
                 f'Replica cluster {cluster_name} is already terminated.')
             return
         except Exception as e:  # pylint: disable=broad-except
@@ -190,11 +189,11 @@ def terminate_cluster(cluster_name: str,
                 raise RuntimeError('Failed to terminate the sky serve replica '
                                    f'cluster {cluster_name}.') from e
             gap_seconds = backoff.current_backoff()
-            down_logger.error(
+            logger.error(
                 'Failed to terminate the sky serve replica cluster '
                 f'{cluster_name}. Retrying after {gap_seconds} seconds.'
                 f'Details: {common_utils.format_exception(e)}')
-            down_logger.error(f'  Traceback: {traceback.format_exc()}')
+            logger.error(f'  Traceback: {traceback.format_exc()}')
             time.sleep(gap_seconds)
 
 
