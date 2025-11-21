@@ -266,7 +266,7 @@ jobs:
       branch: ${{ github.ref_name }}
       message: "nightly-build-pypi test_minimal --runpod"
       pipeline: "smoke-tests"
-      build_env_vars: '{"ARGS": "-k test_minimal --runpod", "FILE_PATTERN": "test_cluster_job.py"}'
+      build_env_vars: '{"ARGS": "-k test_minimal --runpod", "FILE_PATTERN": "test_basic.py"}'
       timeout_minutes: 60
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
