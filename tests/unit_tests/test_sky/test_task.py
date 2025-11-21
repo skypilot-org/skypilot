@@ -238,7 +238,7 @@ def test_update_secrets():
     # Test updating with dict
     secrets_dict = {'API_KEY': 'secret1', 'DB_PASSWORD': 'secret2'}
     task_obj.update_secrets(secrets_dict)
-    assert task_obj.secrets == secrets_dict
+    assert task.get_plaintext_secrets(task_obj.secrets) == secrets_dict
 
     # Test updating with list of tuples
     more_secrets = [('JWT_SECRET', 'jwt-secret'),
@@ -250,11 +250,11 @@ def test_update_secrets():
         'JWT_SECRET': 'jwt-secret',
         'REDIS_PASSWORD': 'redis-pass'
     }
-    assert task_obj.secrets == expected
+    assert task.get_plaintext_secrets(task_obj.secrets) == expected
 
     # Test updating with None (should be no-op)
     task_obj.update_secrets(None)
-    assert task_obj.secrets == expected
+    assert task.get_plaintext_secrets(task_obj.secrets) == expected
 
 
 def test_update_secrets_error_handling():
@@ -288,7 +288,7 @@ def test_secrets_property():
     # Test with initial secrets
     initial_secrets = {'API_KEY': 'secret1', 'DB_PASSWORD': 'secret2'}
     task_obj = task.Task(run='echo hello', secrets=initial_secrets)
-    assert task_obj.secrets == initial_secrets
+    assert task.get_plaintext_secrets(task_obj.secrets) == initial_secrets
 
 
 def test_envs_and_secrets_property():
@@ -298,6 +298,7 @@ def test_envs_and_secrets_property():
 
     task_obj = task.Task(run='echo hello', envs=envs, secrets=secrets)
     combined = task_obj.envs_and_secrets
+    combined = task.get_plaintext_envs_and_secrets(combined)
 
     # Should contain all environment variables
     assert combined['PUBLIC_VAR'] == 'public-value'
@@ -318,6 +319,7 @@ def test_secrets_override_envs_in_combined():
 
     task_obj = task.Task(run='echo hello', envs=envs, secrets=secrets)
     combined = task_obj.envs_and_secrets
+    combined = task.get_plaintext_envs_and_secrets(combined)
 
     # Secret should override env for shared variable name
     assert combined['SHARED_VAR'] == 'secret_value'
@@ -344,7 +346,7 @@ def test_from_yaml_config_with_secrets():
     task_obj = task.Task.from_yaml_config(config)
 
     # Check that secrets are parsed correctly
-    assert task_obj.secrets == {
+    assert task.get_plaintext_secrets(task_obj.secrets) == {
         'API_KEY': 'secret-key-123',
         'DATABASE_PASSWORD': 'secret-password'
     }
@@ -371,10 +373,11 @@ def test_from_yaml_config_secrets_type_conversion():
     task_obj = task.Task.from_yaml_config(config)
 
     # Non-None values should be converted to strings
-    assert task_obj.secrets['NUMERIC_KEY'] == '456'
-    assert task_obj.secrets['BOOL_KEY'] == 'True'
-    assert task_obj.secrets['STRING_KEY'] == 'regular-string'
-    assert task_obj.secrets['EMPTY_KEY'] == ''
+    assert task.get_plaintext_secrets(task_obj.secrets)['NUMERIC_KEY'] == '456'
+    assert task.get_plaintext_secrets(task_obj.secrets)['BOOL_KEY'] == 'True'
+    assert task.get_plaintext_secrets(
+        task_obj.secrets)['STRING_KEY'] == 'regular-string'
+    assert task.get_plaintext_secrets(task_obj.secrets)['EMPTY_KEY'] == ''
 
 
 def test_from_yaml_config_secrets_validation():
@@ -391,7 +394,7 @@ def test_task_initialization_with_secrets():
     secrets = {'API_KEY': 'secret123', 'DB_PASSWORD': 'password456'}
     task_obj = task.Task(run='echo hello', secrets=secrets)
 
-    assert task_obj.secrets == secrets
+    assert task.get_plaintext_secrets(task_obj.secrets) == secrets
     assert task_obj.run == 'echo hello'
 
 
@@ -445,7 +448,7 @@ def test_from_yaml_config_null_secrets_with_override():
         'API_KEY': 'overridden-api-key',
         'TOKEN': 'overridden-token'
     }
-    assert task_obj.secrets == expected_secrets
+    assert task.get_plaintext_secrets(task_obj.secrets) == expected_secrets
 
     # Environment variables should be preserved
     assert task_obj.envs == {'PUBLIC_VAR': 'public-value'}
@@ -486,7 +489,7 @@ def test_from_yaml_config_partial_null_secrets_override():
         'YAML_SECRET': 'yaml-value',
         'NULL_SECRET': 'cli-override'
     }
-    assert task_obj.secrets == expected_secrets
+    assert task.get_plaintext_secrets(task_obj.secrets) == expected_secrets
 
 
 def test_from_yaml_config_override_non_null_secrets():
@@ -505,7 +508,7 @@ def test_from_yaml_config_override_non_null_secrets():
                                           secrets_overrides=secrets_overrides)
 
     expected_secrets = {'EXISTING_SECRET': 'overridden-value'}
-    assert task_obj.secrets == expected_secrets
+    assert task.get_plaintext_secrets(task_obj.secrets) == expected_secrets
 
 
 def test_from_yaml_config_env_and_secrets_overrides_independent():
@@ -529,10 +532,13 @@ def test_from_yaml_config_env_and_secrets_overrides_independent():
                                           secrets_overrides=secrets_overrides)
 
     assert task_obj.envs == {'ENV_VAR': 'env-override'}
-    assert task_obj.secrets == {'SECRET_VAR': 'secret-override'}
+    assert task.get_plaintext_secrets(task_obj.secrets) == {
+        'SECRET_VAR': 'secret-override'
+    }
 
     # Combined should have both
     combined = task_obj.envs_and_secrets
+    combined = task.get_plaintext_envs_and_secrets(combined)
     expected_combined = {
         'ENV_VAR': 'env-override',
         'SECRET_VAR': 'secret-override'

@@ -234,6 +234,10 @@ def get_plaintext_envs_and_secrets(
     }
 
 
+def get_plaintext_secrets(secrets: Dict[str, SecretStr]) -> Dict[str, str]:
+    return {k: v.get_secret_value() for k, v in secrets.items()}
+
+
 class Task:
     """Task: a computation to be run on the cloud."""
 
@@ -1721,6 +1725,8 @@ class Task:
         secrets = self.secrets
         if secrets and not redact_secrets:
             secrets = {k: v.get_secret_value() for k, v in secrets.items()}
+        elif secrets and redact_secrets:
+            secrets = {k: '<redacted>' for k, v in secrets.items()}
         add_if_not_none('secrets', secrets, no_empty=True)
 
         add_if_not_none('file_mounts', {})
