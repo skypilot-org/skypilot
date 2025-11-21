@@ -190,8 +190,6 @@ def _cleanup(service_name: str) -> bool:
                     _set_to_failed_cleanup(info)
         time.sleep(3)
 
-    versions = serve_state.get_service_versions(service_name)
-    serve_state.delete_all_versions(service_name)
 
     def cleanup_version_storage(version: int) -> bool:
         yaml_content = serve_state.get_yaml_content(service_name, version)
@@ -199,8 +197,13 @@ def _cleanup(service_name: str) -> bool:
                     f'yaml_content: {yaml_content}')
         return cleanup_storage(yaml_content)
 
+    versions = serve_state.get_service_versions(service_name)
     if not all(map(cleanup_version_storage, versions)):
         failed = True
+
+    # Cleanup version metadata after all storages are cleaned up, otherwise
+    # the get_yaml_content will return None as all versions are deleted.
+    serve_state.delete_all_versions(service_name)
 
     return failed
 
