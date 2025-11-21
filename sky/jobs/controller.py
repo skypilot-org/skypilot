@@ -955,6 +955,10 @@ class ControllerManager:
                             ctx.override_envs({key: value})
                             logger.debug('Set environment variable: %s=%s', key,
                                          value)
+
+                    # Restore config file if needed
+                    file_content_utils.restore_job_config_file(job_id)
+
                     skypilot_config.reload_config()
                 else:  # pragma: no cover - defensive
                     logger.error('Context is None, cannot set environment '

@@ -20,6 +20,16 @@ FROM python:3.10.18-slim AS process-source
 ARG INSTALL_FROM_SOURCE=true
 ARG NEXT_BASE_PATH=/dashboard
 
+# Run NPM and node install in a separate step for caching.
+RUN if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
+        echo "Installing NPM and Node.js for dashboard build" && \
+        apt-get update -y && \
+        apt-get install --no-install-recommends -y git curl ca-certificates gnupg && \
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+        apt-get install -y nodejs && \
+        npm install -g npm@latest; \
+fi
+
 COPY . /skypilot
 
 RUN cd /skypilot && \
@@ -28,12 +38,6 @@ RUN cd /skypilot && \
         # Retain an /skypilot/dist dir to keep the compatibility in stage 3 and reduce the final image size
         mv /skypilot/dist /dist.backup && cd .. && rm -rf /skypilot && mkdir /skypilot && mv /dist.backup /skypilot/dist; \
     else \
-        echo "Installing NPM and Node.js for dashboard build" && \
-        apt-get update -y && \
-        apt-get install --no-install-recommends -y git curl ca-certificates gnupg && \
-        curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-        apt-get install -y nodejs && \
-        npm install -g npm@latest && \
         echo "Building dashboard in Stage 2" && \
         npm --prefix sky/dashboard install && \
         NEXT_BASE_PATH=${NEXT_BASE_PATH} npm --prefix sky/dashboard run build && \
