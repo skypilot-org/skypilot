@@ -115,10 +115,10 @@ def _is_storage_cloud_enabled(cloud_name: str,
     if cloud_name in enabled_storage_cloud_names:
         return True
     if try_fix_with_sky_check:
-        # TODO(zhwu): Only check the specified cloud to speed up.
         sky_check.check_capability(
             sky_cloud.CloudCapability.STORAGE,
             quiet=True,
+            clouds=[cloud_name],
             workspace=skypilot_config.get_active_workspace())
         return _is_storage_cloud_enabled(cloud_name,
                                          try_fix_with_sky_check=False)

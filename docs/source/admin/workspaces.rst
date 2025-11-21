@@ -43,6 +43,8 @@ The above is achieved by configuring the following section in the config file:
        # Use GCP only with a different project ID.
        gcp:
          project_id: project-id-for-team-b
+         capabilities:
+           - storage
        aws:
          disabled: true
 
@@ -82,10 +84,16 @@ The above is achieved by configuring the following section in the config file:
            gcp:
              disabled: false
              project_id: GCP project ID
+             capabilities:
+               - compute
+               - storage
 
            aws:
              disabled: false
              profile: aws-profile-name
+             capabilities:
+               - compute
+               - storage
 
            nebius:
              disabled: false

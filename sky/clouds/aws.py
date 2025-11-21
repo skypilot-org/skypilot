@@ -908,22 +908,67 @@ class AWS(clouds.Cloud):
     def _check_compute_credentials(
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to this AWS's compute service."""
-        return cls._check_credentials()
+        credentials_exist, identity_str, hints = cls._check_credentials_exist()
+        if not credentials_exist:
+            return False, hints
+
+        # Fetch the AWS catalogs
+        # pylint: disable=import-outside-toplevel
+        from sky.catalog import aws_catalog
+
+        # Trigger the fetch of the availability zones mapping.
+        try:
+            aws_catalog.get_default_instance_type()
+        except RuntimeError as e:
+            return False, (
+                'Failed to fetch the availability zones for the account '
+                f'{identity_str}. It is likely due to permission issues, please'
+                ' check the minimal permission required for AWS: '
+                'https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/aws.html'  # pylint: disable=
+                f'\n{cls._INDENT_PREFIX}Details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
+
+        return True, hints
 
     @classmethod
     def _check_storage_credentials(
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to this AWS's storage service."""
-        # TODO(seungjin): Implement separate check for
-        # if the user has access to S3.
-        return cls._check_credentials()
+        credentials_exist, identity_str, hints = cls._check_credentials_exist()
+        if not credentials_exist:
+            return False, hints
+
+        try:
+            # Create an S3 client
+            s3_client = aws.client('s3')
+
+            # Try to list buckets
+            s3_client.list_buckets()
+        except aws.botocore_exceptions().ClientError as e:
+            return False, (
+                'Failed to list buckets for the account '
+                f'{identity_str}. It is likely due to permission issues, please'
+                ' check the storage permission required for AWS: '
+                'https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/aws.html'  # pylint: disable=
+                f'\n{cls._INDENT_PREFIX}Details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
+
+        return True, hints
 
     @classmethod
     # Cache since getting identity is slow.
     @aws_profile_aware_lru_cache(scope='request',
                                  maxsize=_AWS_PROFILE_SCOPED_FUNC_CACHE_SIZE)
-    def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """Checks if the user has access credentials to AWS."""
+    def _check_credentials_exist(
+            cls) -> Tuple[bool, Optional[str], Optional[str]]:
+        """Checks if the user has access credentials to AWS.
+
+        Returns:
+            bool: True if credentials exist and are valid.
+            str: Identity string of the user. None if credentials do not exist.
+                 (i.e. the first boolean is False)
+            str: Hints for the user to set up credentials.
+        """
 
         dependency_installation_hints = (
             'AWS dependencies are not installed. '
@@ -939,18 +984,18 @@ class AWS(clouds.Cloud):
                               stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE)
         if proc.returncode != 0:
-            return False, dependency_installation_hints
+            return False, None, dependency_installation_hints
 
         # Checks if aws boto is installed properly
         if not common.can_import_modules(['boto3', 'botocore']):
-            return False, dependency_installation_hints
+            return False, None, dependency_installation_hints
 
         # Checks if AWS credentials 1) exist and 2) are valid.
         # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
         try:
             identity_str = cls.get_active_user_identity_str()
         except exceptions.CloudUserIdentityError as e:
-            return False, str(e)
+            return False, None, str(e)
 
         static_credential_exists = os.path.isfile(
             os.path.expanduser('~/.aws/credentials'))
@@ -1004,25 +1049,10 @@ class AWS(clouds.Cloud):
             # other clouds to access private s3 buckets and resources like EC2.
             # `get_active_user_identity` does not guarantee this file exists.
             if not static_credential_exists:
-                return (False, '~/.aws/credentials does not exist. ' +
+                return (False, None, '~/.aws/credentials does not exist. ' +
                         cls._STATIC_CREDENTIAL_HELP_STR)
 
-        # Fetch the AWS catalogs
-        # pylint: disable=import-outside-toplevel
-        from sky.catalog import aws_catalog
-
-        # Trigger the fetch of the availability zones mapping.
-        try:
-            aws_catalog.get_default_instance_type()
-        except RuntimeError as e:
-            return False, (
-                'Failed to fetch the availability zones for the account '
-                f'{identity_str}. It is likely due to permission issues, please'
-                ' check the minimal permission required for AWS: '
-                'https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/aws.html'  # pylint: disable=
-                f'\n{cls._INDENT_PREFIX}Details: '
-                f'{common_utils.format_exception(e, use_bracket=True)}')
-        return True, hints
+        return True, identity_str, hints
 
     @classmethod
     def _current_identity_type(cls) -> Optional[AWSIdentityType]:
