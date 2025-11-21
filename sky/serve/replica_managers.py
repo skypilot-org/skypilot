@@ -114,6 +114,7 @@ def launch_cluster(replica_id: int,
         is_cancelled = replica_to_launch_cancelled.get(replica_id, False)
         if is_cancelled:
             logger.info(f'Replica {replica_id} launch cancelled.')
+            # Pop the value to indicate that the signal was received.
             replica_to_launch_cancelled.pop(replica_id)
         return is_cancelled
 
@@ -945,6 +946,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                         sdk.api_cancel(request_id)
                         break
                     if replica_id not in self._replica_to_launch_cancelled:
+                        # Indicates that the cancellation was received.
                         break
                     time.sleep(0.1)
                 launch_thread.join()
