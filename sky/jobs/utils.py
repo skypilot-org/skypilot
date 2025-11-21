@@ -329,7 +329,21 @@ def ha_recovery_for_consolidation_mode() -> None:
                 log_timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
                 log_path = os.path.join(
                     log_dir, f'recover-job-{job_id}-{log_timestamp}.log')
-                runner.run(script, log_path=log_path)
+                returncode = runner.run(script, log_path=log_path)
+                if returncode != 0:
+                    logger.error(f'Failed to recover {job_id} - setting to '
+                                 'FAILED_CONTROLLER.')
+                    f.write(f'Failed to recover {job_id} - setting to '
+                            'FAILED_CONTROLLER.\n')
+                    managed_job_state.set_failed(
+                        job_id=job_id,
+                        task_id=None,
+                        failure_type=(managed_job_state.ManagedJobStatus.
+                                      FAILED_CONTROLLER),
+                        failure_reason=('Recovery script exited with code '
+                                        f'{returncode}'),
+                    )
+                    scheduler.job_done(job_id, idempotent=True)
                 f.write(f'Job {job_id} completed recovery at '
                         f'{datetime.now()}\n')
         f.write(f'HA recovery completed at {datetime.now()}\n')

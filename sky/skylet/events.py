@@ -95,7 +95,8 @@ class ManagedJobEvent(SkyletEvent):
     def _run(self):
         if not os.path.exists(
                 os.path.expanduser(
-                    managed_job_constants.JOB_CONTROLLER_INDICATOR_FILE)):
+                    managed_job_constants.JOB_CONTROLLER_INDICATOR_FILE)
+        ) and not managed_job_utils.is_consolidation_mode():
             # Note: since the skylet is started before the user setup (in
             # jobs-controller.yaml.j2) runs, it's possible that we hit this
             # before the indicator file is written. However, since we will wait
