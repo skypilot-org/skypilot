@@ -12,7 +12,7 @@ Launch a marimo cluser with the command:
 sky launch -c marimo-example marimo.yaml
 ```
 
-Next, run this command to get the endpoint to connect to over the browser:
+Next, run this command to get the endpoint to connect via the browser:
 
 ```
 sky status marimo-example --endpoints
