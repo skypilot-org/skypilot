@@ -353,7 +353,8 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
                                                       job_id):
             # This can happen when HA recovery runs for some reason but the job
             # controller is still alive.
-            logger.warning(f'Job {job_id} is still alive, skipping submission')
+            logger.warning(f'Job {job_id} is still alive with controller '
+                           f'{controller_process}, skipping submission')
             maybe_start_controllers(from_scheduler=True)
             return
 
@@ -383,16 +384,6 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
     state.scheduler_set_waiting(job_id, dag_yaml_content,
                                 original_user_yaml_content, env_file_content,
                                 config_file_content, priority)
-    if state.get_ha_recovery_script(job_id) is None:
-        # the run command is just the command that called scheduler.
-        # The config file path is passed via SKYPILOT_CONFIG env var, which is
-        # sourced from env_file_path.
-        run = (f'source {env_file_path} && '
-               f'{sys.executable} -m sky.jobs.scheduler {dag_yaml_path} '
-               f'--job-id {job_id} --env-file {env_file_path} '
-               f'--user-yaml-path {original_user_yaml_path} '
-               f'--priority {priority}')
-        state.set_ha_recovery_script(job_id, run)
     maybe_start_controllers(from_scheduler=True)
 
 
