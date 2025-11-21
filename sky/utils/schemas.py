@@ -574,6 +574,9 @@ def get_volume_mount_schema():
             'volume_name': {
                 'type': 'string',
             },
+            'is_ephemeral': {
+                'type': 'boolean',
+            },
             'volume_config': {
                 'type': 'object',
                 'required': [],

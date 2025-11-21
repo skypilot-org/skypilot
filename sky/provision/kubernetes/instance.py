@@ -953,6 +953,25 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     pod_spec['metadata']['labels'].update(
         {constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud})
 
+    ephemeral_volumes = provider_config.get('ephemeral_volume_infos')
+    if ephemeral_volumes:
+        for ephemeral_volume in ephemeral_volumes:
+            # Update the volumes and volume mounts in the pod spec
+            if 'volumes' not in pod_spec['spec']:
+                pod_spec['spec']['volumes'] = []
+            pod_spec['spec']['volumes'].append({
+                'name': ephemeral_volume.name,
+                'persistentVolumeClaim': {
+                    'claimName': ephemeral_volume.volume_name_on_cloud,
+                },
+            })
+            if 'volumeMounts' not in pod_spec['spec']['containers'][0]:
+                pod_spec['spec']['containers'][0]['volumeMounts'] = []
+            pod_spec['spec']['containers'][0]['volumeMounts'].append({
+                'name': ephemeral_volume.name,
+                'mountPath': ephemeral_volume.path,
+            })
+
     terminating_pods = kubernetes_utils.filter_pods(namespace, context, tags,
                                                     ['Terminating'])
     start_time = time.time()
