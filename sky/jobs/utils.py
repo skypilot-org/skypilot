@@ -265,20 +265,19 @@ def is_consolidation_mode(on_api_restart: bool = False) -> bool:
 
 
 def ha_recovery_for_consolidation_mode() -> None:
-    """Recovery logic for HA mode."""
-    # Touch the signal file here to avoid conflict with
-    # update_managed_jobs_statuses. Although we run this first and then start
-    # the deamon, this function is also called in cancel_jobs_by_id.
-    signal_file = pathlib.Path(
-        constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE).expanduser()
-    signal_file.touch()
+    """Recovery logic for consolidation mode.
+
+    This should only be called from the managed-job-status-refresh-daemon, due
+    so that we have correct ordering recovery -> controller start -> job status
+    updates. This also should ensure correct operation during a rolling update.
+    """
     # No setup recovery is needed in consolidation mode, as the API server
     # already has all runtime installed. Directly start jobs recovery here.
     # Refers to sky/templates/kubernetes-ray.yml.j2 for more details.
     runner = command_runner.LocalProcessCommandRunner()
     scheduler.maybe_start_controllers()
     with open(constants.HA_PERSISTENT_RECOVERY_LOG_PATH.format('jobs_'),
-              'w',
+              'a',
               encoding='utf-8') as f:
         start = time.time()
         f.write(f'Starting HA recovery at {datetime.now()}\n')
@@ -328,12 +327,31 @@ def ha_recovery_for_consolidation_mode() -> None:
                             'Skipping recovery. Job schedule state: '
                             f'{job["schedule_state"]}\n')
                     continue
-                runner.run(script)
+                log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                                       'managed_jobs')
+                os.makedirs(log_dir, exist_ok=True)
+                log_timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+                log_path = os.path.join(
+                    log_dir, f'recover-job-{job_id}-{log_timestamp}.log')
+                returncode = runner.run(script, log_path=log_path)
+                if returncode != 0:
+                    logger.error(f'Failed to recover {job_id} - setting to '
+                                 'FAILED_CONTROLLER.')
+                    f.write(f'Failed to recover {job_id} - setting to '
+                            'FAILED_CONTROLLER.\n')
+                    managed_job_state.set_failed(
+                        job_id=job_id,
+                        task_id=None,
+                        failure_type=(managed_job_state.ManagedJobStatus.
+                                      FAILED_CONTROLLER),
+                        failure_reason=('Recovery script exited with code '
+                                        f'{returncode}'),
+                    )
+                    scheduler.job_done(job_id, idempotent=True)
                 f.write(f'Job {job_id} completed recovery at '
                         f'{datetime.now()}\n')
         f.write(f'HA recovery completed at {datetime.now()}\n')
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
-    signal_file.unlink()
 
 
 async def get_job_status(
