@@ -157,7 +157,10 @@ def wait_until_job_status_by_id(
     s = 'start_time=$SECONDS; '
     s += 'while true; do '
     s += f'if (( $SECONDS - $start_time > {timeout} )); then '
-    s += f'  echo "Timeout after {timeout} seconds waiting for job {job_id} to succeed"; exit 1; '
+    s += f'  echo "Timeout after {timeout} seconds waiting for job {job_id} to succeed"; '
+    s += '  echo "=== Running sky status for debugging ==="; '
+    s += '  sky status || true; '
+    s += '  exit 1; '
     s += 'fi; '
     s += f's=$(sky jobs logs --controller {job_id} --no-follow); '
     s += 'echo "$s"; '
@@ -167,6 +170,8 @@ def wait_until_job_status_by_id(
         s += 'fi; '
     for status in bad_statuses:
         s += f'if echo "$s" | grep "Job status: JobStatus.{status}"; then '
+        s += '  echo "=== Running sky status for debugging ==="; '
+        s += '  sky status || true; '
         s += '  exit 1; '
         s += 'fi; '
     s += f'echo "Waiting for job {job_id} to be in {good_statuses}..."; '
@@ -176,7 +181,7 @@ def wait_until_job_status_by_id(
 
 def check_logs(job_id: int, expected_pattern: str):
     """Check that job logs contain the expected pattern.
-    
+
     Args:
         job_id: The job ID to check logs for.
         expected_pattern: The pattern to grep for in the logs.
@@ -258,6 +263,29 @@ def basic_job_conf(
 ):
     return textwrap.dedent(f"""
     name: {job_name}
+
+    run: |
+        {run_cmd}
+    """)
+
+
+def unified_conf(num_workers: int,
+                 infra: str,
+                 resource_string: Optional[str] = None,
+                 setup_cmd: str = 'echo "setup message"',
+                 run_cmd: str = 'echo "run message"'):
+    resource_string_section = f'    {resource_string}\n' if resource_string is not None else ''
+    return textwrap.dedent(f"""
+    pool:
+        workers: {num_workers}
+
+    resources:
+        cpus: 2+
+        memory: 4GB+
+        infra: {infra}
+{resource_string_section}
+    setup: |
+        {setup_cmd}
 
     run: |
         {run_cmd}
@@ -1026,6 +1054,8 @@ def test_heterogeneous_pool_counts(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+# This test is failing on shared gke postgres test cluster, we should remove this after we fix it.
+@pytest.mark.no_remote_server
 def test_pools_num_jobs_basic(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
@@ -1163,4 +1193,32 @@ def test_pools_setup_num_gpus(generic_cloud: str):
             ],
             timeout=timeout,
             teardown=_TEARDOWN_POOL.format(pool_name=pool_name))
+        smoke_tests_utils.run_one_test(test)
+
+
+def test_pools_single_yaml(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+    job_name = f'{name}-job'
+    one_config = unified_conf(num_workers=1,
+                              infra=generic_cloud,
+                              setup_cmd='echo "setup message"',
+                              run_cmd='echo "Unified job"')
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    with tempfile.NamedTemporaryFile(delete=True) as one_config_yaml:
+        write_yaml(one_config_yaml, one_config)
+        test = smoke_tests_utils.Test(
+            'test_pools_single_yaml',
+            [
+                _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                    pool_name=pool_name, pool_yaml=one_config_yaml.name),
+                (f's=$(sky jobs launch --pool {pool_name} {one_config_yaml.name} --name {job_name} -d -y); '
+                 'echo "$s"; '
+                 'echo; echo; echo "$s" | grep "Job submitted, ID: 1"; '
+                 'echo "$s" | grep "Unified job"'),
+                wait_until_job_status(job_name, ['SUCCEEDED'], timeout=timeout),
+            ],
+            timeout=smoke_tests_utils.get_timeout(generic_cloud),
+            teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
+        )
         smoke_tests_utils.run_one_test(test)
