@@ -5222,8 +5222,8 @@ def jobs_pool_down(
         raise click.UsageError('Can only specify one of POOL_NAMES or --all. '
                                f'Provided {argument_str!r}.')
 
-    def _get_nonterminal_jobs(
-            pool_names: List[str]) -> List[responses.ManagedJobRecord]:
+    def _get_nonterminal_jobs(pool_names: List[str],
+                              all: bool) -> List[responses.ManagedJobRecord]:
         # Get nonterminal jobs for this pool using managed_jobs.queue
         request_id, queue_result_version = cli_utils.get_managed_job_queue(
             refresh=False,
@@ -5248,13 +5248,11 @@ def jobs_pool_down(
                 return False
             # If len is 0 then we are using -a option, so we include all jobs
             # if they're associated with a pool.
-            if len(pool_names) == 0 and job.get('pool') is not None:
-                return True
+            if all:
+                return job.get('pool') is not None
             # Otherwise we are using specific pool names, so we include the job
             # if it's associated with one of the specified pools.
-            if len(pool_names) > 0 and job.get('pool') in pool_names:
-                return True
-            return False
+            return job.get('pool') in pool_names
 
         # Filter jobs by pool name and ensure nonterminal
         pool_jobs = [job for job in jobs_list if _should_include_job(job)]
@@ -5268,7 +5266,7 @@ def jobs_pool_down(
 
     already_confirmed = False
     try:
-        pool_jobs = _get_nonterminal_jobs(pool_names)
+        pool_jobs = _get_nonterminal_jobs(pool_names, all)
         if pool_jobs:
             num_jobs = len(pool_jobs)
             job_ids = [job['job_id'] for job in pool_jobs]
@@ -5301,18 +5299,18 @@ def jobs_pool_down(
                 max_wait_time = 300  # 5 minutes max wait
                 check_interval = 2  # Check every 2 seconds
                 start_time = time.time()
-                remaining_pool_jobs = _get_nonterminal_jobs(pool_names)
+                remaining_pool_jobs = _get_nonterminal_jobs(pool_names, all)
                 while (remaining_pool_jobs and
                        time.time() - start_time < max_wait_time):
                     # Check remaining jobs via API
                     time.sleep(check_interval)
-                    remaining_pool_jobs = _get_nonterminal_jobs(pool_names)
+                    remaining_pool_jobs = _get_nonterminal_jobs(pool_names, all)
                     ux_utils.spinner_message(
                         f'Waiting for {len(remaining_pool_jobs)} '
                         'jobs to be cancelled...')
 
                 click.echo('\r' + ' ' * 80 + '\r', nl=False)
-                if time.time() - start_time > max_wait_time:
+                if time.time() - start_time >= max_wait_time:
                     click.echo(
                         f'{colorama.Fore.YELLOW}Warning: Timeout waiting '
                         f'for jobs to finish. Proceeding with pool down '

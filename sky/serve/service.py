@@ -196,7 +196,7 @@ def _cleanup(service_name: str) -> bool:
     def cleanup_version_storage(version: int) -> bool:
         yaml_content = serve_state.get_yaml_content(service_name, version)
         if yaml_content is None:
-            logger.debug(f'No yaml content found for version {version}')
+            logger.warning(f'No yaml content found for version {version}')
             return True
         logger.info(f'Cleaning up storage for version {version}, '
                     f'yaml_content: {yaml_content}')
