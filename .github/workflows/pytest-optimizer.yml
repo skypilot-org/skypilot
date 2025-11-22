@@ -1,0 +1,41 @@
+name: Python Tests
+on:
+  # Trigger the workflow on push or pull request,
+  # but only for the main branch
+  push:
+    branches:
+      - master
+      - 'releases/**'
+  pull_request:
+    branches:
+      - master
+      - 'releases/**'
+  merge_group:
+
+jobs:
+  python-test-optimizer:
+    strategy:
+      matrix:
+        python-version: ["3.8"]
+        test-path:
+          - "tests/test_optimizer_dryruns.py -k \"partial\""
+          - "tests/test_optimizer_dryruns.py -k \"not partial\""
+          - tests/test_optimizer_random_dag.py
+        include:
+          - test-path: "tests/test_optimizer_dryruns.py -k \"partial\""
+            test-name: "Optimizer Dryruns Part 1"
+          - test-path: "tests/test_optimizer_dryruns.py -k \"not partial\""
+            test-name: "Optimizer Dryruns Part 2"
+          - test-path: tests/test_optimizer_random_dag.py
+            test-name: "Optimizer Random DAG Tests"
+    runs-on: ubuntu-latest
+    name: "Python Tests - ${{ matrix.test-name }}"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - name: Run Python Tests
+        uses: ./.github/actions/run-python-tests
+        with:
+          python-version: ${{ matrix.python-version }}
+          test-path: ${{ matrix.test-path }}
+          test-name: ${{ matrix.test-name }}
