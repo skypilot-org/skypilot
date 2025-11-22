@@ -1254,6 +1254,9 @@ POOL_JOBS_RESOURCES_RATIO = 1
 # Number of ongoing launches launches allowed per worker. Can probably be
 # increased a bit to around 16 but keeping it lower to just to be safe
 LAUNCHES_PER_WORKER = 8
+# Number of ongoing launches allowed per service. Can probably be increased
+# a bit as well.
+LAUNCHES_PER_SERVICE = 4
 
 # Based on testing, each worker takes around 200-300MB memory. Keeping it
 # higher to be safe.
@@ -1330,7 +1333,9 @@ def _get_parallelism(pool: bool, raw_resource_per_unit: float) -> int:
     # Otherwise, it runs a local API server on the jobs/serve controller.
     # We need to do the resource management ourselves.
     if not consolidation_mode:
-        resource_per_unit_worker = (LAUNCHES_PER_WORKER *
+        launches_per_worker = (LAUNCHES_PER_WORKER
+                               if pool else LAUNCHES_PER_SERVICE)
+        resource_per_unit_worker = (launches_per_worker *
                                     server_config.LONG_WORKER_MEM_GB * 1024)
 
     # If running pool on jobs controller, we need to account for the resources
@@ -1365,9 +1370,11 @@ def _get_number_of_services(pool: bool) -> int:
 def _get_request_parallelism(pool: bool) -> int:
     # NOTE(dev): One smoke test depends on this value.
     # tests/smoke_tests/test_sky_serve.py::test_skyserve_new_autoscaler_update
-    # assumes 8 concurrent launches.
+    # assumes 4 concurrent launches.
     # Limitation per service x number of services
-    return (LAUNCHES_PER_WORKER * POOL_JOBS_RESOURCES_RATIO *
+    launches_per_worker = (LAUNCHES_PER_WORKER
+                           if pool else LAUNCHES_PER_SERVICE)
+    return (launches_per_worker * POOL_JOBS_RESOURCES_RATIO *
             _get_number_of_services(pool))
 
 

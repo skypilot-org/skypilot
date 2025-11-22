@@ -61,9 +61,9 @@ def _get_service_name() -> str:
 # enough time to sync with the controller and get all ready replica IPs.
 _SERVE_WAIT_UNTIL_READY = (
     '{{ while true; do'
-    '     s=$(sky serve status -v {name}); echo "$s";'
+    '     s=$(sky serve status {name}); echo "$s";'
     '     echo "$s" | grep -q "{replica_num}/{replica_num}" && break;'
-    '     echo "$s" | grep -q "FAILED" && sky serve logs --controller --no-follow {name} && exit 1;'
+    '     echo "$s" | grep -q "FAILED" && exit 1;'
     '     sleep 10;'
     ' done; }}; echo "Got service status $s";'
     f'sleep {serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS + 2};')
@@ -72,8 +72,8 @@ _AWK_ALL_LINES_BELOW_REPLICAS = '/Replicas/{flag=1; next} flag'
 _SERVICE_LAUNCHING_STATUS_REGEX = r'PROVISIONING\|STARTING'
 
 _SHOW_SERVE_STATUS = (
-    'echo "+ sky serve status -v {name}"; '
-    'sky serve status -v {name}; '
+    'echo "+ sky serve status {name}"; '
+    'sky serve status {name}; '
     'echo "+ sky serve logs --controller {name} --no-follow"; '
     'sky serve logs --controller {name} --no-follow; '
     'echo "+ sky serve logs --load-balancer {name} --no-follow"; '
@@ -97,7 +97,7 @@ _TEARDOWN_SERVICE = _SHOW_SERVE_STATUS + (
     'start_time=$(date +%s); '
     'timeout=600; '
     'while true; do '
-    '    status_output=$(sky serve status -v {name} 2>&1); '
+    '    status_output=$(sky serve status {name} 2>&1); '
     '    echo "Checking service termination status..."; '
     '    echo "$status_output"; '
     '    echo "$status_output" | grep -q "Service \'{name}\' not found" && echo "Service terminated successfully" && exit 0; '
@@ -120,13 +120,13 @@ _SERVE_ENDPOINT_WAIT = (
     'export SKYPILOT_DEBUG=$ORIGIN_SKYPILOT_DEBUG; echo "$endpoint"')
 
 _SERVE_STATUS_WAIT = (
-    's=$(sky serve status -v {name}); '
+    's=$(sky serve status {name}); '
     # Wait for "Controller is initializing." to disappear
     'until ! echo "$s" | grep "Controller is initializing."; '
     'do '
     '    echo "Waiting for serve status to be ready..."; '
     '    sleep 5; '
-    '    s=$(sky serve status -v {name}); '
+    '    s=$(sky serve status {name}); '
     'done; '
     'echo "$s"')
 
@@ -151,7 +151,7 @@ _WAIT_PROVISION_REPR = (
     '    echo "Waiting for provisioning resource repr ready..."; '
     '    echo "PROVISIONING: $num_provisioning, vCPU: $num_vcpu_in_provision"; '
     '    sleep 2; '
-    '    s=$(sky serve status -v {name}); '
+    '    s=$(sky serve status {name}); '
     '    num_provisioning=$(echo "$s" | grep "PROVISIONING" | wc -l); '
     '    num_vcpu_in_provision=$(echo "$s" | grep "PROVISIONING" | grep "x(cpus=2, " | wc -l); '
     'done; '
@@ -171,7 +171,7 @@ _WAIT_NO_NOT_READY = (
     'start_time=$(date +%s); '
     'timeout=300; '
     'while true; do '
-    '    not_ready_count=$(sky serve status -v {name} | '
+    '    not_ready_count=$(sky serve status {name} | '
     '        awk \'/{name}/ && $10 == "NOT_READY" {{print}}\' | '
     '        wc -l); '
     '    [ "$not_ready_count" -eq 0 ] && break; '
@@ -249,7 +249,7 @@ def _check_replica_in_status(name: str,
             f'start_time=$(date +%s); '
             f'timeout={timeout_seconds}; '  # Use the provided timeout
             f'while true; do '
-            f'    s=$(sky serve status -v {name}); '
+            f'    s=$(sky serve status {name}); '
             f'    echo "$s"; '
             f'    all_conditions_met=true; ')
 
@@ -469,7 +469,7 @@ def test_skyserve_dynamic_ondemand_fallback():
             # b) And in SHUTTING_DOWN state, it may actually SHUTDOWN and
             # disappear. So we check 1 instance instead of 2. Because it
             # can be 1 or 2.
-            f'count=$(sky serve status -v {name} | grep "x(cpus=2, " | grep "{_SERVICE_LAUNCHING_STATUS_REGEX}\|SHUTTING_DOWN\|READY" | wc -l); '
+            f'count=$(sky serve status {name} | grep "x(cpus=2, " | grep "{_SERVICE_LAUNCHING_STATUS_REGEX}\|SHUTTING_DOWN\|READY" | wc -l); '
             f'[ "$count" -eq 1 ] || [ "$count" -eq 2 ] || {{ echo "Expected 1 or 2 instances, got $count"; exit 1; }}',
 
             # Wait until 2 spot instances are ready.
@@ -527,14 +527,14 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
                 increase_initial_delay_seconds(
                     f'sky serve up -n {name} --infra {generic_cloud} {resource_arg} -y tests/skyserve/restart/user_bug.yaml'
                 ),
-                f's=$(sky serve status -v {name}); echo "$s";'
+                f's=$(sky serve status {name}); echo "$s";'
                 'until echo "$s" | grep -A 100 "Service Replicas" | grep "SHUTTING_DOWN"; '
                 'do echo "Waiting for first service to be SHUTTING DOWN..."; '
-                f'sleep 5; s=$(sky serve status -v {name}); echo "$s"; done; ',
-                f's=$(sky serve status -v {name}); echo "$s";'
+                f'sleep 5; s=$(sky serve status {name}); echo "$s"; done; ',
+                f's=$(sky serve status {name}); echo "$s";'
                 'until echo "$s" | grep -A 100 "Service Replicas" | grep "FAILED"; '
                 'do echo "Waiting for first service to be FAILED..."; '
-                f'sleep 2; s=$(sky serve status -v {name}); echo "$s"; done; echo "$s"; '
+                f'sleep 2; s=$(sky serve status {name}); echo "$s"; done; echo "$s"; '
                 + _check_replica_in_status(name, [(1, True, 'FAILED')]) +
                 # User bug failure will cause no further scaling.
                 f'echo "$s" | grep -A 100 "Service Replicas" | grep "{name}" | wc -l | grep 1; '
@@ -614,7 +614,7 @@ def test_skyserve_auto_restart():
             # that the output of `sky serve status` shows FAILED and this status will
             # cause _SERVE_WAIT_UNTIL_READY to early quit.
             '(while true; do'
-            f'    output=$(sky serve status -v {name});'
+            f'    output=$(sky serve status {name});'
             '     echo "$output" | grep -q "1/1" && break;'
             '     sleep 10;'
             f'done); sleep {serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS};',
@@ -698,10 +698,10 @@ def test_skyserve_readiness_timeout_fail(generic_cloud: str):
             f'sky serve up -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/readiness_timeout/task.yaml',
             # None of the readiness probe will pass, so the service will be
             # terminated after the initial delay.
-            f's=$(sky serve status -v {name}); '
+            f's=$(sky serve status {name}); '
             f'until echo "$s" | grep "FAILED_INITIAL_DELAY"; do '
             'echo "Waiting for replica to be failed..."; sleep 5; '
-            f's=$(sky serve status -v {name}); echo "$s"; done;',
+            f's=$(sky serve status {name}); echo "$s"; done;',
             'sleep 60',
             f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s" | grep "{name}" | grep "FAILED_INITIAL_DELAY" | wc -l | grep 1;'
         ],
@@ -955,43 +955,43 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     name = f'{_get_service_name()}-{mode}'
 
     wait_until_no_pending = (
-        f's=$(sky serve status -v {name}); echo "$s"; '
+        f's=$(sky serve status {name}); echo "$s"; '
         'until ! echo "$s" | grep PENDING; do '
         '  echo "Waiting for replica to be out of pending..."; '
-        f' sleep 5; s=$(sky serve status -v {name}); '
+        f' sleep 5; s=$(sky serve status {name}); '
         '  echo "$s"; '
         'done')
-    eight_spot_up_cmd = _check_replica_in_status(name, [(8, True, 'READY')])
-    update_check = [f'until ({eight_spot_up_cmd}); do sleep 5; done; sleep 15;']
+    four_spot_up_cmd = _check_replica_in_status(name, [(4, True, 'READY')])
+    update_check = [f'until ({four_spot_up_cmd}); do sleep 5; done; sleep 15;']
     if mode == 'rolling':
         # Check rolling update, it will terminate one of the old on-demand
-        # instances, once there are 8 spot instance ready.
+        # instances, once there are 4 spot instance ready.
         update_check += [
             _check_replica_in_status(
-                name, [(2, False, _SERVICE_LAUNCHING_STATUS_REGEX),
-                       (2, False, 'SHUTTING_DOWN'), (2, False, 'READY')]) +
+                name, [(1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
+                       (1, False, 'SHUTTING_DOWN'), (1, False, 'READY')]) +
             _check_service_version(name, "1,2"),
         ]
         # The two old on-demand instances will be in READY or SHUTTING_DOWN
         # status after autoscale.
-        FOUR_OLD_ON_DEMAND_INSTANCES_STATUS_AFTER_AUTOSCALE = r'READY\|SHUTTING_DOWN'
+        TWO_OLD_ON_DEMAND_INSTANCES_STATUS_AFTER_AUTOSCALE = r'READY\|SHUTTING_DOWN'
     else:
         # Check blue green update, it will keep both old on-demand instances
-        # running, once there are 8 spot instance ready.
+        # running, once there are 4 spot instance ready.
         update_check += [
             _check_replica_in_status(
-                name, [(2, False, _SERVICE_LAUNCHING_STATUS_REGEX),
-                       (4, False, 'READY')]) +
+                name, [(1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
+                       (2, False, 'READY')]) +
             _check_service_version(name, "1"),
         ]
         # The two old on-demand instances will be in READY status
         # after autoscale update.
-        FOUR_OLD_ON_DEMAND_INSTANCES_STATUS_AFTER_AUTOSCALE = 'READY'
+        TWO_OLD_ON_DEMAND_INSTANCES_STATUS_AFTER_AUTOSCALE = 'READY'
     test = smoke_tests_utils.Test(
         f'test-skyserve-new-autoscaler-update-{mode}',
         [
             f'sky serve up -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/update/new_autoscaler_before.yaml',
-            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=4) +
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
             _check_service_version(name, "1"),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             's=$(curl $endpoint); echo "$s"; echo "$s" | grep "Hi, SkyPilot here"',
@@ -1000,16 +1000,16 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             'sleep 90',
             wait_until_no_pending,
             _check_replica_in_status(name, [
-                (8, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
-                (2, False, _SERVICE_LAUNCHING_STATUS_REGEX),
-                (4, False, FOUR_OLD_ON_DEMAND_INSTANCES_STATUS_AFTER_AUTOSCALE)
+                (4, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
+                (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
+                (2, False, TWO_OLD_ON_DEMAND_INSTANCES_STATUS_AFTER_AUTOSCALE)
             ]),
             *update_check,
-            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=10),
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=5),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'curl $endpoint | grep "Hi, SkyPilot here"',
-            _check_replica_in_status(name, [(8, True, 'READY'),
-                                            (2, False, 'READY')]),
+            _check_replica_in_status(name, [(4, True, 'READY'),
+                                            (1, False, 'READY')]),
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -1039,10 +1039,10 @@ def test_skyserve_failures(generic_cloud: str):
                 increase_initial_delay_seconds(
                     f'sky serve up -n {name} --infra {generic_cloud} {resource_arg} -y tests/skyserve/failures/initial_delay.yaml'
                 ),
-                f's=$(sky serve status -v {name}); '
+                f's=$(sky serve status {name}); '
                 f'until echo "$s" | grep "FAILED_INITIAL_DELAY"; do '
                 'echo "Waiting for replica to be failed..."; sleep 5; '
-                f's=$(sky serve status -v {name}); echo "$s"; done;',
+                f's=$(sky serve status {name}); echo "$s"; done;',
                 'sleep 60',
                 f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s" | grep "{name}" | grep "FAILED_INITIAL_DELAY" | wc -l | grep 2; '
                 # Make sure no new replicas are started for early failure.
@@ -1050,23 +1050,23 @@ def test_skyserve_failures(generic_cloud: str):
                 increase_initial_delay_seconds(
                     f'sky serve update {name} --infra {generic_cloud} {resource_arg} -y tests/skyserve/failures/probing.yaml'
                 ),
-                f's=$(sky serve status -v {name}); '
+                f's=$(sky serve status {name}); '
                 # Wait for replica to be ready.
                 f'until echo "$s" | grep "READY"; do '
                 'echo "Waiting for replica to be failed..."; sleep 5; '
-                f's=$(sky serve status -v {name}); echo "$s"; done;',
+                f's=$(sky serve status {name}); echo "$s"; done;',
                 # Wait for replica to change to FAILED_PROBING
-                f's=$(sky serve status -v {name}); '
+                f's=$(sky serve status {name}); '
                 f'until echo "$s" | grep "FAILED_PROBING"; do '
                 'echo "Waiting for replica to be failed..."; sleep 5; '
-                f's=$(sky serve status -v {name}); echo "$s"; done',
+                f's=$(sky serve status {name}); echo "$s"; done',
                 # Wait for the PENDING replica to appear.
                 'sleep 10',
                 # Wait until the replica is out of PENDING.
-                f's=$(sky serve status -v {name}); '
+                f's=$(sky serve status {name}); '
                 f'until ! echo "$s" | grep "PENDING" && ! echo "$s" | grep "Please wait for the controller to be ready."; do '
                 'echo "Waiting for replica to be out of pending..."; sleep 5; '
-                f's=$(sky serve status -v {name}); echo "$s"; done; ' +
+                f's=$(sky serve status {name}); echo "$s"; done; ' +
                 _check_replica_in_status(name, [
                     (1, False, 'FAILED_PROBING'),
                     (1, False, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY')
@@ -1134,7 +1134,7 @@ def test_skyserve_multi_ports(generic_cloud: str):
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'curl $replica_endpoint | grep "Hi, SkyPilot here"; '
-            f'export replica_endpoint=$(sky serve status -v {name} | tail -n 1 | awk \'{{print $4}}\'); '
+            f'export replica_endpoint=$(sky serve status {name} | tail -n 1 | awk \'{{print $4}}\'); '
             'export replica_endpoint_alt=$(echo $endpoint | sed "s/8080/8081/"); '
             'curl $replica_endpoint | grep "Hi, SkyPilot here"; '
             'curl $replica_endpoint_alt | grep "Hi, SkyPilot here"',
@@ -1235,7 +1235,7 @@ def test_skyserve_ha_kill_during_provision():
             'until echo "$s" | grep "PROVISIONING"; do '
             '  echo "Waiting for PROVISIONING state..."; '
             '  sleep 5; '
-            f'  s=$(sky serve status -v {name}); '
+            f'  s=$(sky serve status {name}); '
             'done; echo "$s"',
             # Kill controller during provisioning
             smoke_tests_utils.kill_and_wait_controller(name, 'serve'),
@@ -1331,7 +1331,7 @@ def test_skyserve_ha_kill_during_shutdown():
             f'{_SERVE_STATUS_WAIT.format(name=name)}; '
             'until echo "$s" | grep -A 100 "Service Replicas" | grep "SHUTTING_DOWN" > /dev/null; do '
             '  echo "Waiting for replica to be SHUTTING_DOWN..."; sleep 5; '
-            f'  s=$(sky serve status -v {name}); '
+            f'  s=$(sky serve status {name}); '
             'done; echo "$s"',
             # Kill controller during shutdown
             smoke_tests_utils.kill_and_wait_controller(name, 'serve'),
