@@ -360,7 +360,6 @@ def run_bash_command_with_log_and_return_pid(
                                        streaming_prefix=streaming_prefix)
     return {'return_code': return_code, 'pid': os.getpid()}
 
-run_fn = None
 if hasattr(autostop_lib, 'set_last_active_time_to_now'):
     autostop_lib.set_last_active_time_to_now()
 
@@ -374,14 +373,12 @@ print(message, flush=True)
 print('\x1b[2m└── \x1b[0mJob started. Streaming logs... \x1b[2m(Ctrl-C to exit log streaming; job will not be killed)\x1b[0m', flush=True)
 setup_cmd = 'pip install torch'
 setup_cmd = 'export SKYPILOT_NODE_RANK=$SLURM_PROCID; ' + setup_cmd
-# Unset CUDA_VISIBLE_DEVICES so setup can properly use this env var
-setup_cmd = 'unset CUDA_VISIBLE_DEVICES; ' + setup_cmd
 
 job_lib.set_status(2, job_lib.JobStatus.SETTING_UP)
 job_lib.scheduler.schedule_step()
 
 # Run setup command on all nodes using srun
-# srun distributes across nodes automatically (single-node now, multi-node ready)
+# srun distributes across nodes automatically.
 setup_srun = f'srun --unbuffered --jobid=12345 --nodes=1 --ntasks-per-node=1 bash -c {shlex.quote(setup_cmd)}'
 
 setup_result = run_bash_command_with_log_and_return_pid(
@@ -393,8 +390,12 @@ setup_result = run_bash_command_with_log_and_return_pid(
     streaming_prefix=f'{colorama.Fore.CYAN}(sky-cmd, pid={{pid}}){colorama.Style.RESET_ALL} ',
 )
 
-# run_bash_command_with_log_and_return_pid returns dict with 'return_code' and 'pid' keys
+# TODO(kevin): For multi-node, we need to inspect the exit codes
+# for each task/node using sacct.
 setup_returncode = int(setup_result.get('return_code', 1))
+# TODO(kevin): For Slurm, run_bash_command_with_log_and_return_pid runs
+# only on the slurm login/controller node. Similarly, we need to get the
+# PIDs for each task/node, either using sacct or some other way.
 setup_pid = setup_result.get('pid', os.getpid())
 
 if setup_returncode != 0:
@@ -406,7 +407,6 @@ if setup_returncode != 0:
     sys.exit(1)
 
 job_lib.set_job_started(2)
-job_lib.scheduler.schedule_step()
 result = subprocess.run(
     ['srun', '--jobid=12345', '--nodes=1', '--ntasks=1',
      '--ntasks-per-node=1', 'bash', '-c',
@@ -415,38 +415,36 @@ result = subprocess.run(
     text=True,
     check=True
 )
-discovered_ips = result.stdout.strip().split('\n')
+job_ips = result.stdout.strip().split('\n')
 cluster_ips_to_node_id = {ip: i for i, ip in enumerate(['10.0.0.1'])}
-node_ips = sorted(discovered_ips, key=cluster_ips_to_node_id.get)
+job_ip_rank_list = sorted(job_ips, key=cluster_ips_to_node_id.get)
+# Note: job_ip_rank_map is not needed for Slurm, as
+# we will use $SLURM_PROCID to get the node rank.
+job_ip_list_str = '\n'.join(job_ip_rank_list)
 
 sky_env_vars_dict = {}
-sky_env_vars_dict['SKYPILOT_NUM_NODES'] = 1
+sky_env_vars_dict['SKYPILOT_NODE_IPS'] = job_ip_list_str
+sky_env_vars_dict['SKYPILOT_NUM_NODES'] = len(job_ip_rank_list)
 sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = 2
-sky_env_vars_dict['SKYPILOT_NODE_IPS'] = '\n'.join(node_ips)
 
 sky_env_vars_dict['SKYPILOT_TASK_ID'] = 'sky-2024-11-17-00-00-00-000001-cluster-2'
 sky_env_vars_dict['MODEL_NAME'] = 'resnet50'
-log_path = os.path.expanduser(os.path.join('/sky/logs/tasks', "run.log"))
 script = 'python train.py'
-script = 'export SKYPILOT_NODE_RANK=$SLURM_PROCID; ' + script
 rclone_flush_script = '\n# Only waits if cached mount is enabled (RCLONE_MOUNT_CACHED_LOG_DIR is not empty)\n# findmnt alone is not enough, as some clouds (e.g. AWS on ARM64) uses\n# rclone for normal mounts as well.\nif [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ] &&            [ -d ~/.sky/rclone_log ] &&            [ "$(ls -A ~/.sky/rclone_log)" ]; then\n    flushed=0\n    # extra second on top of --vfs-cache-poll-interval to\n    # avoid race condition between rclone log line creation and this check.\n    sleep 1\n    while [ $flushed -eq 0 ]; do\n        # sleep for the same interval as --vfs-cache-poll-interval\n        sleep 10\n        flushed=1\n        for file in ~/.sky/rclone_log/*; do\n            exitcode=0\n            tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?\n            if [ $exitcode -ne 0 ]; then\n                echo "skypilot: cached mount is still uploading to remote"\n                flushed=0\n                break\n            fi\n        done\n    done\n    echo "skypilot: cached mount uploaded complete"\nfi'
 
-# If run_fn is registered, call it to generate the script dynamically
-if run_fn is not None:
-    # For Slurm: pass gang_scheduling_id=0 and node_ips
-    script = run_fn(0, node_ips)
-
 if script is not None:
+    script = 'export SKYPILOT_NODE_RANK=$SLURM_PROCID; ' + script
     script += rclone_flush_script
     sky_env_vars_dict['SKYPILOT_NUM_GPUS_PER_NODE'] = 1
+    # TODO(kevin): Handle multi-node job log paths.
+    log_path = os.path.expanduser(os.path.join('/sky/logs/tasks', "run.log"))
 
     # Wrap script with srun to execute within sbatch allocation
-    # srun distributes across nodes automatically (single-node now, multi-node ready)
-    # Note: srun automatically inherits GPU allocation from sbatch (via --jobid).
-    # CUDA_VISIBLE_DEVICES is set by Slurm at the sbatch level and inherited here.
-    # No need to specify --gres again since we're using all allocated GPUs.
+    # srun distributes across nodes automatically.
     srun_script = f'srun --unbuffered --jobid=12345 --nodes=1 --ntasks-per-node=1 bash -c {shlex.quote(script)}'
 
+    # TODO(kevin): For multi-node, we need to inspect the exit codes
+    # for each task/node using sacct.
     result = run_bash_command_with_log_and_return_pid(
         srun_script,
         log_path,
@@ -456,7 +454,6 @@ if script is not None:
         streaming_prefix=f'{colorama.Fore.CYAN}(sky-cmd, pid={{pid}}){colorama.Style.RESET_ALL} ',
     )
 
-    # run_bash_command_with_log_and_return_pid returns dict with 'return_code' and 'pid' keys
     returncodes = [int(result.get('return_code', 1))]
 else:
     returncodes = [0]

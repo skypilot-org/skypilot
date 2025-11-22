@@ -360,12 +360,6 @@ class RayCodeGen(task_codegen.TaskCodeGen):
       >> code = codegen.build()
     """
 
-    def __init__(self):
-        super().__init__()
-        # For n nodes gang scheduling.
-        self._has_gang_scheduling = False
-        self._num_nodes = 0
-
     def add_prologue(self, job_id: int) -> None:
         assert not self._has_prologue, 'add_prologue() called twice?'
         self._has_prologue = True
@@ -394,10 +388,8 @@ class RayCodeGen(task_codegen.TaskCodeGen):
             import ray.util as ray_util
             """))
 
-        # Add skylet imports
         self._add_skylet_imports()
 
-        # Add common constants
         self._add_constants()
 
         # Add Ray configuration
@@ -464,27 +456,29 @@ class RayCodeGen(task_codegen.TaskCodeGen):
                 sys.stdout.flush()
                 return returncodes, pids
 
-            run_fn = None
             futures = []
             """))
 
-        # Add logging functions
         self._add_logging_functions()
 
-        # Ray-specific wrapping of logging functions
         self._code += [
             'run_bash_command_with_log = run_bash_command_with_log',
             'run_bash_command_with_log_and_return_pid = \
                 ray.remote(run_bash_command_with_log_and_return_pid)',
         ]
 
-        # Add autostop call
-        self._add_autostop_call()
+        self._code.append(
+            # Use hasattr to handle backward compatibility.
+            # TODO(zongheng): remove in ~1-2 minor releases (currently 0.2.x).
+            textwrap.dedent("""\
+            if hasattr(autostop_lib, 'set_last_active_time_to_now'):
+                autostop_lib.set_last_active_time_to_now()
+            """))
 
-        # Set initial job status
-        self._add_job_status_pending(job_id)
+        self._code.append(
+            f'job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)')
 
-    def add_gang_scheduling_and_setup(
+    def add_setup(
         self,
         num_nodes: int,
         resources_dict: Dict[str, float],
@@ -493,17 +487,9 @@ class RayCodeGen(task_codegen.TaskCodeGen):
         setup_cmd: Optional[str] = None,
         setup_log_path: Optional[str] = None,
     ) -> None:
-        """Create the gang scheduling placement group for a Task.
-
-        cluster_ips_sorted is used to ensure that the SKY_NODE_RANK environment
-        variable is assigned in a deterministic order whenever a new task is
-        added.
-        """
-        assert self._has_prologue, (
-            'Call add_prologue() before '
-            'add_gang_scheduling_placement_group_and_setup().')
-        self._has_gang_scheduling = True
-        self._num_nodes = num_nodes
+        assert self._has_prologue, ('Call add_prologue() before '
+                                    'add_setup().')
+        self._has_setup = True
 
         bundles = [copy.copy(resources_dict) for _ in range(num_nodes)]
         # Set CPU to avoid ray hanging the resources allocation
@@ -531,7 +517,8 @@ class RayCodeGen(task_codegen.TaskCodeGen):
                 })
 
         self._code.append(
-            f'pg = ray_util.placement_group({json.dumps(bundles)}, \'STRICT_SPREAD\')')
+            f'pg = ray_util.placement_group({json.dumps(bundles)}, \'STRICT_SPREAD\')'
+        )
         self._add_waiting_for_resources_msg(num_nodes)
         self._code.append(
             textwrap.dedent("""\
@@ -635,22 +622,35 @@ class RayCodeGen(task_codegen.TaskCodeGen):
                 """),
         ]
 
-    def add_task(
-            self,
-            bash_script: Optional[str],
-            task_name: Optional[str],
-            resources_dict: Dict[str, float],
-            log_dir: str,
-            env_vars: Optional[Dict[str, str]] = None,
-            gang_scheduling_id: int = 0) -> None:
-        """Generates code for a ray remote task that runs a bash command.
-        """
-        assert self._has_gang_scheduling, (
-            'Call add_gang_scheduling_and_setup() before '
-            'add_task().')
-        assert (not self._has_register_run_fn or
-                bash_script is None), ('bash_script should '
-                                       'be None when run_fn is registered.')
+    def add_tasks(self,
+                  num_nodes: int,
+                  bash_script: Optional[str],
+                  task_name: Optional[str],
+                  resources_dict: Dict[str, float],
+                  log_dir: str,
+                  env_vars: Optional[Dict[str, str]] = None) -> None:
+        # TODO(zhwu): The resources limitation for multi-node ray.tune and
+        # horovod should be considered.
+        for i in range(num_nodes):
+            # Ray's per-node resources, to constrain scheduling each command to
+            # the corresponding node, represented by private IPs.
+            self.add_single_task(bash_script=bash_script,
+                                 task_name=task_name,
+                                 resources_dict=resources_dict.copy(),
+                                 log_dir=log_dir,
+                                 env_vars=env_vars,
+                                 gang_scheduling_id=i)
+
+    def add_single_task(self,
+                        bash_script: Optional[str],
+                        task_name: Optional[str],
+                        resources_dict: Dict[str, float],
+                        log_dir: str,
+                        env_vars: Optional[Dict[str, str]] = None,
+                        gang_scheduling_id: int = 0) -> None:
+        """Generates code for a ray remote task that runs a bash command."""
+        assert self._has_setup, 'Call add_setup() before add_task().'
+
         task_cpu_demand = resources_dict.pop('CPU')
         # Build remote_task.options(...)
         #   resources=...
@@ -697,8 +697,6 @@ class RayCodeGen(task_codegen.TaskCodeGen):
             textwrap.dedent(f"""\
         script = {bash_script!r}
         rclone_flush_script = {rclone_flush_script!r}
-        if run_fn is not None:
-            script = run_fn({gang_scheduling_id}, gang_scheduling_id_to_ip)
 
         if script is not None:
             script=f'{unset_ray_env_vars}; {{script}}'
@@ -6276,7 +6274,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             codegen = RayCodeGen()
 
         codegen.add_prologue(job_id)
-        codegen.add_gang_scheduling_and_setup(
+        codegen.add_setup(
             1,
             resources_dict,
             stable_cluster_internal_ips=internal_ips,
@@ -6285,15 +6283,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_log_path=os.path.join(log_dir, 'setup.log'),
         )
 
-        # Register run function if callable (works for both Ray and Slurm)
-        if callable(task.run):
-            run_fn_code = textwrap.dedent(inspect.getsource(task.run))
-            run_fn_name = task.run.__name__
-            codegen.register_run_fn(run_fn_code, run_fn_name)
-
-        command_for_node = task.run if isinstance(task.run, str) else None
-        codegen.add_task(
-            bash_script=command_for_node,
+        codegen.add_tasks(
+            bash_script=task.run,
             task_name=task.name,
             resources_dict=backend_utils.get_task_demands_dict(task),
             log_dir=log_dir,
@@ -6337,7 +6328,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             codegen = RayCodeGen()
 
         codegen.add_prologue(job_id)
-        codegen.add_gang_scheduling_and_setup(
+        codegen.add_setup(
             num_actual_nodes,
             resources_dict,
             stable_cluster_internal_ips=internal_ips,
@@ -6346,35 +6337,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_log_path=os.path.join(log_dir, 'setup.log'),
         )
 
-        if callable(task.run):
-            run_fn_code = textwrap.dedent(inspect.getsource(task.run))
-            run_fn_name = task.run.__name__
-            codegen.register_run_fn(run_fn_code, run_fn_name)
-
-        command_for_node = task.run if isinstance(task.run, str) else None
-
-        # Ray-specific: submit per-node tasks in a loop
-        # Slurm: single task call (srun handles node distribution)
-        if isinstance(codegen, RayCodeGen):
-            # TODO(zhwu): The resources limitation for multi-node ray.tune and
-            # horovod should be considered.
-            for i in range(num_actual_nodes):
-                # Ray's per-node resources, to constrain scheduling each command to
-                # the corresponding node, represented by private IPs.
-                codegen.add_task(
-                    bash_script=command_for_node,
-                    task_name=task.name,
-                    resources_dict=backend_utils.get_task_demands_dict(task),
-                    log_dir=log_dir,
-                    env_vars=task_env_vars,
-                    gang_scheduling_id=i)
-        else:
-            # Slurm: single add_task call (srun will handle multi-node)
-            codegen.add_task(bash_script=command_for_node,
-                             task_name=task.name,
-                             resources_dict=resources_dict,
-                             log_dir=log_dir,
-                             env_vars=task_env_vars)
+        codegen.add_tasks(num_nodes=num_actual_nodes,
+                          bash_script=task.run,
+                          task_name=task.name,
+                          resources_dict=resources_dict,
+                          log_dir=log_dir,
+                          env_vars=task_env_vars)
 
         codegen.add_epilogue()
         # TODO(zhanghao): Add help info for downloading logs.

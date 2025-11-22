@@ -80,7 +80,7 @@ def test_single_node_with_gpu():
         'MODEL_NAME': 'resnet50',
     }
 
-    codegen.add_gang_scheduling_and_setup(
+    codegen.add_setup(
         num_nodes=1,
         resources_dict=resources_dict,
         stable_cluster_internal_ips=['10.0.0.1'],
@@ -90,7 +90,8 @@ def test_single_node_with_gpu():
     )
 
     # Single node: no gang_scheduling_id passed
-    codegen.add_task(
+    codegen.add_tasks(
+        num_nodes=1,
         bash_script='python train.py',
         task_name='train_task',
         resources_dict={
@@ -121,7 +122,7 @@ def test_multi_node_2nodes():
         'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000002-cluster-3',
     }
 
-    codegen.add_gang_scheduling_and_setup(
+    codegen.add_setup(
         num_nodes=num_nodes,
         resources_dict=resources_dict,
         stable_cluster_internal_ips=['10.0.0.1', '10.0.0.2'],
@@ -130,16 +131,14 @@ def test_multi_node_2nodes():
         setup_log_path='/sky/logs/setup.log',
     )
 
-    # Multi-node: loop and add task for each node with gang_scheduling_id
-    for i in range(num_nodes):
-        codegen.add_task(
-            bash_script='echo "Running on node $SKYPILOT_NODE_RANK"',
-            task_name='distributed_task',
-            resources_dict={'CPU': 2.0},
-            log_dir='/sky/logs/tasks',
-            env_vars=task_env_vars,
-            gang_scheduling_id=i,
-        )
+    codegen.add_tasks(
+        num_nodes=num_nodes,
+        bash_script='echo "Running on node $SKYPILOT_NODE_RANK"',
+        task_name='distributed_task',
+        resources_dict={'CPU': 2.0},
+        log_dir='/sky/logs/tasks',
+        env_vars=task_env_vars,
+    )
 
     codegen.add_epilogue()
 
@@ -161,7 +160,7 @@ def test_slurm_single_node_with_gpu():
         'MODEL_NAME': 'resnet50',
     }
 
-    codegen.add_gang_scheduling_and_setup(
+    codegen.add_setup(
         num_nodes=1,
         resources_dict=resources_dict,
         stable_cluster_internal_ips=['10.0.0.1'],
@@ -170,8 +169,8 @@ def test_slurm_single_node_with_gpu():
         setup_log_path='/sky/logs/setup.log',
     )
 
-    # Single node: no gang_scheduling_id passed
-    codegen.add_task(
+    codegen.add_tasks(
+        num_nodes=1,
         bash_script='python train.py',
         task_name='train_task',
         resources_dict={
@@ -204,7 +203,7 @@ def test_slurm_multi_node_2nodes():
         'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000002-cluster-3',
     }
 
-    codegen.add_gang_scheduling_and_setup(
+    codegen.add_setup(
         num_nodes=num_nodes,
         resources_dict=resources_dict,
         stable_cluster_internal_ips=['10.0.0.1', '10.0.0.2'],
@@ -213,16 +212,14 @@ def test_slurm_multi_node_2nodes():
         setup_log_path='/sky/logs/setup.log',
     )
 
-    # Multi-node: loop and add task for each node with gang_scheduling_id
-    for i in range(num_nodes):
-        codegen.add_task(
-            bash_script='echo "Running on node $SKYPILOT_NODE_RANK"',
-            task_name='distributed_task',
-            resources_dict={'CPU': 2.0},
-            log_dir='/sky/logs/tasks',
-            env_vars=task_env_vars,
-            gang_scheduling_id=i,
-        )
+    codegen.add_tasks(
+        num_nodes=num_nodes,
+        bash_script='echo "Running on node $SKYPILOT_NODE_RANK"',
+        task_name='distributed_task',
+        resources_dict={'CPU': 2.0},
+        log_dir='/sky/logs/tasks',
+        env_vars=task_env_vars,
+    )
 
     codegen.add_epilogue()
 

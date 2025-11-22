@@ -26,9 +26,8 @@ class TaskCodeGen:
         # Guard method calling order.
         self._has_prologue = False
         self._has_epilogue = False
-        self._has_register_run_fn = False
-
-        # job_id is used to identify the job (also this generated code).
+        self._has_setup = False
+        # Job ID is used to identify the job (also this generated code).
         self.job_id = None
 
     def _add_common_imports(self) -> None:
@@ -82,28 +81,7 @@ class TaskCodeGen:
             inspect.getsource(log_lib.run_bash_command_with_log_and_return_pid),
         ]
 
-    def _add_autostop_call(self) -> None:
-        """Add autostop library initialization."""
-        self._code.append(
-            # Use hasattr to handle backward compatibility.
-            # TODO(zongheng): remove in ~1-2 minor releases (currently 0.2.x).
-            textwrap.dedent("""\
-            if hasattr(autostop_lib, 'set_last_active_time_to_now'):
-                autostop_lib.set_last_active_time_to_now()
-            """))
-
-    def _add_job_status_pending(self, job_id: int) -> None:
-        """Set initial job status to PENDING."""
-        self._code.append(
-            f'job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)')
-
-    def _add_job_status_setting_up(self, job_id: int) -> None:
-        """Set job status to SETTING_UP."""
-        self._code.append(
-            f'job_lib.set_status({job_id!r}, job_lib.JobStatus.SETTING_UP)')
-
     def _add_waiting_for_resources_msg(self, num_nodes: int) -> None:
-        """Add standardized waiting-for-resources message."""
         self._code.append(
             textwrap.dedent(f"""\
             plural = 's' if {num_nodes} > 1 else ''
@@ -114,7 +92,6 @@ class TaskCodeGen:
             print(message, flush=True)"""))
 
     def _add_job_started_msg(self) -> None:
-        """Add standardized job-started streaming message."""
         streaming_message = (
             f'{ux_utils.INDENT_LAST_SYMBOL}Job started. Streaming logs... '
             f'{colorama.Style.DIM}(Ctrl-C to exit log streaming; job will not '
@@ -125,7 +102,6 @@ class TaskCodeGen:
         self,
         resources_dict: Dict[str, float],
     ) -> Tuple[Optional[str], float]:
-        """Return accelerator name and count from resources, if any."""
         resources_copy = resources_dict.copy()
         resources_copy.pop('CPU', None)
 
@@ -139,16 +115,7 @@ class TaskCodeGen:
         acc_name, acc_count = list(resources_copy.items())[0]
         return acc_name, float(acc_count)
 
-    def _add_scheduler_schedule_step(self) -> None:
-        """Schedule the next pending job."""
-        self._code.append('job_lib.scheduler.schedule_step()')
-
-    def _add_job_started(self, job_id: int) -> None:
-        """Mark job as started."""
-        self._code.append(f'job_lib.set_job_started({job_id!r})')
-
     def _add_constants(self) -> None:
-        """Add common constants used by both Ray and Slurm."""
         self._code.append(
             textwrap.dedent(f"""\
             SKY_REMOTE_WORKDIR = {constants.SKY_REMOTE_WORKDIR!r}
@@ -194,25 +161,6 @@ class TaskCodeGen:
             echo "skypilot: cached mount uploaded complete"
         fi""")
 
-    def register_run_fn(self, run_fn_code: str, run_fn_name: str) -> None:
-        """Register a callable run function to be included in generated code.
-
-        This allows task.run to be a Python callable instead of a bash script.
-        The function code is injected into the generated program and called
-        dynamically to generate the bash script.
-
-        Args:
-            run_fn_code: Source code of the run function
-            run_fn_name: Name of the run function
-        """
-        assert not self._has_register_run_fn, 'register_run_fn() called twice?'
-        self._has_register_run_fn = True
-
-        self._code += [
-            run_fn_code,
-            f'run_fn = {run_fn_name}',
-        ]
-
     def add_prologue(self, job_id: int) -> None:
         """Initialize code generator and add prologue code.
 
@@ -221,7 +169,7 @@ class TaskCodeGen:
         """
         raise NotImplementedError
 
-    def add_gang_scheduling_and_setup(
+    def add_setup(
         self,
         num_nodes: int,
         resources_dict: Dict[str, float],
@@ -230,37 +178,24 @@ class TaskCodeGen:
         setup_cmd: Optional[str] = None,
         setup_log_path: Optional[str] = None,
     ) -> None:
-        """Add gang scheduling coordination and setup command execution.
+        """Generates code to set up the task on each node.
 
-        Args:
-            num_nodes: Number of nodes for the task
-            resources_dict: Resource requirements (CPU, GPU, etc.)
-            stable_cluster_internal_ips: Stable internal IPs of cluster nodes
-            env_vars: Environment variables to set
-            setup_cmd: Optional setup command to execute
-            setup_log_path: Optional path to save setup logs
+        stable_cluster_internal_ips is used to ensure that the SKYPILOT_NODE_RANK environment
+        variable is assigned in a deterministic order whenever a new task is
+        added.
         """
         raise NotImplementedError
 
-    def add_task(
+    def add_tasks(
         self,
+        num_nodes: int,
         bash_script: Optional[str],
         task_name: Optional[str],
         resources_dict: Dict[str, float],
         log_dir: str,
         env_vars: Optional[Dict[str, str]] = None,
-        gang_scheduling_id: int = 0,
     ) -> None:
-        """Add task execution code.
-
-        Args:
-            bash_script: Bash script to execute
-            task_name: Optional task name for logging
-            resources_dict: Resource requirements (CPU, GPU, etc.)
-            log_dir: Directory for task logs
-            env_vars: Optional environment variables to set
-            gang_scheduling_id: ID for gang scheduling coordination (multi-node)
-        """
+        """Generates code to run the bash command on each node."""
         raise NotImplementedError
 
     def add_epilogue(self) -> None:
@@ -320,55 +255,94 @@ class SlurmCodeGen(TaskCodeGen):
         """
         super().__init__()
         self._slurm_job_id = slurm_job_id
-        self._num_nodes = 1  # Track for future multi-node support
-        self._stable_cluster_internal_ips = []  # Store for use in add_task()
 
     def add_prologue(self, job_id: int) -> None:
-        """Initialize Slurm executor without Ray.
-
-        Args:
-            job_id: SkyPilot internal job ID
-        """
         assert not self._has_prologue, 'add_prologue() called twice?'
         self._has_prologue = True
         self.job_id = job_id
 
         self._code = []
 
-        # Add common imports
         self._add_common_imports()
 
-        # Add skylet imports
         self._add_skylet_imports()
 
-        # Add common constants
         self._add_constants()
 
-        # Add logging functions
         self._add_logging_functions()
 
-        # Note: No need to wrap functions with ray.remote() for Slurm execution
-        # The functions from log_lib are used directly
+        self._code.append(
+            # Use hasattr to handle backward compatibility.
+            # TODO(zongheng): remove in ~1-2 minor releases (currently 0.2.x).
+            textwrap.dedent("""\
+            if hasattr(autostop_lib, 'set_last_active_time_to_now'):
+                autostop_lib.set_last_active_time_to_now()
+            """))
 
-        # Initialize run_fn variable (may be set via register_run_fn)
-        self._code.append('run_fn = None')
+        self._code.append(
+            f'job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)')
 
-        # Add autostop call
-        self._add_autostop_call()
+    def add_setup(
+        self,
+        num_nodes: int,
+        resources_dict: Dict[str, float],
+        stable_cluster_internal_ips: List[str],
+        env_vars: Dict[str, str],
+        setup_cmd: Optional[str] = None,
+        setup_log_path: Optional[str] = None,
+    ) -> None:
+        assert self._has_prologue, ('Call add_prologue() before add_setup().')
+        self._has_setup = True
 
-        # Set initial job status
-        self._add_job_status_pending(job_id)
+        self._add_waiting_for_resources_msg(num_nodes)
+        self._add_job_started_msg()
 
-    def _add_node_discovery(self, num_nodes: int,
-                            stable_cluster_internal_ips: List[str]) -> None:
-        """Add code for discovering Slurm nodes.
+        if setup_cmd is not None:
+            setup_envs = env_vars.copy()
+            setup_envs[constants.SKYPILOT_NUM_NODES] = str(num_nodes)
+            self._code += [
+                textwrap.dedent(f"""\
+                setup_cmd = {setup_cmd!r}
+                setup_cmd = 'export SKYPILOT_NODE_RANK=$SLURM_PROCID; ' + setup_cmd
 
-        Args:
-            num_nodes: Number of nodes in the task
-            stable_cluster_internal_ips: Pre-fetched cluster IPs for sorting
-        """
-        self._num_nodes = num_nodes
+                job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SETTING_UP)
+                job_lib.scheduler.schedule_step()
 
+                # Run setup command on all nodes using srun
+                # srun distributes across nodes automatically.
+                setup_srun = f'srun --unbuffered --jobid={self._slurm_job_id} --nodes={num_nodes} --ntasks-per-node=1 bash -c {{shlex.quote(setup_cmd)}}'
+
+                setup_result = run_bash_command_with_log_and_return_pid(
+                    setup_srun,
+                    os.path.expanduser({setup_log_path!r}),
+                    env_vars={setup_envs!r},
+                    stream_logs=True,
+                    with_ray=False,
+                    streaming_prefix=f'{{colorama.Fore.CYAN}}(sky-cmd, pid={{{{pid}}}}){{colorama.Style.RESET_ALL}} ',
+                )
+
+                # TODO(kevin): For multi-node, we need to inspect the exit codes
+                # for each task/node using sacct.
+                setup_returncode = int(setup_result.get('return_code', 1))
+                # TODO(kevin): For Slurm, run_bash_command_with_log_and_return_pid runs
+                # only on the slurm login/controller node. Similarly, we need to get the
+                # PIDs for each task/node, either using sacct or some other way.
+                setup_pid = setup_result.get('pid', os.getpid())
+
+                if setup_returncode != 0:
+                    msg = f'ERROR: {colorama.Fore.RED}Job {self.job_id}\\'s setup failed with return code {{setup_returncode}} (pid={{setup_pid}}).'
+                    msg += f' See error logs above for more details.{colorama.Style.RESET_ALL}'
+                    print(msg, flush=True)
+                    job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED_SETUP)
+                    time.sleep(1)
+                    sys.exit(1)
+                """),
+            ]
+        self._code.append(f'job_lib.set_job_started({self.job_id!r})')
+        if setup_cmd is None:
+            self._code.append('job_lib.scheduler.schedule_step()')
+
+        # Get the IP addresses of the nodes in the job.
         self._code.append(
             textwrap.dedent(f"""\
             result = subprocess.run(
@@ -379,171 +353,27 @@ class SlurmCodeGen(TaskCodeGen):
                 text=True,
                 check=True
             )
-            discovered_ips = result.stdout.strip().split('\\n')
+            job_ips = result.stdout.strip().split('\\n')
             cluster_ips_to_node_id = {{ip: i for i, ip in enumerate({stable_cluster_internal_ips!r})}}
-            node_ips = sorted(discovered_ips, key=cluster_ips_to_node_id.get)
+            job_ip_rank_list = sorted(job_ips, key=cluster_ips_to_node_id.get)
+            # Note: job_ip_rank_map is not needed for Slurm, as
+            # we will use $SLURM_PROCID to get the node rank.
+            job_ip_list_str = '\\n'.join(job_ip_rank_list)
             """))
 
-    def _get_log_path_code(self, log_dir: str, num_nodes: int) -> str:
-        """Generate code for determining log path.
-
-        Mimics Ray's logic:
-        - Single-node cluster: run.log
-        - Multi-node cluster: {rank}-{head|workerN}.log
-
-        Args:
-            log_dir: Base log directory
-            num_nodes: Number of nodes
-
-        Returns:
-            Python code string that sets 'log_path' variable
-        """
-        if num_nodes == 1:
-            # Single-node: simple path
-            return f'log_path = os.path.expanduser(os.path.join({log_dir!r}, "run.log"))'
-        else:
-            # Multi-node: rank-based paths (future)
-            # TODO: Determine node name (head vs workerN) based on cluster position
-            return textwrap.dedent(f"""\
-            # Multi-node log paths: TODO - implement proper head/worker naming
-            if node_rank == 0:
-                node_name = 'head'
-            else:
-                node_name = f'worker{{node_rank}}'
-            log_path = os.path.expanduser(os.path.join({log_dir!r}, f'{{node_rank}}-{{node_name}}.log'))
-            """)
-
-    def _build_env_vars_code(self, env_vars: Dict[str, str],
-                             num_nodes: int) -> str:
-        """Generate code for building environment variables dictionary.
-
-        Args:
-            env_vars: Base environment variables
-            num_nodes: Number of nodes
-
-        Returns:
-            Python code string that builds sky_env_vars_dict
-        """
-        sky_env_vars_dict_str = [
-            textwrap.dedent(f"""\
-            sky_env_vars_dict = {{}}
-            sky_env_vars_dict['{constants.SKYPILOT_NUM_NODES}'] = {num_nodes}
-            sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = {self.job_id}
-            sky_env_vars_dict['{constants.SKYPILOT_NODE_IPS}'] = '\\n'.join(node_ips)
-            """)
-        ]
-
-        if env_vars:
-            sky_env_vars_dict_str.extend(f'sky_env_vars_dict[{k!r}] = {v!r}'
-                                         for k, v in env_vars.items())
-
-        return '\n'.join(sky_env_vars_dict_str)
-
-    def add_gang_scheduling_and_setup(
+    def add_tasks(
         self,
         num_nodes: int,
-        resources_dict: Dict[str, float],
-        stable_cluster_internal_ips: List[str],
-        env_vars: Dict[str, str],
-        setup_cmd: Optional[str] = None,
-        setup_log_path: Optional[str] = None,
-    ) -> None:
-        """Unified interface: Add gang scheduling and setup.
-
-        For Slurm, this handles setup command execution using srun.
-        resources_dict is accepted but not used (Slurm uses sbatch allocation).
-        """
-        # Store for later use in add_task()
-        self._stable_cluster_internal_ips = stable_cluster_internal_ips
-
-        self._add_waiting_for_resources_msg(num_nodes)
-        self._add_job_started_msg()
-
-        if setup_cmd is not None:
-            self._add_slurm_task_setup_impl(num_nodes, env_vars, setup_cmd,
-                                            setup_log_path)
-        else:
-            self._add_job_started(self.job_id)
-            self._add_scheduler_schedule_step()
-
-    def _add_slurm_task_setup_impl(
-        self,
-        num_nodes: int,
-        env_vars: Dict[str, str],
-        setup_cmd: str,
-        setup_log_path: str,
-    ) -> None:
-        """Add setup command execution using srun.
-
-        Args:
-            num_nodes: Number of nodes for the task
-            env_vars: Environment variables to set
-            setup_cmd: Setup command to execute
-            setup_log_path: Path to save setup logs
-        """
-        assert self._has_prologue, 'Call add_prologue() before add_slurm_task_setup().'
-
-        setup_envs = env_vars.copy()
-        setup_envs[constants.SKYPILOT_NUM_NODES] = str(num_nodes)
-
-        self._code += [
-            textwrap.dedent(f"""\
-            setup_cmd = {setup_cmd!r}
-            setup_cmd = 'export SKYPILOT_NODE_RANK=$SLURM_PROCID; ' + setup_cmd
-            # Unset CUDA_VISIBLE_DEVICES so setup can properly use this env var
-            setup_cmd = 'unset CUDA_VISIBLE_DEVICES; ' + setup_cmd
-
-            job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SETTING_UP)
-            job_lib.scheduler.schedule_step()
-
-            # Run setup command on all nodes using srun
-            # srun distributes across nodes automatically (single-node now, multi-node ready)
-            setup_srun = f'srun --unbuffered --jobid={self._slurm_job_id} --nodes={num_nodes} --ntasks-per-node=1 bash -c {{shlex.quote(setup_cmd)}}'
-
-            setup_result = run_bash_command_with_log_and_return_pid(
-                setup_srun,
-                os.path.expanduser({setup_log_path!r}),
-                env_vars={setup_envs!r},
-                stream_logs=True,
-                with_ray=False,
-                streaming_prefix=f'{{colorama.Fore.CYAN}}(sky-cmd, pid={{{{pid}}}}){{colorama.Style.RESET_ALL}} ',
-            )
-
-            # run_bash_command_with_log_and_return_pid returns dict with 'return_code' and 'pid' keys
-            setup_returncode = int(setup_result.get('return_code', 1))
-            setup_pid = setup_result.get('pid', os.getpid())
-
-            if setup_returncode != 0:
-                msg = f'ERROR: {colorama.Fore.RED}Job {self.job_id}\\'s setup failed with return code {{setup_returncode}} (pid={{setup_pid}}).'
-                msg += f' See error logs above for more details.{colorama.Style.RESET_ALL}'
-                print(msg, flush=True)
-                job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED_SETUP)
-                time.sleep(1)
-                sys.exit(1)
-            """),
-        ]
-
-        self._add_job_started(self.job_id)
-        self._add_scheduler_schedule_step()
-
-    def add_task(
-        self,
         bash_script: Optional[str],
         task_name: Optional[str],
         resources_dict: Dict[str, float],
         log_dir: str,
         env_vars: Optional[Dict[str, str]] = None,
-        gang_scheduling_id: int = 0,
     ) -> None:
-        """Unified interface: Add task execution.
-
-        For Slurm, uses srun for execution within sbatch allocation.
-        resources_dict is used to extract GPU count for SKYPILOT_NUM_GPUS_PER_NODE.
-        Slurm doesn't use it for scheduling (sbatch handles allocation).
-        gang_scheduling_id is accepted but not used for single-node.
+        """Generates code for invoking a bash command
+        using srun within sbatch allocation.
         """
-        # Determine num_nodes from self._num_nodes set during add_gang_scheduling_and_setup
-        num_nodes = getattr(self, '_num_nodes', 1)
+        assert self._has_setup, 'Call add_setup() before add_task().'
         env_vars = env_vars or {}
 
         acc_name, acc_count = self._get_accelerator_details(resources_dict)
@@ -553,66 +383,41 @@ class SlurmCodeGen(TaskCodeGen):
                     acc_name)):
             num_gpus = int(math.ceil(acc_count))
 
-        self._add_slurm_task_impl(bash_script, num_nodes, env_vars, log_dir,
-                                  task_name, num_gpus)
+        sky_env_vars_dict_str = [
+            textwrap.dedent(f"""\
+            sky_env_vars_dict = {{}}
+            sky_env_vars_dict['{constants.SKYPILOT_NODE_IPS}'] = job_ip_list_str
+            sky_env_vars_dict['{constants.SKYPILOT_NUM_NODES}'] = len(job_ip_rank_list)
+            sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = {self.job_id}
+            """)
+        ]
 
-    def _add_slurm_task_impl(
-        self,
-        bash_script: str,
-        num_nodes: int,
-        env_vars: Dict[str, str],
-        log_dir: str,
-        task_name: Optional[str] = None,
-        num_gpus: int = 0,
-    ) -> None:
-        """Add task execution using srun.
+        if env_vars:
+            sky_env_vars_dict_str.extend(f'sky_env_vars_dict[{k!r}] = {v!r}'
+                                         for k, v in env_vars.items())
+        sky_env_vars_dict_str = '\n'.join(sky_env_vars_dict_str)
 
-        Args:
-            bash_script: Bash script to execute
-            num_nodes: Number of nodes for the task
-            env_vars: Environment variables to set
-            log_dir: Directory for task logs
-            task_name: Optional task name for logging
-            num_gpus: Number of GPUs per node (for SKYPILOT_NUM_GPUS_PER_NODE)
-        """
-        assert self._has_prologue, 'Call add_prologue() before add_slurm_task().'
-
-        # Add node discovery (extensible for multi-node)
-        self._add_node_discovery(num_nodes, self._stable_cluster_internal_ips)
-
-        # Build environment variables using helper
-        sky_env_vars_dict_str = self._build_env_vars_code(env_vars, num_nodes)
-
-        # Get rclone flush script from base class
         rclone_flush_script = self._get_rclone_flush_script()
-
-        # Get log path code (extensible for multi-node)
-        log_path_code = self._get_log_path_code(log_dir, num_nodes)
 
         self._code += [
             sky_env_vars_dict_str,
-            log_path_code,
             textwrap.dedent(f"""\
             script = {bash_script!r}
-            script = 'export SKYPILOT_NODE_RANK=$SLURM_PROCID; ' + script
             rclone_flush_script = {rclone_flush_script!r}
 
-            # If run_fn is registered, call it to generate the script dynamically
-            if run_fn is not None:
-                # For Slurm: pass gang_scheduling_id=0 and node_ips
-                script = run_fn(0, node_ips)
-
             if script is not None:
+                script = 'export SKYPILOT_NODE_RANK=$SLURM_PROCID; ' + script
                 script += rclone_flush_script
                 sky_env_vars_dict['{constants.SKYPILOT_NUM_GPUS_PER_NODE}'] = {num_gpus}
+                # TODO(kevin): Handle multi-node job log paths.
+                log_path = os.path.expanduser(os.path.join({log_dir!r}, "run.log"))
 
                 # Wrap script with srun to execute within sbatch allocation
-                # srun distributes across nodes automatically (single-node now, multi-node ready)
-                # Note: srun automatically inherits GPU allocation from sbatch (via --jobid).
-                # CUDA_VISIBLE_DEVICES is set by Slurm at the sbatch level and inherited here.
-                # No need to specify --gres again since we're using all allocated GPUs.
+                # srun distributes across nodes automatically.
                 srun_script = f'srun --unbuffered --jobid={self._slurm_job_id} --nodes={num_nodes} --ntasks-per-node=1 bash -c {{shlex.quote(script)}}'
 
+                # TODO(kevin): For multi-node, we need to inspect the exit codes
+                # for each task/node using sacct.
                 result = run_bash_command_with_log_and_return_pid(
                     srun_script,
                     log_path,
@@ -622,13 +427,8 @@ class SlurmCodeGen(TaskCodeGen):
                     streaming_prefix=f'{{colorama.Fore.CYAN}}(sky-cmd, pid={{{{pid}}}}){{colorama.Style.RESET_ALL}} ',
                 )
 
-                # run_bash_command_with_log_and_return_pid returns dict with 'return_code' and 'pid' keys
                 returncodes = [int(result.get('return_code', 1))]
             else:
                 returncodes = [0]
             """),
         ]
-
-    def add_epilogue(self) -> None:
-        """Generate epilogue that checks return codes and updates job status."""
-        super().add_epilogue()
