@@ -662,7 +662,6 @@ class ManagedJobScheduleState(enum.Enum):
         """
         protobuf_to_enum = {
             managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_UNSPECIFIED: None,
-
             managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_INACTIVE:
                 cls.INACTIVE,
             managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_WAITING: cls.WAITING,
@@ -685,7 +684,6 @@ class ManagedJobScheduleState(enum.Enum):
     def to_protobuf(self) -> 'managed_jobsv1_pb2.ManagedJobScheduleState':
         """Convert this Python enum value to protobuf enum value."""
         enum_to_protobuf = {
-
             ManagedJobScheduleState.INACTIVE:
                 managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_INACTIVE,
             ManagedJobScheduleState.WAITING:

@@ -458,10 +458,9 @@ def main():
     for cluster_name, cluster_config in clusters_config.items():
         try:
             print(f'SKYPILOT_CURRENT_CLUSTER: {cluster_name}')
-            print(
-                f'{YELLOW}==== Deploying cluster: {cluster_name} ====${NC}')
-            hosts_info = ssh_utils.prepare_hosts_info(
-                cluster_name, cluster_config)
+            print(f'{YELLOW}==== Deploying cluster: {cluster_name} ====${NC}')
+            hosts_info = ssh_utils.prepare_hosts_info(cluster_name,
+                                                      cluster_config)
 
             if not hosts_info:
                 print(
@@ -473,13 +472,12 @@ def main():
 
             # Check cluster history
             os.makedirs(NODE_POOLS_INFO_DIR, exist_ok=True)
-            history_yaml_file = os.path.join(
-                NODE_POOLS_INFO_DIR, f'{context_name}-history.yaml')
+            history_yaml_file = os.path.join(NODE_POOLS_INFO_DIR,
+                                             f'{context_name}-history.yaml')
 
             history = None
             if os.path.exists(history_yaml_file):
-                print(
-                    f'{YELLOW}Loading history from {history_yaml_file}{NC}')
+                print(f'{YELLOW}Loading history from {history_yaml_file}{NC}')
                 with open(history_yaml_file, 'r', encoding='utf-8') as f:
                     history = yaml.safe_load(f)
             else:
@@ -499,20 +497,16 @@ def main():
                             f'Current value: {cluster_config.get(key)}')
                 history_hosts_info = ssh_utils.prepare_hosts_info(
                     cluster_name, history)
-                if not args.cleanup and history_hosts_info[0] != hosts_info[
-                        0]:
+                if not args.cleanup and history_hosts_info[0] != hosts_info[0]:
                     raise ValueError(
                         f'Cluster configuration has changed for master node. '
                         f'Previous value: {history_hosts_info[0]}, '
                         f'Current value: {hosts_info[0]}')
                 history_workers_info = history_hosts_info[1:] if len(
                     history_hosts_info) > 1 else []
-                history_worker_nodes = [
-                    h['ip'] for h in history_workers_info
-                ]
+                history_worker_nodes = [h['ip'] for h in history_workers_info]
                 history_use_ssh_config = [
-                    h.get('use_ssh_config', False)
-                    for h in history_workers_info
+                    h.get('use_ssh_config', False) for h in history_workers_info
                 ]
 
             # Use the first host as the head node and the rest as worker nodes
@@ -559,9 +553,7 @@ def main():
                         successful_hosts.append(host)
                 cluster_config['hosts'] = successful_hosts
                 with open(history_yaml_file, 'w', encoding='utf-8') as f:
-                    print(
-                        f'{YELLOW}Writing history to {history_yaml_file}{NC}'
-                    )
+                    print(f'{YELLOW}Writing history to {history_yaml_file}{NC}')
                     yaml.dump(cluster_config, f)
 
             print(

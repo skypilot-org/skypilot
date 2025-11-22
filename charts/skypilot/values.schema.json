@@ -342,18 +342,6 @@
                         "null"
                     ]
                 },
-                "httpNodePort": {
-                    "type": [
-                        "number",
-                        "null"
-                    ]
-                },
-                "httpsNodePort": {
-                    "type": [
-                        "number",
-                        "null"
-                    ]
-                },
                 "ingressClassName": {
                     "type": "string"
                 },

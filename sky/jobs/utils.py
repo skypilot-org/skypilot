@@ -549,8 +549,6 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
                     logger.exception(error_msg, exc_info=e)
         return error_msg
 
-
-
     # Get jobs that need checking (non-terminal or not DONE)
     job_ids = managed_job_state.get_jobs_to_check_status(job_id)
     if not job_ids:
@@ -566,8 +564,6 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         # will have the same value for these columns. This is what lets us just
         # take tasks[0]['controller_pid'] and tasks[0]['schedule_state'].
         schedule_state = tasks[0]['schedule_state']
-
-
 
         # Handle jobs with schedule state (non-legacy jobs):
         pid = tasks[0]['controller_pid']

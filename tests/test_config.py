@@ -1168,6 +1168,3 @@ def test_standardized_region_configs(monkeypatch, tmp_path) -> None:
         keys=('vcn_ocid',),
         default_value=None)
     assert vcn_ocid is None
-
-
-

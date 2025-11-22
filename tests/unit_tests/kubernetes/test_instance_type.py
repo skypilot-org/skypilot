@@ -58,8 +58,6 @@ def test_kubernetes_instance_type():
             assert instance_type_from_resources.accelerator_type == accelerator_type, f'Failed from resources check for {cpus}, {memory}, {accelerator_count}, {accelerator_type}'
 
 
-
-
 def test_gpu_name_underscore_preservation():
     """Test that GPU names with underscores are preserved exactly as-is.
     
