@@ -210,9 +210,11 @@ def _get_skyserve_http_test(name: str, cloud: str,
     return test
 
 
-def _check_replica_in_status(name: str,
-                             check_tuples: List[Tuple[int, bool, str]],
-                             timeout_seconds: int = 0) -> str:
+def _check_replica_in_status(
+        name: str,
+        check_tuples: List[Tuple[int, bool, str]],
+        timeout_seconds: int = 0,
+        force_skip_provisioning_waiting: bool = False) -> str:
     """Check replicas' status and count in sky serve status
 
     We will check cpus=2, as all our tests use cpus=2.
@@ -242,6 +244,8 @@ def _check_replica_in_status(name: str,
         check_conditions.append(
             f'echo "$s" | grep "{resource_str}" | grep "{status}" | wc -l | '
             f'grep {count}')
+    if force_skip_provisioning_waiting:
+        skip_provisioning_waiting = True
 
     if timeout_seconds > 0:
         # Create a timeout mechanism that will wait up to timeout_seconds
@@ -961,7 +965,8 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
         f' sleep 5; s=$(sky serve status {name}); '
         '  echo "$s"; '
         'done')
-    four_spot_up_cmd = _check_replica_in_status(name, [(4, True, 'READY')])
+    four_spot_up_cmd = _check_replica_in_status(
+        name, [(4, True, 'READY')], force_skip_provisioning_waiting=True)
     update_check = [f'until ({four_spot_up_cmd}); do sleep 5; done; sleep 15;']
     if mode == 'rolling':
         # Check rolling update, it will terminate one of the old on-demand
