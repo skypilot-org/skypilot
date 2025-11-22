@@ -608,7 +608,7 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
 
         # Create resources with GPU and BEST network tier (mimicking H100:8 --network-tier best)
         gpu_resources = mock.MagicMock()
-        gpu_resources.instance_type = "8CPU--32GB--8xH100"  # Instance with 8 H100 GPUs
+        gpu_resources.instance_type = "8CPU--32GB--H100:8"  # Instance with 8 H100 GPUs
         gpu_resources.accelerators = {'H100': 8}
         gpu_resources.use_spot = False
         gpu_resources.region = "nebius-context"
