@@ -27,6 +27,8 @@ class Options(enum.Enum):
     # Internal: This is used for testing to enable grpc for communication
     # between the API server and the Skylet.
     ENABLE_GRPC = ('SKYPILOT_ENABLE_GRPC', False)
+    # Slurm support is experimental.
+    ENABLE_SLURM = ('SKYPILOT_ENABLE_SLURM', False)
     # Allow all contexts for Kubernetes if allowed_contexts is not set in
     # config.
     ALLOW_ALL_KUBERNETES_CONTEXTS = ('SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS',
