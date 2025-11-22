@@ -2,7 +2,7 @@ service:
   readiness_probe:
     path: /health
     initial_delay_seconds: 60
-  replicas: 4
+  replicas: 2
 
 resources:
   ports: 8081

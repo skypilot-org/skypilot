@@ -1304,6 +1304,12 @@ def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
     return total_memory_mb - used
 
 
+def _is_consolidation_mode(pool: bool) -> bool:
+    return skypilot_config.get_nested(
+        ('jobs' if pool else 'serve', 'controller', 'consolidation_mode'),
+        default_value=False)
+
+
 @annotations.lru_cache(scope='request')
 def _get_parallelism(pool: bool, raw_resource_per_unit: float) -> int:
     """Returns the number of jobs controllers / services that should be running.
@@ -1320,9 +1326,7 @@ def _get_parallelism(pool: bool, raw_resource_per_unit: float) -> int:
     each controller will take CONTROLLER_MEMORY_MB + 8 * WORKER_MEMORY_MB. We
     leave some leftover room for ssh codegen and ray status overhead.
     """
-    consolidation_mode = skypilot_config.get_nested(
-        ('jobs' if pool else 'serve', 'controller', 'consolidation_mode'),
-        default_value=False)
+    consolidation_mode = _is_consolidation_mode(pool)
 
     total_memory_mb = _get_total_usable_memory_mb(pool, consolidation_mode)
 
