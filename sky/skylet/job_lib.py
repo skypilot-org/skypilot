@@ -1246,9 +1246,11 @@ class JobLibCodeGen:
                   job_id: Optional[int],
                   managed_job_id: Optional[int],
                   follow: bool = True,
-                  tail: int = 0) -> str:
+                  tail: int = 0,
+                  setup_spinner: bool = False,
+                  cluster_name: Optional[str] = None,
+                  num_nodes: int = 0) -> str:
         # pylint: disable=line-too-long
-
         code = [
             # We use != instead of is not because 1 is not None will print a warning:
             # <stdin>:1: SyntaxWarning: "is not" with a literal. Did you mean "!="?
@@ -1265,6 +1267,9 @@ class JobLibCodeGen:
             # Add a newline to leave the if indent block above.
             f'\ntail_log_kwargs = {{"job_id": job_id, "log_dir": log_dir, "managed_job_id": {managed_job_id!r}, "follow": {follow}}}',
             f'{_LINUX_NEW_LINE}if getattr(constants, "SKYLET_LIB_VERSION", 1) > 1: tail_log_kwargs["tail"] = {tail}',
+            f'{_LINUX_NEW_LINE}if getattr(constants, "SKYLET_LIB_VERSION", 1) > 4: tail_log_kwargs["setup_spinner"] = {setup_spinner}',
+            f'{_LINUX_NEW_LINE}if getattr(constants, "SKYLET_LIB_VERSION", 1) > 4: tail_log_kwargs["cluster_name"] = {cluster_name!r}',
+            f'{_LINUX_NEW_LINE}if getattr(constants, "SKYLET_LIB_VERSION", 1) > 4: tail_log_kwargs["num_nodes"] = {num_nodes}',
             f'{_LINUX_NEW_LINE}log_lib.tail_logs(**tail_log_kwargs)',
             # After tailing, check the job status and exit with appropriate code
             'job_status = job_lib.get_status(job_id)',
