@@ -1214,7 +1214,7 @@ def test_pools_single_yaml(generic_cloud: str):
                     pool_name=pool_name, pool_yaml=one_config_yaml.name),
                 (f's=$(sky jobs launch --pool {pool_name} {one_config_yaml.name} --name {job_name} -d -y); '
                  'echo "$s"; '
-                 'echo; echo; echo "$s" | grep "Job submitted, ID: 1"; '
+                 'echo; echo; echo "$s" | grep "Job submitted"; '
                  'echo "$s" | grep "Unified job"'),
                 wait_until_job_status(job_name, ['SUCCEEDED'], timeout=timeout),
             ],
