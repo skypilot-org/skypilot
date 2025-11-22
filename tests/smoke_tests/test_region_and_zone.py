@@ -45,7 +45,7 @@ def test_aws_region():
     test = smoke_tests_utils.Test(
         'aws_region',
         [
-            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra */us-east-2 examples/minimal.yaml',
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra aws/us-east-2 examples/minimal.yaml',
             f'sky exec {name} examples/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky status -v | grep {name} | grep us-east-2',  # Ensure the region is correct.
@@ -192,8 +192,8 @@ def test_aws_zone():
     test = smoke_tests_utils.Test(
         'aws_zone',
         [
-            f'sky launch -y -c {name} examples/minimal.yaml {smoke_tests_utils.LOW_RESOURCE_ARG} --infra */*/us-east-2b',
-            f'sky exec {name} examples/minimal.yaml --infra */*/us-east-2b',
+            f'sky launch -y -c {name} examples/minimal.yaml {smoke_tests_utils.LOW_RESOURCE_ARG} --infra aws/*/us-east-2b',
+            f'sky exec {name} examples/minimal.yaml --infra aws/*/us-east-2b',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky status -v | grep {name} | grep us-east-2b',  # Ensure the zone is correct.
         ],
