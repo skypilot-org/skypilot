@@ -1003,6 +1003,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             f'sky serve update {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --mode {mode} -y tests/skyserve/update/new_autoscaler_after.yaml',
             # Wait for update to be registered
             'sleep 90',
+            'sky status',
             wait_until_no_pending,
             _check_replica_in_status(name, [
                 (4, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
