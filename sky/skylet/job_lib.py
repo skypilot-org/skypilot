@@ -83,7 +83,7 @@ def create_table(cursor, conn):
             # is not critical and is likely to be enabled by other processes.
 
     # Pid column is used for keeping track of the driver process of a job. It
-    # can be in three states:
+    # can be in two states:
     # 0: The job driver process has never been started. When adding a job with
     #    INIT state, the pid will be set to 0.
     # >=0: The job has been started. The pid is the driver process's pid.

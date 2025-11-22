@@ -173,7 +173,6 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         request_id = requests_lib.get_new_request_id()
         request.state.request_id = request_id
         response = await call_next(request)
-
         response.headers['X-Skypilot-Request-ID'] = request_id
         return response
 

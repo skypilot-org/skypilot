@@ -283,7 +283,6 @@ def get_cloud_config_value_from_dict(
             keys=(cloud, region_key, region) + keys,
             default_value=None,
             override_configs=override_configs)
-
     # if no override found for specified region
     general_config = input_config.get_nested(keys=(cloud,) + keys,
                                              default_value=default_value,
