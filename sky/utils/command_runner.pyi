@@ -310,6 +310,7 @@ class KubernetesCommandRunner(CommandRunner):
 class SlurmCommandRunner(SSHCommandRunner):
     """Runner for Slurm commands."""
     sky_dir: str
+    skypilot_runtime_dir: str
 
     def __init__(
         self,
@@ -318,6 +319,7 @@ class SlurmCommandRunner(SSHCommandRunner):
         ssh_private_key: str,
         *,
         sky_dir: str,
+        skypilot_runtime_dir: str,
         **kwargs,
     ) -> None:
         ...

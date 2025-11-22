@@ -2761,6 +2761,7 @@ def api_logout() -> None:
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@versions.minimal_api_version(24)
 @annotations.client_api
 def realtime_slurm_gpu_availability(
         name_filter: Optional[str] = None,
@@ -2774,7 +2775,6 @@ def realtime_slurm_gpu_availability(
     Returns:
         The request ID of the Slurm GPU availability request.
     """
-    # Assuming SlurmGpuAvailabilityRequestBody exists and is imported
     body = payloads.SlurmGpuAvailabilityRequestBody(
         name_filter=name_filter,
         quantity_filter=quantity_filter,
@@ -2789,6 +2789,7 @@ def realtime_slurm_gpu_availability(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@versions.minimal_api_version(24)
 @annotations.client_api
 def slurm_node_info(
         slurm_cluster_name: Optional[str] = None) -> server_common.RequestId:
