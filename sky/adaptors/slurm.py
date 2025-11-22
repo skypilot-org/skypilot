@@ -60,9 +60,6 @@ class SlurmClient:
 
         Returns:
             List of job IDs matching the filters.
-
-        Raises:
-            CommandError: If the squeue command fails.
         """
         cmd = f'squeue --me -h -o "%i"'
         if state_filters is not None:
@@ -88,9 +85,6 @@ class SlurmClient:
         Args:
             job_name: Name of the job(s) to cancel.
             signal: Optional signal to send to the job(s).
-
-        Raises:
-            CommandError: If the scancel command fails.
         """
         cmd = f'scancel --name {job_name}'
         if signal is not None:
@@ -105,16 +99,13 @@ class SlurmClient:
         logger.debug(f'Successfully cancelled job {job_name}: {stdout}')
 
     def info(self) -> str:
-        """Get Slurm cluster information using sinfo.
+        """Get Slurm cluster information.
 
         This is useful for checking if the cluster is accessible and
         retrieving node information.
 
         Returns:
             The stdout output from sinfo.
-
-        Raises:
-            CommandError: If the sinfo command fails.
         """
         cmd = 'sinfo'
         rc, stdout, stderr = self._runner.run(cmd,
@@ -128,13 +119,10 @@ class SlurmClient:
         """Get Slurm node information.
 
         Returns node names, states, GRES (generic resources like GPUs),
-        and partition in a single call.
+        and partition.
 
         Returns:
-            A list of node info lines from 'sinfo -N -h -o "%N %t %G %P"'
-
-        Raises:
-            CommandError: If the sinfo command fails.
+            A list of node info lines.
         """
         cmd = 'sinfo -h --Node -o "%N %t %G %P"'
         rc, stdout, stderr = self._runner.run(cmd,
@@ -148,7 +136,7 @@ class SlurmClient:
         """Get detailed Slurm node information.
 
         Returns:
-            A dictionary of node info from 'scontrol show node {node_name}'
+            A dictionary of node attributes.
         """
 
         # Helper function to parse scontrol output (can be moved to utils if needed)
@@ -179,10 +167,10 @@ class SlurmClient:
         return node_info
 
     def info_partitions(self) -> List[str]:
-        """Get Slurm partition information.
+        """Get Slurm node-to-partition information.
 
         Returns:
-            A list of partition info lines from 'sinfo -p -h -o "%P %t"'
+            A list of node and partition info lines.
         """
         cmd = 'sinfo -h --Nodes -o "%N %P"'
         rc, stdout, stderr = self._runner.run(cmd,
@@ -199,7 +187,7 @@ class SlurmClient:
         """Get the list of jobs for a given node name.
 
         Returns:
-            A list of job info lines from 'squeue -w {node_name} -h -o "%i"'
+            A list of job names for the current user on the node.
         """
         cmd = f'squeue --me -h --nodelist {node_name} -o "%b"'
         rc, stdout, stderr = self._runner.run(cmd,
@@ -218,9 +206,6 @@ class SlurmClient:
         Returns:
             The job state (e.g., 'PENDING', 'RUNNING', 'COMPLETED', etc.),
             or None if the job is not found.
-
-        Raises:
-            CommandError: If the squeue command fails.
         """
         # Use --only-job-state since we only need the job state.
         # This reduces the work required by slurmctld.
@@ -242,10 +227,6 @@ class SlurmClient:
         Args:
             job_id: The Slurm job ID.
             timeout: Maximum time to wait in seconds (default: 300).
-
-        Raises:
-            TimeoutError: If the job doesn't get nodes allocated within timeout.
-            RuntimeError: If the job fails or is cancelled.
         """
         import time
         start_time = time.time()
@@ -303,11 +284,6 @@ class SlurmClient:
         Returns:
             A tuple of (nodes, node_ips) where nodes is a list of node names
             and node_ips is a list of corresponding IP addresses.
-
-        Raises:
-            CommandError: If the squeue or scontrol command fails.
-            RuntimeError: If no nodes are found for the job.
-            TimeoutError: If waiting for nodes times out.
         """
         # Wait for nodes to be allocated if requested
         if wait:
@@ -364,10 +340,6 @@ class SlurmClient:
 
         Returns:
             The job ID of the submitted job.
-
-        Raises:
-            CommandError: If job submission fails.
-            RuntimeError: If job ID cannot be parsed from sbatch output.
         """
         cmd = f'sbatch --partition={partition} {script_path}'
         rc, stdout, stderr = self._runner.run(cmd,
@@ -376,7 +348,7 @@ class SlurmClient:
         subprocess_utils.handle_returncode(rc,
                                            cmd,
                                            'Failed to submit Slurm job.',
-                                           stderr=stderr)
+                                           stderr=f'{stdout}\n{stderr}')
 
         # Parse job ID from sbatch output (format: "Submitted batch job 12345")
         job_id_match = re.search(r'Submitted batch job (\d+)', stdout)

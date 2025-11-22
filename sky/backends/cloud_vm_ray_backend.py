@@ -369,7 +369,6 @@ class RayCodeGen(task_codegen.TaskCodeGen):
         # Otherwise, ray will fail to get the placement group because of a bug
         # in ray job.
         ray_address = 'auto'
-        self._code = []
 
         # Add common imports
         self._add_common_imports()
@@ -6284,6 +6283,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         )
 
         codegen.add_tasks(
+            1,
             bash_script=task.run,
             task_name=task.name,
             resources_dict=backend_utils.get_task_demands_dict(task),
@@ -6337,7 +6337,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_log_path=os.path.join(log_dir, 'setup.log'),
         )
 
-        codegen.add_tasks(num_nodes=num_actual_nodes,
+        codegen.add_tasks(num_actual_nodes,
                           bash_script=task.run,
                           task_name=task.name,
                           resources_dict=resources_dict,

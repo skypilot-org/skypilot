@@ -217,6 +217,9 @@ def _get_cluster_records_and_set_ssh_config(
                 f'{handle.cluster_name}\"')
             credentials['ssh_proxy_command'] = proxy_command
         elif isinstance(handle.launched_resources.cloud, clouds.Slurm):
+            # TODO(kevin): This is a temporary workaround, ideally we want to
+            # get a shell through srun --pty bash on the existing sbatch job.
+
             # Proxy through the controller/login node to reach the worker node.
             if (handle.cached_internal_ips is None or
                     not handle.cached_internal_ips):

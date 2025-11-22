@@ -1,5 +1,4 @@
-# sky/clouds/service_catalog/slurm_catalog.py
-"""Slurm Cloud Service Catalog."""
+"""Slurm Catalog."""
 
 import collections
 import re
@@ -49,10 +48,6 @@ def get_default_instance_type(cpus: Optional[str] = None,
     return virtual_instance_type
 
 
-# === Slurm-specific Catalog Implementation ===
-
-
-# Renamed from _list_accelerator_realtime for clarity
 def list_accelerators_realtime(
     gpus_only: bool = True,
     name_filter: Optional[str] = None,

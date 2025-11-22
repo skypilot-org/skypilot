@@ -261,8 +261,6 @@ class SlurmCodeGen(TaskCodeGen):
         self._has_prologue = True
         self.job_id = job_id
 
-        self._code = []
-
         self._add_common_imports()
 
         self._add_skylet_imports()
