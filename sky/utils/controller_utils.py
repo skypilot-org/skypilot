@@ -575,9 +575,9 @@ def shared_controller_vars_to_fill(
              if controller == Controllers.SKY_SERVE_CONTROLLER else 'false'),
     })
     override_concurrent_launches = os.environ.get(
-        constants.OVERRIDE_CONCURRENT_LAUNCHES, None)
+        constants.SERVE_OVERRIDE_CONCURRENT_LAUNCHES, None)
     if override_concurrent_launches is not None:
-        env_vars[constants.OVERRIDE_CONCURRENT_LAUNCHES] = str(
+        env_vars[constants.SERVE_OVERRIDE_CONCURRENT_LAUNCHES] = str(
             int(override_concurrent_launches))
     if skypilot_config.loaded():
         # Only set the SKYPILOT_CONFIG env var if the user has a config file.
@@ -1381,8 +1381,8 @@ def _get_request_parallelism(pool: bool) -> int:
     # tests/smoke_tests/test_sky_serve.py::test_skyserve_new_autoscaler_update
     # assumes 4 concurrent launches.
     override_concurrent_launches = os.environ.get(
-        constants.OVERRIDE_CONCURRENT_LAUNCHES, None)
-    if override_concurrent_launches is not None:
+        constants.SERVE_OVERRIDE_CONCURRENT_LAUNCHES, None)
+    if override_concurrent_launches is not None and not pool:
         return int(override_concurrent_launches)
     # Limitation per service x number of services
     launches_per_worker = (LAUNCHES_PER_WORKER

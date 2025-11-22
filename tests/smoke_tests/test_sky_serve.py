@@ -993,7 +993,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
         # The two old on-demand instances will be in READY status
         # after autoscale update.
         TWO_OLD_ON_DEMAND_INSTANCES_STATUS_AFTER_AUTOSCALE = 'READY'
-    override_env = f'--env {constants.OVERRIDE_CONCURRENT_LAUNCHES}=4'
+    override_env = f'--env {constants.SERVE_OVERRIDE_CONCURRENT_LAUNCHES}=4'
     test = smoke_tests_utils.Test(
         f'test-skyserve-new-autoscaler-update-{mode}',
         [
