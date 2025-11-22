@@ -227,6 +227,7 @@ def _check_replica_in_status(name: str,
     """
     # Build the check conditions
     check_conditions = []
+    skip_provisioning_waiting = False
     for check_tuple in check_tuples:
         count, is_spot, status = check_tuple
         resource_str = ''
@@ -236,6 +237,8 @@ def _check_replica_in_status(name: str,
             if is_spot:
                 spot_str = r'\[spot\]'
             resource_str = f'x{spot_str}(cpus=2, '
+        if 'PROVISIONING' in status:
+            skip_provisioning_waiting = True
         check_conditions.append(
             f'echo "$s" | grep "{resource_str}" | grep "{status}" | wc -l | '
             f'grep {count}')
@@ -276,8 +279,9 @@ def _check_replica_in_status(name: str,
         for condition in check_conditions:
             check_cmd += f'{condition} || exit 1; '
 
+    wait_provisioning_cmd = ('' if skip_provisioning_waiting else f'{_WAIT_PROVISION_REPR.format(name=name)}; ')
     return (f'{_SERVE_STATUS_WAIT.format(name=name)}; '
-            f'{_WAIT_PROVISION_REPR.format(name=name)}; '
+            f'{wait_provisioning_cmd} '
             f'{_WAIT_NO_NOT_READY.format(name=name)}; '
             f'echo "$s"; {check_cmd}')
 
