@@ -140,9 +140,9 @@ def _create_virtual_instance(
         # useful logs typically, since we just do a sleep infinity.
         f'#SBATCH --output={SHARED_SKY_DIRECTORY_NAME}/slurm-%j.out',
         f'#SBATCH --error={SHARED_SKY_DIRECTORY_NAME}/slurm-%j.out',
-        # Do not begin execution until all nodes are ready for use.
-        '#SBATCH --wait-all-nodes',
         f'#SBATCH --nodes={num_nodes}',
+        # Do not begin execution until all nodes are ready for use.
+        '#SBATCH --wait-all-nodes=1',
         f'#SBATCH --cpus-per-task={int(resources["cpus"])}',
         f'#SBATCH --mem={int(resources["memory"])}G',
     ]

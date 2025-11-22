@@ -81,7 +81,7 @@ def test_single_node_with_gpu():
     }
 
     codegen.add_setup(
-        num_nodes=1,
+        1,
         resources_dict=resources_dict,
         stable_cluster_internal_ips=['10.0.0.1'],
         env_vars=task_env_vars,
@@ -91,7 +91,7 @@ def test_single_node_with_gpu():
 
     # Single node: no gang_scheduling_id passed
     codegen.add_tasks(
-        num_nodes=1,
+        1,
         bash_script='python train.py',
         task_name='train_task',
         resources_dict={
@@ -123,7 +123,7 @@ def test_multi_node_2nodes():
     }
 
     codegen.add_setup(
-        num_nodes=num_nodes,
+        num_nodes,
         resources_dict=resources_dict,
         stable_cluster_internal_ips=['10.0.0.1', '10.0.0.2'],
         env_vars=task_env_vars,
@@ -132,7 +132,7 @@ def test_multi_node_2nodes():
     )
 
     codegen.add_tasks(
-        num_nodes=num_nodes,
+        num_nodes,
         bash_script='echo "Running on node $SKYPILOT_NODE_RANK"',
         task_name='distributed_task',
         resources_dict={'CPU': 2.0},
@@ -161,7 +161,7 @@ def test_slurm_single_node_with_gpu():
     }
 
     codegen.add_setup(
-        num_nodes=1,
+        1,
         resources_dict=resources_dict,
         stable_cluster_internal_ips=['10.0.0.1'],
         env_vars=task_env_vars,
@@ -170,7 +170,7 @@ def test_slurm_single_node_with_gpu():
     )
 
     codegen.add_tasks(
-        num_nodes=1,
+        1,
         bash_script='python train.py',
         task_name='train_task',
         resources_dict={
@@ -204,7 +204,7 @@ def test_slurm_multi_node_2nodes():
     }
 
     codegen.add_setup(
-        num_nodes=num_nodes,
+        num_nodes,
         resources_dict=resources_dict,
         stable_cluster_internal_ips=['10.0.0.1', '10.0.0.2'],
         env_vars=task_env_vars,
@@ -213,7 +213,7 @@ def test_slurm_multi_node_2nodes():
     )
 
     codegen.add_tasks(
-        num_nodes=num_nodes,
+        num_nodes,
         bash_script='echo "Running on node $SKYPILOT_NODE_RANK"',
         task_name='distributed_task',
         resources_dict={'CPU': 2.0},
