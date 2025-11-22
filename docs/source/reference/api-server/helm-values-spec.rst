@@ -33,6 +33,9 @@ Below is the available helm value keys and the default value of each key:
 
 .. parsed-literal::
 
+  :ref:`global <helm-values-global>`:
+    :ref:`imageRegistry <helm-values-global-imageRegistry>`: null
+    :ref:`imagePullSecrets <helm-values-global-imagePullSecrets>`: null
   :ref:`apiService <helm-values-apiService>`:
     :ref:`image <helm-values-apiService-image>`: berkeleyskypilot/skypilot-nightly:latest
     :ref:`upgradeStrategy <helm-values-apiService-upgradeStrategy>`: Recreate
@@ -77,7 +80,6 @@ Below is the available helm value keys and the default value of each key:
       :ref:`retention <helm-values-apiService-logs-retention>`:
         :ref:`enabled <helm-values-apiService-logs-retention-enabled>`: false
         :ref:`size <helm-values-apiService-logs-retention-size>`: 10M
-    :ref:`imagePullSecrets <helm-values-apiService-imagePullSecrets>`: null
     :ref:`imagePullPolicy <helm-values-apiService-imagePullPolicy>`: Always
 
   :ref:`auth <helm-values-auth>`:
@@ -130,6 +132,8 @@ Below is the available helm value keys and the default value of each key:
       :ref:`redis-url <helm-values-ingress-oauth2-proxy-redis-url>`: null
       :ref:`cookie-refresh <helm-values-ingress-oauth2-proxy-cookie-refresh>`: null
       :ref:`cookie-expire <helm-values-ingress-oauth2-proxy-cookie-expire>`: null
+    :ref:`tls <helm-values-ingress-tls>`:
+      :ref:`enabled <helm-values-ingress-tls-enabled>`: false
 
   :ref:`ingress-nginx <helm-values-ingress-nginx>`:
     :ref:`enabled <helm-values-ingress-nginx-enabled>`: true
@@ -252,6 +256,59 @@ Below is the available helm value keys and the default value of each key:
 Fields
 ----------
 
+.. _helm-values-global:
+
+``global``
+~~~~~~~~~~
+
+Global configuration for all components in the chart.
+
+.. _helm-values-global-imageRegistry:
+
+``global.imageRegistry``
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+Override the image registry host for every container image produced by the chart. Images that omit a registry (implicitly ``docker.io``) are prefixed with ``global.imageRegistry`` and images that already declare a registry have that host replaced with ``global.imageRegistry``.
+
+For example, if ``global.imageRegistry`` is set to ``registry.example.com/custom``, the following images will be replaced:
+
+.. code-block:: yaml
+
+  berkeleyskypilot/skypilot:latest
+  # becomes
+  registry.example.com/custom/berkeleyskypilot/skypilot:latest
+
+  quay.io/oauth2-proxy/oauth2-proxy:v7.9.0
+  # becomes
+  registry.example.com/custom/oauth2-proxy/oauth2-proxy:v7.9.0
+
+.. note::
+
+  This override will only be applied to images defined in the SkyPilot chart; bundled subcharts such as ``ingress-nginx`` keep their own registry configuration. Refer to the documentations of subcharts for how to change them.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  global:
+    imageRegistry: registry.example.com/custom
+
+
+.. _helm-values-global-imagePullSecrets:
+
+``global.imagePullSecrets``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Specify imagePullSecrets for all components in the chart.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  global:
+    imagePullSecrets:
+      - name: my-registry-credentials
+
 .. _helm-values-apiService:
 
 ``apiService``
@@ -285,20 +342,6 @@ To use a nightly build, find the desired nightly version on `pypi <https://pypi.
     # Replace 1.0.0.devYYYYMMDD with the desired nightly version
     image: berkeleyskypilot/skypilot-nightly:1.0.0.devYYYYMMDD
 
-.. _helm-values-apiService-imagePullSecrets:
-
-``apiService.imagePullSecrets``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-List of Kubernetes ``imagePullSecrets`` objects to attach to the API server pods. Set this when the API server image is hosted in a private registry so the pods can authenticate during pulls.
-
-Default: ``null``
-
-.. code-block:: yaml
-
-  apiService:
-    imagePullSecrets:
-      - name: my-registry-credentials
 
 .. _helm-values-apiService-imagePullPolicy:
 
@@ -1477,6 +1520,34 @@ Default: ``null``
   ingress:
     oauth2-proxy:
       cookie-expire: 86400  # 24 hours
+
+.. _helm-values-ingress-tls:
+
+``ingress.tls``
+^^^^^^^^^^^^^^^
+TLS configuration for the ingress controller. When setting to ``true``, TLS will be enabled. User can either provide their own TLS secret with a name ``<release-name>-tls-secrets`` or use ``cert-manager`` to automatically manage TLS certificates.
+
+Default: ``false``
+
+Example with TLS enabled using `cert-manager <https://cert-manager.io/docs/>`_:
+
+.. code-block:: yaml
+
+  ingress:
+    enabled: true
+    host: skypilot.example.com
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt
+      kubernetes.io/ingress.allow-http: "false"
+    tls:
+      enabled: true
+
+.. _helm-values-ingress-tls-enabled:
+
+``ingress.tls.enabled``
+'''''''''''''''''''''''
+
+Enable TLS for the ingress. When enabled, either cert-manager annotation should be provided or a TLS secret with name ``<release-name>-tls-secrets`` should be created in the namespace.
 
 .. _helm-values-ingress-nginx:
 

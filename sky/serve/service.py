@@ -190,17 +190,22 @@ def _cleanup(service_name: str) -> bool:
                     _set_to_failed_cleanup(info)
         time.sleep(3)
 
-    versions = serve_state.get_service_versions(service_name)
-    serve_state.delete_all_versions(service_name)
-
     def cleanup_version_storage(version: int) -> bool:
         yaml_content = serve_state.get_yaml_content(service_name, version)
+        if yaml_content is None:
+            logger.warning(f'No yaml content found for version {version}')
+            return True
         logger.info(f'Cleaning up storage for version {version}, '
                     f'yaml_content: {yaml_content}')
         return cleanup_storage(yaml_content)
 
+    versions = serve_state.get_service_versions(service_name)
     if not all(map(cleanup_version_storage, versions)):
         failed = True
+
+    # Cleanup version metadata after all storages are cleaned up, otherwise
+    # the get_yaml_content will return None as all versions are deleted.
+    serve_state.delete_all_versions(service_name)
 
     return failed
 
@@ -381,7 +386,19 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
         for process in process_to_kill:
             process.join()
 
-        failed = _cleanup(service_name)
+        # Catch any exception here to avoid it kill the service monitoring
+        # process. In which case, the service will not only fail to clean
+        # up, but also cannot be terminated in the future as no process
+        # will handle the user signal anymore. Instead, we catch any error
+        # and set it to FAILED_CLEANUP instead.
+        try:
+            failed = _cleanup(service_name)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Failed to clean up service {service_name}: {e}')
+            with ux_utils.enable_traceback():
+                logger.error(f'  Traceback: {traceback.format_exc()}')
+            failed = True
+
         if failed:
             serve_state.set_service_status_and_active_versions(
                 service_name, serve_state.ServiceStatus.FAILED_CLEANUP)

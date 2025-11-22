@@ -483,7 +483,9 @@ def launch(
                     backend = backend_utils.get_backend_from_handle(
                         local_handle)
                     assert isinstance(backend, backends.CloudVmRayBackend)
-                    with sky_logging.silent():
+                    # Suppress file mount logs when submitting multiple jobs.
+                    should_silence = num_jobs is not None and num_jobs > 1
+                    with sky_logging.silent(should_silence):
                         backend.sync_file_mounts(
                             handle=local_handle,
                             all_file_mounts=controller_task.file_mounts,
@@ -499,10 +501,14 @@ def launch(
                         for k, v in controller_task.envs.items()
                     ]
                     run_script = '\n'.join(env_cmds + [run_script])
-                    # Dump script for high availability recovery.
-                    managed_job_state.set_ha_recovery_script(
-                        consolidation_mode_job_id, run_script)
-                    backend.run_on_head(local_handle, run_script)
+                    log_dir = os.path.join(skylet_constants.SKY_LOGS_DIRECTORY,
+                                           'managed_jobs')
+                    os.makedirs(log_dir, exist_ok=True)
+                    log_path = os.path.join(
+                        log_dir, f'submit-job-{consolidation_mode_job_id}.log')
+                    backend.run_on_head(local_handle,
+                                        run_script,
+                                        log_path=log_path)
                     ux_utils.starting_message(
                         f'Job submitted, ID: {consolidation_mode_job_id}')
                     return consolidation_mode_job_id, local_handle

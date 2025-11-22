@@ -78,6 +78,7 @@ from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import dag_utils
+from sky.utils import env_options
 from sky.utils import perf_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
@@ -668,16 +669,6 @@ app.include_router(ssh_node_pools_rest.router,
 soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
 
-# Increase the limit of files we can open to our hard limit. This fixes bugs
-# where we can not aquire file locks or open enough logs and the API server
-# crashes. On Mac, the hard limit is 9,223,372,036,854,775,807.
-# TODO(luca) figure out what to do if we need to open more than 2^63 files.
-try:
-    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
-    resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
-except Exception:  # pylint: disable=broad-except
-    pass  # no issue, we will warn the user later if its too low
-
 
 @app.exception_handler(exceptions.ConcurrentWorkerExhaustedError)
 def handle_concurrent_worker_exhausted_error(
@@ -798,7 +789,8 @@ async def kubernetes_node_info(
 
 @app.get('/status_kubernetes')
 async def status_kubernetes(request: fastapi.Request) -> None:
-    """Gets Kubernetes status."""
+    """[Experimental] Get all SkyPilot resources (including from other '
+    'users) in the current Kubernetes context."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.STATUS_KUBERNETES,
@@ -878,6 +870,11 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
         # thread executor to avoid blocking the uvicorn event loop.
         await context_utils.to_thread(validate_dag, dag)
     except Exception as e:  # pylint: disable=broad-except
+        # Print the exception to the API server log.
+        if env_options.Options.SHOW_DEBUG_INFO.get():
+            logger.info('/validate exception:', exc_info=True)
+        # Set the exception stacktrace for the serialized exception.
+        requests_lib.set_exception_stacktrace(e)
         raise fastapi.HTTPException(
             status_code=400, detail=exceptions.serialize_exception(e)) from e
 

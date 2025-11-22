@@ -1252,13 +1252,15 @@ def test_managed_jobs_env_isolation(generic_cloud: str):
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=f'{name}',
                     job_status=[sky.ManagedJobStatus.RUNNING],
-                    timeout=80),
+                    timeout=600
+                    if smoke_tests_utils.is_remote_server_test() else 80),
                 f'sky jobs logs -n {name} --no-follow | grep "my name is {name}"',
                 smoke_tests_utils.
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=f'{name}',
                     job_status=[sky.ManagedJobStatus.SUCCEEDED],
-                    timeout=80),
+                    timeout=600
+                    if smoke_tests_utils.is_remote_server_test() else 80),
             ],
             f'sky jobs cancel -y -n {name}',
             env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
@@ -1667,10 +1669,8 @@ def test_large_production_performance(request):
     test = smoke_tests_utils.Test(
         name='test-large-production-performance',
         commands=[
-            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}=tests/test_yamls/consolidation_mode_config.yaml && '
-            f'sky api stop || true && sky api start',
-            f'bash tests/load_tests/db_scale_tests/test_large_production_performance.sh',
+            f'bash tests/load_tests/db_scale_tests/test_large_production_performance.sh --postgres --restart-api-server',
         ],
-        timeout=15 * 60,  # 15 minutes for data injection and testing
-        teardown=f'sky api stop')
+        timeout=30 * 60,  # 30 minutes for data injection and testing
+    )
     smoke_tests_utils.run_one_test(test)

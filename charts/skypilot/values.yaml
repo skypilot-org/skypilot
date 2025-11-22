@@ -1,3 +1,13 @@
+# Global configuration for all components in the chart.
+global:
+  # Override the default imageRegistry for all images in the chart.
+  # @schema type: [string, null]
+  imageRegistry: null
+  # Specify imagePullSecrets for all components in the chart.
+  # @schema type: [array, null]; item: object
+  imagePullSecrets: null
+
+
 apiService:
   # Docker image to use for the API server. The default value will be updated by the release pipeline to be consistent with the SkyPilot release or nightly build.
   # Refer to https://docs.skypilot.co/en/latest/reference/api-server/helm-values-spec.html#helm-values-apiservice-image for more details.
@@ -161,9 +171,6 @@ apiService:
       # The size of the log file to retain
       size: 10M
 
-  # Image pull secrets for the API server pod
-  # @schema type: [array, null]; item: object
-  imagePullSecrets: null
   # Image pull policy for the API server pod
   # @schema type: [string, null]
   imagePullPolicy: Always
@@ -343,6 +350,10 @@ ingress:
     # @schema type: [string, number, null]
     cookie-expire: null  # cookie expiration time (should match refresh token lifespan)
 
+  # TLS settings to enable https ingress
+  tls:
+    enabled: false
+
 ingress-nginx:
   enabled: true
   controller:
@@ -480,6 +491,9 @@ gcpCredentials:
   projectId: null
   # Name of the secret containing the gcp credentials. Only used if enabled is true.
   gcpSecretName: gcp-credentials
+  # Docker image to use for initializing the GCP credentials.
+  # @schema type: [string, null]
+  image: google/cloud-sdk:latest
 
 # Populate RunPod credentials from the secret with key `api_key`
 runpodCredentials:

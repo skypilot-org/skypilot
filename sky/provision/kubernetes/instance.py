@@ -275,7 +275,7 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
 
                 # Emit the error message without logging prefixes for better UX.
                 tmp_handler = sky_logging.EnvAwareHandler(sys.stdout)
-                tmp_handler.flush = sys.stdout.flush
+                tmp_handler.flush = sys.stdout.flush  # type: ignore
                 tmp_handler.setFormatter(sky_logging.NO_PREFIX_FORMATTER)
                 tmp_handler.setLevel(sky_logging.ERROR)
                 prev_propagate = logger.propagate
@@ -539,8 +539,9 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                 pod.status.phase == 'Failed'):
             # Get the reason and write to cluster events before
             # the pod gets completely deleted from the API.
-            reason = _get_pod_termination_reason(pod, cluster_name)
-            logger.warning(f'Pod {pod.metadata.name} terminated: {reason}')
+            termination_reason = _get_pod_termination_reason(pod, cluster_name)
+            logger.warning(
+                f'Pod {pod.metadata.name} terminated: {termination_reason}')
             raise config_lib.KubernetesError(
                 f'Pod {pod.metadata.name} has terminated or failed '
                 f'unexpectedly. Run `sky logs --provision {cluster_name}` '
@@ -554,7 +555,7 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                     for container in container_statuses)):
             return True, None
 
-        reason = None
+        reason: Optional[str] = None
         if pod.status.phase == 'Pending':
             pending_reason = _get_pod_pending_reason(context, namespace,
                                                      pod.metadata.name)
@@ -630,7 +631,7 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                                                         _NUM_THREADS)
 
         all_pods_running = True
-        pending_reasons_count = {}
+        pending_reasons_count: Dict[str, int] = {}
         for is_running, pending_reason in pod_statuses:
             if not is_running:
                 all_pods_running = False
@@ -951,6 +952,25 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         pod_spec['metadata']['labels'] = tags
     pod_spec['metadata']['labels'].update(
         {constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud})
+
+    ephemeral_volumes = provider_config.get('ephemeral_volume_infos')
+    if ephemeral_volumes:
+        for ephemeral_volume in ephemeral_volumes:
+            # Update the volumes and volume mounts in the pod spec
+            if 'volumes' not in pod_spec['spec']:
+                pod_spec['spec']['volumes'] = []
+            pod_spec['spec']['volumes'].append({
+                'name': ephemeral_volume.name,
+                'persistentVolumeClaim': {
+                    'claimName': ephemeral_volume.volume_name_on_cloud,
+                },
+            })
+            if 'volumeMounts' not in pod_spec['spec']['containers'][0]:
+                pod_spec['spec']['containers'][0]['volumeMounts'] = []
+            pod_spec['spec']['containers'][0]['volumeMounts'].append({
+                'name': ephemeral_volume.name,
+                'mountPath': ephemeral_volume.path,
+            })
 
     terminating_pods = kubernetes_utils.filter_pods(namespace, context, tags,
                                                     ['Terminating'])

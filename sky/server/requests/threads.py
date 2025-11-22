@@ -1,12 +1,22 @@
 """Request execution threads management."""
 
 import concurrent.futures
+import sys
 import threading
-from typing import Callable, Set
+from typing import Callable, Set, TypeVar
 
 from sky import exceptions
 from sky import sky_logging
 from sky.utils import atomic
+
+# pylint: disable=ungrouped-imports
+if sys.version_info >= (3, 10):
+    from typing import ParamSpec
+else:
+    from typing_extensions import ParamSpec
+
+_P = ParamSpec('_P')
+_T = TypeVar('_T')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -70,7 +80,8 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
             self.running.decrement()
         return count
 
-    def submit(self, fn, /, *args, **kwargs):
+    def submit(self, fn: Callable[_P, _T], *args: _P.args,
+               **kwargs: _P.kwargs) -> 'concurrent.futures.Future[_T]':
         with self._shutdown_lock:
             if self._shutdown:
                 raise RuntimeError(
