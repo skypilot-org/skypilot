@@ -670,16 +670,6 @@ app.include_router(ssh_node_pools_rest.router,
 soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
 
-# Increase the limit of files we can open to our hard limit. This fixes bugs
-# where we can not aquire file locks or open enough logs and the API server
-# crashes. On Mac, the hard limit is 9,223,372,036,854,775,807.
-# TODO(luca) figure out what to do if we need to open more than 2^63 files.
-try:
-    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
-    resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
-except Exception:  # pylint: disable=broad-except
-    pass  # no issue, we will warn the user later if its too low
-
 
 @app.exception_handler(exceptions.ConcurrentWorkerExhaustedError)
 def handle_concurrent_worker_exhausted_error(
