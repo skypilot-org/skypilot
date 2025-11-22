@@ -585,6 +585,7 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
         return False, reason
 
     missing_pods_retry = 0
+    last_status_msg: Optional[str] = None
     while True:
         # Get all pods in a single API call
         cluster_name_on_cloud = new_pods[0].metadata.labels[
@@ -645,15 +646,16 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
         if pending_reasons_count:
             msg = ', '.join([
                 f'{count} pod(s) pending due to {reason}'
-                for reason, count in pending_reasons_count.items()
+                for reason, count in sorted(pending_reasons_count.items())
             ])
-            rich_utils.force_update_status(
-                ux_utils.spinner_message(f'Launching ({msg})',
-                                         cluster_name=cluster_name))
+            status_text = f'Launching ({msg})'
         else:
-            rich_utils.force_update_status(
-                ux_utils.spinner_message('Launching',
-                                         cluster_name=cluster_name))
+            status_text = 'Launching'
+        new_status_msg = ux_utils.spinner_message(status_text,
+                                                  cluster_name=cluster_name)
+        if new_status_msg != last_status_msg:
+            rich_utils.force_update_status(new_status_msg)
+            last_status_msg = new_status_msg
         time.sleep(1)
 
 
