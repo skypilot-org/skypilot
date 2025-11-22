@@ -993,16 +993,16 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
         # The two old on-demand instances will be in READY status
         # after autoscale update.
         TWO_OLD_ON_DEMAND_INSTANCES_STATUS_AFTER_AUTOSCALE = 'READY'
-    override_env = f'--env {constants.SERVE_OVERRIDE_CONCURRENT_LAUNCHES}=4'
+    override_env = f'export {constants.SERVE_OVERRIDE_CONCURRENT_LAUNCHES}=4;'
     test = smoke_tests_utils.Test(
         f'test-skyserve-new-autoscaler-update-{mode}',
         [
-            f'sky serve up -n {name} {override_env} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/update/new_autoscaler_before.yaml',
+            f'{override_env} sky serve up -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/update/new_autoscaler_before.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
             _check_service_version(name, "1"),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             's=$(curl $endpoint); echo "$s"; echo "$s" | grep "Hi, SkyPilot here"',
-            f'sky serve update {name} {override_env} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --mode {mode} -y tests/skyserve/update/new_autoscaler_after.yaml',
+            f'{override_env} sky serve update {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --mode {mode} -y tests/skyserve/update/new_autoscaler_after.yaml',
             # Wait for update to be registered
             'sleep 90',
             'sky status',
