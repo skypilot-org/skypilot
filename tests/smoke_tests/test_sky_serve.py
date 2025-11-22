@@ -279,7 +279,8 @@ def _check_replica_in_status(name: str,
         for condition in check_conditions:
             check_cmd += f'{condition} || exit 1; '
 
-    wait_provisioning_cmd = ('' if skip_provisioning_waiting else f'{_WAIT_PROVISION_REPR.format(name=name)}; ')
+    wait_provisioning_cmd = ('' if skip_provisioning_waiting else
+                             f'{_WAIT_PROVISION_REPR.format(name=name)}; ')
     return (f'{_SERVE_STATUS_WAIT.format(name=name)}; '
             f'{wait_provisioning_cmd} '
             f'{_WAIT_NO_NOT_READY.format(name=name)}; '
