@@ -556,8 +556,8 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
     _kill_requests(request_ids)
 
 
-def kill_requests_with_prefix(request_ids: Optional[List[str]] = None,
-                              user_id: Optional[str] = None) -> List[str]:
+def kill_requests(request_ids: Optional[List[str]] = None,
+                  user_id: Optional[str] = None) -> List[str]:
     """Kill requests with a given request ID prefix."""
     expanded_request_ids: Optional[List[str]] = None
     if request_ids is not None:
@@ -574,8 +574,9 @@ def kill_requests_with_prefix(request_ids: Optional[List[str]] = None,
     return _kill_requests(request_ids=expanded_request_ids, user_id=user_id)
 
 
-# needed for backward compatibility. Remove by v0.10.7 or v0.11.0
-kill_requests = kill_requests_with_prefix
+# needed for backward compatibility. Remove by v0.10.7 or v0.12.0
+# and rename kill_requests to kill_requests_with_prefix.
+kill_requests_with_prefix = kill_requests
 
 
 def _should_kill_request(request_id: str,
