@@ -114,9 +114,6 @@ Below is the available helm value keys and the default value of each key:
     :ref:`host <helm-values-ingress-host>`: null
     :ref:`path <helm-values-ingress-path>`: '/'
     :ref:`ingressClassName <helm-values-ingress-ingressClassName>`: nginx
-    :ref:`nodePortEnabled <helm-values-ingress-nodePortEnabled>`: null
-    :ref:`httpNodePort <helm-values-ingress-httpNodePort>`: 30050
-    :ref:`httpsNodePort <helm-values-ingress-httpsNodePort>`: 30051
     :ref:`annotations <helm-values-ingress-annotations>`: null
     # Deprecated: use auth.oauth instead.
     :ref:`oauth2-proxy <helm-values-ingress-oauth2-proxy>`:
@@ -1253,48 +1250,6 @@ Default: ``nginx``
 
   ingress:
     ingressClassName: nginx
-
-.. _helm-values-ingress-nodePortEnabled:
-
-``ingress.nodePortEnabled``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Whether to enable an additional NodePort service for the ingress controller. Deprecated: use ``ingress-nginx.controller.service.type=NodePort`` instead.
-
-Default: ``null``
-
-.. code-block:: yaml
-
-  ingress:
-    nodePortEnabled: false
-
-.. _helm-values-ingress-httpNodePort:
-
-``ingress.httpNodePort``
-^^^^^^^^^^^^^^^^^^^^^^^^
-
-Specific nodePort to use for HTTP traffic. Deprecated: use ``ingress-nginx.controller.service.nodePorts.http`` instead.
-
-Default: ``30050``
-
-.. code-block:: yaml
-
-  ingress:
-    httpNodePort: 30050
-
-.. _helm-values-ingress-httpsNodePort:
-
-``ingress.httpsNodePort``
-^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Specific nodePort to use for HTTPS traffic. Deprecated: use ``ingress-nginx.controller.service.nodePorts.https`` instead.
-
-Default: ``30051``
-
-.. code-block:: yaml
-
-  ingress:
-    httpsNodePort: 30051
 
 .. _helm-values-ingress-annotations:
 

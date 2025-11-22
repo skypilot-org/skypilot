@@ -549,42 +549,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
                     logger.exception(error_msg, exc_info=e)
         return error_msg
 
-    # For backwards compatible jobs
-    # TODO(cooperc): Remove before 0.11.0.
-    def _handle_legacy_job(job_id: int):
-        controller_status = job_lib.get_status(job_id)
-        if controller_status is None or controller_status.is_terminal():
-            logger.error(f'Controller process for legacy job {job_id} is '
-                         'in an unexpected state.')
 
-            cleanup_error = _cleanup_job_clusters(job_id)
-            if cleanup_error:
-                # Unconditionally set the job to failed_controller if the
-                # cleanup fails.
-                managed_job_state.set_failed(
-                    job_id,
-                    task_id=None,
-                    failure_type=managed_job_state.ManagedJobStatus.
-                    FAILED_CONTROLLER,
-                    failure_reason=
-                    'Legacy controller process has exited abnormally, and '
-                    f'cleanup failed: {cleanup_error}. For more details, run: '
-                    f'sky jobs logs --controller {job_id}',
-                    override_terminal=True)
-                return
-
-            # It's possible for the job to have transitioned to
-            # another terminal state while between when we checked its
-            # state and now. In that case, set_failed won't do
-            # anything, which is fine.
-            managed_job_state.set_failed(
-                job_id,
-                task_id=None,
-                failure_type=managed_job_state.ManagedJobStatus.
-                FAILED_CONTROLLER,
-                failure_reason=(
-                    'Legacy controller process has exited abnormally. For '
-                    f'more details, run: sky jobs logs --controller {job_id}'))
 
     # Get jobs that need checking (non-terminal or not DONE)
     job_ids = managed_job_state.get_jobs_to_check_status(job_id)
@@ -602,13 +567,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         # take tasks[0]['controller_pid'] and tasks[0]['schedule_state'].
         schedule_state = tasks[0]['schedule_state']
 
-        # Backwards compatibility: this job was submitted when ray was still
-        # used for managing the parallelism of job controllers, before #4485.
-        # TODO(cooperc): Remove before 0.11.0.
-        if (schedule_state is
-                managed_job_state.ManagedJobScheduleState.INVALID):
-            _handle_legacy_job(job_id)
-            continue
+
 
         # Handle jobs with schedule state (non-legacy jobs):
         pid = tasks[0]['controller_pid']
