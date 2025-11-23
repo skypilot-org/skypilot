@@ -593,8 +593,6 @@ _SPOT_STATUS_TO_COLOR = {
 class ManagedJobScheduleState(enum.Enum):
     """Captures the state of the job from the scheduler's perspective.
 
-    A job that predates the introduction of the scheduler will be INVALID.
-
     A newly created job will be INACTIVE.  The following transitions are valid:
     - INACTIVE -> WAITING: The job is "submitted" to the scheduler, and its job
       controller can be started.
@@ -631,14 +629,10 @@ class ManagedJobScheduleState(enum.Enum):
     briefly observe inconsistent states, like a job that just finished but
     hasn't yet transitioned to DONE.
     """
-    # This job may have been created before scheduler was introduced in #4458.
-    # This state is not used by scheduler but just for backward compatibility.
-    # TODO(cooperc): remove this in v0.11.0
     # TODO(luca): the only states we need are INACTIVE, WAITING, ALIVE, and
     # DONE. ALIVE = old LAUNCHING + ALIVE + ALIVE_BACKOFF + ALIVE_WAITING and
     # will represent jobs that are claimed by a controller. Delete the rest
     # in v0.13.0
-    INVALID = None
     # The job should be ignored by the scheduler.
     INACTIVE = 'INACTIVE'
     # The job is waiting to transition to LAUNCHING for the first time. The
@@ -668,7 +662,6 @@ class ManagedJobScheduleState(enum.Enum):
         """
         protobuf_to_enum = {
             managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_UNSPECIFIED: None,
-            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_INVALID: cls.INVALID,
             managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_INACTIVE:
                 cls.INACTIVE,
             managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_WAITING: cls.WAITING,
@@ -691,8 +684,6 @@ class ManagedJobScheduleState(enum.Enum):
     def to_protobuf(self) -> 'managed_jobsv1_pb2.ManagedJobScheduleState':
         """Convert this Python enum value to protobuf enum value."""
         enum_to_protobuf = {
-            ManagedJobScheduleState.INVALID:
-                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_INVALID,
             ManagedJobScheduleState.INACTIVE:
                 managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_INACTIVE,
             ManagedJobScheduleState.WAITING:
@@ -2365,8 +2356,6 @@ def reset_jobs_for_recovery() -> None:
             job_info_table.c.controller_pid.isnot(None),
             # Schedule state should be alive.
             job_info_table.c.schedule_state.isnot(None),
-            (job_info_table.c.schedule_state !=
-             ManagedJobScheduleState.INVALID.value),
             (job_info_table.c.schedule_state !=
              ManagedJobScheduleState.WAITING.value),
             (job_info_table.c.schedule_state !=

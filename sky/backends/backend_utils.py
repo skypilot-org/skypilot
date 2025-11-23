@@ -1064,11 +1064,7 @@ def write_cluster_config(
         with open(tmp_yaml_path, 'w', encoding='utf-8') as f:
             f.write(restored_yaml_content)
 
-    # Read the cluster name from the tmp yaml file, to take the backward
-    # compatbility restortion above into account.
-    # TODO: remove this after 2 minor releases, 0.10.0.
-    yaml_config = yaml_utils.read_yaml(tmp_yaml_path)
-    config_dict['cluster_name_on_cloud'] = yaml_config['cluster_name']
+    config_dict['cluster_name_on_cloud'] = cluster_name_on_cloud
 
     # Make sure to do this before we optimize file mounts. Optimization is
     # non-deterministic, but everything else before this point should be
@@ -3635,31 +3631,6 @@ def check_rsync_installed() -> None:
                 ' it is not installed. For Debian/Ubuntu system, '
                 'install it with:\n'
                 '  $ sudo apt install rsync') from None
-
-
-def check_stale_runtime_on_remote(returncode: int, stderr: str,
-                                  cluster_name: str) -> None:
-    """Raises RuntimeError if remote SkyPilot runtime needs to be updated.
-
-    We detect this by parsing certain backward-incompatible error messages from
-    `stderr`. Typically due to the local client version just got updated, and
-    the remote runtime is an older version.
-    """
-    pattern = re.compile(r'AttributeError: module \'sky\.(.*)\' has no '
-                         r'attribute \'(.*)\'')
-    if returncode != 0:
-        # TODO(zhwu): Backward compatibility for old SkyPilot runtime version on
-        # the remote cluster. Remove this after 0.10.0 is released.
-        attribute_error = re.findall(pattern, stderr)
-        if attribute_error or 'SkyPilot runtime is too old' in stderr:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    f'{colorama.Fore.RED}SkyPilot runtime needs to be updated '
-                    f'on the remote cluster: {cluster_name}. To update, run '
-                    '(existing jobs will not be interrupted): '
-                    f'{colorama.Style.BRIGHT}sky start -f -y '
-                    f'{cluster_name}{colorama.Style.RESET_ALL}'
-                    f'\n--- Details ---\n{stderr.strip()}\n') from None
 
 
 def get_endpoints(cluster: str,

@@ -174,8 +174,6 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         request_id = requests_lib.get_new_request_id()
         request.state.request_id = request_id
         response = await call_next(request)
-        # TODO(syang): remove X-Request-ID when v0.10.0 is released.
-        response.headers['X-Request-ID'] = request_id
         response.headers['X-Skypilot-Request-ID'] = request_id
         return response
 
@@ -633,8 +631,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=['*'],
     allow_headers=['*'],
-    # TODO(syang): remove X-Request-ID \when v0.10.0 is released.
-    expose_headers=['X-Request-ID', 'X-Skypilot-Request-ID'])
+    expose_headers=['X-Skypilot-Request-ID'])
 # The order of all the authentication-related middleware is important.
 # RBACMiddleware must precede all the auth middleware, so it can access
 # request.state.auth_user.
