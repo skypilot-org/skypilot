@@ -61,9 +61,7 @@ from sky.client import sdk
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
-from sky.server import config as server_config
 from sky.skylet import constants
-from sky.utils import annotations
 from sky.utils import controller_utils
 from sky.utils import subprocess_utils
 
@@ -83,33 +81,6 @@ JOB_CONTROLLER_PID_LOCK = os.path.expanduser(
 
 JOB_CONTROLLER_PID_PATH = os.path.expanduser('~/.sky/job_controller_pid')
 JOB_CONTROLLER_ENV_PATH = os.path.expanduser('~/.sky/job_controller_env')
-
-# Based on testing, each worker takes around 200-300MB memory. Keeping it
-# higher to be safe.
-JOB_MEMORY_MB = 400
-# Number of ongoing launches launches allowed per worker. Can probably be
-# increased a bit to around 16 but keeping it lower to just to be safe
-LAUNCHES_PER_WORKER = 8
-# this can probably be increased to around 300-400 but keeping it lower to just
-# to be safe
-MAX_JOBS_PER_WORKER = 200
-# Maximum number of controllers that can be running. Hard to handle more than
-# 512 launches at once.
-MAX_CONTROLLERS = 512 // LAUNCHES_PER_WORKER
-# Limit the number of jobs that can be running at once on the entire jobs
-# controller cluster. It's hard to handle cancellation of more than 2000 jobs at
-# once.
-# TODO(cooperc): Once we eliminate static bottlenecks (e.g. sqlite), remove this
-# hardcoded max limit.
-MAX_TOTAL_RUNNING_JOBS = 2000
-# Maximum values for above constants. There will start to be lagging issues
-# at these numbers already.
-# JOB_MEMORY_MB = 200
-# LAUNCHES_PER_WORKER = 16
-# JOBS_PER_WORKER = 400
-
-# keep 2GB reserved after the controllers
-MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB = 2048
 
 CURRENT_HASH = os.path.expanduser('~/.sky/wheels/current_sky_wheel_hash')
 
@@ -177,50 +148,6 @@ def _append_controller_pid_record(pid: int,
     entry = str(pid) if started_at is None else f'{pid},{started_at}'
     with open(JOB_CONTROLLER_PID_PATH, 'a', encoding='utf-8') as f:
         f.write(entry + '\n')
-
-
-@annotations.lru_cache(scope='global')
-def get_number_of_controllers() -> int:
-    """Returns the number of controllers that should be running.
-
-    This is the number of controllers that should be running to maximize
-    resource utilization.
-
-    In consolidation mode, we use the existing API server so our resource
-    requirements are just for the job controllers. We try taking up as much
-    much memory as possible left over from the API server.
-
-    In non-consolidation mode, we have to take into account the memory of the
-    API server workers. We limit to only 8 launches per worker, so our logic is
-    each controller will take CONTROLLER_MEMORY_MB + 8 * WORKER_MEMORY_MB. We
-    leave some leftover room for ssh codegen and ray status overhead.
-    """
-    consolidation_mode = skypilot_config.get_nested(
-        ('jobs', 'controller', 'consolidation_mode'), default_value=False)
-
-    total_memory_mb = controller_utils.get_controller_mem_size_gb() * 1024
-    if consolidation_mode:
-        config = server_config.compute_server_config(deploy=True, quiet=True)
-
-        used = 0.0
-        used += MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB
-        used += (config.long_worker_config.garanteed_parallelism +
-                    config.long_worker_config.burstable_parallelism) * \
-            server_config.LONG_WORKER_MEM_GB * 1024
-        used += (config.short_worker_config.garanteed_parallelism +
-                    config.short_worker_config.burstable_parallelism) * \
-            server_config.SHORT_WORKER_MEM_GB * 1024
-
-        return min(MAX_CONTROLLERS,
-                   max(1, int((total_memory_mb - used) // JOB_MEMORY_MB)))
-    else:
-        return min(
-            MAX_CONTROLLERS,
-            max(
-                1,
-                int((total_memory_mb - MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB) /
-                    ((LAUNCHES_PER_WORKER * server_config.LONG_WORKER_MEM_GB) *
-                     1024 + JOB_MEMORY_MB))))
 
 
 def start_controller() -> None:
@@ -320,7 +247,7 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
             alive = get_alive_controllers()
             if alive is None:
                 return
-            wanted = get_number_of_controllers()
+            wanted = controller_utils.get_number_of_jobs_controllers()
             started = 0
 
             while alive + started < wanted:
@@ -428,7 +355,7 @@ async def scheduled_launch(
     while True:
         async with starting_lock:
             starting_count = len(starting)
-            if starting_count < LAUNCHES_PER_WORKER:
+            if starting_count < controller_utils.LAUNCHES_PER_WORKER:
                 break
             logger.info('Too many jobs starting, waiting for a slot')
             await starting_signal.wait()

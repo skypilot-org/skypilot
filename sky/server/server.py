@@ -77,6 +77,7 @@ from sky.utils import common as common_lib
 from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import context_utils
+from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import perf_utils
@@ -2167,8 +2168,21 @@ if __name__ == '__main__':
 
     max_db_connections = global_user_state.get_max_db_connections()
     logger.info(f'Max db connections: {max_db_connections}')
-    config = server_config.compute_server_config(cmd_args.deploy,
-                                                 max_db_connections)
+
+    # Reserve memory for jobs and serve/pool controller in consolidation mode.
+    reserved_memory_mb = (
+        controller_utils.compute_memory_reserved_for_controllers(
+            reserve_for_controllers=os.environ.get(
+                constants.OVERRIDE_CONSOLIDATION_MODE) is not None,
+            # For jobs controller, we need to reserve for both jobs and
+            # pool controller.
+            reserve_extra_for_pool=not os.environ.get(
+                constants.IS_SKYPILOT_SERVE_CONTROLLER)))
+
+    config = server_config.compute_server_config(
+        cmd_args.deploy,
+        max_db_connections,
+        reserved_memory_mb=reserved_memory_mb)
 
     num_workers = config.num_server_workers
 
