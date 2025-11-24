@@ -259,7 +259,7 @@ def check_capabilities(
 
         if not hide_per_cloud_details:
             for cloud_tuple, check_result_list in sorted(
-                    check_results_dict.items(), key=lambda item: item[0][0]):
+                check_results_dict.items(), key=lambda item: item[0][0]):
                 _print_checked_cloud(echo, verbose, cloud_tuple,
                                      check_result_list,
                                      cloud2ctx2text.get(cloud_tuple[0], {}))
