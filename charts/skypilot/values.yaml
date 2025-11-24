@@ -1,3 +1,13 @@
+# Global configuration for all components in the chart.
+global:
+  # Override the default imageRegistry for all images in the chart.
+  # @schema type: [string, null]
+  imageRegistry: null
+  # Specify imagePullSecrets for all components in the chart.
+  # @schema type: [array, null]; item: object
+  imagePullSecrets: null
+
+
 apiService:
   # Docker image to use for the API server. The default value will be updated by the release pipeline to be consistent with the SkyPilot release or nightly build.
   # Refer to https://docs.skypilot.co/en/latest/reference/api-server/helm-values-spec.html#helm-values-apiservice-image for more details.
@@ -161,9 +171,6 @@ apiService:
       # The size of the log file to retain
       size: 10M
 
-  # Image pull secrets for the API server pod
-  # @schema type: [array, null]; item: object
-  imagePullSecrets: null
   # Image pull policy for the API server pod
   # @schema type: [string, null]
   imagePullPolicy: Always
@@ -278,28 +285,6 @@ ingress:
   # Custom annotations for the ingress
   # @schema type: [object, null]
   annotations: null
-
-  # Whether enable an additional NodePort service for the ingress controller
-  # Default to null for backward compatibility:
-  # - For existing deployments, error out and ask users to set ingress.nodePortEnabled explicitly
-  # - For new deployments, disable the NodePort service, equivalent to ingress.nodePortEnabled=false
-  # So, for deployments that use default values, upgrade from 0.8.0 nightly will:
-  # - Ask users to set ingress.nodePortEnabled explicitly
-  # - Create a new LoadBalancer endpoint since ingress-nginx.controller.service.type is now default to LoadBalancer
-  # It is recommended to keep only one endpoint by explicitly setting ingress.nodePortEnabled=false and switch to ingress-nginx.controller.service.type
-  # if you are upgrading from 0.8.0 nightly.
-  # Deprecated: use ingress-nginx.controller.service.type=NodePort instead
-  # TODO(aylei): remove these fields in v0.10.0
-  # @schema hidden: true
-  nodePortEnabled: null
-  # Specific nodePort to use for the ingress controller
-  # If not set, Kubernetes will assign random ports in the NodePort range (default 30000-32767)
-  # Deprecated: use ingress-nginx.controller.service.nodePorts.http instead
-  # @schema type: [number, null]
-  httpNodePort: 30050 # Set to null to automatically assign a random port
-  # Deprecated: use ingress-nginx.controller.service.nodePorts.https instead
-  # @schema type: [number, null]
-  httpsNodePort: 30051 # Set to null to automatically assign a random port
 
   # TODO(aylei): deprecate skypilot managed proxy auth to reduce our maintenance burden, replace with examples instead.
   # OAuth2 Proxy configuration for authentication
@@ -484,6 +469,9 @@ gcpCredentials:
   projectId: null
   # Name of the secret containing the gcp credentials. Only used if enabled is true.
   gcpSecretName: gcp-credentials
+  # Docker image to use for initializing the GCP credentials.
+  # @schema type: [string, null]
+  image: google/cloud-sdk:latest
 
 # Populate RunPod credentials from the secret with key `api_key`
 runpodCredentials:
@@ -607,7 +595,7 @@ prometheus:
     {{ end}}
   kube-state-metrics:
     enabled: true
-    # TODO (kyuds): remove skypilot-cluster label in v0.11.0; deprecated in favor of skypilot-cluster-name.
+    # TODO (kyuds): remove skypilot-cluster label in v0.12.0; deprecated in favor of skypilot-cluster-name.
     metricLabelsAllowlist:
       - pods=[skypilot-cluster,skypilot-cluster-name]
   prometheus-node-exporter:

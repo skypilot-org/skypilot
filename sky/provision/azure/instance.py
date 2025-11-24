@@ -214,7 +214,7 @@ def _create_network_interface(
             location=provider_config['location'],
             public_ip_allocation_method='Static',
             public_ip_address_version='IPv4',
-            sku=network.PublicIPAddressSku(name='Basic', tier='Regional'))
+            sku=network.PublicIPAddressSku(name='Standard', tier='Regional'))
         ip_poller = network_client.public_ip_addresses.begin_create_or_update(
             resource_group_name=provider_config['resource_group'],
             public_ip_address_name=f'{vm_name}-ip',

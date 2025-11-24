@@ -74,7 +74,7 @@ LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG = {
     'jobs': {
         'controller': {
             'resources': {
-                'cpus': '2+',
+                'cpus': '4+',
                 'memory': '4+'
             }
         }
@@ -82,7 +82,7 @@ LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG = {
     'serve': {
         'controller': {
             'resources': {
-                'cpus': '2+',
+                'cpus': '4+',
                 'memory': '4+'
             }
         }
@@ -772,6 +772,37 @@ VALIDATE_LAUNCH_OUTPUT_NO_PG_CONN_CLOSED_ERROR = (
     ' && echo "==Validating no pg conn closed error==" && '
     '! echo "$s" | grep -i "psycopg2.InterfaceError: connection already closed"'
 )
+
+
+def get_disk_size_and_validate_launch_output(generic_cloud: str):
+    """Get DISK_SIZE_PARAM and VALIDATE_LAUNCH_OUTPUT for a given cloud.
+
+    For RunPod, returns:
+    - DISK_SIZE_PARAM: '--disk-size 20'
+    - VALIDATE_LAUNCH_OUTPUT: Modified version with increased grep context
+      to handle RunPod's raw_response and banner output
+
+    For other clouds, returns:
+    - DISK_SIZE_PARAM: ''
+    - VALIDATE_LAUNCH_OUTPUT: Standard VALIDATE_LAUNCH_OUTPUT
+
+    Returns:
+        tuple: (DISK_SIZE_PARAM, VALIDATE_LAUNCH_OUTPUT)
+    """
+    if generic_cloud == 'runpod':
+        disk_size_param = '--disk-size 20'
+        # Use -A 10 instead of -A 1 for "Launching on" line to handle RunPod raw_response output
+        # Use -A 100 instead of -A 1 for "Job started. Streaming logs..." to handle RunPod banner output
+        validate_launch_output = (VALIDATE_LAUNCH_OUTPUT.replace(
+            'grep -A 1 "Launching on"', 'grep -A 10 "Launching on"').replace(
+                'grep -A 1 "Job started. Streaming logs..."',
+                'grep -A 100 "Job started. Streaming logs..."'))
+    else:
+        disk_size_param = ''
+        validate_launch_output = VALIDATE_LAUNCH_OUTPUT
+
+    return disk_size_param, validate_launch_output
+
 
 _CLOUD_CMD_CLUSTER_NAME_SUFFIX = '-cloud-cmd'
 

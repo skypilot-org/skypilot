@@ -77,15 +77,6 @@
                         "null"
                     ]
                 },
-                "imagePullSecrets": {
-                    "type": [
-                        "array",
-                        "null"
-                    ],
-                    "items": {
-                        "type": "object"
-                    }
-                },
                 "initialBasicAuthCredentials": {
                     "type": "string"
                 },
@@ -284,7 +275,33 @@
                 "gcpSecretName": {
                     "type": "string"
                 },
+                "image": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
                 "projectId": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                }
+            }
+        },
+        "global": {
+            "type": "object",
+            "properties": {
+                "imagePullSecrets": {
+                    "type": [
+                        "array",
+                        "null"
+                    ],
+                    "items": {
+                        "type": "object"
+                    }
+                },
+                "imageRegistry": {
                     "type": [
                         "string",
                         "null"
@@ -322,18 +339,6 @@
                 "host": {
                     "type": [
                         "string",
-                        "null"
-                    ]
-                },
-                "httpNodePort": {
-                    "type": [
-                        "number",
-                        "null"
-                    ]
-                },
-                "httpsNodePort": {
-                    "type": [
-                        "number",
                         "null"
                     ]
                 },

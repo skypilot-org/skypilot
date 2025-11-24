@@ -947,29 +947,6 @@ If you want to use an existing service account and permissions that meet the :re
       --set rbac.serviceAccountName=my-existing-service-account
 
 
-.. _sky-migrate-legacy-service:
-
-.. dropdown:: Migrate from legacy NodePort service
-
-
-    If you are upgrading from an early 0.8.0 nightly with a previously deployed NodePort service (named ``${RELEASE_NAME}-ingress-controller-np``), an error will be raised to ask for migration. In addition, a new service will be created to expose the API server (using ``LoadBalancer`` service type by default). You can choose any of the following options to proceed the upgrade process based on your needs:
-
-    - Keep the legacy NodePort service and gradually migrate to the new LoadBalancer service:
-
-    Add ``--set ingress.nodePortEnabled=true`` to your ``helm upgrade`` command to keep the legacy NodePort service. Existing clients can continue to use the previous NodePort service. After all clients have been migrated to the new service, you can disable the legacy NodePort service by adding ``--set ingress.nodePortEnabled=false`` to the ``helm upgrade`` command.
-
-    - Disable the legacy NodePort service:
-
-    Add ``--set ingress.nodePortEnabled=false`` to your ``helm upgrade`` command to disable the legacy NodePort service. Clients will need to use the new service to connect to the API server.
-
-    .. note::
-
-        Make sure there is no clients using the NodePort service before disabling it.
-
-    .. note::
-
-        Refer to :ref:`sky-get-api-server-url` for how to customize and/or connect to the new service.
-
 .. _sky-api-server-helm-multiple-deploy:
 
 Reusing ingress controller for API server
