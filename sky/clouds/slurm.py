@@ -455,7 +455,17 @@ class Slurm(clouds.Cloud):
         return catalog.instance_type_exists(instance_type, 'slurm')
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return catalog.validate_region_zone(region, zone, clouds='slurm')
+        all_clusters = slurm_utils.get_all_slurm_cluster_names()
+        if region and region not in all_clusters:
+            raise ValueError(
+                f'Cluster {region} not found in Slurm config. Slurm only '
+                'supports cluster names as regions. Available '
+                f'clusters: {all_clusters}')
+        # TODO(kevin): Remove this once we support Slurm partitions.
+        if zone is not None:
+            raise ValueError('Slurm support does not support setting zone. '
+                             'Cluster used is determined by the Slurm config.')
+        return region, zone
 
     def accelerator_in_region_or_zone(self,
                                       accelerator: str,
