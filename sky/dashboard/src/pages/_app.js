@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import ReactDOM from 'react-dom/client';
 import dynamic from 'next/dynamic';
 import PropTypes from 'prop-types';
 import '@/app/globals.css';
@@ -13,6 +14,12 @@ const Layout = dynamic(
   () => import('@/components/elements/layout').then((mod) => mod.Layout),
   { ssr: false }
 );
+
+// Expose React and ReactDOM to window for plugins to use
+if (typeof window !== 'undefined') {
+  window.React = React;
+  window.ReactDOM = ReactDOM;
+}
 
 function App({ Component, pageProps }) {
   useEffect(() => {

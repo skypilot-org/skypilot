@@ -26,7 +26,7 @@ import { Settings, User } from 'lucide-react';
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
-import { useTopNavLinks, usePluginRoutes } from '@/plugins/PluginProvider';
+import { useGroupedNavLinks, usePluginRoutes } from '@/plugins/PluginProvider';
 
 // Create a context for sidebar state management
 const SidebarContext = createContext(null);
@@ -162,11 +162,13 @@ export function TopBar() {
   const { userEmail, userRole, isMobileSidebarOpen, toggleMobileSidebar } =
     useSidebar();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const pluginNavLinks = useTopNavLinks();
+  const [openNavDropdown, setOpenNavDropdown] = useState(null);
+  const { ungrouped, groups } = useGroupedNavLinks();
   const pluginRoutes = usePluginRoutes();
 
   const dropdownRef = useRef(null);
   const mobileNavRef = useRef(null);
+  const navDropdownRef = useRef(null);
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -182,6 +184,10 @@ export function TopBar() {
         if (isMobileSidebarOpen) {
           toggleMobileSidebar();
         }
+      }
+      // Handle navigation dropdown menu clicks outside
+      if (navDropdownRef.current && !navDropdownRef.current.contains(event.target)) {
+        setOpenNavDropdown(null);
       }
     }
     // Bind the event listener
@@ -349,6 +355,68 @@ export function TopBar() {
     );
   };
 
+  // Render desktop dropdown menu for grouped plugins
+  const renderDesktopDropdownMenu = (groupName, links) => {
+    const isOpen = openNavDropdown === groupName;
+
+    return (
+      <div className="relative" key={groupName} ref={navDropdownRef}>
+        <button
+          onClick={() => setOpenNavDropdown(isOpen ? null : groupName)}
+          className={`inline-flex items-center border-b-2 px-1 pt-1 space-x-1 ${
+            isOpen
+              ? 'text-blue-600 border-blue-600'
+              : 'border-transparent text-gray-700 hover:text-blue-600'
+          }`}
+        >
+          <span>{groupName}</span>
+          <svg
+            className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+            fill="currentColor"
+            viewBox="0 0 20 20"
+          >
+            <path
+              fillRule="evenodd"
+              d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+              clipRule="evenodd"
+            />
+          </svg>
+        </button>
+
+        {isOpen && (
+          <div className="absolute top-full left-0 mt-1 w-64 bg-white rounded-md shadow-lg border border-gray-200 z-50">
+            <div className="py-1">
+              {links.map((link) => (
+                <Link
+                  key={link.id}
+                  href={resolvePluginHref(link.href)}
+                  className="block px-4 py-3 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                  onClick={() => setOpenNavDropdown(null)}
+                  prefetch={false}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-2">
+                      {link.icon && <span className="text-base leading-none">{link.icon}</span>}
+                      <span className="font-medium">{link.label}</span>
+                    </span>
+                    {link.badge && (
+                      <span className="text-[10px] uppercase tracking-wide bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">
+                        {link.badge}
+                      </span>
+                    )}
+                  </div>
+                  {link.description && (
+                    <p className="mt-1 text-xs text-gray-500">{link.description}</p>
+                  )}
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <>
       <div className="fixed top-0 left-0 right-0 bg-white z-30 h-14 px-4 border-b border-gray-200 shadow-sm">
@@ -459,7 +527,13 @@ export function TopBar() {
                 <span>Users</span>
               </Link>
 
-              {pluginNavLinks.map((link) => renderDesktopPluginNavLink(link))}
+              {/* Ungrouped plugin links */}
+              {ungrouped.map((link) => renderDesktopPluginNavLink(link))}
+
+              {/* Grouped dropdown menus */}
+              {Object.entries(groups).map(([groupName, links]) =>
+                renderDesktopDropdownMenu(groupName, links)
+              )}
             </div>
           )}
 
@@ -726,14 +800,24 @@ export function TopBar() {
                   Users
                 </Link>
 
-                {pluginNavLinks.length > 0 && (
+                {/* Ungrouped plugins */}
+                {ungrouped.length > 0 && (
                   <>
                     <div className="border-t border-gray-200 my-4"></div>
-                    {pluginNavLinks.map((link) =>
-                      renderMobilePluginNavLink(link)
-                    )}
+                    {ungrouped.map((link) => renderMobilePluginNavLink(link))}
                   </>
                 )}
+
+                {/* Grouped plugins (displayed flat on mobile) */}
+                {Object.entries(groups).map(([groupName, links]) => (
+                  <div key={groupName}>
+                    <div className="border-t border-gray-200 my-4"></div>
+                    <div className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      {groupName}
+                    </div>
+                    {links.map((link) => renderMobilePluginNavLink(link))}
+                  </div>
+                ))}
 
                 <div className="border-t border-gray-200 my-4"></div>
 
