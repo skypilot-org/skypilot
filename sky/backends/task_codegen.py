@@ -380,6 +380,8 @@ class SlurmCodeGen(TaskCodeGen):
                     acc_name)):
             num_gpus = int(math.ceil(acc_count))
 
+        # Note: $SLURM_* env vars are only defined when the generated script is
+        # run with srun, which is the case with SlurmCommandRunner.run().
         sky_env_vars_dict_str = [
             textwrap.dedent(f"""\
             sky_env_vars_dict = {{}}

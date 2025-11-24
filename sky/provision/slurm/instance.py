@@ -390,24 +390,43 @@ def terminate_instances(
         ssh_proxy_command=ssh_proxy_command,
     )
 
+    # Clean up runtime directories on compute nodes before cancelling the job.
+    # This must happen before cancel since we need the job to still be running
+    # to use SlurmCommandRunner (which uses srun with the job ID).
+    skypilot_runtime_dir = _skypilot_runtime_dir(cluster_name_on_cloud)
+    try:
+        cluster_info = get_cluster_info(
+            region='',
+            cluster_name_on_cloud=cluster_name_on_cloud,
+            provider_config=provider_config)
+        runners = get_command_runners(
+            cluster_info,
+            ssh_user=ssh_user,
+            ssh_private_key=ssh_key,
+        )
+        for runner in runners:
+            rc = runner.run(f'rm -rf {skypilot_runtime_dir}', stream_logs=False)
+            if rc != 0:
+                logger.warning(f'Failed to remove {skypilot_runtime_dir} on '
+                               f'compute node {runner.slurm_node}')
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning('Failed to clean up compute node runtime directory: '
+                       f'{common_utils.format_exception(e)}')
+
     client.cancel_jobs_by_name(cluster_name_on_cloud)
 
-    # Clean up the sky directory.
+    # Clean up the sky directory on NFS (shared across all nodes).
     sky_dir = _sky_cluster_home_dir(cluster_name_on_cloud)
-    skypilot_runtime_dir = _skypilot_runtime_dir(cluster_name_on_cloud)
     controller_node_runner = command_runner.SSHCommandRunner(
         (ssh_host, ssh_port),
         ssh_user,
         ssh_key,
         ssh_proxy_command=ssh_proxy_command,
     )
-    cleanup_cmd = f'rm -rf {sky_dir} {skypilot_runtime_dir}'
-    rc, _, stderr = controller_node_runner.run(cleanup_cmd,
-                                               require_outputs=True)
+    cleanup_cmd = f'rm -rf {sky_dir}'
+    rc = controller_node_runner.run(cleanup_cmd, stream_logs=False)
     if rc != 0:
-        logger.warning(
-            f'Failed to clean up {sky_dir} and {skypilot_runtime_dir}: {stderr}'
-        )
+        logger.warning(f'Failed to clean up {sky_dir} on login node')
 
 
 def open_ports(
@@ -433,7 +452,7 @@ def cleanup_ports(
 def get_command_runners(
     cluster_info: common.ClusterInfo,
     **credentials: Dict[str, Any],
-) -> List[command_runner.CommandRunner]:
+) -> List[command_runner.SlurmCommandRunner]:
     """Get a command runner for the given cluster."""
     assert cluster_info.provider_config is not None, cluster_info
 
@@ -456,7 +475,7 @@ def get_command_runners(
     # it is the login node's. The internal IP is the private IP of the node.
     ssh_user = cast(str, credentials.pop('ssh_user'))
     ssh_private_key = cast(str, credentials.pop('ssh_private_key'))
-    runners: List[command_runner.CommandRunner] = [
+    runners = [
         command_runner.SlurmCommandRunner(
             (instance_info.external_ip or '', instance_info.ssh_port),
             ssh_user,

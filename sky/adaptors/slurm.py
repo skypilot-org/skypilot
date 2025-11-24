@@ -214,8 +214,8 @@ class SlurmClient:
         # This reduces the work required by slurmctld.
         cmd = f'squeue -h --only-job-state --jobs {job_id} -o "%T"'
         rc, stdout, stderr = self._runner.run(cmd,
-                                         require_outputs=True,
-                                         stream_logs=False)
+                                              require_outputs=True,
+                                              stream_logs=False)
         if rc != 0:
             # Job may not exist
             logger.debug(f'Failed to get job state for job {job_id}: {stderr}')
@@ -255,8 +255,8 @@ class SlurmClient:
             # Check if nodes are allocated by trying to get node list
             cmd = f'squeue -h --jobs {job_id} -o "%N"'
             rc, stdout, stderr = self._runner.run(cmd,
-                                             require_outputs=True,
-                                             stream_logs=False)
+                                                  require_outputs=True,
+                                                  stream_logs=False)
 
             if rc == 0 and stdout.strip():
                 # Nodes are allocated

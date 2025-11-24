@@ -457,12 +457,11 @@ class Slurm(clouds.Cloud):
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
         return catalog.validate_region_zone(region, zone, clouds='slurm')
 
-    def accelerator_in_region_or_zone(
-            self,
-            accelerator: str,
-            acc_count: int,
-            region: Optional[str] = None,
-            zone: Optional[str] = None) -> bool:
+    def accelerator_in_region_or_zone(self,
+                                      accelerator: str,
+                                      acc_count: int,
+                                      region: Optional[str] = None,
+                                      zone: Optional[str] = None) -> bool:
         del zone  # unused for now
         regions = catalog.get_region_zones_for_accelerators(accelerator,
                                                             acc_count,

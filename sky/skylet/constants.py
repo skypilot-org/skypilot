@@ -63,8 +63,7 @@ SKY_RAY_CMD = (f'{SKY_PYTHON_CMD} $([ -s {SKY_RAY_PATH_FILE} ] && '
 # Separate env for SkyPilot runtime dependencies.
 SKY_REMOTE_PYTHON_ENV_NAME = 'skypilot-runtime'
 SKY_CONDA_ROOT = f'{SKY_RUNTIME_DIR}/miniconda3'
-SKY_REMOTE_PYTHON_ENV: str = (
-    f'{SKY_RUNTIME_DIR}/{SKY_REMOTE_PYTHON_ENV_NAME}')
+SKY_REMOTE_PYTHON_ENV: str = (f'{SKY_RUNTIME_DIR}/{SKY_REMOTE_PYTHON_ENV_NAME}')
 ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
 # uv is used for venv and pip, much faster than python implementations.
 SKY_UV_INSTALL_DIR = f'"{SKY_RUNTIME_DIR}/.local/bin"'
@@ -155,11 +154,9 @@ DISABLE_GPU_ECC_COMMAND = (
     '{ sudo reboot || echo "Failed to reboot. ECC mode may not be disabled"; } '
     '|| true; ')
 
-SETUP_SKY_DIRS_COMMANDS = (
-    f'mkdir -p ~/sky_workdir && '
-    f'mkdir -p ~/.sky/sky_app && '
-    f'mkdir -p {SKY_RUNTIME_DIR}/.sky;'
-)
+SETUP_SKY_DIRS_COMMANDS = (f'mkdir -p ~/sky_workdir && '
+                           f'mkdir -p ~/.sky/sky_app && '
+                           f'mkdir -p {SKY_RUNTIME_DIR}/.sky;')
 
 # Install conda on the remote cluster if it is not already installed.
 # We use conda with python 3.10 to be consistent across multiple clouds with

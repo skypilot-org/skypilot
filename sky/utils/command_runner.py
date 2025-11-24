@@ -1354,14 +1354,13 @@ class SlurmCommandRunner(SSHCommandRunner):
         # Build ProxyCommand to proxy through the Slurm login node to
         # the compute node where the job is running.
         proxy_ssh_options = ' '.join(
-            ssh_options_list(
-                self.ssh_private_key,
-                None,
-                ssh_proxy_command=self._ssh_proxy_command,
-                port=self.port,
-                disable_control_master=True))
+            ssh_options_list(self.ssh_private_key,
+                             None,
+                             ssh_proxy_command=self._ssh_proxy_command,
+                             port=self.port,
+                             disable_control_master=True))
         login_node_proxy_command = (f'ssh {proxy_ssh_options} '
-                               f'-W %h:%p {self.ssh_user}@{self.ip}')
+                                    f'-W %h:%p {self.ssh_user}@{self.ip}')
 
         # Build the complete SSH option to pass in to rsync -e 'ssh ...',
         # utilizing the login node proxy command we have above.
@@ -1373,16 +1372,17 @@ class SlurmCommandRunner(SSHCommandRunner):
                 disable_control_master=True))
         rsh_option = f'ssh {ssh_options}'
 
-        self._rsync(source,
-                    target,
-                    # Compute node
-                    node_destination=f'{self.ssh_user}@{self.slurm_node}',
-                    up=up,
-                    rsh_option=rsh_option,
-                    log_path=log_path,
-                    stream_logs=stream_logs,
-                    max_retry=max_retry,
-                    get_remote_home_dir=lambda: self.sky_dir)
+        self._rsync(
+            source,
+            target,
+            # Compute node
+            node_destination=f'{self.ssh_user}@{self.slurm_node}',
+            up=up,
+            rsh_option=rsh_option,
+            log_path=log_path,
+            stream_logs=stream_logs,
+            max_retry=max_retry,
+            get_remote_home_dir=lambda: self.sky_dir)
 
     @timeline.event
     @context_utils.cancellation_guard
@@ -1404,14 +1404,17 @@ class SlurmCommandRunner(SSHCommandRunner):
         # could be part of a shared filesystem.
         # And similarly for SKY_RUNTIME_DIR. See constants.\
         # SKY_RUNTIME_DIR_ENV_VAR for more details.
-        cmd = (f'export {constants.SKY_RUNTIME_DIR_ENV_VAR}="{self.skypilot_runtime_dir}" && '
+        cmd = (f'export {constants.SKY_RUNTIME_DIR_ENV_VAR}='
+               f'"{self.skypilot_runtime_dir}" && '
                f'cd {self.sky_dir} && export HOME=$(pwd) && {cmd}')
 
         # Wrap the command in srun to execute on the specific compute node
-        # instead of the login node. This ensures conda and other installations
-        # happen on the compute node's local /tmp.
-        # --overlap allows multiple job steps to run simultaneously on the same allocation
-        cmd = (f'srun --quiet --overlap --jobid={self.job_id} --nodelist={self.slurm_node} '
+        # instead of the login node. This ensures conda and other
+        # installations happen on the compute node's local /tmp.
+        # --overlap allows multiple job steps to run simultaneously on the
+        # same allocation
+        cmd = (f'srun --quiet --overlap --jobid={self.job_id} '
+               f'--nodelist={self.slurm_node} '
                f'--nodes=1 --ntasks=1 bash -c {shlex.quote(cmd)}')
 
         return super().run(cmd, **kwargs)

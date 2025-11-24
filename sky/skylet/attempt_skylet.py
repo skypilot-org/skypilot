@@ -5,7 +5,8 @@ import subprocess
 
 from sky.skylet import constants
 
-SKY_RUNTIME_DIR = os.environ.get(constants.SKY_RUNTIME_DIR_ENV_VAR, os.path.expanduser('~'))
+SKY_RUNTIME_DIR = os.environ.get(constants.SKY_RUNTIME_DIR_ENV_VAR,
+                                 os.path.expanduser('~'))
 VERSION_FILE = os.path.join(SKY_RUNTIME_DIR, '.sky/skylet_version')
 SKYLET_LOG_FILE = os.path.join(SKY_RUNTIME_DIR, '.sky/skylet.log')
 
