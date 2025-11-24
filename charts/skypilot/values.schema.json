@@ -292,7 +292,7 @@
         "global": {
             "type": "object",
             "properties": {
-                "imagePullSecrets": {
+                "extraEnvs": {
                     "type": [
                         "array",
                         "null"
@@ -301,7 +301,7 @@
                         "type": "object"
                     }
                 },
-                "extraEnvs": {
+                "imagePullSecrets": {
                     "type": [
                         "array",
                         "null"

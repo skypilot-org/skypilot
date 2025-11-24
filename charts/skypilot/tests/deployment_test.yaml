@@ -86,6 +86,25 @@ tests:
           path: spec.template.spec.containers[1].image
           value: registry.example.com/custom/skypilot-dev/sky:dev
 
+  - it: should inject global extra envs into api containers and init containers
+    set:
+      global.extraEnvs:
+        - name: GLOBAL_ENV
+          value: global
+      awsCredentials.enabled: true
+      awsCredentials.useCredentialsFile: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GLOBAL_ENV
+            value: global
+      - contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: GLOBAL_ENV
+            value: global
+
   - it: should prefix gcp credentials init container image with the global registry override
     set:
       global.imageRegistry: registry.example.com/custom
