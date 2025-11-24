@@ -71,7 +71,7 @@ spec:
         resources:
           {{- toYaml .Values.apiService.resources | nindent 10 }}
         env:
-        {{- with .Values.global.extraEnvs }}
+        {{- with $.Values.global.extraEnvs }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
         {{- with .Values.apiService.extraEnvs }}
