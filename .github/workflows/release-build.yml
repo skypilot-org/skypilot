@@ -268,37 +268,41 @@ jobs:
       - name: Create release branch and PR
         env:
           GH_TOKEN: ${{ secrets.GH_PAT_FOR_RELEASE }}
-          TEST_BRANCH: ${{ needs.release-build.outputs.test_branch }}
-          RELEASE_BRANCH: ${{ needs.release-build.outputs.release_branch }}
-          RELEASE_VERSION: ${{ needs.release-build.outputs.release_version }}
-          SMOKE_TEST_BUILD: ${{ needs.smoke-tests.outputs.build_number }}
-          QUICKTEST_BUILD: ${{ needs.quicktest-core.outputs.build_number }}
-          QUICKTEST_PREV_MINOR_BUILD: ${{ needs.quicktest-core-previous-minor.outputs.build_number }}
-          REMOTE_SERVER_K8S_BUILD: ${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_number }}
-          RELEASE_TEST_BUILD: ${{ needs.release-tests.outputs.build_number }}
         run: |
           # Configure git
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
 
           # Create PR with buildkite links
-          PR_BODY="Release ${RELEASE_VERSION}
+          PR_BODY="Release ${{ needs.release-build.outputs.release_version }}
 
           Buildkite Test Links:
-          - [Full Smoke Tests](https://buildkite.com/skypilot-1/full-smoke-tests-run/builds/${SMOKE_TEST_BUILD}) - $([ "${{ needs.smoke-tests.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
-          - [Quicktest Core](https://buildkite.com/skypilot-1/quicktest-core/builds/${QUICKTEST_BUILD}) - $([ "${{ needs.quicktest-core.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
-          - [Smoke Tests Remote Server Kubernetes](https://buildkite.com/skypilot-1/smoke-tests/builds/${REMOTE_SERVER_K8S_BUILD}) - $([ "${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")"
-          if [ "${{ needs.quicktest-core-previous-minor.result }}" == "success" ] || [ "${{ needs.quicktest-core-previous-minor.result }}" == "failure" ]; then
-            PR_BODY="${PR_BODY}
-          - [Quicktest Core (vs Previous Minor)](https://buildkite.com/skypilot-1/quicktest-core/builds/${QUICKTEST_PREV_MINOR_BUILD}) - $([ "${{ needs.quicktest-core-previous-minor.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")"
-          fi
-          PR_BODY="${PR_BODY}
-          - [Release Tests](https://buildkite.com/skypilot-1/release/builds/${RELEASE_TEST_BUILD}) - ⏳ (not waiting for completion)
+          - [Full Smoke Tests](https://buildkite.com/skypilot-1/full-smoke-tests-run/builds/${{ needs.smoke-tests.outputs.build_number }}) - $([ "${{ needs.smoke-tests.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Quicktest Core](https://buildkite.com/skypilot-1/quicktest-core/builds/${{ needs.quicktest-core.outputs.build_number }}) - $([ "${{ needs.quicktest-core.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Quicktest Core (vs Previous Minor)](https://buildkite.com/skypilot-1/quicktest-core/builds/${{ needs.quicktest-core-previous-minor.outputs.build_number }}) - $([ "${{ needs.quicktest-core-previous-minor.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Smoke Tests Remote Server Kubernetes](https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_number }}) - $([ "${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Release Tests](https://buildkite.com/skypilot-1/release/builds/${{ needs.release-tests.outputs.build_number }}) - ⏳ (not waiting for completion)
 
           *Release Tests may take up to 24 hours to complete and might fail due to resource constraints.*"
 
-          echo "Creating PR from ${TEST_BRANCH} to ${RELEASE_BRANCH}"
+          echo "Creating PR from ${{ needs.release-build.outputs.test_branch }} to ${{ needs.release-build.outputs.release_branch }}"
 
-          gh pr create --base ${RELEASE_BRANCH} --head ${TEST_BRANCH} \
-            --title "Release ${RELEASE_VERSION}" \
+          gh pr create --base ${{ needs.release-build.outputs.release_branch }} --head ${{ needs.release-build.outputs.test_branch }} \
+            --title "Release ${{ needs.release-build.outputs.release_version }}" \
             --body "${PR_BODY}"
+
+      - name: Summary
+        if: always()
+        run: |
+          cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+          # Release ${{ needs.release-build.outputs.release_version }}
+
+          ## Buildkite Test Links
+          - [Full Smoke Tests](https://buildkite.com/skypilot-1/full-smoke-tests-run/builds/${{ needs.smoke-tests.outputs.build_number }}) - $([ "${{ needs.smoke-tests.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Quicktest Core](https://buildkite.com/skypilot-1/quicktest-core/builds/${{ needs.quicktest-core.outputs.build_number }}) - $([ "${{ needs.quicktest-core.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Quicktest Core (vs Previous Minor)](https://buildkite.com/skypilot-1/quicktest-core/builds/${{ needs.quicktest-core-previous-minor.outputs.build_number }}) - $([ "${{ needs.quicktest-core-previous-minor.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Smoke Tests Remote Server Kubernetes](https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_number }}) - $([ "${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Release Tests](https://buildkite.com/skypilot-1/release/builds/${{ needs.release-tests.outputs.build_number }}) - ⏳ (not waiting for completion)
+
+          *Release Tests may take up to 24 hours to complete and might fail due to resource constraints.*
+          EOF
