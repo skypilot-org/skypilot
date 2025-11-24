@@ -209,7 +209,8 @@ def run_with_log(
             # Format streaming_prefix with subprocess PID if it contains {pid}
             formatted_streaming_prefix = streaming_prefix
             if streaming_prefix and '{pid}' in streaming_prefix:
-                formatted_streaming_prefix = streaming_prefix.format(pid=proc.pid)
+                formatted_streaming_prefix = streaming_prefix.format(
+                    pid=proc.pid)
 
             stdout = ''
             stderr = ''
@@ -355,9 +356,12 @@ def run_bash_command_with_log_and_return_pid(
         stream_logs: bool = False,
         with_ray: bool = False,
         streaming_prefix: Optional[str] = None):
-    return_code = run_bash_command_with_log(bash_command, log_path, env_vars,
-                                       stream_logs, with_ray,
-                                       streaming_prefix=streaming_prefix)
+    return_code = run_bash_command_with_log(bash_command,
+                                            log_path,
+                                            env_vars,
+                                            stream_logs,
+                                            with_ray,
+                                            streaming_prefix=streaming_prefix)
     return {'return_code': return_code, 'pid': os.getpid()}
 
 if hasattr(autostop_lib, 'set_last_active_time_to_now'):
@@ -372,7 +376,6 @@ message = ('[2m├── [0m[2m'
 print(message, flush=True)
 print('\x1b[2m└── \x1b[0mJob started. Streaming logs... \x1b[2m(Ctrl-C to exit log streaming; job will not be killed)\x1b[0m', flush=True)
 setup_cmd = 'pip install torch'
-setup_cmd = 'export SKYPILOT_NODE_RANK=$SLURM_PROCID; ' + setup_cmd
 
 job_lib.set_status(2, job_lib.JobStatus.SETTING_UP)
 job_lib.scheduler.schedule_step()
@@ -387,7 +390,7 @@ setup_result = run_bash_command_with_log_and_return_pid(
     env_vars={'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000001-cluster-2', 'MODEL_NAME': 'resnet50', 'SKYPILOT_NUM_NODES': '1'},
     stream_logs=True,
     with_ray=False,
-    streaming_prefix=f'{colorama.Fore.CYAN}(sky-cmd, pid={{pid}}){colorama.Style.RESET_ALL} ',
+    streaming_prefix=f'{colorama.Fore.CYAN}(setup pid={{pid}}){colorama.Style.RESET_ALL} ',
 )
 
 # TODO(kevin): For multi-node, we need to inspect the exit codes
@@ -424,7 +427,8 @@ job_ip_list_str = '\n'.join(job_ip_rank_list)
 
 sky_env_vars_dict = {}
 sky_env_vars_dict['SKYPILOT_NODE_IPS'] = job_ip_list_str
-sky_env_vars_dict['SKYPILOT_NUM_NODES'] = len(job_ip_rank_list)
+sky_env_vars_dict['SKYPILOT_NUM_NODES'] = os.environ.get('SLURM_NNODES') or os.environ.get('SLURM_JOB_NUM_NODES')
+sky_env_vars_dict['SKYPILOT_NODE_RANK'] = os.environ.get('SLURM_PROCID')
 sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = 2
 
 sky_env_vars_dict['SKYPILOT_TASK_ID'] = 'sky-2024-11-17-00-00-00-000001-cluster-2'
@@ -433,7 +437,6 @@ script = 'python train.py'
 rclone_flush_script = '\n# Only waits if cached mount is enabled (RCLONE_MOUNT_CACHED_LOG_DIR is not empty)\n# findmnt alone is not enough, as some clouds (e.g. AWS on ARM64) uses\n# rclone for normal mounts as well.\nif [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ] &&            [ -d ~/.sky/rclone_log ] &&            [ "$(ls -A ~/.sky/rclone_log)" ]; then\n    flushed=0\n    # extra second on top of --vfs-cache-poll-interval to\n    # avoid race condition between rclone log line creation and this check.\n    sleep 1\n    while [ $flushed -eq 0 ]; do\n        # sleep for the same interval as --vfs-cache-poll-interval\n        sleep 10\n        flushed=1\n        for file in ~/.sky/rclone_log/*; do\n            exitcode=0\n            tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?\n            if [ $exitcode -ne 0 ]; then\n                echo "skypilot: cached mount is still uploading to remote"\n                flushed=0\n                break\n            fi\n        done\n    done\n    echo "skypilot: cached mount uploaded complete"\nfi'
 
 if script is not None:
-    script = 'export SKYPILOT_NODE_RANK=$SLURM_PROCID; ' + script
     script += rclone_flush_script
     sky_env_vars_dict['SKYPILOT_NUM_GPUS_PER_NODE'] = 1
     # TODO(kevin): Handle multi-node job log paths.
@@ -451,7 +454,7 @@ if script is not None:
         env_vars=sky_env_vars_dict,
         stream_logs=True,
         with_ray=False,
-        streaming_prefix=f'{colorama.Fore.CYAN}(sky-cmd, pid={{pid}}){colorama.Style.RESET_ALL} ',
+        streaming_prefix=f'{colorama.Fore.CYAN}(train_task, pid={{pid}}){colorama.Style.RESET_ALL} ',
     )
 
     returncodes = [int(result.get('return_code', 1))]

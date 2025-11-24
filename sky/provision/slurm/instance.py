@@ -1,6 +1,5 @@
 """Slurm instance provisioning."""
 
-import re
 import tempfile
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -29,7 +28,8 @@ _TIMEOUT_SECONDS_FOR_JOB_TERMINATION = 60
 
 
 def _sky_cluster_home_dir(cluster_name_on_cloud: str) -> str:
-    """Returns the SkyPilot cluster's home directory path on the Slurm cluster."""
+    """Returns the SkyPilot cluster's home directory path on the Slurm cluster.
+    """
     return f'{SHARED_ROOT_SKY_DIRECTORY}/{cluster_name_on_cloud}'
 
 
@@ -64,12 +64,13 @@ def _create_virtual_instance(
         ssh_proxy_command=ssh_proxy_command,
     )
 
-    # COMPLETING state occurs when a job is being terminated - during this phase,
-    # slurmd sends SIGTERM to tasks, waits for KillWait period, sends SIGKILL if
-    # needed, runs epilog scripts, and notifies slurmctld. This typically happens
-    # when a previous job with the same name is being cancelled or has finished.
-    # Jobs can get stuck in COMPLETING if epilog scripts hang or tasks don't
-    # respond to signals, so we wait with a timeout.
+    # COMPLETING state occurs when a job is being terminated - during this
+    # phase, slurmd sends SIGTERM to tasks, waits for KillWait period, sends
+    # SIGKILL if needed, runs epilog scripts, and notifies slurmctld. This
+    # typically happens when a previous job with the same name is being
+    # cancelled or has finished. Jobs can get stuck in COMPLETING if epilog
+    # scripts hang or tasks don't respond to signals, so we wait with a
+    # timeout.
     completing_jobs = client.query_jobs(
         cluster_name_on_cloud,
         ['completing'],
@@ -99,14 +100,13 @@ def _create_virtual_instance(
         ['pending', 'running'],
     )
     if existing_jobs:
-        assert len(
-            existing_jobs
-        ) == 1, f'Multiple jobs found with name {cluster_name_on_cloud}: {existing_jobs}'
+        assert len(existing_jobs) == 1, (
+            f'Multiple jobs found with name {cluster_name_on_cloud}: '
+            f'{existing_jobs}')
 
         job_id = existing_jobs[0]
-        logger.debug(
-            f'Job with name {cluster_name_on_cloud} already exists (JOBID: {job_id})'
-        )
+        logger.debug(f'Job with name {cluster_name_on_cloud} already exists '
+                     f'(JOBID: {job_id})')
 
         # Wait for nodes to be allocated (job might be in PENDING state)
         nodes, _ = client.get_job_nodes(job_id, wait=True)
@@ -127,7 +127,8 @@ def _create_virtual_instance(
     accelerator_type = resources.get('accelerator_type')
     accelerator_count_raw = resources.get('accelerator_count')
     try:
-        accelerator_count = int(accelerator_count_raw)
+        accelerator_count = int(
+            accelerator_count_raw) if accelerator_count_raw is not None else 0
     except (TypeError, ValueError):
         accelerator_count = 0
     provision_lines = [
@@ -214,7 +215,7 @@ def query_instances(
     retry_if_missing: bool = False,
 ) -> Dict[str, Tuple[Optional[status_lib.ClusterStatus], Optional[str]]]:
     """See sky/provision/__init__.py"""
-    del retry_if_missing  # Unused for SLURM
+    del cluster_name, retry_if_missing  # Unused for Slurm
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
 
     ssh_config_dict = provider_config['ssh']
@@ -233,7 +234,8 @@ def query_instances(
     )
 
     # Map Slurm job states to SkyPilot ClusterStatus
-    # Slurm states: https://slurm.schedmd.com/squeue.html#SECTION_JOB-STATE-CODES
+    # Slurm states:
+    # https://slurm.schedmd.com/squeue.html#SECTION_JOB-STATE-CODES
     status_map = {
         'pending': status_lib.ClusterStatus.INIT,
         'running': status_lib.ClusterStatus.UP,
@@ -243,7 +245,8 @@ def query_instances(
         'failed': status_lib.ClusterStatus.INIT,
     }
 
-    statuses = {}
+    statuses: Dict[str, Tuple[Optional[status_lib.ClusterStatus],
+                              Optional[str]]] = {}
     for state, sky_status in status_map.items():
         if non_terminated_only and sky_status is None:
             continue
@@ -259,8 +262,11 @@ def query_instances(
     return statuses
 
 
-def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
-                  config: common.ProvisionConfig) -> common.ProvisionRecord:
+def run_instances(
+        region: str,
+        cluster_name: str,  # pylint: disable=unused-argument
+        cluster_name_on_cloud: str,
+        config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Run instances for the given cluster (Slurm in this case)."""
     return _create_virtual_instance(region, cluster_name_on_cloud, config)
 
@@ -314,9 +320,9 @@ def get_cluster_info(
             provider_name='slurm',
             provider_config=provider_config,
         )
-    assert len(
-        running_jobs
-    ) == 1, f'Multiple running jobs found for cluster {cluster_name_on_cloud}: {running_jobs}'
+    assert len(running_jobs) == 1, (
+        f'Multiple running jobs found for cluster {cluster_name_on_cloud}: '
+        f'{running_jobs}')
 
     job_id = running_jobs[0]
     # Running jobs should already have nodes allocated, so don't wait
@@ -332,6 +338,7 @@ def get_cluster_info(
                 tags={
                     constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud,
                     'job_id': job_id,
+                    'node': node,
                 },
             )
         ] for node, node_ip in zip(nodes, node_ips)
@@ -374,7 +381,6 @@ def terminate_instances(
     ssh_user = ssh_config_dict['user']
     ssh_key = ssh_config_dict['private_key']
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
-    partition = slurm_utils.get_partition_from_config(provider_config)
 
     client = slurm.SlurmClient(
         ssh_host,
@@ -405,20 +411,22 @@ def terminate_instances(
 
 
 def open_ports(
-    cluster_name_on_cloud: str,
-    ports: List[str],
-    provider_config: Optional[Dict[str, Any]] = None,
+        cluster_name_on_cloud: str,
+        ports: List[str],
+        provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
+    del cluster_name_on_cloud, ports, provider_config
     pass
 
 
 def cleanup_ports(
-    cluster_name_on_cloud: str,
-    ports: List[str],
-    provider_config: Optional[Dict[str, Any]] = None,
+        cluster_name_on_cloud: str,
+        ports: List[str],
+        provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
+    del cluster_name_on_cloud, ports, provider_config
     pass
 
 
@@ -433,7 +441,9 @@ def get_command_runners(
         # No running job found
         return []
 
-    cluster_name_on_cloud = cluster_info.get_head_instance().tags.get(
+    head_instance = cluster_info.get_head_instance()
+    assert head_instance is not None, 'Head instance not found'
+    cluster_name_on_cloud = head_instance.tags.get(
         constants.TAG_SKYPILOT_CLUSTER_NAME, None)
     assert cluster_name_on_cloud is not None, cluster_info
 
@@ -444,11 +454,13 @@ def get_command_runners(
 
     # Note: For Slurm, the external IP for all instances is the same,
     # it is the login node's. The internal IP is the private IP of the node.
-    runners = [
+    runners: List[command_runner.CommandRunner] = [
         command_runner.SlurmCommandRunner(
-            (instance_info.external_ip, instance_info.ssh_port),
+            (instance_info.external_ip or '', instance_info.ssh_port),
             sky_dir=_sky_cluster_home_dir(cluster_name_on_cloud),
             skypilot_runtime_dir=_skypilot_runtime_dir(cluster_name_on_cloud),
+            job_id=instance_info.tags['job_id'],
+            slurm_node=instance_info.tags['node'],
             **credentials) for instance_info in instances
     ]
 

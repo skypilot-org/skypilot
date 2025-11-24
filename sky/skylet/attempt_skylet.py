@@ -5,7 +5,9 @@ import subprocess
 
 from sky.skylet import constants
 
-VERSION_FILE = os.path.expanduser(constants.SKYLET_VERSION_FILE)
+SKY_RUNTIME_DIR = os.environ.get(constants.SKY_RUNTIME_DIR_ENV_VAR, os.path.expanduser('~'))
+VERSION_FILE = os.path.join(SKY_RUNTIME_DIR, '.sky/skylet_version')
+SKYLET_LOG_FILE = os.path.join(SKY_RUNTIME_DIR, '.sky/skylet.log')
 
 
 def restart_skylet():
@@ -18,7 +20,7 @@ def restart_skylet():
         # because need to handle the backward compatibility of the old skylet
         # started before #3326, which does not use the full path to python.
         'ps aux | grep "sky.skylet.skylet" | grep " -m "'
-        '| awk \'{print $2}\' | xargs kill >> ~/.sky/skylet.log 2>&1',
+        f'| awk \'{{print $2}}\' | xargs kill >> {SKYLET_LOG_FILE} 2>&1',
         shell=True,
         check=False)
     subprocess.run(
@@ -26,7 +28,7 @@ def restart_skylet():
         # skypilot runtime env activated, so that skylet can access the cloud
         # CLI tools.
         f'nohup {constants.SKY_PYTHON_CMD} -m sky.skylet.skylet'
-        ' >> ~/.sky/skylet.log 2>&1 &',
+        f' >> {SKYLET_LOG_FILE} 2>&1 &',
         shell=True,
         check=True)
     with open(VERSION_FILE, 'w', encoding='utf-8') as v_f:

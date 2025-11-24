@@ -937,6 +937,10 @@ def write_cluster_config(
                         '{conda_auto_activate}',
                         conda_auto_activate).replace('{is_custom_docker}',
                                                      is_custom_docker),
+                # Currently only used by Slurm. For other clouds, it is
+                # already part of RAY_SKYPILOT_INSTALLATION_COMMANDS
+                'setup_sky_dirs_commands':
+                    constants.SETUP_SKY_DIRS_COMMANDS,
                 'ray_skypilot_installation_commands':
                     (constants.RAY_SKYPILOT_INSTALLATION_COMMANDS.replace(
                         '{sky_wheel_hash}',

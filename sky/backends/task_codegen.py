@@ -20,18 +20,18 @@ class TaskCodeGen:
     RayCodeGen and SlurmCodeGen can use.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Code generated so far, to be joined via '\n'.
-        self._code = []
+        self._code: List[str] = []
         # Guard method calling order.
-        self._has_prologue = False
-        self._has_epilogue = False
-        self._has_setup = False
+        self._has_prologue: bool = False
+        self._has_epilogue: bool = False
+        self._has_setup: bool = False
         # Job ID is used to identify the job (also this generated code).
-        self.job_id = None
+        self.job_id: Optional[int] = None
 
     def _add_common_imports(self) -> None:
-        """Add standard library imports common to both Ray and Slurm execution."""
+        """Add common imports for both Ray and Slurm execution."""
         self._code.append(
             textwrap.dedent("""\
             import functools
@@ -180,9 +180,9 @@ class TaskCodeGen:
     ) -> None:
         """Generates code to set up the task on each node.
 
-        stable_cluster_internal_ips is used to ensure that the SKYPILOT_NODE_RANK environment
-        variable is assigned in a deterministic order whenever a new task is
-        added.
+        stable_cluster_internal_ips is used to ensure that the
+        SKYPILOT_NODE_RANK environment variable is assigned in a
+        deterministic order whenever a new task is added.
         """
         raise NotImplementedError
 
@@ -251,7 +251,7 @@ class SlurmCodeGen(TaskCodeGen):
         """Initialize SlurmCodeGen.
 
         Args:
-            slurm_job_id: SLURM_JOB_ID from sbatch environment (provisioned job ID)
+            slurm_job_id: The Slurm job ID, i.e. SLURM_JOB_ID
         """
         super().__init__()
         self._slurm_job_id = slurm_job_id
@@ -301,7 +301,6 @@ class SlurmCodeGen(TaskCodeGen):
             self._code += [
                 textwrap.dedent(f"""\
                 setup_cmd = {setup_cmd!r}
-                setup_cmd = 'export SKYPILOT_NODE_RANK=$SLURM_PROCID; ' + setup_cmd
 
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SETTING_UP)
                 job_lib.scheduler.schedule_step()
@@ -316,7 +315,7 @@ class SlurmCodeGen(TaskCodeGen):
                     env_vars={setup_envs!r},
                     stream_logs=True,
                     with_ray=False,
-                    streaming_prefix=f'{{colorama.Fore.CYAN}}(sky-cmd, pid={{{{pid}}}}){{colorama.Style.RESET_ALL}} ',
+                    streaming_prefix=f'{{colorama.Fore.CYAN}}(setup pid={{{{pid}}}}){{colorama.Style.RESET_ALL}} ',
                 )
 
                 # TODO(kevin): For multi-node, we need to inspect the exit codes
@@ -385,7 +384,8 @@ class SlurmCodeGen(TaskCodeGen):
             textwrap.dedent(f"""\
             sky_env_vars_dict = {{}}
             sky_env_vars_dict['{constants.SKYPILOT_NODE_IPS}'] = job_ip_list_str
-            sky_env_vars_dict['{constants.SKYPILOT_NUM_NODES}'] = len(job_ip_rank_list)
+            sky_env_vars_dict['{constants.SKYPILOT_NUM_NODES}'] = os.environ.get('SLURM_NNODES') or os.environ.get('SLURM_JOB_NUM_NODES')
+            sky_env_vars_dict['{constants.SKYPILOT_NODE_RANK}'] = os.environ.get('SLURM_PROCID')
             sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = {self.job_id}
             """)
         ]
@@ -404,7 +404,6 @@ class SlurmCodeGen(TaskCodeGen):
             rclone_flush_script = {rclone_flush_script!r}
 
             if script is not None:
-                script = 'export SKYPILOT_NODE_RANK=$SLURM_PROCID; ' + script
                 script += rclone_flush_script
                 sky_env_vars_dict['{constants.SKYPILOT_NUM_GPUS_PER_NODE}'] = {num_gpus}
                 # TODO(kevin): Handle multi-node job log paths.
@@ -422,7 +421,7 @@ class SlurmCodeGen(TaskCodeGen):
                     env_vars=sky_env_vars_dict,
                     stream_logs=True,
                     with_ray=False,
-                    streaming_prefix=f'{{colorama.Fore.CYAN}}(sky-cmd, pid={{{{pid}}}}){{colorama.Style.RESET_ALL}} ',
+                    streaming_prefix=f'{{colorama.Fore.CYAN}}({task_name}, pid={{{{pid}}}}){{colorama.Style.RESET_ALL}} ',
                 )
 
                 returncodes = [int(result.get('return_code', 1))]

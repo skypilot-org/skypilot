@@ -57,10 +57,13 @@ def test_example_app():
 # ---------- A minimal task ----------
 def test_minimal(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
+    check_raylet_cmd = '"prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"'
+    if generic_cloud == 'slurm':
+        check_raylet_cmd = 'true'
     test = smoke_tests_utils.Test(
         'minimal',
         [
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && echo OUTPUT && echo $s && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             # Output validation done.
             f'sky logs {name} 1 --status',
             f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',  # Equivalent.
@@ -75,7 +78,7 @@ def test_minimal(generic_cloud: str):
             '  && expanded_log_path=$(eval echo "$log_path") && echo "$expanded_log_path" '
             '  && test -f $expanded_log_path/run.log',
             # Ensure the raylet process has the correct file descriptor limit.
-            f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',
+            f'sky exec {name} {check_raylet_cmd}',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             # Install jq for the next test.
             f'sky exec {name} \'sudo apt-get update && sudo apt-get install -y jq\'',

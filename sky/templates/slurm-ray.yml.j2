@@ -89,7 +89,7 @@ setup_commands:
     sudo dpkg --configure -a;
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     {{ conda_installation_commands }}
-    mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
+    {{ setup_sky_dirs_commands }}
     {{ skypilot_wheel_installation_commands }}
 
 head_node: {}

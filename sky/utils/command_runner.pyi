@@ -311,6 +311,8 @@ class SlurmCommandRunner(SSHCommandRunner):
     """Runner for Slurm commands."""
     sky_dir: str
     skypilot_runtime_dir: str
+    job_id: str
+    slurm_node: str
 
     def __init__(
         self,
@@ -320,6 +322,8 @@ class SlurmCommandRunner(SSHCommandRunner):
         *,
         sky_dir: str,
         skypilot_runtime_dir: str,
+        job_id: str,
+        slurm_node: str,
         **kwargs,
     ) -> None:
         ...

@@ -146,7 +146,9 @@ def init_db(func):
 
         with _db_init_lock:
             if _DB is None:
-                db_path = os.path.expanduser('~/.sky/jobs.db')
+                runtime_dir = os.environ.get(constants.SKY_RUNTIME_DIR_ENV_VAR,
+                                             os.path.expanduser('~'))
+                db_path = os.path.join(runtime_dir, '.sky/jobs.db')
                 os.makedirs(pathlib.Path(db_path).parents[0], exist_ok=True)
                 _DB = db_utils.SQLiteConn(db_path, create_table)
         return func(*args, **kwargs)

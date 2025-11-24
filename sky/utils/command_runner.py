@@ -1293,6 +1293,8 @@ class SlurmCommandRunner(SSHCommandRunner):
         *,
         sky_dir: str,
         skypilot_runtime_dir: str,
+        job_id: str,
+        slurm_node: str,
         **kwargs,
     ):
         """Initialize SlurmCommandRunner.
@@ -1303,7 +1305,9 @@ class SlurmCommandRunner(SSHCommandRunner):
                 ssh_user,
                 ssh_private_key,
                 sky_dir=sky_dir,
-                skypilot_runtime_dir=skypilot_runtime_dir)
+                skypilot_runtime_dir=skypilot_runtime_dir,
+                job_id=job_id,
+                slurm_node=slurm_node)
             runner.run('ls -l', mode=SshMode.NON_INTERACTIVE)
             runner.rsync(source, target, up=True)
 
@@ -1315,12 +1319,16 @@ class SlurmCommandRunner(SSHCommandRunner):
               Slurm cluster.
             skypilot_runtime_dir: The directory for the SkyPilot runtime
               on the Slurm cluster.
+            job_id: The Slurm job ID for this instance.
+            slurm_node: The Slurm node hostname for this instance.
             **kwargs: Additional arguments forwarded to SSHCommandRunner
               (e.g., ssh_proxy_command).
         """
         super().__init__(node, ssh_user, ssh_private_key, **kwargs)
         self.sky_dir = sky_dir
         self.skypilot_runtime_dir = skypilot_runtime_dir
+        self.job_id = job_id
+        self.slurm_node = slurm_node
 
     def rsync(
         self,
@@ -1332,18 +1340,49 @@ class SlurmCommandRunner(SSHCommandRunner):
         stream_logs: bool = True,
         max_retry: int = 1,
     ) -> None:
-        """Override rsync to use sky_dir as the remote home directory.
+        """Rsyncs files directly to the Slurm compute node,
+        by proxying through the Slurm login node.
 
-        For Slurm clusters with shared home directories, we need to ensure
-        all files are synced to the isolated sky_dir, not the shared home.
+        For Slurm, files need to be accessible by compute nodes where jobs
+        execute via srun. This means either it has to be on the compute node's
+        local filesystem, or on a shared filesystem.
         """
-        return super().rsync(source,
-                             target,
-                             up=up,
-                             log_path=log_path,
-                             stream_logs=stream_logs,
-                             max_retry=max_retry,
-                             get_remote_home_dir=lambda: self.sky_dir)
+        # TODO(kevin): We can probably optimize this to skip the proxying
+        # if the target dir is in a shared filesystem, since it will
+        # be accessible by the compute node.
+
+        # Build ProxyCommand to proxy through the Slurm login node to
+        # the compute node where the job is running.
+        proxy_ssh_options = ' '.join(
+            ssh_options_list(
+                self.ssh_private_key,
+                None,
+                ssh_proxy_command=self._ssh_proxy_command,
+                port=self.port,
+                disable_control_master=True))
+        login_node_proxy_command = (f'ssh {proxy_ssh_options} '
+                               f'-W %h:%p {self.ssh_user}@{self.ip}')
+
+        # Build the complete SSH option to pass in to rsync -e 'ssh ...',
+        # utilizing the login node proxy command we have above.
+        ssh_options = ' '.join(
+            ssh_options_list(
+                None,  # Assume no key needed to ssh from login to compute node
+                None,
+                ssh_proxy_command=login_node_proxy_command,
+                disable_control_master=True))
+        rsh_option = f'ssh {ssh_options}'
+
+        self._rsync(source,
+                    target,
+                    # Compute node
+                    node_destination=f'{self.ssh_user}@{self.slurm_node}',
+                    up=up,
+                    rsh_option=rsh_option,
+                    log_path=log_path,
+                    stream_logs=stream_logs,
+                    max_retry=max_retry,
+                    get_remote_home_dir=lambda: self.sky_dir)
 
     @timeline.event
     @context_utils.cancellation_guard
@@ -1363,9 +1402,16 @@ class SlurmCommandRunner(SSHCommandRunner):
         # from one another. We rely on the assumption that ~ is exclusively
         # used by a cluster, and in Slurm that is not the case, as $HOME
         # could be part of a shared filesystem.
-        # Override SKY_REMOTE_PYTHON_ENV_DIR so that skypilot-runtime is
-        # installed to local disk instead of a shared filesystem.
-        cmd = (f'export SKY_REMOTE_PYTHON_ENV_DIR='
-               f'"{self.skypilot_runtime_dir}" && '
+        # And similarly for SKY_RUNTIME_DIR. See constants.\
+        # SKY_RUNTIME_DIR_ENV_VAR for more details.
+        cmd = (f'export {constants.SKY_RUNTIME_DIR_ENV_VAR}="{self.skypilot_runtime_dir}" && '
                f'cd {self.sky_dir} && export HOME=$(pwd) && {cmd}')
+
+        # Wrap the command in srun to execute on the specific compute node
+        # instead of the login node. This ensures conda and other installations
+        # happen on the compute node's local /tmp.
+        # --overlap allows multiple job steps to run simultaneously on the same allocation
+        cmd = (f'srun --quiet --overlap --jobid={self.job_id} --nodelist={self.slurm_node} '
+               f'--nodes=1 --ntasks=1 bash -c {shlex.quote(cmd)}')
+
         return super().run(cmd, **kwargs)
