@@ -2,6 +2,7 @@
 
 import logging
 import re
+import time
 from typing import Dict, List, Optional, Tuple, Union
 
 from sky.utils import command_runner
@@ -39,8 +40,9 @@ class SlurmClient:
 
         # Internal runner for executing Slurm CLI commands
         # on the controller node.
+        port = int(ssh_port) if isinstance(ssh_port, str) else ssh_port
         self._runner = command_runner.SSHCommandRunner(
-            (ssh_host, ssh_port),
+            (ssh_host, port),
             ssh_user,
             ssh_key,
             ssh_proxy_command=ssh_proxy_command,
@@ -55,13 +57,13 @@ class SlurmClient:
 
         Args:
             job_name: Optional job name to filter by.
-            state_filters: List of job states to filter by (e.g., ['running', 'pending']).
-                           If None, returns jobs in all states.
+            state_filters: List of job states to filter by
+                (e.g., ['running', 'pending']). If None, returns all jobs.
 
         Returns:
             List of job IDs matching the filters.
         """
-        cmd = f'squeue --me -h -o "%i"'
+        cmd = 'squeue --me -h -o "%i"'
         if state_filters is not None:
             state_filters_str = ','.join(state_filters)
             cmd += f' --states {state_filters_str}'
@@ -79,7 +81,9 @@ class SlurmClient:
         job_ids = stdout.strip().splitlines()
         return job_ids
 
-    def cancel_jobs_by_name(self, job_name: str, signal: Optional[str] = None) -> None:
+    def cancel_jobs_by_name(self,
+                            job_name: str,
+                            signal: Optional[str] = None) -> None:
         """Cancel Slurm job(s) by name.
 
         Args:
@@ -139,12 +143,11 @@ class SlurmClient:
             A dictionary of node attributes.
         """
 
-        # Helper function to parse scontrol output (can be moved to utils if needed)
         def _parse_scontrol_node_output(output: str) -> Dict[str, str]:
             """Parses the key=value output of 'scontrol show node'."""
             node_info = {}
-            # Split by space, handling values that might contain spaces if quoted
-            # This is a simplified parser; scontrol output can be complex.
+            # Split by space, handling values that might have spaces
+            # if quoted. This is simplified; scontrol can be complex.
             parts = output.split()
             for part in parts:
                 if '=' in part:
@@ -211,10 +214,11 @@ class SlurmClient:
         # This reduces the work required by slurmctld.
         cmd = f'squeue -h --only-job-state --jobs {job_id} -o "%T"'
         rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
+                                         require_outputs=True,
+                                         stream_logs=False)
         if rc != 0:
             # Job may not exist
+            logger.debug(f'Failed to get job state for job {job_id}: {stderr}')
             return None
 
         state = stdout.strip()
@@ -228,7 +232,6 @@ class SlurmClient:
             job_id: The Slurm job ID.
             timeout: Maximum time to wait in seconds (default: 300).
         """
-        import time
         start_time = time.time()
         last_state = None
 
@@ -240,34 +243,34 @@ class SlurmClient:
                 last_state = state
 
             if state is None:
-                raise RuntimeError(
-                    f'Job {job_id} not found. It may have been cancelled or failed.'
-                )
+                raise RuntimeError(f'Job {job_id} not found. It may have been '
+                                   'cancelled or failed.')
 
             if state in ('COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT'):
                 raise RuntimeError(
-                    f'Job {job_id} terminated with state {state} before nodes were allocated.'
-                )
+                    f'Job {job_id} terminated with state {state} '
+                    'before nodes were allocated.')
             # TODO(kevin): Log reason for pending.
 
             # Check if nodes are allocated by trying to get node list
             cmd = f'squeue -h --jobs {job_id} -o "%N"'
             rc, stdout, stderr = self._runner.run(cmd,
-                                                  require_outputs=True,
-                                                  stream_logs=False)
+                                             require_outputs=True,
+                                             stream_logs=False)
 
             if rc == 0 and stdout.strip():
                 # Nodes are allocated
                 logger.debug(
                     f'Job {job_id} has nodes allocated: {stdout.strip()}')
                 return
+            elif rc != 0:
+                logger.debug(f'Failed to get nodes for job {job_id}: {stderr}')
 
             # Wait before checking again
             time.sleep(2)
 
-        raise TimeoutError(
-            f'Job {job_id} did not get nodes allocated within {timeout} seconds. '
-            f'Last state: {last_state}')
+        raise TimeoutError(f'Job {job_id} did not get nodes allocated within '
+                           f'{timeout} seconds. Last state: {last_state}')
 
     @timeline.event
     def get_job_nodes(self,
@@ -357,8 +360,7 @@ class SlurmClient:
                 f'Failed to parse job ID from sbatch output: {stdout}')
 
         job_id = job_id_match.group(1).strip()
-        logger.debug(
-            f'Successfully submitted Slurm job {job_id} with name {job_name}: {stdout}'
-        )
+        logger.debug(f'Successfully submitted Slurm job {job_id} with name '
+                     f'{job_name}: {stdout}')
 
         return job_id

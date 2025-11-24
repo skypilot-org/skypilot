@@ -2,8 +2,7 @@
 
 import collections
 import re
-import subprocess
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from sky import check as sky_check
 from sky import clouds as sky_clouds
@@ -11,7 +10,6 @@ from sky import sky_logging
 from sky.catalog import common
 from sky.clouds import cloud
 from sky.provision.slurm import utils as slurm_utils
-from sky.utils import common_utils
 from sky.utils import resources_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -26,12 +24,10 @@ def get_default_instance_type(cpus: Optional[str] = None,
                                   resources_utils.DiskTier] = None,
                               region: Optional[str] = None,
                               zone: Optional[str] = None) -> Optional[str]:
-    from sky.provision.slurm import utils as slurm_utils
+    # Delete unused parameters.
+    del disk_tier, region, zone
 
-    # Delete unused disk_tier.
-    del disk_tier
-
-    # Slurm can provision resources through options like --cpus-per-task and --mem.
+    # Slurm provisions resources via --cpus-per-task and --mem.
     instance_cpus = float(
         cpus.strip('+')) if cpus is not None else _DEFAULT_NUM_VCPUS
     if memory is not None:
@@ -88,7 +84,11 @@ def list_accelerators_realtime(
         return {}, {}, {}
 
     if region_filter is None:
-        slurm_cluster = slurm_utils.get_default_slurm_cluster_name()
+        # Get the first available cluster as default
+        all_clusters = slurm_utils.get_all_slurm_cluster_names()
+        if not all_clusters:
+            return {}, {}, {}
+        slurm_cluster = all_clusters[0]
     else:
         slurm_cluster = region_filter
 

@@ -17,11 +17,10 @@ from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import registry
 from sky.utils import resources_utils
-from sky.utils import subprocess_utils
-from sky.utils import volume as volume_lib
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
+    from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -55,7 +54,7 @@ class Slurm(clouds.Cloud):
     @classmethod
     def _unsupported_features_for_resources(
         cls,
-        resources: 'resources_utils.Resources',
+        resources: 'resources_lib.Resources',
         region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         del region  # unused
@@ -85,7 +84,8 @@ class Slurm(clouds.Cloud):
         use_spot: bool = False,
     ) -> Iterator[Optional[List[clouds.Zone]]]:
         # Always yield None for zones because Slurm does not support zones.
-        # This allows handling for any region without being restricted by zone logic.
+        # This allows handling for any region without being restricted by
+        # zone logic.
         yield None
 
     @classmethod
@@ -274,8 +274,9 @@ class Slurm(clouds.Cloud):
         ssh_config = SSHConfig.from_path(os.path.expanduser(CREDENTIAL_PATH))
         ssh_config_dict = ssh_config.lookup(cluster)
 
-        r = resources
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        resources = resources.assert_launchable()
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
@@ -300,7 +301,7 @@ class Slurm(clouds.Cloud):
             'slurm_partition': slurm_utils.DEFAULT_PARTITION,
             # TODO(jwj): Pass SSH config in a smarter way
             'ssh_hostname': ssh_config_dict['hostname'],
-            'ssh_port': ssh_config_dict.get('port', 22),
+            'ssh_port': str(ssh_config_dict.get('port', 22)),
             'ssh_user': ssh_config_dict['user'],
             'slurm_proxy_command': ssh_config_dict.get('proxycommand', None),
             # TODO(jwj): Solve naming collision with 'ssh_private_key'.
@@ -352,6 +353,8 @@ class Slurm(clouds.Cloud):
             disk_tier=resources.disk_tier,
             region=resources.region,
             zone=resources.zone)
+        if default_instance_type is None:
+            return resources_utils.FeasibleResources([], [], None)
 
         if accelerators is None:
             chosen_instance_type = default_instance_type
@@ -369,14 +372,16 @@ class Slurm(clouds.Cloud):
             # if resources.cpus is None:
             #     gpu_task_cpus = self._DEFAULT_NUM_VCPUS_WITH_GPU * acc_count
             # gpu_task_memory = (float(resources.memory.strip('+')) if
-            #                    resources.memory is not None else gpu_task_cpus *
+            #                    resources.memory is not None else
+            #                    gpu_task_cpus *
             #                    self._DEFAULT_MEMORY_CPU_RATIO_WITH_GPU)
 
             chosen_instance_type = (
                 slurm_utils.SlurmInstanceType.from_resources(
                     gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name)
 
-        # Check the availability of the specified instance type in all Slurm clusters.
+        # Check the availability of the specified instance type in all
+        # Slurm clusters.
         available_regions = self.regions_with_offering(
             chosen_instance_type,
             accelerators=None,
@@ -452,13 +457,22 @@ class Slurm(clouds.Cloud):
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
         return catalog.validate_region_zone(region, zone, clouds='slurm')
 
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        return catalog.accelerator_in_region_or_zone(accelerator, acc_count,
-                                                     region, zone, 'slurm')
+    def accelerator_in_region_or_zone(
+            self,
+            accelerator: str,
+            acc_count: int,
+            region: Optional[str] = None,
+            zone: Optional[str] = None) -> bool:
+        del zone  # unused for now
+        regions = catalog.get_region_zones_for_accelerators(accelerator,
+                                                            acc_count,
+                                                            use_spot=False,
+                                                            clouds='slurm')
+        if not regions:
+            return False
+        if region is None:
+            return True
+        return any(r.name == region for r in regions)
 
     @classmethod
     def expand_infras(cls) -> List[str]:

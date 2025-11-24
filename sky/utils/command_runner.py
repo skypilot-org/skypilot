@@ -905,8 +905,8 @@ class SSHCommandRunner(CommandRunner):
             stream_logs: Stream logs to the stdout/stderr.
             max_retry: The maximum number of retries for the rsync command.
               This value should be non-negative.
-            get_remote_home_dir: A callable that returns the remote home directory.
-              Defaults to '~'.
+            get_remote_home_dir: A callable that returns the remote home
+              directory. Defaults to '~'.
 
         Raises:
             exceptions.CommandError: rsync command failed.
@@ -1298,11 +1298,12 @@ class SlurmCommandRunner(SSHCommandRunner):
         """Initialize SlurmCommandRunner.
 
         Example Usage:
-            runner = SlurmCommandRunner((ip, port),
-                                        ssh_user,
-                                        ssh_private_key,
-                                        sky_dir=sky_dir,
-                                        skypilot_runtime_dir=skypilot_runtime_dir)
+            runner = SlurmCommandRunner(
+                (ip, port),
+                ssh_user,
+                ssh_private_key,
+                sky_dir=sky_dir,
+                skypilot_runtime_dir=skypilot_runtime_dir)
             runner.run('ls -l', mode=SshMode.NON_INTERACTIVE)
             runner.rsync(source, target, up=True)
 
@@ -1310,9 +1311,12 @@ class SlurmCommandRunner(SSHCommandRunner):
             node: (ip, port) The IP address and port of the remote machine.
             ssh_user: SSH username.
             ssh_private_key: Path to SSH private key.
-            sky_dir: The private directory for the SkyPilot cluster on the Slurm cluster.
-            skypilot_runtime_dir: The directory for the SkyPilot runtime on the Slurm cluster.
-            **kwargs: Additional arguments forwarded to SSHCommandRunner (e.g., ssh_proxy_command).
+            sky_dir: The private directory for the SkyPilot cluster on the
+              Slurm cluster.
+            skypilot_runtime_dir: The directory for the SkyPilot runtime
+              on the Slurm cluster.
+            **kwargs: Additional arguments forwarded to SSHCommandRunner
+              (e.g., ssh_proxy_command).
         """
         super().__init__(node, ssh_user, ssh_private_key, **kwargs)
         self.sky_dir = sky_dir
@@ -1361,6 +1365,7 @@ class SlurmCommandRunner(SSHCommandRunner):
         # could be part of a shared filesystem.
         # Override SKY_REMOTE_PYTHON_ENV_DIR so that skypilot-runtime is
         # installed to local disk instead of a shared filesystem.
-        cmd = (f'export SKY_REMOTE_PYTHON_ENV_DIR="{self.skypilot_runtime_dir}" && '
+        cmd = (f'export SKY_REMOTE_PYTHON_ENV_DIR='
+               f'"{self.skypilot_runtime_dir}" && '
                f'cd {self.sky_dir} && export HOME=$(pwd) && {cmd}')
         return super().run(cmd, **kwargs)

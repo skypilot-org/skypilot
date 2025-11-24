@@ -1,30 +1,22 @@
 """Slurm utilities for SkyPilot."""
-import collections
 import math
 import os
 import re
-import shlex
-import subprocess
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from paramiko.config import SSHConfig
 
 from sky import exceptions
-from sky import models
 from sky import sky_logging
 from sky.adaptors import slurm
-from sky.utils import annotations
-from sky.utils import command_runner
 from sky.utils import common_utils
-from sky.utils import subprocess_utils
-from sky.utils import timeline
 
 logger = sky_logging.init_logger(__name__)
 
 # TODO(jwj): Choose commonly used default values.
 DEFAULT_SLURM_PATH = '~/.slurm/config'
-DEFAULT_CLUSTER_NAME = "localcluster"
-DEFAULT_PARTITION = "dev"
+DEFAULT_CLUSTER_NAME = 'localcluster'
+DEFAULT_PARTITION = 'dev'
 
 
 class SlurmInstanceType:
@@ -197,12 +189,12 @@ def get_all_slurm_cluster_names() -> List[str]:
         ssh_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
     except Exception as e:
         raise ValueError(
-            f'Failed to load SSH configuration from {DEFAULT_SLURM_PATH}: {common_utils.format_exception(e)}'
-        )
+            f'Failed to load SSH configuration from {DEFAULT_SLURM_PATH}: '
+            f'{common_utils.format_exception(e)}') from e
 
     cluster_names = []
     for cluster in ssh_config.get_hostnames():
-        if cluster == "*":
+        if cluster == '*':
             continue
 
         cluster_names.append(cluster)
@@ -246,7 +238,9 @@ def check_instance_fits(cluster: str,
             if gres_str == gres_to_match:
                 gpu_nodes.append(node)
         if len(gpu_nodes) == 0:
-            return False, f'No GPU nodes found with {acc_type}:{acc_count} on the cluster.'
+            return (False,
+                    f'No GPU nodes found with {acc_type}:{acc_count} on the '
+                    f'cluster.')
 
         candidate_nodes = gpu_nodes
         not_fit_reason_prefix = (f'GPU nodes with {acc_type} do not have '
@@ -284,8 +278,8 @@ def _get_slurm_node_info_list(
             slurm_cluster_name = slurm_cluster_names[0]
     if slurm_cluster_name is None:
         raise ValueError(
-            f'No Slurm cluster name found in the {DEFAULT_SLURM_PATH} configuration.'
-        )
+            f'No Slurm cluster name found in the {DEFAULT_SLURM_PATH} '
+            f'configuration.')
     slurm_config_dict = slurm_config.lookup(slurm_cluster_name)
     logger.debug(f'Slurm config dict: {slurm_config_dict}')
     slurm_client = slurm.SlurmClient(
@@ -299,8 +293,8 @@ def _get_slurm_node_info_list(
 
     if not sinfo_output:
         logger.warning(
-            f'`sinfo -N` returned no output on cluster {slurm_cluster_name}. No nodes found?'
-        )
+            f'`sinfo -N` returned no output on cluster {slurm_cluster_name}. '
+            f'No nodes found?')
         return []
 
     # 2. Process each node

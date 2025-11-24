@@ -235,17 +235,16 @@ def _get_cluster_records_and_set_ssh_config(
             controller_host = handle.cached_external_ips[0]
 
             # Build jump proxy: ssh to worker via controller/login node
-            proxy_command = (
-                f'ssh -tt -i {escaped_key_path} '
-                '-o StrictHostKeyChecking=no '
-                '-o UserKnownHostsFile=/dev/null '
-                '-o IdentitiesOnly=yes '
-                '-W %h:%p '
-                f'{handle.ssh_user}@{controller_host}'
-            )
+            proxy_command = (f'ssh -tt -i {escaped_key_path} '
+                             '-o StrictHostKeyChecking=no '
+                             '-o UserKnownHostsFile=/dev/null '
+                             '-o IdentitiesOnly=yes '
+                             '-W %h:%p '
+                             f'{handle.ssh_user}@{controller_host}')
             original_proxy = credentials.get('ssh_proxy_command')
             if original_proxy:
-                proxy_command += f' -o ProxyCommand={shlex.quote(original_proxy)}'
+                proxy_command += (
+                    f' -o ProxyCommand={shlex.quote(original_proxy)}')
 
             credentials['ssh_proxy_command'] = proxy_command
 
@@ -3814,10 +3813,8 @@ def show_gpus(
         """
         if quantity_filter:
             qty_header = 'QTY_FILTER'
-            free_header = 'FILTERED_FREE_GPUS'
         else:
             qty_header = 'REQUESTABLE_QTY_PER_NODE'
-            free_header = 'TOTAL_FREE_GPUS'
 
         realtime_gpu_availability_lists = sdk.stream_and_get(
             sdk.realtime_slurm_gpu_availability(
@@ -3853,7 +3850,8 @@ def show_gpus(
                 realtime_gpu_table.add_row([
                     gpu_availability.gpu,
                     _list_to_str(requestable_quantities),
-                    f'{gpu_availability.available} of {gpu_availability.capacity} free',
+                    (f'{gpu_availability.available} of '
+                     f'{gpu_availability.capacity} free'),
                 ])
                 gpu = gpu_availability.gpu
                 capacity = gpu_availability.capacity
@@ -3869,7 +3867,8 @@ def show_gpus(
             total_realtime_gpu_table = log_utils.create_table(
                 ['GPU', 'UTILIZATION'])
             for gpu, stats in total_gpu_info.items():
-                total_realtime_gpu_table.add_row([gpu, f'{stats[1]} of {stats[0]} free'])
+                total_realtime_gpu_table.add_row(
+                    [gpu, f'{stats[1]} of {stats[0]} free'])
         else:
             total_realtime_gpu_table = None
 
@@ -3929,7 +3928,8 @@ def show_gpus(
                 node_info.get('partition', '-'),
                 node_info.get('node_state'),
                 node_info.get('gpu_type', '-'),
-                f'{node_info.get("free_gpus", 0)} of {node_info.get("total_gpus", 0)} free',
+                (f'{node_info.get("free_gpus", 0)} of '
+                 f'{node_info.get("total_gpus", 0)} free'),
             ])
 
         slurm_per_node_msg = 'Slurm per node accelerator availability'
@@ -4074,8 +4074,8 @@ def show_gpus(
             show_node_info: bool) -> Generator[str, None, None]:
         # print total table
         yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
-                'Slurm GPUs'
-                f'{colorama.Style.RESET_ALL}\n')
+               'Slurm GPUs'
+               f'{colorama.Style.RESET_ALL}\n')
         if total_table is not None:
             yield from total_table.get_string()
             yield '\n'

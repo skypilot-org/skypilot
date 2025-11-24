@@ -234,7 +234,8 @@ def run_with_log(
             # Format streaming_prefix with subprocess PID if it contains {pid}
             formatted_streaming_prefix = streaming_prefix
             if streaming_prefix and '{pid}' in streaming_prefix:
-                formatted_streaming_prefix = streaming_prefix.format(pid=proc.pid)
+                formatted_streaming_prefix = streaming_prefix.format(
+                    pid=proc.pid)
 
             stdout = ''
             stderr = ''
@@ -384,9 +385,12 @@ def run_bash_command_with_log_and_return_pid(
         stream_logs: bool = False,
         with_ray: bool = False,
         streaming_prefix: Optional[str] = None):
-    return_code = run_bash_command_with_log(bash_command, log_path, env_vars,
-                                       stream_logs, with_ray,
-                                       streaming_prefix=streaming_prefix)
+    return_code = run_bash_command_with_log(bash_command,
+                                            log_path,
+                                            env_vars,
+                                            stream_logs,
+                                            with_ray,
+                                            streaming_prefix=streaming_prefix)
     return {'return_code': return_code, 'pid': os.getpid()}
 
 

@@ -959,10 +959,7 @@ async function getSlurmClusterGPUs() {
         if (data.detail && data.detail.error) {
           try {
             const error = JSON.parse(data.detail.error);
-            console.error(
-              'Error fetching Slurm cluster GPUs:',
-              error.message
-            );
+            console.error('Error fetching Slurm cluster GPUs:', error.message);
           } catch (jsonError) {
             console.error('Error parsing JSON for Slurm error:', jsonError);
           }
@@ -977,9 +974,7 @@ async function getSlurmClusterGPUs() {
       throw new Error(msg);
     }
     const data = await fetchedData.json();
-    const clusterGPUs = data.return_value
-      ? JSON.parse(data.return_value)
-      : [];
+    const clusterGPUs = data.return_value ? JSON.parse(data.return_value) : [];
     return clusterGPUs;
   } catch (error) {
     console.error('Error fetching Slurm cluster GPUs:', error);
@@ -1123,4 +1118,3 @@ async function getSlurmServiceGPUs() {
     };
   }
 }
-

@@ -1,5 +1,4 @@
 """SDK functions for cluster/job management."""
-import collections
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -1361,8 +1360,9 @@ def realtime_slurm_gpu_availability(
                 catalog.list_accelerator_realtime(
                     gpus_only=True,  # Ensure we only query for GPUs
                     name_filter=name_filter,
-                    # Pass None for region_filter here; filtering happens inside if
-                    # needed, but we want all partitions returned for grouping.
+                    # Pass None for region_filter here; filtering happens
+                    # inside if needed, but we want all partitions returned
+                    # for grouping.
                     region_filter=slurm_cluster_name,
                     quantity_filter=quantity_filter,
                     clouds='slurm',

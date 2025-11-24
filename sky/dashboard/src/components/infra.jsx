@@ -374,18 +374,16 @@ export function InfrastructureSection({
                         const requestableQtys = groupedPerContextGPUs
                           ? Object.values(groupedPerContextGPUs)
                               .flat()
-                              .filter(
-                                (g) => {
-                                  if (g.gpu_name !== gpu.gpu_name) return false;
-                                  if (isSlurm) return true; // For Slurm, include all
-                                  // For Kubernetes/SSH, filter by context type
-                                  const contextKey = g.context || g.cluster;
-                                  if (!contextKey) return false;
-                                  return isSSH
-                                    ? contextKey.startsWith('ssh-')
-                                    : !contextKey.startsWith('ssh-');
-                                }
-                              )
+                              .filter((g) => {
+                                if (g.gpu_name !== gpu.gpu_name) return false;
+                                if (isSlurm) return true; // For Slurm, include all
+                                // For Kubernetes/SSH, filter by context type
+                                const contextKey = g.context || g.cluster;
+                                if (!contextKey) return false;
+                                return isSSH
+                                  ? contextKey.startsWith('ssh-')
+                                  : !contextKey.startsWith('ssh-');
+                              })
                               .map((g) => g.gpu_requestable_qty_per_node)
                               .filter((qty, i, arr) => arr.indexOf(qty) === i) // Unique values
                               .join(', ')
@@ -2131,7 +2129,9 @@ export function GPUs() {
     if (!perClusterSlurmGPUs || !Array.isArray(perClusterSlurmGPUs)) {
       return [];
     }
-    const clusters = [...new Set(perClusterSlurmGPUs.map((gpu) => gpu.cluster))];
+    const clusters = [
+      ...new Set(perClusterSlurmGPUs.map((gpu) => gpu.cluster)),
+    ];
     return clusters.sort();
   }, [perClusterSlurmGPUs]);
 
