@@ -144,8 +144,7 @@ def handle_returncode(returncode: int,
                       command: str,
                       error_msg: Union[str, Callable[[], str]],
                       stderr: Optional[str] = None,
-                      stream_logs: bool = True,
-                      redacted_cmd: Optional[str] = None) -> None:
+                      stream_logs: bool = True) -> None:
     """Handle the returncode of a command.
 
     Args:
@@ -165,8 +164,6 @@ def handle_returncode(returncode: int,
         format_err_msg = (
             f'{colorama.Fore.RED}{error_msg}{colorama.Style.RESET_ALL}')
         with ux_utils.print_exception_no_traceback():
-            if redacted_cmd is not None:
-                command = redacted_cmd
             raise exceptions.CommandError(returncode, command, format_err_msg,
                                           stderr)
 
