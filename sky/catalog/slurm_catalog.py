@@ -18,6 +18,11 @@ _DEFAULT_NUM_VCPUS = 2
 _DEFAULT_MEMORY_CPU_RATIO = 1
 
 
+def instance_type_exists(instance_type: str) -> bool:
+    """Check if the given instance type is valid for Slurm."""
+    return slurm_utils.SlurmInstanceType.is_valid_instance_type(instance_type)
+
+
 def get_default_instance_type(cpus: Optional[str] = None,
                               memory: Optional[str] = None,
                               disk_tier: Optional[
