@@ -655,7 +655,8 @@ app.add_middleware(BearerTokenMiddleware)
 app.add_middleware(InitializeRequestAuthUserMiddleware)
 app.add_middleware(RequestIDMiddleware)
 
-logger.info(f'PID {os.getpid()}: Loading plugins...')
+# Load plugins after all the middlewares are added, to keep the core
+# middleware stack intact if a plugin adds new middlewares.
 plugins.load_plugins(plugins.ExtensionContext(app=app))
 
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
