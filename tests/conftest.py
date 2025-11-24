@@ -820,7 +820,7 @@ def setup_slurm_env(request):
     if not request.config.getoption('--slurm'):
         yield
         return
-    os.environ['SKYPILOT_ENABLE_SLURM'] = '1'
+    os.environ['PYTEST_SKYPILOT_ENABLE_SLURM'] = '1'
     yield
 
 
