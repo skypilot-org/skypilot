@@ -187,6 +187,8 @@ def get_all_slurm_cluster_names() -> List[str]:
     """
     try:
         ssh_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
+    except FileNotFoundError:
+        return []
     except Exception as e:
         raise ValueError(
             f'Failed to load SSH configuration from {DEFAULT_SLURM_PATH}: '
