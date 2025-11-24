@@ -2987,7 +2987,7 @@ def is_controller_accessible(
         exceptions.ClusterNotUpError: if the controller is not accessible, or
           failed to be connected.
     """
-    if (managed_job_utils.is_consolidation_mode(validate=True) and
+    if (managed_job_utils.is_consolidation_mode() and
             controller == controller_utils.Controllers.JOBS_CONTROLLER
        ) or (serve_utils.is_consolidation_mode() and
              controller == controller_utils.Controllers.SKY_SERVE_CONTROLLER):

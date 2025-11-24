@@ -223,7 +223,7 @@ def _validate_consolidation_mode_config(
 # directly in the API Server.
 # Use LRU Cache so that the check is only done once.
 @annotations.lru_cache(scope='request', maxsize=2)
-def is_consolidation_mode(on_api_restart: bool = False, validate=False) -> bool:
+def is_consolidation_mode(on_api_restart: bool = False) -> bool:
     if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
         return True
 
@@ -255,8 +255,7 @@ def is_consolidation_mode(on_api_restart: bool = False, validate=False) -> bool:
     # We should only do this check on API server, as the controller will not
     # have related config and will always seemingly disabled for consolidation
     # mode. Check #6611 for more details.
-    if validate and os.environ.get(
-            constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         _validate_consolidation_mode_config(config_consolidation_mode)
     return config_consolidation_mode
 
