@@ -44,6 +44,23 @@ def get_default_instance_type(cpus: Optional[str] = None,
     return virtual_instance_type
 
 
+def list_accelerators(
+        gpus_only: bool,
+        name_filter: Optional[str],
+        region_filter: Optional[str],
+        quantity_filter: Optional[int],
+        case_sensitive: bool = True,
+        all_regions: bool = False,
+        require_price: bool = True) -> Dict[str, List[common.InstanceTypeInfo]]:
+    """List accelerators in Slurm clusters.
+
+    Returns a dictionary mapping GPU type to a list of InstanceTypeInfo objects.
+    """
+    return list_accelerators_realtime(gpus_only, name_filter, region_filter,
+                                      quantity_filter, case_sensitive,
+                                      all_regions, require_price)[0]
+
+
 def list_accelerators_realtime(
     gpus_only: bool = True,
     name_filter: Optional[str] = None,
