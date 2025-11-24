@@ -2915,7 +2915,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     @property
     def is_grpc_enabled_with_flag(self) -> bool:
         """Returns whether this handle has gRPC enabled and gRPC flag is set."""
-        return env_options.Options.ENABLE_GRPC.get() and self.is_grpc_enabled
+        return (env_options.Options.ENABLE_GRPC.get() and
+                self.is_grpc_enabled and
+                not isinstance(self.launched_resources.cloud, clouds.Slurm))
 
     def __getstate__(self):
         state = self.__dict__.copy()

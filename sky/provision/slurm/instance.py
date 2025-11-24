@@ -2,7 +2,7 @@
 
 import tempfile
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, cast, Dict, List, Optional, Tuple
 
 from sky import sky_logging
 from sky.adaptors import slurm
@@ -411,9 +411,9 @@ def terminate_instances(
 
 
 def open_ports(
-        cluster_name_on_cloud: str,
-        ports: List[str],
-        provider_config: Optional[Dict[str, Any]] = None,
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
     del cluster_name_on_cloud, ports, provider_config
@@ -421,9 +421,9 @@ def open_ports(
 
 
 def cleanup_ports(
-        cluster_name_on_cloud: str,
-        ports: List[str],
-        provider_config: Optional[Dict[str, Any]] = None,
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
     del cluster_name_on_cloud, ports, provider_config
@@ -454,9 +454,13 @@ def get_command_runners(
 
     # Note: For Slurm, the external IP for all instances is the same,
     # it is the login node's. The internal IP is the private IP of the node.
+    ssh_user = cast(str, credentials.pop('ssh_user'))
+    ssh_private_key = cast(str, credentials.pop('ssh_private_key'))
     runners: List[command_runner.CommandRunner] = [
         command_runner.SlurmCommandRunner(
             (instance_info.external_ip or '', instance_info.ssh_port),
+            ssh_user,
+            ssh_private_key,
             sky_dir=_sky_cluster_home_dir(cluster_name_on_cloud),
             skypilot_runtime_dir=_skypilot_runtime_dir(cluster_name_on_cloud),
             job_id=instance_info.tags['job_id'],
