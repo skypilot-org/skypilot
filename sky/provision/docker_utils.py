@@ -176,6 +176,15 @@ def _with_interactive(cmd):
     return ['bash', '--login', '-c', '-i', shlex.quote(force_interactive)]
 
 
+def _redact_docker_password(cmd: str) -> str:
+    parts = shlex.split(cmd)
+    for i, part in enumerate(parts):
+        if part == '--password':
+            if i + 1 < len(parts):
+                parts[i + 1] = '<redacted>'
+    return ' '.join(parts)
+
+
 # SkyPilot: New class to initialize docker containers on a remote node.
 # Adopted from ray.autoscaler._private.command_runner.DockerCommandRunner.
 class DockerInitializer:
@@ -220,14 +229,8 @@ class DockerInitializer:
                    f'-c {shlex.quote(cmd)}')
 
         # Redact the password in the login command.
-        parts = shlex.split(cmd)
-        for i, part in enumerate(parts):
-            if part == '--password':
-                if i + 1 < len(parts):
-                    parts[i + 1] = '<redacted>'
-        cmd_logged = ' '.join(parts)
-
-        logger.debug(f'+ {cmd_logged}')
+        redacted_cmd = _redact_docker_password(cmd)
+        logger.debug(f'+ {redacted_cmd}')
         start = time.time()
         while True:
             rc, stdout, stderr = self.runner.run(
@@ -263,7 +266,8 @@ class DockerInitializer:
             error_msg='Failed to run docker setup commands.',
             stderr=stdout + stderr,
             # Print out the error message if the command failed.
-            stream_logs=log_err_when_fail)
+            stream_logs=log_err_when_fail,
+            redacted_cmd=redacted_cmd)
         return stdout.strip()
 
     def initialize(self) -> str:
