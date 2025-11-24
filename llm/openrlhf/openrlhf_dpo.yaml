@@ -1,5 +1,7 @@
 # Adapted from https://openrlhf.readthedocs.io/en/latest/non_rl.html#direct-preference-optimization-dpo
-# sky launch -c open-rlhf-dpo open-rlhf-dpo.yaml
+# To run simply run the following command in a SkyPilot environment (with GCP configured):
+# WANDB_TOKEN=xxx sky launch -c open-rlhf-dpo openrlhf_dpo.yaml --secret WANDB_TOKEN
+
 resources:
   infra: gcp
   accelerators: A100:8

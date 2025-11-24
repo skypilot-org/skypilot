@@ -1,4 +1,6 @@
 # Adapted from https://openrlhf.readthedocs.io/en/latest/rl.html#supervised-fine-tuning
+# To run simply run the following command in a SkyPilot environment (with GCP configured):
+# WANDB_TOKEN=xxx HF_TOKEN=xxx sky launch -c open-rlhf-sft openrlhf_sft.yaml --secret WANDB_TOKEN --secret HF_TOKEN
 
 resources:
   infra: gcp
