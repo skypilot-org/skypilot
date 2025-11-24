@@ -179,6 +179,7 @@ function normalizeNavLink(link) {
     label: String(link.label),
     href: String(link.href),
     order: Number.isFinite(link.order) ? link.order : 0,
+    group: link.group ? String(link.group) : null,
     target: link.target === '_blank' ? '_blank' : '_self',
     rel:
       link.rel ??
@@ -321,6 +322,30 @@ export function useTopNavLinks() {
       }),
     [topNavLinks]
   );
+}
+
+export function useGroupedNavLinks() {
+  const { topNavLinks } = usePluginState();
+
+  return useMemo(() => {
+    const sorted = [...topNavLinks].sort((a, b) => a.order - b.order);
+
+    // Separate links with and without group
+    const ungrouped = sorted.filter(link => !link.group);
+    const grouped = sorted.filter(link => link.group);
+
+    // Categorize by group
+    const groups = grouped.reduce((acc, link) => {
+      const groupName = link.group;
+      if (!acc[groupName]) {
+        acc[groupName] = [];
+      }
+      acc[groupName].push(link);
+      return acc;
+    }, {});
+
+    return { ungrouped, groups };
+  }, [topNavLinks]);
 }
 
 export function usePluginRoutes() {
