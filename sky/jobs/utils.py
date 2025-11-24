@@ -233,14 +233,11 @@ def is_consolidation_mode(on_api_restart: bool = False) -> bool:
     signal_file = pathlib.Path(
         _JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE).expanduser()
 
-    restart_signal_file_exists = signal_file.exists()
-    consolidation_mode = (config_consolidation_mode and
-                          restart_signal_file_exists)
-
     if on_api_restart:
         if config_consolidation_mode:
             signal_file.touch()
     else:
+        restart_signal_file_exists = signal_file.exists()
         if not restart_signal_file_exists:
             if config_consolidation_mode:
                 logger.warning(f'{colorama.Fore.YELLOW}Consolidation mode for '
@@ -259,8 +256,8 @@ def is_consolidation_mode(on_api_restart: bool = False) -> bool:
     # have related config and will always seemingly disabled for consolidation
     # mode. Check #6611 for more details.
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-        _validate_consolidation_mode_config(consolidation_mode)
-    return consolidation_mode
+        _validate_consolidation_mode_config(config_consolidation_mode)
+    return config_consolidation_mode
 
 
 def ha_recovery_for_consolidation_mode() -> None:
