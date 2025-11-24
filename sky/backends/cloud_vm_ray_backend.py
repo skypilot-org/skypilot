@@ -3592,6 +3592,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                               dryrun, stream_logs, cluster_name,
                                               retry_until_up,
                                               skip_unnecessary_provisioning)
+            except exceptions.ExecutionRetryableError as e:
+                # When retry_until_up is set and all zones fail, sleep and
+                # retry.
+                logger.info(e.hint)
+                time.sleep(e.retry_wait_seconds)
+                # Continue the loop to retry provisioning.
+                continue
             except locks.LockTimeout:
                 if not communicated_with_user:
                     rich_utils.force_update_status(
