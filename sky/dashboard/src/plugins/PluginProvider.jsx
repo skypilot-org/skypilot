@@ -159,7 +159,10 @@ function extractJsPath(pluginDescriptor) {
     return null;
   }
   if (pluginDescriptor.js_extension_path) {
-    console.log('Extracting JS extension path:', pluginDescriptor.js_extension_path);
+    console.log(
+      'Extracting JS extension path:',
+      pluginDescriptor.js_extension_path
+    );
     return pluginDescriptor.js_extension_path;
   }
   return null;
@@ -188,8 +191,7 @@ function normalizeNavLink(link) {
         : undefined),
     external:
       link.external ??
-      (/^(https?:)?\/\//.test(String(link.href)) ||
-        link.target === '_blank'),
+      (/^(https?:)?\/\//.test(String(link.href)) || link.target === '_blank'),
     badge: typeof link.badge === 'string' ? link.badge : null,
     icon: typeof link.icon === 'string' ? link.icon : null,
     description:
@@ -331,8 +333,8 @@ export function useGroupedNavLinks() {
     const sorted = [...topNavLinks].sort((a, b) => a.order - b.order);
 
     // Separate links with and without group
-    const ungrouped = sorted.filter(link => !link.group);
-    const grouped = sorted.filter(link => link.group);
+    const ungrouped = sorted.filter((link) => !link.group);
+    const grouped = sorted.filter((link) => link.group);
 
     // Categorize by group
     const groups = grouped.reduce((acc, link) => {

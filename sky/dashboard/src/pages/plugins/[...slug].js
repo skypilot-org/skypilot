@@ -73,7 +73,9 @@ export default function PluginRoutePage() {
         route.id,
         error
       );
-      setMountError('Failed to render the plugin page. Check the browser console for details.');
+      setMountError(
+        'Failed to render the plugin page. Check the browser console for details.'
+      );
     }
 
     return () => {
@@ -81,13 +83,19 @@ export default function PluginRoutePage() {
         try {
           cleanup();
         } catch (error) {
-          console.warn('[SkyDashboardPlugin] Error during plugin route cleanup:', error);
+          console.warn(
+            '[SkyDashboardPlugin] Error during plugin route cleanup:',
+            error
+          );
         }
       } else if (route.unmount) {
         try {
           route.unmount({ container, route });
         } catch (error) {
-          console.warn('[SkyDashboardPlugin] Error during plugin unmount:', error);
+          console.warn(
+            '[SkyDashboardPlugin] Error during plugin unmount:',
+            error
+          );
         }
       }
       if (container) {

@@ -186,7 +186,10 @@ export function TopBar() {
         }
       }
       // Handle navigation dropdown menu clicks outside
-      if (navDropdownRef.current && !navDropdownRef.current.contains(event.target)) {
+      if (
+        navDropdownRef.current &&
+        !navDropdownRef.current.contains(event.target)
+      ) {
         setOpenNavDropdown(null);
       }
     }
@@ -396,7 +399,11 @@ export function TopBar() {
                 >
                   <div className="flex items-center justify-between">
                     <span className="flex items-center gap-2">
-                      {link.icon && <span className="text-base leading-none">{link.icon}</span>}
+                      {link.icon && (
+                        <span className="text-base leading-none">
+                          {link.icon}
+                        </span>
+                      )}
                       <span className="font-medium">{link.label}</span>
                     </span>
                     {link.badge && (
@@ -406,7 +413,9 @@ export function TopBar() {
                     )}
                   </div>
                   {link.description && (
-                    <p className="mt-1 text-xs text-gray-500">{link.description}</p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      {link.description}
+                    </p>
                   )}
                 </Link>
               ))}
