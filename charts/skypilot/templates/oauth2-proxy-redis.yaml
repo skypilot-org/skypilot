@@ -30,6 +30,10 @@ spec:
       containers:
       - name: redis
         image: {{ include "common.image" (dict "root" . "image" (default "redis:7-alpine" (index $oauth2 "redis-image"))) }}
+        {{- with $.Values.global.extraEnvs }}
+        env:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         ports:
         - containerPort: 6379
         resources:

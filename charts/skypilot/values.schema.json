@@ -301,6 +301,15 @@
                         "type": "object"
                     }
                 },
+                "extraEnvs": {
+                    "type": [
+                        "array",
+                        "null"
+                    ],
+                    "items": {
+                        "type": "object"
+                    }
+                },
                 "imageRegistry": {
                     "type": [
                         "string",
