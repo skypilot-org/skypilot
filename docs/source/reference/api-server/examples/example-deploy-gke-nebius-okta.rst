@@ -473,8 +473,6 @@ you can install the Prometheus operator manually using the community helm chart:
     --set nodeExporter.enabled=true \
     --set prometheusOperator.enabled=true
 
-
-
 By default, the CPU and memory metrics exported by node exporter do not include the ``node`` label, which is required for the SkyPilot dashboard to display the metrics. You can add the ``node`` label to the metrics by applying the following config to the node exporter service monitor resource:
 
 .. code-block:: bash
