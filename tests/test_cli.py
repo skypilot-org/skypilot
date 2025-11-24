@@ -495,7 +495,7 @@ class TestHelperFunctions:
 
     def test_list_to_str_float_formatting(self):
         """Test that _list_to_str formats whole number floats as integers.
-        
+
         Regression test for GitHub issue #6484 where requestable quantities
         were shown as '1.0, 2.0, 4.0, 8.0' instead of '1, 2, 4, 8'.
         """
@@ -536,7 +536,7 @@ class TestHelperFunctions:
 
     def test_show_gpus_k8s_float_formatting(self, monkeypatch):
         """Integration test for sky show-gpus --infra k8s output formatting.
-        
+
         Regression test for GitHub issue #6484 to ensure that requestable quantities
         are displayed as integers (1, 2, 4, 8) instead of floats (1.0, 2.0, 4.0, 8.0).
         """

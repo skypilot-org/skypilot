@@ -819,6 +819,97 @@ def test_resolve_volumes_override_topology():
             assert r.zone == 'a'
 
 
+def test_resolve_volumes_ephemeral_volume_success():
+    """Test resolving ephemeral volume with 'size' field."""
+    t = task.Task()
+    t._volumes = {'/mnt': {'size': 10}}
+    t.resources = [make_mock_resource()]
+
+    # Mock VolumeMount.resolve_ephemeral_config to return a mock volume mount
+    mock_volume_mount = mock.MagicMock()
+    mock_volume_mount.is_ephemeral = True
+    mock_volume_mount.volume_name = 'ephemeral-vol'
+    mock_volume_mount.path = '/mnt'
+
+    with mock.patch('sky.utils.volume.VolumeMount.resolve_ephemeral_config',
+                    return_value=mock_volume_mount) as mock_resolve:
+        t.resolve_and_validate_volumes()
+        # Verify resolve_ephemeral_config was called with correct parameters
+        mock_resolve.assert_called_once_with('/mnt', {'size': 10})
+        # Verify volume_mounts was populated
+        assert t.volume_mounts is not None
+        assert len(t.volume_mounts) == 1
+        assert t.volume_mounts[0] == mock_volume_mount
+
+
+def test_resolve_volumes_ephemeral_volume_with_multiple_fields():
+    """Test resolving ephemeral volume with 'size' and other fields."""
+    t = task.Task()
+    vol_config = {'size': 20, 'type': 'pd-standard', 'labels': {'env': 'test'}}
+    t._volumes = {'/data': vol_config}
+    t.resources = [make_mock_resource()]
+
+    mock_volume_mount = mock.MagicMock()
+    mock_volume_mount.is_ephemeral = True
+
+    with mock.patch('sky.utils.volume.VolumeMount.resolve_ephemeral_config',
+                    return_value=mock_volume_mount) as mock_resolve:
+        t.resolve_and_validate_volumes()
+        mock_resolve.assert_called_once_with('/data', vol_config)
+
+
+def test_resolve_volumes_dict_with_name_and_size():
+    """Test dict with both 'size' and 'name' prioritizes 'size' (ephemeral)."""
+    t = task.Task()
+    # When both 'size' and 'name' exist, 'size' takes precedence (ephemeral)
+    t._volumes = {'/mnt': {'size': 10, 'name': 'vol1'}}
+    t.resources = [make_mock_resource()]
+
+    mock_volume_mount = mock.MagicMock()
+    mock_volume_mount.is_ephemeral = True
+
+    with mock.patch('sky.utils.volume.VolumeMount.resolve_ephemeral_config',
+                    return_value=mock_volume_mount) as mock_ephemeral, \
+         mock.patch('sky.utils.volume.VolumeMount.resolve') as mock_resolve:
+        t.resolve_and_validate_volumes()
+        # Verify ephemeral config is called (size takes precedence)
+        mock_ephemeral.assert_called_once()
+        # Verify resolve is NOT called
+        mock_resolve.assert_not_called()
+
+
+def test_resolve_volumes_invalid_dict_no_size_no_name():
+    """Test dict without 'size' or 'name' raises ValueError."""
+    t = task.Task()
+    t._volumes = {'/mnt': {'type': 'pd-standard'}}
+    t.resources = [make_mock_resource()]
+
+    with pytest.raises(ValueError,
+                       match='Invalid volume config.*Either "size".*or "name"'):
+        t.resolve_and_validate_volumes()
+
+
+def test_resolve_volumes_invalid_dict_empty():
+    """Test empty dict raises ValueError."""
+    t = task.Task()
+    t._volumes = {'/mnt': {}}
+    t.resources = [make_mock_resource()]
+
+    with pytest.raises(ValueError,
+                       match='Invalid volume config.*Either "size".*or "name"'):
+        t.resolve_and_validate_volumes()
+
+
+def test_resolve_volumes_invalid_type_list():
+    """Test volume config with invalid type (list) raises ValueError."""
+    t = task.Task()
+    t._volumes = {'/mnt': ['vol1', 'vol2']}
+    t.resources = [make_mock_resource()]
+
+    with pytest.raises(ValueError, match='Invalid volume config'):
+        t.resolve_and_validate_volumes()
+
+
 def test_resolve_volumes_with_envs():
 
     config = {
@@ -878,7 +969,7 @@ def test_resolve_volumes_with_envs_dict():
 
 
 def test_resources_to_config():
-    """Test the functionality of converting resources to 
+    """Test the functionality of converting resources to
     its respective yaml config."""
     t = task.Task()
     resource1 = resources_lib.Resources(cloud='aws',

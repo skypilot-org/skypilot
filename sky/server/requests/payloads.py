@@ -60,6 +60,11 @@ EXTERNAL_LOCAL_ENV_VARS = [
     'AWS_ACCESS_KEY_ID',
     'AWS_SECRET_ACCESS_KEY',
     'AWS_SESSION_TOKEN',
+    # Allow overriding the Azure authentication.
+    'AZURE_CLIENT_ID',
+    'AZURE_CLIENT_SECRET',
+    'AZURE_TENANT_ID',
+    'AZURE_SUBSCRIPTION_ID',
     # Allow overriding the GCP authentication.
     'GOOGLE_APPLICATION_CREDENTIALS',
     # Allow overriding the kubeconfig.
@@ -317,7 +322,7 @@ class StatusBody(RequestBody):
     cluster_names: Optional[List[str]] = None
     refresh: common_lib.StatusRefreshMode = common_lib.StatusRefreshMode.NONE
     all_users: bool = True
-    # TODO (kyuds): default to False post 0.10.5
+    # TODO (kyuds): default to False post 0.12.0
     include_credentials: bool = True
     # Only return fields that are needed for the
     # dashboard / CLI summary response

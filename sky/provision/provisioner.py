@@ -28,6 +28,7 @@ from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
+from sky.provision import volume as provision_volume
 from sky.skylet import constants
 from sky.utils import common
 from sky.utils import common_utils
@@ -59,6 +60,11 @@ def _bulk_provision(
     region_name = region.name
 
     start = time.time()
+
+    provision_volume.provision_ephemeral_volumes(cloud, region_name,
+                                                 cluster_name.name_on_cloud,
+                                                 bootstrap_config)
+
     # TODO(suquark): Should we cache the bootstrapped result?
     #  Currently it is not necessary as bootstrapping takes
     #  only ~3s, caching it seems over-engineering and could
@@ -237,6 +243,7 @@ def teardown_cluster(cloud_name: str, cluster_name: resources_utils.ClusterName,
         provision.terminate_instances(cloud_name, cluster_name.name_on_cloud,
                                       provider_config)
         metadata_utils.remove_cluster_metadata(cluster_name.name_on_cloud)
+        provision_volume.delete_ephemeral_volumes(provider_config)
     else:
         provision.stop_instances(cloud_name, cluster_name.name_on_cloud,
                                  provider_config)

@@ -238,7 +238,7 @@ class Task:
         num_nodes: Optional[int] = None,
         file_mounts: Optional[Dict[str, str]] = None,
         storage_mounts: Optional[Dict[str, storage_lib.Storage]] = None,
-        volumes: Optional[Dict[str, str]] = None,
+        volumes: Optional[Dict[str, Union[str, Dict[str, Any]]]] = None,
         resources: Optional[Union['resources_lib.Resources',
                                   List['resources_lib.Resources'],
                                   Set['resources_lib.Resources']]] = None,
@@ -317,7 +317,10 @@ class Task:
             object}``, where mount_path is the path inside the remote VM(s)
             where the Storage object will be mounted on.
           volumes: A dict of volumes to be mounted for the task. The dict has
-            the form of ``{mount_path: volume_name}``.
+            the form of ``{mount_path: volume_name}`` for external persistent
+            volumes, or ``{mount_path: volume_config}`` for ephemeral volumes
+            where volume_config is a dict with 'size', and optional type,
+            labels, and 'config' fields, etc.
           resources: either a sky.Resources, a set of them, or a list of them.
             A set or a list of resources asks the optimizer to "pick the
             best of these resources" to run this task.
@@ -704,33 +707,8 @@ class Task:
             task.set_outputs(outputs=outputs,
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
-        # Experimental configs.
-        experimental_configs = config.pop('experimental', None)
-
         # Handle the top-level config field
         config_override = config.pop('config', None)
-
-        # Handle backward compatibility with experimental.config_overrides
-        # TODO: Remove experimental.config_overrides in 0.11.0.
-        if experimental_configs is not None:
-            exp_config_override = experimental_configs.pop(
-                'config_overrides', None)
-            if exp_config_override is not None:
-                logger.warning(
-                    f'{colorama.Fore.YELLOW}`experimental.config_overrides` '
-                    'field is deprecated in the task YAML. Use the `config` '
-                    f'field to set config overrides.{colorama.Style.RESET_ALL}')
-                if config_override is not None:
-                    logger.warning(
-                        f'{colorama.Fore.YELLOW}Both top-level `config` and '
-                        f'`experimental.config_overrides` are specified. '
-                        f'Using top-level `config`.{colorama.Style.RESET_ALL}')
-                else:
-                    config_override = exp_config_override
-            logger.debug('Overriding skypilot config with task-level config: '
-                         f'{config_override}')
-            assert not experimental_configs, ('Invalid task args: '
-                                              f'{experimental_configs.keys()}')
 
         # Store the final config override for use in resource setup
         cluster_config_override = config_override
@@ -838,13 +816,26 @@ class Task:
         volume_mounts: List[volume_lib.VolumeMount] = []
         for dst_path, vol in self._volumes.items():
             self._validate_mount_path(dst_path, location='volumes')
-            # Shortcut for `dst_path: volume_name`
+            # Shortcut for `dst_path: volume_name` (external persistent volume)
             if isinstance(vol, str):
                 volume_mount = volume_lib.VolumeMount.resolve(dst_path, vol)
             elif isinstance(vol, dict):
-                assert 'name' in vol, 'Volume name must be set.'
-                volume_mount = volume_lib.VolumeMount.resolve(
-                    dst_path, vol['name'])
+                # Check if this is an ephemeral volume config or external volume
+                # with 'size' field
+                if 'size' in vol:
+                    # This is an ephemeral volume config
+                    volume_mount = (
+                        volume_lib.VolumeMount.resolve_ephemeral_config(
+                            dst_path, vol))
+                elif 'name' in vol:
+                    # External volume with 'name' field
+                    volume_mount = volume_lib.VolumeMount.resolve(
+                        dst_path, vol['name'])
+                else:
+                    raise ValueError(
+                        f'Invalid volume config: {dst_path}: {vol}. '
+                        'Either "size" (for ephemeral volume) or "name" '
+                        '(for external volume) must be set.')
             else:
                 raise ValueError(f'Invalid volume config: {dst_path}: {vol}')
             volume_mounts.append(volume_mount)
@@ -873,6 +864,9 @@ class Task:
             if access_mode in disabled_modes:
                 raise ValueError(f'Volume {vol.volume_name} with '
                                  f'{disabled_modes[access_mode]}')
+            # Skip ephemeral volumes for topology check
+            if vol.is_ephemeral:
+                continue
             # Check topology
             for key, (vol_name, previous_req) in topology.items():
                 req = getattr(vol.volume_config, key)
@@ -909,6 +903,8 @@ class Task:
                         vol_req)
                 else:
                     override_params[key] = vol_req
+        logger.debug(
+            f'Override resources with volume constraints: {override_params}')
         self.set_resources_override(override_params)
         self.volume_mounts = volume_mounts
 
@@ -943,18 +939,22 @@ class Task:
         return self._secrets
 
     @property
-    def volumes(self) -> Dict[str, str]:
+    def volumes(self) -> Dict[str, Union[str, Dict[str, Any]]]:
         return self._volumes
 
-    def set_volumes(self, volumes: Dict[str, str]) -> None:
+    def set_volumes(self, volumes: Dict[str, Union[str, Dict[str,
+                                                             Any]]]) -> None:
         """Sets the volumes for this task.
 
         Args:
-          volumes: a dict of ``{mount_path: volume_name}``.
+          volumes: a dict of ``{mount_path: volume_name}`` for external
+            persistent volumes, or ``{mount_path: volume_config}`` for
+            ephemeral volumes.
         """
         self._volumes = volumes
 
-    def update_volumes(self, volumes: Dict[str, str]) -> None:
+    def update_volumes(self, volumes: Dict[str, Union[str, Dict[str,
+                                                                Any]]]) -> None:
         """Updates the volumes for this task."""
         self._volumes.update(volumes)
 
@@ -1755,7 +1755,12 @@ class Task:
         return required_features
 
     def __rshift__(self, b):
-        dag_lib.get_current_dag().add_edge(self, b)
+        dag = dag_lib.get_current_dag()
+        if dag is None:
+            raise RuntimeError(
+                'Cannot use >> operator outside of a DAG context. '
+                'Please use "with sky.Dag() as dag:" to create a DAG context.')
+        dag.add_edge(self, b)
 
     def __repr__(self):
         if isinstance(self.run, str):

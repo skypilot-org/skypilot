@@ -193,7 +193,8 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
                         sky.ManagedJobStatus.STARTING,
                         sky.ManagedJobStatus.RUNNING
                     ],
-                    timeout=60),
+                    timeout=600
+                    if smoke_tests_utils.is_remote_server_test() else 60),
             ]),
             *set_user(
                 user_2,
@@ -207,7 +208,8 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
                             sky.ManagedJobStatus.STARTING,
                             sky.ManagedJobStatus.RUNNING
                         ],
-                        timeout=60),
+                        timeout=600
+                        if smoke_tests_utils.is_remote_server_test() else 60),
                     # Should only cancel user_2's job.
                     'sky jobs cancel -y --all',
                     smoke_tests_utils.
@@ -548,7 +550,7 @@ def test_tail_jobs_logs_blocks_ssh(generic_cloud: str):
 
         # Wait for the job to start.
         def is_job_started(job_id: int):
-            req_id = jobs.queue(refresh=True, job_ids=[job_id])
+            req_id = jobs.queue_v2(refresh=True, job_ids=[job_id])
             job_records = sky.stream_and_get(req_id)[0]
             assert len(job_records) == 1
             return job_records[0]['status'] == sky.ManagedJobStatus.RUNNING

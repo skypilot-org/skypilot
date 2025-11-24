@@ -24,7 +24,7 @@ import socket
 import threading
 import time
 from pathlib import Path
-from pprint import pprint
+from pprint import pformat, pprint
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
@@ -67,13 +67,13 @@ def log_in_out(func):
         logger.debug(
             f"\n\nEnter {name} from {inspect.stack()[0][3]} "
             f"{inspect.stack()[1][3]} {inspect.stack()[2][3]} with args: "
-            f"entered with args:\n{pprint(args)} and kwargs {pprint(kwargs)}"
+            f"entered with args:\n{pformat(args)} and kwargs {pformat(kwargs)}"
         )
         try:
             result = func(*args, **kwargs)
             logger.debug(
                 f"Leave {name} from {inspect.stack()[1][3]} with result "
-                f"Func Result:{pprint(result)}\n\n"
+                f"Func Result:{pformat(result)}\n\n"
             )
         except Exception:
             cli_logger.error(f"Error in {name}")
@@ -502,8 +502,12 @@ class IBMVPCNodeProvider(NodeProvider):
 
         logger.info(f"Creating new VM instance {name}")
 
-        security_group_identity_model = {"id": self.vpc_tags["security_group_id"]}
-        subnet_identity_model = {"id": self.vpc_tags["subnet_id"]}
+        if self.vpc_tags is None:
+            raise ValueError("vpc_tags must be initialized before creating instances")
+        vpc_tags = self.vpc_tags  # Help mypy with type narrowing
+
+        security_group_identity_model = {"id": vpc_tags["security_group_id"]}
+        subnet_identity_model = {"id": vpc_tags["subnet_id"]}
         primary_network_interface = {
             "name": "eth0",
             "subnet": subnet_identity_model,
@@ -536,7 +540,7 @@ class IBMVPCNodeProvider(NodeProvider):
         instance_prototype["keys"] = [key_identity_model]
         instance_prototype["profile"] = {"name": profile_name}
         instance_prototype["resource_group"] = {"id": self.resource_group_id}
-        instance_prototype["vpc"] = {"id": self.vpc_tags["vpc_id"]}
+        instance_prototype["vpc"] = {"id": vpc_tags["vpc_id"]}
         instance_prototype["image"] = {"id": base_config["image_id"]}
 
         instance_prototype["zone"] = {"name": self.zone}
@@ -584,7 +588,7 @@ class IBMVPCNodeProvider(NodeProvider):
         floating_ip_name = f"{RAY_RECYCLABLE}-{uuid4().hex[:4]}"
         # create a new floating ip
         logger.debug(f"Creating floating IP {floating_ip_name}")
-        floating_ip_prototype = {}
+        floating_ip_prototype: Dict[str, Any] = {}
         floating_ip_prototype["name"] = floating_ip_name
         floating_ip_prototype["zone"] = {"name": self.zone}
         floating_ip_prototype["resource_group"] = {"id": self.resource_group_id}

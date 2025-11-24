@@ -34,7 +34,15 @@ else:
 
 F = TypeVar('F', bound=Callable[..., Any])
 
-_RETRY_CONTEXT = contextvars.ContextVar('retry_context', default=None)
+
+class RetryContext:
+
+    def __init__(self):
+        self.line_processed = 0
+
+
+_RETRY_CONTEXT: contextvars.ContextVar[Optional[RetryContext]] = (
+    contextvars.ContextVar('retry_context', default=None))
 
 _session = requests.Session()
 # Tune connection pool size, otherwise the default max is just 10.
@@ -61,12 +69,6 @@ _transient_errors = [
 
 _HTML_TITLE_RE = re.compile(r'<title[^>]*>(.*?)</title>',
                             re.IGNORECASE | re.DOTALL)
-
-
-class RetryContext:
-
-    def __init__(self):
-        self.line_processed = 0
 
 
 @contextlib.contextmanager

@@ -175,6 +175,13 @@ def _execute(
       handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
         if dryrun.
     """
+    if _request_name == request_names.AdminPolicyRequestName.CLUSTER_LAUNCH:
+        if _is_launched_by_jobs_controller:
+            _request_name = (
+                request_names.AdminPolicyRequestName.JOBS_LAUNCH_CLUSTER)
+        elif _is_launched_by_sky_serve_controller:
+            _request_name = (
+                request_names.AdminPolicyRequestName.SERVE_LAUNCH_REPLICA)
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
     for task in dag.tasks:
         for resource in task.resources:
@@ -718,7 +725,7 @@ def launch(
         job_logger=job_logger)
 
 
-# needed for backward compatibility. Remove by v0.10.7 or v0.11.0
+# needed for backward compatibility. Remove by v0.12.0
 cluster_launch = launch
 
 

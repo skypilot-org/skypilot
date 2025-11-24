@@ -2368,7 +2368,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     def _update_cluster_info(self):
         # When a cluster is on a cloud that does not support the new
         # provisioner, we should skip updating cluster_info.
-        if (self.launched_resources.cloud.PROVISIONER_VERSION >=
+        if (self.launched_resources.cloud is not None and
+                self.launched_resources.cloud.PROVISIONER_VERSION >=
                 clouds.ProvisionerVersion.SKYPILOT):
             provider_name = str(self.launched_resources.cloud).lower()
             config = {}
@@ -3514,8 +3515,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 try:
                     retry_provisioner = RetryingVmProvisioner(
                         self.log_dir,
-                        self._dag,
-                        self._optimize_target,
+                        self._dag,  # type: ignore[arg-type]
+                        self._optimize_target,  # type: ignore[arg-type]
                         self._requested_features,
                         local_wheel_path,
                         wheel_hash,
@@ -4288,10 +4289,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                           job_submit_cmd,
                                                           stream_logs=False,
                                                           require_outputs=True)
-            # Happens when someone calls `sky exec` but remote is outdated for
-            # running a job. Necessitating calling `sky launch`.
-            backend_utils.check_stale_runtime_on_remote(returncode, stderr,
-                                                        handle.cluster_name)
             output = stdout + stderr
             if _is_message_too_long(returncode, output=output):
                 # If the job submit script is too long, we need to retry it
@@ -4359,10 +4356,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 stream_logs=False,
                 require_outputs=True,
                 separate_stderr=True)
-            # Happens when someone calls `sky exec` but remote is outdated for
-            # adding a job. Necessitating calling `sky launch`.
-            backend_utils.check_stale_runtime_on_remote(returncode, stderr,
-                                                        handle.cluster_name)
             # TODO(zhwu): this sometimes will unexpectedly fail, we can add
             # retry for this, after we figure out the reason.
             subprocess_utils.handle_returncode(returncode, code,

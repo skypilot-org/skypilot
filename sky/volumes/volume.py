@@ -13,6 +13,10 @@ VOLUME_TYPE_TO_CLOUD = {
     volume_lib.VolumeType.PVC: clouds.Kubernetes(),
     volume_lib.VolumeType.RUNPOD_NETWORK_VOLUME: clouds.RunPod(),
 }
+CLOUD_TO_VOLUME_TYPE = {
+    clouds.Kubernetes(): [volume_lib.VolumeType.PVC],
+    clouds.RunPod(): [volume_lib.VolumeType.RUNPOD_NETWORK_VOLUME],
+}
 
 
 class Volume:

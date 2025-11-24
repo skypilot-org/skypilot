@@ -27,6 +27,7 @@ from sky.clouds.utils import aws_utils
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import env_options
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import rich_utils
@@ -35,6 +36,8 @@ from sky.utils import ux_utils
 from sky.utils.db import kv_cache
 
 if typing.TYPE_CHECKING:
+    from mypy_boto3_ec2 import type_defs as ec2_type_defs
+
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
     from sky.utils import status_lib
@@ -477,6 +480,73 @@ class AWS(clouds.Cloud):
         return image_id_str
 
     @classmethod
+    def _describe_image_with_retry(
+        cls,
+        image_id: str,
+        region: str,
+        log_context: str,
+    ) -> Optional['ec2_type_defs.ImageTypeDef']:
+        image_not_found_message = (
+            f'Image {image_id!r} not found in AWS region {region} - '
+            f'can\'t get {log_context}.\n\n'
+            f'To find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
+            'Example: ami-0729d913a335efca7')
+        max_retries = 3
+        debug_message = 'no describe_images response'
+        for iteration in range(1, max_retries + 1):
+            try:
+                client = aws.client('ec2', region_name=region)
+                response = client.describe_images(ImageIds=[image_id])
+                # These values are not optional, but we will use .get() to avoid
+                # crashing on a malformed response from AWS.
+                metadata = response.get('ResponseMetadata', {})
+                image_info = response.get('Images')
+                debug_message = (
+                    'describe_images response:\n'
+                    f'  status code: {metadata.get("HTTPStatusCode")}\n'
+                    f'  retry attempts: {metadata.get("RetryAttempts")}\n'
+                    f'  len(images): {len(image_info) if image_info else -1}\n'
+                    f'  next token: {response.get("NextToken")}')
+                logger.debug(debug_message)
+                if not image_info:
+                    # image_info is [] (can't find image) or None (invalid
+                    # response from AWS)
+                    with ux_utils.print_exception_no_traceback():
+                        if env_options.Options.SHOW_DEBUG_INFO.get():
+                            image_not_found_message += f'\n{debug_message}'
+                        raise ValueError(image_not_found_message)
+                image = image_info[0]
+                return image
+            except (aws.botocore_exceptions().NoCredentialsError,
+                    aws.botocore_exceptions().ProfileNotFound) as e:
+                # The caller will fall back to its own default value when we
+                # return None. Mention that explicitly in the shared log line.
+                logger.debug(
+                    f'Failed to get {log_context} for {image_id} in region '
+                    f'{region}: {e}. Using default value.')
+                return None
+            except aws.botocore_exceptions().ClientError as e:
+                # This shared log message replaces two attribute-specific
+                # messages (image size/root device) for simplicity.
+                logger.debug(f'Failed to get {log_context} for image '
+                             f'{image_id!r} in region {region}: {e}')
+                if iteration == max_retries:
+                    with ux_utils.print_exception_no_traceback():
+                        if env_options.Options.SHOW_DEBUG_INFO.get():
+                            image_not_found_message += f'\n{debug_message}'
+                            # Note: the ClientError's exception message should
+                            # include most useful info:
+                            # https://github.com/boto/botocore/blob/260a8b91cedae895165984d2102bcbc487de3027/botocore/exceptions.py#L518-L532
+                            additional_info = f'  ClientError: {e}'
+                            logger.debug(additional_info)
+                            image_not_found_message += '\n' + additional_info
+                        raise ValueError(image_not_found_message) from None
+            # linear backoff starting from 0.5 seconds
+            time.sleep(iteration * 0.5)
+        # Should never reach here, but keep type checker happy.
+        raise RuntimeError('Unreachable')
+
+    @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         if image_id.startswith('skypilot:'):
             return DEFAULT_AMI_GB
@@ -486,42 +556,21 @@ class AWS(clouds.Cloud):
         kv_cache_key = f'aws:ami:size:{workspace_profile}:{region}:{image_id}'
         image_size = kv_cache.get_cache_entry(kv_cache_key)
         if image_size is not None:
+            logger.debug(
+                f'Image size {image_size} found in cache {kv_cache_key}')
             return float(image_size)
         # if not found in cache, query the cloud
-        image_not_found_message = (
-            f'Image {image_id!r} not found in AWS region {region}.\n'
-            f'\nTo find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
-            'Example: ami-0729d913a335efca7')
-        max_retries = 3
-        for iteration in range(1, max_retries + 1):
-            try:
-                client = aws.client('ec2', region_name=region)
-                image_info = client.describe_images(ImageIds=[image_id]).get(
-                    'Images', [])
-                if not image_info:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(image_not_found_message)
-                image_size = image_info[0]['BlockDeviceMappings'][0]['Ebs'][
-                    'VolumeSize']
-                break
-            except (aws.botocore_exceptions().NoCredentialsError,
-                    aws.botocore_exceptions().ProfileNotFound) as e:
-                logger.debug(
-                    f'Failed to get image size for {image_id} in region {region}: {e}'
-                )
-                # Fallback to default image size if no credentials are available.
-                # The credentials issue will be caught when actually provisioning
-                # the instance and appropriate errors will be raised there.
-                return DEFAULT_AMI_GB
-            except aws.botocore_exceptions().ClientError as e:
-                logger.debug(
-                    f'Failed to get image size for {image_id} in region {region}: {e}'
-                )
-                if iteration == max_retries:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(image_not_found_message) from None
-            # linear backoff starting from 0.5 seconds
-            time.sleep(iteration * 0.5)
+        image = cls._describe_image_with_retry(
+            image_id,
+            region,
+            log_context='image size',
+        )
+        if image is None:
+            # Fallback to default image size if no credentials are available.
+            # The credentials issue will be caught when actually provisioning
+            # the instance and appropriate errors will be raised there.
+            return DEFAULT_AMI_GB
+        image_size = image['BlockDeviceMappings'][0]['Ebs']['VolumeSize']
         # cache the result for a day.
         # AMIs are immutable, so we can cache the result for a long time.
         # While AMIs can be deleted, if the AMI is deleted before cache expiration,
@@ -551,51 +600,23 @@ class AWS(clouds.Cloud):
         kv_cache_key = f'aws:ami:root_device_name:{workspace_profile}:{region}:{image_id}'
         root_device_name = kv_cache.get_cache_entry(kv_cache_key)
         if root_device_name is not None:
+            logger.debug(f'Image root device name {root_device_name} found in '
+                         f'cache {kv_cache_key}')
             return root_device_name
         # if not found in cache, query the cloud
-        image_not_found_message = (
-            f'Image {image_id!r} not found in AWS region {region}.\n'
-            f'To find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
-            'Example: ami-0729d913a335efca7')
-        max_retries = 3
-        for iteration in range(1, max_retries + 1):
-            try:
-                client = aws.client('ec2', region_name=region)
-                image_info = client.describe_images(ImageIds=[image_id]).get(
-                    'Images', [])
-                if not image_info:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(image_not_found_message)
-                image = image_info[0]
-                if 'RootDeviceName' not in image:
-                    logger.debug(f'Image {image_id!r} does not have a root '
-                                 f'device name. '
-                                 f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
-                    return DEFAULT_ROOT_DEVICE_NAME
-                root_device_name = image['RootDeviceName']
-                break
-            except (aws.botocore_exceptions().NoCredentialsError,
-                    aws.botocore_exceptions().ProfileNotFound) as e:
-                # Fallback to default root device name if no credentials are
-                # available.
-                # The credentials issue will be caught when actually provisioning
-                # the instance and appropriate errors will be raised there.
-                logger.debug(f'Failed to get image root device name for '
-                             f'{image_id} in region {region}: {e}. '
-                             f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
-                return DEFAULT_ROOT_DEVICE_NAME
-            except aws.botocore_exceptions().ClientError as e:
-                logger.debug(f'Failed to get image root device name for '
-                             f'{image_id} in region {region}: {e}.')
-                if iteration == max_retries:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(image_not_found_message) from None
-            # linear backoff starting from 0.5 seconds
-            time.sleep(iteration * 0.5)
-        # cache the result for a day.
-        # Root device names are immutable, so we can cache the result for a long time.
-        # While AMIs can be deleted, if the AMI is deleted before cache expiration,
-        # the actual VM launch still fails.
+        image = cls._describe_image_with_retry(
+            image_id,
+            region,
+            log_context='image root device name',
+        )
+        if image is None:
+            return DEFAULT_ROOT_DEVICE_NAME
+        if 'RootDeviceName' not in image:
+            logger.debug(f'Image {image_id!r} does not have a root '
+                         f'device name. '
+                         f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
+            return DEFAULT_ROOT_DEVICE_NAME
+        root_device_name = image['RootDeviceName']
         day_in_seconds = 60 * 60 * 24  # 1 day, 60s * 60m * 24h
         try:
             kv_cache.add_or_update_cache_entry(kv_cache_key, root_device_name,
@@ -887,22 +908,67 @@ class AWS(clouds.Cloud):
     def _check_compute_credentials(
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to this AWS's compute service."""
-        return cls._check_credentials()
+        credentials_exist, identity_str, hints = cls._check_credentials_exist()
+        if not credentials_exist:
+            return False, hints
+
+        # Fetch the AWS catalogs
+        # pylint: disable=import-outside-toplevel
+        from sky.catalog import aws_catalog
+
+        # Trigger the fetch of the availability zones mapping.
+        try:
+            aws_catalog.get_default_instance_type()
+        except RuntimeError as e:
+            return False, (
+                'Failed to fetch the availability zones for the account '
+                f'{identity_str}. It is likely due to permission issues, please'
+                ' check the minimal permission required for AWS: '
+                'https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/aws.html'  # pylint: disable=
+                f'\n{cls._INDENT_PREFIX}Details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
+
+        return True, hints
 
     @classmethod
     def _check_storage_credentials(
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to this AWS's storage service."""
-        # TODO(seungjin): Implement separate check for
-        # if the user has access to S3.
-        return cls._check_credentials()
+        credentials_exist, identity_str, hints = cls._check_credentials_exist()
+        if not credentials_exist:
+            return False, hints
+
+        try:
+            # Create an S3 client
+            s3_client = aws.client('s3')
+
+            # Try to list buckets
+            s3_client.list_buckets()
+        except aws.botocore_exceptions().ClientError as e:
+            return False, (
+                'Failed to list buckets for the account '
+                f'{identity_str}. It is likely due to permission issues, please'
+                ' check the storage permission required for AWS: '
+                'https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/aws.html'  # pylint: disable=
+                f'\n{cls._INDENT_PREFIX}Details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
+
+        return True, hints
 
     @classmethod
     # Cache since getting identity is slow.
     @aws_profile_aware_lru_cache(scope='request',
                                  maxsize=_AWS_PROFILE_SCOPED_FUNC_CACHE_SIZE)
-    def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """Checks if the user has access credentials to AWS."""
+    def _check_credentials_exist(
+            cls) -> Tuple[bool, Optional[str], Optional[str]]:
+        """Checks if the user has access credentials to AWS.
+
+        Returns:
+            bool: True if credentials exist and are valid.
+            str: Identity string of the user. None if credentials do not exist.
+                 (i.e. the first boolean is False)
+            str: Hints for the user to set up credentials.
+        """
 
         dependency_installation_hints = (
             'AWS dependencies are not installed. '
@@ -918,18 +984,18 @@ class AWS(clouds.Cloud):
                               stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE)
         if proc.returncode != 0:
-            return False, dependency_installation_hints
+            return False, None, dependency_installation_hints
 
         # Checks if aws boto is installed properly
         if not common.can_import_modules(['boto3', 'botocore']):
-            return False, dependency_installation_hints
+            return False, None, dependency_installation_hints
 
         # Checks if AWS credentials 1) exist and 2) are valid.
         # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
         try:
             identity_str = cls.get_active_user_identity_str()
         except exceptions.CloudUserIdentityError as e:
-            return False, str(e)
+            return False, None, str(e)
 
         static_credential_exists = os.path.isfile(
             os.path.expanduser('~/.aws/credentials'))
@@ -983,25 +1049,10 @@ class AWS(clouds.Cloud):
             # other clouds to access private s3 buckets and resources like EC2.
             # `get_active_user_identity` does not guarantee this file exists.
             if not static_credential_exists:
-                return (False, '~/.aws/credentials does not exist. ' +
+                return (False, None, '~/.aws/credentials does not exist. ' +
                         cls._STATIC_CREDENTIAL_HELP_STR)
 
-        # Fetch the AWS catalogs
-        # pylint: disable=import-outside-toplevel
-        from sky.catalog import aws_catalog
-
-        # Trigger the fetch of the availability zones mapping.
-        try:
-            aws_catalog.get_default_instance_type()
-        except RuntimeError as e:
-            return False, (
-                'Failed to fetch the availability zones for the account '
-                f'{identity_str}. It is likely due to permission issues, please'
-                ' check the minimal permission required for AWS: '
-                'https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/aws.html'  # pylint: disable=
-                f'\n{cls._INDENT_PREFIX}Details: '
-                f'{common_utils.format_exception(e, use_bracket=True)}')
-        return True, hints
+        return True, identity_str, hints
 
     @classmethod
     def _current_identity_type(cls) -> Optional[AWSIdentityType]:
