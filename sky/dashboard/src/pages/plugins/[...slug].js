@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
+import { CircularProgress } from '@mui/material';
 import { usePluginRoute } from '@/plugins/PluginProvider';
 
 function normalizeSlug(slug) {
@@ -112,12 +113,13 @@ export default function PluginRoutePage() {
         ) : (
           <>
             {!route && (
-              <div className="max-w-3xl mx-auto p-6 mb-6 bg-white border border-gray-200 rounded-lg shadow-sm">
-                <p className="text-gray-600">
+              <div className="flex justify-center items-center h-64">
+                <CircularProgress size={20} />
+                <span className="ml-2 text-gray-500">
                   {router.isReady
                     ? 'Loading plugin resources...'
                     : 'Preparing plugin route...'}
-                </p>
+                </span>
               </div>
             )}
             <div ref={containerRef} />
