@@ -752,3 +752,24 @@ class TestAwsProfileAwareLruCache:
             else:
                 os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
             skypilot_config.reload_config()
+
+
+class TestAwsConfigFileEnvVar:
+    """Tests for AWS_CONFIG_FILE credential override."""
+
+    def test_get_credential_file_mounts_respects_env_override(
+            self, tmp_path, monkeypatch):
+        credential_file = tmp_path / 'aws_credentials'
+        credential_file.write_text('dummy')
+        monkeypatch.setenv('AWS_CONFIG_FILE', str(credential_file))
+
+        aws = aws_mod.AWS()
+        with mock.patch.object(
+                aws_mod.AWS,
+                '_current_identity_type',
+                return_value=aws_mod.AWSIdentityType.SHARED_CREDENTIALS_FILE):
+            mounts = aws.get_credential_file_mounts()
+
+        assert mounts == {
+            aws_mod._DEFAULT_AWS_CONFIG_PATH: str(credential_file)
+        }
