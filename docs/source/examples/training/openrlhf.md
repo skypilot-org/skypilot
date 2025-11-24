@@ -1,1 +1,2 @@
-../../generated-examples/openrlhf.md
+:::{include} ../../generated-examples/openrlhf.md
+:::
