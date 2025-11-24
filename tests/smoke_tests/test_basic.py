@@ -1778,9 +1778,6 @@ def test_cluster_setup_num_gpus():
 
 
 @pytest.mark.aws
-@pytest.mark.no_hyperbolic  # Hyperbolic does not support AWS
-@pytest.mark.no_shadeform  # Shadeform does not support AWS
-@pytest.mark.no_seeweb  # Seeweb does not support AWS
 def test_launch_retry_until_up():
     """Test that retry until up considers more resources after trying all zones."""
     cluster_name = smoke_tests_utils.get_cluster_name()
