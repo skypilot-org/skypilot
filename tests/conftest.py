@@ -814,6 +814,17 @@ def setup_grpc_backend_env(request):
 
 
 @pytest.fixture(scope='session', autouse=True)
+def setup_slurm_env(request):
+    """Setup SLURM enabled environment variable if --slurm is specified.
+    """
+    if not request.config.getoption('--slurm'):
+        yield
+        return
+    os.environ['SKYPILOT_ENABLE_SLURM'] = '1'
+    yield
+
+
+@pytest.fixture(scope='session', autouse=True)
 def prepare_env_file(request):
     """Prepare environment file for tests.
 
