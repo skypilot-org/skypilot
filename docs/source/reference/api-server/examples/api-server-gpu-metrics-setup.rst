@@ -82,27 +82,6 @@ If any are missing, edit the Service to add them.
 
 where ``$NAMESPACE`` is the DCGM-Exporter namespace.
 
-Deploying the Prometheus Operator and Node Exporter
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The Prometheus Operator and Node Exporter can be
-deployed using the prometheus community helm chart:
-
-.. code-block:: bash
-
-    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-    helm repo update
-
-    helm upgrade --install kube-prometheus prometheus-community/kube-prometheus-stack \
-    --namespace skypilot \
-    --create-namespace \
-    --set prometheus.enabled=false \
-    --set alertmanager.enabled=false \
-    --set grafana.enabled=false \
-    --set kubeStateMetrics.enabled=false \
-    --set nodeExporter.enabled=true \
-    --set prometheusOperator.enabled=true
-
 Check the node exporter setup
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
