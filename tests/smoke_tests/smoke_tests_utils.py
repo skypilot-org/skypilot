@@ -475,6 +475,9 @@ def override_sky_config(
     if is_slurm_enabled_test():
         env_dict[env_options.Options.ENABLE_SLURM.env_key] = '1'
 
+    # Clear request_body_env_vars cache so it picks up the new env vars
+    payloads.request_body_env_vars.cache_clear()
+
     if not override_sky_config_dict:
         yield None
         return
