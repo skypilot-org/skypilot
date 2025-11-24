@@ -656,19 +656,13 @@ async def storage_delete(
 @annotations.client_api
 async def local_up(
         gpus: bool,
-        ips: Optional[List[str]],
-        ssh_user: Optional[str],
-        ssh_key: Optional[str],
-        cleanup: bool,
-        context_name: Optional[str] = None,
         name: Optional[str] = None,
-        password: Optional[str] = None,
+        port_start: Optional[int] = None,
         stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG) -> None:
     """Async version of local_up() that launches a Kubernetes cluster on
     local machines."""
-    request_id = await context_utils.to_thread(sdk.local_up, gpus, ips,
-                                               ssh_user, ssh_key, cleanup,
-                                               context_name, name, password)
+    request_id = await context_utils.to_thread(sdk.local_up, gpus, name,
+                                               port_start)
     if stream_logs is not None:
         return await _stream_and_get(request_id, stream_logs)
     else:

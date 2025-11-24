@@ -6240,33 +6240,6 @@ def local():
               help='Launch cluster without GPU support even '
               'if GPUs are detected on the host.')
 @click.option(
-    '--ips',
-    type=str,
-    required=False,
-    help='Path to the file containing IP addresses of remote machines.')
-@click.option('--ssh-user',
-              type=str,
-              required=False,
-              help='SSH username for accessing remote machines.')
-@click.option('--ssh-key-path',
-              type=str,
-              required=False,
-              help='Path to the SSH private key.')
-@click.option('--cleanup',
-              is_flag=True,
-              help='Clean up the remote cluster instead of deploying it.')
-@click.option(
-    '--context-name',
-    type=str,
-    required=False,
-    help='Name to use for the kubeconfig context. Defaults to "default". '
-    'Used with the ip list.')
-@click.option('--password',
-              type=str,
-              required=False,
-              help='Password for the ssh-user to execute sudo commands. '
-              'Required only if passwordless sudo is not setup.')
-@click.option(
     '--name',
     type=str,
     required=False,
@@ -6282,56 +6255,10 @@ def local():
 @flags.config_option(expose_value=False)
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
-def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
-             cleanup: bool, context_name: Optional[str],
-             password: Optional[str], name: Optional[str],
-             port_start: Optional[int], async_call: bool):
-    """Creates a local or remote cluster."""
-
-    def _validate_args(ips, ssh_user, ssh_key_path, cleanup):
-        # If any of --ips, --ssh-user, or --ssh-key-path is specified,
-        # all must be specified
-        if bool(ips) or bool(ssh_user) or bool(ssh_key_path):
-            if not (ips and ssh_user and ssh_key_path):
-                raise click.BadParameter(
-                    'All --ips, --ssh-user, and --ssh-key-path '
-                    'must be specified together.')
-
-        # --cleanup can only be used if --ips, --ssh-user and --ssh-key-path
-        # are all provided
-        if cleanup and not (ips and ssh_user and ssh_key_path):
-            raise click.BadParameter('--cleanup can only be used with '
-                                     '--ips, --ssh-user and --ssh-key-path.')
-
-    _validate_args(ips, ssh_user, ssh_key_path, cleanup)
-
-    # If remote deployment arguments are specified, run remote up script
-    ip_list = None
-    ssh_key = None
-    if ips and ssh_user and ssh_key_path:
-        # Read and validate IP file
-        try:
-            with open(os.path.expanduser(ips), 'r', encoding='utf-8') as f:
-                ip_list = f.read().strip().splitlines()
-            if not ip_list:
-                raise click.BadParameter(f'IP file is empty: {ips}')
-        except (IOError, OSError) as e:
-            raise click.BadParameter(f'Failed to read IP file {ips}: {str(e)}')
-
-        # Read and validate SSH key file
-        try:
-            with open(os.path.expanduser(ssh_key_path), 'r',
-                      encoding='utf-8') as f:
-                ssh_key = f.read()
-            if not ssh_key:
-                raise click.BadParameter(
-                    f'SSH key file is empty: {ssh_key_path}')
-        except (IOError, OSError) as e:
-            raise click.BadParameter(
-                f'Failed to read SSH key file {ssh_key_path}: {str(e)}')
-
-    request_id = sdk.local_up(gpus, ip_list, ssh_user, ssh_key, cleanup,
-                              context_name, password, name, port_start)
+def local_up(gpus: bool, name: Optional[str], port_start: Optional[int],
+             async_call: bool):
+    """Creates a local cluster."""
+    request_id = sdk.local_up(gpus, name, port_start)
     _async_call_or_wait(request_id, async_call, request_name='local up')
 
 
@@ -6344,12 +6271,7 @@ def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 def local_down(name: Optional[str], async_call: bool):
-    """Deletes a local cluster.
-
-    This will only delete a local cluster started without the ip list.
-    To clean up the local cluster started with a ip list, use `sky local up`
-    with the cleanup flag.
-    """
+    """Deletes a local cluster."""
     request_id = sdk.local_down(name)
     _async_call_or_wait(request_id, async_call, request_name='sky.local.down')
 
