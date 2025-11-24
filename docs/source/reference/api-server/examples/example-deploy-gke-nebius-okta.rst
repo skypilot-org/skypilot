@@ -430,6 +430,34 @@ If you are using Nebius Kubernetes cluster, you can setup GPU metrics in the clu
 
 1. Install the Prometheus operator.
 
+On Nebius console, in the detail page of the Nebius Kubernetes cluster, go to ``Applications`` -> Search for ``Prometheus Operator`` -> ``Deploy`` -> Enter ``skypilot`` for the ``Namespace`` -> ``Deploy application``.
+
+.. image:: ../../../images/metrics/search-prom-operator.png
+    :alt: Search for Prometheus Operator
+    :align: center
+    :width: 60%
+
+.. image:: ../../../images/metrics/deploy-prom-operator.png
+    :alt: Deploy Prometheus Operator
+    :align: center
+    :width: 60%
+
+Wait for the Prometheus operator to be installed, the status badge will become ``Deployed``.
+
+.. image:: ../../../images/metrics/status-prom-operator.png
+    :alt: Status of Prometheus Operator
+    :align: center
+    :width: 60%
+
+You can also check the Pod status to verify the installation.
+
+.. code-block:: bash
+
+  kubectl get pods -n skypilot
+
+If there are any issues with the installation like pods stuck in ``ErrImagePull`` or ``ImagePullBackOff``,
+you can install the Prometheus operator manually using the community helm chart:
+
 .. code-block:: bash
 
   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
@@ -445,11 +473,7 @@ If you are using Nebius Kubernetes cluster, you can setup GPU metrics in the clu
     --set nodeExporter.enabled=true \
     --set prometheusOperator.enabled=true
 
-You can check the Pod status to verify the installation.
 
-.. code-block:: bash
-
-  kubectl get pods -n skypilot
 
 By default, the CPU and memory metrics exported by node exporter do not include the ``node`` label, which is required for the SkyPilot dashboard to display the metrics. You can add the ``node`` label to the metrics by applying the following config to the node exporter service monitor resource:
 

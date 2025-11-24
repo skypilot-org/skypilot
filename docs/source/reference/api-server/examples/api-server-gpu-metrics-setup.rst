@@ -18,32 +18,10 @@ Before you begin, make sure your Kubernetes cluster meets the following
 requirements:
 
 * **NVIDIA GPUs** are available on your worker nodes.
-* The Prometheus Operator is installed.
 * The `NVIDIA device plugin <https://github.com/NVIDIA/k8s-device-plugin>`_ or the NVIDIA **GPU Operator** is installed.
 * **DCGM-Exporter** is running on the cluster and exposes metrics on
   port ``9400``.  Most GPU Operator installations already deploy DCGM-Exporter for you.
 * `Node Exporter <https://prometheus.io/docs/guides/node-exporter/>`_ is running on the cluster and exposes metrics on port ``9100``. This is required only if you want to monitor the CPU and Memory metrics.
-
-Installing the Prometheus Operator and Node Exporter
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The Prometheus Operator is necessary for the DCGM-Exporter to start properly. The Prometheus Operator and Node Exporter can be
-deployed using the prometheus community helm chart:
-
-.. code-block:: bash
-
-    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-    helm repo update
-
-    helm upgrade --install kube-prometheus prometheus-community/kube-prometheus-stack \
-    --namespace skypilot \
-    --create-namespace \
-    --set prometheus.enabled=false \
-    --set alertmanager.enabled=false \
-    --set grafana.enabled=false \
-    --set kubeStateMetrics.enabled=false \
-    --set nodeExporter.enabled=true \
-    --set prometheusOperator.enabled=true
 
 Check the dcgm exporter setup
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -103,6 +81,27 @@ If any are missing, edit the Service to add them.
     kubectl create -f https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/examples/metrics/dcgm_service.yaml -n $NAMESPACE
 
 where ``$NAMESPACE`` is the DCGM-Exporter namespace.
+
+Deploying the Prometheus Operator and Node Exporter
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The Prometheus Operator and Node Exporter can be
+deployed using the prometheus community helm chart:
+
+.. code-block:: bash
+
+    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+    helm repo update
+
+    helm upgrade --install kube-prometheus prometheus-community/kube-prometheus-stack \
+    --namespace skypilot \
+    --create-namespace \
+    --set prometheus.enabled=false \
+    --set alertmanager.enabled=false \
+    --set grafana.enabled=false \
+    --set kubeStateMetrics.enabled=false \
+    --set nodeExporter.enabled=true \
+    --set prometheusOperator.enabled=true
 
 Check the node exporter setup
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
