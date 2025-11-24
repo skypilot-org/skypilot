@@ -1947,3 +1947,39 @@ def test_cancel_job_reliability(generic_cloud: str):
             2,  # Longer timeout for 10 iterations
         )
         smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.aws
+def test_docker_pass_redacted(generic_cloud: str):
+    fake_token = 'dckr_pat_fakefakefake'
+    cluster_yaml = textwrap.dedent(f"""
+    name: test_docker_pass
+
+    resources:
+      cloud: {generic_cloud}
+      region: us-west-1
+      image_id: docker:lab3522/ubuntu:latest
+      cpus: 2+
+      memory: 4GB+
+
+    secrets:
+      SKYPILOT_DOCKER_USERNAME: lab3522
+      SKYPILOT_DOCKER_PASSWORD: {fake_token}
+      SKYPILOT_DOCKER_SERVER: docker.io
+
+    run: echo "Test completed"
+    """)
+    with tempfile.NamedTemporaryFile(delete=True) as f:
+        f.write(cluster_yaml.encode('utf-8'))
+        f.flush()
+        name = smoke_tests_utils.get_cluster_name()
+        test = smoke_tests_utils.Test(
+            'test_docker_pass_redacted',
+            [
+                # Make sure the docker password is not in the output.
+                f's=$(sky launch -y -c {name} {f.name} -y 2>&1); echo "$s"; ! echo "$s" | grep -q "{fake_token}"',
+            ],
+            timeout=smoke_tests_utils.get_timeout(generic_cloud),
+            teardown=f'sky down -y {name}',
+        )
+        smoke_tests_utils.run_one_test(test)
