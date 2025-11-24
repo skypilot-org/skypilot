@@ -219,7 +219,15 @@ class DockerInitializer:
             cmd = (f'flock {flock_args} /tmp/{flock_name} '
                    f'-c {shlex.quote(cmd)}')
 
-        logger.debug(f'+ {cmd}')
+        # Redact the password in the login command.
+        parts = shlex.split(cmd)
+        for i, part in enumerate(parts):
+            if part == '--password':
+                if i + 1 < len(parts):
+                    parts[i + 1] = '<redacted>'
+        cmd_logged = ' '.join(parts)
+
+        logger.debug(f'+ {cmd_logged}')
         start = time.time()
         while True:
             rc, stdout, stderr = self.runner.run(
