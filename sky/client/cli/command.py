@@ -3040,34 +3040,6 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
             # there is no in-prgress managed jobs.
             managed_jobs_ = []
             pools_ = []
-        except exceptions.InconsistentConsolidationModeError:
-            # If this error is raised, it means the user switched to the
-            # consolidation mode but the previous controller cluster is still
-            # running. We should allow the user to tear down the controller
-            # cluster in this case.
-            with skypilot_config.override_skypilot_config(
-                {'jobs': {
-                    'controller': {
-                        'consolidation_mode': False
-                    }
-                }}):
-                # Check again with the consolidation mode disabled. This is to
-                # make sure there is no in-progress managed jobs.
-                request_id, queue_result_version = (
-                    cli_utils.get_managed_job_queue(
-                        refresh=False,
-                        skip_finished=True,
-                        all_users=True,
-                        fields=fields,
-                    ))
-                result = sdk.stream_and_get(request_id)
-                if queue_result_version.v2():
-                    managed_jobs_, _, status_counts, _ = result
-                else:
-                    managed_jobs_ = typing.cast(
-                        List[responses.ManagedJobRecord], result)
-                request_id_pools = managed_jobs.pool_status(pool_names=None)
-                pools_ = sdk.stream_and_get(request_id_pools)
 
     msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
            'jobs controller. Please be aware of the following:'
@@ -3144,21 +3116,6 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str,
             # controller being STOPPED or being firstly launched, i.e., there is
             # no in-prgress services.
             services = []
-        except exceptions.InconsistentConsolidationModeError:
-            # If this error is raised, it means the user switched to the
-            # consolidation mode but the previous controller cluster is still
-            # running. We should allow the user to tear down the controller
-            # cluster in this case.
-            with skypilot_config.override_skypilot_config(
-                {'serve': {
-                    'controller': {
-                        'consolidation_mode': False
-                    }
-                }}):
-                # Check again with the consolidation mode disabled. This is to
-                # make sure there is no in-progress services.
-                request_id = serve_lib.status(service_names=None)
-                services = sdk.stream_and_get(request_id)
 
     if services:
         service_names = [service['name'] for service in services]
