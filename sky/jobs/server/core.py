@@ -257,7 +257,7 @@ def launch(
     # to the jobs controller. for example if the postgres is whitelisted to
     # only the API server, this will then break. the simple solution to that is
     # telling the user to add the jobs controller to the postgres whitelist.
-    if not managed_job_utils.is_consolidation_mode():
+    if not managed_job_utils.is_consolidation_mode(validate=True):
         db_path = mutated_user_config.get('db', None)
         if db_path is not None:
             parsed = urlparse.urlparse(db_path)
