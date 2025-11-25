@@ -356,10 +356,10 @@ def setup_verda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = auth_utils.get_or_generate_keys()
     with open(public_key_path, 'r', encoding='UTF-8') as pub_key_file:
         public_key = pub_key_file.read().strip()
-        current_key_list = verda.verda().ssh_keys.get()  # pylint: disable=assignment-from-no-return
+        current_key_list = verda.verda_client().ssh_keys.get()  # pylint: disable=assignment-from-no-return
         # Only add an ssh key if it hasn't already been added
         if not any(ssh_key.public_key == public_key for ssh_key in current_key_list):
-            verda.verda().ssh_keys.create(name="skypilot-key", key=public_key)
+            verda.verda_client().ssh_keys.create(name="skypilot-key", key=public_key)
 
     config['auth']['ssh_public_key'] = public_key_path
     return configure_ssh_info(config)

@@ -45,6 +45,7 @@ Install SkyPilot using pip:
           # Seeweb is only supported for Python >= 3.10
           pip install "skypilot[seeweb]"
           pip install "skypilot[primeintellect]"
+          pip install "skypilot[verda]"
 
           pip install "skypilot[all]"
 

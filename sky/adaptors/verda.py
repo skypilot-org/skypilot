@@ -4,26 +4,28 @@ import functools
 import os
 from json import load as json_load
 
-_verda_sdk = None
+from datacrunch import DataCrunchClient
+
+_verda_client = None
 
 def import_package(func):
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        global _verda_sdk
+        global _verda_client
 
-        if _verda_sdk is None:
+        if _verda_client is None:
             try:
                 import datacrunch as _verda  # pylint: disable=import-outside-toplevel
                 configured, error, config = get_configuration()
                 if not configured:
                     raise Exception(error)
 
-                _verda_sdk = _verda.DataCrunchClient(
+                _verda_client = _verda.DataCrunchClient(
                     client_id=config['client_id'],
                     client_secret=config['client_secret'],
                     base_url=config['base_url'] if 'base_url' in config else 'https://api.datacrunch.io/v1',
-                    inference_key=config['inference_key'] if 'inference_key' in config else None
+                    inference_key=config['inference_key'] if 'inference_key' in config else None # type: ignore (inference_key is optional)
                 )
             except ImportError as e:
                 raise ImportError(f'Fail to import dependencies for Verda Cloud: {e}\n'
@@ -34,9 +36,11 @@ def import_package(func):
 
 
 @import_package
-def verda():
-    """Return the verda package."""
-    return _verda_sdk
+def verda_client() -> DataCrunchClient:
+    """Return the configured Verda Client. @see https://github.com/verda-cloud/sdk-python for more details."""
+    if _verda_client is None:
+        raise Exception('Verda Client is not configured')
+    return _verda_client
 
 def get_configuration():
     """Checks known config file exists and is valid. Also supports using env vars instead."""

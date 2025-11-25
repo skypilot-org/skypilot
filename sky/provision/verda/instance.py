@@ -2,11 +2,13 @@
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from datacrunch.instances.instances import Instance, InstanceStatus
+
 from sky import exceptions
 from sky import sky_logging
 from sky.provision import common
 from sky.provision.verda import utils
-from sky.provision.verda.utils import VerdaCloudAPIClient
+from sky.adaptors.verda import verda_client
 from sky.utils import common_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
@@ -28,66 +30,66 @@ SSH_CONN_RETRY_INTERVAL_SECONDS = 10
 
 
 def _filter_instances(cluster_name_on_cloud: str,
-                      status_filters: Optional[List[str]]) -> Dict[str, Any]:
-    client = VerdaCloudAPIClient()
-    instances = client.list_instances()
+                      status_filters: Optional[List[str]]) -> Dict[str, Instance]:
+    instances = verda_client().instances.get()
     filtered_instances = {}
     for instance in instances:
-        instance_id = instance['id']
-        instance_name = instance.get('name', '')
+        instance_id = instance.id
+        instance_name = instance.hostname
         # Filter by cluster name (instances should have cluster name in their name)
         if cluster_name_on_cloud and cluster_name_on_cloud not in instance_name:
             continue
         # Filter by status if status_filters is provided
         if (status_filters is not None and
-                instance.get('status') not in status_filters):
+                instance.status not in status_filters):
             continue
         filtered_instances[instance_id] = instance
     return filtered_instances
 
 
-def _get_instance_info(instance_id: str) -> Dict[str, Any]:
-    client = VerdaCloudAPIClient()
-    return client.get_instance_details(instance_id)
+def _get_instance_info(instance_id: str) -> Instance:
+    return verda_client().instances.get_by_id(instance_id)
 
 
-def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
+def _get_head_instance_id(instances: Dict[str, Instance]) -> Optional[str]:
     head_instance_id = None
     for inst_id, inst in instances.items():
-        if inst['name'].endswith('-head'):
+        if inst.hostname.endswith('-head'):
             head_instance_id = inst_id
             break
     return head_instance_id
 
-
-# Helper is available as utils.parse_ssh_connection.
+def find_ssh_key_id(public_key: str):
+    ssh_keys = verda_client().ssh_keys.get()
+    for ssh_key in ssh_keys:
+        if ssh_key.public_key == public_key:
+            return ssh_key.id
+    raise Exception(f'SSH key {public_key} not found in your Verda Cloud account')
 
 
 def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
     del cluster_name  # unused
-    pending_status = [
-        'PROVISIONING',
-        'PENDING',
+    pending_statuses = [
+        InstanceStatus.PROVISIONING,
+        InstanceStatus.ORDERED,
     ]
     newly_started_instances = _filter_instances(cluster_name_on_cloud,
-                                                pending_status)
-    client = utils.VerdaCloudAPIClient()
-
+                                                pending_statuses)
     while True:
-        instances = _filter_instances(cluster_name_on_cloud, pending_status)
+        instances = _filter_instances(cluster_name_on_cloud, pending_statuses)
         if not instances:
             break
         instance_statuses = [
-            instance['status'] for instance in instances.values()
+            instance.status for instance in instances.values()
         ]
         logger.info(f'Waiting for {len(instances)} instances to be ready: '
                     f'{instance_statuses}')
         time.sleep(POLL_INTERVAL)
 
     exist_instances = _filter_instances(cluster_name_on_cloud,
-                                        status_filters=pending_status)
+                                        status_filters=pending_statuses)
     if len(exist_instances) > config.count:
         raise RuntimeError(
             f'Cluster {cluster_name_on_cloud} already has '
@@ -104,11 +106,6 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     if to_start_count == 0:
         if head_instance_id is None:
             head_instance_id = list(exist_instances.keys())[0]
-            # TODO: implement rename pod
-            # client.rename(
-            #     instance_id=head_instance_id,
-            #     name=f'{cluster_name_on_cloud}-head',
-            # )
         assert head_instance_id is not None, (
             'head_instance_id should not be None')
         logger.info(f'Cluster {cluster_name_on_cloud} already has '
@@ -128,43 +125,53 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         node_type = 'head' if head_instance_id is None else 'worker'
         try:
             # Extract vCPUs and memory from instance type
-            # Format: provider__gpu_prefix_base_type__vcpus__memory[_SPOT]
+            # Format: instance_type__vcpus__memory[__SPOT]
             instance_type = config.node_config['InstanceType']
-            disk_size = config.node_config.get('DiskSize')
-            vcpus = -1
-            memory = -1
+            disk_size = config.node_config.get('DiskSize', 50) # Verda Cloud default disk size is 50GB
+            vcpus: int = -1
+            memory: int = -1
+            verda_instance_type = utils.get_verda_instance_type(instance_type)
+            is_spot: bool = False
             try:
                 # Split by '__'
                 parts = instance_type.split('__')
-
-                # Format: provider__gpu_info__vcpus__memory[_SPOT]
-                # For: datacrunch__8xH100_80GB__104__752_SPOT
-                # parts[0] = primecompute, parts[1] = 8xH100_80GB,
-                # parts[2] = 104, parts[3] = 752, parts[4] = SPOT
-                if len(parts) >= 4:
-                    vcpu_str = parts[2]
-                    memory_str = parts[3]
+                # Format: instance_type__vcpus__memory[__SPOT]
+                # For: 1A100.22V_80GB__22__120__SPOT
+                # parts[0] = 1A100.22V_80GB
+                # parts[1] = 22, parts[2] = 120, parts[3] = SPOT
+                if len(parts) >= 3:
+                    vcpu_str = parts[1]
+                    memory_str = parts[2]
                     vcpus = int(vcpu_str)
                     memory = int(memory_str)
+                    is_spot = parts[3] == 'SPOT' if len(parts) >= 4 else False
             except (ValueError, IndexError) as e:
                 # If parsing fails, try to get from catalog
                 logger.warning(
                     f'Failed to parse vCPUs/memory from instance type '
                     f'{instance_type}: {e}')
 
-            params = {
-                'name': f'{cluster_name_on_cloud}-{node_type}',
-                'instance_type': config.node_config['InstanceType'],
-                'region': region,
-                'availability_zone': config.provider_config['zones'],
-                'disk_size': disk_size,
-                'vcpus': vcpus,
-                'memory': memory,
-            }
+            if verda_instance_type is None:
+                raise ValueError(f'Invalid instance type: {instance_type}')
 
-            response = client.launch(**params)
-            instance_id = response['id']
-        except utils.VerdaAPIError as e:
+            ssh_public_key = config.node_config['PublicKey']
+            if ssh_public_key is None:
+                raise ValueError(f'SSH public key is not set in the node config')
+            ssh_key_id = find_ssh_key_id(ssh_public_key)
+
+            response = verda_client().instances.create(
+                instance_type=verda_instance_type,
+                hostname=f'{cluster_name_on_cloud}-{node_type}',
+                location=region,
+                is_spot=is_spot,
+                contract='PAY_AS_YOU_GO' if not is_spot else 'SPOT',
+                image='ubuntu-24.04-cuda-12.6-docker',
+                description='Created by SkyPilot',
+                ssh_key_ids=[ssh_key_id],
+                os_volume={ 'name': f'{cluster_name_on_cloud}-{node_type}', 'size': disk_size }
+            )
+            instance_id = response.id
+        except Exception as e:  # pylint: disable=broad-except
             # API errors - provide specific message
             instance_type = config.node_config['InstanceType']
             region_str = (f' in region {region}'
@@ -187,18 +194,6 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             logger.warning(f'API error during instance launch: {e}')
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(error_msg) from e
-        except Exception as e:  # pylint: disable=broad-except
-            # Generic error handling for unexpected errors
-            instance_type = config.node_config['InstanceType']
-            region_str = (f' in region {region}'
-                          if region != 'PLACEHOLDER' else '')
-            error_msg = (
-                f'Unexpected error while launching {instance_type} instance '
-                f'on Verda{region_str}. Details: '
-                f'{common_utils.format_exception(e, use_bracket=False)}')
-            logger.warning(f'Unexpected error during instance launch: {e}')
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.ResourcesUnavailableError(error_msg) from e
         logger.info(f'Launched instance {instance_id}.')
         created_instance_ids.append(instance_id)
         if head_instance_id is None:
@@ -206,7 +201,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     # Wait for instances to be ready.
     for _ in range(MAX_POLLS_FOR_UP_OR_TERMINATE):
-        instances = _filter_instances(cluster_name_on_cloud, ['ACTIVE'])
+        instances = _filter_instances(cluster_name_on_cloud, [InstanceStatus.RUNNING])
         logger.info('Waiting for instances to be ready: '
                     f'({len(instances)}/{config.count}).')
         if len(instances) == config.count:
@@ -219,10 +214,10 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         instance_type = config.node_config['InstanceType']
         region_str = (f' in region {region}' if region != 'PLACEHOLDER' else '')
         active_instances = len(
-            _filter_instances(cluster_name_on_cloud, ['ACTIVE']))
+            _filter_instances(cluster_name_on_cloud, [InstanceStatus.RUNNING]))
         error_msg = (
             f'Timed out waiting for {instance_type} instances to become '
-            f'ready on Verda{region_str}. Only {active_instances} '
+            f'ready on Verda Cloud{region_str}. Only {active_instances} '
             f'out of {config.count} instances became active. This may '
             f'indicate capacity issues or slow provisioning. Please try '
             f'again later or consider using a different instance type or '
@@ -235,7 +230,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         provider_name='verda',
         cluster_name=cluster_name_on_cloud,
         region=region,
-        zone=config.provider_config['zones'],
+        zone=None,
         head_instance_id=head_instance_id,
         resumed_instance_ids=[],
         created_instance_ids=created_instance_ids,
@@ -262,7 +257,6 @@ def terminate_instances(
 ) -> None:
     """See sky/provision/__init__.py"""
     del provider_config  # unused
-    client = utils.VerdaCloudAPIClient()
     instances = _filter_instances(cluster_name_on_cloud, None)
 
     # Log if no instances found
@@ -274,7 +268,7 @@ def terminate_instances(
     non_terminated_instances = {
         inst_id: inst
         for inst_id, inst in instances.items()
-        if inst['status'] not in ['TERMINATED', 'DELETING']
+        if inst.status not in [InstanceStatus.OFFLINE]
     }
 
     if not non_terminated_instances:
@@ -285,7 +279,7 @@ def terminate_instances(
 
     # Log what we're about to terminate
     instance_names = [
-        inst['name'] for inst in non_terminated_instances.values()
+        inst.hostname for inst in non_terminated_instances.values()
     ]
     logger.info(
         f'Terminating {len(non_terminated_instances)} instances for cluster '
@@ -294,14 +288,14 @@ def terminate_instances(
     # Terminate each instance
     terminated_instances = []
     for inst_id, inst in non_terminated_instances.items():
-        status = inst['status']
+        status = inst.status
         logger.debug(f'Terminating instance {inst_id} (status: {status})')
-        if worker_only and inst['name'].endswith('-head'):
+        if worker_only and inst.hostname.endswith('-head'):
             continue
         try:
-            client.remove(inst_id)
+            verda_client().instances.action(id_list=[inst_id], action="delete")
             terminated_instances.append(inst_id)
-            name = inst['name']
+            name = inst.hostname
             logger.info(
                 f'Successfully initiated termination of instance {inst_id} '
                 f'({name})')
@@ -334,7 +328,7 @@ def terminate_instances(
             break
 
         # Log status of remaining instances
-        remaining_statuses = [(inst_id, remaining_instances[inst_id]['status'])
+        remaining_statuses = [(inst_id, remaining_instances[inst_id].status)
                               for inst_id in still_exist]
         logger.info(
             f'Waiting for termination... {len(still_exist)} instances still '
@@ -360,37 +354,12 @@ def get_cluster_info(
         cluster_name_on_cloud: str,
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     del region  # unused
-    running_instances = _filter_instances(cluster_name_on_cloud, ['ACTIVE'])
+    running_instances = _filter_instances(cluster_name_on_cloud, [InstanceStatus.RUNNING])
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
-    head_ssh_user = None
     for instance_id, instance in running_instances.items():
-        retry_count = 0
-        max_retries = SSH_CONN_MAX_RETRIES
-        while (instance.get('sshConnection') is None and
-               retry_count < max_retries):
-            name = instance.get('name')
-            print(f'SSH connection to {name} is not ready, waiting '
-                  f'{SSH_CONN_RETRY_INTERVAL_SECONDS} seconds... '
-                  f'(attempt {retry_count + 1}/{max_retries})')
-            time.sleep(SSH_CONN_RETRY_INTERVAL_SECONDS)
-            retry_count += 1
-            running_instances[instance_id] = _get_instance_info(instance_id)
-
-        if instance.get('sshConnection') is not None:
-            print('SSH connection is ready!')
-        else:
-            raise Exception(
-                f'Failed to establish SSH connection after {max_retries} '
-                f'attempts')
-
-        assert instance.get(
-            'sshConnection'), 'sshConnection cannot be null anymore'
-
-        ssh_connection = instance['sshConnection']
-        _, ssh_port = utils.parse_ssh_connection(ssh_connection)
-
-        external_ip = instance['ip']
+        running_instances[instance_id] = _get_instance_info(instance_id)
+        external_ip = instance.ip
         if isinstance(external_ip, list):
             external_ip = external_ip[0]
 
@@ -399,21 +368,19 @@ def get_cluster_info(
                 instance_id=instance_id,
                 internal_ip='NOT_SUPPORTED',
                 external_ip=external_ip,
-                ssh_port=ssh_port,
-                tags={'provider': instance['providerType']},
+                ssh_port=22,
+                tags={'provider': "verda"},
             )
         ]
-        if instance['name'].endswith('-head'):
+        if instance.hostname.endswith('-head'):
             head_instance_id = instance_id
-            parsed_user_for_user, _ = utils.parse_ssh_connection(ssh_connection)
-            head_ssh_user = parsed_user_for_user or 'ubuntu'
 
     return common.ClusterInfo(
         instances=instances,
         head_instance_id=head_instance_id,
         provider_name='verda',
         provider_config=provider_config,
-        ssh_user=head_ssh_user,
+        ssh_user="root",
     )
 
 
@@ -421,23 +388,25 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
+    retry_if_missing: bool = False,
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
+    del retry_if_missing  # unused
     instances = _filter_instances(cluster_name_on_cloud, None)
 
     status_map = {
-        'PENDING': status_lib.ClusterStatus.INIT,
-        'ERROR': status_lib.ClusterStatus.INIT,
-        'ACTIVE': status_lib.ClusterStatus.UP,
-        'STOPPED': status_lib.ClusterStatus.STOPPED,
-        'DELETING': None,  # Being deleted - should be filtered out
-        'TERMINATED': None,  # Already terminated - should be filtered out
+        InstanceStatus.PROVISIONING: status_lib.ClusterStatus.INIT,
+        InstanceStatus.ERROR: status_lib.ClusterStatus.INIT,
+        InstanceStatus.RUNNING: status_lib.ClusterStatus.UP,
+        InstanceStatus.OFFLINE: status_lib.ClusterStatus.STOPPED,
+        "deleted": None,  # Being deleted - should be filtered out
+        "discontinued": None,  # Already terminated - should be filtered out
     }
     statuses: Dict[str, Tuple[Optional[status_lib.ClusterStatus],
                               Optional[str]]] = {}
     for inst_id, inst in instances.items():
-        status = status_map[inst['status']]
+        status = status_map[inst.status]
         if non_terminated_only and status is None:
             continue
         statuses[inst_id] = (status, None)
