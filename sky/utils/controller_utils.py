@@ -1352,7 +1352,7 @@ def _get_parallelism(pool: bool, raw_resource_per_unit: float) -> int:
     ratio = (1. + POOL_JOBS_RESOURCES_RATIO) if pool else 1.
     resource_per_unit = ratio * (raw_resource_per_unit +
                                  resource_per_unit_worker)
-
+    logger.info(f'Total memory: {total_memory_mb}, resource per unit: {resource_per_unit}')
     return max(int(total_memory_mb / resource_per_unit), 1)
 
 
