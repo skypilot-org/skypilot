@@ -245,9 +245,9 @@ def test_scp_job_queue():
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus.
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
-@pytest.mark.no_kubernetes  # Kubernetes not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
+@pytest.mark.no_slurm  # Slurm does not support num_nodes > 1 yet
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 def test_job_queue_multinode(generic_cloud: str, accelerator: Dict[str, str]):
     accelerator = accelerator.get(generic_cloud, 'T4')
@@ -659,6 +659,7 @@ def test_tpu_pod_slice_gke():
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
+@pytest.mark.no_slurm  # Slurm does not support num_nodes > 1 yet
 def test_multi_hostname(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     total_timeout_minutes = 25 if generic_cloud == 'azure' else 15
@@ -682,6 +683,7 @@ def test_multi_hostname(generic_cloud: str):
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
+@pytest.mark.no_slurm  # Slurm does not support num_nodes > 1 yet
 def test_multi_node_failure(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -1317,6 +1319,7 @@ def test_azure_start_stop():
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 and autostop yet
 @pytest.mark.no_seeweb  # Seeweb does not support autostop
+@pytest.mark.no_slurm  # Slurm does not support autostop yet
 def test_autostop_wait_for_jobs(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
@@ -1389,6 +1392,7 @@ def test_autostop_wait_for_jobs(generic_cloud: str):
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 and autostop yet
 @pytest.mark.no_seeweb  # Seeweb does not support autostop
+@pytest.mark.no_slurm  # Slurm does not support autostop yet
 def test_autostop_wait_for_jobs_and_ssh(generic_cloud: str):
     """Test that autostop is prevented when SSH sessions are active."""
     name = smoke_tests_utils.get_cluster_name()
@@ -1436,6 +1440,7 @@ def test_autostop_wait_for_jobs_and_ssh(generic_cloud: str):
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 and autostop yet
 @pytest.mark.no_seeweb  # Seeweb does not support autostop
+@pytest.mark.no_slurm  # Slurm does not support autostop yet
 def test_autostop_wait_for_none(generic_cloud: str):
     """Test that autostop is prevented when hard stop is set."""
     name = smoke_tests_utils.get_cluster_name()
@@ -1522,6 +1527,7 @@ def test_cancel_azure():
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support num_nodes > 1 yet
+@pytest.mark.no_slurm  # Slurm does not support num_nodes > 1 yet
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
@@ -2206,6 +2212,7 @@ def test_remote_server_api_login():
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support autostop
+@pytest.mark.no_slurm  # Slurm does not support autostop yet
 def test_autostop_with_unhealthy_ray_cluster(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # See test_autostop_wait_for_jobs() for explanation of autostop_timeout.
