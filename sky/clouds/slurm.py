@@ -33,16 +33,29 @@ class Slurm(clouds.Cloud):
 
     _REPR = 'Slurm'
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.AUTOSTOP: 'Stopping not supported.',
-        clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
-        clouds.CloudImplementationFeatures.SPOT_INSTANCE:
-            ('Spot is not supported, as Slurm API does not implement spot .'),
-        clouds.CloudImplementationFeatures.MULTI_NODE:
-            ('Multi-node not supported yet, as the interconnection among nodes '
-             'are non-trivial on Slurm.'),
+        clouds.CloudImplementationFeatures.AUTOSTOP: 'Slurm does not '
+                                                     'support autostop.',
+        clouds.CloudImplementationFeatures.STOP: 'Slurm does not support '
+                                                 'stopping instances.',
+        clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'Spot instances are '
+                                                          'not supported in '
+                                                          'Slurm.',
+        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not '
+                                                       'supported in Slurm.',
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
-            ('Customized multiple network interfaces are not supported in '
-             'Slurm.'),
+            'Customized multiple network interfaces are not supported in '
+            'Slurm.',
+        clouds.CloudImplementationFeatures.OPEN_PORTS: 'Opening ports is not '
+                                                       'supported in Slurm.',
+        clouds.CloudImplementationFeatures.HOST_CONTROLLERS:
+            'Running '
+            'controllers is not '
+            'well tested with '
+            'Slurm.',
+        clouds.CloudImplementationFeatures.IMAGE_ID: 'Specifying image ID is '
+                                                     'not supported in Slurm.',
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE: 'Docker image is not '
+                                                         'supported in Slurm.',
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
