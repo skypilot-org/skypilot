@@ -635,8 +635,7 @@ class SSHCommandRunner(CommandRunner):
 
         Args:
             node: (ip, port) The IP address and port of the remote machine.
-            ssh_private_key: The path to the private key to use for ssh,
-                or None for keyless SSH (e.g., within Slurm clusters).
+            ssh_private_key: The path to the private key to use for ssh.
             ssh_user: The user to use for ssh.
             ssh_control_name: The files name of the ssh_control to use. This is
                 used to avoid confliction between clusters for creating ssh
@@ -1290,7 +1289,7 @@ class SlurmCommandRunner(SSHCommandRunner):
         self,
         node: Tuple[str, int],
         ssh_user: str,
-        ssh_private_key: str,
+        ssh_private_key: Optional[str],
         *,
         sky_dir: str,
         skypilot_runtime_dir: str,

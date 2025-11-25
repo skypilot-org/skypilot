@@ -1,6 +1,5 @@
 """Slurm instance provisioning."""
 
-import os
 import tempfile
 import time
 from typing import Any, cast, Dict, List, Optional, Tuple
@@ -153,14 +152,29 @@ def _create_virtual_instance(
         provision_lines.append(f'#SBATCH --gres=gpu:{accelerator_type.lower()}:'
                                f'{accelerator_count}')
 
+    skypilot_runtime_dir = _skypilot_runtime_dir(cluster_name_on_cloud)
     sky_dir = _sky_cluster_home_dir(cluster_name_on_cloud)
     provision_lines.extend([
+        '',
+        # Cleanup function to remove cluster dirs on job termination.
+        'cleanup() {',
+        # The Skylet is daemonized, so it is not automatically terminated when
+        # the Slurm job is terminated, we need to kill it manually.
+        '    echo "Terminating Skylet..."',
+        f'    if [ -f "{skypilot_runtime_dir}/.sky/skylet_pid" ]; then',
+        f'        kill $(cat "{skypilot_runtime_dir}/.sky/skylet_pid") 2>/dev/null || true',  # pylint: disable=line-too-long
+        '    fi',
+        '    echo "Cleaning up sky directories..."',
+        f'    rm -rf "{skypilot_runtime_dir}"',
+        f'    rm -rf "{sky_dir}"',
+        '}',
+        'trap cleanup TERM EXIT',
         '',
         # Create sky directory for the cluster.
         # TODO(kevin): Since this is run inside the sbatch script, failures
         # will not be surfaced in a synchronous way. We should add a check
         # to verify the creation of the directory.
-        f'mkdir -p {sky_dir}',
+        f'mkdir -p {sky_dir} {skypilot_runtime_dir}',
         # Suppress login messages.
         f'touch {sky_dir}/.hushlogin',
         'sleep infinity',
@@ -380,61 +394,27 @@ def terminate_instances(
     ssh_host = ssh_config_dict['hostname']
     ssh_port = int(ssh_config_dict['port'])
     ssh_user = ssh_config_dict['user']
-    ssh_key = ssh_config_dict['private_key']
-    # Check if key exists; will be None when run on the remote cluster,
-    # where we assume keyless SSH from compute to login node works.
+    ssh_private_key = ssh_config_dict['private_key']
+    # Check if we are running inside a Slurm job (Only happens with autodown,
+    # where the Skylet will invoke terminate_instances on the remote cluster),
+    # where we assume SSH between nodes have been set up on each node's
+    # ssh config.
     # TODO(kevin): Validate this assumption. Another way would be to
     # mount the private key to the remote cluster, like we do with
     # other clouds' API keys.
-    if not os.path.exists(os.path.expanduser(ssh_key)):
-        ssh_key = None
+    if slurm_utils.is_inside_slurm_job():
+        logger.debug('Running inside a Slurm job, using machine\'s ssh config')
+        ssh_private_key = None
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
 
     client = slurm.SlurmClient(
         ssh_host,
         ssh_port,
         ssh_user,
-        ssh_key,
+        ssh_private_key,
         ssh_proxy_command=ssh_proxy_command,
     )
-
-    # Clean up runtime directories on compute nodes before cancelling the job.
-    # This must happen before cancel since we need the job to still be running
-    # to use SlurmCommandRunner (which uses srun with the job ID).
-    skypilot_runtime_dir = _skypilot_runtime_dir(cluster_name_on_cloud)
-    try:
-        cluster_info = get_cluster_info(
-            region='',
-            cluster_name_on_cloud=cluster_name_on_cloud,
-            provider_config=provider_config)
-        runners = get_command_runners(
-            cluster_info,
-            ssh_user=ssh_user,
-            ssh_private_key=ssh_key,
-        )
-        for runner in runners:
-            rc = runner.run(f'rm -rf {skypilot_runtime_dir}', stream_logs=False)
-            if rc != 0:
-                logger.warning(f'Failed to remove {skypilot_runtime_dir} on '
-                               f'compute node {runner.slurm_node}')
-    except Exception as e:  # pylint: disable=broad-except
-        logger.warning('Failed to clean up compute node runtime directory: '
-                       f'{common_utils.format_exception(e)}')
-
     client.cancel_jobs_by_name(cluster_name_on_cloud)
-
-    # Clean up the sky directory on NFS (shared across all nodes).
-    sky_dir = _sky_cluster_home_dir(cluster_name_on_cloud)
-    controller_node_runner = command_runner.SSHCommandRunner(
-        (ssh_host, ssh_port),
-        ssh_user,
-        ssh_key,
-        ssh_proxy_command=ssh_proxy_command,
-    )
-    cleanup_cmd = f'rm -rf {sky_dir}'
-    rc = controller_node_runner.run(cleanup_cmd, stream_logs=False)
-    if rc != 0:
-        logger.warning(f'Failed to clean up {sky_dir} on login node')
 
 
 def open_ports(
