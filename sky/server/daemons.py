@@ -2,6 +2,7 @@
 import atexit
 import dataclasses
 import os
+import sys
 import time
 import typing
 from typing import Callable
@@ -112,6 +113,10 @@ def refresh_cluster_status_event():
     # This periodically refresh will hold the lock for the cluster being
     # refreshed, but it is OK because other operations will just wait for
     # the lock and get the just refreshed status without refreshing again.
+    # Temporary logging to verify cache growth across daemon iterations.
+    logger.info('Request-level cache functions: %d (bytes=%d)',
+                len(annotations._FUNCTIONS_NEED_RELOAD_CACHE),
+                sys.getsizeof(annotations._FUNCTIONS_NEED_RELOAD_CACHE))
     backend_utils.refresh_cluster_records()
     logger.info('Status refreshed. Sleeping '
                 f'{server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS}'
