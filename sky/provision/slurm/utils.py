@@ -213,7 +213,7 @@ def check_instance_fits(cluster: str,
 
     client = slurm.SlurmClient(
         ssh_config_dict['hostname'],
-        ssh_config_dict.get('port', 22),
+        int(ssh_config_dict.get('port', 22)),
         ssh_config_dict['user'],
         ssh_config_dict['identityfile'][0],
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
@@ -286,7 +286,7 @@ def _get_slurm_node_info_list(
     logger.debug(f'Slurm config dict: {slurm_config_dict}')
     slurm_client = slurm.SlurmClient(
         slurm_config_dict['hostname'],
-        slurm_config_dict.get('port', 22),
+        int(slurm_config_dict.get('port', 22)),
         slurm_config_dict['user'],
         slurm_config_dict['identityfile'][0],
         ssh_proxy_command=slurm_config_dict.get('proxycommand', None),

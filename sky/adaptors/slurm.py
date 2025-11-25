@@ -3,7 +3,7 @@
 import logging
 import re
 import time
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
 
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
@@ -18,7 +18,7 @@ class SlurmClient:
     def __init__(
         self,
         ssh_host: str,
-        ssh_port: Union[str, int],
+        ssh_port: int,
         ssh_user: str,
         ssh_key: Optional[str],
         ssh_proxy_command: Optional[str] = None,
@@ -40,9 +40,8 @@ class SlurmClient:
 
         # Internal runner for executing Slurm CLI commands
         # on the controller node.
-        port = int(ssh_port) if isinstance(ssh_port, str) else ssh_port
         self._runner = command_runner.SSHCommandRunner(
-            (ssh_host, port),
+            (ssh_host, ssh_port),
             ssh_user,
             ssh_key,
             ssh_proxy_command=ssh_proxy_command,

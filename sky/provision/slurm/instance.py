@@ -51,7 +51,7 @@ def _create_virtual_instance(
     provider_config = config.provider_config
     ssh_config_dict = provider_config['ssh']
     ssh_host = ssh_config_dict['hostname']
-    ssh_port = ssh_config_dict['port']
+    ssh_port = int(ssh_config_dict['port'])
     ssh_user = ssh_config_dict['user']
     ssh_key = ssh_config_dict['private_key']
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
@@ -221,7 +221,7 @@ def query_instances(
 
     ssh_config_dict = provider_config['ssh']
     ssh_host = ssh_config_dict['hostname']
-    ssh_port = ssh_config_dict['port']
+    ssh_port = int(ssh_config_dict['port'])
     ssh_user = ssh_config_dict['user']
     ssh_key = ssh_config_dict['private_key']
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
@@ -293,7 +293,7 @@ def get_cluster_info(
     # https://slurm.schedmd.com/multi_cluster.html.
     ssh_config_dict = provider_config['ssh']
     ssh_host = ssh_config_dict['hostname']
-    ssh_port = ssh_config_dict['port']
+    ssh_port = int(ssh_config_dict['port'])
     ssh_user = ssh_config_dict['user']
     ssh_key = ssh_config_dict['private_key']
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
@@ -378,7 +378,7 @@ def terminate_instances(
 
     ssh_config_dict = provider_config['ssh']
     ssh_host = ssh_config_dict['hostname']
-    ssh_port = ssh_config_dict['port']
+    ssh_port = int(ssh_config_dict['port'])
     ssh_user = ssh_config_dict['user']
     ssh_key = ssh_config_dict['private_key']
     # Check if key exists; will be None when run on the remote cluster,

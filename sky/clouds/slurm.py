@@ -435,7 +435,7 @@ class Slurm(clouds.Cloud):
             try:
                 client = slurm.SlurmClient(
                     ssh_config_dict['hostname'],
-                    ssh_config_dict.get('port', 22),
+                    int(ssh_config_dict.get('port', 22)),
                     ssh_config_dict['user'],
                     ssh_config_dict['identityfile'][0],
                     ssh_proxy_command=ssh_config_dict.get('proxycommand', None))
