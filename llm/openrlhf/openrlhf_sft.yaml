@@ -8,6 +8,13 @@ resources:
   use_spot: True
   autostop:
     idle_minutes: 2 # Auto-stop after 2 minutes of idleness.
+  image_id: docker:nvcr.io/nvidia/pytorch:25.02-py3
+
+config:
+  docker:
+    run_options:
+      - -v $PWD:/openrlhf
+      - -v /checkpoints:/checkpoints
 
 envs:
   WANDB_TOKEN: null # Pass with `--secret WANDB_TOKEN` in CLI
@@ -20,42 +27,33 @@ file_mounts:
 
 setup: |
   sudo apt update
-  docker pull nvcr.io/nvidia/pytorch:25.02-py3
-  docker run --name openrlhf_tmp --runtime=nvidia -v $PWD:/openrlhf nvcr.io/nvidia/pytorch:25.02-py3 bash -c "
-          pip uninstall xgboost transformer_engine flash_attn pynvml opencv-python-headless -y
-
-          pip install git+https://github.com/OpenRLHF/OpenRLHF.git@1bfcc334692f4d1e0ec0817465d3d9d495fb162f
-  "
-  docker commit openrlhf_tmp openrlhf:custom
-  docker rm openrlhf_tmp
+  pip uninstall xgboost transformer_engine flash_attn pynvml opencv-python-headless -y
+  pip install git+https://github.com/OpenRLHF/OpenRLHF.git@1bfcc334692f4d1e0ec0817465d3d9d495fb162f
 
 run: |
-  docker run --runtime=nvidia -v $PWD:/openrlhf -v /checkpoints:/checkpoints openrlhf:custom bash -c "
-
-    huggingface-cli login --token ${HF_TOKEN}
-
-    deepspeed --module openrlhf.cli.train_sft \
-      --max_len 2048 \
-      --dataset Open-Orca/OpenOrca \
-      --input_key question \
-      --output_key response \
-      --input_template $'User: {}\nAssistant: ' \
-      --train_batch_size 256 \
-      --micro_train_batch_size 8 \
-      --max_samples 500000 \
-      --pretrain meta-llama/Llama-3.2-1B \
-      --save_path /checkpoints/llama3_2-1b-sft \
-      --save_steps -1 \
-      --logging_steps 1 \
-      --eval_steps -1 \
-      --zero_stage 2 \
-      --max_epochs 1 \
-      --bf16 \
-      --attn_implementation flash_attention_2 \
-      --packing_samples \
-      --learning_rate 5e-6 \
-      --gradient_checkpointing \
-      --use_wandb ${WANDB_TOKEN} \
-      --wandb_project openrlhf \
-      --wandb_run_name sft-training
+  huggingface-cli login --token ${HF_TOKEN}
+  deepspeed --module openrlhf.cli.train_sft \
+    --max_len 2048 \
+    --dataset Open-Orca/OpenOrca \
+    --input_key question \
+    --output_key response \
+    --input_template $'User: {}\nAssistant: ' \
+    --train_batch_size 256 \
+    --micro_train_batch_size 8 \
+    --max_samples 500000 \
+    --pretrain meta-llama/Llama-3.2-1B \
+    --save_path /checkpoints/llama3_2-1b-sft \
+    --save_steps -1 \
+    --logging_steps 1 \
+    --eval_steps -1 \
+    --zero_stage 2 \
+    --max_epochs 1 \
+    --bf16 \
+    --attn_implementation flash_attention_2 \
+    --packing_samples \
+    --learning_rate 5e-6 \
+    --gradient_checkpointing \
+    --use_wandb ${WANDB_TOKEN} \
+    --wandb_project openrlhf \
+    --wandb_run_name sft-training
   "
