@@ -1,6 +1,4 @@
 """SSH-based Kubernetes Cluster Deployment Script"""
-# Refer to https://docs.skypilot.co/en/latest/reservations/existing-machines.html for details on how to use this script. # pylint: disable=line-too-long
-import argparse
 import base64
 import concurrent.futures as cf
 import os
@@ -11,10 +9,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from typing import List, Set
+from typing import List, Set, Optional
 
 import yaml
 
+from sky import sky_logging
 from sky.utils import ux_utils
 from sky.utils.kubernetes import ssh_utils
 
@@ -32,39 +31,10 @@ NODE_POOLS_INFO_DIR = os.path.expanduser('~/.sky/ssh_node_pools_info')
 # Get the directory of this script
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description='Deploy a Kubernetes cluster on remote machines.')
-    parser.add_argument(
-        '--infra', help='Name of the cluster in ssh_node_pools.yaml to use')
-    parser.add_argument(
-        '--ssh-node-pools-file',
-        dest='ssh_node_pools_file',
-        default=ssh_utils.DEFAULT_SSH_NODE_POOLS_PATH,
-        help=
-        f'Path to SSH node pools YAML file (default: {ssh_utils.DEFAULT_SSH_NODE_POOLS_PATH})'
-    )
-    parser.add_argument(
-        '--kubeconfig-path',
-        dest='kubeconfig_path',
-        default=DEFAULT_KUBECONFIG_PATH,
-        help=
-        f'Path to save the kubeconfig file (default: {DEFAULT_KUBECONFIG_PATH})'
-    )
-    parser.add_argument(
-        '--use-ssh-config',
-        dest='use_ssh_config',
-        action='store_true',
-        help='Use SSH config for host settings instead of explicit parameters')
-    parser.add_argument('--cleanup',
-                        action='store_true',
-                        help='Clean up the cluster')
-
-    return parser.parse_args()
+logger = sky_logging.init_logger(__name__)
 
 
-def run_command(cmd, shell=False):
+def run_command(cmd: str, shell: bool=False, silent: bool=False):
     """Run a local command and return the output."""
     process = subprocess.run(cmd,
                              shell=shell,
@@ -72,9 +42,10 @@ def run_command(cmd, shell=False):
                              text=True,
                              check=False)
     if process.returncode != 0:
-        print(f'{RED}Error executing command: {cmd}{NC}')
-        print(f'STDOUT: {process.stdout}')
-        print(f'STDERR: {process.stderr}')
+        if not silent:
+            logger.error(f'{RED}Error executing command: {cmd}{NC}')
+            logger.error(f'STDOUT: {process.stdout}')
+            logger.error(f'STDERR: {process.stderr}')
         return None
     return process.stdout.strip()
 
@@ -102,8 +73,11 @@ def run_remote(node,
                connect_timeout=30,
                use_ssh_config=False,
                print_output=False,
-               use_shell=False):
-    """Run a command on a remote machine via SSH."""
+               use_shell=False,
+               silent=False):
+    """Run a command on a remote machine via SSH.
+    
+    silent is used for gpu checking (will show error logs when no gpus are found)"""
     ssh_cmd: List[str]
     if use_ssh_config:
         # Use SSH config for connection parameters
@@ -131,11 +105,12 @@ def run_remote(node,
                              check=False,
                              shell=use_shell)
     if process.returncode != 0:
-        print(f'{RED}Error executing command {cmd} on {node}:{NC}')
-        print(f'STDERR: {process.stderr}')
+        if not silent:
+            logger.error(f'{RED}Error executing command {cmd} on {node}:{NC}')
+            logger.error(f'STDERR: {process.stderr}')
         return None
     if print_output:
-        print(process.stdout)
+        logger.info(process.stdout)
     return process.stdout.strip()
 
 
@@ -160,12 +135,12 @@ export SUDO_ASKPASS=$ASKPASS_SCRIPT
 
 def progress_message(message):
     """Show a progress message."""
-    print(f'{YELLOW}➜ {message}{NC}')
+    logger.info(f'{YELLOW}➜ {message}{NC}')
 
 
 def success_message(message):
     """Show a success message."""
-    print(f'{GREEN}✔ {message}{NC}')
+    logger.info(f'{GREEN}✔ {message}{NC}')
 
 
 def cleanup_server_node(node,
@@ -174,7 +149,7 @@ def cleanup_server_node(node,
                         askpass_block,
                         use_ssh_config=False):
     """Uninstall k3s and clean up the state on a server node."""
-    print(f'{YELLOW}Cleaning up head node {node}...{NC}')
+    logger.info(f'{YELLOW}Cleaning up head node {node}...{NC}')
     cmd = f"""
         {askpass_block}
         echo 'Uninstalling k3s...' &&
@@ -183,7 +158,7 @@ def cleanup_server_node(node,
     """
     result = run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
     if result is None:
-        print(f'{RED}Failed to clean up head node ({node}).{NC}')
+        logger.error(f'{RED}Failed to clean up head node ({node}).{NC}')
     else:
         success_message(f'Node {node} cleaned up successfully.')
 
@@ -194,7 +169,7 @@ def cleanup_agent_node(node,
                        askpass_block,
                        use_ssh_config=False):
     """Uninstall k3s and clean up the state on an agent node."""
-    print(f'{YELLOW}Cleaning up worker node {node}...{NC}')
+    logger.info(f'{YELLOW}Cleaning up worker node {node}...{NC}')
     cmd = f"""
         {askpass_block}
         echo 'Uninstalling k3s...' &&
@@ -203,7 +178,7 @@ def cleanup_agent_node(node,
     """
     result = run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
     if result is None:
-        print(f'{RED}Failed to clean up worker node ({node}).{NC}')
+        logger.error(f'{RED}Failed to clean up worker node ({node}).{NC}')
     else:
         success_message(f'Node {node} cleaned up successfully.')
 
@@ -217,6 +192,7 @@ def start_agent_node(node,
                      use_ssh_config=False):
     """Start a k3s agent node.
     Returns: if the start is successful, and if the node has a GPU."""
+    logger.info(f'{YELLOW}Deploying worker node ({node}).')
     cmd = f"""
             {askpass_block}
             curl -sfL https://get.k3s.io | K3S_NODE_NAME={node} INSTALL_K3S_EXEC='agent --node-label skypilot-ip={node}' \
@@ -224,12 +200,12 @@ def start_agent_node(node,
         """
     result = run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
     if result is None:
-        print(f'{RED}Failed to deploy K3s on worker node ({node}).{NC}')
+        logger.error(f'{RED}Failed to deploy K3s on worker node ({node}).{NC}')
         return node, False, False
     success_message(f'Kubernetes deployed on worker node ({node}).')
     # Check if worker node has a GPU
     if check_gpu(node, user, ssh_key, use_ssh_config=use_ssh_config):
-        print(f'{YELLOW}GPU detected on worker node ({node}).{NC}')
+        logger.info(f'{YELLOW}GPU detected on worker node ({node}).{NC}')
         return node, True, True
     return node, True, False
 
@@ -237,7 +213,7 @@ def start_agent_node(node,
 def check_gpu(node, user, ssh_key, use_ssh_config=False):
     """Check if a node has a GPU."""
     cmd = 'command -v nvidia-smi &> /dev/null && nvidia-smi --query-gpu=gpu_name --format=csv,noheader &> /dev/null'
-    result = run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
+    result = run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config, silent=True)
     return result is not None
 
 
@@ -368,7 +344,7 @@ def setup_kubectl_ssh_tunnel(head_node,
     has_cert_files = os.path.isfile(client_cert_file) and os.path.isfile(
         client_key_file)
     if has_cert_files:
-        print(
+        logger.info(
             f'{GREEN}Client certificate data extracted and will be used for authentication{NC}'
         )
 
@@ -395,13 +371,13 @@ def setup_kubectl_ssh_tunnel(head_node,
     success_message(
         f'SSH tunnel configured through kubectl credential plugin on port {port}'
     )
-    print(
+    logger.info(
         f'{GREEN}Your kubectl connection is now tunneled through SSH (port {port}).{NC}'
     )
-    print(
+    logger.info(
         f'{GREEN}This tunnel will be automatically established when needed.{NC}'
     )
-    print(
+    logger.info(
         f'{GREEN}Credential TTL set to {ttl_seconds}s to ensure tunnel health is checked frequently.{NC}'
     )
 
@@ -427,43 +403,45 @@ def cleanup_kubectl_ssh_tunnel(context_name):
 
         success_message(f'SSH tunnel for context {context_name} cleaned up')
     else:
-        print(f'{YELLOW}Cleanup script not found: {cleanup_script}{NC}')
+        logger.error(f'{YELLOW}Cleanup script not found: {cleanup_script}{NC}')
 
 
-def main():
-    args = parse_args()
+def deploy_clusters(infra: Optional[str], 
+                    ssh_node_pools_file: str = ssh_utils.DEFAULT_SSH_NODE_POOLS_PATH,
+                    kubeconfig_path: str = DEFAULT_KUBECONFIG_PATH,
+                    global_use_ssh_config: bool = True,
+                    cleanup: bool = True):
 
-    kubeconfig_path = os.path.expanduser(args.kubeconfig_path)
-    global_use_ssh_config = args.use_ssh_config
+    kubeconfig_path = os.path.expanduser(kubeconfig_path)
 
     failed_clusters = []
     successful_clusters = []
 
     # Print cleanup mode marker if applicable
-    if args.cleanup:
-        print('SKYPILOT_CLEANUP_MODE: Cleanup mode activated')
+    if cleanup:
+        logger.info('SKYPILOT_CLEANUP_MODE: Cleanup mode activated')
 
     # Using YAML configuration
-    targets = ssh_utils.load_ssh_targets(args.ssh_node_pools_file)
+    targets = ssh_utils.load_ssh_targets(ssh_node_pools_file)
     clusters_config = ssh_utils.get_cluster_config(
-        targets, args.infra, file_path=args.ssh_node_pools_file)
+        targets, infra, file_path=ssh_node_pools_file)
 
     # Print information about clusters being processed
     num_clusters = len(clusters_config)
     cluster_names = list(clusters_config.keys())
     cluster_info = f'Found {num_clusters} Node Pool{"s" if num_clusters > 1 else ""}: {", ".join(cluster_names)}'
-    print(f'SKYPILOT_CLUSTER_INFO: {cluster_info}')
+    logger.info(f'SKYPILOT_CLUSTER_INFO: {cluster_info}')
 
     # Process each cluster
     for cluster_name, cluster_config in clusters_config.items():
         try:
-            print(f'SKYPILOT_CURRENT_CLUSTER: {cluster_name}')
-            print(f'{YELLOW}==== Deploying cluster: {cluster_name} ====${NC}')
+            logger.info(f'SKYPILOT_CURRENT_CLUSTER: {cluster_name}')
+            logger.info(f'{YELLOW}==== Deploying cluster: {cluster_name} ====${NC}')
             hosts_info = ssh_utils.prepare_hosts_info(cluster_name,
                                                       cluster_config)
 
             if not hosts_info:
-                print(
+                logger.warning(
                     f'{RED}Error: No valid hosts found for cluster {cluster_name!r}. Skipping.{NC}'
                 )
                 continue
@@ -477,11 +455,11 @@ def main():
 
             history = None
             if os.path.exists(history_yaml_file):
-                print(f'{YELLOW}Loading history from {history_yaml_file}{NC}')
+                logger.info(f'{YELLOW}Loading history from {history_yaml_file}{NC}')
                 with open(history_yaml_file, 'r', encoding='utf-8') as f:
                     history = yaml.safe_load(f)
             else:
-                print(f'{YELLOW}No history found for {context_name}.{NC}')
+                logger.info(f'{YELLOW}No history found for {context_name}.{NC}')
 
             history_workers_info = None
             history_worker_nodes = None
@@ -489,7 +467,7 @@ def main():
             # Do not support changing anything besides hosts for now
             if history is not None:
                 for key in ['user', 'identity_file', 'password']:
-                    if not args.cleanup and history.get(
+                    if not cleanup and history.get(
                             key) != cluster_config.get(key):
                         raise ValueError(
                             f'Cluster configuration has changed for field {key!r}. '
@@ -497,7 +475,7 @@ def main():
                             f'Current value: {cluster_config.get(key)}')
                 history_hosts_info = ssh_utils.prepare_hosts_info(
                     cluster_name, history)
-                if not args.cleanup and history_hosts_info[0] != hosts_info[0]:
+                if not cleanup and history_hosts_info[0] != hosts_info[0]:
                     raise ValueError(
                         f'Cluster configuration has changed for master node. '
                         f'Previous value: {history_hosts_info[0]}, '
@@ -536,13 +514,13 @@ def main():
                 head_use_ssh_config,
                 worker_use_ssh_config,
                 kubeconfig_path,
-                args.cleanup,
+                cleanup,
                 worker_hosts=worker_hosts,
                 history_worker_nodes=history_worker_nodes,
                 history_workers_info=history_workers_info,
                 history_use_ssh_config=history_use_ssh_config)
 
-            if not args.cleanup:
+            if not cleanup:
                 successful_hosts = []
                 for host in cluster_config['hosts']:
                     if isinstance(host, str):
@@ -553,22 +531,22 @@ def main():
                         successful_hosts.append(host)
                 cluster_config['hosts'] = successful_hosts
                 with open(history_yaml_file, 'w', encoding='utf-8') as f:
-                    print(f'{YELLOW}Writing history to {history_yaml_file}{NC}')
+                    logger.info(f'{YELLOW}Writing history to {history_yaml_file}{NC}')
                     yaml.dump(cluster_config, f)
 
-            print(
+            logger.info(
                 f'{GREEN}==== Completed deployment for cluster: {cluster_name} ====${NC}'
             )
             successful_clusters.append(cluster_name)
         except Exception as e:  # pylint: disable=broad-except
             reason = str(e)
             failed_clusters.append((cluster_name, reason))
-            print(
+            logger.error(
                 f'{RED}Error deploying SSH Node Pool {cluster_name}: {reason}{NC}'
             )  # Print for internal logging
 
     if failed_clusters:
-        action = 'clean' if args.cleanup else 'deploy'
+        action = 'clean' if cleanup else 'deploy'
         msg = f'{GREEN}Successfully {action}ed {len(successful_clusters)} cluster(s) ({", ".join(successful_clusters)}). {NC}'
         msg += f'{RED}Failed to {action} {len(failed_clusters)} cluster(s): {NC}'
         for cluster_name, reason in failed_clusters:
@@ -609,7 +587,7 @@ def deploy_cluster(head_node,
     k3s_token = 'mytoken'  # Any string can be used as the token
 
     # Pre-flight checks
-    print(f'{YELLOW}Checking SSH connection to head node...{NC}')
+    logger.info(f'{YELLOW}Checking SSH connection to head node...{NC}')
     result = run_remote(
         head_node,
         f'echo \'SSH connection successful ({head_node})\'',
@@ -638,7 +616,7 @@ def deploy_cluster(head_node,
                 history_worker_nodes, history_workers_info,
                 history_use_ssh_config):
             if worker_hosts is not None and history_info not in worker_hosts:
-                print(
+                logger.info(
                     f'{YELLOW}Worker node {history_node} not found in YAML config. '
                     f'Removing from history...{NC}')
                 worker_nodes_to_cleanup.append(
@@ -676,7 +654,7 @@ def deploy_cluster(head_node,
                     use_ssh_config=use_ssh_config,
                 ))
 
-        print(f'{YELLOW}Starting cleanup...{NC}')
+        logger.info(f'{YELLOW}Starting cleanup...{NC}')
 
         # Clean up head node
         cleanup_server_node(head_node,
@@ -692,7 +670,7 @@ def deploy_cluster(head_node,
     with cf.ThreadPoolExecutor() as executor:
 
         def run_cleanup_cmd(cmd):
-            print('Cleaning up worker nodes:', cmd)
+            logger.info('Cleaning up worker nodes:', cmd)
             run_command(cmd, shell=True)
 
         executor.map(run_cleanup_cmd, remove_worker_cmds)
@@ -735,14 +713,14 @@ def deploy_cluster(head_node,
         # will restart the ssh tunnel if it's not running.
         cleanup_kubectl_ssh_tunnel(context_name)
 
-        print(f'{GREEN}Cleanup completed successfully.{NC}')
+        logger.info(f'{GREEN}Cleanup completed successfully.{NC}')
 
         # Print completion marker for current cluster
-        print(f'{GREEN}SKYPILOT_CLUSTER_COMPLETED: {NC}')
+        logger.info(f'{GREEN}SKYPILOT_CLUSTER_COMPLETED: {NC}')
 
         return []
 
-    print(f'{YELLOW}Checking TCP Forwarding Options...{NC}')
+    logger.info(f'{YELLOW}Checking TCP Forwarding Options...{NC}')
     cmd = (
         'if [ "$(sudo sshd -T | grep allowtcpforwarding)" = "allowtcpforwarding yes" ]; then '
         f'echo "TCP Forwarding already enabled on head node ({head_node})."; '
@@ -769,7 +747,7 @@ def deploy_cluster(head_node,
     # Get effective IP for master node if using SSH config - needed for workers to connect
     if head_use_ssh_config:
         effective_master_ip = get_effective_host_ip(head_node)
-        print(
+        logger.info(
             f'{GREEN}Resolved head node {head_node} to {effective_master_ip} from SSH config{NC}'
         )
     else:
@@ -815,7 +793,7 @@ def deploy_cluster(head_node,
                  ssh_user,
                  ssh_key,
                  use_ssh_config=head_use_ssh_config):
-        print(f'{YELLOW}GPU detected on head node ({head_node}).{NC}')
+        logger.info(f'{YELLOW}GPU detected on head node ({head_node}).{NC}')
         install_gpu = True
 
     # Fetch the head node's internal IP (this will be passed to worker nodes)
@@ -828,7 +806,7 @@ def deploy_cluster(head_node,
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(f'Failed to SSH to head node ({head_node}). '
                                f'Please check the SSH configuration.')
-    print(f'{GREEN}Master node internal IP: {master_addr}{NC}')
+    logger.info(f'{GREEN}Master node internal IP: {master_addr}{NC}')
 
     # Step 2: Install k3s on worker nodes and join them to the master node
     def deploy_worker(args):
@@ -840,7 +818,7 @@ def deploy_cluster(head_node,
         if worker_hosts and i < len(worker_hosts):
             if history_workers_info is not None and worker_hosts[
                     i] in history_workers_info:
-                print(
+                logger.info(
                     f'{YELLOW}Worker node ({node}) already exists in history. '
                     f'Skipping...{NC}')
                 return node, True, False
@@ -972,7 +950,7 @@ def deploy_cluster(head_node,
                         has_end = '-----END CERTIFICATE-----' in cert_pem
 
                         if not has_begin or not has_end:
-                            print(
+                            logger.warning(
                                 f'{YELLOW}Warning: Certificate data missing PEM markers, attempting to fix...{NC}'
                             )
                             # Add PEM markers if missing
@@ -988,7 +966,7 @@ def deploy_cluster(head_node,
 
                         # Verify the file was written correctly
                         if os.path.getsize(cert_file_path) > 0:
-                            print(
+                            logger.info(
                                 f'{GREEN}Successfully saved certificate data ({len(cert_pem)} bytes){NC}'
                             )
 
@@ -1004,13 +982,13 @@ def deploy_cluster(head_node,
                             if not first_line.startswith(
                                     '-----BEGIN') or not last_line.startswith(
                                         '-----END'):
-                                print(
+                                logger.warning(
                                     f'{YELLOW}Warning: Certificate may not be in proper PEM format{NC}'
                                 )
                         else:
-                            print(f'{RED}Error: Certificate file is empty{NC}')
+                            logger.error(f'{RED}Error: Certificate file is empty{NC}')
                     except Exception as e:  # pylint: disable=broad-except
-                        print(
+                        logger.error(
                             f'{RED}Error processing certificate data: {e}{NC}')
 
                 if client_key_data:
@@ -1052,7 +1030,7 @@ def deploy_cluster(head_node,
                             ])
 
                             if not has_begin or not has_end:
-                                print(
+                                logger.warning(
                                     f'{YELLOW}Warning: Key data missing PEM markers, attempting to fix...{NC}'
                                 )
                                 # Add PEM markers if missing
@@ -1072,7 +1050,7 @@ def deploy_cluster(head_node,
 
                         # Verify the file was written correctly
                         if os.path.getsize(key_file_path) > 0:
-                            print(
+                            logger.info(
                                 f'{GREEN}Successfully saved key data ({len(key_pem)} bytes){NC}'
                             )
 
@@ -1088,13 +1066,13 @@ def deploy_cluster(head_node,
                             if not first_line.startswith(
                                     '-----BEGIN') or not last_line.startswith(
                                         '-----END'):
-                                print(
+                                logger.info(
                                     f'{YELLOW}Warning: Key may not be in proper PEM format{NC}'
                                 )
                         else:
-                            print(f'{RED}Error: Key file is empty{NC}')
+                            logger.error(f'{RED}Error: Key file is empty{NC}')
                     except Exception as e:  # pylint: disable=broad-except
-                        print(f'{RED}Error processing key data: {e}{NC}')
+                        logger.error(f'{RED}Error processing key data: {e}{NC}')
 
         # First check if context name exists and delete it if it does
         # TODO(romilb): Should we throw an error here instead?
@@ -1130,13 +1108,13 @@ def deploy_cluster(head_node,
 
     success_message(f'kubectl configured with new context \'{context_name}\'.')
 
-    print(
+    logger.info(
         f'Cluster deployment completed. Kubeconfig saved to {kubeconfig_path}')
-    print('You can now run \'kubectl get nodes\' to verify the setup.')
+    logger.info('You can now run \'kubectl get nodes\' to verify the setup.')
 
     # Install GPU operator if a GPU was detected on any node
     if install_gpu:
-        print(
+        logger.info(
             f'{YELLOW}GPU detected in the cluster. Installing Nvidia GPU Operator...{NC}'
         )
         cmd = f"""
@@ -1167,11 +1145,11 @@ def deploy_cluster(head_node,
                             ssh_key,
                             use_ssh_config=head_use_ssh_config)
         if result is None:
-            print(f'{RED}Failed to install GPU Operator.{NC}')
+            logger.error(f'{RED}Failed to install GPU Operator.{NC}')
         else:
             success_message('GPU Operator installed.')
     else:
-        print(
+        logger.info(
             f'{YELLOW}No GPUs detected. Skipping GPU Operator installation.{NC}'
         )
 
@@ -1185,33 +1163,29 @@ def deploy_cluster(head_node,
     success_message('SkyPilot configured successfully.')
 
     # Display final success message
-    print(
+    logger.info(
         f'{GREEN}==== 🎉 Kubernetes cluster deployment completed successfully 🎉 ====${NC}'
     )
-    print(
+    logger.info(
         'You can now interact with your Kubernetes cluster through SkyPilot: ')
-    print('  • List available GPUs: sky show-gpus --cloud kubernetes')
-    print(
+    logger.info('  • List available GPUs: sky show-gpus --cloud kubernetes')
+    logger.info(
         '  • Launch a GPU development pod: sky launch -c devbox --cloud kubernetes'
     )
-    print(
+    logger.info(
         '  • Connect to pod with VSCode: code --remote ssh-remote+devbox "/home"'
     )
     # Print completion marker for current cluster
-    print(f'{GREEN}SKYPILOT_CLUSTER_COMPLETED: {NC}')
+    logger.info(f'{GREEN}SKYPILOT_CLUSTER_COMPLETED: {NC}')
 
     if unsuccessful_workers:
         quoted_unsuccessful_workers = [
             f'"{worker}"' for worker in unsuccessful_workers
         ]
 
-        print(
+        logger.info(
             f'{WARNING_YELLOW}Failed to deploy Kubernetes on the following nodes: '
             f'{", ".join(quoted_unsuccessful_workers)}. Please check '
             f'the logs for more details.{NC}')
 
     return unsuccessful_workers
-
-
-if __name__ == '__main__':
-    main()
