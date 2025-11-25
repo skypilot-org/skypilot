@@ -862,8 +862,11 @@ def write_cluster_config(
 
     # Dump the Ray ports to a file for Ray job submission
     dump_port_command = (
-        f'{constants.SKY_PYTHON_CMD} -c \'import json, os; json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
-        f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", encoding="utf-8"))\''
+        f'{constants.SKY_PYTHON_CMD} -c \''
+        f'import json, os; '
+        f'runtime_dir = os.environ.get("{constants.SKY_RUNTIME_DIR_ENV_VAR}", os.path.expanduser("~")); '
+        f'json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
+        f'open(os.path.join(runtime_dir, "{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", encoding="utf-8"))\''
     )
 
     # We disable conda auto-activation if the user has specified a docker image

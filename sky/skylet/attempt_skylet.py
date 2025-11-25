@@ -9,10 +9,10 @@ from sky.utils import common_utils
 
 SKY_RUNTIME_DIR = os.environ.get(constants.SKY_RUNTIME_DIR_ENV_VAR,
                                  os.path.expanduser('~'))
-VERSION_FILE = os.path.join(SKY_RUNTIME_DIR, '.sky/skylet_version')
-SKYLET_LOG_FILE = os.path.join(SKY_RUNTIME_DIR, '.sky/skylet.log')
-PID_FILE = os.path.join(SKY_RUNTIME_DIR, '.sky/skylet_pid')
-PORT_FILE = os.path.join(SKY_RUNTIME_DIR, '.sky/skylet_port')
+VERSION_FILE = os.path.join(SKY_RUNTIME_DIR, constants.SKYLET_VERSION_FILE)
+SKYLET_LOG_FILE = os.path.join(SKY_RUNTIME_DIR, constants.SKYLET_LOG_FILE)
+PID_FILE = os.path.join(SKY_RUNTIME_DIR, constants.SKYLET_PID_FILE)
+PORT_FILE = os.path.join(SKY_RUNTIME_DIR, constants.SKYLET_PORT_FILE)
 
 
 def restart_skylet():

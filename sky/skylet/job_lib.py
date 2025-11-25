@@ -633,7 +633,9 @@ def get_ray_port():
     If the port file does not exist, the cluster was launched before #1790,
     return the default port.
     """
-    port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
+    runtime_dir = os.environ.get(constants.SKY_RUNTIME_DIR_ENV_VAR,
+                                 os.path.expanduser('~'))
+    port_path = os.path.join(runtime_dir, constants.SKY_REMOTE_RAY_PORT_FILE)
     if not os.path.exists(port_path):
         return 6379
     port = json.load(open(port_path, 'r', encoding='utf-8'))['ray_port']
@@ -646,7 +648,9 @@ def get_job_submission_port():
     If the port file does not exist, the cluster was launched before #1790,
     return the default port.
     """
-    port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
+    runtime_dir = os.environ.get(constants.SKY_RUNTIME_DIR_ENV_VAR,
+                                 os.path.expanduser('~'))
+    port_path = os.path.join(runtime_dir, constants.SKY_REMOTE_RAY_PORT_FILE)
     if not os.path.exists(port_path):
         return 8265
     port = json.load(open(port_path, 'r',
