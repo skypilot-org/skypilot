@@ -208,12 +208,6 @@ class InconsistentHighAvailabilityError(Exception):
     pass
 
 
-class InconsistentConsolidationModeError(Exception):
-    """Raised when the consolidation mode property in the user config
-    is inconsistent with the actual cluster."""
-    pass
-
-
 class ProvisionPrechecksError(Exception):
     """Raised when a managed job fails prechecks before provision.
 

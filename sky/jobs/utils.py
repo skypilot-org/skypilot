@@ -186,13 +186,11 @@ def _validate_consolidation_mode_config(
         controller_cn = (
             controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name)
         if global_user_state.cluster_with_name_exists(controller_cn):
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.InconsistentConsolidationModeError(
-                    f'{colorama.Fore.RED}Consolidation mode for jobs is '
-                    f'enabled, but the controller cluster '
-                    f'{controller_cn} is still running. Please '
-                    'terminate the controller cluster first.'
-                    f'{colorama.Style.RESET_ALL}')
+            logger.warning(
+                f'{colorama.Fore.RED}Consolidation mode for jobs is enabled, '
+                f'but the controller cluster {controller_cn} is still running. '
+                'Please terminate the controller cluster first.'
+                f'{colorama.Style.RESET_ALL}')
     else:
         total_jobs = managed_job_state.get_managed_jobs_total()
         if total_jobs > 0:
@@ -200,13 +198,11 @@ def _validate_consolidation_mode_config(
                 managed_job_state.get_nonterminal_job_ids_by_name(
                     None, None, all_users=True))
             if nonterminal_jobs:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.InconsistentConsolidationModeError(
-                        f'{colorama.Fore.RED}Consolidation mode '
-                        'is disabled, but there are still '
-                        f'{len(nonterminal_jobs)} managed jobs '
-                        'running. Please terminate those jobs '
-                        f'first.{colorama.Style.RESET_ALL}')
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}Consolidation mode is disabled, '
+                    f'but there are still {len(nonterminal_jobs)} managed jobs '
+                    'running. Please terminate those jobs first.'
+                    f'{colorama.Style.RESET_ALL}')
             else:
                 logger.warning(
                     f'{colorama.Fore.YELLOW}Consolidation mode is disabled, '
@@ -233,14 +229,11 @@ def is_consolidation_mode(on_api_restart: bool = False) -> bool:
     signal_file = pathlib.Path(
         _JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE).expanduser()
 
-    restart_signal_file_exists = signal_file.exists()
-    consolidation_mode = (config_consolidation_mode and
-                          restart_signal_file_exists)
-
     if on_api_restart:
         if config_consolidation_mode:
             signal_file.touch()
     else:
+        restart_signal_file_exists = signal_file.exists()
         if not restart_signal_file_exists:
             if config_consolidation_mode:
                 logger.warning(f'{colorama.Fore.YELLOW}Consolidation mode for '
@@ -259,8 +252,8 @@ def is_consolidation_mode(on_api_restart: bool = False) -> bool:
     # have related config and will always seemingly disabled for consolidation
     # mode. Check #6611 for more details.
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-        _validate_consolidation_mode_config(consolidation_mode)
-    return consolidation_mode
+        _validate_consolidation_mode_config(config_consolidation_mode)
+    return config_consolidation_mode
 
 
 def ha_recovery_for_consolidation_mode() -> None:
