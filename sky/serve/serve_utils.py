@@ -218,25 +218,23 @@ def _validate_consolidation_mode_config(current_is_consolidation_mode: bool,
     if current_is_consolidation_mode:
         controller_cn = controller.cluster_name
         if global_user_state.cluster_with_name_exists(controller_cn):
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.InconsistentConsolidationModeError(
-                    f'{colorama.Fore.RED}Consolidation mode for '
-                    f'{controller.controller_type} is enabled, but the '
-                    f'controller cluster {controller_cn} is still running. '
-                    'Please terminate the controller cluster first.'
-                    f'{colorama.Style.RESET_ALL}')
+            logger.warning(
+                f'{colorama.Fore.RED}Consolidation mode for '
+                f'{controller.controller_type} is enabled, but the controller '
+                f'cluster {controller_cn} is still running. Please terminate '
+                'the controller cluster first.'
+                f'{colorama.Style.RESET_ALL}')
     else:
         noun = 'pool' if pool else 'service'
         all_services = [
             svc for svc in serve_state.get_services() if svc['pool'] == pool
         ]
         if all_services:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.InconsistentConsolidationModeError(
-                    f'{colorama.Fore.RED}Consolidation mode for '
-                    f'{controller.controller_type} is disabled, but there are '
-                    f'still {len(all_services)} {noun}s running. Please '
-                    f'terminate those {noun}s first.{colorama.Style.RESET_ALL}')
+            logger.warning(
+                f'{colorama.Fore.RED}Consolidation mode for '
+                f'{controller.controller_type} is disabled, but there are '
+                f'still {len(all_services)} {noun}s running. Please terminate '
+                f'those {noun}s first.{colorama.Style.RESET_ALL}')
 
 
 @annotations.lru_cache(scope='request', maxsize=1)
