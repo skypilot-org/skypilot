@@ -362,7 +362,12 @@ class Test(NamedTuple):
 
 def get_timeout(generic_cloud: str,
                 override_timeout: int = DEFAULT_CMD_TIMEOUT):
-    timeouts = {'fluidstack': 60 * 60}  # file_mounts
+    timeouts = {
+        'fluidstack': 60 * 60,  # file_mounts
+        'slurm':
+            40 *
+            60  # Slurm uses NFS which is slower to write to for file_mounts tests
+    }
     return timeouts.get(generic_cloud, override_timeout)
 
 

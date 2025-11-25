@@ -428,6 +428,7 @@ def test_skyserve_spot_recovery():
 @pytest.mark.no_shadeform  # Shadeform does not support opening ports
 @pytest.mark.serve
 @pytest.mark.no_kubernetes
+@pytest.mark.no_slurm  # Slurm does not support opening ports
 @pytest.mark.no_do
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
@@ -695,6 +696,7 @@ def test_skyserve_streaming(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_slurm  # Slurm does not support opening ports
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_shadeform  # Shadeform does not support opening ports
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
@@ -1041,6 +1043,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
 @pytest.mark.no_fluidstack
 @pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_slurm  # Slurm does not support opening ports
 @pytest.mark.no_shadeform  # Shadeform does not support opening ports
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.serve

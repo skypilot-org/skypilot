@@ -56,7 +56,7 @@ from sky.utils import resources_utils
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
-    if generic_cloud in ('kubernetes', 'k8s'):
+    if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
@@ -437,6 +437,7 @@ def test_docker_preinstalled_package(generic_cloud: str):
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus
 @pytest.mark.no_do  # DO does not have T4 gpus
 @pytest.mark.no_nebius  # Nebius does not have T4 gpus
+@pytest.mark.no_slurm  # Slurm does not support multi-node yet
 @pytest.mark.no_hyperbolic  # Hyperbolic has low availability of T4 GPUs
 @pytest.mark.no_seeweb  # Seeweb does not have T4 gpus
 @pytest.mark.resource_heavy
