@@ -26,16 +26,9 @@ def test_deploy_remote_cluster():
 
     mock_context_name = 'test-infra'
 
-    mock_cluster_config = {
-        mock_context_name: {
-            'hosts': ['test-host']
-        }
-    }
+    mock_cluster_config = {mock_context_name: {'hosts': ['test-host']}}
 
-    mock_ssh_targets = [{
-        'name': mock_context_name,
-        'hosts': ['test-host']
-    }]
+    mock_ssh_targets = [{'name': mock_context_name, 'hosts': ['test-host']}]
 
     with mock.patch('sky.utils.kubernetes.deploy_remote_cluster.parse_args') as mock_parse_args, \
          mock.patch('sky.utils.kubernetes.deploy_remote_cluster.ssh_utils.load_ssh_targets') as mock_load_ssh_targets, \
