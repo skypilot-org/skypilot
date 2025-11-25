@@ -342,7 +342,7 @@ GCP
     .. tab-item:: Archive Download
         :sync: gcp-archive-download-tab
 
-        Follow the `Google Cloud SDK installation instructions <https://cloud.google.com/sdk/docs/install#installation_instructions>`_ for your OS. Do not forget to run the optional step to add gcloud to your PATH. It is essential for SkyPilot to detect that gcloud is properly configured.
+        Follow the `Google Cloud SDK installation instructions <https://cloud.google.com/sdk/docs/install#installation_instructions>`_ for your OS. Be sure to complete the optional step that adds `gcloud` to your PATH. This step is required for SkyPilot to recognize that your `gcloud` installation is configured correctly.
 
 .. tip::
 
