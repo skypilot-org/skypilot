@@ -3164,7 +3164,7 @@ def filter_pods(namespace: str,
     # worker2, worker3, ...) even when Kubernetes API returns them in
     # arbitrary order. This works even if there were somehow pod names other
     # than head/worker ones, but that may be overkill.
-    def get_pod_sort_key(pod):
+    def get_pod_sort_key(pod: V1Pod) -> Tuple[int, Union[int, str]]:
         name = pod.metadata.name
         if '-worker' in name:
             try:
