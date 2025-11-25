@@ -12,7 +12,8 @@ from sky.adaptors import common
 warnings.filterwarnings(
     'ignore',
     category=FutureWarning,
-    message=r'.*You are using a Python version.*which Google will stop supporting.*',
+    message=
+    r'.*You are using a Python version.*which Google will stop supporting.*',
 )
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for GCP. '
