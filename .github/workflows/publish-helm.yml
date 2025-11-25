@@ -103,8 +103,8 @@ jobs:
           semversion=$(echo "$semversion" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)a([0-9]+)/\1-alpha.\2/')
           semversion=$(echo "$semversion" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)b([0-9]+)/\1-beta.\2/')
           # Post-releases use build metadata (+) since SemVer has no direct equivalent to PEP440's .post
-          # Note: PEP440 .post means "after release", but SemVer build metadata has same precedence.
-          # Caveat: If both 0.11.0 and 0.11.0+post.1 exist, Helm's "latest" behavior is undefined.
+          # PEP440 .post means "after release", but SemVer build metadata has same precedence.
+          # TODO(romilb): If both 0.11.0 and 0.11.0+post.1 exist, Helm's "latest" behavior is undefined - some sources claim the newer one wins. Need to verify this.
           semversion=$(echo "$semversion" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)\.post([0-9]+)/\1+post.\2/')
           
           # Update the version and name in the main skypilot chart
