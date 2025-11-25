@@ -6338,12 +6338,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_log_path=os.path.join(log_dir, 'setup.log'),
         )
 
-        codegen.add_tasks(num_actual_nodes,
-                          bash_script=task.run,
-                          task_name=task.name,
-                          resources_dict=resources_dict,
-                          log_dir=log_dir,
-                          env_vars=task_env_vars)
+        codegen.add_tasks(
+            num_actual_nodes,
+            bash_script=task.run,
+            task_name=task.name,
+            resources_dict=backend_utils.get_task_demands_dict(task),
+            log_dir=log_dir,
+            env_vars=task_env_vars)
 
         codegen.add_epilogue()
         # TODO(zhanghao): Add help info for downloading logs.
