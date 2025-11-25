@@ -270,9 +270,16 @@ class RequestWorker:
                 queue.put(request_element)
         except exceptions.ExecutionRetryableError as e:
             time.sleep(e.retry_wait_seconds)
+            # Reset the request status to PENDING so it can be picked up again.
+            # Assume retryable since the error is ExecutionRetryableError.
+            request_id, _, _ = request_element
+            with api_requests.update_request(request_id) as request_task:
+                assert request_task is not None, request_id
+                request_task.status = api_requests.RequestStatus.PENDING
             # Reschedule the request.
             queue = _get_queue(self.schedule_type)
             queue.put(request_element)
+            logger.info(f'Rescheduled request {request_id} for retry')
         finally:
             # Increment the free executor count when a request finishes
             if metrics_utils.METRICS_ENABLED:
