@@ -2,8 +2,16 @@
 
 # pylint: disable=import-outside-toplevel
 import json
+import warnings
 
 from sky.adaptors import common
+
+# Suppress FutureWarning from google.api_core about Python 3.10 support ending.
+warnings.filterwarnings(
+    'ignore',
+    category=FutureWarning,
+    message='.*You are using a Python version.*which Google will stop supporting.*',
+)
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for GCP. '
                          'Try pip install "skypilot[gcp]"')
