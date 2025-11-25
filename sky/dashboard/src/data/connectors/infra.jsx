@@ -381,7 +381,10 @@ async function getKubernetesGPUsFromContexts(contextNames) {
         contextToNodeInfo[contextNames[i]] = result.value;
       } else {
         // Log the error but continue with other contexts
-        console.warn(`Failed to get node info for context ${contextNames[i]}:`, result.reason);
+        console.warn(
+          `Failed to get node info for context ${contextNames[i]}:`,
+          result.reason
+        );
         contextToNodeInfo[contextNames[i]] = {};
       }
     }
