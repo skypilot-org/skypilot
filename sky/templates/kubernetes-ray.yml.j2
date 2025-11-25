@@ -908,6 +908,7 @@ available_node_types:
                   sleep 0.1
                   echo "Waiting for curl package to be installed..."
                 done
+                {{ setup_sky_dirs_commands }}
                 {{ conda_installation_commands }}
                 {{ ray_installation_commands }}
 

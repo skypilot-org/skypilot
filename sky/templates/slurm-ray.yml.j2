@@ -88,8 +88,8 @@ setup_commands:
     sudo pkill -9 dpkg;
     sudo dpkg --configure -a;
     mkdir -p ~/.ssh; touch ~/.ssh/config;
-    {{ conda_installation_commands }}
     {{ setup_sky_dirs_commands }}
+    {{ conda_installation_commands }}
     {{ skypilot_wheel_installation_commands }}
 
 head_node: {}

@@ -110,6 +110,7 @@ setup_commands:
     # Docker installed via cloud-init; ensure service will be started by cloud-init
     {%- endif %}
 
+    {{ setup_sky_dirs_commands }}
     {{ conda_installation_commands }}
     {{ ray_skypilot_installation_commands }}
     {{ copy_skypilot_templates_commands }}

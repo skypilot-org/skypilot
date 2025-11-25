@@ -63,7 +63,7 @@ SKY_RAY_CMD = (f'{SKY_PYTHON_CMD} $([ -s {SKY_RAY_PATH_FILE} ] && '
 # Separate env for SkyPilot runtime dependencies.
 SKY_REMOTE_PYTHON_ENV_NAME = 'skypilot-runtime'
 SKY_CONDA_ROOT = f'{SKY_RUNTIME_DIR}/miniconda3'
-SKY_REMOTE_PYTHON_ENV: str = (f'{SKY_RUNTIME_DIR}/{SKY_REMOTE_PYTHON_ENV_NAME}')
+SKY_REMOTE_PYTHON_ENV = f'{SKY_RUNTIME_DIR}/{SKY_REMOTE_PYTHON_ENV_NAME}'
 ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
 # uv is used for venv and pip, much faster than python implementations.
 SKY_UV_INSTALL_DIR = f'"{SKY_RUNTIME_DIR}/.local/bin"'
@@ -220,7 +220,6 @@ _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'
 RAY_INSTALLATION_COMMANDS = (
     f'{SKY_UV_INSTALL_CMD};'
-    f'{SETUP_SKY_DIRS_COMMANDS}'
     # Print the PATH in provision.log to help debug PATH issues.
     'echo PATH=$PATH; '
     # Install setuptools<=69.5.1 to avoid the issue with the latest setuptools
