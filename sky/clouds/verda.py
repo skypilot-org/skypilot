@@ -10,6 +10,7 @@ from sky import catalog
 from sky import clouds
 from sky.utils import registry
 from sky.utils import resources_utils
+from sky.adaptors.verda import get_configuration
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -85,9 +86,10 @@ class Verda(clouds.Cloud):
     ) -> List[clouds.Region]:
         assert zone is None, 'Verda does not support zones.'
         del accelerators, zone  # unused
+        print(f"regions_with_offering: {instance_type}, {use_spot}, {region}, {resources}")
         regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'verda')
-
+        print(f"regions: {regions}")
         if region is not None:
             regions = [r for r in regions if r.name == region]
         return regions
@@ -272,63 +274,8 @@ class Verda(clouds.Cloud):
     ) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Check if Verda Cloud credentials are properly configured."""
         del cloud_capability  # unused
-        try:
-            api_key_path = os.path.expanduser('~/.verda/config.json')
-            if not os.path.exists(api_key_path):
-                return False, (
-                    f'Verda Cloud config.json not found. '
-                    f'Please save your config.json as {api_key_path}\n'
-                    '    Credentials can be set up by:\n'
-                    '        $ mkdir -p ~/.verda\n'
-                    '        $ cat > ~/.verda/config.json << EOF\n'
-                    '        {\n'
-                    '          "api_key": "your-api-key",\n'
-                    '          "api_secret": "your-api-secret"\n'
-                    '        }\n'
-                    '        EOF'
-                )
-
-            # Try to read the API key
-            with open(api_key_path, 'r', encoding='utf-8') as f:
-                config = json_load(f)
-
-            if 'api_key' not in config or not config.get('api_key'):
-                return False, (
-                    f'Verda Cloud API key is missing or empty in {api_key_path}\n'
-                    '    Please ensure your config.json contains:\n'
-                    '        {\n'
-                    '          "api_key": "your-api-key",\n'
-                    '          "api_secret": "your-api-secret"\n'
-                    '        }'
-                )
-
-            if 'api_secret' not in config or not config.get('api_secret'):
-                return False, (
-                    f'Verda Cloud API secret is missing or empty in {api_key_path}\n'
-                    '    Please ensure your config.json contains:\n'
-                    '        {\n'
-                    '          "api_key": "your-api-key",\n'
-                    '          "api_secret": "your-api-secret"\n'
-                    '        }'
-                )
-
-            return True, None
-
-        except (OSError, IOError) as e:
-            return False, (
-                f'Error reading Verda Cloud credentials from {api_key_path}: {str(e)}\n'
-                '    Please ensure the file exists and is readable.'
-            )
-        except (KeyError, ValueError) as e:
-            # KeyError for missing keys, ValueError for JSON decode errors
-            return False, (
-                f'Error parsing Verda Cloud credentials from {api_key_path}: {str(e)}\n'
-                '    Please ensure your config.json is valid JSON and contains:\n'
-                '        {\n'
-                '          "api_key": "your-api-key",\n'
-                '          "api_secret": "your-api-secret"\n'
-                '        }'
-            )
+        configured, error, _ = get_configuration()
+        return configured, error
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {

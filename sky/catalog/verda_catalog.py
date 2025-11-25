@@ -1,7 +1,7 @@
-""" RunPod | Catalog
+""" Verda Cloud | Catalog
 
 This module loads the service catalog file and can be used to
-query instance types and pricing information for RunPod.
+query instance types and pricing information for Verda Cloud.
 """
 
 import typing
@@ -12,7 +12,7 @@ from sky.catalog import common
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
-# Runpod has no set updated schedule for their catalog. We pull the catalog
+# Verda Cloud has not set the update schedule for their catalog. We pull the catalog
 # every 7 hours to make sure we have the latest information.
 _PULL_FREQUENCY_HOURS = 7
 _df = common.read_catalog('verda/vms.csv',
@@ -48,7 +48,7 @@ def get_default_instance_type(cpus: Optional[str] = None,
                               disk_tier: Optional[str] = None,
                               region: Optional[str] = None,
                               zone: Optional[str] = None) -> Optional[str]:
-    del disk_tier  # RunPod does not support disk tiers.
+    del disk_tier  # Verda Cloud does not support disk tiers.
     # NOTE: After expanding catalog to multiple entries, you may
     # want to specify a default instance type or family.
     return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory, region,
@@ -93,7 +93,7 @@ def list_accelerators(
         case_sensitive: bool = True,
         all_regions: bool = False,
         require_price: bool = True) -> Dict[str, List[common.InstanceTypeInfo]]:
-    """Returns all instance types in Verda Cloud offering GPUs."""
+    """Returns all instance types in Verda Cloud offering accelerators."""
     del require_price  # Unused.
     return common.list_accelerators_impl('Verda', _df, gpus_only, name_filter,
                                          region_filter, quantity_filter,
