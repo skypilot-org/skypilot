@@ -619,7 +619,7 @@ class SSHCommandRunner(CommandRunner):
         self,
         node: Tuple[str, int],
         ssh_user: str,
-        ssh_private_key: str,
+        ssh_private_key: Optional[str],
         ssh_control_name: Optional[str] = '__default__',
         ssh_proxy_command: Optional[str] = None,
         docker_user: Optional[str] = None,
@@ -635,7 +635,8 @@ class SSHCommandRunner(CommandRunner):
 
         Args:
             node: (ip, port) The IP address and port of the remote machine.
-            ssh_private_key: The path to the private key to use for ssh.
+            ssh_private_key: The path to the private key to use for ssh,
+                or None for keyless SSH (e.g., within Slurm clusters).
             ssh_user: The user to use for ssh.
             ssh_control_name: The files name of the ssh_control to use. This is
                 used to avoid confliction between clusters for creating ssh
@@ -668,9 +669,10 @@ class SSHCommandRunner(CommandRunner):
             control_master_utils.should_disable_control_master())
         # Ensure SSH key is available. For SkyPilot-managed keys, create from
         # database. For external keys (e.g., Slurm clusters), verify existence.
-        if _is_skypilot_managed_key(ssh_private_key):
+        if ssh_private_key is not None and _is_skypilot_managed_key(
+                ssh_private_key):
             auth_utils.create_ssh_key_files_from_db(ssh_private_key)
-        else:
+        elif ssh_private_key is not None:
             # Externally managed key - just verify it exists
             expanded_key_path = os.path.expanduser(ssh_private_key)
             if not os.path.exists(expanded_key_path):

@@ -1,5 +1,6 @@
 """Slurm instance provisioning."""
 
+import os
 import tempfile
 import time
 from typing import Any, cast, Dict, List, Optional, Tuple
@@ -380,6 +381,13 @@ def terminate_instances(
     ssh_port = ssh_config_dict['port']
     ssh_user = ssh_config_dict['user']
     ssh_key = ssh_config_dict['private_key']
+    # Check if key exists; will be None when run on the remote cluster,
+    # where we assume keyless SSH from compute to login node works.
+    # TODO(kevin): Validate this assumption. Another way would be to
+    # mount the private key to the remote cluster, like we do with
+    # other clouds' API keys.
+    if not os.path.exists(os.path.expanduser(ssh_key)):
+        ssh_key = None
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
 
     client = slurm.SlurmClient(

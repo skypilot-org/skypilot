@@ -130,7 +130,7 @@ class SSHCommandRunner(CommandRunner):
     ip: str
     port: int
     ssh_user: str
-    ssh_private_key: str
+    ssh_private_key: Optional[str]
     ssh_control_name: Optional[str]
     docker_user: str
     disable_control_master: Optional[bool]
@@ -140,7 +140,7 @@ class SSHCommandRunner(CommandRunner):
         self,
         node: Tuple[str, int],
         ssh_user: str,
-        ssh_private_key: str,
+        ssh_private_key: Optional[str],
         ssh_control_name: Optional[str] = ...,
         ssh_proxy_command: Optional[str] = ...,
         docker_user: Optional[str] = ...,
@@ -318,7 +318,7 @@ class SlurmCommandRunner(SSHCommandRunner):
         self,
         node: Tuple[str, int],
         ssh_user: str,
-        ssh_private_key: str,
+        ssh_private_key: Optional[str],
         *,
         sky_dir: str,
         skypilot_runtime_dir: str,

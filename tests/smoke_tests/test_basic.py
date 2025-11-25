@@ -379,6 +379,7 @@ def test_launch_fast_with_cluster_changes(generic_cloud: str, tmp_path):
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
+@pytest.mark.no_slurm  # Slurm does not support stopping instances
 @pytest.mark.no_vast  # This requires port opening
 @pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
 @pytest.mark.no_shadeform  #Shadeform does not support stopping instances in SkyPilot implementation
@@ -1529,6 +1530,7 @@ def test_sky_down_with_multiple_sgs():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_slurm  # Slurm does not support multi-node yet
 def test_launch_with_failing_setup(generic_cloud: str):
     """Test that failing setup outputs the right error message."""
     name = smoke_tests_utils.get_cluster_name()
@@ -1729,6 +1731,7 @@ def test_kubernetes_ssh_proxy_connection():
 # Only checks for processes in local machine, so skip remote server test.
 # TODO(kevin): Add metrics for number of open SSH tunnels and refactor this test to use it.
 @pytest.mark.no_remote_server
+@pytest.mark.no_slurm  # Slurm does not support gRPC skylet yet
 def test_no_ssh_tunnel_process_leak_after_teardown(generic_cloud: str):
     """Test that no SSH tunnel process leaks after teardown."""
     cluster_name = smoke_tests_utils.get_cluster_name()

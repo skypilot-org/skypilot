@@ -20,7 +20,7 @@ class SlurmClient:
         ssh_host: str,
         ssh_port: Union[str, int],
         ssh_user: str,
-        ssh_key: str,
+        ssh_key: Optional[str],
         ssh_proxy_command: Optional[str] = None,
     ):
         """Initialize SlurmClient.
@@ -29,7 +29,7 @@ class SlurmClient:
             ssh_host: Hostname of the Slurm controller.
             ssh_port: SSH port on the controller.
             ssh_user: SSH username.
-            ssh_key: Path to SSH private key.
+            ssh_key: Path to SSH private key, or None for keyless SSH.
             ssh_proxy_command: Optional SSH proxy command.
         """
         self.ssh_host = ssh_host
