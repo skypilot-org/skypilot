@@ -1286,7 +1286,7 @@ def compute_memory_reserved_for_controllers(
     if reserve_for_controllers:
         reserved_memory_mb = float(MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB)
         if reserve_extra_for_pool:
-            reserved_memory_mb *= (1. + POOL_JOBS_RESOURCES_RATIO)
+            reserved_memory_mb *= POOL_JOBS_RESOURCES_RATIO
     return reserved_memory_mb
 
 
@@ -1349,7 +1349,7 @@ def _get_parallelism(pool: bool, raw_resource_per_unit: float) -> int:
 
     # If running pool on jobs controller, we need to account for the resources
     # consumed by the jobs.
-    ratio = (1. + POOL_JOBS_RESOURCES_RATIO) if pool else 1.
+    ratio = POOL_JOBS_RESOURCES_RATIO if pool else 1.
     resource_per_unit = ratio * (raw_resource_per_unit +
                                  resource_per_unit_worker)
 
