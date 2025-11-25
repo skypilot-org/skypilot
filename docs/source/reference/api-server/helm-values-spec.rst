@@ -36,6 +36,7 @@ Below is the available helm value keys and the default value of each key:
   :ref:`global <helm-values-global>`:
     :ref:`imageRegistry <helm-values-global-imageRegistry>`: null
     :ref:`imagePullSecrets <helm-values-global-imagePullSecrets>`: null
+    :ref:`extraEnvs <helm-values-global-extraEnvs>`: null
   :ref:`apiService <helm-values-apiService>`:
     :ref:`image <helm-values-apiService-image>`: berkeleyskypilot/skypilot-nightly:latest
     :ref:`upgradeStrategy <helm-values-apiService-upgradeStrategy>`: Recreate
@@ -305,6 +306,22 @@ Default: ``null``
   global:
     imagePullSecrets:
       - name: my-registry-credentials
+
+.. _helm-values-global-extraEnvs:
+
+``global.extraEnvs``
+^^^^^^^^^^^^^^^^^^^^
+
+Specify extra environment variables to set on all components in the chart.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  global:
+    extraEnvs:
+      - name: HTTP_PROXY
+        value: http://proxy.example.com
 
 .. _helm-values-apiService:
 

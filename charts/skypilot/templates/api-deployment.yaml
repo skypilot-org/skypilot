@@ -71,8 +71,11 @@ spec:
         resources:
           {{- toYaml .Values.apiService.resources | nindent 10 }}
         env:
-        {{- if .Values.apiService.extraEnvs }}
-        {{- toYaml .Values.apiService.extraEnvs | nindent 8 }}
+        {{- with $.Values.global.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- with .Values.apiService.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
         {{- end }}
         - name: SKYPILOT_DEV
           value: {{ .Values.apiService.skypilotDev | quote }}
@@ -388,6 +391,9 @@ spec:
             sleep 600
           fi
         env:
+        {{- with $.Values.global.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         - name: AWS_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
@@ -435,6 +441,9 @@ spec:
           echo "Account ID:"
           cat /root/.cloudflare/accountid
         env:
+        {{- with $.Values.global.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         - name: R2_CREDENTIALS
           valueFrom:
             secretKeyRef:
@@ -458,6 +467,9 @@ spec:
         image: {{ include "common.image" (dict "root" . "image" .Values.gcpCredentials.image) }}
         command: ["/bin/sh", "-c"]
         env:
+        {{- with $.Values.global.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         - name: GOOGLE_APPLICATION_CREDENTIALS
           value: /root/gcp-cred.json
         args:
@@ -492,6 +504,9 @@ spec:
             sleep 600
           fi
         env:
+        {{- with $.Values.global.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         - name: RUNPOD_API_KEY
           valueFrom:
             secretKeyRef:
@@ -521,6 +536,9 @@ spec:
             sleep 600
           fi
         env:
+        {{- with $.Values.global.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         - name: LAMBDA_API_KEY
           valueFrom:
             secretKeyRef:
@@ -550,6 +568,9 @@ spec:
             sleep 600
           fi
         env:
+        {{- with $.Values.global.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         - name: VAST_API_KEY
           valueFrom:
             secretKeyRef:
