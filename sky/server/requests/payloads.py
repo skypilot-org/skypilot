@@ -72,7 +72,6 @@ EXTERNAL_LOCAL_ENV_VARS = [
 ]
 
 
-@annotations.lru_cache(scope='global')
 def request_body_env_vars() -> dict:
     env_vars = {}
     for env_var in os.environ:
