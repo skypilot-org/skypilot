@@ -1285,48 +1285,61 @@ def test_pool_down_all_with_running_jobs(generic_cloud: str):
         job_name=job_name_1,  # Name will be overridden with -n flag
         run_cmd='sleep infinity',
     )
+    
+    # Configure jobs controller resources: 4 cores and 20GB memory
+    controller_config = {
+        'jobs': {
+            'controller': {
+                'resources': {
+                    'cpus': '4+',
+                    'memory': '20+',
+                }
+            }
+        }
+    }
+    
+    with smoke_tests_utils.override_sky_config(config_dict=controller_config):
+        with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+            with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
+                write_yaml(pool_yaml, pool_config)
+                write_yaml(job_yaml, job_config)
 
-    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
-        with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
-            write_yaml(pool_yaml, pool_config)
-            write_yaml(job_yaml, job_config)
-
-            test = smoke_tests_utils.Test(
-                'test_pool_down_all_with_running_jobs',
-                [
-                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
-                        pool_name=pool_name_1, pool_yaml=pool_yaml.name),
-                    wait_until_pool_ready(pool_name_1, timeout=timeout),
-                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
-                        pool_name=pool_name_2, pool_yaml=pool_yaml.name),
-                    wait_until_pool_ready(pool_name_2, timeout=timeout),
-                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
-                        pool_name=pool_name_1,
-                        job_yaml=job_yaml.name,
-                        job_name=job_name_1),
-                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
-                        pool_name=pool_name_2,
-                        job_yaml=job_yaml.name,
-                        job_name=job_name_2),
-                    wait_until_job_status(job_name_1, ['RUNNING'],
-                                          timeout=timeout),
-                    wait_until_job_status(job_name_2, ['RUNNING'],
-                                          timeout=timeout),
-                    'sky jobs pool down -a -y',
-                    # Wait a bit for cancellation to propagate
-                    'sleep 10',
-                    wait_until_job_status(
-                        job_name_1, ['CANCELLED'], bad_statuses=[], timeout=30),
-                    wait_until_job_status(
-                        job_name_2, ['CANCELLED'], bad_statuses=[], timeout=30),
-                    check_pool_not_in_status(pool_name_1),
-                    check_pool_not_in_status(pool_name_2),
-                ],
-                timeout=timeout,
-                teardown=cancel_jobs_and_teardown_pool(pool_name_1, timeout=5) +
-                cancel_jobs_and_teardown_pool(pool_name_2, timeout=5),
-            )
-            smoke_tests_utils.run_one_test(test)
+                test = smoke_tests_utils.Test(
+                    'test_pool_down_all_with_running_jobs',
+                    [
+                        _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                            pool_name=pool_name_1, pool_yaml=pool_yaml.name),
+                        wait_until_pool_ready(pool_name_1, timeout=timeout),
+                        _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                            pool_name=pool_name_2, pool_yaml=pool_yaml.name),
+                        wait_until_pool_ready(pool_name_2, timeout=timeout),
+                        _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
+                            pool_name=pool_name_1,
+                            job_yaml=job_yaml.name,
+                            job_name=job_name_1),
+                        _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
+                            pool_name=pool_name_2,
+                            job_yaml=job_yaml.name,
+                            job_name=job_name_2),
+                        wait_until_job_status(job_name_1, ['RUNNING'],
+                                              timeout=timeout),
+                        wait_until_job_status(job_name_2, ['RUNNING'],
+                                              timeout=timeout),
+                        'sky jobs pool down -a -y',
+                        # Wait a bit for cancellation to propagate
+                        'sleep 10',
+                        wait_until_job_status(
+                            job_name_1, ['CANCELLED'], bad_statuses=[], timeout=30),
+                        wait_until_job_status(
+                            job_name_2, ['CANCELLED'], bad_statuses=[], timeout=30),
+                        check_pool_not_in_status(pool_name_1),
+                        check_pool_not_in_status(pool_name_2),
+                    ],
+                    timeout=timeout,
+                    teardown=cancel_jobs_and_teardown_pool(pool_name_1, timeout=5) +
+                    cancel_jobs_and_teardown_pool(pool_name_2, timeout=5),
+                )
+                smoke_tests_utils.run_one_test(test)
 
 
 def test_pool_down_single_pool(generic_cloud: str):
