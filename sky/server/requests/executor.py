@@ -274,11 +274,8 @@ class RequestWorker:
             # Assume retryable since the error is ExecutionRetryableError.
             request_id, _, _ = request_element
             with api_requests.update_request(request_id) as request_task:
-                if request_task is not None:
-                    request_task.status = api_requests.RequestStatus.PENDING
-                else:
-                    logger.error('Failed to reset request status to PENDING for'
-                                 f'request {request_id} for retry')
+                assert request_task is not None, request_id
+                request_task.status = api_requests.RequestStatus.PENDING
             # Reschedule the request.
             queue = _get_queue(self.schedule_type)
             queue.put(request_element)
