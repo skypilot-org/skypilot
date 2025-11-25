@@ -308,7 +308,7 @@ def get_worker_cluster_name(pool_name: str, worker_id: int):
     'Skipping vllm pool test until more remote server testing is done.')
 def test_vllm_pool(generic_cloud: str, accelerator: Dict[str, str]):
     if generic_cloud == 'kubernetes':
-        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
+        accelerator = smoke_tests_utils.get_available_gpus()
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
@@ -1262,7 +1262,7 @@ def check_pool_not_in_status(pool_name: str):
 
 def test_pool_down_all_with_running_jobs(generic_cloud: str):
     """Test that `sky jobs pool down -a -y` cancels running jobs and removes pools.
-    
+
     This test:
     1. Launches two pools with the same config but different names
     2. Launches 1 job (sleeping for a long time) to each pool (2 jobs total)
@@ -1331,7 +1331,7 @@ def test_pool_down_all_with_running_jobs(generic_cloud: str):
 
 def test_pool_down_single_pool(generic_cloud: str):
     """Test that `sky jobs pool down <pool_name> -y` downs a single pool.
-    
+
     This test:
     1. Launches one pool
     2. Launches 1 job (sleeping for a long time) to the pool

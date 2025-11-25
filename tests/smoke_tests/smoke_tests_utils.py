@@ -1144,14 +1144,15 @@ def is_in_buildkite_env() -> bool:
     return env_options.Options.RUNNING_IN_BUILDKITE.get()
 
 
-def get_avaliabe_gpus_for_k8s_tests(default_gpu: str = 'T4') -> str:
+def get_available_gpus(default_gpu: str = 'T4',
+                       infra: str = 'kubernetes') -> str:
     """Get the available GPUs for K8s."""
     if is_remote_server_test():
         prefix = ''
         env_file = pytest_config_file_override()
         if env_file is not None:
             prefix = f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}={env_file}'
-        command = f'{prefix} sky show-gpus --infra kubernetes | grep -A1 "^GPU" | tail -1 | awk "{{print \$1}}"'
+        command = f'{prefix} sky show-gpus --infra {infra} | grep -A1 "^GPU" | tail -1 | awk "{{print \$1}}"'
         Test.echo_without_prefix(command)
         result = subprocess_utils.run(command,
                                       shell=True,

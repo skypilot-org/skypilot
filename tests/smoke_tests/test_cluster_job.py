@@ -56,8 +56,8 @@ from sky.utils import resources_utils
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
-    if generic_cloud == 'kubernetes':
-        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
+    if generic_cloud in ('kubernetes', 'k8s'):
+        accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
@@ -447,7 +447,8 @@ def test_multi_echo(generic_cloud: str):
         # EKS does not support spot instances
         # Assume tests using a remote api server endpoint do not support spot instances
         use_spot = not smoke_tests_utils.is_eks_cluster()
-        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
+    if generic_cloud in ('kubernetes', 'k8s'):
+        accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
     test = smoke_tests_utils.Test(
         'multi_echo',
         [
@@ -504,8 +505,8 @@ def test_multi_echo(generic_cloud: str):
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 def test_huggingface(generic_cloud: str, accelerator: Dict[str, str]):
-    if generic_cloud == 'kubernetes':
-        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
+    if generic_cloud in ('kubernetes', 'k8s'):
+        accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
@@ -1532,7 +1533,7 @@ def test_cancel_azure():
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
     if generic_cloud == 'kubernetes':
-        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
+        accelerator = smoke_tests_utils.get_available_gpus()
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
@@ -1755,7 +1756,7 @@ def test_aws_custom_image():
     ])
 def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
-    accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
+    accelerator = smoke_tests_utils.get_available_gpus()
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'test-kubernetes-custom-image',
