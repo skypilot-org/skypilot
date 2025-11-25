@@ -322,15 +322,27 @@ To use AWS IAM Identity Center (AWS SSO), see :ref:`here<aws-sso>` for instructi
 GCP
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. code-block:: shell
+.. tab-set::
 
-  conda install -c conda-forge google-cloud-sdk
+    .. tab-item:: Conda
+        :sync: gcp-conda-tab
 
-  gcloud init
+        .. code-block:: shell
 
-  # Run this if you don't have a credentials file.
-  # This will generate ~/.config/gcloud/application_default_credentials.json.
-  gcloud auth application-default login
+          # Install Google Cloud SDK via conda-forge
+          conda install -c conda-forge google-cloud-sdk
+
+          # Initialize gcloud
+          gcloud init
+
+          # Run this if you don't have a credentials file.
+          # This will generate ~/.config/gcloud/application_default_credentials.json.
+          gcloud auth application-default login
+
+    .. tab-item:: Archive Download
+        :sync: gcp-archive-download-tab
+
+        Follow the `Google Cloud SDK installation instructions <https://cloud.google.com/sdk/docs/install#installation_instructions>`_ for your OS. Do not forget to run the optional step to add gcloud to your PATH. It is essential for SkyPilot to detect that gcloud is properly configured.
 
 .. tip::
 
