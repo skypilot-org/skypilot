@@ -1,5 +1,6 @@
 """skylet: a daemon running on the head node of a cluster."""
 
+import argparse
 import concurrent.futures
 import os
 import time
@@ -81,7 +82,16 @@ def run_event_loop():
 
 
 def main():
-    grpc_server = start_grpc_server()
+    parser = argparse.ArgumentParser(description='Start skylet daemon')
+    parser.add_argument(
+        '--port',
+        type=int,
+        default=constants.SKYLET_GRPC_PORT,
+        help=f'gRPC port to listen on (default: '
+        f'{constants.SKYLET_GRPC_PORT})')
+    args = parser.parse_args()
+
+    grpc_server = start_grpc_server(port=args.port)
     try:
         run_event_loop()
     except KeyboardInterrupt:

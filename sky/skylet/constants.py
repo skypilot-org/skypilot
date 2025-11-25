@@ -63,7 +63,7 @@ SKY_RAY_CMD = (f'{SKY_PYTHON_CMD} $([ -s {SKY_RAY_PATH_FILE} ] && '
 # Separate env for SkyPilot runtime dependencies.
 SKY_REMOTE_PYTHON_ENV_NAME = 'skypilot-runtime'
 SKY_CONDA_ROOT = f'{SKY_RUNTIME_DIR}/miniconda3'
-SKY_REMOTE_PYTHON_ENV = f'{SKY_RUNTIME_DIR}/{SKY_REMOTE_PYTHON_ENV_NAME}'
+SKY_REMOTE_PYTHON_ENV: str = f'{SKY_RUNTIME_DIR}/{SKY_REMOTE_PYTHON_ENV_NAME}'
 ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
 # uv is used for venv and pip, much faster than python implementations.
 SKY_UV_INSTALL_DIR = f'"{SKY_RUNTIME_DIR}/.local/bin"'
@@ -117,6 +117,8 @@ SKYLET_VERSION = '26'
 SKYLET_LIB_VERSION = 4
 SKYLET_VERSION_FILE = f'{SKY_RUNTIME_DIR}/.sky/skylet_version'
 SKYLET_LOG_FILE = f'{SKY_RUNTIME_DIR}/.sky/skylet.log'
+SKYLET_PID_FILE = f'{SKY_RUNTIME_DIR}/.sky/skylet_pid'
+SKYLET_PORT_FILE = f'{SKY_RUNTIME_DIR}/.sky/skylet_port'
 SKYLET_GRPC_PORT = 46590
 SKYLET_GRPC_TIMEOUT_SECONDS = 10
 
