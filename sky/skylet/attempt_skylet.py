@@ -33,7 +33,7 @@ def restart_skylet():
                 pass
         except (OSError, ValueError, IOError) as exc:
             raise RuntimeError(f'Failed to read PID file {PID_FILE}: '
-                f'{common_utils.format_exception(exc)}') from exc
+                               f'{common_utils.format_exception(exc)}') from exc
     else:
         # Fall back to old behavior for backward compatibility
         subprocess.run(
@@ -77,7 +77,7 @@ if os.path.exists(PID_FILE):
         # Check if the process is still alive
         os.kill(pid, 0)
         running = True
-    except Exception as e: # pylint: disable=broad-except
+    except Exception as e:  # pylint: disable=broad-except
         # Assume the process is not running and restart it
         pass
 else:
