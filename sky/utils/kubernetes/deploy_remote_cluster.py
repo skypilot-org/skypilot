@@ -468,7 +468,7 @@ def main():
                 )
                 continue
 
-            context_name = 'ssh-default'
+            context_name = f'ssh-{cluster_name}'
 
             # Check cluster history
             os.makedirs(NODE_POOLS_INFO_DIR, exist_ok=True)

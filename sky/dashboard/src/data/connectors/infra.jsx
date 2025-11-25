@@ -370,12 +370,23 @@ async function getKubernetesGPUsFromContexts(contextNames) {
 
     // Get all of the node info for all contexts in parallel and put them
     // in a dictionary keyed by context name.
-    const contextNodeInfoList = await Promise.all(
+    // Use Promise.allSettled to handle partial failures gracefully
+    const contextNodeInfoResults = await Promise.allSettled(
       contextNames.map((context) => getKubernetesPerNodeGPUs(context))
     );
     const contextToNodeInfo = {};
     for (let i = 0; i < contextNames.length; i++) {
-      contextToNodeInfo[contextNames[i]] = contextNodeInfoList[i];
+      const result = contextNodeInfoResults[i];
+      if (result.status === 'fulfilled') {
+        contextToNodeInfo[contextNames[i]] = result.value;
+      } else {
+        // Log the error but continue with other contexts
+        console.warn(
+          `Failed to get node info for context ${contextNames[i]}:`,
+          result.reason
+        );
+        contextToNodeInfo[contextNames[i]] = {};
+      }
     }
 
     // Populate the gpuToData map for each context.
