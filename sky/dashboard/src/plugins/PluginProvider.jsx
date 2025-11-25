@@ -8,6 +8,7 @@ import React, {
   useReducer,
 } from 'react';
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
+import { apiClient } from '@/data/connectors/client';
 
 const PluginContext = createContext({
   topNavLinks: [],
@@ -52,24 +53,6 @@ function upsertById(collection, item) {
 }
 
 const pluginScriptPromises = new Map();
-
-function sanitizeEndpoint(endpoint) {
-  if (!endpoint) {
-    return '';
-  }
-  if (endpoint.length > 1 && endpoint.endsWith('/')) {
-    return endpoint.slice(0, -1);
-  }
-  return endpoint;
-}
-
-function getPluginDiscoveryUrl() {
-  const base = sanitizeEndpoint(ENDPOINT);
-  if (!base || base === '/') {
-    return '/api/plugins';
-  }
-  return `${base}/api/plugins`;
-}
 
 function resolveScriptUrl(jsPath) {
   if (!jsPath || typeof jsPath !== 'string') {
@@ -128,12 +111,8 @@ function loadPluginScript(jsPath) {
 }
 
 async function fetchPluginManifest() {
-  const url = getPluginDiscoveryUrl();
   try {
-    const response = await fetch(url, {
-      credentials: 'include',
-      cache: 'no-store',
-    });
+    const response = await apiClient.get(`/api/plugins`);
     if (!response.ok) {
       console.warn(
         '[SkyDashboardPlugin] Failed to fetch plugin manifest:',
