@@ -1255,7 +1255,7 @@ MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB = 2048
 # The ratio of resources consumption for managed jobs and pool/serve.
 # This measures pool_resources / jobs_resources. If 2 GB memory is allocated to
 # jobs, then 2 * POOL_JOBS_RESOURCES_RATIO GB memory is allocated to pool/serve.
-POOL_JOBS_RESOURCES_RATIO = 0.58
+POOL_JOBS_RESOURCES_RATIO = 1
 # Number of ongoing launches launches allowed per worker. Can probably be
 # increased a bit to around 16 but keeping it lower to just to be safe
 LAUNCHES_PER_WORKER = 8
