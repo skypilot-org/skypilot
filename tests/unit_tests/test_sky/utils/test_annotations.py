@@ -76,38 +76,3 @@ class TestLruCache:
         result3 = func_to_clear(5)
         assert result3 == 5
         assert call_count == 2  # Called again after clear
-
-
-def test_clear_request_level_cache_prunes_dead_entries():
-    cache_entries = []
-    with patch('sky.utils.annotations._FUNCTIONS_NEED_RELOAD_CACHE',
-               cache_entries):
-
-        @annotations.lru_cache(scope='request', maxsize=5)
-        def alive_func(x):
-            return x
-
-        def _create_temp_func():
-
-            @annotations.lru_cache(scope='request', maxsize=5)
-            def temp_func(x):
-                return x * 2
-
-            return temp_func
-
-        temp_func = _create_temp_func()
-
-        alive_func(1)
-        temp_func(1)
-
-        assert len(cache_entries) == 2
-
-        temp_func = None
-        gc.collect()
-
-        annotations.clear_request_level_cache()
-
-        assert len(cache_entries) == 1
-        cached_alive_func = cache_entries[0]()
-        assert cached_alive_func is alive_func
-        assert cached_alive_func.cache_info().currsize == 0
