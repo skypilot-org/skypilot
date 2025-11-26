@@ -2431,15 +2431,19 @@ def get_task_logs_to_clean(retention_seconds: int,
                 spot_table.join(
                     job_info_table,
                     spot_table.c.spot_job_id == job_info_table.c.spot_job_id,
-                )).where(
-                    sqlalchemy.and_(
-                        job_info_table.c.schedule_state.is_(
-                            ManagedJobScheduleState.DONE.value),
-                        spot_table.c.end_at.isnot(None),
-                        spot_table.c.end_at < (now - retention_seconds),
-                        spot_table.c.logs_cleaned_at.is_(None),
-                        spot_table.c.local_log_file.isnot(None),
-                    )).limit(batch_size))
+                )).
+            where(
+                sqlalchemy.and_(
+                    job_info_table.c.schedule_state.is_(
+                        ManagedJobScheduleState.DONE.value),
+                    spot_table.c.end_at.isnot(None),
+                    spot_table.c.end_at < (now - retention_seconds),
+                    spot_table.c.logs_cleaned_at.is_(None),
+                    # The local log file is set AFTER the task is finished,
+                    # add this condition to ensure the entire log file has
+                    # been written.
+                    spot_table.c.local_log_file.isnot(None),
+                )).limit(batch_size))
         rows = result.fetchall()
         return [{
             'job_id': row[0],
