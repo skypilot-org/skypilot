@@ -86,7 +86,7 @@ class TestLruCache:
 
             def make_cached_func():
 
-                @annotations.lru_cache(scope='request', maxsize=5)
+                @annotations.ttl_cache(scope='request', maxsize=5, ttl=5)
                 def cached_func(x):
                     return x
 
