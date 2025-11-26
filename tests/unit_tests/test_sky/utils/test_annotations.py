@@ -1,5 +1,8 @@
 """Unit tests for sky.utils.annotations."""
 
+import gc
+import threading
+
 from sky.utils import annotations
 
 
@@ -73,38 +76,40 @@ class TestLruCache:
         assert result3 == 5
         assert call_count == 2  # Called again after clear
 
-    def test_weakref_cache_entries_pruned_after_gc(self):
-        """Ensure dead weakref entries are pruned on cache clearing."""
-        import gc
-        import weakref
 
-        with annotations._FUNCTIONS_NEED_RELOAD_CACHE_LOCK:
-            original_entries = annotations._FUNCTIONS_NEED_RELOAD_CACHE
-            annotations._FUNCTIONS_NEED_RELOAD_CACHE.clear()
+def test_clear_request_level_cache_prunes_dead_entries(monkeypatch):
+    cache_entries = []
+    cache_lock = threading.Lock()
+    monkeypatch.setattr(annotations, '_FUNCTIONS_NEED_RELOAD_CACHE',
+                        cache_entries)
+    monkeypatch.setattr(annotations, '_FUNCTIONS_NEED_RELOAD_CACHE_LOCK',
+                        cache_lock)
 
-        try:
+    @annotations.lru_cache(scope='request', maxsize=5)
+    def alive_func(x):
+        return x
 
-            def make_cached_func():
+    def _create_temp_func():
 
-                @annotations.ttl_cache(scope='request', maxsize=5, ttl=5)
-                def cached_func(x):
-                    return x
+        @annotations.lru_cache(scope='request', maxsize=5)
+        def temp_func(x):
+            return x * 2
 
-                return cached_func
+        return temp_func
 
-            cached_func = make_cached_func()
-            with annotations._FUNCTIONS_NEED_RELOAD_CACHE_LOCK:
-                assert len(annotations._FUNCTIONS_NEED_RELOAD_CACHE) == 1
+    temp_func = _create_temp_func()
 
-            func_ref = weakref.ref(cached_func)
-            cached_func = None
-            gc.collect()
+    alive_func(1)
+    temp_func(1)
 
-            assert func_ref() is None
-            annotations.clear_request_level_cache()
+    assert len(cache_entries) == 2
 
-            with annotations._FUNCTIONS_NEED_RELOAD_CACHE_LOCK:
-                assert not annotations._FUNCTIONS_NEED_RELOAD_CACHE
-        finally:
-            with annotations._FUNCTIONS_NEED_RELOAD_CACHE_LOCK:
-                annotations._FUNCTIONS_NEED_RELOAD_CACHE[:] = original_entries
+    temp_func = None
+    gc.collect()
+
+    annotations.clear_request_level_cache()
+
+    assert len(cache_entries) == 1
+    cached_alive_func = cache_entries[0]()
+    assert cached_alive_func is alive_func
+    assert cached_alive_func.cache_info().currsize == 0
