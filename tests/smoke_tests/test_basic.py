@@ -1076,12 +1076,19 @@ def test_kubernetes_get_nodes():
         assert node_addresses == preloaded_addresses
 
 
-@pytest.mark.kubernetes
-def test_kubernetes_show_gpus(generic_cloud: str):
+@pytest.mark.no_aws
+@pytest.mark.no_gcp
+@pytest.mark.no_nebius
+@pytest.mark.no_lambda_cloud
+@pytest.mark.no_runpod
+@pytest.mark.no_azure
+def test_kubernetes_slurm_show_gpus(generic_cloud: str):
+    assert generic_cloud in ('kubernetes', 'slurm')
+
     test = smoke_tests_utils.Test(
         'kubernetes_show_gpus',
         [(
-            's=$(SKYPILOT_DEBUG=0 sky show-gpus --infra kubernetes) && '
+            f's=$(SKYPILOT_DEBUG=0 sky show-gpus --infra {generic_cloud}) && '
             'echo "$s" && '
             # Verify either:
             # 1. We have at least one GPU entry with utilization info
@@ -1091,12 +1098,14 @@ def test_kubernetes_show_gpus(generic_cloud: str):
             # 2. The cluster has no GPUs, and the expected message is shown
             '(echo "$s" | grep -A 1 "REQUESTABLE_QTY_PER_NODE" | '
             'grep -E "^[A-Z0-9]+[[:space:]]+[0-9, ]+[[:space:]]+[0-9]+ of [0-9]+ free" || '
-            'echo "$s" | grep "No GPUs found in any Kubernetes clusters")')],
+            f'echo "$s" | grep "No GPUs found in any {generic_cloud} clusters")'
+        )],
     )
     smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_kubernetes
+@pytest.mark.no_slurm
 def test_show_gpus(generic_cloud: str):
     # Check that output contains GPU table headers and common GPU types
     check_cmd = ('echo "$s" && '
