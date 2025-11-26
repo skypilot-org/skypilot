@@ -7,6 +7,7 @@ import pathlib
 import resource
 import shutil
 import sys
+import threading
 import time
 import traceback
 import typing
@@ -1201,9 +1202,12 @@ async def main(controller_uuid: str):
     # Will loop forever, do it in the background
     cancel_job_task = asyncio.create_task(controller.cancel_job())
     monitor_loop_task = asyncio.create_task(controller.monitor_loop())
-    log_gc_task = asyncio.create_task(log_gc.elect_for_log_gc())
+    # Run the garbage collector in a dedicated daemon thread to avoid affecting
+    # the main event loop.
+    gc_thread = threading.Thread(target=log_gc.elect_for_log_gc, daemon=True)
+    gc_thread.start()
     try:
-        await asyncio.gather(cancel_job_task, monitor_loop_task, log_gc_task)
+        await asyncio.gather(cancel_job_task, monitor_loop_task)
     except Exception as e:  # pylint: disable=broad-except
         logger.error(f'Controller server crashed: {e}')
         sys.exit(1)
