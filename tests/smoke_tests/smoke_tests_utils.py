@@ -1151,8 +1151,8 @@ def is_in_buildkite_env() -> bool:
 
 def get_available_gpus(default_gpu: str = 'T4',
                        infra: str = 'kubernetes') -> str:
-    """Get the available GPUs for K8s."""
-    if is_remote_server_test():
+    """Get the available GPUs for K8s or Slurm."""
+    try:
         prefix = ''
         env_file = pytest_config_file_override()
         if env_file is not None:
@@ -1166,7 +1166,9 @@ def get_available_gpus(default_gpu: str = 'T4',
                                       text=True)
         gpu_name = result.stdout.strip()
         return gpu_name
-    return default_gpu
+    except Exception as e:
+        Test.echo_without_prefix(f'Error getting available GPUs: {e}')
+        return default_gpu
 
 
 def get_enabled_cloud_storages() -> List[clouds.Cloud]:

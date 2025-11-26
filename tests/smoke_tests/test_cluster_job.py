@@ -21,7 +21,6 @@
 
 import os
 import pathlib
-import re
 import shlex
 import tempfile
 import textwrap
@@ -508,7 +507,7 @@ def test_multi_echo(generic_cloud: str):
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 def test_huggingface(generic_cloud: str, accelerator: Dict[str, str]):
-    if generic_cloud in ('kubernetes', 'k8s'):
+    if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
@@ -2288,6 +2287,8 @@ def test_autodown(generic_cloud: str):
             # Ensure the cluster is terminated.
             f'sleep {autodown_timeout}',
             f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|Cluster \'{name}\' not found"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
+            # Fails here with: E 11-25 21:23:59 sdk.py:389] RuntimeError: Failed to run setup commands on an instance. (exit code 1). Error: ===== stdout =====
+            # E 11-25 21:23:59 sdk.py:389] srun: error: Slurm job 665 has expired
             f'sky launch -y -d -c {name} --infra {generic_cloud} --num-nodes {num_nodes} --down {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
             f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
             f'sky exec {name} --infra {generic_cloud} tests/test_yamls/minimal.yaml',

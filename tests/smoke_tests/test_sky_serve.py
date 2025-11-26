@@ -1046,6 +1046,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
 @pytest.mark.no_slurm  # Slurm does not support opening ports
 @pytest.mark.no_shadeform  # Shadeform does not support opening ports
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
+@pytest.mark.no_slurm  # Slurm does not support opening ports
 @pytest.mark.serve
 @pytest.mark.no_remote_server
 def test_skyserve_failures(generic_cloud: str):
