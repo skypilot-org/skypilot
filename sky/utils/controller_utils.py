@@ -1334,6 +1334,7 @@ def _get_parallelism(pool: bool, raw_resource_per_unit: float) -> int:
     consolidation_mode = _is_consolidation_mode(pool)
 
     total_memory_mb = _get_total_usable_memory_mb(pool, consolidation_mode)
+    logger.info(f'Total usable memory: {total_memory_mb} MB')
 
     # In consolidation mode, we assume the API server is running in deployment
     # mode, hence resource management (i.e. how many requests are allowed) is
@@ -1346,12 +1347,14 @@ def _get_parallelism(pool: bool, raw_resource_per_unit: float) -> int:
                                if pool else LAUNCHES_PER_SERVICE)
         resource_per_unit_worker = (launches_per_worker *
                                     server_config.LONG_WORKER_MEM_GB * 1024)
+        logger.info(f'Resource per unit worker: {resource_per_unit_worker} MB')
 
     # If running pool on jobs controller, we need to account for the resources
     # consumed by the jobs.
     ratio = (1. + POOL_JOBS_RESOURCES_RATIO) if pool else 1.
     resource_per_unit = ratio * (raw_resource_per_unit +
                                  resource_per_unit_worker)
+    logger.info(f'Resource per unit: {resource_per_unit} MB')
 
     return max(int(total_memory_mb / resource_per_unit), 1)
 
@@ -1398,6 +1401,8 @@ def can_provision(pool: bool) -> bool:
 
 
 def can_start_new_process(pool: bool) -> bool:
+    logger.info(f'Number of services: {serve_state.get_num_services()}, '
+                f'Number of services allowed: {_get_number_of_services(pool)}')
     return serve_state.get_num_services() < _get_number_of_services(pool)
 
 
