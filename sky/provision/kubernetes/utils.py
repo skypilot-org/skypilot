@@ -14,7 +14,8 @@ import shutil
 import subprocess
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import (Any, Callable, Dict, List, Literal, Optional, Set, Tuple,
+                    Union)
 
 import ijson
 
@@ -3164,7 +3165,10 @@ def filter_pods(namespace: str,
     # worker2, worker3, ...) even when Kubernetes API returns them in
     # arbitrary order. This works even if there were somehow pod names other
     # than head/worker ones, but that may be overkill.
-    def get_pod_sort_key(pod: V1Pod) -> Tuple[int, Union[int, str]]:
+    def get_pod_sort_key(
+        pod: V1Pod
+    ) -> Union[Tuple[Literal[0], str], Tuple[Literal[1], int], Tuple[Literal[2],
+                                                                     str]]:
         name = pod.metadata.name
         if '-worker' in name:
             try:
