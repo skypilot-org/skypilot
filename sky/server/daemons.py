@@ -120,14 +120,6 @@ def refresh_cluster_status_event():
     time.sleep(server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS)
 
 
-# After #7332, we start a local API server for pool/serve controller.
-# We should skip the status refresh event on the pool/serve controller,
-# as they have their own logic to cleanup the cluster records. This refresh
-# will break existing workflows.
-def should_skip_refresh_cluster_status() -> bool:
-    return os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None
-
-
 def refresh_volume_status_event():
     """Periodically refresh the volume status."""
     # pylint: disable=import-outside-toplevel
@@ -274,7 +266,6 @@ INTERNAL_REQUEST_DAEMONS = [
         id='skypilot-status-refresh-daemon',
         name=request_names.RequestName.REQUEST_DAEMON_STATUS_REFRESH,
         event_fn=refresh_cluster_status_event,
-        should_skip=should_skip_refresh_cluster_status,
         default_log_level='DEBUG'),
     # Volume status refresh daemon to update the volume status periodically.
     InternalRequestDaemon(
