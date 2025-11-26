@@ -357,7 +357,7 @@ def up(
                     lb_port = serve_utils.load_service_initialization_result(
                         lb_port_payload)
         except (exceptions.CommandError, grpc.FutureTimeoutError,
-                grpc.RpcError):
+                grpc.RpcError) as e:
             if serve_utils.is_consolidation_mode(pool):
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
@@ -377,7 +377,7 @@ def up(
                     raise RuntimeError(
                         'Max number of services reached. '
                         'To spin up more services, please '
-                        'tear down some existing services.') from None
+                        'tear down some existing services.') from e
             else:
                 # Possible cases:
                 # (1) name conflict;
