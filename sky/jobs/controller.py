@@ -1204,6 +1204,7 @@ async def main(controller_uuid: str):
     monitor_loop_task = asyncio.create_task(controller.monitor_loop())
     # Run the garbage collector in a dedicated daemon thread to avoid affecting
     # the main event loop.
+    logger.info('Starting gc_thread')
     gc_thread = threading.Thread(target=log_gc.elect_for_log_gc, daemon=True)
     gc_thread.start()
     try:

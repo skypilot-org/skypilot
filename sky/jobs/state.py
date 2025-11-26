@@ -198,18 +198,25 @@ def force_no_postgres() -> bool:
 
 
 def initialize_and_get_db_async() -> sql_async.AsyncEngine:
+    logger.info('Initializing async database')
     global _SQLALCHEMY_ENGINE_ASYNC
     if _SQLALCHEMY_ENGINE_ASYNC is not None:
         return _SQLALCHEMY_ENGINE_ASYNC
+    logger.info('Getting new engine for async database')
     with _SQLALCHEMY_ENGINE_LOCK:
+        logger.info('Got lock for async database')
         if _SQLALCHEMY_ENGINE_ASYNC is not None:
+            logger.info('Returning existing engine for async database')
             return _SQLALCHEMY_ENGINE_ASYNC
-
+        logger.info('Getting new engine for async database')
         _SQLALCHEMY_ENGINE_ASYNC = db_utils.get_engine('spot_jobs',
                                                        async_engine=True)
+        logger.info('Got new engine for async database')
 
     # to create the table in case an async function gets called first
+    logger.info('Initializing sync database')
     initialize_and_get_db()
+    logger.info('Initialized sync database')
     return _SQLALCHEMY_ENGINE_ASYNC
 
 
@@ -244,14 +251,17 @@ def _init_db_async(func):
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
         if _SQLALCHEMY_ENGINE_ASYNC is None:
+            logger.info('Initializing async database')
             # this may happen multiple times since there is no locking
             # here but thats fine, this is just a short circuit for the
             # common case.
             await context_utils.to_thread(initialize_and_get_db_async)
+            logger.info('Initialized async database')
 
         backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=5)
         last_exc = None
-        for _ in range(_DB_RETRY_TIMES):
+        for i in range(_DB_RETRY_TIMES):
+            logger.info(f'Attempting to call function, attempt {i}')
             try:
                 return await func(*args, **kwargs)
             except (sqlalchemy_exc.OperationalError,
@@ -259,6 +269,7 @@ def _init_db_async(func):
                     sqlalchemy_exc.TimeoutError, sqlite3.OperationalError,
                     sqlalchemy_exc.InterfaceError, sqlite3.InterfaceError) as e:
                 last_exc = e
+                logger.info(f'DB error: {last_exc}')
             logger.debug(f'DB error: {last_exc}')
             await asyncio.sleep(backoff.current_backoff())
         assert last_exc is not None
@@ -2462,11 +2473,15 @@ async def get_controller_logs_to_clean_async(
     - the job schedule state is DONE
     - AND the end time of the latest task is older than the retention period
     """
-
+    logger.info('Calling get_controller_logs_to_clean_async')
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
         now = time.time()
+        logger.info(f'Now: {now}')
+        logger.info(f'Retention seconds: {retention_seconds}')
+        logger.info(f'Batch size: {batch_size}')
 
+        logger.info('Executing query')
         result = await session.execute(
             sqlalchemy.select(job_info_table.c.spot_job_id,).select_from(
                 job_info_table.join(
@@ -2487,6 +2502,7 @@ async def get_controller_logs_to_clean_async(
                                 sqlalchemy.func.max(spot_table.c.end_at) < (
                                     now - retention_seconds)).limit(batch_size))
         rows = result.fetchall()
+        logger.info(f'Fetched rows')
         return [{'job_id': row[0]} for row in rows]
 
 

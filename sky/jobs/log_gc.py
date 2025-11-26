@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import datetime
+from logging import LoggerAdapter
 import os
 import pathlib
 import shutil
@@ -43,7 +44,9 @@ def _next_gc_interval(retention_seconds: int) -> int:
 async def gc_controller_logs_for_job():
     """Garbage collect job and controller logs."""
     while True:
+        logger.info('GC controller logs for job: starting loop')
         skypilot_config.reload_config()
+        logger.info('Reloaded config')
         controller_logs_retention = skypilot_config.get_nested(
             ('jobs', 'controller', 'controller_logs_gc_retention_hours'),
             _DEFAULT_CONTROLLER_LOGS_GC_RETENTION_HOURS) * 3600
@@ -56,6 +59,7 @@ async def gc_controller_logs_for_job():
                 while not finished:
                     finished = await _clean_controller_logs_with_retention(
                         controller_logs_retention)
+                    logger.info(f'Finished: {finished}')
             except asyncio.CancelledError:
                 logger.info('Managed jobs logs GC task cancelled')
                 break
@@ -108,14 +112,20 @@ async def _clean_controller_logs_with_retention(retention_seconds: int,
         Whether the GC of this round has finished, False means there might
         still be more controller logs to clean.
     """
+    logger.info('Cleaning controller logs with retention')
     assert batch_size > 0, 'Batch size must be positive'
+    logger.info('Passed assert')
     jobs = await managed_job_state.get_controller_logs_to_clean_async(
         retention_seconds, batch_size=batch_size)
+    logger.info(f'Got jobs: {jobs}')
     job_ids_to_update = []
     for job in jobs:
         job_ids_to_update.append(job['job_id'])
+        logger.info(f'Getting log file for job: {job["job_id"]}')
         log_file = managed_job_utils.controller_log_file_for_job(job['job_id'])
+        logger.info(f'Log file: {log_file}')
         cleaned_at = time.time()
+        logger.info(f'Cleaned at: {cleaned_at}')
         if await anyio.Path(log_file).exists():
             ts_str = datetime.fromtimestamp(cleaned_at).strftime(
                 '%Y-%m-%d %H:%M:%S')
@@ -124,12 +134,19 @@ async def _clean_controller_logs_with_retention(retention_seconds: int,
             # keep the file and delete the content.
             # TODO(aylei): refactor sync down logs if the inode usage
             # becomes an issue.
+            logger.info(f'Writing message to log file: {msg}')
             async with await anyio.open_file(log_file, 'w',
                                              encoding='utf-8') as f:
+                logger.info(f'File opened calling write')
                 await f.write(msg + '\n')
+                logger.info(f'Message written to log file')
+        else:
+            logger.info(f'Log file does not exist: {log_file}')
+    logger.info(f'Job ids to update: {job_ids_to_update}')
     # Batch the update, the timestamp will be not accurate but it's okay.
     await managed_job_state.set_controller_logs_cleaned_async(
         job_ids=job_ids_to_update, logs_cleaned_at=time.time())
+    logger.info(f'Set controller logs cleaned at: {time.time()}')
     complete = len(jobs) < batch_size
     logger.info(f'Cleaned {len(jobs)} controller logs with retention '
                 f'{retention_seconds} seconds, complete: {complete}')
@@ -174,6 +191,7 @@ async def _clean_task_logs_with_retention(retention_seconds: int,
 @context.contextual_async
 async def run_log_gc():
     """Run the log garbage collector."""
+    logger.info('Running log garbage collector')
     log_dir = os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(log_dir, 'garbage_collector.log')
