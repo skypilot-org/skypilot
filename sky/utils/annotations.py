@@ -2,7 +2,7 @@
 
 import functools
 import threading
-from typing import Callable, List, Literal, TypeVar
+from typing import Any, Callable, List, Literal, TypeVar
 import weakref
 
 import cachetools
@@ -35,13 +35,35 @@ def client_api(func: Callable[P, T]) -> Callable[P, T]:
     return wrapper
 
 
-def _register_functions_need_reload_cache(func: Callable) -> None:
+class _ReloadWrapper:
+    """Wrapper for functions that need to be reloaded for a new request."""
+
+    def __init__(self, target: Callable[..., Any]):
+        self._target = target
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return self._target(*args, **kwargs)
+
+    def cache_clear(self):
+        if hasattr(self._target, 'cache_clear'):
+            self._target.cache_clear()
+
+
+def _register_functions_need_reload_cache(func: Callable) -> Callable:
     """Register a cachefunction that needs to be reloaded for a new request.
 
     The function will be registered as a weak reference to avoid blocking GC.
     """
+    try:
+        func_ref = weakref.ref(func)
+    except TypeError:
+        # The function might be not weakrefable (e.g. functools.lru_cache),
+        # wrap it in this case.
+        func_ref = weakref.ref(_ReloadWrapper(func))
+
     with _FUNCTIONS_NEED_RELOAD_CACHE_LOCK:
-        _FUNCTIONS_NEED_RELOAD_CACHE.append(weakref.ref(func))
+        _FUNCTIONS_NEED_RELOAD_CACHE.append(func_ref)
+    return func
 
 
 def lru_cache(scope: Literal['global', 'request'], *lru_cache_args,
@@ -65,8 +87,7 @@ def lru_cache(scope: Literal['global', 'request'], *lru_cache_args,
         else:
             cached_func = functools.lru_cache(*lru_cache_args,
                                               **lru_cache_kwargs)(func)
-            _register_functions_need_reload_cache(cached_func)
-            return cached_func
+            return _register_functions_need_reload_cache(cached_func)
 
     return decorator
 
@@ -86,8 +107,7 @@ def ttl_cache(scope: Literal['global', 'request'], *ttl_cache_args,
         else:
             cached_func = cachetools.cached(
                 cachetools.TTLCache(*ttl_cache_args, **ttl_cache_kwargs))(func)
-            _register_functions_need_reload_cache(cached_func)
-            return cached_func
+            return _register_functions_need_reload_cache(cached_func)
 
     return decorator
 
