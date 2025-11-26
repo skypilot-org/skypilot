@@ -7,7 +7,6 @@ import pathlib
 import resource
 import shutil
 import sys
-import threading
 import time
 import traceback
 import typing
