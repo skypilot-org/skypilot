@@ -122,6 +122,7 @@ def refresh_cluster_status_event():
                 f'{server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS}'
                 ' seconds for the next refresh...\n')
     time.sleep(server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS)
+    raise ValueError('BOOMBOOMBOOM')
 
 
 # After #7332, we start a local API server for pool/serve controller.
