@@ -171,16 +171,14 @@ def run_log_gc():
     ctx = context.get()
     assert ctx is not None, 'Context is not initialized'
     ctx.redirect_log(pathlib.Path(log_path))
-    controller_gc_thread = threading.Thread(target=gc_controller_logs_for_job,
-                                            name='log-gc-controller',
-                                            daemon=True)
-    task_gc_thread = threading.Thread(target=gc_task_logs_for_job,
-                                      name='log-gc-task',
-                                      daemon=True)
-    controller_gc_thread.start()
-    task_gc_thread.start()
-    controller_gc_thread.join()
-    task_gc_thread.join()
+    tasks = []
+    tasks.append(
+        threading.Thread(target=gc_controller_logs_for_job, daemon=True))
+    tasks.append(threading.Thread(target=gc_task_logs_for_job, daemon=True))
+    for task in tasks:
+        task.start()
+    for task in tasks:
+        task.join()
 
 
 def elect_for_log_gc():
