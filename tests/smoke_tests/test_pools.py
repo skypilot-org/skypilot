@@ -1321,7 +1321,7 @@ def test_pool_down_all_with_running_jobs(generic_cloud: str):
             'controller': {
                 'resources': {
                     'cpus': '4+',
-                    'memory': '20+',
+                    'memory': '21+',
                 }
             }
         }
