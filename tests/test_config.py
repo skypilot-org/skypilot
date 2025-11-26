@@ -888,15 +888,15 @@ def test_override_skypilot_config_warning_deduplication(monkeypatch, tmp_path):
         # Verify the cache entry is for run_id_1
         cache_entry_run_id_1 = (run_id_1, ('aws.vpc_name',))
         assert cache_entry_run_id_1 in skypilot_config._WARNED_DISALLOWED_KEYS_CACHE
-        
+
         # Change run_id and verify it's different
         monkeypatch.setenv(usage_constants.USAGE_RUN_ID_ENV_VAR, run_id_2)
         assert os.environ.get(usage_constants.USAGE_RUN_ID_ENV_VAR) == run_id_2
-        
+
         # The cache entry for run_id_2 should not exist yet
         cache_entry_run_id_2 = (run_id_2, ('aws.vpc_name',))
         assert cache_entry_run_id_2 not in skypilot_config._WARNED_DISALLOWED_KEYS_CACHE
-        
+
         # Call with new run_id - should trigger warning
         override_configs_3 = {'aws': {'vpc_name': 'override-vpc',}}
         with skypilot_config.override_skypilot_config(override_configs_3):
@@ -905,18 +905,18 @@ def test_override_skypilot_config_warning_deduplication(monkeypatch, tmp_path):
         assert mock_logger.warning.call_count == 1, (
             f'Expected 1 warning call, got {mock_logger.warning.call_count}. '
             f'Cache size: {len(skypilot_config._WARNED_DISALLOWED_KEYS_CACHE)}. '
-            f'Cache contents: {list(skypilot_config._WARNED_DISALLOWED_KEYS_CACHE)}')
+            f'Cache contents: {list(skypilot_config._WARNED_DISALLOWED_KEYS_CACHE)}'
+        )
         # Cache should now have 2 entries (one per run_id)
         assert len(skypilot_config._WARNED_DISALLOWED_KEYS_CACHE) == 2
         assert cache_entry_run_id_2 in skypilot_config._WARNED_DISALLOWED_KEYS_CACHE
         mock_logger.warning.reset_mock()
 
-        mock_logger.warning.reset_mock()
-
         # Test 3: Backward compatibility - warning appears when run_id is not set
         monkeypatch.delenv(usage_constants.USAGE_RUN_ID_ENV_VAR, raising=False)
         override_configs_no_run_id = {'aws': {'vpc_name': 'override-vpc',}}
-        with skypilot_config.override_skypilot_config(override_configs_no_run_id):
+        with skypilot_config.override_skypilot_config(
+                override_configs_no_run_id):
             pass
         # Should log warning when run_id is not set
         mock_logger.warning.assert_called_once()
@@ -924,8 +924,13 @@ def test_override_skypilot_config_warning_deduplication(monkeypatch, tmp_path):
 
         # Test 4: Different disallowed keys get separate warnings
         monkeypatch.setenv(usage_constants.USAGE_RUN_ID_ENV_VAR, run_id_1)
-        override_configs_different_key = {'aws': {'ssh_proxy_command': 'override-command',}}
-        with skypilot_config.override_skypilot_config(override_configs_different_key):
+        override_configs_different_key = {
+            'aws': {
+                'ssh_proxy_command': 'override-command',
+            }
+        }
+        with skypilot_config.override_skypilot_config(
+                override_configs_different_key):
             pass
         # Should log warning for different keys even with same run_id
         mock_logger.warning.assert_called_once()
@@ -980,7 +985,8 @@ def test_override_skypilot_config_warning_cache_clearing(monkeypatch, tmp_path):
             pass
         # Cache should be cleared and only have 1 entry now (the 1002nd entry)
         assert len(skypilot_config._WARNED_DISALLOWED_KEYS_CACHE) == 1
-        assert (run_id_1001, ('aws.vpc_name',)) in skypilot_config._WARNED_DISALLOWED_KEYS_CACHE
+        assert (run_id_1001, (
+            'aws.vpc_name',)) in skypilot_config._WARNED_DISALLOWED_KEYS_CACHE
 
 
 def test_hierarchical_server_config(monkeypatch, tmp_path):
