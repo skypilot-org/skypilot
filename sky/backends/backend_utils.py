@@ -3641,11 +3641,8 @@ def check_stale_runtime_on_remote(returncode: int, stderr: str,
     `stderr`. Typically due to the local client version just got updated, and
     the remote runtime is an older version.
     """
-    pattern = re.compile(r'AttributeError: module \'sky\.(.*)\' has no '
-                         r'attribute \'(.*)\'')
     if returncode != 0:
-        attribute_error = re.findall(pattern, stderr)
-        if attribute_error:
+        if 'SkyPilot runtime is too old' in stderr:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     f'{colorama.Fore.RED}SkyPilot runtime needs to be updated '
