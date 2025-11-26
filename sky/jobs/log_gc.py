@@ -189,7 +189,7 @@ async def run_log_gc():
                          gc_task_logs_for_job_task)
 
 
-def elect_for_log_gc():
+async def elect_for_log_gc():
     """Use filelock to elect for the log garbage collector.
 
     The log garbage collector runs in the controller process to avoid the
@@ -197,5 +197,8 @@ def elect_for_log_gc():
     threads that does not elected as the log garbage collector just wait.
     on the filelock and bring trivial overhead.
     """
+    # Use a synchronous file lock since we expect multiple attempts
+    # to run the log garbage collector and some may fail, so we don't want
+    # to block a thread on the event loop.
     with filelock.FileLock(_JOB_CONTROLLER_GC_LOCK_PATH):
-        asyncio.run(run_log_gc())
+        await run_log_gc()
