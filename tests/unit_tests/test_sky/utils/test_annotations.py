@@ -1,9 +1,5 @@
 """Unit tests for sky.utils.annotations."""
 
-import gc
-import threading
-from unittest.mock import patch
-
 from sky.utils import annotations
 
 
