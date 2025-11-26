@@ -48,6 +48,8 @@ GIT_EXCLUDE = '.git/info/exclude'
 RSYNC_EXCLUDE_OPTION = '--exclude-from={}'
 # Owner and group metadata is not needed for downloads.
 RSYNC_NO_OWNER_NO_GROUP_OPTION = '--no-owner --no-group'
+# Delete files in the target directory that are not in the source.
+RSYNC_DELETE_OPTION = '--delete'
 
 _HASH_MAX_LENGTH = 10
 _DEFAULT_CONNECT_TIMEOUT = 30
@@ -305,6 +307,7 @@ class CommandRunner:
             node_destination: Optional[str],
             up: bool,
             rsh_option: Optional[str],
+            should_delete: bool = False,
             # Advanced options.
             log_path: str = os.devnull,
             stream_logs: bool = True,
@@ -320,24 +323,26 @@ class CommandRunner:
         if not up:
             rsync_command.append(RSYNC_NO_OWNER_NO_GROUP_OPTION)
 
-        # --filter
+        # Build --exclude-from arguments
         # The source is a local path, so we need to resolve it.
         resolved_source = pathlib.Path(source).expanduser().resolve()
+        ignore_files = []
         if (resolved_source / constants.SKY_IGNORE_FILE).exists():
-            rsync_command.append(RSYNC_FILTER_SKYIGNORE)
+            ignore_files.append(resolved_source / constants.SKY_IGNORE_FILE)
         else:
-            rsync_command.append(RSYNC_FILTER_GITIGNORE)
+            ignore_files.append(resolved_source / constants.GIT_IGNORE_FILE)
             if up:
-                # Build --exclude-from argument.
-                if (resolved_source / GIT_EXCLUDE).exists():
-                    # Ensure file exists; otherwise, rsync will error out.
-                    #
-                    # We shlex.quote() because the path may contain spaces:
-                    #   'my dir/.git/info/exclude'
-                    # Without quoting rsync fails.
-                    rsync_command.append(
-                        RSYNC_EXCLUDE_OPTION.format(
-                            shlex.quote(str(resolved_source / GIT_EXCLUDE))))
+                ignore_files.append(resolved_source / GIT_EXCLUDE)
+
+        for ignore_file in ignore_files:
+            # Ensure file exists; otherwise, rsync will error out.
+            #
+            # We shlex.quote() because the path may contain spaces:
+            #   'my dir/.git/info/exclude'
+            # Without quoting rsync fails.
+            if ignore_file.exists():
+                rsync_command.append(
+                    RSYNC_EXCLUDE_OPTION.format(shlex.quote(str(ignore_file))))
 
         if rsh_option is not None:
             rsync_command.append(f'-e {shlex.quote(rsh_option)}')
@@ -345,6 +350,10 @@ class CommandRunner:
                              f'{node_destination}:')
 
         if up:
+            # Only add --delete option for uploads, as deleting files in
+            # someone's local machine feels prone to errors
+            if should_delete:
+                rsync_command.append(RSYNC_DELETE_OPTION)
             resolved_target = target
             if node_destination is None:
                 # Is a local rsync. Directly resolve the target.
@@ -457,6 +466,7 @@ class CommandRunner:
         target: str,
         *,
         up: bool,
+        should_delete: bool = False,
         # Advanced options.
         log_path: str = os.devnull,
         stream_logs: bool = True,
