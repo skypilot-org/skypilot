@@ -1916,41 +1916,60 @@ def test_combine_pod_config_fields_and_metadata_uses_correct_cloud():
             "custom_metadata should use SSH cloud"
 
 
-def test_filter_pods_sorts_by_name():
+@pytest.mark.parametrize('unsorted_pod_names, expected_sorted_pod_names', [
+    ([
+        'test-cluster-worker10', 'test-cluster-worker2', 'test-cluster-head',
+        'test-cluster-worker1', 'test-cluster-worker3'
+    ], [
+        'test-cluster-head', 'test-cluster-worker1', 'test-cluster-worker2',
+        'test-cluster-worker3', 'test-cluster-worker10'
+    ]),
+    ([
+        'test-cluster-worker1', 'test-cluster-worker20', 'test-cluster-head',
+        'test-cluster-worker3', 'test-cluster-worker2'
+    ], [
+        'test-cluster-head', 'test-cluster-worker1', 'test-cluster-worker2',
+        'test-cluster-worker3', 'test-cluster-worker20'
+    ]),
+    ([
+        'test-cluster-worker1', 'test-cluster-worker2', 'test-cluster-head',
+        'test-cluster-worker3', 'test-cluster-worker4'
+    ], [
+        'test-cluster-head', 'test-cluster-worker1', 'test-cluster-worker2',
+        'test-cluster-worker3', 'test-cluster-worker4'
+    ]),
+    ([
+        'test-cluster-head', 'test-cluster-worker1', 'test-cluster-worker2',
+        'test-cluster-worker3', 'test-cluster-worker4'
+    ], [
+        'test-cluster-head', 'test-cluster-worker1', 'test-cluster-worker2',
+        'test-cluster-worker3', 'test-cluster-worker4'
+    ]),
+    ([
+        'my-worker-head', 'my-worker-worker1', 'my-worker-worker2',
+        'my-worker-worker3', 'my-worker-worker4'
+    ], [
+        'my-worker-head', 'my-worker-worker1', 'my-worker-worker2',
+        'my-worker-worker3', 'my-worker-worker4'
+    ]),
+    ([
+        'my-worker-head', 'my-worker-worker1', 'extra-pod', 'my-worker-worker2',
+        'my-worker-worker3', 'my-worker-worker4'
+    ], [
+        'my-worker-head', 'my-worker-worker1', 'my-worker-worker2',
+        'my-worker-worker3', 'my-worker-worker4', 'extra-pod'
+    ]),
+])
+def test_filter_pods_sorts_by_name(unsorted_pod_names,
+                                   expected_sorted_pod_names):
     """Test that filter_pods returns pods sorted correctly"""
-    # Head pod should come first, then worker pods sorted by their numeric
-    # suffix, then any other pods alphabetically.
-
-    # Create mock pods with out-of-order names
-    mock_pod_worker4 = mock.MagicMock()
-    mock_pod_worker4.metadata.name = 'test-cluster-worker4'
-    mock_pod_worker4.metadata.deletion_timestamp = None
-
-    mock_pod_worker1 = mock.MagicMock()
-    mock_pod_worker1.metadata.name = 'test-cluster-worker1'
-    mock_pod_worker1.metadata.deletion_timestamp = None
-
-    mock_pod_head = mock.MagicMock()
-    mock_pod_head.metadata.name = 'test-cluster-head'
-    mock_pod_head.metadata.deletion_timestamp = None
-
-    mock_pod_worker3 = mock.MagicMock()
-    mock_pod_worker3.metadata.name = 'test-cluster-worker3'
-    mock_pod_worker3.metadata.deletion_timestamp = None
-
-    mock_pod_worker2 = mock.MagicMock()
-    mock_pod_worker2.metadata.name = 'test-cluster-worker2'
-    mock_pod_worker2.metadata.deletion_timestamp = None
-
-    # Mock pod list returned in arbitrary order
     mock_pod_list = mock.MagicMock()
-    mock_pod_list.items = [
-        mock_pod_worker4,
-        mock_pod_worker1,
-        mock_pod_worker3,
-        mock_pod_head,
-        mock_pod_worker2,
-    ]
+    mock_pod_list.items = []
+    for pod_name in unsorted_pod_names:
+        mock_pod = mock.MagicMock()
+        mock_pod.metadata.name = pod_name
+        mock_pod.metadata.deletion_timestamp = None
+        mock_pod_list.items.append(mock_pod)
 
     with patch('sky.provision.kubernetes.utils.kubernetes.core_api'
               ) as mock_core_api:
@@ -1962,56 +1981,4 @@ def test_filter_pods_sorts_by_name():
 
         # Verify the pods are returned in sorted order
         pod_names = list(result.keys())
-        assert pod_names == [
-            'test-cluster-head',
-            'test-cluster-worker1',
-            'test-cluster-worker2',
-            'test-cluster-worker3',
-            'test-cluster-worker4',
-        ]
-
-
-def test_filter_pods_handles_gaps_in_worker_numbers():
-    """Test that filter_pods correctly sorts workers even with gaps in numbering"""
-    # Create mock pods with gaps (worker1, worker2, worker5)
-    mock_pod_worker5 = mock.MagicMock()
-    mock_pod_worker5.metadata.name = 'test-cluster-worker5'
-    mock_pod_worker5.metadata.deletion_timestamp = None
-
-    mock_pod_worker2 = mock.MagicMock()
-    mock_pod_worker2.metadata.name = 'test-cluster-worker2'
-    mock_pod_worker2.metadata.deletion_timestamp = None
-
-    mock_pod_head = mock.MagicMock()
-    mock_pod_head.metadata.name = 'test-cluster-head'
-    mock_pod_head.metadata.deletion_timestamp = None
-
-    mock_pod_worker1 = mock.MagicMock()
-    mock_pod_worker1.metadata.name = 'test-cluster-worker1'
-    mock_pod_worker1.metadata.deletion_timestamp = None
-
-    # Mock pod list in arbitrary order
-    mock_pod_list = mock.MagicMock()
-    mock_pod_list.items = [
-        mock_pod_worker5,
-        mock_pod_worker2,
-        mock_pod_head,
-        mock_pod_worker1,
-    ]
-
-    with patch('sky.provision.kubernetes.utils.kubernetes.core_api'
-              ) as mock_core_api:
-        mock_core_api.return_value.list_namespaced_pod.return_value = mock_pod_list
-
-        result = utils.filter_pods(namespace='test-namespace',
-                                   context='test-context',
-                                   tag_filters={'test-label': 'test-value'})
-
-        # Verify the pods are returned in sorted order with gaps preserved
-        pod_names = list(result.keys())
-        assert pod_names == [
-            'test-cluster-head',
-            'test-cluster-worker1',
-            'test-cluster-worker2',
-            'test-cluster-worker5',
-        ]
+        assert pod_names == expected_sorted_pod_names
