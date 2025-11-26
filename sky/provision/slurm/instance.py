@@ -1,6 +1,7 @@
 """Slurm instance provisioning."""
 
 import tempfile
+import textwrap
 import time
 from typing import Any, cast, Dict, List, Optional, Tuple
 
@@ -131,55 +132,54 @@ def _create_virtual_instance(
             accelerator_count_raw) if accelerator_count_raw is not None else 0
     except (TypeError, ValueError):
         accelerator_count = 0
-    provision_lines = [
-        '#!/bin/bash',
-        f'#SBATCH --job-name={cluster_name_on_cloud}',
-        # By default stdout and stderr will be written to $HOME/slurm-%j.out
-        # (because we invoke sbatch from $HOME)
-        # Redirect elsewhere to not pollute the home directory.
-        # Note: The output of the batch step does not contain any
-        # useful logs typically, since we just do a sleep infinity.
-        f'#SBATCH --output={SHARED_SKY_DIRECTORY_NAME}/slurm-%j.out',
-        f'#SBATCH --error={SHARED_SKY_DIRECTORY_NAME}/slurm-%j.out',
-        f'#SBATCH --nodes={num_nodes}',
-        # Do not begin execution until all nodes are ready for use.
-        '#SBATCH --wait-all-nodes=1',
-        f'#SBATCH --cpus-per-task={int(resources["cpus"])}',
-        f'#SBATCH --mem={int(resources["memory"])}G',
-    ]
-    if (accelerator_type is not None and accelerator_type.upper() != 'NONE' and
-            accelerator_count > 0):
-        provision_lines.append(f'#SBATCH --gres=gpu:{accelerator_type.lower()}:'
-                               f'{accelerator_count}')
 
     skypilot_runtime_dir = _skypilot_runtime_dir(cluster_name_on_cloud)
     sky_dir = _sky_cluster_home_dir(cluster_name_on_cloud)
-    provision_lines.extend([
-        '',
+
+    # Build the sbatch script
+    gpu_directive = ''
+    if (accelerator_type is not None and accelerator_type.upper() != 'NONE' and
+            accelerator_count > 0):
+        gpu_directive = (f'#SBATCH --gres=gpu:{accelerator_type.lower()}:'
+                         f'{accelerator_count}')
+
+    # By default stdout and stderr will be written to $HOME/slurm-%j.out
+    # (because we invoke sbatch from $HOME). Redirect elsewhere to not pollute
+    # the home directory.
+    provision_script = textwrap.dedent(f"""\
+        #!/bin/bash
+        #SBATCH --job-name={cluster_name_on_cloud}
+        #SBATCH --output={SHARED_SKY_DIRECTORY_NAME}/slurm-%j.out
+        #SBATCH --error={SHARED_SKY_DIRECTORY_NAME}/slurm-%j.out
+        #SBATCH --nodes={num_nodes}
+        #SBATCH --wait-all-nodes=1
+        #SBATCH --cpus-per-task={int(resources["cpus"])}
+        #SBATCH --mem={int(resources["memory"])}G
+        {gpu_directive}
+
         # Cleanup function to remove cluster dirs on job termination.
-        'cleanup() {',
-        # The Skylet is daemonized, so it is not automatically terminated when
-        # the Slurm job is terminated, we need to kill it manually.
-        '    echo "Terminating Skylet..."',
-        f'    if [ -f "{skypilot_runtime_dir}/.sky/skylet_pid" ]; then',
-        f'        kill $(cat "{skypilot_runtime_dir}/.sky/skylet_pid") 2>/dev/null || true',  # pylint: disable=line-too-long
-        '    fi',
-        '    echo "Cleaning up sky directories..."',
-        f'    rm -rf "{skypilot_runtime_dir}"',
-        f'    rm -rf "{sky_dir}"',
-        '}',
-        'trap cleanup TERM EXIT',
-        '',
+        cleanup() {{
+            # The Skylet is daemonized, so it is not automatically terminated when
+            # the Slurm job is terminated, we need to kill it manually.
+            echo "Terminating Skylet..."
+            if [ -f "{skypilot_runtime_dir}/.sky/skylet_pid" ]; then
+                kill $(cat "{skypilot_runtime_dir}/.sky/skylet_pid") 2>/dev/null || true
+            fi
+            echo "Cleaning up sky directories..."
+            rm -rf "{skypilot_runtime_dir}"
+            rm -rf "{sky_dir}"
+        }}
+        trap cleanup TERM EXIT
+
         # Create sky directory for the cluster.
         # TODO(kevin): Since this is run inside the sbatch script, failures
         # will not be surfaced in a synchronous way. We should add a check
         # to verify the creation of the directory.
-        f'mkdir -p {sky_dir} {skypilot_runtime_dir}',
+        mkdir -p {sky_dir} {skypilot_runtime_dir}
         # Suppress login messages.
-        f'touch {sky_dir}/.hushlogin',
-        'sleep infinity',
-    ])
-    provision_script = '\n'.join(provision_lines)
+        touch {sky_dir}/.hushlogin
+        sleep infinity
+        """)
 
     # To bootstrap things, we need to do it with SSHCommandRunner first.
     # SlurmCommandRunner is for after the virtual instances are created.
