@@ -749,10 +749,10 @@ def override_skypilot_config(
         if should_warn:
             logger.warning(
                 f'The following keys ({json.dumps(disallowed_diff_keys)}) have '
-                'different values in the client SkyPilot config with the server '
-                'and will be ignored. Remove these keys to disable this warning. '
-                'If you want to specify it, please modify it on server side or '
-                'contact your administrator.')
+                'different values in the client SkyPilot config with the '
+                'server and will be ignored. Remove these keys to disable '
+                'this warning. If you want to specify it, please modify it '
+                'on server side or contact your administrator.')
     config = original_config.get_nested(
         keys=tuple(),
         default_value=None,
