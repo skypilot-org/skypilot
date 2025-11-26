@@ -3633,6 +3633,29 @@ def check_rsync_installed() -> None:
                 '  $ sudo apt install rsync') from None
 
 
+def check_stale_runtime_on_remote(returncode: int, stderr: str,
+                                  cluster_name: str) -> None:
+    """Raises RuntimeError if remote SkyPilot runtime needs to be updated.
+
+    We detect this by parsing certain backward-incompatible error messages from
+    `stderr`. Typically due to the local client version just got updated, and
+    the remote runtime is an older version.
+    """
+    pattern = re.compile(r'AttributeError: module \'sky\.(.*)\' has no '
+                         r'attribute \'(.*)\'')
+    if returncode != 0:
+        attribute_error = re.findall(pattern, stderr)
+        if attribute_error:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'{colorama.Fore.RED}SkyPilot runtime needs to be updated '
+                    f'on the remote cluster: {cluster_name}. To update, run '
+                    '(existing jobs will not be interrupted): '
+                    f'{colorama.Style.BRIGHT}sky start -f -y '
+                    f'{cluster_name}{colorama.Style.RESET_ALL}'
+                    f'\n--- Details ---\n{stderr.strip()}\n') from None
+
+
 def get_endpoints(cluster: str,
                   port: Optional[Union[int, str]] = None,
                   skip_status_check: bool = False) -> Dict[int, str]:
