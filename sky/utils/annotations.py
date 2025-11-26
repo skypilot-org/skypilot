@@ -1,14 +1,19 @@
 """Annotations for public APIs."""
 
 import functools
-from typing import Callable, Literal, TypeVar
+import threading
+from typing import Callable, List, Literal, TypeVar
+import weakref
 
 import cachetools
 from typing_extensions import ParamSpec
 
 # Whether the current process is a SkyPilot API server process.
 is_on_api_server = True
-_FUNCTIONS_NEED_RELOAD_CACHE = []
+_FUNCTIONS_NEED_RELOAD_CACHE_LOCK = threading.Lock()
+# Caches can be thread-local, use weakref to avoid blocking the GC when the
+# thread is destroyed.
+_FUNCTIONS_NEED_RELOAD_CACHE: List[weakref.ReferenceType] = []
 
 T = TypeVar('T')
 P = ParamSpec('P')
@@ -28,6 +33,15 @@ def client_api(func: Callable[P, T]) -> Callable[P, T]:
         return func(*args, **kwargs)
 
     return wrapper
+
+
+def _register_functions_need_reload_cache(func: Callable) -> None:
+    """Register a cachefunction that needs to be reloaded for a new request.
+
+    The function will be registered as a weak reference to avoid blocking GC.
+    """
+    with _FUNCTIONS_NEED_RELOAD_CACHE_LOCK:
+        _FUNCTIONS_NEED_RELOAD_CACHE.append(weakref.ref(func))
 
 
 def lru_cache(scope: Literal['global', 'request'], *lru_cache_args,
@@ -51,7 +65,7 @@ def lru_cache(scope: Literal['global', 'request'], *lru_cache_args,
         else:
             cached_func = functools.lru_cache(*lru_cache_args,
                                               **lru_cache_kwargs)(func)
-            _FUNCTIONS_NEED_RELOAD_CACHE.append(cached_func)
+            _register_functions_need_reload_cache(cached_func)
             return cached_func
 
     return decorator
@@ -72,7 +86,7 @@ def ttl_cache(scope: Literal['global', 'request'], *ttl_cache_args,
         else:
             cached_func = cachetools.cached(
                 cachetools.TTLCache(*ttl_cache_args, **ttl_cache_kwargs))(func)
-            _FUNCTIONS_NEED_RELOAD_CACHE.append(cached_func)
+            _register_functions_need_reload_cache(cached_func)
             return cached_func
 
     return decorator
@@ -80,5 +94,13 @@ def ttl_cache(scope: Literal['global', 'request'], *ttl_cache_args,
 
 def clear_request_level_cache():
     """Clear the request-level cache."""
-    for func in _FUNCTIONS_NEED_RELOAD_CACHE:
-        func.cache_clear()
+    alive_entries = []
+    with _FUNCTIONS_NEED_RELOAD_CACHE_LOCK:
+        for entry in _FUNCTIONS_NEED_RELOAD_CACHE:
+            func = entry()
+            if func is None:
+                # Has been GC'ed, drop the reference.
+                continue
+            func.cache_clear()
+            alive_entries.append(entry)
+        _FUNCTIONS_NEED_RELOAD_CACHE[:] = alive_entries
