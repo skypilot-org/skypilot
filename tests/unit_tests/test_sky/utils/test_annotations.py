@@ -2,6 +2,7 @@
 
 import gc
 import threading
+from unittest.mock import patch
 
 from sky.utils import annotations
 
@@ -77,39 +78,36 @@ class TestLruCache:
         assert call_count == 2  # Called again after clear
 
 
-def test_clear_request_level_cache_prunes_dead_entries(monkeypatch):
+def test_clear_request_level_cache_prunes_dead_entries():
     cache_entries = []
-    cache_lock = threading.Lock()
-    monkeypatch.setattr(annotations, '_FUNCTIONS_NEED_RELOAD_CACHE',
-                        cache_entries)
-    monkeypatch.setattr(annotations, '_FUNCTIONS_NEED_RELOAD_CACHE_LOCK',
-                        cache_lock)
-
-    @annotations.lru_cache(scope='request', maxsize=5)
-    def alive_func(x):
-        return x
-
-    def _create_temp_func():
+    with patch('sky.utils.annotations._FUNCTIONS_NEED_RELOAD_CACHE',
+               cache_entries):
 
         @annotations.lru_cache(scope='request', maxsize=5)
-        def temp_func(x):
-            return x * 2
+        def alive_func(x):
+            return x
 
-        return temp_func
+        def _create_temp_func():
 
-    temp_func = _create_temp_func()
+            @annotations.lru_cache(scope='request', maxsize=5)
+            def temp_func(x):
+                return x * 2
 
-    alive_func(1)
-    temp_func(1)
+            return temp_func
 
-    assert len(cache_entries) == 2
+        temp_func = _create_temp_func()
 
-    temp_func = None
-    gc.collect()
+        alive_func(1)
+        temp_func(1)
 
-    annotations.clear_request_level_cache()
+        assert len(cache_entries) == 2
 
-    assert len(cache_entries) == 1
-    cached_alive_func = cache_entries[0]()
-    assert cached_alive_func is alive_func
-    assert cached_alive_func.cache_info().currsize == 0
+        temp_func = None
+        gc.collect()
+
+        annotations.clear_request_level_cache()
+
+        assert len(cache_entries) == 1
+        cached_alive_func = cache_entries[0]()
+        assert cached_alive_func is alive_func
+        assert cached_alive_func.cache_info().currsize == 0
