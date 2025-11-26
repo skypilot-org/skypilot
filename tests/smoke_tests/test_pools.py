@@ -1288,6 +1288,7 @@ def check_pool_not_in_status(pool_name: str):
             f'echo "Pool {pool_name} correctly removed from pool status"')
 
 
+@pytest.mark.resource_heavy
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_down_all_with_running_jobs(generic_cloud: str):
     """Test that `sky jobs pool down -a -y` cancels running jobs and removes pools.
@@ -1321,7 +1322,7 @@ def test_pool_down_all_with_running_jobs(generic_cloud: str):
             'controller': {
                 'resources': {
                     'cpus': '4+',
-                    'memory': '20+',
+                    'memory': '32+',
                 }
             }
         }
