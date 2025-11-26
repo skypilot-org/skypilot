@@ -83,15 +83,6 @@ class InternalRequestDaemon:
                     sky_logging.reload_logger()
                     level = self.refresh_log_level()
                     self.event_fn()
-                # Clear request level cache after each run to avoid
-                # using too much memory.
-                annotations.clear_request_level_cache()
-                timeline.save_timeline()
-                # Kill all children processes related to this request.
-                # Each executor handles a single request, so we can safely
-                # kill all children processes related to this request.
-                subprocess_utils.kill_children_processes()
-                common_utils.release_memory()
             except Exception:  # pylint: disable=broad-except
                 # It is OK to fail to run the event, as the event is not
                 # critical, but we should log the error.
@@ -101,6 +92,16 @@ class InternalRequestDaemon:
                     f'{server_constants.DAEMON_RESTART_INTERVAL_SECONDS} '
                     'seconds...')
                 time.sleep(server_constants.DAEMON_RESTART_INTERVAL_SECONDS)
+            finally:
+                # Clear request level cache after each run to avoid
+                # using too much memory.
+                annotations.clear_request_level_cache()
+                timeline.save_timeline()
+                # Kill all children processes related to this request.
+                # Each executor handles a single request, so we can safely
+                # kill all children processes related to this request.
+                subprocess_utils.kill_children_processes()
+                common_utils.release_memory()
 
 
 def refresh_cluster_status_event():
