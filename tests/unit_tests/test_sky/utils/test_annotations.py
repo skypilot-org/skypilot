@@ -42,7 +42,7 @@ class TestLruCache:
 
         # The function should be in the _FUNCTIONS_NEED_RELOAD_CACHE list
         assert any(
-            f.__name__ == 'request_scoped_func' or hasattr(f, '__wrapped__')
+            f().__name__ == 'request_scoped_func' or hasattr(f, '__wrapped__')
             for f in annotations._FUNCTIONS_NEED_RELOAD_CACHE)
 
     def test_cache_clear_method(self):
@@ -72,3 +72,39 @@ class TestLruCache:
         result3 = func_to_clear(5)
         assert result3 == 5
         assert call_count == 2  # Called again after clear
+
+    def test_weakref_cache_entries_pruned_after_gc(self):
+        """Ensure dead weakref entries are pruned on cache clearing."""
+        import gc
+        import weakref
+
+        with annotations._FUNCTIONS_NEED_RELOAD_CACHE_LOCK:
+            original_entries = annotations._FUNCTIONS_NEED_RELOAD_CACHE
+            annotations._FUNCTIONS_NEED_RELOAD_CACHE.clear()
+
+        try:
+
+            def make_cached_func():
+
+                @annotations.lru_cache(scope='request', maxsize=5)
+                def cached_func(x):
+                    return x
+
+                return cached_func
+
+            cached_func = make_cached_func()
+            with annotations._FUNCTIONS_NEED_RELOAD_CACHE_LOCK:
+                assert len(annotations._FUNCTIONS_NEED_RELOAD_CACHE) == 1
+
+            func_ref = weakref.ref(cached_func)
+            cached_func = None
+            gc.collect()
+
+            assert func_ref() is None
+            annotations.clear_request_level_cache()
+
+            with annotations._FUNCTIONS_NEED_RELOAD_CACHE_LOCK:
+                assert not annotations._FUNCTIONS_NEED_RELOAD_CACHE
+        finally:
+            with annotations._FUNCTIONS_NEED_RELOAD_CACHE_LOCK:
+                annotations._FUNCTIONS_NEED_RELOAD_CACHE[:] = original_entries
