@@ -3162,21 +3162,23 @@ def filter_pods(namespace: str,
 
     # Sort pods by name, with workers sorted by their numeric suffix.
     # This ensures consistent ordering (e.g., cluster-head, cluster-worker1,
-    # worker2, worker3, ...) even when Kubernetes API returns them in
-    # arbitrary order. This works even if there were somehow pod names other
-    # than head/worker ones, but that may be overkill.
+    # cluster-worker2, cluster-worker3, ...) even when Kubernetes API
+    # returns them in arbitrary order. This works even if there were
+    # somehow pod names other than head/worker ones, and those end up at
+    # the end of the list.
     def get_pod_sort_key(
         pod: V1Pod
     ) -> Union[Tuple[Literal[0], str], Tuple[Literal[1], int], Tuple[Literal[2],
                                                                      str]]:
         name = pod.metadata.name
-        if '-worker' in name:
+        name_suffix = name.split('-')[-1]
+        if name_suffix == 'head':
+            return (0, name)
+        elif name_suffix.startswith('worker'):
             try:
-                return (1, int(name.split('-worker')[-1]))
+                return (1, int(name_suffix.split('worker')[-1]))
             except (ValueError, IndexError):
                 return (2, name)
-        elif '-head' in name:
-            return (0, name)
         else:
             return (2, name)
 
