@@ -676,8 +676,9 @@ class ManagedJobScheduleState(enum.Enum):
         }
 
         if protobuf_value not in protobuf_to_enum:
-            raise ValueError('Unknown protobuf ManagedJobScheduleState value: '
-                             f'{protobuf_value}')
+            # This may be an unknown or previously removed value.
+            # For backwards compatibility, return None.
+            return None
 
         return protobuf_to_enum[protobuf_value]
 
