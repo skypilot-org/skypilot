@@ -477,11 +477,6 @@ def override_sky_config(
         )
     if is_grpc_enabled_test():
         env_dict[env_options.Options.ENABLE_GRPC.env_key] = '1'
-    if is_slurm_enabled_test():
-        env_dict[env_options.Options.ENABLE_SLURM.env_key] = '1'
-
-    # Clear request_body_env_vars cache so it picks up the new env vars
-    payloads.request_body_env_vars.cache_clear()
 
     if not override_sky_config_dict:
         yield None
@@ -979,10 +974,6 @@ def is_postgres_backend_test() -> bool:
 
 def is_grpc_enabled_test() -> bool:
     return os.environ.get('PYTEST_SKYPILOT_GRPC_ENABLED', None) is not None
-
-
-def is_slurm_enabled_test() -> bool:
-    return os.environ.get('PYTEST_SKYPILOT_ENABLE_SLURM', None) is not None
 
 
 def pytest_config_file_override() -> Optional[str]:

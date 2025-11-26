@@ -14,7 +14,6 @@ from sky.adaptors import slurm
 from sky.provision.slurm import utils as slurm_utils
 from sky.utils import annotations
 from sky.utils import common_utils
-from sky.utils import env_options
 from sky.utils import registry
 from sky.utils import resources_utils
 
@@ -411,13 +410,6 @@ class Slurm(clouds.Cloud):
     def _check_compute_credentials(
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to the Slurm cluster."""
-        # Check if Slurm support is enabled via feature flag
-        if not env_options.Options.ENABLE_SLURM.get():
-            return (False,
-                    'Slurm support is experimental and disabled by default. '
-                    'To enable, set the environment variable: '
-                    'SKYPILOT_ENABLE_SLURM=1')
-
         ssh_config = SSHConfig.from_path(os.path.expanduser(CREDENTIAL_PATH))
         existing_allowed_clusters = cls.existing_allowed_clusters()
 
