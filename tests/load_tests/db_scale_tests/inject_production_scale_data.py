@@ -19,7 +19,6 @@ import argparse
 import copy
 import os
 import random
-import sqlite3
 import sys
 import time
 import uuid
@@ -38,7 +37,9 @@ class ProductionScaleGenerator(SampleBasedGenerator):
                  active_cluster_name: str,
                  terminated_cluster_name: str,
                  managed_job_id: int,
-                 num_users: int = 10):
+                 num_users: int = 10,
+                 db_connection_getter=None,
+                 format_sql=None):
         """Initialize the generator.
 
         Args:
@@ -46,9 +47,14 @@ class ProductionScaleGenerator(SampleBasedGenerator):
             terminated_cluster_name: Name of a terminated cluster to use as template
             managed_job_id: Job ID of a managed job to use as template
             num_users: Number of users to simulate
+            db_connection_getter: Optional function to get database connection
+            format_sql: Optional function to format SQL queries
         """
-        super().__init__(active_cluster_name, terminated_cluster_name,
-                         managed_job_id)
+        super().__init__(active_cluster_name,
+                         terminated_cluster_name,
+                         managed_job_id,
+                         db_connection_getter=db_connection_getter,
+                         format_sql=format_sql)
         self.num_users = num_users
         self.user_hashes = [
             f"user-{i:02d}-{uuid.uuid4().hex[:8]}" for i in range(num_users)
@@ -74,7 +80,6 @@ class ProductionScaleGenerator(SampleBasedGenerator):
                 current_time - random.uniform(0, 7 * 24 * 3600))  # Last 7 days
             cluster['status_updated_at'] = int(
                 current_time - random.uniform(0, 24 * 3600))  # Last day
-            cluster['user_hash'] = self._get_random_user_hash()
 
             # Update handle with new cluster name if handle exists
             if cluster.get('handle'):
@@ -108,7 +113,6 @@ class ProductionScaleGenerator(SampleBasedGenerator):
             cluster[
                 'name'] = f"prod-hist-recent-{i+1:06d}-{uuid.uuid4().hex[:8]}"
             cluster['cluster_hash'] = str(uuid.uuid4())
-            cluster['user_hash'] = self._get_random_user_hash()
 
             days_ago_seconds = random.randint(1 * 24 * 60 * 60,
                                               30 * 24 * 60 * 60)
@@ -126,7 +130,6 @@ class ProductionScaleGenerator(SampleBasedGenerator):
             cluster[
                 'name'] = f"prod-hist-medium-{i+1:06d}-{uuid.uuid4().hex[:8]}"
             cluster['cluster_hash'] = str(uuid.uuid4())
-            cluster['user_hash'] = self._get_random_user_hash()
 
             days_ago_seconds = random.randint(30 * 24 * 60 * 60,
                                               90 * 24 * 60 * 60)
@@ -143,7 +146,6 @@ class ProductionScaleGenerator(SampleBasedGenerator):
 
             cluster['name'] = f"prod-hist-old-{i+1:06d}-{uuid.uuid4().hex[:8]}"
             cluster['cluster_hash'] = str(uuid.uuid4())
-            cluster['user_hash'] = self._get_random_user_hash()
 
             days_ago_seconds = random.randint(90 * 24 * 60 * 60,
                                               365 * 24 * 60 * 60)
@@ -164,18 +166,33 @@ class ProductionScaleTest(TestScale):
                    active_cluster_name,
                    terminated_cluster_name,
                    managed_job_id,
-                   num_users=10):
-        """Initialize with production-scale generator."""
-        self.db_path = os.path.expanduser("~/.sky/state.db")
-        self.jobs_db_path = os.path.expanduser("~/.sky/spot_jobs.db")
-        self.test_cluster_names = []
-        self.test_cluster_hashes = []
-        self.test_job_ids = []
+                   num_users=10,
+                   sql_url=None):
+        """Initialize with production-scale generator.
+
+        Args:
+            active_cluster_name: Name of active cluster template
+            terminated_cluster_name: Name of terminated cluster template
+            managed_job_id: Job ID template
+            num_users: Number of users to simulate
+            sql_url: Optional PostgreSQL connection URL (e.g., postgresql://user:pass@host:port/db)
+                    If None, uses SQLite databases
+        """
+        # Initialize parent class with PostgreSQL support
+        super().initialize(active_cluster_name,
+                           terminated_cluster_name,
+                           managed_job_id,
+                           sql_url=sql_url)
+
+        # Replace generator with production-scale generator
         self.generator = ProductionScaleGenerator(
             active_cluster_name=active_cluster_name,
             terminated_cluster_name=terminated_cluster_name,
             managed_job_id=managed_job_id,
-            num_users=num_users)
+            num_users=num_users,
+            db_connection_getter=self._get_connection
+            if self.use_postgres else None,
+            format_sql=self._format_sql if self.use_postgres else None)
 
     def inject_production_clusters(self, count: int = 1500):
         """Inject production-scale clusters."""
@@ -185,12 +202,13 @@ class ProductionScaleTest(TestScale):
         clusters = self.generator.generate_production_cluster_data(count)
 
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
 
             # Load cluster YAML for the sample cluster
             cursor.execute(
-                "SELECT yaml FROM cluster_yaml WHERE cluster_name = ?",
+                self._format_sql(
+                    "SELECT yaml FROM cluster_yaml WHERE cluster_name = ?"),
                 (self.generator.active_cluster_name,))
             sample_yaml_row = cursor.fetchone()
             sample_yaml = sample_yaml_row[0] if sample_yaml_row else None
@@ -200,13 +218,15 @@ class ProductionScaleTest(TestScale):
             columns_str = ', '.join(cluster_columns)
             placeholders = ', '.join(['?' for _ in cluster_columns])
 
-            insert_sql = f"INSERT INTO clusters ({columns_str}) VALUES ({placeholders})"
+            insert_sql = self._format_sql(
+                f"INSERT INTO clusters ({columns_str}) VALUES ({placeholders})")
 
-            yaml_insert_sql = """
+            # ON CONFLICT syntax (both databases support it, but PostgreSQL uses EXCLUDED vs excluded)
+            yaml_insert_sql = self._format_sql(f"""
                 INSERT INTO cluster_yaml (cluster_name, yaml)
                 VALUES (?, ?)
-                ON CONFLICT(cluster_name) DO UPDATE SET yaml = excluded.yaml
-            """
+                ON CONFLICT(cluster_name) DO UPDATE SET yaml = {self._get_excluded_keyword()}.yaml
+            """)
 
             # Insert in batches for performance
             batch_size = 100
@@ -220,14 +240,20 @@ class ProductionScaleTest(TestScale):
                     row_data = tuple(cluster[col] for col in cluster_columns)
                     batch_data.append(row_data)
 
-                cursor.executemany(insert_sql, batch_data)
+                self._execute_batch(cursor,
+                                    insert_sql,
+                                    batch_data,
+                                    page_size=batch_size)
                 conn.commit()
 
                 if sample_yaml:
                     yaml_batch_data = [
                         (cluster['name'], sample_yaml) for cluster in batch
                     ]
-                    cursor.executemany(yaml_insert_sql, yaml_batch_data)
+                    self._execute_batch(cursor,
+                                        yaml_insert_sql,
+                                        yaml_batch_data,
+                                        page_size=batch_size)
                     conn.commit()
 
                 total_inserted += len(batch_data)
@@ -261,7 +287,7 @@ class ProductionScaleTest(TestScale):
             count)
 
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
 
             # Get column names from first cluster dict
@@ -269,7 +295,9 @@ class ProductionScaleTest(TestScale):
             columns_str = ', '.join(cluster_columns)
             placeholders = ', '.join(['?' for _ in cluster_columns])
 
-            insert_sql = f"INSERT INTO cluster_history ({columns_str}) VALUES ({placeholders})"
+            insert_sql = self._format_sql(
+                f"INSERT INTO cluster_history ({columns_str}) VALUES ({placeholders})"
+            )
 
             batch_size = 100
             total_inserted = 0
@@ -283,7 +311,10 @@ class ProductionScaleTest(TestScale):
                     batch_data.append(row_data)
                     self.test_cluster_hashes.append(cluster['cluster_hash'])
 
-                cursor.executemany(insert_sql, batch_data)
+                self._execute_batch(cursor,
+                                    insert_sql,
+                                    batch_data,
+                                    page_size=batch_size)
                 conn.commit()
                 total_inserted += len(batch_data)
 
@@ -325,7 +356,7 @@ class ProductionScaleTest(TestScale):
         statuses = ['INIT', 'UP', 'STOPPED']
 
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
 
             # Get all cluster hashes (both active and history)
@@ -333,7 +364,8 @@ class ProductionScaleTest(TestScale):
             active_clusters = cursor.fetchall()
 
             cursor.execute(
-                "SELECT cluster_hash, name FROM cluster_history LIMIT ?",
+                self._format_sql(
+                    "SELECT cluster_hash, name FROM cluster_history LIMIT ?"),
                 (min(count // 2,
                      100000),))  # Limit history clusters for performance
             history_clusters = cursor.fetchall()
@@ -416,12 +448,12 @@ class ProductionScaleTest(TestScale):
                 f"  Generated {len(events)} events, inserting into database...")
 
             # Insert events in batches
-            insert_sql = """
+            insert_sql = self._format_sql("""
                 INSERT INTO cluster_events
                 (cluster_hash, name, starting_status, ending_status, reason,
                  transitioned_at, type, request_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """
+            """)
 
             batch_size = 100
             total_inserted = 0
@@ -435,10 +467,13 @@ class ProductionScaleTest(TestScale):
                 ]
 
                 try:
-                    cursor.executemany(insert_sql, batch_data)
+                    self._execute_batch(cursor,
+                                        insert_sql,
+                                        batch_data,
+                                        page_size=batch_size)
                     conn.commit()
                     total_inserted += len(batch_data)
-                except sqlite3.IntegrityError:
+                except self._get_integrity_error_class():
                     # Skip duplicate events (same cluster_hash, reason, transitioned_at)
                     conn.rollback()
                     # Try inserting one by one
@@ -447,7 +482,7 @@ class ProductionScaleTest(TestScale):
                             cursor.execute(insert_sql, event_data)
                             conn.commit()
                             total_inserted += 1
-                        except sqlite3.IntegrityError:
+                        except self._get_integrity_error_class():
                             conn.rollback()
                             continue
 
@@ -476,7 +511,7 @@ class ProductionScaleTest(TestScale):
 
         try:
             # Clean up active clusters
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
 
             # Clean up production clusters (inject_production_clusters creates prod-cluster-*)
@@ -541,23 +576,23 @@ class ProductionScaleTest(TestScale):
             conn.close()
 
             # Clean up managed jobs
-            conn = sqlite3.connect(self.jobs_db_path)
+            conn = self._get_connection(for_jobs=True)
             cursor = conn.cursor()
 
             # Delete from job_info first (to handle foreign key constraints if any)
             cursor.execute(
-                """
+                self._format_sql("""
                 DELETE FROM job_info
                 WHERE spot_job_id > ?
-            """, (managed_job_id,))
+            """), (managed_job_id,))
             job_info_deleted = cursor.rowcount
 
             # Delete from spot
             cursor.execute(
-                """
+                self._format_sql("""
                 DELETE FROM spot
                 WHERE job_id > ?
-            """, (managed_job_id,))
+            """), (managed_job_id,))
             jobs_deleted = cursor.rowcount
             conn.commit()
 
@@ -659,6 +694,13 @@ def main():
         '--cleanup',
         action='store_true',
         help='Clean up (undo) all production-scale data instead of injecting')
+    parser.add_argument(
+        '--sql-url',
+        type=str,
+        default=None,
+        help=
+        'PostgreSQL connection URL (e.g., postgresql://user:pass@host:port/db). '
+        'If not provided, uses SQLite databases.')
 
     args = parser.parse_args()
 
@@ -672,8 +714,15 @@ def main():
 
         # Create test instance (minimal init for cleanup)
         test = ProductionScaleTest()
-        test.db_path = os.path.expanduser("~/.sky/state.db")
-        test.jobs_db_path = os.path.expanduser("~/.sky/spot_jobs.db")
+        if args.sql_url:
+            test.initialize(active_cluster_name='dummy',
+                            terminated_cluster_name='dummy',
+                            managed_job_id=args.managed_job_id,
+                            sql_url=args.sql_url)
+        else:
+            test.db_path = os.path.expanduser("~/.sky/state.db")
+            test.jobs_db_path = os.path.expanduser("~/.sky/spot_jobs.db")
+            test.use_postgres = False
 
         try:
             results = test.cleanup_production_data(args.managed_job_id)
@@ -701,7 +750,8 @@ def main():
     test.initialize(active_cluster_name=args.active_cluster,
                     terminated_cluster_name=args.terminated_cluster,
                     managed_job_id=args.managed_job_id,
-                    num_users=args.num_users)
+                    num_users=args.num_users,
+                    sql_url=args.sql_url)
 
     results = {}
     start_time = time.time()

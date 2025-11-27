@@ -103,6 +103,7 @@ class AdminPolicyRequestName(str, enum.Enum):
     # but is defined here for admin policy application
     JOBS_LAUNCH_CONTROLLER = 'jobs.launch_controller'
     JOBS_POOL_APPLY = RequestName.JOBS_POOL_APPLY.value
+    JOBS_LAUNCH_CLUSTER = 'jobs.launch_cluster'
     # Serve requests
     SERVE_UP = RequestName.SERVE_UP.value
     # serve launch controller request is not stored in the request db,

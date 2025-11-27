@@ -574,6 +574,9 @@ def get_volume_mount_schema():
             'volume_name': {
                 'type': 'string',
             },
+            'is_ephemeral': {
+                'type': 'boolean',
+            },
             'volume_config': {
                 'type': 'object',
                 'required': [],
@@ -791,23 +794,6 @@ def _filter_schema(schema: dict, keys_to_keep: List[Tuple[str, ...]]) -> dict:
     return new_schema
 
 
-def _experimental_task_schema() -> dict:
-    # TODO: experimental.config_overrides has been deprecated in favor of the
-    # top-level `config` field. Remove in v0.11.0.
-    config_override_schema = _filter_schema(
-        get_config_schema(), constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK)
-    return {
-        'experimental': {
-            'type': 'object',
-            'required': [],
-            'additionalProperties': False,
-            'properties': {
-                'config_overrides': config_override_schema,
-            }
-        }
-    }
-
-
 def get_task_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -918,7 +904,6 @@ def get_task_schema():
             '_metadata': {
                 'type': 'object',
             },
-            **_experimental_task_schema(),
         }
     }
 
@@ -1047,6 +1032,16 @@ def get_default_remote_identity(cloud: str) -> str:
         return RemoteIdentityOptions.SERVICE_ACCOUNT.value
     return RemoteIdentityOptions.LOCAL_CREDENTIALS.value
 
+
+_CAPABILITIES_SCHEMA = {
+    'capabilities': {
+        'type': 'array',
+        'items': {
+            'type': 'string',
+            'case_insensitive_enum': ['compute', 'storage']
+        },
+    }
+}
 
 _REMOTE_IDENTITY_SCHEMA = {
     'remote_identity': {
@@ -1267,6 +1262,7 @@ def get_config_schema():
                         }]
                     },
                 },
+                **_CAPABILITIES_SCHEMA,
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
@@ -1324,6 +1320,7 @@ def get_config_schema():
                         }
                     ],
                 },
+                **_CAPABILITIES_SCHEMA,
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
@@ -1664,7 +1661,8 @@ def get_config_schema():
                         },
                         'disabled': {
                             'type': 'boolean'
-                        }
+                        },
+                        **_CAPABILITIES_SCHEMA,
                     },
                     'additionalProperties': False,
                 },
@@ -1677,6 +1675,7 @@ def get_config_schema():
                         'disabled': {
                             'type': 'boolean'
                         },
+                        **_CAPABILITIES_SCHEMA,
                     },
                     'additionalProperties': False,
                 },

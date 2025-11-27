@@ -6,7 +6,7 @@ Run a personal [marimo](https://marimo.io/) server on a SkyPilot cluster.
 
 ## Launch with CLI
 
-Launch a marimo cluser with the command:
+Launch a marimo cluster with the command:
 
 ```bash
 sky launch -c marimo-example marimo.yaml

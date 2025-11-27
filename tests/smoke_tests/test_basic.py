@@ -56,16 +56,18 @@ def test_example_app():
 
 # ---------- A minimal task ----------
 def test_minimal(generic_cloud: str):
+    disk_size_param, validate_launch_output = smoke_tests_utils.get_disk_size_and_validate_launch_output(
+        generic_cloud)
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'minimal',
         [
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {disk_size_param} tests/test_yamls/minimal.yaml) && {validate_launch_output}',
             # Output validation done.
             f'sky logs {name} 1 --status',
             f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',  # Equivalent.
             # Test launch output again on existing cluster
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {disk_size_param} tests/test_yamls/minimal.yaml) && {validate_launch_output}',
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
             # Check the logs downloading
@@ -175,22 +177,24 @@ def test_minimal_arm64(generic_cloud: str):
 
 # ---------- A minimal task with git repository workdir ----------
 def test_minimal_with_git_workdir(generic_cloud: str):
+    disk_size_param, validate_launch_output = smoke_tests_utils.get_disk_size_and_validate_launch_output(
+        generic_cloud)
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'minimal_with_git_workdir',
         [
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --git-url https://github.com/skypilot-org/skypilot.git --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --git-url https://github.com/skypilot-org/skypilot.git --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {disk_size_param} tests/test_yamls/minimal.yaml) && {validate_launch_output}',
             # Output validation done.
             f'sky logs {name} 1 --status',
             f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',  # Equivalent.
             # Check the current branch
             f'sky exec {name} \'git status | grep master || exit 1\'',
             # Checkout to releases/0.10.0
-            f'SKYPILOT_DEBUG=0 sky launch -y -c {name} --git-url https://github.com/skypilot-org/skypilot.git --git-ref releases/0.10.0 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            f'SKYPILOT_DEBUG=0 sky launch -y -c {name} --git-url https://github.com/skypilot-org/skypilot.git --git-ref releases/0.10.0 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {disk_size_param} tests/test_yamls/minimal.yaml',
             # Check the current branch
             f'sky exec {name} \'git status | grep "releases/0\.10\.0" || exit 1\'',
             # Checkout to default branch
-            f'SKYPILOT_DEBUG=0 sky launch -y -c {name} --git-url https://github.com/skypilot-org/skypilot.git --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            f'SKYPILOT_DEBUG=0 sky launch -y -c {name} --git-url https://github.com/skypilot-org/skypilot.git --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {disk_size_param} tests/test_yamls/minimal.yaml',
             # Check the current branch
             f'sky exec {name} \'git status | grep master || exit 1\'',
             # Checkout to releases/0.10.0
@@ -216,6 +220,7 @@ def test_minimal_with_git_workdir(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_runpod
 def test_minimal_with_git_workdir_docker(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -1770,3 +1775,27 @@ def test_cluster_setup_num_gpus():
             teardown=f'sky down -y {name}',
         )
         smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.aws
+def test_launch_retry_until_up():
+    """Test that retry until up considers more resources after trying all zones."""
+    cluster_name = smoke_tests_utils.get_cluster_name()
+    timeout = 180
+    test = smoke_tests_utils.Test(
+        'launch-retry-until-up',
+        [
+            # Launch something we'll never get.
+            f's=$(timeout {timeout} sky launch -c {cluster_name} --gpus B200:8 --infra aws echo hi -y -d --retry-until-up --use-spot 2>&1 || true) && '
+            # Check that "Retry after" appears in the output
+            'echo "$s" | grep -q "Retry after" && '
+            # Find the first occurrence of "Retry after" and get its line number
+            'RETRY_LINE=$(echo "$s" | grep -n "Retry after" | head -1 | cut -d: -f1) && '
+            # Check that "Considered resources" appears after the first "Retry after"
+            # We do this by extracting all lines after RETRY_LINE and checking if "Considered resources" appears
+            'echo "$s" | tail -n +$((RETRY_LINE + 1)) | grep -q "Considered resources"'
+        ],
+        timeout=200,  # Slightly more than 180 to account for test overhead
+        teardown=f'sky down -y {cluster_name}',
+    )
+    smoke_tests_utils.run_one_test(test)

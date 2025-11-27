@@ -61,9 +61,7 @@ from sky.client import sdk
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
-from sky.server import config as server_config
 from sky.skylet import constants
-from sky.utils import annotations
 from sky.utils import controller_utils
 from sky.utils import subprocess_utils
 
@@ -83,33 +81,6 @@ JOB_CONTROLLER_PID_LOCK = os.path.expanduser(
 
 JOB_CONTROLLER_PID_PATH = os.path.expanduser('~/.sky/job_controller_pid')
 JOB_CONTROLLER_ENV_PATH = os.path.expanduser('~/.sky/job_controller_env')
-
-# Based on testing, each worker takes around 200-300MB memory. Keeping it
-# higher to be safe.
-JOB_MEMORY_MB = 400
-# Number of ongoing launches launches allowed per worker. Can probably be
-# increased a bit to around 16 but keeping it lower to just to be safe
-LAUNCHES_PER_WORKER = 8
-# this can probably be increased to around 300-400 but keeping it lower to just
-# to be safe
-MAX_JOBS_PER_WORKER = 200
-# Maximum number of controllers that can be running. Hard to handle more than
-# 512 launches at once.
-MAX_CONTROLLERS = 512 // LAUNCHES_PER_WORKER
-# Limit the number of jobs that can be running at once on the entire jobs
-# controller cluster. It's hard to handle cancellation of more than 2000 jobs at
-# once.
-# TODO(cooperc): Once we eliminate static bottlenecks (e.g. sqlite), remove this
-# hardcoded max limit.
-MAX_TOTAL_RUNNING_JOBS = 2000
-# Maximum values for above constants. There will start to be lagging issues
-# at these numbers already.
-# JOB_MEMORY_MB = 200
-# LAUNCHES_PER_WORKER = 16
-# JOBS_PER_WORKER = 400
-
-# keep 2GB reserved after the controllers
-MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB = 2048
 
 CURRENT_HASH = os.path.expanduser('~/.sky/wheels/current_sky_wheel_hash')
 
@@ -179,50 +150,6 @@ def _append_controller_pid_record(pid: int,
         f.write(entry + '\n')
 
 
-@annotations.lru_cache(scope='global')
-def get_number_of_controllers() -> int:
-    """Returns the number of controllers that should be running.
-
-    This is the number of controllers that should be running to maximize
-    resource utilization.
-
-    In consolidation mode, we use the existing API server so our resource
-    requirements are just for the job controllers. We try taking up as much
-    much memory as possible left over from the API server.
-
-    In non-consolidation mode, we have to take into account the memory of the
-    API server workers. We limit to only 8 launches per worker, so our logic is
-    each controller will take CONTROLLER_MEMORY_MB + 8 * WORKER_MEMORY_MB. We
-    leave some leftover room for ssh codegen and ray status overhead.
-    """
-    consolidation_mode = skypilot_config.get_nested(
-        ('jobs', 'controller', 'consolidation_mode'), default_value=False)
-
-    total_memory_mb = controller_utils.get_controller_mem_size_gb() * 1024
-    if consolidation_mode:
-        config = server_config.compute_server_config(deploy=True, quiet=True)
-
-        used = 0.0
-        used += MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB
-        used += (config.long_worker_config.garanteed_parallelism +
-                    config.long_worker_config.burstable_parallelism) * \
-            server_config.LONG_WORKER_MEM_GB * 1024
-        used += (config.short_worker_config.garanteed_parallelism +
-                    config.short_worker_config.burstable_parallelism) * \
-            server_config.SHORT_WORKER_MEM_GB * 1024
-
-        return min(MAX_CONTROLLERS,
-                   max(1, int((total_memory_mb - used) // JOB_MEMORY_MB)))
-    else:
-        return min(
-            MAX_CONTROLLERS,
-            max(
-                1,
-                int((total_memory_mb - MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB) /
-                    ((LAUNCHES_PER_WORKER * server_config.LONG_WORKER_MEM_GB) *
-                     1024 + JOB_MEMORY_MB))))
-
-
 def start_controller() -> None:
     """Start the job controller process.
 
@@ -271,6 +198,22 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
     Will also add the job_id, dag_yaml_path, and env_file_path to the
     controllers list of processes.
     """
+    # In consolidation mode, during rolling update, two API servers may be
+    # running. If we are on the new API server, and we haven't finished the
+    # recovery process, we should avoid starting new controllers. The old API
+    # server/consolidated jobs controller could run update_managed_jobs_statuses
+    # and if there are jobs running on the new API server, the old one will not
+    # see the corresponding processes and may mark them as FAILED_CONTROLLER.
+    if from_scheduler and managed_job_utils.is_consolidation_mode(
+    ) and os.path.exists(
+            os.path.expanduser(
+                constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE)):
+        # This could happen during an API server rolling update, or during
+        # normal running while managed-job-status-refresh-daemon is running. In
+        # either case, the controllers should be already started or will be
+        # started by the recovery process.
+        logger.info('Recovery is still in progress, skipping controller start.')
+        return
     try:
         with filelock.FileLock(JOB_CONTROLLER_PID_LOCK, blocking=False):
             if from_scheduler and not managed_job_utils.is_consolidation_mode():
@@ -304,7 +247,7 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
             alive = get_alive_controllers()
             if alive is None:
                 return
-            wanted = get_number_of_controllers()
+            wanted = controller_utils.get_number_of_jobs_controllers()
             started = 0
 
             while alive + started < wanted:
@@ -337,7 +280,8 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
                                                       job_id):
             # This can happen when HA recovery runs for some reason but the job
             # controller is still alive.
-            logger.warning(f'Job {job_id} is still alive, skipping submission')
+            logger.warning(f'Job {job_id} is still alive with controller '
+                           f'{controller_process}, skipping submission')
             maybe_start_controllers(from_scheduler=True)
             return
 
@@ -348,21 +292,25 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
         original_user_yaml_content = original_user_yaml_file.read()
     with open(env_file_path, 'r', encoding='utf-8') as env_file:
         env_file_content = env_file.read()
+
+    # Read config file if SKYPILOT_CONFIG env var is set
+    config_file_content: Optional[str] = None
+    config_file_path = os.environ.get(skypilot_config.ENV_VAR_SKYPILOT_CONFIG)
+    if config_file_path:
+        config_file_path = os.path.expanduser(config_file_path)
+        if os.path.exists(config_file_path):
+            with open(config_file_path, 'r', encoding='utf-8') as config_file:
+                config_file_content = config_file.read()
+
+    config_bytes = (len(config_file_content) if config_file_content else 0)
     logger.debug(f'Storing job {job_id} file contents in database '
                  f'(DAG bytes={len(dag_yaml_content)}, '
                  f'original user yaml bytes={len(original_user_yaml_content)}, '
-                 f'env bytes={len(env_file_content)}).')
+                 f'env bytes={len(env_file_content)}, '
+                 f'config bytes={config_bytes}).')
     state.scheduler_set_waiting(job_id, dag_yaml_content,
                                 original_user_yaml_content, env_file_content,
-                                priority)
-    if state.get_ha_recovery_script(job_id) is None:
-        # the run command is just the command that called scheduler
-        run = (f'source {env_file_path} && '
-               f'{sys.executable} -m sky.jobs.scheduler {dag_yaml_path} '
-               f'--job-id {job_id} --env-file {env_file_path} '
-               f'--user-yaml-path {original_user_yaml_path} '
-               f'--priority {priority}')
-        state.set_ha_recovery_script(job_id, run)
+                                config_file_content, priority)
     maybe_start_controllers(from_scheduler=True)
 
 
@@ -407,7 +355,7 @@ async def scheduled_launch(
     while True:
         async with starting_lock:
             starting_count = len(starting)
-            if starting_count < LAUNCHES_PER_WORKER:
+            if starting_count < controller_utils.LAUNCHES_PER_WORKER:
                 break
             logger.info('Too many jobs starting, waiting for a slot')
             await starting_signal.wait()

@@ -201,6 +201,10 @@ Follow these steps to create a new AWS user:
 
            Search for the **AdministratorAccess** policy, and check the box to add it. Click **Next** to proceed.
 
+           .. tip::
+
+            To use AWS for S3 but not for launching VMs, add **AmazonS3FullAccess** policy instead.
+
        .. tab-item:: Minimal permissions
 
            Click on **Create Policy**.

@@ -1,8 +1,4 @@
 {{- if .Values.rbac.create }}
-{{/* TODO(aylei): removed in v0.11.0 */}}
-{{- if .Values.rbac.rules }}
-{{- fail "`.rbac.rules` is deprecated. Please use `.rbac.namespaceRules` and `.rbac.clusterRules` instead" }}
-{{- end }}
 ---
 apiVersion: v1
 kind: ServiceAccount

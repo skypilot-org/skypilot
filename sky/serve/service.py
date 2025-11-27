@@ -31,6 +31,7 @@ from sky.utils import auth_utils
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import subprocess_utils
+from sky.utils import thread_utils
 from sky.utils import ux_utils
 
 # Use the explicit logger name so that the logger is under the
@@ -115,7 +116,7 @@ def cleanup_storage(yaml_content: str) -> bool:
 # NOTE(dev): We don't need to acquire the `with_lock` in replica manager here
 # because we killed all the processes (controller & replica manager) before
 # calling this function.
-def _cleanup(service_name: str) -> bool:
+def _cleanup(service_name: str, pool: bool) -> bool:
     """Clean up all service related resources, i.e. replicas and storage."""
     # Cleanup the HA recovery script first as it is possible that some error
     # was raised when we construct the task object (e.g.,
@@ -123,8 +124,8 @@ def _cleanup(service_name: str) -> bool:
     serve_state.remove_ha_recovery_script(service_name)
     failed = False
     replica_infos = serve_state.get_replica_infos(service_name)
-    info2proc: Dict[replica_managers.ReplicaInfo,
-                    multiprocessing.Process] = dict()
+    info2thr: Dict[replica_managers.ReplicaInfo,
+                   thread_utils.SafeThread] = dict()
     # NOTE(dev): This relies on `sky/serve/serve_utils.py::
     # generate_replica_cluster_name`. Change it if you change the function.
     existing_cluster_names = global_user_state.get_cluster_names_start_with(
@@ -135,9 +136,12 @@ def _cleanup(service_name: str) -> bool:
                         f'{info.replica_id} not found. Might be a failed '
                         'cluster. Skipping.')
             continue
-        p = multiprocessing.Process(target=replica_managers.terminate_cluster,
-                                    args=(info.cluster_name,))
-        info2proc[info] = p
+
+        log_file_name = serve_utils.generate_replica_log_file_name(
+            service_name, info.replica_id)
+        t = thread_utils.SafeThread(target=replica_managers.terminate_cluster,
+                                    args=(info.cluster_name, log_file_name))
+        info2thr[info] = t
         # Set replica status to `SHUTTING_DOWN`
         info.status_property.sky_launch_status = (
             replica_managers.common_utils.ProcessStatus.SUCCEEDED)
@@ -157,32 +161,32 @@ def _cleanup(service_name: str) -> bool:
 
     # Please reference to sky/serve/replica_managers.py::_refresh_process_pool.
     # TODO(tian): Refactor to use the same logic and code.
-    while info2proc:
-        snapshot = list(info2proc.items())
-        for info, p in snapshot:
-            if p.is_alive():
+    while info2thr:
+        snapshot = list(info2thr.items())
+        for info, t in snapshot:
+            if t.is_alive():
                 continue
             if (info.status_property.sky_down_status ==
                     replica_managers.common_utils.ProcessStatus.SCHEDULED):
-                if controller_utils.can_terminate():
+                if controller_utils.can_terminate(pool):
                     try:
-                        p.start()
+                        t.start()
                     except Exception as e:  # pylint: disable=broad-except
                         _set_to_failed_cleanup(info)
-                        logger.error(f'Failed to start process for replica '
+                        logger.error(f'Failed to start thread for replica '
                                      f'{info.replica_id}: {e}')
-                        del info2proc[info]
+                        del info2thr[info]
                     else:
                         info.status_property.sky_down_status = (
                             common_utils.ProcessStatus.RUNNING)
                         serve_state.add_or_update_replica(
                             service_name, info.replica_id, info)
             else:
-                logger.info('Terminate process for replica '
+                logger.info('Terminate thread for replica '
                             f'{info.replica_id} finished.')
-                p.join()
-                del info2proc[info]
-                if p.exitcode == 0:
+                t.join()
+                del info2thr[info]
+                if t.format_exc is None:
                     serve_state.remove_replica(service_name, info.replica_id)
                     logger.info(
                         f'Replica {info.replica_id} terminated successfully.')
@@ -190,17 +194,22 @@ def _cleanup(service_name: str) -> bool:
                     _set_to_failed_cleanup(info)
         time.sleep(3)
 
-    versions = serve_state.get_service_versions(service_name)
-    serve_state.delete_all_versions(service_name)
-
     def cleanup_version_storage(version: int) -> bool:
         yaml_content = serve_state.get_yaml_content(service_name, version)
+        if yaml_content is None:
+            logger.warning(f'No yaml content found for version {version}')
+            return True
         logger.info(f'Cleaning up storage for version {version}, '
                     f'yaml_content: {yaml_content}')
         return cleanup_storage(yaml_content)
 
+    versions = serve_state.get_service_versions(service_name)
     if not all(map(cleanup_version_storage, versions)):
         failed = True
+
+    # Cleanup version metadata after all storages are cleaned up, otherwise
+    # the get_yaml_content will return None as all versions are deleted.
+    serve_state.delete_all_versions(service_name)
 
     return failed
 
@@ -257,7 +266,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
 
     if not is_recovery:
         with filelock.FileLock(controller_utils.get_resources_lock_path()):
-            if not controller_utils.can_start_new_process():
+            if not controller_utils.can_start_new_process(task.service.pool):
                 cleanup_storage(yaml_content)
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
@@ -381,7 +390,19 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
         for process in process_to_kill:
             process.join()
 
-        failed = _cleanup(service_name)
+        # Catch any exception here to avoid it kill the service monitoring
+        # process. In which case, the service will not only fail to clean
+        # up, but also cannot be terminated in the future as no process
+        # will handle the user signal anymore. Instead, we catch any error
+        # and set it to FAILED_CLEANUP instead.
+        try:
+            failed = _cleanup(service_name, service_spec.pool)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Failed to clean up service {service_name}: {e}')
+            with ux_utils.enable_traceback():
+                logger.error(f'  Traceback: {traceback.format_exc()}')
+            failed = True
+
         if failed:
             serve_state.set_service_status_and_active_versions(
                 service_name, serve_state.ServiceStatus.FAILED_CLEANUP)

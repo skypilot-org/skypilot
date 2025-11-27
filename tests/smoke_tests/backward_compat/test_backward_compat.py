@@ -211,15 +211,20 @@ class TestBackwardCompatibility:
         yield  # Optional teardown logic
         self._run_cmd(f'{self.ACTIVATE_CURRENT} && sky api stop',)
 
-    def run_compatibility_test(self, test_name: str, commands: list,
-                               teardown: str):
+    def run_compatibility_test(self,
+                               test_name: str,
+                               commands: list,
+                               teardown: str,
+                               use_low_resource_config: bool = True):
         """Helper method to create and run tests with proper cleanup"""
+        env = (smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV
+               if use_low_resource_config else None)
         test = smoke_tests_utils.Test(
             test_name,
             commands,
             teardown=teardown,
             timeout=self.TEST_TIMEOUT,
-            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            env=env,
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -539,7 +544,12 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && sky serve down {serve_name}-1 -y',
         ]
         teardown = f'{self.ACTIVATE_CURRENT} && sky serve down {serve_name}* -y'
-        self.run_compatibility_test(serve_name, commands, teardown)
+        # NOTE(dev): This test assumes 2 services running at the same time,
+        # which is not enough for low resource config. We disable it for now.
+        self.run_compatibility_test(serve_name,
+                                    commands,
+                                    teardown,
+                                    use_low_resource_config=False)
 
     def test_client_server_compatibility_old_server(self, generic_cloud: str):
         """Test client server compatibility across versions

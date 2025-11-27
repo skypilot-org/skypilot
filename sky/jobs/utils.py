@@ -19,7 +19,6 @@ import typing
 from typing import (Any, Deque, Dict, Iterable, List, Literal, Optional, Set,
                     TextIO, Tuple, Union)
 
-import click
 import colorama
 import filelock
 
@@ -40,7 +39,6 @@ from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import annotations
-from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import controller_utils
@@ -188,13 +186,11 @@ def _validate_consolidation_mode_config(
         controller_cn = (
             controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name)
         if global_user_state.cluster_with_name_exists(controller_cn):
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.InconsistentConsolidationModeError(
-                    f'{colorama.Fore.RED}Consolidation mode for jobs is '
-                    f'enabled, but the controller cluster '
-                    f'{controller_cn} is still running. Please '
-                    'terminate the controller cluster first.'
-                    f'{colorama.Style.RESET_ALL}')
+            logger.warning(
+                f'{colorama.Fore.RED}Consolidation mode for jobs is enabled, '
+                f'but the controller cluster {controller_cn} is still running. '
+                'Please terminate the controller cluster first.'
+                f'{colorama.Style.RESET_ALL}')
     else:
         total_jobs = managed_job_state.get_managed_jobs_total()
         if total_jobs > 0:
@@ -202,13 +198,11 @@ def _validate_consolidation_mode_config(
                 managed_job_state.get_nonterminal_job_ids_by_name(
                     None, None, all_users=True))
             if nonterminal_jobs:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.InconsistentConsolidationModeError(
-                        f'{colorama.Fore.RED}Consolidation mode '
-                        'is disabled, but there are still '
-                        f'{len(nonterminal_jobs)} managed jobs '
-                        'running. Please terminate those jobs '
-                        f'first.{colorama.Style.RESET_ALL}')
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}Consolidation mode is disabled, '
+                    f'but there are still {len(nonterminal_jobs)} managed jobs '
+                    'running. Please terminate those jobs first.'
+                    f'{colorama.Style.RESET_ALL}')
             else:
                 logger.warning(
                     f'{colorama.Fore.YELLOW}Consolidation mode is disabled, '
@@ -235,14 +229,11 @@ def is_consolidation_mode(on_api_restart: bool = False) -> bool:
     signal_file = pathlib.Path(
         _JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE).expanduser()
 
-    restart_signal_file_exists = signal_file.exists()
-    consolidation_mode = (config_consolidation_mode and
-                          restart_signal_file_exists)
-
     if on_api_restart:
         if config_consolidation_mode:
             signal_file.touch()
     else:
+        restart_signal_file_exists = signal_file.exists()
         if not restart_signal_file_exists:
             if config_consolidation_mode:
                 logger.warning(f'{colorama.Fore.YELLOW}Consolidation mode for '
@@ -261,25 +252,23 @@ def is_consolidation_mode(on_api_restart: bool = False) -> bool:
     # have related config and will always seemingly disabled for consolidation
     # mode. Check #6611 for more details.
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-        _validate_consolidation_mode_config(consolidation_mode)
-    return consolidation_mode
+        _validate_consolidation_mode_config(config_consolidation_mode)
+    return config_consolidation_mode
 
 
 def ha_recovery_for_consolidation_mode() -> None:
-    """Recovery logic for HA mode."""
-    # Touch the signal file here to avoid conflict with
-    # update_managed_jobs_statuses. Although we run this first and then start
-    # the deamon, this function is also called in cancel_jobs_by_id.
-    signal_file = pathlib.Path(
-        constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE).expanduser()
-    signal_file.touch()
+    """Recovery logic for consolidation mode.
+
+    This should only be called from the managed-job-status-refresh-daemon, due
+    so that we have correct ordering recovery -> controller start -> job status
+    updates. This also should ensure correct operation during a rolling update.
+    """
     # No setup recovery is needed in consolidation mode, as the API server
     # already has all runtime installed. Directly start jobs recovery here.
     # Refers to sky/templates/kubernetes-ray.yml.j2 for more details.
-    runner = command_runner.LocalProcessCommandRunner()
     scheduler.maybe_start_controllers()
     with open(constants.HA_PERSISTENT_RECOVERY_LOG_PATH.format('jobs_'),
-              'w',
+              'a',
               encoding='utf-8') as f:
         start = time.time()
         f.write(f'Starting HA recovery at {datetime.now()}\n')
@@ -309,61 +298,34 @@ def ha_recovery_for_consolidation_mode() -> None:
                             managed_job_state.ControllerPidRecord(
                                 pid=controller_pid,
                                 started_at=controller_pid_started_at), job_id):
-                        f.write(f'Controller pid {controller_pid} for '
-                                f'job {job_id} is still running. '
-                                'Skipping recovery.\n')
+                        message = (f'Controller pid {controller_pid} for '
+                                   f'job {job_id} is still running. '
+                                   'Skipping recovery.\n')
+                        logger.debug(message)
+                        f.write(message)
                         continue
                 except Exception:  # pylint: disable=broad-except
                     # _controller_process_alive may raise if psutil fails; we
                     # should not crash the recovery logic because of this.
-                    f.write('Error checking controller pid '
-                            f'{controller_pid} for job {job_id}\n')
+                    message = ('Error checking controller pid '
+                               f'{controller_pid} for job {job_id}\n')
+                    logger.warning(message, exc_info=True)
+                    f.write(message)
 
+            # Controller process is not set or not alive.
             if job['schedule_state'] not in [
                     managed_job_state.ManagedJobScheduleState.DONE,
                     managed_job_state.ManagedJobScheduleState.WAITING,
+                    # INACTIVE job may be mid-submission, don't set to WAITING.
+                    managed_job_state.ManagedJobScheduleState.INACTIVE,
             ]:
-                script = managed_job_state.get_ha_recovery_script(job_id)
-                if script is None:
-                    f.write(f'Job {job_id}\'s recovery script does not exist. '
-                            'Skipping recovery. Job schedule state: '
-                            f'{job["schedule_state"]}\n')
-                    continue
-                runner.run(script)
-                f.write(f'Job {job_id} completed recovery at '
-                        f'{datetime.now()}\n')
+                managed_job_state.reset_job_for_recovery(job_id)
+                message = (f'Job {job_id} completed recovery at '
+                           f'{datetime.now()}\n')
+                logger.info(message)
+                f.write(message)
         f.write(f'HA recovery completed at {datetime.now()}\n')
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
-    signal_file.unlink()
-
-
-def validate_pool_job(dag: 'dag_lib.Dag', pool: str) -> None:
-    """Validate that a job being launched to a pool doesn't modify worker.
-
-    Pool jobs are not allowed to modify the configuration of workers in order to
-    maintain a consistent environment. Setup, file mounts, and storage mounts
-    should be performed at pool apply time. Not doing this would require complex
-    logic to reset the worker to the original state after the job is finished.
-    Furthermore, supporting multiple jobs running concurrently on the same
-    worker would be complex.
-
-    Args:
-        dag: The DAG containing tasks to validate
-        pool: The name of the pool the job is being launched to
-
-    Raises:
-        click.UsageError: If any task has setup, file_mounts, or storage_mounts
-    """
-    for task_ in dag.tasks:
-        if (task_.setup is not None or task_.file_mounts or
-                task_.storage_mounts):
-            raise click.UsageError(
-                'Pool jobs are not allowed to modify '
-                'the configuration of workers in order to maintain a '
-                'consistent environment. The `setup` section, file mounts, '
-                'and storage mounts must not be specified. To update a pool, '
-                'modify the workers directly using `sky jobs pool apply -p '
-                f'{pool} new-pool.yaml`.')
 
 
 async def get_job_status(
@@ -556,7 +518,6 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         This function should not throw any exception. If it fails, it will
         capture the error message, and log/return it.
         """
-        managed_job_state.remove_ha_recovery_script(job_id)
         error_msg = None
         tasks = managed_job_state.get_managed_job_tasks(job_id)
         for task in tasks:
@@ -581,43 +542,6 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
                     logger.exception(error_msg, exc_info=e)
         return error_msg
 
-    # For backwards compatible jobs
-    # TODO(cooperc): Remove before 0.11.0.
-    def _handle_legacy_job(job_id: int):
-        controller_status = job_lib.get_status(job_id)
-        if controller_status is None or controller_status.is_terminal():
-            logger.error(f'Controller process for legacy job {job_id} is '
-                         'in an unexpected state.')
-
-            cleanup_error = _cleanup_job_clusters(job_id)
-            if cleanup_error:
-                # Unconditionally set the job to failed_controller if the
-                # cleanup fails.
-                managed_job_state.set_failed(
-                    job_id,
-                    task_id=None,
-                    failure_type=managed_job_state.ManagedJobStatus.
-                    FAILED_CONTROLLER,
-                    failure_reason=
-                    'Legacy controller process has exited abnormally, and '
-                    f'cleanup failed: {cleanup_error}. For more details, run: '
-                    f'sky jobs logs --controller {job_id}',
-                    override_terminal=True)
-                return
-
-            # It's possible for the job to have transitioned to
-            # another terminal state while between when we checked its
-            # state and now. In that case, set_failed won't do
-            # anything, which is fine.
-            managed_job_state.set_failed(
-                job_id,
-                task_id=None,
-                failure_type=managed_job_state.ManagedJobStatus.
-                FAILED_CONTROLLER,
-                failure_reason=(
-                    'Legacy controller process has exited abnormally. For '
-                    f'more details, run: sky jobs logs --controller {job_id}'))
-
     # Get jobs that need checking (non-terminal or not DONE)
     job_ids = managed_job_state.get_jobs_to_check_status(job_id)
     if not job_ids:
@@ -633,14 +557,6 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         # will have the same value for these columns. This is what lets us just
         # take tasks[0]['controller_pid'] and tasks[0]['schedule_state'].
         schedule_state = tasks[0]['schedule_state']
-
-        # Backwards compatibility: this job was submitted when ray was still
-        # used for managing the parallelism of job controllers, before #4485.
-        # TODO(cooperc): Remove before 0.11.0.
-        if (schedule_state is
-                managed_job_state.ManagedJobScheduleState.INVALID):
-            _handle_legacy_job(job_id)
-            continue
 
         # Handle jobs with schedule state (non-legacy jobs):
         pid = tasks[0]['controller_pid']
