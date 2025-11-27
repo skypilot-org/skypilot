@@ -77,6 +77,11 @@ class ThreadLocalTTLCache(threading.local):
                                    timer=time.time)(self.func)
         return self.cache
 
+    def __del__(self):
+        if hasattr(self, 'cache'):
+            self.cache.cache_clear()
+            self.cache = None
+
 
 def thread_local_ttl_cache(maxsize=32, ttl=60 * 55):
     """Thread-local TTL cache decorator.
