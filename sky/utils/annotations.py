@@ -2,7 +2,8 @@
 
 import functools
 import threading
-from typing import Any, Callable, List, Literal, TypeVar
+import time
+from typing import Callable, List, Literal, TypeVar
 import weakref
 
 import cachetools
@@ -35,35 +36,87 @@ def client_api(func: Callable[P, T]) -> Callable[P, T]:
     return wrapper
 
 
-class _ReloadWrapper:
-    """Wrapper for functions that need to be reloaded for a new request."""
-
-    def __init__(self, target: Callable[..., Any]):
-        self._target = target
-
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        return self._target(*args, **kwargs)
-
-    def cache_clear(self):
-        if hasattr(self._target, 'cache_clear'):
-            self._target.cache_clear()
-
-
 def _register_functions_need_reload_cache(func: Callable) -> Callable:
     """Register a cachefunction that needs to be reloaded for a new request.
 
     The function will be registered as a weak reference to avoid blocking GC.
     """
+    assert hasattr(func, 'cache_clear'), f'{func.__name__} is not cacheable'
+    wrapped_fn = func
     try:
         func_ref = weakref.ref(func)
     except TypeError:
         # The function might be not weakrefable (e.g. functools.lru_cache),
         # wrap it in this case.
-        func_ref = weakref.ref(_ReloadWrapper(func))
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            return func(*args, **kwargs)
 
+        wrapper.cache_clear = func.cache_clear  # type: ignore[attr-defined]
+        func_ref = weakref.ref(wrapper)
+        wrapped_fn = wrapper
     with _FUNCTIONS_NEED_RELOAD_CACHE_LOCK:
         _FUNCTIONS_NEED_RELOAD_CACHE.append(func_ref)
-    return func
+    return wrapped_fn
+
+
+class ThreadLocalTTLCache(threading.local):
+    """Thread-local storage for _thread_local_lru_cache decorator."""
+
+    def __init__(self, func, maxsize: int, ttl: int):
+        super().__init__()
+        self.func = func
+        self.maxsize = maxsize
+        self.ttl = ttl
+
+    def get_cache(self):
+        if not hasattr(self, 'cache'):
+            self.cache = ttl_cache(scope='request',
+                                   maxsize=self.maxsize,
+                                   ttl=self.ttl,
+                                   timer=time.time)(self.func)
+        return self.cache
+
+
+def thread_local_ttl_cache(maxsize=32, ttl=60 * 55):
+    """Thread-local TTL cache decorator.
+
+    Args:
+        maxsize: Maximum size of the cache.
+        ttl: Time to live for the cache in seconds.
+             Default is 55 minutes, a bit less than 1 hour
+             default lifetime of an STS token.
+    """
+
+    def decorator(func):
+        # Create thread-local storage for the LRU cache
+        local_cache = ThreadLocalTTLCache(func, maxsize, ttl)
+
+        # We can't apply the lru_cache here, because this runs at import time
+        # so we will always have the main thread's cache.
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            # We are within the actual function call, which may be on a thread,
+            # so local_cache.cache will return the correct thread-local cache,
+            # which we can now apply and immediately call.
+            return local_cache.get_cache()(*args, **kwargs)
+
+        def cache_info():
+            # Note that this will only give the cache info for the current
+            # thread's cache.
+            return local_cache.get_cache().cache_info()
+
+        def cache_clear():
+            # Note that this will only clear the cache for the current thread.
+            local_cache.get_cache().cache_clear()
+
+        wrapper.cache_info = cache_info  # type: ignore[attr-defined]
+        wrapper.cache_clear = cache_clear  # type: ignore[attr-defined]
+
+        return wrapper
+
+    return decorator
 
 
 def lru_cache(scope: Literal['global', 'request'], *lru_cache_args,
