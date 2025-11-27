@@ -52,6 +52,11 @@ case "$PROVIDER" in
     echo "Region: $REGION"
     echo "Node Count: $NODE_COUNT"
     echo "Instance Type: $INSTANCE_TYPE"
+    if [ -n "$EKS_VPC_CONFIG_PRIVATE" ]; then
+        echo "Using custom VPC configuration from EKS_VPC_CONFIG_PRIVATE"
+    else
+        echo "Using default VPC configuration (EKS_VPC_CONFIG_PRIVATE not set)"
+    fi
 
     # Check if cluster exists and delete it if present
     echo "Checking if EKS cluster '$CLUSTER_NAME' exists..."

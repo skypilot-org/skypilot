@@ -82,7 +82,7 @@ fi
 # Get VPC and subnets if instance doesn't exist - use EKS VPC if available, otherwise use default VPC
 if [ "$INSTANCE_EXISTS" = "false" ]; then
 if [ -n "$EKS_VPC_CONFIG_PRIVATE" ]; then
-    echo "Using EKS VPC configuration from EKS_VPC_CONFIG_PRIVATE..." >&2
+    echo "Using custom VPC configuration from EKS_VPC_CONFIG_PRIVATE..." >&2
     # Parse VPC ID from YAML format: "  id: vpc-xxx" (under vpc:)
     # Look for lines with "id:" that contain "vpc-" pattern
     VPC_ID=$(echo "$EKS_VPC_CONFIG_PRIVATE" | grep -E "^\s+id:\s+vpc-" | awk '{print $2}' | tr -d '"' | tr -d "'" | head -n1)
@@ -126,6 +126,7 @@ if [ -n "$EKS_VPC_CONFIG_PRIVATE" ]; then
     fi
 else
     USE_EKS_VPC=false
+    echo "Using default VPC configuration (EKS_VPC_CONFIG_PRIVATE not set)..." >&2
 fi
 
 if [ "$USE_EKS_VPC" != "true" ]; then
