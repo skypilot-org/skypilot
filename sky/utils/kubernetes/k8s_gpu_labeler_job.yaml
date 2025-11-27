@@ -17,6 +17,7 @@ spec:
         command: ["/bin/bash", "-i", "-c"]
         args:
           - |
+            pip install kubernetes
             python /label_gpus.py
         env:
         - name: MY_NODE_NAME
