@@ -76,6 +76,13 @@ case "$PROVIDER" in
     fi
 
     RESOLVED_CONFIG="/tmp/${CLUSTER_NAME}-eks-cluster-config.yaml"
+    # Convert literal \n to actual newlines if EKS_VPC_CONFIG_PRIVATE is set
+    if [ -n "$EKS_VPC_CONFIG_PRIVATE" ]; then
+        # Use printf to interpret escape sequences like \n
+        VPC_CONFIG=$(printf '%b\n' "$EKS_VPC_CONFIG_PRIVATE")
+    else
+        VPC_CONFIG=""
+    fi
     cat > "$RESOLVED_CONFIG" <<EOF
 apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
@@ -83,7 +90,7 @@ kind: ClusterConfig
 metadata:
   name: ${CLUSTER_NAME}
   region: ${REGION}
-${EKS_VPC_CONFIG_PRIVATE}
+${VPC_CONFIG}
 iam:
   withOIDC: true
 managedNodeGroups:
@@ -104,8 +111,10 @@ EOF
     # Service type LoadBalancer can provision internet-facing ELB/NLB.
     if [ -n "$EKS_VPC_CONFIG_PRIVATE" ]; then
         echo "Tagging provided public subnets for internet-facing LoadBalancers..."
+        # Convert literal \n to actual newlines for parsing
+        VPC_CONFIG_FOR_PARSING=$(printf '%b\n' "$EKS_VPC_CONFIG_PRIVATE")
         # Extract all subnet IDs from the config (deduplicated)
-        mapfile -t SUBNET_IDS < <(echo "$EKS_VPC_CONFIG_PRIVATE" | grep -E 'id:\s*subnet-' | awk '{print $2}' | tr -d '"' | sort -u)
+        mapfile -t SUBNET_IDS < <(echo "$VPC_CONFIG_FOR_PARSING" | grep -E 'id:\s*subnet-' | awk '{print $2}' | tr -d '"' | sort -u)
         for subnet_id in "${SUBNET_IDS[@]}"; do
             if [ -n "$subnet_id" ]; then
                 echo "Tagging subnet $subnet_id"
