@@ -208,7 +208,7 @@ You can verify that this notebook has access to the mounted storage bucket.
   :width: 100%
   :alt: accessing covid data from notebook
 
-.. _dev-notebooks:
+.. _marimo-notebooks:
 
 marimo notebooks
 ~~~~~~~~~~~~~~~~~
