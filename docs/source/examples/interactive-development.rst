@@ -220,16 +220,17 @@ Connect to the machine and forward the port that you want marimo to use:
 
    ssh -L 8080:localhost:8080 dev
 
-Inside the cluster, you can run the following commands to start a Jupyter session:
+Inside the cluster, you can run the following commands to start marimo.
+
+.. note::
+    By starting the notebook this way it runs in a completely sandboxed environment. The `uvx` command ensures that
+    we can use `marimo` without installing it in a pre-existing environment and the `--sandbox` flag
+    makes sure that any dependencies of the notebook are installed in a separate environment too.
 
 .. code-block:: bash
 
    pip install uv
    uvx marimo edit --sandbox demo.py --port 8080 --token-password=supersecret
-
-By starting the notebook this way it runs in a completely sandboxed environment. The `uvx` command ensures that
-we can use `marimo` without installing it in a pre-existing environment and the `--sandbox` flag
-makes sure that any dependencies of the notebook are installed in a separate environment too.
 
 In your local browser, you should now be able to access :code:`localhost:8080` and see the following screen:
 
@@ -237,19 +238,108 @@ In your local browser, you should now be able to access :code:`localhost:8080` a
   :width: 100%
   :alt: marimo authentication window
 
-Enter the password or token and you will be directed to a page where you can create a new notebook.
+Enter the password or token and you will be directed to your notebook.
 
 .. image:: ../images/marimo-use.png
   :width: 100%
   :alt: What a newly created marimo notebook looks like
 
 You can verify that this notebook is running on the GPU-backed instance using :code:`nvidia-smi` in
-the dedicated terminal that marimo provides.
+the terminal that marimo provides from the browser.
 
 .. image:: ../images/marimo-nvidea.png
   :width: 100%
   :alt: nvidia-smi in notebook
 
+marimo as SkyPilot jobs
+^^^^^^^^^^^^^^^^^^^^^^^
+
+Because marimo notebooks are stored as Python scripts on disk, they can be easily converted into SkyPilot jobs.
+
+To demonstrate this, let's consider the following marimo notebook:
+
+.. code-block:: python
+
+    # /// script
+    # requires-python = ">=3.12"
+    # dependencies = [
+    #     "marimo",
+    # ]
+    # ///
+
+    import marimo
+
+    __generated_with = "0.18.1"
+    app = marimo.App(sql_output="polars")
+
+
+    @app.cell
+    def _():
+        import marimo as mo
+        return (mo,)
+
+
+    @app.cell
+    def _(mo):
+        print(mo.cli_args())
+        return
+
+
+    if __name__ == "__main__":
+        app.run()
+
+
+This notebook uses `mo.cli_args()` to parse any command-line arguments passed to the notebook.
+You can confirm this locally by running the notebook with the following command:
+
+.. code-block:: bash
+
+    uv run demo.py --hello world --demo works --lr 0.01
+
+This will print the command-line arguments passed to the notebook.
+
+::code-block:: bash
+
+    {'hello': 'world', 'demo': 'works', 'lr': '0.01'}
+
+To use a notebook like this as SkyPilot job you'll want to configure a notebook
+yaml file like this:
+
+.. code-block:: yaml
+
+  # marimo-demo.yaml
+  name: marimo-demo
+
+  resources:
+    accelerators: V100:1
+    use_spot: true  # Use spot instances to save cost.
+
+  envs:
+    # Fill in any external env keys, like wandb
+    WANDB_API_KEY:
+
+  workdir: ~/transformers
+
+  setup: |
+    pip install uv
+
+  run: uv run demo.py --hello world --demo works --lr 0.01
+
+You can now submit this job to SkyPilot using the following command:
+
+.. code-block:: bash
+
+    sky jobs launch -n marimo-demo marimo-demo.yaml
+
+This command will provision cloud resources and then launch the job. You can monitor
+the job status by checking logs in the terminal, but you can also check the dashboard
+by running `sky dashboard`.
+
+This is what the dashboard of the job looks like after it is done.
+
+.. image:: ../images/marimo-job.png
+  :align: center
+  :alt: marimo job completed
 
 Working with clusters
 ---------------------
