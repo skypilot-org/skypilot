@@ -4005,7 +4005,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         runners = handle.get_command_runners(avoid_ssh_control=True)
 
         def _setup_node(node_id: int) -> None:
-            setup_envs = task.envs_and_secrets
+            setup_envs = task_lib.get_plaintext_envs_and_secrets(
+                task.envs_and_secrets)
             setup_envs.update(self._skypilot_predefined_env_vars(handle))
             setup_envs['SKYPILOT_SETUP_NODE_IPS'] = '\n'.join(internal_ips)
             setup_envs['SKYPILOT_SETUP_NODE_RANK'] = str(node_id)
@@ -4282,6 +4283,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                           job_submit_cmd,
                                                           stream_logs=False,
                                                           require_outputs=True)
+            # Happens when someone calls `sky exec` but remote is outdated for
+            # running a job. Necessitating calling `sky launch`.
+            backend_utils.check_stale_runtime_on_remote(returncode, stderr,
+                                                        handle.cluster_name)
             output = stdout + stderr
             if _is_message_too_long(returncode, output=output):
                 # If the job submit script is too long, we need to retry it
@@ -4349,6 +4354,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 stream_logs=False,
                 require_outputs=True,
                 separate_stderr=True)
+            # Happens when someone calls `sky exec` but remote is outdated for
+            # adding a job. Necessitating calling `sky launch`.
+            backend_utils.check_stale_runtime_on_remote(returncode, stderr,
+                                                        handle.cluster_name)
             # TODO(zhwu): this sometimes will unexpectedly fail, we can add
             # retry for this, after we figure out the reason.
             subprocess_utils.handle_returncode(returncode, code,
@@ -6215,7 +6224,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def _get_task_env_vars(self, task: task_lib.Task, job_id: int,
                            handle: CloudVmRayResourceHandle) -> Dict[str, str]:
         """Returns the environment variables for the task."""
-        env_vars = task.envs_and_secrets
+        env_vars = task_lib.get_plaintext_envs_and_secrets(
+            task.envs_and_secrets)
         # If it is a managed job, the TASK_ID_ENV_VAR will have been already set
         # by the controller.
         if constants.TASK_ID_ENV_VAR not in env_vars:

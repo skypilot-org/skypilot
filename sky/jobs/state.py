@@ -662,6 +662,9 @@ class ManagedJobScheduleState(enum.Enum):
         """
         protobuf_to_enum = {
             managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_UNSPECIFIED: None,
+            # TODO(cooperc): remove this in v0.13.0. See #8105.
+            managed_jobsv1_pb2.DEPRECATED_MANAGED_JOB_SCHEDULE_STATE_INVALID:
+                (None),
             managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_INACTIVE:
                 cls.INACTIVE,
             managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_WAITING: cls.WAITING,
@@ -2410,20 +2413,19 @@ def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:
         return job_ids
 
 
-@_init_db_async
-async def get_task_logs_to_clean_async(retention_seconds: int,
-                                       batch_size) -> List[Dict[str, Any]]:
+@_init_db
+def get_task_logs_to_clean(retention_seconds: int,
+                           batch_size: int) -> List[Dict[str, Any]]:
     """Get the logs of job tasks to clean.
 
     The logs of a task will only cleaned when:
     - the job schedule state is DONE
     - AND the end time of the task is older than the retention period
     """
-
-    assert _SQLALCHEMY_ENGINE_ASYNC is not None
-    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         now = time.time()
-        result = await session.execute(
+        result = session.execute(
             sqlalchemy.select(
                 spot_table.c.spot_job_id,
                 spot_table.c.task_id,
@@ -2453,21 +2455,19 @@ async def get_task_logs_to_clean_async(retention_seconds: int,
         } for row in rows]
 
 
-@_init_db_async
-async def get_controller_logs_to_clean_async(
-        retention_seconds: int, batch_size: int) -> List[Dict[str, Any]]:
+@_init_db
+def get_controller_logs_to_clean(retention_seconds: int,
+                                 batch_size: int) -> List[Dict[str, Any]]:
     """Get the controller logs to clean.
 
     The controller logs will only cleaned when:
     - the job schedule state is DONE
     - AND the end time of the latest task is older than the retention period
     """
-
-    assert _SQLALCHEMY_ENGINE_ASYNC is not None
-    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         now = time.time()
-
-        result = await session.execute(
+        result = session.execute(
             sqlalchemy.select(job_info_table.c.spot_job_id,).select_from(
                 job_info_table.join(
                     spot_table,
@@ -2490,36 +2490,32 @@ async def get_controller_logs_to_clean_async(
         return [{'job_id': row[0]} for row in rows]
 
 
-@_init_db_async
-async def set_task_logs_cleaned_async(tasks: List[Tuple[int, int]],
-                                      logs_cleaned_at: float):
+@_init_db
+def set_task_logs_cleaned(tasks: List[Tuple[int, int]], logs_cleaned_at: float):
     """Set the task logs cleaned at."""
     if not tasks:
         return
-    # Deduplicate
     task_keys = list(dict.fromkeys(tasks))
-    assert _SQLALCHEMY_ENGINE_ASYNC is not None
-    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
-        await session.execute(
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.tuple_(spot_table.c.spot_job_id,
                                   spot_table.c.task_id).in_(task_keys)).values(
                                       logs_cleaned_at=logs_cleaned_at))
-        await session.commit()
+        session.commit()
 
 
-@_init_db_async
-async def set_controller_logs_cleaned_async(job_ids: List[int],
-                                            logs_cleaned_at: float):
+@_init_db
+def set_controller_logs_cleaned(job_ids: List[int], logs_cleaned_at: float):
     """Set the controller logs cleaned at."""
     if not job_ids:
         return
-    # Deduplicate
     job_ids = list(dict.fromkeys(job_ids))
-    assert _SQLALCHEMY_ENGINE_ASYNC is not None
-    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
-        await session.execute(
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.execute(
             sqlalchemy.update(job_info_table).where(
                 job_info_table.c.spot_job_id.in_(job_ids)).values(
                     controller_logs_cleaned_at=logs_cleaned_at))
-        await session.commit()
+        session.commit()

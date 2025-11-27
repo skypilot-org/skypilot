@@ -284,6 +284,11 @@ def test_requests_scheduling(generic_cloud: str):
 
 
 # ---- Test recent request tracking -----
+# We mark this test as no_remote_server since it requires a dedicated API server
+# for the test otherwise we can't make any guarantees about the most recent
+# request. Replace with another option to skip shared server tests when we have
+# one.
+@pytest.mark.no_remote_server
 def test_recent_request_tracking(generic_cloud: str):
     with smoke_tests_utils.override_sky_config():
         # We need to override the sky api endpoint env if --remote-server is

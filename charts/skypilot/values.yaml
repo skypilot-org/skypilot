@@ -6,6 +6,9 @@ global:
   # Specify imagePullSecrets for all components in the chart.
   # @schema type: [array, null]; item: object
   imagePullSecrets: null
+  # Specify extra environment variables to set on all components in the chart.
+  # @schema type: [array, null]; item: object
+  extraEnvs: null
 
 
 apiService:

@@ -3075,34 +3075,6 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
             # there is no in-prgress managed jobs.
             managed_jobs_ = []
             pools_ = []
-        except exceptions.InconsistentConsolidationModeError:
-            # If this error is raised, it means the user switched to the
-            # consolidation mode but the previous controller cluster is still
-            # running. We should allow the user to tear down the controller
-            # cluster in this case.
-            with skypilot_config.override_skypilot_config(
-                {'jobs': {
-                    'controller': {
-                        'consolidation_mode': False
-                    }
-                }}):
-                # Check again with the consolidation mode disabled. This is to
-                # make sure there is no in-progress managed jobs.
-                request_id, queue_result_version = (
-                    cli_utils.get_managed_job_queue(
-                        refresh=False,
-                        skip_finished=True,
-                        all_users=True,
-                        fields=fields,
-                    ))
-                result = sdk.stream_and_get(request_id)
-                if queue_result_version.v2():
-                    managed_jobs_, _, status_counts, _ = result
-                else:
-                    managed_jobs_ = typing.cast(
-                        List[responses.ManagedJobRecord], result)
-                request_id_pools = managed_jobs.pool_status(pool_names=None)
-                pools_ = sdk.stream_and_get(request_id_pools)
 
     msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
            'jobs controller. Please be aware of the following:'
@@ -3179,21 +3151,6 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str,
             # controller being STOPPED or being firstly launched, i.e., there is
             # no in-prgress services.
             services = []
-        except exceptions.InconsistentConsolidationModeError:
-            # If this error is raised, it means the user switched to the
-            # consolidation mode but the previous controller cluster is still
-            # running. We should allow the user to tear down the controller
-            # cluster in this case.
-            with skypilot_config.override_skypilot_config(
-                {'serve': {
-                    'controller': {
-                        'consolidation_mode': False
-                    }
-                }}):
-                # Check again with the consolidation mode disabled. This is to
-                # make sure there is no in-progress services.
-                request_id = serve_lib.status(service_names=None)
-                services = sdk.stream_and_get(request_id)
 
     if services:
         service_names = [service['name'] for service in services]
@@ -6473,33 +6430,6 @@ def local():
               help='Launch cluster without GPU support even '
               'if GPUs are detected on the host.')
 @click.option(
-    '--ips',
-    type=str,
-    required=False,
-    help='Path to the file containing IP addresses of remote machines.')
-@click.option('--ssh-user',
-              type=str,
-              required=False,
-              help='SSH username for accessing remote machines.')
-@click.option('--ssh-key-path',
-              type=str,
-              required=False,
-              help='Path to the SSH private key.')
-@click.option('--cleanup',
-              is_flag=True,
-              help='Clean up the remote cluster instead of deploying it.')
-@click.option(
-    '--context-name',
-    type=str,
-    required=False,
-    help='Name to use for the kubeconfig context. Defaults to "default". '
-    'Used with the ip list.')
-@click.option('--password',
-              type=str,
-              required=False,
-              help='Password for the ssh-user to execute sudo commands. '
-              'Required only if passwordless sudo is not setup.')
-@click.option(
     '--name',
     type=str,
     required=False,
@@ -6515,56 +6445,10 @@ def local():
 @flags.config_option(expose_value=False)
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
-def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
-             cleanup: bool, context_name: Optional[str],
-             password: Optional[str], name: Optional[str],
-             port_start: Optional[int], async_call: bool):
-    """Creates a local or remote cluster."""
-
-    def _validate_args(ips, ssh_user, ssh_key_path, cleanup):
-        # If any of --ips, --ssh-user, or --ssh-key-path is specified,
-        # all must be specified
-        if bool(ips) or bool(ssh_user) or bool(ssh_key_path):
-            if not (ips and ssh_user and ssh_key_path):
-                raise click.BadParameter(
-                    'All --ips, --ssh-user, and --ssh-key-path '
-                    'must be specified together.')
-
-        # --cleanup can only be used if --ips, --ssh-user and --ssh-key-path
-        # are all provided
-        if cleanup and not (ips and ssh_user and ssh_key_path):
-            raise click.BadParameter('--cleanup can only be used with '
-                                     '--ips, --ssh-user and --ssh-key-path.')
-
-    _validate_args(ips, ssh_user, ssh_key_path, cleanup)
-
-    # If remote deployment arguments are specified, run remote up script
-    ip_list = None
-    ssh_key = None
-    if ips and ssh_user and ssh_key_path:
-        # Read and validate IP file
-        try:
-            with open(os.path.expanduser(ips), 'r', encoding='utf-8') as f:
-                ip_list = f.read().strip().splitlines()
-            if not ip_list:
-                raise click.BadParameter(f'IP file is empty: {ips}')
-        except (IOError, OSError) as e:
-            raise click.BadParameter(f'Failed to read IP file {ips}: {str(e)}')
-
-        # Read and validate SSH key file
-        try:
-            with open(os.path.expanduser(ssh_key_path), 'r',
-                      encoding='utf-8') as f:
-                ssh_key = f.read()
-            if not ssh_key:
-                raise click.BadParameter(
-                    f'SSH key file is empty: {ssh_key_path}')
-        except (IOError, OSError) as e:
-            raise click.BadParameter(
-                f'Failed to read SSH key file {ssh_key_path}: {str(e)}')
-
-    request_id = sdk.local_up(gpus, ip_list, ssh_user, ssh_key, cleanup,
-                              context_name, password, name, port_start)
+def local_up(gpus: bool, name: Optional[str], port_start: Optional[int],
+             async_call: bool):
+    """Creates a local cluster."""
+    request_id = sdk.local_up(gpus, name, port_start)
     _async_call_or_wait(request_id, async_call, request_name='local up')
 
 
@@ -6577,12 +6461,7 @@ def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 def local_down(name: Optional[str], async_call: bool):
-    """Deletes a local cluster.
-
-    This will only delete a local cluster started without the ip list.
-    To clean up the local cluster started with a ip list, use `sky local up`
-    with the cleanup flag.
-    """
+    """Deletes a local cluster."""
     request_id = sdk.local_down(name)
     _async_call_or_wait(request_id, async_call, request_name='sky.local.down')
 
