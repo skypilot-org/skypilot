@@ -208,6 +208,47 @@ You can verify that this notebook has access to the mounted storage bucket.
   :alt: accessing covid data from notebook
 
 
+marimo notebooks
+~~~~~~~~~~~~~~~~~
+
+marimo notebooks are a modern alternative to traditional Jupyter notebooks, stored
+as Python scripts on disk. They are also fully reproducible thanks to the `uv` integration.
+
+Connect to the machine and forward the port that you want marimo to use:
+
+.. code-block:: bash
+
+   ssh -L 8080:localhost:8080 dev
+
+Inside the cluster, you can run the following commands to start a Jupyter session:
+
+.. code-block:: bash
+
+   pip install uv
+   uvx marimo edit --sandbox demo.py --port 8080 --token-password=supersecret
+
+By starting the notebook this way it runs in a completely sandboxed environment. The `uvx` command ensures that
+we can use `marimo` without installing it in a pre-existing environment and the `--sandbox` flag
+makes sure that any dependencies of the notebook are installed in a separate environment too.
+
+In your local browser, you should now be able to access :code:`localhost:8080` and see the following screen:
+
+.. image:: ../images/marimo-auth.png
+  :width: 100%
+  :alt: marimo authentication window
+
+Enter the password or token and you will be directed to a page where you can create a new notebook.
+
+.. image:: ../images/marimo-use.png
+  :width: 100%
+  :alt: What a newly created marimo notebook looks like
+
+You can verify that this notebook is running on the GPU-backed instance using :code:`nvidia-smi` in
+the dedicated terminal that marimo provides.
+
+.. image:: ../images/marimo-nvidia.png
+  :width: 100%
+  :alt: nvidia-smi in notebook
 
 
 Working with clusters
