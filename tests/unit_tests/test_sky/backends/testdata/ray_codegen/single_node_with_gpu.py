@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -439,9 +440,7 @@ def run_bash_command_with_log_and_return_pid(
 
 run_bash_command_with_log = run_bash_command_with_log
 run_bash_command_with_log_and_return_pid =                 ray.remote(run_bash_command_with_log_and_return_pid)
-if hasattr(autostop_lib, 'set_last_active_time_to_now'):
-    autostop_lib.set_last_active_time_to_now()
-
+autostop_lib.set_last_active_time_to_now()
 job_lib.set_status(2, job_lib.JobStatus.PENDING)
 pg = ray_util.placement_group([{"CPU": 4.0, "GPU": 1.0}], 'STRICT_SPREAD')
 plural = 's' if 1 > 1 else ''

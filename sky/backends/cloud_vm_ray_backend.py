@@ -463,18 +463,9 @@ class RayCodeGen(task_codegen.TaskCodeGen):
             'run_bash_command_with_log = run_bash_command_with_log',
             'run_bash_command_with_log_and_return_pid = \
                 ray.remote(run_bash_command_with_log_and_return_pid)',
+            'autostop_lib.set_last_active_time_to_now()',
+            f'job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)',
         ]
-
-        self._code.append(
-            # Use hasattr to handle backward compatibility.
-            # TODO(zongheng): remove in ~1-2 minor releases (currently 0.2.x).
-            textwrap.dedent("""\
-            if hasattr(autostop_lib, 'set_last_active_time_to_now'):
-                autostop_lib.set_last_active_time_to_now()
-            """))
-
-        self._code.append(
-            f'job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)')
 
     def add_setup(
         self,

@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -364,54 +365,27 @@ def run_bash_command_with_log_and_return_pid(
                                             streaming_prefix=streaming_prefix)
     return {'return_code': return_code, 'pid': os.getpid()}
 
-if hasattr(autostop_lib, 'set_last_active_time_to_now'):
-    autostop_lib.set_last_active_time_to_now()
-
+autostop_lib.set_last_active_time_to_now()
 job_lib.set_status(2, job_lib.JobStatus.PENDING)
+has_setup_cmd = False
+setup_cmd = None
+setup_envs = None
+setup_log_path = None
+setup_num_nodes = None
 plural = 's' if 1 > 1 else ''
 node_str = f'1 node{plural}'
 message = ('[2m├── [0m[2m'
            'Waiting for task resources on '
            f'{node_str}.[0m')
 print(message, flush=True)
-print('\x1b[2m└── \x1b[0mJob started. Streaming logs... \x1b[2m(Ctrl-C to exit log streaming; job will not be killed)\x1b[0m', flush=True)
+has_setup_cmd = True
 setup_cmd = 'pip install torch'
+setup_envs = {'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000001-cluster-2', 'MODEL_NAME': 'resnet50', 'SKYPILOT_NUM_NODES': '1'}
+setup_log_path = '/sky/logs/setup.log'
+setup_num_nodes = 1
 
-job_lib.set_status(2, job_lib.JobStatus.SETTING_UP)
-job_lib.scheduler.schedule_step()
-
-# Run setup command on all nodes using srun
-# srun distributes across nodes automatically.
-setup_srun = f'srun --unbuffered --jobid=12345 --nodes=1 --ntasks-per-node=1 bash -c {shlex.quote(setup_cmd)}'
-
-setup_result = run_bash_command_with_log_and_return_pid(
-    setup_srun,
-    os.path.expanduser('/sky/logs/setup.log'),
-    env_vars={'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000001-cluster-2', 'MODEL_NAME': 'resnet50', 'SKYPILOT_NUM_NODES': '1'},
-    stream_logs=True,
-    with_ray=False,
-    streaming_prefix=f'{colorama.Fore.CYAN}(setup pid={{pid}}){colorama.Style.RESET_ALL} ',
-)
-
-# TODO(kevin): For multi-node, we need to inspect the exit codes
-# for each task/node using sacct.
-setup_returncode = int(setup_result.get('return_code', 1))
-# TODO(kevin): For Slurm, run_bash_command_with_log_and_return_pid runs
-# only on the slurm login/controller node. Similarly, we need to get the
-# PIDs for each task/node, either using sacct or some other way.
-setup_pid = setup_result.get('pid', os.getpid())
-
-if setup_returncode != 0:
-    msg = f'ERROR: [31mJob 2\'s setup failed with return code {setup_returncode} (pid={setup_pid}).'
-    msg += f' See error logs above for more details.[0m'
-    print(msg, flush=True)
-    job_lib.set_status(2, job_lib.JobStatus.FAILED_SETUP)
-    time.sleep(1)
-    sys.exit(1)
-
-job_lib.set_job_started(2)
 result = subprocess.run(
-    ['srun', '--jobid=12345', '--nodes=1', '--ntasks=1',
+    ['srun', '--overlap', '--jobid=12345', '--nodes=1', '--ntasks=1',
      '--ntasks-per-node=1', 'bash', '-c',
      'hostname -I | awk "{print \$1}"'],
     capture_output=True,
@@ -442,20 +416,94 @@ if script is not None:
     # TODO(kevin): Handle multi-node job log paths.
     log_path = os.path.expanduser(os.path.join('/sky/logs/tasks', "run.log"))
 
-    # Wrap script with srun to execute within sbatch allocation
-    # srun distributes across nodes automatically.
-    srun_script = f'srun --unbuffered --jobid=12345 --nodes=1 --ntasks-per-node=1 bash -c {shlex.quote(script)}'
+    # Signal files that signal:
+    # 1. srun has acquired allocation within its existing sbatch allocation.
+    alloc_signal_file = f'/tmp/sky_alloc_12345_2'
+    # 2. Driver script has finished `setup` and `run` is ready to proceed.
+    setup_done_signal_file = f'/tmp/sky_setup_done_12345_2'
 
-    # TODO(kevin): For multi-node, we need to inspect the exit codes
-    # for each task/node using sacct.
-    result = run_bash_command_with_log_and_return_pid(
-        srun_script,
-        log_path,
-        env_vars=sky_env_vars_dict,
-        stream_logs=True,
-        with_ray=False,
-        streaming_prefix=f'{colorama.Fore.CYAN}(train_task, pid={{pid}}){colorama.Style.RESET_ALL} ',
+    # Add prolog to signal allocation and wait for setup to finish.
+    run_script = (
+        f"touch {alloc_signal_file} && "
+        f"while [ ! -f {setup_done_signal_file} ]; do sleep 0.05; done && "
+        f"rm -f {setup_done_signal_file} && "
+        + script
     )
+    # Start exclusive srun in a thread to reserve allocation (similar to ray.get(pg.ready()))
+    gpu_arg = f'--gpus-per-node=1' if 1 > 0 else ''
+    def run_thread_func():
+        # This blocks until Slurm allocates resources (--exclusive)
+        srun_cmd = f'srun --quiet --unbuffered --jobid=12345 --nodes=1 --mem=0 --ntasks-per-node=1 {gpu_arg} --exclusive bash -c {shlex.quote(run_script)}'
+        result = run_bash_command_with_log_and_return_pid(
+            srun_cmd,
+            log_path,
+            env_vars=sky_env_vars_dict,
+            stream_logs=True,
+            with_ray=False,
+            streaming_prefix=f'{colorama.Fore.CYAN}(train_task, pid={{pid}}){colorama.Style.RESET_ALL} ',
+        )
+        return result
+
+    run_thread_result = {'result': None}
+    def run_thread_wrapper():
+        run_thread_result['result'] = run_thread_func()
+
+    run_thread = threading.Thread(target=run_thread_wrapper)
+    run_thread.start()
+
+    # Wait for allocation signal from inside srun
+    while not os.path.exists(alloc_signal_file):
+        time.sleep(0.1)
+
+    print('\x1b[2m└── \x1b[0mJob started. Streaming logs... \x1b[2m(Ctrl-C to exit log streaming; job will not be killed)\x1b[0m', flush=True)
+
+    if has_setup_cmd:
+        job_lib.set_status(2, job_lib.JobStatus.SETTING_UP)
+
+        # The schedule_step should be called after the job status is set to
+        # non-PENDING, otherwise, the scheduler will think the current job
+        # is not submitted yet, and skip the scheduling step.
+        job_lib.scheduler.schedule_step()
+
+        # --overlap as we have already secured allocation with the srun for the run section,
+        # and otherwise this srun would get blocked and deadlock.
+        setup_srun = f'srun --quiet --unbuffered --overlap --jobid=12345 --nodes={setup_num_nodes} --ntasks-per-node=1 bash -c {shlex.quote(setup_cmd)}'
+
+        setup_result = run_bash_command_with_log_and_return_pid(
+            setup_srun,
+            os.path.expanduser(setup_log_path),
+            env_vars=setup_envs,
+            stream_logs=True,
+            with_ray=False,
+            streaming_prefix=f'{colorama.Fore.CYAN}(setup pid={{pid}}){colorama.Style.RESET_ALL} ',
+        )
+
+        setup_returncode = int(setup_result.get('return_code', 1))
+        if setup_returncode != 0:
+            setup_pid = setup_result.get('pid', os.getpid())
+            msg = f'ERROR: [31mJob 2\'s setup failed with return code {setup_returncode} (pid={setup_pid}).'
+            msg += f' See error logs above for more details.[0m'
+            print(msg, flush=True)
+            job_lib.set_status(2, job_lib.JobStatus.FAILED_SETUP)
+            time.sleep(1)
+            sys.exit(1)
+
+    job_lib.set_job_started(2)
+    if not has_setup_cmd:
+        # Need to call schedule_step() to make sure the scheduler
+        # schedule the next pending job.
+        job_lib.scheduler.schedule_step()
+
+    # Signal run thread to proceed.
+    pathlib.Path(setup_done_signal_file).touch()
+
+    # Wait for run thread to complete.
+    run_thread.join()
+    result = run_thread_result['result']
+
+    # Cleanup signal file
+    if os.path.exists(alloc_signal_file):
+        os.remove(alloc_signal_file)
 
     returncodes = [int(result.get('return_code', 1))]
 else:
