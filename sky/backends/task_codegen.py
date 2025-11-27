@@ -347,6 +347,7 @@ class SlurmCodeGen(TaskCodeGen):
         """
         assert self._has_setup, 'Call add_setup() before add_task().'
         env_vars = env_vars or {}
+        task_name = task_name if task_name is not None else 'task'
 
         acc_name, acc_count = self._get_accelerator_details(resources_dict)
         num_gpus = 0
@@ -397,10 +398,13 @@ class SlurmCodeGen(TaskCodeGen):
                 setup_done_signal_file = f'/tmp/sky_setup_done_{self._slurm_job_id}_{self.job_id}'
 
                 # Add prolog to signal allocation and wait for setup to finish.
+                # We also need to source ~/.bashrc again to make it as if the
+                # run section is run in a new shell, after setup is finished.
                 run_script = (
                     f"touch {{alloc_signal_file}} && "
                     f"while [ ! -f {{setup_done_signal_file}} ]; do sleep 0.05; done && "
                     f"rm -f {{setup_done_signal_file}} && "
+                    "source ~/.bashrc && "
                     + script
                 )
                 # Start exclusive srun in a thread to reserve allocation (similar to ray.get(pg.ready()))

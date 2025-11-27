@@ -416,10 +416,13 @@ if script is not None:
     setup_done_signal_file = f'/tmp/sky_setup_done_67890_3'
 
     # Add prolog to signal allocation and wait for setup to finish.
+    # We also need to source ~/.bashrc again to make it as if the
+    # run section is run in a new shell, after setup is finished.
     run_script = (
         f"touch {alloc_signal_file} && "
         f"while [ ! -f {setup_done_signal_file} ]; do sleep 0.05; done && "
         f"rm -f {setup_done_signal_file} && "
+        "source ~/.bashrc && "
         + script
     )
     # Start exclusive srun in a thread to reserve allocation (similar to ray.get(pg.ready()))
@@ -427,7 +430,7 @@ if script is not None:
     def run_thread_func():
         # This blocks until Slurm allocates resources (--exclusive)
         # --mem=0 to match RayCodeGen's behavior where we don't explicitly request memory.
-        srun_cmd = f'srun --quiet --unbuffered --jobid=67890 --nodes=2 --cpus-per-task=2.0 --mem=0 --ntasks-per-node=1 {gpu_arg} --exclusive bash -c {shlex.quote(run_script)}'
+        srun_cmd = f'srun --quiet --unbuffered --jobid=67890 --nodes=2 --cpus-per-task=2 --mem=0 --ntasks-per-node=1 {gpu_arg} --exclusive bash -c {shlex.quote(run_script)}'
         result = run_bash_command_with_log_and_return_pid(
             srun_cmd,
             log_path,
