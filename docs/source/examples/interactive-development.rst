@@ -214,7 +214,8 @@ marimo notebooks
 marimo notebooks are a modern alternative to traditional Jupyter notebooks, stored
 as Python scripts on disk. They are also fully reproducible thanks to the `uv` integration.
 
-Connect to the machine and forward the port that you want marimo to use:
+To start a marimo notebook interactively, you can connect to the machine and forward the
+port that you want marimo to use:
 
 .. code-block:: bash
 
@@ -254,9 +255,9 @@ the terminal that marimo provides from the browser.
 marimo as SkyPilot jobs
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-Because marimo notebooks are stored as Python scripts on disk, they can be easily converted into SkyPilot jobs.
-
-To demonstrate this, let's consider the following marimo notebook:
+Because marimo notebooks are stored as Python scripts on disk, they can
+immediately be used as SkyPilot jobs too. To demonstrate this, let's consider
+the following marimo notebook:
 
 .. code-block:: python
 
@@ -298,7 +299,7 @@ You can confirm this locally by running the notebook with the following command:
 
 This will print the command-line arguments passed to the notebook.
 
-::code-block:: bash
+.. code-block:: bash
 
     {'hello': 'world', 'demo': 'works', 'lr': '0.01'}
 
@@ -308,22 +309,24 @@ yaml file like this:
 .. code-block:: yaml
 
   # marimo-demo.yaml
-  name: marimo-demo
+    name: marimo-demo
 
-  resources:
-    accelerators: V100:1
-    use_spot: true  # Use spot instances to save cost.
+    # Specify specific resources for this job here
+    resources:
 
-  envs:
-    # Fill in any external env keys, like wandb
-    WANDB_API_KEY:
+    # This needs to point to the folder that has the marimo notebook
+    workdir: scripts
 
-  workdir: ~/transformers
+    # Fill in any env keys, like wandb
+    envs:
+      WANDB_API_KEY: "key"
 
-  setup: |
-    pip install uv
+    # We only need to install uv
+    setup: pip install uv
 
-  run: uv run demo.py --hello world --demo works --lr 0.01
+    # If the notebook is sandboxed via --sandbox, uv takes care of the dependencies
+    run: uv run demo.py --hello world --demo works --lr 0.01
+
 
 You can now submit this job to SkyPilot using the following command:
 
