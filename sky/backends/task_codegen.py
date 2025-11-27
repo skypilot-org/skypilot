@@ -356,7 +356,7 @@ class SlurmCodeGen(TaskCodeGen):
             num_gpus = int(math.ceil(acc_count))
 
         # Slurm does not support fractional CPUs.
-        task_cpu_demand = math.ceil(resources_dict.pop('CPU'))
+        task_cpu_demand = int(math.ceil(resources_dict.pop('CPU')))
 
         # Note: $SLURM_* env vars are only defined when the generated script is
         # run with srun, which is the case with SlurmCommandRunner.run().
