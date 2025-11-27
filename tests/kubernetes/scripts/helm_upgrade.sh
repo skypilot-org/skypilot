@@ -38,6 +38,11 @@ fi
 echo "Testing Helm upgrade for package: $PACKAGE_NAME"
 echo "Upgrading to version: $CURRENT_VERSION"
 
+# Debug: Print all environment variables
+echo "=== DEBUG: All Environment Variables ==="
+env | sort
+echo "=== End of Environment Variables ==="
+
 # Function to launch sky jobs (for first deployment)
 launch_sky_jobs() {
     local version="$1"
