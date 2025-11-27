@@ -3,10 +3,10 @@
 # connects to SkyPilot's internal cluster, causing resource conflicts.
 
 resources:
-  accelerators: L4:2
+  accelerators: L4:4
   memory: 64+
 
-num_nodes: 2
+num_nodes: 4
 
 workdir: .
 
