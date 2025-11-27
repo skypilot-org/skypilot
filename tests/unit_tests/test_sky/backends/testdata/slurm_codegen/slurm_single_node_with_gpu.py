@@ -433,7 +433,8 @@ if script is not None:
     gpu_arg = f'--gpus-per-node=1' if 1 > 0 else ''
     def run_thread_func():
         # This blocks until Slurm allocates resources (--exclusive)
-        srun_cmd = f'srun --quiet --unbuffered --jobid=12345 --nodes=1 --mem=0 --ntasks-per-node=1 {gpu_arg} --exclusive bash -c {shlex.quote(run_script)}'
+        # --mem=0 to match RayCodeGen's behavior where we don't explicitly request memory.
+        srun_cmd = f'srun --quiet --unbuffered --jobid=12345 --nodes=1 --cpus-per-task=4.0 --mem=0 --ntasks-per-node=1 {gpu_arg} --exclusive bash -c {shlex.quote(run_script)}'
         result = run_bash_command_with_log_and_return_pid(
             srun_cmd,
             log_path,
