@@ -5,7 +5,7 @@ This directory contains useful scripts and notes for developing SkyPilot on Kube
 ## Building and pushing SkyPilot image
 
 We maintain a container image that has all basic SkyPilot dependencies installed.
-This image is hosted at `us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest`.
+This image is hosted at `us-docker.pkg.dev/sky-dev-465/skypilotk8s/skypilot:latest`.
 
 To build this image locally and optionally push to the SkyPilot registry, run:
 ```bash

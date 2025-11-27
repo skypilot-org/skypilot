@@ -36,7 +36,7 @@ Step A1 - Can you create pods and services?
 
 As a sanity check, we will now try creating a simple pod running a HTTP server and a service to verify that your cluster and it's networking is functional.
 
-We will use the SkyPilot default image :code:`us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest` to verify that the image can be pulled from the registry.
+We will use the SkyPilot default image :code:`us-docker.pkg.dev/sky-dev-465/skypilotk8s/skypilot:latest` to verify that the image can be pulled from the registry.
 
 .. code-block:: bash
 
