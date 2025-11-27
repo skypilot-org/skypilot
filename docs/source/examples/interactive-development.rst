@@ -216,7 +216,7 @@ marimo notebooks
 marimo notebooks are a modern alternative to traditional Jupyter notebooks, stored
 as Python scripts on disk. They are also fully reproducible thanks to the `uv` integration.
 
-To start a marimo notebook interactively, you can connect to the machine and forward the
+To start a marimo notebook interactively via `sky`, you can connect to the machine and forward the
 port that you want marimo to use:
 
 .. code-block:: bash
@@ -258,7 +258,7 @@ marimo as SkyPilot jobs
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 Because marimo notebooks are stored as Python scripts on disk, they can
-immediately be used as SkyPilot jobs too. To demonstrate this, let's consider
+immediately be used via `sky jobs` too. To demonstrate this, let's consider
 the following marimo notebook:
 
 .. code-block:: python
@@ -305,7 +305,7 @@ This will print the command-line arguments passed to the notebook.
 
     {'hello': 'world', 'demo': 'works', 'lr': '0.01'}
 
-To use a notebook like this as SkyPilot job you'll want to configure a notebook
+To use a notebook like this as a job you'll want to configure a notebook
 yaml file like this:
 
 .. code-block:: yaml
@@ -330,7 +330,7 @@ yaml file like this:
     run: uv run demo.py --hello world --demo works --lr 0.01
 
 
-You can now submit this job to SkyPilot using the following command:
+You can now submit this job to `sky` using the following command:
 
 .. code-block:: bash
 
@@ -345,6 +345,10 @@ This is what the dashboard of the job looks like after it is done.
 .. image:: ../images/marimo-job.png
   :align: center
   :alt: marimo job completed
+
+The resources used during the job will also turn off automatically after
+the resource detects a configurable amount of inactivity. You can learn more
+about how to configure this behavior on the :ref:`managed-jobs` guide.
 
 Working with clusters
 ---------------------
