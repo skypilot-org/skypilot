@@ -339,7 +339,7 @@ async def test_execute_with_isolated_env_and_config(isolated_database,
         os.environ.pop('TEST_VAR_A', None)
 
 
-FAKE_FD_START = 100
+FAKE_FD_START = 100000
 
 
 def _get_saved_fd_close_count(close_calls: List[int], created_fds: set) -> int:
