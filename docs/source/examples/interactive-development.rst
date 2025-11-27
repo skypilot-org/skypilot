@@ -13,6 +13,7 @@ SkyPilot makes interactive development easy on Kubernetes or cloud VMs. It helps
    - :ref:`SSH <dev-ssh>`
    - :ref:`VSCode <dev-vscode>`
    - :ref:`Jupyter Notebooks <dev-notebooks>`
+   - :ref:`marimo Notebooks <marimo-notebooks>`
 
 .. _dev-launch:
 
@@ -207,6 +208,7 @@ You can verify that this notebook has access to the mounted storage bucket.
   :width: 100%
   :alt: accessing covid data from notebook
 
+.. _dev-notebooks:
 
 marimo notebooks
 ~~~~~~~~~~~~~~~~~
