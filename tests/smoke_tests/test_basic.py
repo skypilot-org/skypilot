@@ -54,6 +54,39 @@ def test_example_app():
     smoke_tests_utils.run_one_test(test)
 
 
+def test_bk_test_suit(generic_cloud: str):
+    """Test to verify buildkite-test-collector is working and debug upload issues."""
+    test = smoke_tests_utils.Test(
+        'bk_test_suit',
+        [
+            # Verify buildkite-test-collector package is installed
+            'python -c "import buildkite_test_collector; print(\"✓ buildkite-test-collector is installed\")" || echo "✗ ERROR: buildkite-test-collector not installed"',
+            # Check pip list for the package
+            'pip list | grep buildkite-test-collector || echo "✗ ERROR: buildkite-test-collector not found in pip list"',
+            # Echo all BUILDKITE-related environment variables
+            'echo "=== BUILDKITE Environment Variables ==="',
+            'env | grep BUILDKITE || echo "No BUILDKITE environment variables found"',
+            'echo "BUILDKITE_ANALYTICS_TOKEN: ${BUILDKITE_ANALYTICS_TOKEN:-NOT SET}"',
+            'echo "BUILDKITE_BUILD_ID: ${BUILDKITE_BUILD_ID:-NOT SET}"',
+            'echo "BUILDKITE_JOB_ID: ${BUILDKITE_JOB_ID:-NOT SET}"',
+            'echo "BUILDKITE_BRANCH: ${BUILDKITE_BRANCH:-NOT SET}"',
+            'echo "BUILDKITE_COMMIT: ${BUILDKITE_COMMIT:-NOT SET}"',
+            'echo "BUILDKITE_PIPELINE_SLUG: ${BUILDKITE_PIPELINE_SLUG:-NOT SET}"',
+            'echo "BUILDKITE_BUILD_NUMBER: ${BUILDKITE_BUILD_NUMBER:-NOT SET}"',
+            # Check pytest plugins
+            'echo "=== Pytest Plugins ==="',
+            'python -m pytest --version 2>&1 | grep -i buildkite || echo "No buildkite plugin found in pytest version"',
+            # Run a simple test to see if collector is active
+            'echo "=== Running simple test to verify collector ==="',
+            'python -m pytest tests/smoke_tests/test_basic.py::test_minimal --collect-only -v 2>&1 | tail -20',
+            # Echo a single message for verification
+            'echo "=== BUILDKITE TEST SUIT DEBUG COMPLETE ==="',
+        ],
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- A minimal task ----------
 def test_minimal(generic_cloud: str):
     disk_size_param, validate_launch_output = smoke_tests_utils.get_disk_size_and_validate_launch_output(
