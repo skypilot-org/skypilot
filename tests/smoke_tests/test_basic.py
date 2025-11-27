@@ -73,6 +73,7 @@ def test_bk_test_suit(generic_cloud: str):
             'echo "BUILDKITE_COMMIT: ${BUILDKITE_COMMIT:-NOT SET}"',
             'echo "BUILDKITE_PIPELINE_SLUG: ${BUILDKITE_PIPELINE_SLUG:-NOT SET}"',
             'echo "BUILDKITE_BUILD_NUMBER: ${BUILDKITE_BUILD_NUMBER:-NOT SET}"',
+            'echo "CI: ${CI:-NOT SET}"',
             # Check pytest plugins
             'echo "=== Pytest Plugins ==="',
             'python -m pytest --version 2>&1 | grep -i buildkite || echo "No buildkite plugin found in pytest version"',
