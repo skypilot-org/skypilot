@@ -21,7 +21,9 @@ from sky.serve import autoscalers
 from sky.serve import replica_managers
 from sky.serve import serve_state
 from sky.serve import serve_utils
+from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import context_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -287,6 +289,9 @@ class SkyServeController:
 # specific time period.
 def run_controller(service_name: str, service_spec: serve.SkyServiceSpec,
                    version: int, controller_host: str, controller_port: int):
+    os.environ[constants.OVERRIDE_CONSOLIDATION_MODE] = 'true'
+    # Hijack sys.stdout/stderr to be context aware.
+    context_utils.hijack_sys_attrs()
     controller = SkyServeController(service_name, service_spec, version,
                                     controller_host, controller_port)
     controller.run()

@@ -26,7 +26,7 @@ class ManagedJobStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
 class ManagedJobScheduleState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     MANAGED_JOB_SCHEDULE_STATE_UNSPECIFIED: _ClassVar[ManagedJobScheduleState]
-    MANAGED_JOB_SCHEDULE_STATE_INVALID: _ClassVar[ManagedJobScheduleState]
+    DEPRECATED_MANAGED_JOB_SCHEDULE_STATE_INVALID: _ClassVar[ManagedJobScheduleState]
     MANAGED_JOB_SCHEDULE_STATE_INACTIVE: _ClassVar[ManagedJobScheduleState]
     MANAGED_JOB_SCHEDULE_STATE_WAITING: _ClassVar[ManagedJobScheduleState]
     MANAGED_JOB_SCHEDULE_STATE_ALIVE_WAITING: _ClassVar[ManagedJobScheduleState]
@@ -49,7 +49,7 @@ MANAGED_JOB_STATUS_FAILED_PRECHECKS: ManagedJobStatus
 MANAGED_JOB_STATUS_FAILED_NO_RESOURCE: ManagedJobStatus
 MANAGED_JOB_STATUS_FAILED_CONTROLLER: ManagedJobStatus
 MANAGED_JOB_SCHEDULE_STATE_UNSPECIFIED: ManagedJobScheduleState
-MANAGED_JOB_SCHEDULE_STATE_INVALID: ManagedJobScheduleState
+DEPRECATED_MANAGED_JOB_SCHEDULE_STATE_INVALID: ManagedJobScheduleState
 MANAGED_JOB_SCHEDULE_STATE_INACTIVE: ManagedJobScheduleState
 MANAGED_JOB_SCHEDULE_STATE_WAITING: ManagedJobScheduleState
 MANAGED_JOB_SCHEDULE_STATE_ALIVE_WAITING: ManagedJobScheduleState

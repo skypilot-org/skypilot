@@ -126,6 +126,7 @@ export async function getWorkspaceManagedJobs(workspaceName) {
       throw new Error(msg);
     }
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
+    let errorMessage = fetchedData.statusText;
     if (fetchedData.status === 500) {
       try {
         const data = await fetchedData.json();
@@ -135,17 +136,24 @@ export async function getWorkspaceManagedJobs(workspaceName) {
             // Handle specific error types
             if (error.type && error.type === CLUSTER_NOT_UP_ERROR) {
               return { jobs: [] };
+            } else {
+              errorMessage = error.message || String(data.detail.error);
             }
           } catch (jsonError) {
-            console.error('Error parsing JSON:', jsonError);
+            console.error(
+              'Error parsing JSON from data.detail.error:',
+              jsonError
+            );
+            errorMessage = String(data.detail.error);
           }
         }
       } catch (parseError) {
-        console.error('Error parsing JSON:', parseError);
+        console.error('Error parsing response JSON:', parseError);
+        errorMessage = String(parseError);
       }
     }
     if (!fetchedData.ok) {
-      const msg = `API request to get managed jobs result failed with status ${fetchedData.status} for workspace ${workspaceName}`;
+      const msg = `API request to get managed jobs result failed with status ${fetchedData.status}, error: ${errorMessage} for workspace ${workspaceName}`;
       throw new Error(msg);
     }
     const data = await fetchedData.json();

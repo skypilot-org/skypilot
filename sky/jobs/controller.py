@@ -955,6 +955,10 @@ class ControllerManager:
                             ctx.override_envs({key: value})
                             logger.debug('Set environment variable: %s=%s', key,
                                          value)
+
+                    # Restore config file if needed
+                    file_content_utils.restore_job_config_file(job_id)
+
                     skypilot_config.reload_config()
                 else:  # pragma: no cover - defensive
                     logger.error('Context is None, cannot set environment '
@@ -1117,7 +1121,7 @@ class ControllerManager:
             async with self._job_tasks_lock:
                 starting_count = len(self.starting)
 
-            if starting_count >= scheduler.LAUNCHES_PER_WORKER:
+            if starting_count >= controller_utils.LAUNCHES_PER_WORKER:
                 # launching a job takes around 1 minute, so lets wait half that
                 # time
                 await asyncio.sleep(30)
@@ -1127,9 +1131,9 @@ class ControllerManager:
             # ton of controllers, we need to limit the number of jobs that can
             # run on each controller, to achieve a total of 2000 jobs across all
             # controllers.
-            max_jobs = min(scheduler.MAX_JOBS_PER_WORKER,
-                           (scheduler.MAX_TOTAL_RUNNING_JOBS //
-                            scheduler.get_number_of_controllers()))
+            max_jobs = min(controller_utils.MAX_JOBS_PER_WORKER,
+                           (controller_utils.MAX_TOTAL_RUNNING_JOBS //
+                            controller_utils.get_number_of_jobs_controllers()))
 
             if len(running_tasks) >= max_jobs:
                 logger.info('Too many jobs running, waiting for 60 seconds')

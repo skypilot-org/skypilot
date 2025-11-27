@@ -34,7 +34,11 @@ enum ManagedJobStatus {
 
 enum ManagedJobScheduleState {
   MANAGED_JOB_SCHEDULE_STATE_UNSPECIFIED = 0;
-  MANAGED_JOB_SCHEDULE_STATE_INVALID = 1;
+  // Old servers mapped `None` to INVALID, instead of omitting the field. Keep
+  // the enum value so we can deserialize the response properly. On the client,
+  // this should be mapped to `None` / missing field. See #8105.
+  // TODO(cooperc): Remove in 0.13.0
+  DEPRECATED_MANAGED_JOB_SCHEDULE_STATE_INVALID = 1 [deprecated = true];
   MANAGED_JOB_SCHEDULE_STATE_INACTIVE = 2;
   MANAGED_JOB_SCHEDULE_STATE_WAITING = 3;
   MANAGED_JOB_SCHEDULE_STATE_ALIVE_WAITING = 4;

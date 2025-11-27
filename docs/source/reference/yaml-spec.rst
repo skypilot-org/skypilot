@@ -73,6 +73,8 @@ Below is the configuration syntax and some example values.  See details under ea
 
   :ref:`volumes <yaml-spec-new-volumes>`:
     /mnt/data: volume-name
+    /mnt/cache:
+      size: 100Gi
 
   :ref:`file_mounts <yaml-spec-file-mounts>`:
     # Sync a local directory to a remote directory
@@ -970,14 +972,18 @@ Example:
 ``volumes``
 ~~~~~~~~~~~
 
-SkyPilot supports managing volumes resource for tasks or jobs on Kubernetes clusters. Refer to :ref:`volumes on Kubernetes <volumes-on-kubernetes>` for more details.
+SkyPilot supports managing persistent and ephemeral volumes for tasks or jobs on Kubernetes clusters. Refer to :ref:`volumes on Kubernetes <volumes-on-kubernetes>` for more details.
 
 Example:
 
 .. code-block:: yaml
 
   volumes:
+    # Persistent volume
     /mnt/data: volume-name
+    # Ephemeral volume
+    /mnt/cache:
+      size: 100Gi
 
 
 .. _yaml-spec-file-mounts:

@@ -56,13 +56,13 @@ spec:
       {{- end }}
       runtimeClassName: {{ .Values.runtimeClassName }}
       terminationGracePeriodSeconds: {{ .Values.apiService.terminationGracePeriodSeconds }}
-      {{- with .Values.apiService.imagePullSecrets }}
+      {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:
       - name: skypilot-api
-        image: {{ .Values.apiService.image }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         imagePullPolicy: {{ .Values.apiService.imagePullPolicy }}
         {{- with .Values.securityContext }}
         securityContext:
@@ -71,8 +71,11 @@ spec:
         resources:
           {{- toYaml .Values.apiService.resources | nindent 10 }}
         env:
-        {{- if .Values.apiService.extraEnvs }}
-        {{- toYaml .Values.apiService.extraEnvs | nindent 8 }}
+        {{- with $.Values.global.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- with .Values.apiService.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
         {{- end }}
         - name: SKYPILOT_DEV
           value: {{ .Values.apiService.skypilotDev | quote }}
@@ -226,18 +229,8 @@ spec:
           done
           {{- end }}
 
-          if sky api start -h | grep -q -- "--foreground"; then
-            mkdir -p /root/.sky/api_server
-            exec sky api start {{ include "skypilot.apiArgs" . }} --foreground  2>&1 | tee -a /root/.sky/api_server/server.log
-          else
-            # For backward compatibility, run in background if --foreground is not supported.
-            # TODO(aylei): this will be dropped in 0.11.0.
-            if sky api start {{ include "skypilot.apiArgs" . }}; then
-              tail -n+0 -f /root/.sky/api_server/server.log
-            else
-              cat /root/.sky/api_server/server.log
-            fi
-          fi
+          mkdir -p /root/.sky/api_server
+          exec sky api start {{ include "skypilot.apiArgs" . }} --foreground  2>&1 | tee -a /root/.sky/api_server/server.log
         ports:
         - containerPort: 46580
         livenessProbe:
@@ -346,7 +339,7 @@ spec:
         {{- end }}
       {{- if .Values.apiService.logs.retention.enabled }}
       - name: logrotate
-        image: {{ .Values.apiService.image }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         command: ["/bin/sh", "-c"]
         # Warn if logrotate is missing in the image and keep the sidecar running
         args:
@@ -383,7 +376,7 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: {{ .Values.apiService.image }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -398,6 +391,9 @@ spec:
             sleep 600
           fi
         env:
+        {{- with $.Values.global.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         - name: AWS_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
@@ -418,7 +414,7 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: {{ .Values.apiService.image }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -445,6 +441,9 @@ spec:
           echo "Account ID:"
           cat /root/.cloudflare/accountid
         env:
+        {{- with $.Values.global.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         - name: R2_CREDENTIALS
           valueFrom:
             secretKeyRef:
@@ -465,9 +464,12 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: google/cloud-sdk:latest
+        image: {{ include "common.image" (dict "root" . "image" .Values.gcpCredentials.image) }}
         command: ["/bin/sh", "-c"]
         env:
+        {{- with $.Values.global.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         - name: GOOGLE_APPLICATION_CREDENTIALS
           value: /root/gcp-cred.json
         args:
@@ -487,7 +489,7 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: {{ .Values.apiService.image }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -502,6 +504,9 @@ spec:
             sleep 600
           fi
         env:
+        {{- with $.Values.global.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         - name: RUNPOD_API_KEY
           valueFrom:
             secretKeyRef:
@@ -517,7 +522,7 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: {{ .Values.apiService.image }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -531,6 +536,9 @@ spec:
             sleep 600
           fi
         env:
+        {{- with $.Values.global.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         - name: LAMBDA_API_KEY
           valueFrom:
             secretKeyRef:
@@ -546,7 +554,7 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: {{ .Values.apiService.image }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -560,6 +568,9 @@ spec:
             sleep 600
           fi
         env:
+        {{- with $.Values.global.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         - name: VAST_API_KEY
           valueFrom:
             secretKeyRef:

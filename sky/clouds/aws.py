@@ -55,26 +55,6 @@ _DEFAULT_GPU_ARM64_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-arm64'
 _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-ubuntu-2004'
 _DEFAULT_NEURON_IMAGE_ID = 'skypilot:neuron-ubuntu-2204'
 
-# This local file (under ~/.aws/) will be uploaded to remote nodes (any
-# cloud), if all of the following conditions hold:
-#   - the current user identity is not using AWS SSO
-#   - this file exists
-# It has the following purposes:
-#   - make all nodes (any cloud) able to access private S3 buckets
-#   - make some remote nodes able to launch new nodes on AWS (i.e., makes
-#     AWS head node able to launch AWS workers, or any-cloud jobs controller
-#     able to launch spot clusters on AWS).
-#
-# If we detect the current user identity is AWS SSO, we will not upload this
-# file to any remote nodes (any cloud). Instead, a SkyPilot IAM role is
-# assigned to both AWS head and workers.
-# TODO(skypilot): This also means we leave open a bug for AWS SSO users that
-# use multiple clouds. The non-AWS nodes will have neither the credential
-# file nor the ability to understand AWS IAM.
-_CREDENTIAL_FILES = [
-    'credentials',
-]
-
 DEFAULT_AMI_GB = 45
 DEFAULT_SSH_USER = 'ubuntu'
 DEFAULT_ROOT_DEVICE_NAME = '/dev/sda1'
@@ -124,8 +104,23 @@ _EFA_IMAGE_NAME = 'Deep Learning Base OSS Nvidia Driver GPU AMI' \
 # For functions that needs caching per AWS profile.
 _AWS_PROFILE_SCOPED_FUNC_CACHE_SIZE = 5
 
+# Ref: https://docs.aws.amazon.com/cli/v1/userguide/cli-configure-envvars.html
+_DEFAULT_AWS_CONFIG_PATH = '~/.aws/credentials'
+_AWS_CONFIG_FILE_ENV_VAR = 'AWS_CONFIG_FILE'
+
 T = TypeVar('T')
 P = ParamSpec('P')
+
+
+def _get_credentials_path() -> str:
+    cred_path = os.getenv(_AWS_CONFIG_FILE_ENV_VAR, None)
+    if cred_path is not None:
+        if not os.path.isfile(os.path.expanduser(cred_path)):
+            raise FileNotFoundError(f'{_AWS_CONFIG_FILE_ENV_VAR}={cred_path},'
+                                    ' but the file does not exist.')
+        return cred_path
+    # Fallback to the default config path.
+    return _DEFAULT_AWS_CONFIG_PATH
 
 
 def aws_profile_aware_lru_cache(*lru_cache_args,
@@ -908,22 +903,67 @@ class AWS(clouds.Cloud):
     def _check_compute_credentials(
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to this AWS's compute service."""
-        return cls._check_credentials()
+        credentials_exist, identity_str, hints = cls._check_credentials_exist()
+        if not credentials_exist:
+            return False, hints
+
+        # Fetch the AWS catalogs
+        # pylint: disable=import-outside-toplevel
+        from sky.catalog import aws_catalog
+
+        # Trigger the fetch of the availability zones mapping.
+        try:
+            aws_catalog.get_default_instance_type()
+        except RuntimeError as e:
+            return False, (
+                'Failed to fetch the availability zones for the account '
+                f'{identity_str}. It is likely due to permission issues, please'
+                ' check the minimal permission required for AWS: '
+                'https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/aws.html'  # pylint: disable=
+                f'\n{cls._INDENT_PREFIX}Details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
+
+        return True, hints
 
     @classmethod
     def _check_storage_credentials(
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to this AWS's storage service."""
-        # TODO(seungjin): Implement separate check for
-        # if the user has access to S3.
-        return cls._check_credentials()
+        credentials_exist, identity_str, hints = cls._check_credentials_exist()
+        if not credentials_exist:
+            return False, hints
+
+        try:
+            # Create an S3 client
+            s3_client = aws.client('s3')
+
+            # Try to list buckets
+            s3_client.list_buckets()
+        except aws.botocore_exceptions().ClientError as e:
+            return False, (
+                'Failed to list buckets for the account '
+                f'{identity_str}. It is likely due to permission issues, please'
+                ' check the storage permission required for AWS: '
+                'https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/aws.html'  # pylint: disable=
+                f'\n{cls._INDENT_PREFIX}Details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
+
+        return True, hints
 
     @classmethod
     # Cache since getting identity is slow.
     @aws_profile_aware_lru_cache(scope='request',
                                  maxsize=_AWS_PROFILE_SCOPED_FUNC_CACHE_SIZE)
-    def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """Checks if the user has access credentials to AWS."""
+    def _check_credentials_exist(
+            cls) -> Tuple[bool, Optional[str], Optional[str]]:
+        """Checks if the user has access credentials to AWS.
+
+        Returns:
+            bool: True if credentials exist and are valid.
+            str: Identity string of the user. None if credentials do not exist.
+                 (i.e. the first boolean is False)
+            str: Hints for the user to set up credentials.
+        """
 
         dependency_installation_hints = (
             'AWS dependencies are not installed. '
@@ -939,21 +979,22 @@ class AWS(clouds.Cloud):
                               stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE)
         if proc.returncode != 0:
-            return False, dependency_installation_hints
+            return False, None, dependency_installation_hints
 
         # Checks if aws boto is installed properly
         if not common.can_import_modules(['boto3', 'botocore']):
-            return False, dependency_installation_hints
+            return False, None, dependency_installation_hints
 
         # Checks if AWS credentials 1) exist and 2) are valid.
         # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
         try:
             identity_str = cls.get_active_user_identity_str()
         except exceptions.CloudUserIdentityError as e:
-            return False, str(e)
+            return False, None, str(e)
 
+        credentials_path = _get_credentials_path()
         static_credential_exists = os.path.isfile(
-            os.path.expanduser('~/.aws/credentials'))
+            os.path.expanduser(credentials_path))
         hints = None
         identity_type = cls._current_identity_type()
         single_cloud_hint = (
@@ -1004,25 +1045,10 @@ class AWS(clouds.Cloud):
             # other clouds to access private s3 buckets and resources like EC2.
             # `get_active_user_identity` does not guarantee this file exists.
             if not static_credential_exists:
-                return (False, '~/.aws/credentials does not exist. ' +
+                return (False, None, f'{credentials_path} does not exist. ' +
                         cls._STATIC_CREDENTIAL_HELP_STR)
 
-        # Fetch the AWS catalogs
-        # pylint: disable=import-outside-toplevel
-        from sky.catalog import aws_catalog
-
-        # Trigger the fetch of the availability zones mapping.
-        try:
-            aws_catalog.get_default_instance_type()
-        except RuntimeError as e:
-            return False, (
-                'Failed to fetch the availability zones for the account '
-                f'{identity_str}. It is likely due to permission issues, please'
-                ' check the minimal permission required for AWS: '
-                'https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/aws.html'  # pylint: disable=
-                f'\n{cls._INDENT_PREFIX}Details: '
-                f'{common_utils.format_exception(e, use_bracket=True)}')
-        return True, hints
+        return True, identity_str, hints
 
     @classmethod
     def _current_identity_type(cls) -> Optional[AWSIdentityType]:
@@ -1260,11 +1286,31 @@ class AWS(clouds.Cloud):
         if self._current_identity_type(
         ) != AWSIdentityType.SHARED_CREDENTIALS_FILE:
             return {}
-        return {
-            f'~/.aws/{filename}': f'~/.aws/{filename}'
-            for filename in _CREDENTIAL_FILES
-            if os.path.exists(os.path.expanduser(f'~/.aws/{filename}'))
-        }
+
+        # This local credentials file (default to ~/.aws/credentials and can be
+        # overridden by AWS_CONFIG_FILE environment variable) will be uploaded
+        # to remote nodes (any cloud), if all of the following conditions hold:
+        #   - the current user identity is not using AWS SSO
+        #   - this file exists
+        # It has the following purposes:
+        #   - make all nodes (any cloud) able to access private S3 buckets
+        #   - make some remote nodes able to launch new nodes on AWS (i.e., makes
+        #     AWS head node able to launch AWS workers, or any-cloud jobs controller
+        #     able to launch spot clusters on AWS).
+        #
+        # If we detect the current user identity is AWS SSO, we will not upload this
+        # file to any remote nodes (any cloud). Instead, a SkyPilot IAM role is
+        # assigned to both AWS head and workers.
+        # TODO(skypilot): This also means we leave open a bug for AWS SSO users that
+        # use multiple clouds. The non-AWS nodes will have neither the credential
+        # file nor the ability to understand AWS IAM.
+        credentials_path = os.path.expanduser(_get_credentials_path())
+        if os.path.exists(credentials_path):
+            return {
+                # Upload to the default config location on remote cluster.
+                _DEFAULT_AWS_CONFIG_PATH: credentials_path
+            }
+        return {}
 
     @aws_profile_aware_lru_cache(scope='request',
                                  maxsize=_AWS_PROFILE_SCOPED_FUNC_CACHE_SIZE)

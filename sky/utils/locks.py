@@ -155,7 +155,7 @@ class FileLock(DistributedLock):
         common_utils.remove_file_if_exists(self.lock_path)
 
     def is_locked(self) -> bool:
-        return self._filelock.is_locked()
+        return self._filelock.is_locked
 
 
 class PostgresLock(DistributedLock):
@@ -169,6 +169,7 @@ class PostgresLock(DistributedLock):
     # pylint: disable=line-too-long
     - https://www.postgresql.org/docs/current/explicit-locking.html#ADVISORY-LOCKS
     - https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADVISORY-LOCKS
+    # TODO(cooperc): re-enable pylint line-too-long
     """
 
     def __init__(self,

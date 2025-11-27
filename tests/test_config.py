@@ -2,6 +2,7 @@
 import copy
 import os
 import pathlib
+import shutil
 import textwrap
 from unittest import mock
 
@@ -77,27 +78,26 @@ def _create_config_file(config_file_path: pathlib.Path) -> None:
 def _create_task_yaml_file(task_file_path: pathlib.Path) -> None:
     task_file_path.write_text(
         textwrap.dedent(f"""\
-        experimental:
-            config_overrides:
-                docker:
-                    run_options:
-                        - -v /tmp:/tmp
-                kubernetes:
-                    pod_config:
-                        metadata:
-                            labels:
-                                test-key: test-value
-                            annotations:
-                                abc: def
-                        spec:
-                            imagePullSecrets:
-                                - name: my-secret-2
-                    provision_timeout: 100
-                gcp:
-                    managed_instance_group:
-                        run_duration: {RUN_DURATION_OVERRIDE}
-                nvidia_gpus:
-                    disable_ecc: true
+        config:
+            docker:
+                run_options:
+                    - -v /tmp:/tmp
+            kubernetes:
+                pod_config:
+                    metadata:
+                        labels:
+                            test-key: test-value
+                        annotations:
+                            abc: def
+                    spec:
+                        imagePullSecrets:
+                            - name: my-secret-2
+                provision_timeout: 100
+            gcp:
+                managed_instance_group:
+                    run_duration: {RUN_DURATION_OVERRIDE}
+            nvidia_gpus:
+                disable_ecc: true
         resources:
             image_id: docker:ubuntu:latest
 
@@ -109,20 +109,19 @@ def _create_task_yaml_file(task_file_path: pathlib.Path) -> None:
 def _create_invalid_config_yaml_file(task_file_path: pathlib.Path) -> None:
     task_file_path.write_text(
         textwrap.dedent("""\
-        experimental:
-            config_overrides:
-                kubernetes:
-                    pod_config:
-                        metadata:
-                            labels:
-                                test-key: test-value
-                            annotations:
-                                abc: def
-                        spec:
-                            containers:
-                                - name:
-                            imagePullSecrets:
-                                - name: my-secret-2
+        config:
+            kubernetes:
+                pod_config:
+                    metadata:
+                        labels:
+                            test-key: test-value
+                        annotations:
+                            abc: def
+                    spec:
+                        containers:
+                            - name:
+                        imagePullSecrets:
+                            - name: my-secret-2
 
         setup: echo 'Setting up...'
         run: echo 'Running...'
@@ -397,9 +396,9 @@ def test_k8s_config_with_override(monkeypatch, tmp_path,
     task.set_resources_override({'cloud': sky.Kubernetes()})
     request_id = sky.launch(task, cluster_name=cluster_name, dryrun=True)
     sky.stream_and_get(request_id)
-    cluster_yaml = pathlib.Path(
-        f'~/.sky/generated/{cluster_name}.yml.tmp').expanduser().rename(
-            tmp_path / (cluster_name + '.yml'))
+    cluster_yaml = shutil.move(
+        pathlib.Path(f'~/.sky/generated/{cluster_name}.yml.tmp').expanduser(),
+        tmp_path / (cluster_name + '.yml'))
 
     # Load the cluster YAML
     cluster_config = yaml_utils.read_yaml(cluster_yaml)
@@ -454,9 +453,9 @@ def test_gcp_config_with_override(monkeypatch, tmp_path,
     task.set_resources_override({'cloud': sky.GCP(), 'accelerators': 'L4'})
     request_id = sky.launch(task, cluster_name=cluster_name, dryrun=True)
     sky.stream_and_get(request_id)
-    cluster_yaml = pathlib.Path(
-        f'~/.sky/generated/{cluster_name}.yml.tmp').expanduser().rename(
-            tmp_path / (cluster_name + '.yml'))
+    cluster_yaml = shutil.move(
+        pathlib.Path(f'~/.sky/generated/{cluster_name}.yml.tmp').expanduser(),
+        tmp_path / (cluster_name + '.yml'))
 
     # Load the cluster YAML
     cluster_config = yaml_utils.read_yaml(cluster_yaml)
@@ -1136,111 +1135,6 @@ def test_standardized_region_configs(monkeypatch, tmp_path) -> None:
     assert 'eu-west1' not in ssh_proxy
 
     # nebius: test filesystems
-    no_filesystem = skypilot_config.get_effective_region_config(
-        cloud='nebius',
-        region='eu-north1',
-        keys=('filesystems',),
-        default_value=[])
-    assert len(no_filesystem) == 0
-
-    filesystems = skypilot_config.get_effective_region_config(
-        cloud='nebius',
-        region='eu-west1',
-        keys=('filesystems',),
-        default_value=[])
-    assert len(filesystems) == 2
-
-    # oci: test general
-    vcn_ocid = skypilot_config.get_effective_region_config(cloud='oci',
-                                                           region='default',
-                                                           keys=('vcn_ocid',),
-                                                           default_value=None)
-    assert vcn_ocid == 'vcn_ocid_default'
-
-    vcn_ocid = skypilot_config.get_effective_region_config(cloud='oci',
-                                                           region='ap-seoul-1',
-                                                           keys=('vcn_ocid',),
-                                                           default_value=None)
-    assert vcn_ocid == 'vcn_ocid1'
-
-    vcn_ocid = skypilot_config.get_effective_region_config(
-        cloud='oci',
-        region='not_valid_region',
-        keys=('vcn_ocid',),
-        default_value=None)
-    assert vcn_ocid is None
-
-
-# TODO (kyuds): remove after 0.11.0
-def test_standardized_region_configs_back_compat(monkeypatch, tmp_path) -> None:
-    """Test that nested per-region nebius config works with legacy yaml"""
-    from sky.provision.kubernetes import utils as kubernetes_utils
-    with open(tmp_path / 'region_configs.yaml', 'w', encoding='utf-8') as f:
-        f.write(f"""\
-        nebius:
-            use_internal_ips: true
-            ssh_proxy_command:
-                eu-north1: ssh -W %h:%p user@host
-            eu-north1:
-                project_id: project-e00
-                fabric: fabric-3
-            eu-west1:
-                project_id: project-e01
-                fabric: fabric-5
-                filesystems:
-                    - filesystem_id: computefilesystem-e00aaaaa01bbbbbbbb
-                      mount_path: /mnt/fsnew
-                      attach_mode: READ_WRITE
-                    - filesystem_id: computefilesystem-e00ccccc02dddddddd
-                      mount_path: /mnt/fsnew2
-                      attach_mode: READ_ONLY
-
-        oci:
-            default:
-                vcn_ocid: vcn_ocid_default
-                vcn_subnet: vcn_subnet_default
-            ap-seoul-1:
-                vcn_ocid: vcn_ocid1
-                vcn_subnet: vcn_subnet1
-        """)
-    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
-                        tmp_path / 'region_configs.yaml')
-    skypilot_config.reload_config()
-
-    # test project_id property
-    eu_n1_proj = skypilot_config.get_effective_region_config(
-        cloud='nebius', region='eu-north1', keys=('project_id',))
-    assert eu_n1_proj == 'project-e00'
-    eu_w1_proj = skypilot_config.get_effective_region_config(
-        cloud='nebius', region='eu-west1', keys=('project_id',))
-    assert eu_w1_proj == 'project-e01'
-
-    # test fabric property
-    eu_n1_fabric = skypilot_config.get_effective_region_config(
-        cloud='nebius', region='eu-north1', keys=('fabric',))
-    assert eu_n1_fabric == 'fabric-3'
-    eu_w1_fabric = skypilot_config.get_effective_region_config(
-        cloud='nebius', region='eu-west1', keys=('fabric',))
-    assert eu_w1_fabric == 'fabric-5'
-
-    # test use_internal_ips property
-    eu_n1_ip = skypilot_config.get_effective_region_config(
-        cloud='nebius', region='eu-north1', keys=('use_internal_ips',))
-    assert eu_n1_ip == True
-    eu_w1_ip = skypilot_config.get_effective_region_config(
-        cloud='nebius', region='eu-west1', keys=('use_internal_ips',))
-    assert eu_w1_ip == True
-    generic = skypilot_config.get_effective_region_config(
-        cloud='nebius', region=None, keys=('use_internal_ips',))
-    assert generic == True
-
-    # test ssh_proxy_command defaults
-    ssh_proxy = skypilot_config.get_effective_region_config(
-        cloud='nebius', region=None, keys=('ssh_proxy_command',))
-    assert ssh_proxy['eu-north1'] == 'ssh -W %h:%p user@host'
-    assert 'eu-west1' not in ssh_proxy
-
-    # test filesystems
     no_filesystem = skypilot_config.get_effective_region_config(
         cloud='nebius',
         region='eu-north1',
