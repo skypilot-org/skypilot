@@ -246,7 +246,7 @@ Enter the password or token and you will be directed to a page where you can cre
 You can verify that this notebook is running on the GPU-backed instance using :code:`nvidia-smi` in
 the dedicated terminal that marimo provides.
 
-.. image:: ../images/marimo-nvidia.png
+.. image:: ../images/marimo-nvidea.png
   :width: 100%
   :alt: nvidia-smi in notebook
 
