@@ -227,22 +227,32 @@ def check_instance_fits(cluster: str,
     if acc_type is not None:
         assert acc_count is not None, (acc_type, acc_count)
 
-        gres_to_match = f'{acc_type}:{acc_count}'.lower()
         gpu_nodes = []
         for node in nodes:
             _, _, gres_str, _ = node.split()
             # gres_str is like 'gpu:acc_type:acc_count'
             gres_list = gres_str.split(':')
-            gres_str = ':'.join(gres_list[1:]).lower()
+            # Extract the GPU type and count from the GRES string
+            if len(gres_list) >= 3:
+                node_acc_type = gres_list[1].lower()
+                try:
+                    node_acc_count = int(gres_list[2])
+                except (ValueError, IndexError):
+                    continue
+            else:
+                continue
 
             # TODO(jwj): Handle status check.
 
-            if gres_str == gres_to_match:
+            # Check if the node has the requested GPU type and at least the
+            # requested count
+            if (node_acc_type == acc_type.lower() and
+                    node_acc_count >= acc_count):
                 gpu_nodes.append(node)
         if len(gpu_nodes) == 0:
             return (False,
-                    f'No GPU nodes found with {acc_type}:{acc_count} on the '
-                    f'cluster.')
+                    f'No GPU nodes found with at least {acc_type}:{acc_count} '
+                    f'on the cluster.')
 
         candidate_nodes = gpu_nodes
         not_fit_reason_prefix = (f'GPU nodes with {acc_type} do not have '
