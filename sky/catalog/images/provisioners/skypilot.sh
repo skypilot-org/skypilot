@@ -35,7 +35,7 @@ mkdir -p ~/.ssh
 touch ~/.ssh/config
 
 # Install Miniconda
-curl -o Miniconda3-Linux-${ARCH_PATH}.sh https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-${ARCH_PATH}.sh
+curl -o Miniconda3-Linux-${ARCH_PATH}.sh https://repo.anaconda.com/miniconda/Miniconda3-py311_23.11.0-2-Linux-${ARCH_PATH}.sh
 bash Miniconda3-Linux-${ARCH_PATH}.sh -b
 eval "$(~/miniconda3/bin/conda shell.bash hook)"
 rm Miniconda3-Linux-${ARCH_PATH}.sh
