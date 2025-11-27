@@ -5,7 +5,7 @@ set -e
 #   create_cluster.sh gcp <CLUSTER_NAME> <PROJECT_ID> <ZONE> <NODE_COUNT> <MACHINE_TYPE>
 #   create_cluster.sh aws <CLUSTER_NAME> <REGION> <NODE_COUNT> <INSTANCE_TYPE>
 
-# If EKS_VPC_CONFIG_PUBLIC is set, it will be injected verbatim into the eksctl config
+# If EKS_VPC_CONFIG_PRIVATE is set, it will be injected verbatim into the eksctl config
 
 PROVIDER=${1:-"gcp"}
 shift || true
@@ -78,7 +78,7 @@ kind: ClusterConfig
 metadata:
   name: ${CLUSTER_NAME}
   region: ${REGION}
-${EKS_VPC_CONFIG_PUBLIC}
+${EKS_VPC_CONFIG_PRIVATE}
 iam:
   withOIDC: true
 managedNodeGroups:
@@ -95,12 +95,12 @@ EOF
 
     aws eks --region "$REGION" update-kubeconfig --name "$CLUSTER_NAME"
 
-    # If user provided VPC/subnets via EKS_VPC_CONFIG_PUBLIC, tag those subnets so
+    # If user provided VPC/subnets via EKS_VPC_CONFIG_PRIVATE, tag those subnets so
     # Service type LoadBalancer can provision internet-facing ELB/NLB.
-    if [ -n "$EKS_VPC_CONFIG_PUBLIC" ]; then
+    if [ -n "$EKS_VPC_CONFIG_PRIVATE" ]; then
         echo "Tagging provided public subnets for internet-facing LoadBalancers..."
         # Extract all subnet IDs from the config (deduplicated)
-        mapfile -t SUBNET_IDS < <(echo "$EKS_VPC_CONFIG_PUBLIC" | grep -E 'id:\s*subnet-' | awk '{print $2}' | tr -d '"' | sort -u)
+        mapfile -t SUBNET_IDS < <(echo "$EKS_VPC_CONFIG_PRIVATE" | grep -E 'id:\s*subnet-' | awk '{print $2}' | tr -d '"' | sort -u)
         for subnet_id in "${SUBNET_IDS[@]}"; do
             if [ -n "$subnet_id" ]; then
                 echo "Tagging subnet $subnet_id"
