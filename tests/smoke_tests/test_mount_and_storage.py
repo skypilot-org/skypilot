@@ -785,6 +785,14 @@ exclude.py
                 job_name=f'{jobs_name}',
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
                 timeout=600),
+
+            # Test that removed local files are not synced to the remote
+            # workdir after deletion
+            f'sky exec {name} "test -f ~/sky_workdir/data.txt"',
+            f'rm {os.path.join(temp_dir, "data.txt")}',
+            # We use exec instead of launch to avoid running the verification task in the yaml
+            f'sky exec {name} --workdir {temp_dir} "true"',
+            f'sky exec {name} "! test -f ~/sky_workdir/data.txt"',
         ]
 
         teardown_commands = [
