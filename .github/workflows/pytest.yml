@@ -68,35 +68,11 @@ jobs:
       - name: Set branch name and commit message
         id: set_env
         run: |
-          # Debug: show all available GitHub context variables
-          echo "=== GitHub Context Debug ==="
-          echo "github.head_ref: ${{ github.head_ref }}"
-          echo "github.ref: ${{ github.ref }}"
-          echo "github.ref_name: ${{ github.ref_name }}"
-          echo "github.event.pull_request.title: ${{ github.event.pull_request.title }}"
-          echo "github.event.pull_request.head.sha: ${{ github.event.pull_request.head.sha }}"
-          echo "github.event.head_commit.message: ${{ github.event.head_commit.message }}"
-          echo "github.sha: ${{ github.sha }}"
-          echo ""
-
-          # Set branch - prefer GITHUB_HEAD_REF for PRs
           BRANCH="${{ github.head_ref }}"
-          if [ -z "$BRANCH" ]; then
-            BRANCH="${{ github.ref_name }}"
-          fi
-          echo "branch=refs/heads/$BRANCH" >> $GITHUB_OUTPUT
-          echo "Setting branch: refs/heads/$BRANCH"
-
-          # Set message - try multiple sources
+          [ -z "$BRANCH" ] && BRANCH="${{ github.ref_name }}"
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
           MESSAGE="${{ github.event.pull_request.title }}"
-          if [ -z "$MESSAGE" ]; then
-            MESSAGE="${{ github.event.head_commit.message }}"
-          fi
-          if [ -z "$MESSAGE" ]; then
-            MESSAGE="$(git log -1 --pretty=%B ${{ github.sha }} 2>/dev/null || echo 'GitHub Actions Run')"
-          fi
           echo "message=$MESSAGE" >> $GITHUB_OUTPUT
-          echo "Setting message: $MESSAGE"
       - name: Run tests with pytest
         env:
           TEST_PATH: ${{ matrix.test-path }}
@@ -104,14 +80,8 @@ jobs:
           BUILDKITE_ANALYTICS_TOKEN: ${{ secrets.BUILDKITE_ANALYTICS_TOKEN }}
         run: |
           source ~/test-env/bin/activate
-          # Override GITHUB_REF to use actual branch name for PRs (collector reads GITHUB_REF)
           export GITHUB_REF="${{ steps.set_env.outputs.branch }}"
-          # Use commit message as test run description
-          # For GitHub Actions, the collector reads TEST_ANALYTICS_COMMIT_MESSAGE
           export TEST_ANALYTICS_COMMIT_MESSAGE="${{ steps.set_env.outputs.message }}"
-          # Debug: print the values
-          echo "GITHUB_REF=$GITHUB_REF"
-          echo "TEST_ANALYTICS_COMMIT_MESSAGE=$TEST_ANALYTICS_COMMIT_MESSAGE"
           if [[ "$TEST_NAME" == "No Parallel Tests" || "$TEST_NAME" == "Event Loop Lag Tests" ]]; then
             SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 eval "pytest -n 0 --dist no $TEST_PATH"
           else
@@ -150,49 +120,19 @@ jobs:
       - name: Set branch name and commit message
         id: set_env
         run: |
-          # Debug: show all available GitHub context variables
-          echo "=== GitHub Context Debug ==="
-          echo "github.head_ref: ${{ github.head_ref }}"
-          echo "github.ref: ${{ github.ref }}"
-          echo "github.ref_name: ${{ github.ref_name }}"
-          echo "github.event.pull_request.title: ${{ github.event.pull_request.title }}"
-          echo "github.event.pull_request.head.sha: ${{ github.event.pull_request.head.sha }}"
-          echo "github.event.head_commit.message: ${{ github.event.head_commit.message }}"
-          echo "github.sha: ${{ github.sha }}"
-          echo ""
-
-          # Set branch - prefer GITHUB_HEAD_REF for PRs
           BRANCH="${{ github.head_ref }}"
-          if [ -z "$BRANCH" ]; then
-            BRANCH="${{ github.ref_name }}"
-          fi
-          echo "branch=refs/heads/$BRANCH" >> $GITHUB_OUTPUT
-          echo "Setting branch: refs/heads/$BRANCH"
-
-          # Set message - try multiple sources
+          [ -z "$BRANCH" ] && BRANCH="${{ github.ref_name }}"
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
           MESSAGE="${{ github.event.pull_request.title }}"
-          if [ -z "$MESSAGE" ]; then
-            MESSAGE="${{ github.event.head_commit.message }}"
-          fi
-          if [ -z "$MESSAGE" ]; then
-            MESSAGE="$(git log -1 --pretty=%B ${{ github.sha }} 2>/dev/null || echo 'GitHub Actions Run')"
-          fi
           echo "message=$MESSAGE" >> $GITHUB_OUTPUT
-          echo "Setting message: $MESSAGE"
       - name: Run tests with pytest
         env:
           TEST_PATH: ${{ matrix.test-path }}
           BUILDKITE_ANALYTICS_TOKEN: ${{ secrets.BUILDKITE_ANALYTICS_TOKEN }}
         run: |
           source ~/test-env/bin/activate
-          # Override GITHUB_REF to use actual branch name for PRs (collector reads GITHUB_REF)
           export GITHUB_REF="${{ steps.set_env.outputs.branch }}"
-          # Use commit message as test run description
-          # For GitHub Actions, the collector reads TEST_ANALYTICS_COMMIT_MESSAGE
           export TEST_ANALYTICS_COMMIT_MESSAGE="${{ steps.set_env.outputs.message }}"
-          # Debug: print the values
-          echo "GITHUB_REF=$GITHUB_REF"
-          echo "TEST_ANALYTICS_COMMIT_MESSAGE=$TEST_ANALYTICS_COMMIT_MESSAGE"
           SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 eval "pytest -n 0 --dist no $TEST_PATH"
 
   failover-test:
@@ -228,46 +168,16 @@ jobs:
       - name: Set branch name and commit message
         id: set_env
         run: |
-          # Debug: show all available GitHub context variables
-          echo "=== GitHub Context Debug ==="
-          echo "github.head_ref: ${{ github.head_ref }}"
-          echo "github.ref: ${{ github.ref }}"
-          echo "github.ref_name: ${{ github.ref_name }}"
-          echo "github.event.pull_request.title: ${{ github.event.pull_request.title }}"
-          echo "github.event.pull_request.head.sha: ${{ github.event.pull_request.head.sha }}"
-          echo "github.event.head_commit.message: ${{ github.event.head_commit.message }}"
-          echo "github.sha: ${{ github.sha }}"
-          echo ""
-
-          # Set branch - prefer GITHUB_HEAD_REF for PRs
           BRANCH="${{ github.head_ref }}"
-          if [ -z "$BRANCH" ]; then
-            BRANCH="${{ github.ref_name }}"
-          fi
-          echo "branch=refs/heads/$BRANCH" >> $GITHUB_OUTPUT
-          echo "Setting branch: refs/heads/$BRANCH"
-
-          # Set message - try multiple sources
+          [ -z "$BRANCH" ] && BRANCH="${{ github.ref_name }}"
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
           MESSAGE="${{ github.event.pull_request.title }}"
-          if [ -z "$MESSAGE" ]; then
-            MESSAGE="${{ github.event.head_commit.message }}"
-          fi
-          if [ -z "$MESSAGE" ]; then
-            MESSAGE="$(git log -1 --pretty=%B ${{ github.sha }} 2>/dev/null || echo 'GitHub Actions Run')"
-          fi
           echo "message=$MESSAGE" >> $GITHUB_OUTPUT
-          echo "Setting message: $MESSAGE"
       - name: Run tests with pytest
         env:
           BUILDKITE_ANALYTICS_TOKEN: ${{ secrets.BUILDKITE_ANALYTICS_TOKEN }}
         run: |
           source ~/test-env/bin/activate
-          # Override GITHUB_REF to use actual branch name for PRs (collector reads GITHUB_REF)
           export GITHUB_REF="${{ steps.set_env.outputs.branch }}"
-          # Use commit message as test run description
-          # For GitHub Actions, the collector reads TEST_ANALYTICS_COMMIT_MESSAGE
           export TEST_ANALYTICS_COMMIT_MESSAGE="${{ steps.set_env.outputs.message }}"
-          # Debug: print the values
-          echo "GITHUB_REF=$GITHUB_REF"
-          echo "TEST_ANALYTICS_COMMIT_MESSAGE=$TEST_ANALYTICS_COMMIT_MESSAGE"
           SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 4 --dist worksteal ${{ matrix.test-path }}
