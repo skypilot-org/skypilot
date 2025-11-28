@@ -154,7 +154,7 @@ CONDA_INSTALLATION_COMMANDS = (
     '{ '
     # Use uname -m to get the architecture of the machine and download the
     # corresponding Miniconda3-Linux.sh script.
-    'curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-$(uname -m).sh -o Miniconda3-Linux.sh && '  # pylint: disable=line-too-long
+    'curl https://repo.anaconda.com/miniconda/Miniconda3-py311_23.11.0-2-Linux-$(uname -m).sh -o Miniconda3-Linux.sh && '  # pylint: disable=line-too-long
     # We do not use && for installation of conda and the following init commands
     # because for some images, conda is already installed, but not initialized.
     # In this case, we need to initialize conda and set auto_activate_base to
@@ -195,7 +195,7 @@ CONDA_INSTALLATION_COMMANDS = (
     # uv to use the python version specified in the `.python_version` file.
     # TODO(zhwu): consider adding --python-preference only-managed to avoid
     # using the system python, if a user report such issue.
-    f'{SKY_UV_CMD} venv --seed {SKY_REMOTE_PYTHON_ENV} --python 3.10;'
+    f'{SKY_UV_CMD} venv --seed {SKY_REMOTE_PYTHON_ENV} --python 3.11;'
     f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'
 )
 
