@@ -39,7 +39,7 @@ In this example, create the following repository secrets:
 - ``SKYPILOT_API_URL``: URL to the SkyPilot API server, in format of ``http(s)://url-or-ip``.
 If using basic auth, the URL should also include the credentials in format of ``http(s)://username:password@url-or-ip``.
 - ``SKYPILOT_SERVICE_ACCOUNT_TOKEN``: Only required if using OAuth. Service account token for GitHub actions user generated above.
-- ``SLACK_BOT_TOKEN``: Optional, create a [Slack App](https://api.slack.com/apps) and get a slack "App-Level Token" with `connections:write` permssion to send a summary message. If not provided, a slack message is not sent after a job is queued.
+- ``SLACK_BOT_TOKEN``: Optional, create a [Slack App](https://api.slack.com/apps) and get a slack "App-Level Token" with `connections:write` permission to send a summary message. If not provided, a slack message is not sent after a job is queued.
 - ``SLACK_CHANNEL_ID``: Optional, Slack Channel ID to send a summary message. If not provided, a slack message is not sent after a job is queued.
 
 ## Repository Structure

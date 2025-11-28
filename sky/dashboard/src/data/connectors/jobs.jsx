@@ -84,6 +84,7 @@ export async function getManagedJobs(options = {}) {
       throw new Error(msg);
     }
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
+    let errorMessage = fetchedData.statusText;
     if (fetchedData.status === 500) {
       try {
         const data = await fetchedData.json();
@@ -93,18 +94,25 @@ export async function getManagedJobs(options = {}) {
             // Handle specific error types
             if (error.type && error.type === CLUSTER_NOT_UP_ERROR) {
               return { jobs: [], total: 0, controllerStopped: true };
+            } else {
+              errorMessage = error.message || String(data.detail.error);
             }
           } catch (jsonError) {
-            console.error('Error parsing JSON:', jsonError);
+            console.error(
+              'Error parsing JSON from data.detail.error:',
+              jsonError
+            );
+            errorMessage = String(data.detail.error);
           }
         }
       } catch (parseError) {
-        console.error('Error parsing JSON:', parseError);
+        console.error('Error parsing response JSON:', parseError);
+        errorMessage = String(parseError);
       }
     }
     // Handle all error status codes (4xx, 5xx, etc.)
     if (!fetchedData.ok) {
-      const msg = `API request to get managed jobs result failed with status ${fetchedData.status}`;
+      const msg = `API request to get managed jobs result failed with status ${fetchedData.status}, error: ${errorMessage}`;
       throw new Error(msg);
     }
     // print out the response for debugging
@@ -323,7 +331,7 @@ export async function getPoolStatus() {
       throw new Error(msg);
     }
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
-
+    let errorMessage = fetchedData.statusText;
     if (fetchedData.status === 500) {
       try {
         const data = await fetchedData.json();
@@ -332,18 +340,25 @@ export async function getPoolStatus() {
             const error = JSON.parse(data.detail.error);
             if (error.type && error.type === CLUSTER_NOT_UP_ERROR) {
               return { pools: [], controllerStopped: true };
+            } else {
+              errorMessage = error.message || String(data.detail.error);
             }
           } catch (jsonError) {
-            console.error('Failed to parse error JSON:', jsonError);
+            console.error(
+              'Error parsing JSON from data.detail.error:',
+              jsonError
+            );
+            errorMessage = String(data.detail.error);
           }
         }
       } catch (dataError) {
-        console.error('Failed to parse response JSON:', dataError);
+        console.error('Error parsing response JSON:', dataError);
+        errorMessage = String(dataError);
       }
     }
 
     if (!fetchedData.ok) {
-      const msg = `API request to get pool status result failed with status ${fetchedData.status}`;
+      const msg = `API request to get pool status result failed with status ${fetchedData.status}, error: ${errorMessage}`;
       throw new Error(msg);
     }
 

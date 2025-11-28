@@ -17,7 +17,6 @@ def test_request_body_env_vars_includes_expected_keys(monkeypatch):
                        '/tmp/project.yaml')
     monkeypatch.setenv(constants.ENV_VAR_DB_CONNECTION_URI, 'db-uri')
 
-    payloads.request_body_env_vars.cache_clear()
     monkeypatch.setattr(payloads.common, 'is_api_server_local', lambda: True)
     local_env = payloads.request_body_env_vars()
     assert server_env not in local_env
@@ -27,7 +26,6 @@ def test_request_body_env_vars_includes_expected_keys(monkeypatch):
     assert skypilot_config.ENV_VAR_GLOBAL_CONFIG not in local_env
     assert skypilot_config.ENV_VAR_PROJECT_CONFIG not in local_env
 
-    payloads.request_body_env_vars.cache_clear()
     monkeypatch.setattr(payloads.common, 'is_api_server_local', lambda: False)
     remote_env = payloads.request_body_env_vars()
     assert 'AWS_PROFILE' not in remote_env
