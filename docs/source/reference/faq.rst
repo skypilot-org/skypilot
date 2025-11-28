@@ -193,7 +193,7 @@ Check out your schema version by running the following command:
 
 .. code-block:: bash
 
-  python -c "from sky.clouds import service_catalog; print(service_catalog.CATALOG_SCHEMA_VERSION)"
+  python -c "from sky.skylet import constants; print(constants.CATALOG_SCHEMA_VERSION)"
 
 You can customize the catalog files to your needs.
 For example, if you have access to special regions of GCP, add the data to ``~/.sky/catalogs/<schema-version>/gcp.csv``.
