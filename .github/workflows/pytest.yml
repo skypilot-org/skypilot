@@ -69,6 +69,7 @@ jobs:
         env:
           TEST_PATH: ${{ matrix.test-path }}
           TEST_NAME: ${{ matrix.test-name }}
+          BUILDKITE_ANALYTICS_TOKEN: ${{ secrets.BUILDKITE_ANALYTICS_TOKEN }}
         run: |
           source ~/test-env/bin/activate
           if [[ "$TEST_NAME" == "No Parallel Tests" || "$TEST_NAME" == "Event Loop Lag Tests" ]]; then
@@ -109,6 +110,7 @@ jobs:
       - name: Run tests with pytest
         env:
           TEST_PATH: ${{ matrix.test-path }}
+          BUILDKITE_ANALYTICS_TOKEN: ${{ secrets.BUILDKITE_ANALYTICS_TOKEN }}
         run: |
           source ~/test-env/bin/activate
           SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 eval "pytest -n 0 --dist no $TEST_PATH"
@@ -144,6 +146,8 @@ jobs:
           uv pip install -e ".[all]"
           uv pip install pytest pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0 moto==5.1.2 buildkite-test-collector
       - name: Run tests with pytest
+        env:
+          BUILDKITE_ANALYTICS_TOKEN: ${{ secrets.BUILDKITE_ANALYTICS_TOKEN }}
         run: |
           source ~/test-env/bin/activate
           SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 4 --dist worksteal ${{ matrix.test-path }}
