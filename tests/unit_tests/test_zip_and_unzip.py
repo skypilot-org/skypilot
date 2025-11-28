@@ -115,3 +115,42 @@ def test_unzip_file(skyignore_dir, tmp_path):
         # Verify empty folders are preserved
         assert (unzipped_dir / 'empty-folder').is_dir()
         assert not any((unzipped_dir / 'empty-folder').iterdir())
+
+
+def test_unzip_file_deletes_old_files(tmp_path):
+    """Test that unzip_file deletes old files before extracting new ones."""
+    # First upload
+    zip_path1 = tmp_path / 'upload1.zip'
+    source_dir1 = tmp_path / 'source1'
+    source_dir1.mkdir()
+    (source_dir1 / 'file_a.txt').write_text('a')
+    (source_dir1 / 'file_b.txt').write_text('b')
+    (source_dir1 / 'old_file.txt').write_text('delete me')
+
+    storage_utils.zip_files_and_folders([str(source_dir1)], zip_path1,
+                                        io.StringIO())
+
+    extract_dir = tmp_path / 'extract'
+    extract_dir.mkdir()
+    asyncio.run(server.unzip_file(zip_path1, extract_dir))
+
+    # Verify all files exist
+    extracted = extract_dir / str(source_dir1).lstrip('/')
+    assert (extracted / 'file_a.txt').exists()
+    assert (extracted / 'file_b.txt').exists()
+    assert (extracted / 'old_file.txt').exists()
+
+    # Delete old_file.txt from source to simulate local deletion
+    (source_dir1 / 'old_file.txt').unlink()
+
+    # Second upload WITHOUT old_file.txt
+    zip_path2 = tmp_path / 'upload2.zip'
+
+    storage_utils.zip_files_and_folders([str(source_dir1)], zip_path2,
+                                        io.StringIO())
+    asyncio.run(server.unzip_file(zip_path2, extract_dir))
+
+    # Verify old_file.txt is DELETED
+    assert (extracted / 'file_a.txt').exists()
+    assert (extracted / 'file_b.txt').exists()
+    assert not (extracted / 'old_file.txt').exists()
