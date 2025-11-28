@@ -16,7 +16,6 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
     from sky.utils import volume as volume_lib
 
-_CREDENTIAL_FILE = 'config.json'
 
 
 @registry.CLOUD_REGISTRY.register
@@ -47,7 +46,7 @@ class Verda(clouds.Cloud):
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _MAX_VOLUME_NAME_LEN_LIMIT = 30
-    _regions: List[clouds.Region] = []
+    CREDENTIALS_PATH = os.path.expanduser('~/.verda/config.json')
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
     OPEN_PORTS_VERSION = clouds.OpenPortsVersion.LAUNCH_ONLY
@@ -59,7 +58,7 @@ class Verda(clouds.Cloud):
         region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         """The features not supported based on the resources provided.
-
+        
         This method is used by check_features_are_supported() to check if the
         cloud implementation supports all the requested features.
 
@@ -68,7 +67,13 @@ class Verda(clouds.Cloud):
             cloud implementation.
         """
         del resources  # unused
-        return cls._CLOUD_UNSUPPORTED_FEATURES
+        unsupported_features = cls._CLOUD_UNSUPPORTED_FEATURES.copy()
+        
+        # Hide MULTI_NODE feature behind experimental flag
+        if os.getenv('SKYPILOT_EXPERIMENTAL_VERDA_MULTI_NODE', '') == '1':
+            unsupported_features.pop(clouds.CloudImplementationFeatures.MULTI_NODE, None)
+        
+        return unsupported_features
 
     @classmethod
     def _max_cluster_name_length(cls) -> Optional[int]:
@@ -278,9 +283,9 @@ class Verda(clouds.Cloud):
         return configured, error
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        return {
-            f'~/.verda/{_CREDENTIAL_FILE}': f'~/.verda/{_CREDENTIAL_FILE}'
-        }
+        if os.path.exists(self.CREDENTIALS_PATH):
+            return { f'{self.CREDENTIALS_PATH}': f'{self.CREDENTIALS_PATH}' }
+        return {}
 
     @classmethod
     def get_user_identities(cls) -> Optional[List[List[str]]]:
