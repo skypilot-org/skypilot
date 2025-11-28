@@ -5644,6 +5644,7 @@ def _generate_task_with_service(
 
     return task
 
+
 @serve.command('apply', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @click.argument('service_yaml',
@@ -5670,7 +5671,7 @@ def _generate_task_with_service(
                     'service with rolling update. If "blue_green", SkyServe '
                     'will update the service with blue-green update. This '
                     'option is only valid when the service is already running.')
-              )
+             )
 @_add_click_options(flags.TASK_OPTIONS + flags.EXTRA_RESOURCES_OPTIONS +
                     flags.COMMON_OPTIONS)
 @flags.yes_option()
@@ -5754,13 +5755,11 @@ def serve_apply(
     with dag_lib.Dag() as dag:
         dag.add(task)
 
-    serve_lib.apply(
-        task=task,
-        workers=None,
-        service_name=service_name,
-        mode=serve_lib.UpdateMode(mode),
-        _need_confirmation=not yes
-    )
+    serve_lib.apply(task=task,
+                    workers=None,
+                    service_name=service_name,
+                    mode=serve_lib.UpdateMode(mode),
+                    _need_confirmation=not yes)
 
 
 @serve.command('up', cls=_DocumentedCodeCommand)
