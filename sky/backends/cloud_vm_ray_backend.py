@@ -769,6 +769,7 @@ class RayCodeGen:
            [ -d {constants.RCLONE_MOUNT_CACHED_LOG_DIR} ] && \
            [ "$(ls -A {constants.RCLONE_MOUNT_CACHED_LOG_DIR})" ]; then
             flushed=0
+            initial_total=0
             # extra second on top of --vfs-cache-poll-interval to
             # avoid race condition between rclone log line creation and this check.
             sleep 1
@@ -776,15 +777,45 @@ class RayCodeGen:
                 # sleep for the same interval as --vfs-cache-poll-interval
                 sleep {constants.RCLONE_CACHE_REFRESH_INTERVAL}
                 flushed=1
+                total_to_upload=0
+                total_uploading=0
                 for file in {constants.RCLONE_MOUNT_CACHED_LOG_DIR}/*; do
-                    exitcode=0
-                    tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?
-                    if [ $exitcode -ne 0 ]; then
-                        echo "skypilot: cached mount is still uploading to remote"
+                    # Extract the latest "vfs cache: cleaned:" line
+                    cache_line=$(tac $file | grep "vfs cache: cleaned:" -m 1)
+                    if [ -z "$cache_line" ]; then
+                        continue
+                    fi
+                    # Check if upload is complete
+                    echo "$cache_line" | grep "in use 0, to upload 0, uploading 0" -q
+                    if [ $? -ne 0 ]; then
+                        # Extract numbers: "to upload X" and "uploading Y"
+                        to_upload=$(echo "$cache_line" | sed -n 's/.*to upload \([0-9]*\).*/\1/p')
+                        uploading=$(echo "$cache_line" | sed -n 's/.*uploading \([0-9]*\).*/\1/p')
+                        # Default to 0 if extraction failed
+                        to_upload=${to_upload:-0}
+                        uploading=${uploading:-0}
+                        total_to_upload=$((total_to_upload + to_upload))
+                        total_uploading=$((total_uploading + uploading))
                         flushed=0
-                        break
                     fi
                 done
+                if [ $flushed -eq 0 ]; then
+                    # Calculate current total remaining
+                    current_total=$((total_to_upload + total_uploading))
+                    # Set initial total on first iteration
+                    if [ $initial_total -eq 0 ]; then
+                        initial_total=$current_total
+                    fi
+                    # Calculate percentage
+                    if [ $initial_total -gt 0 ]; then
+                        completed=$((initial_total - current_total))
+                        # Use awk for floating point calculation
+                        percent=$(awk -v completed=$completed -v total=$initial_total "BEGIN {{printf \"%.1f\", (completed / total) * 100}}")
+                        echo "skypilot: cached mount uploading to remote: $percent% complete ($completed/$initial_total files, $current_total remaining: $total_to_upload queued, $total_uploading uploading)"
+                    else
+                        echo "skypilot: cached mount uploading to remote: $current_total files remaining ($total_to_upload queued, $total_uploading uploading)"
+                    fi
+                fi
             done
             echo "skypilot: cached mount uploaded complete"
         fi""")
