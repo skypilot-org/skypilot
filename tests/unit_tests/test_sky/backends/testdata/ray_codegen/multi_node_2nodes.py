@@ -39,12 +39,9 @@ kwargs = dict()
 # launched before #1790.
 if os.path.exists('/tmp/ray_skypilot'):
     kwargs['_temp_dir'] = '/tmp/ray_skypilot'
-ray.init(
-    address='auto',
-    namespace='__sky__3__',
-    log_to_driver=True,
-    **kwargs
-)
+ray.init(address='auto', namespace='__sky__3__', log_to_driver=True, **kwargs)
+
+
 def get_or_fail(futures, pg) -> List[int]:
     """Wait for tasks, if any fails, cancel all unready."""
     if not futures:
@@ -54,6 +51,7 @@ def get_or_fail(futures, pg) -> List[int]:
     failed = False
     # Wait for 1 task to be ready.
     ready = []
+
     # Keep invoking ray.wait if ready is empty. This is because
     # ray.wait with timeout=None will only wait for 10**6 seconds,
     # which will cause tasks running for more than 12 days to return
@@ -94,8 +92,10 @@ def get_or_fail(futures, pg) -> List[int]:
     sys.stdout.flush()
     return returncodes, pids
 
+
 run_fn = None
 futures = []
+
 
 class _ProcessingArgs:
     """Arguments for processing logs."""
@@ -118,6 +118,7 @@ class _ProcessingArgs:
         self.line_processor = line_processor
         self.streaming_prefix = streaming_prefix
 
+
 def _get_context():
     # TODO(aylei): remove this after we drop the backward-compatibility for
     # 0.9.x in 0.12.0
@@ -126,6 +127,7 @@ def _get_context():
         return context.get()
     else:
         return None
+
 
 def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
     """Process the stream of a process."""
@@ -181,6 +183,7 @@ def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
                 out.append(line)
     return ''.join(out)
 
+
 def process_subprocess_stream(proc, stdout_stream_handler,
                               stderr_stream_handler) -> Tuple[str, str]:
     """Process the stream of a process in threads, blocking."""
@@ -201,6 +204,7 @@ def process_subprocess_stream(proc, stdout_stream_handler,
         stdout = stdout_stream_handler(proc.stdout, sys.stdout)
         stderr = ''
     return stdout, stderr
+
 
 def run_with_log(
     cmd: Union[List[str], str],
@@ -343,6 +347,7 @@ def run_with_log(
             subprocess_utils.kill_children_processes()
             raise
 
+
 def make_task_bash_script(codegen: str,
                           env_vars: Optional[Dict[str, str]] = None) -> str:
     # set -a is used for exporting all variables functions to the environment
@@ -373,6 +378,7 @@ def make_task_bash_script(codegen: str,
     script = '\n'.join(script)
     return script
 
+
 def add_ray_env_vars(
         env_vars: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     # Adds Ray-related environment variables.
@@ -387,6 +393,7 @@ def add_ray_env_vars(
         if env_var in env_dict:
             env_vars[env_var] = env_dict[env_var]
     return env_vars
+
 
 def run_bash_command_with_log(bash_command: str,
                               log_path: str,
@@ -409,6 +416,7 @@ def run_bash_command_with_log(bash_command: str,
                             with_ray=with_ray,
                             shell=True)
 
+
 def run_bash_command_with_log_and_return_pid(
         bash_command: str,
         log_path: str,
@@ -419,8 +427,10 @@ def run_bash_command_with_log_and_return_pid(
                                             stream_logs, with_ray)
     return {'return_code': return_code, 'pid': os.getpid()}
 
+
 run_bash_command_with_log = run_bash_command_with_log
-run_bash_command_with_log_and_return_pid =                 ray.remote(run_bash_command_with_log_and_return_pid)
+run_bash_command_with_log_and_return_pid = ray.remote(
+    run_bash_command_with_log_and_return_pid)
 if hasattr(autostop_lib, 'set_last_active_time_to_now'):
     autostop_lib.set_last_active_time_to_now()
 
@@ -429,32 +439,40 @@ pg = ray_util.placement_group([{"CPU": 2.0}, {"CPU": 2.0}], 'STRICT_SPREAD')
 plural = 's' if 2 > 1 else ''
 node_str = f'2 node{plural}'
 message = ('[2m├── [0m[2m'
-            'Waiting for task resources on '
+           'Waiting for task resources on '
            f'{node_str}.[0m')
 print(message, flush=True)
 # FIXME: This will print the error message from autoscaler if
 # it is waiting for other task to finish. We should hide the
 # error message.
 ray.get(pg.ready())
-print('\x1b[2m└── \x1b[0mJob started. Streaming logs... \x1b[2m(Ctrl-C to exit log streaming; job will not be killed)\x1b[0m', flush=True)
+print(
+    '\x1b[2m└── \x1b[0mJob started. Streaming logs... \x1b[2m(Ctrl-C to exit log streaming; job will not be killed)\x1b[0m',
+    flush=True)
 
 job_lib.set_job_started(3)
 job_lib.scheduler.schedule_step()
+
+
 @ray.remote
 def check_ip():
     return ray.util.get_node_ip_address()
+
+
 gang_scheduling_id_to_ip = ray.get([
-    check_ip.options(
-            num_cpus=2.0,
-            scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy(
-                placement_group=pg,
-                placement_group_bundle_index=i
-            )).remote()
+    check_ip.options(num_cpus=2.0,
+                     scheduling_strategy=ray.util.scheduling_strategies.
+                     PlacementGroupSchedulingStrategy(
+                         placement_group=pg,
+                         placement_group_bundle_index=i)).remote()
     for i in range(pg.bundle_count)
 ])
 
-cluster_ips_to_node_id = {ip: i for i, ip in enumerate(['10.0.0.1', '10.0.0.2'])}
-job_ip_rank_list = sorted(gang_scheduling_id_to_ip, key=cluster_ips_to_node_id.get)
+cluster_ips_to_node_id = {
+    ip: i for i, ip in enumerate(['10.0.0.1', '10.0.0.2'])
+}
+job_ip_rank_list = sorted(gang_scheduling_id_to_ip,
+                          key=cluster_ips_to_node_id.get)
 job_ip_rank_map = {ip: i for i, ip in enumerate(job_ip_rank_list)}
 job_ip_list_str = '\n'.join(job_ip_rank_list)
 
@@ -462,31 +480,35 @@ sky_env_vars_dict = {}
 sky_env_vars_dict['SKYPILOT_NODE_IPS'] = job_ip_list_str
 sky_env_vars_dict['SKYPILOT_NUM_NODES'] = len(job_ip_rank_list)
 
-sky_env_vars_dict['SKYPILOT_TASK_ID'] = 'sky-2024-11-17-00-00-00-000002-cluster-3'
+sky_env_vars_dict[
+    'SKYPILOT_TASK_ID'] = 'sky-2024-11-17-00-00-00-000002-cluster-3'
 script = 'echo "Running on node $SKYPILOT_NODE_RANK"'
 rclone_flush_script = '\n# Only waits if cached mount is enabled (RCLONE_MOUNT_CACHED_LOG_DIR is not empty)\n# findmnt alone is not enough, as some clouds (e.g. AWS on ARM64) uses\n# rclone for normal mounts as well.\nif [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ] &&            [ -d ~/.sky/rclone_log ] &&            [ "$(ls -A ~/.sky/rclone_log)" ]; then\n    flushed=0\n    # extra second on top of --vfs-cache-poll-interval to\n    # avoid race condition between rclone log line creation and this check.\n    sleep 1\n    while [ $flushed -eq 0 ]; do\n        # sleep for the same interval as --vfs-cache-poll-interval\n        sleep 10\n        flushed=1\n        for file in ~/.sky/rclone_log/*; do\n            exitcode=0\n            tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?\n            if [ $exitcode -ne 0 ]; then\n                echo "skypilot: cached mount is still uploading to remote"\n                flushed=0\n                break\n            fi\n        done\n    done\n    echo "skypilot: cached mount uploaded complete"\nfi'
 if run_fn is not None:
     script = run_fn(0, gang_scheduling_id_to_ip)
 
 if script is not None:
-    script=f'unset RAY_RAYLET_PID; {script}'
+    script = f'unset RAY_RAYLET_PID; {script}'
     script += rclone_flush_script
     sky_env_vars_dict['SKYPILOT_NUM_GPUS_PER_NODE'] = 0
 
     ip = gang_scheduling_id_to_ip[0]
     rank = job_ip_rank_map[ip]
 
-    if len(cluster_ips_to_node_id) == 1: # Single-node task on single-node cluter
+    if len(cluster_ips_to_node_id
+          ) == 1:  # Single-node task on single-node cluter
         name_str = 'distributed_task,' if 'distributed_task' != None else 'task,'
-        log_path = os.path.expanduser(os.path.join('/sky/logs/tasks', 'run.log'))
-    else: # Single-node or multi-node task on multi-node cluster
+        log_path = os.path.expanduser(os.path.join('/sky/logs/tasks',
+                                                   'run.log'))
+    else:  # Single-node or multi-node task on multi-node cluster
         idx_in_cluster = cluster_ips_to_node_id[ip]
         if cluster_ips_to_node_id[ip] == 0:
             node_name = 'head'
         else:
             node_name = f'worker{idx_in_cluster}'
         name_str = f'{node_name}, rank={rank},'
-        log_path = os.path.expanduser(os.path.join('/sky/logs/tasks', f'{rank}-{node_name}.log'))
+        log_path = os.path.expanduser(
+            os.path.join('/sky/logs/tasks', f'{rank}-{node_name}.log'))
     sky_env_vars_dict['SKYPILOT_NODE_RANK'] = rank
 
     sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = 3
@@ -504,31 +526,35 @@ sky_env_vars_dict = {}
 sky_env_vars_dict['SKYPILOT_NODE_IPS'] = job_ip_list_str
 sky_env_vars_dict['SKYPILOT_NUM_NODES'] = len(job_ip_rank_list)
 
-sky_env_vars_dict['SKYPILOT_TASK_ID'] = 'sky-2024-11-17-00-00-00-000002-cluster-3'
+sky_env_vars_dict[
+    'SKYPILOT_TASK_ID'] = 'sky-2024-11-17-00-00-00-000002-cluster-3'
 script = 'echo "Running on node $SKYPILOT_NODE_RANK"'
 rclone_flush_script = '\n# Only waits if cached mount is enabled (RCLONE_MOUNT_CACHED_LOG_DIR is not empty)\n# findmnt alone is not enough, as some clouds (e.g. AWS on ARM64) uses\n# rclone for normal mounts as well.\nif [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ] &&            [ -d ~/.sky/rclone_log ] &&            [ "$(ls -A ~/.sky/rclone_log)" ]; then\n    flushed=0\n    # extra second on top of --vfs-cache-poll-interval to\n    # avoid race condition between rclone log line creation and this check.\n    sleep 1\n    while [ $flushed -eq 0 ]; do\n        # sleep for the same interval as --vfs-cache-poll-interval\n        sleep 10\n        flushed=1\n        for file in ~/.sky/rclone_log/*; do\n            exitcode=0\n            tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?\n            if [ $exitcode -ne 0 ]; then\n                echo "skypilot: cached mount is still uploading to remote"\n                flushed=0\n                break\n            fi\n        done\n    done\n    echo "skypilot: cached mount uploaded complete"\nfi'
 if run_fn is not None:
     script = run_fn(1, gang_scheduling_id_to_ip)
 
 if script is not None:
-    script=f'unset RAY_RAYLET_PID; {script}'
+    script = f'unset RAY_RAYLET_PID; {script}'
     script += rclone_flush_script
     sky_env_vars_dict['SKYPILOT_NUM_GPUS_PER_NODE'] = 0
 
     ip = gang_scheduling_id_to_ip[1]
     rank = job_ip_rank_map[ip]
 
-    if len(cluster_ips_to_node_id) == 1: # Single-node task on single-node cluter
+    if len(cluster_ips_to_node_id
+          ) == 1:  # Single-node task on single-node cluter
         name_str = 'distributed_task,' if 'distributed_task' != None else 'task,'
-        log_path = os.path.expanduser(os.path.join('/sky/logs/tasks', 'run.log'))
-    else: # Single-node or multi-node task on multi-node cluster
+        log_path = os.path.expanduser(os.path.join('/sky/logs/tasks',
+                                                   'run.log'))
+    else:  # Single-node or multi-node task on multi-node cluster
         idx_in_cluster = cluster_ips_to_node_id[ip]
         if cluster_ips_to_node_id[ip] == 0:
             node_name = 'head'
         else:
             node_name = f'worker{idx_in_cluster}'
         name_str = f'{node_name}, rank={rank},'
-        log_path = os.path.expanduser(os.path.join('/sky/logs/tasks', f'{rank}-{node_name}.log'))
+        log_path = os.path.expanduser(
+            os.path.join('/sky/logs/tasks', f'{rank}-{node_name}.log'))
     sky_env_vars_dict['SKYPILOT_NODE_RANK'] = rank
 
     sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = 3
