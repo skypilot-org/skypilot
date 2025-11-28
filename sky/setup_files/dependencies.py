@@ -84,6 +84,7 @@ install_requires = [
     'bcrypt==4.0.1',
     'pyjwt',
     'gitpython',
+    'paramiko',
     'types-paramiko',
     'alembic',
     'aiohttp',
@@ -234,6 +235,7 @@ cloud_dependencies: Dict[str, List[str]] = {
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'seeweb': ['ecsapi==0.4.0'],
     'shadeform': [],  # No dependencies needed for shadeform
+    'slurm': [],  # No dependencies needed for slurm
 }
 
 # Calculate which clouds should be included in the [all] installation.

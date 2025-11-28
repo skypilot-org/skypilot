@@ -187,6 +187,7 @@ setup_commands:
     {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
     {%- endfor %}
+    {{ setup_sky_dirs_commands }}
     {{ conda_installation_commands }}
     conda config --remove channels "https://aws-ml-conda-ec2.s3.us-west-2.amazonaws.com" || true;
     {{ ray_skypilot_installation_commands }}

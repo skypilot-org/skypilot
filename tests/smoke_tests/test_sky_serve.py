@@ -350,13 +350,14 @@ def test_skyserve_oci_http():
 @pytest.mark.no_hyperbolic  # Hyperbolic has low availability of T4 GPUs
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
 @pytest.mark.no_seeweb  # Seeweb  does not support T4
+@pytest.mark.no_slurm  # Slurm does not support opening ports
 @pytest.mark.serve
 @pytest.mark.resource_heavy
 @pytest.mark.no_shadeform  # Shadeform does not support T4 GPUs
 def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
     """Test skyserve with real LLM usecase"""
     if generic_cloud == 'kubernetes':
-        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
+        accelerator = smoke_tests_utils.get_available_gpus()
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
 
@@ -427,6 +428,7 @@ def test_skyserve_spot_recovery():
 @pytest.mark.no_shadeform  # Shadeform does not support opening ports
 @pytest.mark.serve
 @pytest.mark.no_kubernetes
+@pytest.mark.no_slurm  # Slurm does not support opening ports
 @pytest.mark.no_do
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
@@ -517,6 +519,7 @@ def test_skyserve_dynamic_ondemand_fallback():
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.no_shadeform  # Shadeform does not support opening ports
+@pytest.mark.no_slurm  # Slurm does not support opening ports
 @pytest.mark.no_remote_server
 def test_skyserve_user_bug_restart(generic_cloud: str):
     """Tests that we restart the service after user bug."""
@@ -561,6 +564,7 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_shadeform  # Shadeform does not support opening ports
+@pytest.mark.no_slurm  # Slurm does not support opening ports
 @pytest.mark.serve
 @pytest.mark.no_kubernetes  # Replicas on k8s may be running on the same node and have the same public IP
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
@@ -637,6 +641,7 @@ def test_skyserve_auto_restart():
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_shadeform  # Shadeform does not support opening ports
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
+@pytest.mark.no_slurm  # Slurm does not support opening ports
 @pytest.mark.serve
 @pytest.mark.no_remote_server
 def test_skyserve_cancel(generic_cloud: str):
@@ -667,6 +672,7 @@ def test_skyserve_cancel(generic_cloud: str):
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_shadeform  # Shadeform does not support opening ports
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
+@pytest.mark.no_slurm  # Slurm does not support opening ports
 @pytest.mark.serve
 @pytest.mark.no_remote_server
 def test_skyserve_streaming(generic_cloud: str):
@@ -690,6 +696,7 @@ def test_skyserve_streaming(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_slurm  # Slurm does not support opening ports
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_shadeform  # Shadeform does not support opening ports
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
@@ -720,6 +727,7 @@ def test_skyserve_readiness_timeout_fail(generic_cloud: str):
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_shadeform  # Shadeform does not support opening ports
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
+@pytest.mark.no_slurm  # Slurm does not support opening ports
 @pytest.mark.serve
 @pytest.mark.no_remote_server
 def test_skyserve_large_readiness_timeout(generic_cloud: str):
@@ -746,6 +754,7 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_shadeform  # Shadeform does not support opening ports
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
+@pytest.mark.no_slurm  # Slurm does not support opening ports
 @pytest.mark.serve
 @pytest.mark.no_remote_server
 def test_skyserve_update(generic_cloud: str):
@@ -787,6 +796,7 @@ def test_skyserve_update(generic_cloud: str):
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_shadeform  # Shadeform does not support opening ports
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
+@pytest.mark.no_slurm  # Slurm does not support opening ports
 @pytest.mark.serve
 @pytest.mark.no_remote_server
 def test_skyserve_rolling_update(generic_cloud: str):
@@ -850,8 +860,9 @@ def test_skyserve_rolling_update(generic_cloud: str):
 @pytest.mark.no_fluidstack
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_shadeform  # Shadeform does not support opening ports
-@pytest.mark.serve
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
+@pytest.mark.no_slurm  # Slurm does not support opening ports
+@pytest.mark.serve
 @pytest.mark.no_remote_server
 def test_skyserve_fast_update(generic_cloud: str):
     """Test skyserve with fast update (Increment version of old replicas)"""
@@ -897,6 +908,7 @@ def test_skyserve_fast_update(generic_cloud: str):
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_shadeform  # Shadeform does not support opening ports
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
+@pytest.mark.no_slurm  # Slurm does not support opening ports
 @pytest.mark.serve
 @pytest.mark.no_remote_server
 def test_skyserve_update_autoscale(generic_cloud: str):
@@ -954,6 +966,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
 @pytest.mark.no_seeweb  # Seeweb does not support spot instances
+@pytest.mark.no_slurm  # Slurm does not support opening ports
 @pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
 def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     """Test skyserve with update that changes autoscaler"""
@@ -1030,8 +1043,10 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
 @pytest.mark.no_fluidstack
 @pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_slurm  # Slurm does not support opening ports
 @pytest.mark.no_shadeform  # Shadeform does not support opening ports
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
+@pytest.mark.no_slurm  # Slurm does not support opening ports
 @pytest.mark.serve
 @pytest.mark.no_remote_server
 def test_skyserve_failures(generic_cloud: str):
@@ -1092,6 +1107,7 @@ def test_skyserve_failures(generic_cloud: str):
 @pytest.mark.resource_heavy
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.no_shadeform  # Shadeform does not support opening ports
+@pytest.mark.no_slurm  # Slurm does not support opening ports
 def test_skyserve_https(generic_cloud: str):
     """Test skyserve with https"""
     name = _get_service_name()
@@ -1131,6 +1147,7 @@ def test_skyserve_https(generic_cloud: str):
 
 @pytest.mark.serve
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
+@pytest.mark.no_slurm  # Slurm does not support opening ports
 @pytest.mark.no_remote_server
 def test_skyserve_multi_ports(generic_cloud: str):
     """Test skyserve with multiple ports"""

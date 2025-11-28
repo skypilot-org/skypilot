@@ -362,7 +362,12 @@ class Test(NamedTuple):
 
 def get_timeout(generic_cloud: str,
                 override_timeout: int = DEFAULT_CMD_TIMEOUT):
-    timeouts = {'fluidstack': 60 * 60}  # file_mounts
+    timeouts = {
+        'fluidstack': 60 * 60,  # file_mounts
+        'slurm':
+            40 *
+            60  # Slurm uses NFS which is slower to write to for file_mounts tests
+    }
     return timeouts.get(generic_cloud, override_timeout)
 
 
@@ -1135,14 +1140,16 @@ def is_in_buildkite_env() -> bool:
     return env_options.Options.RUNNING_IN_BUILDKITE.get()
 
 
-def get_avaliabe_gpus_for_k8s_tests(default_gpu: str = 'T4') -> str:
-    """Get the available GPUs for K8s."""
-    if is_remote_server_test():
+def get_available_gpus(default_gpu: str = 'T4',
+                       infra: str = 'kubernetes',
+                       count: int = 1) -> str:
+    """Get the available GPUs for K8s or Slurm."""
+    try:
         prefix = ''
         env_file = pytest_config_file_override()
         if env_file is not None:
             prefix = f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}={env_file}'
-        command = f'{prefix} sky show-gpus --infra kubernetes | grep -A1 "^GPU" | tail -1 | awk "{{print \$1}}"'
+        command = f'{prefix} sky show-gpus --infra {infra} | grep -A1 "^GPU" | grep " {count}" | tail -1 | awk "{{print \$1}}"'
         Test.echo_without_prefix(command)
         result = subprocess_utils.run(command,
                                       shell=True,
@@ -1151,7 +1158,9 @@ def get_avaliabe_gpus_for_k8s_tests(default_gpu: str = 'T4') -> str:
                                       text=True)
         gpu_name = result.stdout.strip()
         return gpu_name
-    return default_gpu
+    except Exception as e:
+        Test.echo_without_prefix(f'Error getting available GPUs: {e}')
+        return default_gpu
 
 
 def get_enabled_cloud_storages() -> List[clouds.Cloud]:

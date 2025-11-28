@@ -7,6 +7,15 @@ from packaging import version
 import sky
 from sky.setup_files import dependencies
 
+# The base directory for all SkyPilot runtime artifacts.
+# Historically, we have always used $HOME, but we couldn't
+# do that for Slurm, because $HOME typically points to a NFS
+# mounted directory, which does not play nicely with SQLite.
+# https://sqlite.org/faq.html#q5
+# Additionally, having the skypilot-runtime python venv be
+# on an NFS makes things very slow.
+SKY_RUNTIME_DIR_ENV_VAR = 'SKY_RUNTIME_DIR'
+SKY_RUNTIME_DIR = '${SKY_RUNTIME_DIR:-$HOME}'
 SKY_LOGS_DIRECTORY = '~/sky_logs'
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
 SKY_IGNORE_FILE = '.skyignore'
@@ -25,7 +34,9 @@ SKY_REMOTE_RAY_PORT_DICT_STR = (
     f'"ray_dashboard_port":{SKY_REMOTE_RAY_DASHBOARD_PORT}}}')
 # The file contains the ports of the Ray cluster that SkyPilot launched,
 # i.e. the PORT_DICT_STR above.
-SKY_REMOTE_RAY_PORT_FILE = '~/.sky/ray_port.json'
+# Relative path as it is used inside Python code, and thus needs to be
+# resolved at runtime and joined with the runtime directory.
+SKY_REMOTE_RAY_PORT_FILE = '.sky/ray_port.json'
 SKY_REMOTE_RAY_TEMPDIR = '/tmp/ray_skypilot'
 SKY_REMOTE_RAY_VERSION = '2.9.3'
 
@@ -35,8 +46,8 @@ SKY_UNSET_PYTHONPATH = 'env -u PYTHONPATH'
 # can use this path. This is useful for the case where the user has a custom
 # conda environment as a default environment, which is not the same as the one
 # used for installing SkyPilot runtime (ray and skypilot).
-SKY_PYTHON_PATH_FILE = '~/.sky/python_path'
-SKY_RAY_PATH_FILE = '~/.sky/ray_path'
+SKY_PYTHON_PATH_FILE = f'{SKY_RUNTIME_DIR}/.sky/python_path'
+SKY_RAY_PATH_FILE = f'{SKY_RUNTIME_DIR}/.sky/ray_path'
 SKY_GET_PYTHON_PATH_CMD = (f'[ -s {SKY_PYTHON_PATH_FILE} ] && '
                            f'cat {SKY_PYTHON_PATH_FILE} 2> /dev/null || '
                            'which python3')
@@ -53,10 +64,11 @@ SKY_RAY_CMD = (f'{SKY_PYTHON_CMD} $([ -s {SKY_RAY_PATH_FILE} ] && '
                f'cat {SKY_RAY_PATH_FILE} 2> /dev/null || which ray)')
 # Separate env for SkyPilot runtime dependencies.
 SKY_REMOTE_PYTHON_ENV_NAME = 'skypilot-runtime'
-SKY_REMOTE_PYTHON_ENV: str = f'~/{SKY_REMOTE_PYTHON_ENV_NAME}'
+SKY_CONDA_ROOT = f'{SKY_RUNTIME_DIR}/miniconda3'
+SKY_REMOTE_PYTHON_ENV: str = f'{SKY_RUNTIME_DIR}/{SKY_REMOTE_PYTHON_ENV_NAME}'
 ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
 # uv is used for venv and pip, much faster than python implementations.
-SKY_UV_INSTALL_DIR = '"$HOME/.local/bin"'
+SKY_UV_INSTALL_DIR = f'"{SKY_RUNTIME_DIR}/.local/bin"'
 # set UV_SYSTEM_PYTHON to false in case the
 # user provided docker image set it to true.
 # unset PYTHONPATH in case the user provided docker image set it.
@@ -74,7 +86,7 @@ SKY_UV_RUN_CMD: str = (f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} run '
 # not work when conda is used.
 DEACTIVATE_SKY_REMOTE_PYTHON_ENV = (
     'export PATH='
-    f'$(echo $PATH | sed "s|$(echo ~)/{SKY_REMOTE_PYTHON_ENV_NAME}/bin:||") && '
+    f'$(echo $PATH | sed "s|$(echo {SKY_REMOTE_PYTHON_ENV})/bin:||") && '
     'unset VIRTUAL_ENV && unset VIRTUAL_ENV_PROMPT')
 
 # Prefix for SkyPilot environment variables
@@ -105,7 +117,12 @@ SKYLET_VERSION = '26'
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
 SKYLET_LIB_VERSION = 4
-SKYLET_VERSION_FILE = '~/.sky/skylet_version'
+# Relative path as it is used inside Python code, and thus needs to be
+# resolved at runtime and joined with the runtime directory.
+SKYLET_VERSION_FILE = '.sky/skylet_version'
+SKYLET_LOG_FILE = '.sky/skylet.log'
+SKYLET_PID_FILE = '.sky/skylet_pid'
+SKYLET_PORT_FILE = '.sky/skylet_port'
 SKYLET_GRPC_PORT = 46590
 SKYLET_GRPC_TIMEOUT_SECONDS = 10
 
@@ -143,6 +160,10 @@ DISABLE_GPU_ECC_COMMAND = (
     '{ sudo reboot || echo "Failed to reboot. ECC mode may not be disabled"; } '
     '|| true; ')
 
+SETUP_SKY_DIRS_COMMANDS = (f'mkdir -p ~/sky_workdir && '
+                           f'mkdir -p ~/.sky/sky_app && '
+                           f'mkdir -p {SKY_RUNTIME_DIR}/.sky;')
+
 # Install conda on the remote cluster if it is not already installed.
 # We use conda with python 3.10 to be consistent across multiple clouds with
 # best effort.
@@ -159,8 +180,10 @@ CONDA_INSTALLATION_COMMANDS = (
     # because for some images, conda is already installed, but not initialized.
     # In this case, we need to initialize conda and set auto_activate_base to
     # true.
-    '{ bash Miniconda3-Linux.sh -b || true; '
-    'eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && '
+    '{ '
+    f'INSTALL_DIR={SKY_CONDA_ROOT}; '
+    'bash Miniconda3-Linux.sh -b -p "${INSTALL_DIR}" || true; '
+    f'eval "$({SKY_CONDA_ROOT}/bin/conda shell.bash hook)" && conda init && '
     # Caller should replace {conda_auto_activate} with either true or false.
     'conda config --set auto_activate_base {conda_auto_activate} && '
     'conda activate base; }; '
@@ -203,7 +226,6 @@ _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'
 RAY_INSTALLATION_COMMANDS = (
     f'{SKY_UV_INSTALL_CMD};'
-    'mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;'
     # Print the PATH in provision.log to help debug PATH issues.
     'echo PATH=$PATH; '
     # Install setuptools<=69.5.1 to avoid the issue with the latest setuptools
@@ -237,7 +259,7 @@ RAY_INSTALLATION_COMMANDS = (
     #
     # Here, we add ~/.local/bin to the end of the PATH to make sure the issues
     # mentioned above are resolved.
-    'export PATH=$PATH:$HOME/.local/bin; '
+    f'export PATH=$PATH:{SKY_RUNTIME_DIR}/.local/bin; '
     # Writes ray path to file if it does not exist or the file is empty.
     f'[ -s {SKY_RAY_PATH_FILE} ] || '
     f'{{ {SKY_UV_RUN_CMD} '
@@ -513,7 +535,7 @@ CATALOG_SCHEMA_VERSION = 'v8'
 CATALOG_DIR = '~/.sky/catalogs'
 ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
               'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
-              'paperspace', 'primeintellect', 'do', 'nebius', 'ssh',
+              'paperspace', 'primeintellect', 'do', 'nebius', 'ssh', 'slurm',
               'hyperbolic', 'seeweb', 'shadeform')
 # END constants used for service catalog.
 

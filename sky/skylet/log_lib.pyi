@@ -68,7 +68,7 @@ def run_with_log(cmd: Union[List[str], str],
                  process_stream: bool = ...,
                  line_processor: Optional[log_utils.LineProcessor] = ...,
                  streaming_prefix: Optional[str] = ...,
-                 ray_job_id: Optional[str] = ...,
+                 log_cmd: bool = ...,
                  **kwargs) -> int:
     ...
 
@@ -87,7 +87,7 @@ def run_with_log(cmd: Union[List[str], str],
                  process_stream: bool = ...,
                  line_processor: Optional[log_utils.LineProcessor] = ...,
                  streaming_prefix: Optional[str] = ...,
-                 ray_job_id: Optional[str] = ...,
+                 log_cmd: bool = ...,
                  **kwargs) -> Tuple[int, str, str]:
     ...
 
@@ -106,8 +106,8 @@ def run_with_log(cmd: Union[List[str], str],
                  process_stream: bool = ...,
                  line_processor: Optional[log_utils.LineProcessor] = ...,
                  streaming_prefix: Optional[str] = ...,
-                 ray_job_id: Optional[str] = ...,
-                 **kwargs) -> Union[int, Tuple[int, str, str]]:
+                 log_cmd: bool = ...,
+                 **kwargs) -> Tuple[int, int]:
     ...
 
 
@@ -125,7 +125,8 @@ def run_bash_command_with_log(bash_command: str,
                               log_path: str,
                               env_vars: Optional[Dict[str, str]] = ...,
                               stream_logs: bool = ...,
-                              with_ray: bool = ...):
+                              with_ray: bool = ...,
+                              streaming_prefix: Optional[str] = ...) -> int:
     ...
 
 
@@ -134,7 +135,8 @@ def run_bash_command_with_log_and_return_pid(
         log_path: str,
         env_vars: Optional[Dict[str, str]] = ...,
         stream_logs: bool = ...,
-        with_ray: bool = ...):
+        with_ray: bool = ...,
+        streaming_prefix: Optional[str] = ...) -> Dict[str, Union[int, str]]:
     ...
 
 

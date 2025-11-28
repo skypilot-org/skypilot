@@ -58,8 +58,8 @@ from sky.utils import controller_utils
 def test_file_mounts(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     extra_flags = ''
-    if generic_cloud in 'kubernetes':
-        # Kubernetes does not support multi-node
+    if generic_cloud == 'slurm':
+        # Slurm does not support multi-node
         # NOTE: S3 mounting now works on all architectures including ARM64
         #  (uses rclone fallback for ARM64, goofys for x86_64).
         extra_flags = '--num-nodes 1'

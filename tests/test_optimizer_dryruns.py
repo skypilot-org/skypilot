@@ -696,11 +696,17 @@ def test_optimize_disk_tier(enable_all_clouds):
             task, blocked_resources=None)
         return set(per_cloud_candidates.keys())
 
+    all_clouds = set(registry.CLOUD_REGISTRY.values())
+    all_clouds_without_slurm = set()
+    for cloud in all_clouds:
+        if not isinstance(cloud, clouds.Slurm):
+            all_clouds_without_slurm.add(cloud)
+
     # All cloud supports BEST disk tier.
     best_tier_resources = sky.Resources(disk_tier=resources_utils.DiskTier.BEST)
     best_tier_candidates = _get_all_candidate_cloud(best_tier_resources)
-    assert best_tier_candidates == set(
-        registry.CLOUD_REGISTRY.values()), best_tier_candidates
+    assert (
+        best_tier_candidates == all_clouds_without_slurm), best_tier_candidates
 
     # Only AWS, GCP, Azure, OCI supports LOW disk tier.
     low_tier_resources = sky.Resources(disk_tier=resources_utils.DiskTier.LOW)
