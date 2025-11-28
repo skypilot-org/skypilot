@@ -303,7 +303,8 @@ def _generate_pipeline(test_file: str,
     for test_function, clouds_queues_param in function_cloud_map.items():
         for cloud, queue, param, extra_args in zip(*clouds_queues_param):
             label = f'{test_function} on {cloud}'
-            command = f'pytest {test_file}::{test_function} --{cloud}'
+            # Patch buildkite-test-collector before running pytest
+            command = f'python .buildkite/patch_buildkite_collector.py && pytest {test_file}::{test_function} --{cloud}'
             if param:
                 label += f' with param {param}'
                 command += f' -k {param}'
