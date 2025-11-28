@@ -11,13 +11,19 @@ from sky import authentication
 from sky import sky_logging
 from sky.utils import status_lib
 
-#TODO update to prod endpoint
 BASE_URL = 'https://api.hyperbolic.xyz'
 API_KEY_PATH = '~/.hyperbolic/api_key'
 
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
 TIMEOUT = 120
+
+# Hyperbolic API Endpoints
+API_ENDPOINTS = {
+    'create': '/v2/marketplace/virtual-machine-rentals',
+    'list': '/v2/marketplace/virtual-machine-rentals',
+    'terminate': '/v2/marketplace/virtual-machine-rentals/terminate'
+}
 
 logger = sky_logging.init_logger(__name__)
 
@@ -41,6 +47,10 @@ class HyperbolicInstanceStatus(enum.Enum):
     ERROR = 'error'
     TERMINATED = 'terminated'
 
+    # API endpoint statuses
+    PENDING = 'pending'
+    RUNNING = 'running'
+
     @classmethod
     def cluster_status_map(
         cls
@@ -48,7 +58,9 @@ class HyperbolicInstanceStatus(enum.Enum):
         return {
             cls.CREATING: status_lib.ClusterStatus.INIT,
             cls.STARTING: status_lib.ClusterStatus.INIT,
+            cls.PENDING: status_lib.ClusterStatus.INIT,  # Map PENDING to INIT
             cls.ONLINE: status_lib.ClusterStatus.UP,
+            cls.RUNNING: status_lib.ClusterStatus.UP,  # Map RUNNING to UP
             cls.FAILED: status_lib.ClusterStatus.INIT,
             cls.ERROR: status_lib.ClusterStatus.INIT,
             cls.RESTARTING: status_lib.ClusterStatus.INIT,
@@ -62,10 +74,31 @@ class HyperbolicInstanceStatus(enum.Enum):
     @classmethod
     def from_raw_status(cls, status: str) -> 'HyperbolicInstanceStatus':
         """Convert raw status string to HyperbolicInstanceStatus enum."""
-        try:
-            return cls(status.lower())
-        except ValueError as exc:
-            raise HyperbolicError(f'Unknown instance status: {status}') from exc
+        if not status:
+            return cls.UNKNOWN
+
+        status_lower = status.lower()
+        status_mapping = {
+            'failed': cls.FAILED,
+            'pending': cls.PENDING,
+            'running': cls.RUNNING,
+            'terminated': cls.TERMINATED,
+            'unknown': cls.UNKNOWN,
+            'online': cls.ONLINE,
+            'offline': cls.OFFLINE,
+            'starting': cls.STARTING,
+            'stopping': cls.STOPPING,
+            'busy': cls.BUSY,
+            'restarting': cls.RESTARTING,
+            'creating': cls.CREATING,
+            'error': cls.ERROR,
+        }
+
+        result = status_mapping.get(status_lower, cls.UNKNOWN)
+        if result == cls.UNKNOWN:
+            logger.warning(
+                f'Unknown instance status: {status}, defaulting to UNKNOWN')
+        return result
 
     def to_cluster_status(self) -> Optional[status_lib.ClusterStatus]:
         """Convert to SkyPilot cluster status."""
@@ -97,48 +130,41 @@ class HyperbolicClient:
             'Content-Type': 'application/json'
         }
 
-        # Debug logging for request
         logger.debug(f'Making {method} request to {url}')
         if payload:
             logger.debug(f'Request payload: {json.dumps(payload, indent=2)}')
 
         try:
             if method == 'GET':
-                response = requests.get(url, headers=headers, timeout=120)
+                response = requests.get(url, headers=headers, timeout=TIMEOUT)
             elif method == 'POST':
                 response = requests.post(url,
                                          headers=headers,
                                          json=payload,
-                                         timeout=120)
+                                         timeout=TIMEOUT)
             else:
                 raise HyperbolicError(f'Unsupported HTTP method: {method}')
 
-            # Debug logging for response
             logger.debug(f'Response status code: {response.status_code}')
-            logger.debug(f'Response headers: {dict(response.headers)}')
 
-            # Try to parse response as JSON
             try:
                 response_data = response.json()
                 logger.debug(
                     f'Response body: {json.dumps(response_data, indent=2)}')
             except json.JSONDecodeError as exc:
-                # If response is not JSON, use the raw text
                 response_text = response.text
                 logger.debug(f'Response body (raw): {response_text}')
                 if not response.ok:
-                    raise HyperbolicError(f'API request failed with status '
-                                          f'{response.status_code}: '
-                                          f'{response_text}') from exc
-                # If response is OK but not JSON, return empty dict
+                    raise HyperbolicError(
+                        f'API request failed with status '
+                        f'{response.status_code}: {response_text}') from exc
                 return {}
 
             if not response.ok:
                 error_msg = response_data.get(
                     'error', response_data.get('message', response.text))
-                raise HyperbolicError(
-                    f'API request failed with status {response.status_code}: '
-                    f'{error_msg}')
+                raise HyperbolicError(f'API request failed with status '
+                                      f'{response.status_code}: {error_msg}')
 
             return response_data
         except requests.exceptions.RequestException as e:
@@ -147,64 +173,124 @@ class HyperbolicClient:
             raise HyperbolicError(
                 f'Unexpected error during API request: {str(e)}') from e
 
-    def launch_instance(self, gpu_model: str, gpu_count: int,
-                        name: str) -> Tuple[str, str]:
-        """Launch a new instance with the specified configuration."""
-        # Initialize config with basic instance info
-        config = {
-            'gpuModel': gpu_model,
-            'gpuCount': str(gpu_count),
-            'userMetadata': {
-                'skypilot': {
-                    'cluster_name': name,
-                    'launch_time': str(int(time.time()))
-                }
+    def _create_payload(self, gpu_model: str, gpu_count: int,
+                        name: str) -> Dict[str, Any]:
+        """Create a payload for launching an instance."""
+        skypilot_metadata = {
+            'skypilot': {
+                'cluster_name': name,
+                'launch_time': str(int(time.time()))
             }
         }
 
-        config = authentication.setup_hyperbolic_authentication(config)
+        return {'gpuCount': gpu_count, 'userMetadata': skypilot_metadata}
 
-        endpoint = '/v2/marketplace/instances/create-cheapest'
+    def launch_instance(self, gpu_model: str, gpu_count: int,
+                        name: str) -> Tuple[str, str]:
+        """Launch a new instance with the specified configuration."""
+        config = self._create_payload(gpu_model, gpu_count, name)
+
+        logger.info(f'Using Hyperbolic API endpoints for {gpu_model} instance')
+
         try:
-            response = self._make_request('POST', endpoint, payload=config)
+            response = self._make_request('POST',
+                                          API_ENDPOINTS['create'],
+                                          payload=config)
             logger.debug(f'Launch response: {json.dumps(response, indent=2)}')
 
-            instance_id = response.get('instanceName')
+            instance_id = response.get('id')
             if not instance_id:
-                logger.error(f'No instance ID in response: {response}')
-                raise HyperbolicError('No instance ID returned from API')
-
-            logger.info(f'Successfully launched instance {instance_id}, '
-                        f'waiting for it to be ready...')
-
-            # Wait for instance to be ready
-            if not self.wait_for_instance(
-                    instance_id, HyperbolicInstanceStatus.ONLINE.value):
                 raise HyperbolicError(
-                    f'Instance {instance_id} failed to reach ONLINE state')
+                    'No instance ID returned from Hyperbolic API')
 
-            # Get instance details to get SSH command
-            instances = self.list_instances(
-                metadata={'skypilot': {
-                    'cluster_name': name
-                }})
-            instance = instances.get(instance_id)
-            if not instance:
+            ssh_command = response.get('meta', {}).get('ssh_command')
+            if ssh_command:
+                logger.info(f'Launched on-demand instance {instance_id} '
+                            f'with SSH command')
+                return str(instance_id), ssh_command
+            else:
                 raise HyperbolicError(
-                    f'Instance {instance_id} not found after launch')
-
-            ssh_command = instance.get('sshCommand')
-            if not ssh_command:
-                logger.error(
-                    f'No SSH command available for instance {instance_id}')
-                raise HyperbolicError('No SSH command available for instance')
-
-            logger.info(f'Instance {instance_id} is ready with SSH command')
-            return instance_id, ssh_command
+                    'No SSH command available in API response')
 
         except Exception as e:
             logger.error(f'Failed to launch instance: {str(e)}')
             raise HyperbolicError(f'Failed to launch instance: {str(e)}') from e
+
+    def _parse_instance(self, instance: Dict[str,
+                                             Any]) -> Optional[Dict[str, Any]]:
+        """Parse an instance from the API response."""
+        instance_id = str(instance.get('id'))
+        meta = instance.get('meta', {})
+        current_status = instance.get('status') or (
+            'terminated' if instance.get('terminatedAt') else 'running')
+
+        resources = meta.get('resources', {})
+        gpus = resources.get('gpus', {})
+        gpu_model = list(gpus.keys())[0] if gpus else ''
+        gpu_count = gpus.get(gpu_model, {}).get('count', 0) if gpus else 0
+
+        return {
+            'id': instance_id,
+            'created': instance.get('createdAt'),
+            'sshCommand': meta.get('ssh_command'),
+            'status':
+                HyperbolicInstanceStatus.from_raw_status(current_status).value,
+            'gpu_count': gpu_count,
+            'gpus_total': gpu_count,
+            'owner': instance.get('userId'),
+            'cpus': resources.get('vcpu_count'),
+            'gpus': gpu_count,
+            'ram': f'{resources.get("ram_gb")}GB'
+                   if resources.get('ram_gb') else None,
+            'storage': f'{resources.get("storage_gb")}GB'
+                       if resources.get('storage_gb') else None,
+            'pricing': {
+                'costPerHour': instance.get('costPerHour')
+            },
+            'metadata': meta,
+            'gpu_model': gpu_model,
+            'is_ondemand': True,
+            'public_ip': meta.get('public_ip'),
+            'internal_ip': meta.get('internal_ip')
+        }
+
+    def _filter_by_metadata(
+            self, instance: Dict[str, Any],
+            metadata: Optional[Dict[str, Dict[str, str]]]) -> bool:
+        """Filter instances based on metadata."""
+        if not metadata:
+            return True
+
+        cluster_name = metadata.get('skypilot', {}).get('cluster_name', '')
+        instance_skypilot = instance.get('meta',
+                                         {}).get('userMetadata',
+                                                 {}).get('skypilot', {})
+
+        return instance_skypilot.get('cluster_name',
+                                     '').startswith(cluster_name)
+
+    def _get_instances_from_endpoint(
+        self,
+        endpoint: str,
+        status: Optional[str] = None,
+        metadata: Optional[Dict[str, Dict[str, str]]] = None
+    ) -> Dict[str, Dict[str, Any]]:
+        """Get instances from the Hyperbolic API endpoint."""
+        instances = {}
+        try:
+            response = self._make_request('GET', endpoint)
+            instances_list = response
+            for instance in instances_list:
+                if not isinstance(instance, dict):
+                    continue
+                parsed = self._parse_instance(instance)
+                if parsed and self._filter_by_metadata(instance, metadata):
+                    if not status or parsed['status'] == status.lower():
+                        instances[parsed['id']] = parsed
+        except HyperbolicError as e:
+            logger.warning(
+                f'Failed to get instances from Hyperbolic API: {str(e)}')
+        return instances
 
     def list_instances(
         self,
@@ -212,71 +298,16 @@ class HyperbolicClient:
         metadata: Optional[Dict[str, Dict[str, str]]] = None
     ) -> Dict[str, Dict[str, Any]]:
         """List all instances, optionally filtered by status and metadata."""
-        endpoint = '/v1/marketplace/instances'
-        try:
-            response = self._make_request('GET', endpoint)
-            logger.debug(f'Raw API response: {json.dumps(response, indent=2)}')
-            instances = {}
-            for instance in response.get('instances', []):
-                instance_info = instance.get('instance', {})
-                current_status = instance_info.get('status')
-                logger.debug(
-                    f'Instance {instance.get("id")} status: {current_status}')
-
-                # Convert raw status to enum
-                try:
-                    instance_status = HyperbolicInstanceStatus.from_raw_status(
-                        current_status)
-                except HyperbolicError as e:
-                    logger.warning(f'Failed to parse status for instance '
-                                   f'{instance.get("id")}: {e}')
-                    continue
-
-                if status and instance_status.value != status.lower():
-                    continue
-
-                if metadata:
-                    skypilot_metadata: Dict[str,
-                                            str] = metadata.get('skypilot', {})
-                    cluster_name = skypilot_metadata.get('cluster_name', '')
-                    instance_skypilot = instance.get('userMetadata',
-                                                     {}).get('skypilot', {})
-                    if not instance_skypilot.get('cluster_name',
-                                                 '').startswith(cluster_name):
-                        logger.debug(
-                            f'Skipping instance {instance.get("id")} - '
-                            f'skypilot metadata {instance_skypilot} '
-                            f'does not match {skypilot_metadata}')
-                        continue
-                    logger.debug(f'Including instance {instance.get("id")} '
-                                 f'- skypilot metadata matches')
-
-                hardware = instance_info.get('hardware', {})
-                instances[instance.get('id')] = {
-                    'id': instance.get('id'),
-                    'created': instance.get('created'),
-                    'sshCommand': instance.get('sshCommand'),
-                    'status': instance_status.value,
-                    'gpu_count': instance_info.get('gpu_count'),
-                    'gpus_total': instance_info.get('gpus_total'),
-                    'owner': instance_info.get('owner'),
-                    'cpus': hardware.get('cpus'),
-                    'gpus': hardware.get('gpus'),
-                    'ram': hardware.get('ram'),
-                    'storage': hardware.get('storage'),
-                    'pricing': instance_info.get('pricing'),
-                    'metadata': instance.get('userMetadata', {})
-                }
-            return instances
-        except Exception as e:
-            raise HyperbolicError(f'Failed to list instances: {str(e)}') from e
+        return self._get_instances_from_endpoint(API_ENDPOINTS['list'], status,
+                                                 metadata)
 
     def terminate_instance(self, instance_id: str) -> None:
         """Terminate an instance by ID."""
-        endpoint = '/v1/marketplace/instances/terminate'
-        data = {'id': instance_id}
         try:
-            self._make_request('POST', endpoint, payload=data)
+            logger.info('Using Hyperbolic API terminate endpoint')
+
+            data = {'rentalId': instance_id}
+            self._make_request('POST', API_ENDPOINTS['terminate'], payload=data)
         except Exception as e:
             raise HyperbolicError(
                 f'Failed to terminate instance {instance_id}: {str(e)}') from e
@@ -289,15 +320,14 @@ class HyperbolicClient:
         start_time = time.time()
         target_status_enum = HyperbolicInstanceStatus.from_raw_status(
             target_status)
-        logger.info(
-            f'Waiting for instance {instance_id} '
-            f'to reach status {target_status_enum.value} and have SSH command')
+        logger.info(f'Waiting for instance {instance_id} to reach status '
+                    f'{target_status_enum.value} and have SSH command')
 
         while True:
             elapsed = time.time() - start_time
             if elapsed >= timeout:
-                logger.error(f'Timeout after {int(elapsed)}s '
-                             f'waiting for instance {instance_id}')
+                logger.error(f'Timeout after {int(elapsed)}s waiting for '
+                             f'instance {instance_id}')
                 return False
 
             try:
@@ -311,24 +341,26 @@ class HyperbolicClient:
 
                 current_status = instance.get('status', '').lower()
                 ssh_command = instance.get('sshCommand')
-                logger.debug(f'Current status: {current_status}, '
-                             f'Target status: {target_status_enum.value}, '
-                             f'SSH command: {ssh_command}')
+                logger.debug(
+                    f'Current status: {current_status}, Target status: '
+                    f'{target_status_enum.value}, SSH command: {ssh_command}')
 
                 if current_status == target_status_enum.value and ssh_command:
-                    logger.info(f'Instance {instance_id} reached '
-                                f'target status {target_status_enum.value} '
-                                f'and has SSH command after {int(elapsed)}s')
+                    logger.info(
+                        f'Instance {instance_id} reached target status '
+                        f'{target_status_enum.value} and has SSH command '
+                        f'after {int(elapsed)}s')
                     return True
 
+                # Check for terminal statuses
                 if current_status in ['failed', 'error', 'terminated']:
-                    logger.error(f'Instance {instance_id} reached '
-                                 f'terminal status: {current_status} '
-                                 f'after {int(elapsed)}s')
+                    logger.error(
+                        f'Instance {instance_id} reached terminal status: '
+                        f'{current_status} after {int(elapsed)}s')
                     return False
 
                 time.sleep(5)
-            except Exception as e:  # pylint: disable=broad-except
+            except HyperbolicError as e:
                 logger.warning(
                     f'Error while waiting for instance {instance_id}: {str(e)}')
                 time.sleep(5)
