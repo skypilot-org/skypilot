@@ -4,7 +4,7 @@ import functools
 import os
 from json import load as json_load
 
-from datacrunch import DataCrunchClient
+from verda import VerdaClient
 
 _verda_client = None
 
@@ -21,7 +21,7 @@ def import_package(func):
                 if not configured:
                     raise Exception(error)
 
-                _verda_client = _verda.DataCrunchClient(
+                _verda_client = VerdaClient(
                     client_id=config['client_id'],
                     client_secret=config['client_secret'],
                     base_url=config['base_url'] if 'base_url' in config else 'https://api.datacrunch.io/v1',
@@ -36,7 +36,7 @@ def import_package(func):
 
 
 @import_package
-def verda_client() -> DataCrunchClient:
+def verda_client() -> VerdaClient:
     """Return the configured Verda Client. @see https://github.com/verda-cloud/sdk-python for more details."""
     if _verda_client is None:
         raise Exception('Verda Client is not configured')

@@ -2,7 +2,8 @@
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from datacrunch.instances.instances import Instance, InstanceStatus
+from verda.instances import Instance
+from verda.constants import InstanceStatus
 
 from sky import exceptions
 from sky import sky_logging
