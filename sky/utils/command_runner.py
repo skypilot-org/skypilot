@@ -873,6 +873,7 @@ class SSHCommandRunner(CommandRunner):
         target: str,
         *,
         up: bool,
+        should_delete: bool = False,
         # Advanced options.
         log_path: str = os.devnull,
         stream_logs: bool = True,
@@ -885,6 +886,8 @@ class SSHCommandRunner(CommandRunner):
             target: The target path.
             up: The direction of the sync, True for local to cluster, False
               for cluster to local.
+            should_delete: Whether to delete extraneous files from the
+              destination directory (only for uploads).
             log_path: Redirect stdout/stderr to the log_path.
             stream_logs: Stream logs to the stdout/stderr.
             max_retry: The maximum number of retries for the rsync command.
@@ -911,6 +914,7 @@ class SSHCommandRunner(CommandRunner):
                     node_destination=f'{self.ssh_user}@{self.ip}',
                     up=up,
                     rsh_option=rsh_option,
+                    should_delete=should_delete,
                     log_path=log_path,
                     stream_logs=stream_logs,
                     max_retry=max_retry)
@@ -1119,6 +1123,7 @@ class KubernetesCommandRunner(CommandRunner):
         target: str,
         *,
         up: bool,
+        should_delete: bool = False,
         # Advanced options.
         log_path: str = os.devnull,
         stream_logs: bool = True,
@@ -1131,6 +1136,8 @@ class KubernetesCommandRunner(CommandRunner):
             target: The target path.
             up: The direction of the sync, True for local to cluster, False
               for cluster to local.
+            should_delete: Whether to delete extraneous files from the
+              destination directory (only for uploads).
             log_path: Redirect stdout/stderr to the log_path.
             stream_logs: Stream logs to the stdout/stderr.
             max_retry: The maximum number of retries for the rsync command.
@@ -1158,6 +1165,7 @@ class KubernetesCommandRunner(CommandRunner):
             node_destination=f'{self.pod_name}@{encoded_namespace_context}',
             up=up,
             rsh_option=helper_path,
+            should_delete=should_delete,
             log_path=log_path,
             stream_logs=stream_logs,
             max_retry=max_retry,
@@ -1243,6 +1251,7 @@ class LocalProcessCommandRunner(CommandRunner):
         target: str,
         *,
         up: bool,
+        should_delete: bool = False,
         # Advanced options.
         log_path: str = os.devnull,
         stream_logs: bool = True,
@@ -1254,6 +1263,7 @@ class LocalProcessCommandRunner(CommandRunner):
                     node_destination=None,
                     up=up,
                     rsh_option=None,
+                    should_delete=should_delete,
                     log_path=log_path,
                     stream_logs=stream_logs,
                     max_retry=max_retry)
