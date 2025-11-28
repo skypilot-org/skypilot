@@ -1075,11 +1075,27 @@ async def unzip_file(zip_file_path: pathlib.Path,
     def _do_unzip() -> None:
         try:
             with zipfile.ZipFile(zip_file_path, 'r') as zipf:
+                cleaned_directories = set()
                 for member in zipf.infolist():
                     # Determine the new path
                     original_path = os.path.normpath(member.filename)
                     new_path = client_file_mounts_dir / original_path.lstrip(
                         '/')
+
+                    # Check if new_path is in a directory that already exists,
+                    # and if so, clean up the top-level directory.
+                    relative = new_path.relative_to(client_file_mounts_dir)
+                    if relative.parts:
+                        top_level = client_file_mounts_dir / relative.parts[0]
+                        if top_level not in cleaned_directories:
+                            try:
+                                logger.debug(
+                                    f'Removing existing directory: {top_level}')
+                                shutil.rmtree(top_level)
+                            except FileNotFoundError:
+                                # Directory does not exist, which is fine
+                                pass
+                        cleaned_directories.add(top_level)
 
                     if (member.external_attr >> 28) == 0xA:
                         # Symlink. Read the target path and create a symlink.
