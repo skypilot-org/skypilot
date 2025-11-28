@@ -14,7 +14,8 @@ import shutil
 import subprocess
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import (Any, Callable, Dict, List, Literal, Optional, Set, Tuple,
+                    Union)
 
 import ijson
 
@@ -3136,7 +3137,11 @@ def filter_pods(namespace: str,
                 context: Optional[str],
                 tag_filters: Dict[str, str],
                 status_filters: Optional[List[str]] = None) -> Dict[str, Any]:
-    """Filters pods by tags and status."""
+    """Filters pods by tags and status.
+
+    Returned dict is sorted by name, with workers sorted by their numeric suffix.
+    This ensures consistent ordering for SSH configuration and other operations.
+    """
     non_included_pod_statuses = POD_STATUSES.copy()
 
     field_selector = ''
@@ -3154,7 +3159,32 @@ def filter_pods(namespace: str,
     pods = [
         pod for pod in pod_list.items if pod.metadata.deletion_timestamp is None
     ]
-    return {pod.metadata.name: pod for pod in pods}
+
+    # Sort pods by name, with workers sorted by their numeric suffix.
+    # This ensures consistent ordering (e.g., cluster-head, cluster-worker1,
+    # cluster-worker2, cluster-worker3, ...) even when Kubernetes API
+    # returns them in arbitrary order. This works even if there were
+    # somehow pod names other than head/worker ones, and those end up at
+    # the end of the list.
+    def get_pod_sort_key(
+        pod: V1Pod
+    ) -> Union[Tuple[Literal[0], str], Tuple[Literal[1], int], Tuple[Literal[2],
+                                                                     str]]:
+        name = pod.metadata.name
+        name_suffix = name.split('-')[-1]
+        if name_suffix == 'head':
+            return (0, name)
+        elif name_suffix.startswith('worker'):
+            try:
+                return (1, int(name_suffix.split('worker')[-1]))
+            except (ValueError, IndexError):
+                return (2, name)
+        else:
+            return (2, name)
+
+    sorted_pods = sorted(pods, key=get_pod_sort_key)
+
+    return {pod.metadata.name: pod for pod in sorted_pods}
 
 
 def _remove_pod_annotation(pod: Any,
