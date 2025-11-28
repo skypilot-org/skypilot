@@ -68,11 +68,8 @@ jobs:
       - name: Set branch name and commit message
         id: set_env
         run: |
-          BRANCH="${{ github.head_ref }}"
-          [ -z "$BRANCH" ] && BRANCH="${{ github.ref_name }}"
-          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
-          MESSAGE="${{ github.event.pull_request.title }}"
-          echo "message=$MESSAGE" >> $GITHUB_OUTPUT
+          echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+          echo "message=${{ github.event.pull_request.title }}" >> $GITHUB_OUTPUT
       - name: Run tests with pytest
         env:
           TEST_PATH: ${{ matrix.test-path }}
@@ -120,11 +117,8 @@ jobs:
       - name: Set branch name and commit message
         id: set_env
         run: |
-          BRANCH="${{ github.head_ref }}"
-          [ -z "$BRANCH" ] && BRANCH="${{ github.ref_name }}"
-          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
-          MESSAGE="${{ github.event.pull_request.title }}"
-          echo "message=$MESSAGE" >> $GITHUB_OUTPUT
+          echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+          echo "message=${{ github.event.pull_request.title }}" >> $GITHUB_OUTPUT
       - name: Run tests with pytest
         env:
           TEST_PATH: ${{ matrix.test-path }}
@@ -168,11 +162,8 @@ jobs:
       - name: Set branch name and commit message
         id: set_env
         run: |
-          BRANCH="${{ github.head_ref }}"
-          [ -z "$BRANCH" ] && BRANCH="${{ github.ref_name }}"
-          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
-          MESSAGE="${{ github.event.pull_request.title }}"
-          echo "message=$MESSAGE" >> $GITHUB_OUTPUT
+          echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+          echo "message=${{ github.event.pull_request.title }}" >> $GITHUB_OUTPUT
       - name: Run tests with pytest
         env:
           BUILDKITE_ANALYTICS_TOKEN: ${{ secrets.BUILDKITE_ANALYTICS_TOKEN }}
