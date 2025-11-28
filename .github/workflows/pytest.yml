@@ -65,32 +65,13 @@ jobs:
           # tests to access them.
           uv pip install -e ".[all]"
           uv pip install pytest pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0 buildkite-test-collector
-      - name: Set Buildkite Analytics env vars
-        id: set_bk_env
-        run: |
-          if [ -n "${{ github.head_ref }}" ]; then
-            echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
-          else
-            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-          fi
-          if [ -n "${{ github.event.pull_request.title }}" ]; then
-            echo "message=${{ github.event.pull_request.title }}" >> $GITHUB_OUTPUT
-          elif [ -n "${{ github.event.head_commit.message }}" ]; then
-            echo "message=${{ github.event.head_commit.message }}" >> $GITHUB_OUTPUT
-          else
-            echo "message=GitHub Actions Run" >> $GITHUB_OUTPUT
-          fi
       - name: Run tests with pytest
         env:
           TEST_PATH: ${{ matrix.test-path }}
           TEST_NAME: ${{ matrix.test-name }}
           BUILDKITE_ANALYTICS_TOKEN: ${{ secrets.BUILDKITE_ANALYTICS_TOKEN }}
-          # Override Buildkite Analytics env vars for better GitHub Actions integration
-          BUILDKITE_ANALYTICS_BRANCH: ${{ steps.set_bk_env.outputs.branch }}
-          BUILDKITE_ANALYTICS_SHA: ${{ github.sha }}
-          BUILDKITE_ANALYTICS_KEY: ${{ github.repository }}-${{ github.run_id }}-${{ github.run_attempt }}
-          BUILDKITE_ANALYTICS_MESSAGE: ${{ steps.set_bk_env.outputs.message }}
-          BUILDKITE_ANALYTICS_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # Use commit message as test run description
+          BUILDKITE_ANALYTICS_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           source ~/test-env/bin/activate
           if [[ "$TEST_NAME" == "No Parallel Tests" || "$TEST_NAME" == "Event Loop Lag Tests" ]]; then
@@ -128,31 +109,12 @@ jobs:
           # Install limited dependencies only
           uv pip install -e ".[kubernetes,aws,gcp,azure]"
           uv pip install pytest pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0 buildkite-test-collector
-      - name: Set Buildkite Analytics env vars
-        id: set_bk_env
-        run: |
-          if [ -n "${{ github.head_ref }}" ]; then
-            echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
-          else
-            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-          fi
-          if [ -n "${{ github.event.pull_request.title }}" ]; then
-            echo "message=${{ github.event.pull_request.title }}" >> $GITHUB_OUTPUT
-          elif [ -n "${{ github.event.head_commit.message }}" ]; then
-            echo "message=${{ github.event.head_commit.message }}" >> $GITHUB_OUTPUT
-          else
-            echo "message=GitHub Actions Run" >> $GITHUB_OUTPUT
-          fi
       - name: Run tests with pytest
         env:
           TEST_PATH: ${{ matrix.test-path }}
           BUILDKITE_ANALYTICS_TOKEN: ${{ secrets.BUILDKITE_ANALYTICS_TOKEN }}
-          # Override Buildkite Analytics env vars for better GitHub Actions integration
-          BUILDKITE_ANALYTICS_BRANCH: ${{ steps.set_bk_env.outputs.branch }}
-          BUILDKITE_ANALYTICS_SHA: ${{ github.sha }}
-          BUILDKITE_ANALYTICS_KEY: ${{ github.repository }}-${{ github.run_id }}-${{ github.run_attempt }}
-          BUILDKITE_ANALYTICS_MESSAGE: ${{ steps.set_bk_env.outputs.message }}
-          BUILDKITE_ANALYTICS_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # Use commit message as test run description
+          BUILDKITE_ANALYTICS_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           source ~/test-env/bin/activate
           SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 eval "pytest -n 0 --dist no $TEST_PATH"
@@ -187,30 +149,11 @@ jobs:
           # tests to access them.
           uv pip install -e ".[all]"
           uv pip install pytest pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0 moto==5.1.2 buildkite-test-collector
-      - name: Set Buildkite Analytics env vars
-        id: set_bk_env
-        run: |
-          if [ -n "${{ github.head_ref }}" ]; then
-            echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
-          else
-            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-          fi
-          if [ -n "${{ github.event.pull_request.title }}" ]; then
-            echo "message=${{ github.event.pull_request.title }}" >> $GITHUB_OUTPUT
-          elif [ -n "${{ github.event.head_commit.message }}" ]; then
-            echo "message=${{ github.event.head_commit.message }}" >> $GITHUB_OUTPUT
-          else
-            echo "message=GitHub Actions Run" >> $GITHUB_OUTPUT
-          fi
       - name: Run tests with pytest
         env:
           BUILDKITE_ANALYTICS_TOKEN: ${{ secrets.BUILDKITE_ANALYTICS_TOKEN }}
-          # Override Buildkite Analytics env vars for better GitHub Actions integration
-          BUILDKITE_ANALYTICS_BRANCH: ${{ steps.set_bk_env.outputs.branch }}
-          BUILDKITE_ANALYTICS_SHA: ${{ github.sha }}
-          BUILDKITE_ANALYTICS_KEY: ${{ github.repository }}-${{ github.run_id }}-${{ github.run_attempt }}
-          BUILDKITE_ANALYTICS_MESSAGE: ${{ steps.set_bk_env.outputs.message }}
-          BUILDKITE_ANALYTICS_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # Use commit message as test run description
+          BUILDKITE_ANALYTICS_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           source ~/test-env/bin/activate
           SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 4 --dist worksteal ${{ matrix.test-path }}
