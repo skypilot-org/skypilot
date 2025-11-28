@@ -414,7 +414,7 @@ async function getKubernetesGPUsFromContexts(contextNames) {
             continue;
           }
 
-          const gpuName = nodeData['accelerator_type'];
+          const gpuName = nodeData['accelerator_type'] || '-';
           const totalCount = nodeData['total']?.['accelerator_count'] || 0;
           const freeCount = nodeData['free']?.['accelerators_available'] || 0;
 
@@ -514,22 +514,26 @@ async function getKubernetesGPUsFromContexts(contextNames) {
       }
     }
 
+    console.log('[DEBUG] All GPUs summary:', allGPUsSummary);
+    console.log('[DEBUG] Per context GPUs data:', perContextGPUsData);
+    console.log('[DEBUG] Per node GPUs data:', perNodeGPUs_dict);
+    console.log('[DEBUG] Context errors:', contextErrors);
     return {
       allGPUs: Object.values(allGPUsSummary).sort((a, b) =>
-        a.gpu_name.localeCompare(b.gpu_name)
+        (a.gpu_name || '').localeCompare(b.gpu_name || '')
       ),
       perContextGPUs: Object.values(perContextGPUsData)
         .flat()
         .sort(
           (a, b) =>
-            a.context.localeCompare(b.context) ||
-            a.gpu_name.localeCompare(b.gpu_name)
+            (a.context || '').localeCompare(b.context || '') ||
+            (a.gpu_name || '').localeCompare(b.gpu_name || '')
         ),
       perNodeGPUs: Object.values(perNodeGPUs_dict).sort(
         (a, b) =>
-          a.context.localeCompare(b.context) ||
-          a.node_name.localeCompare(b.node_name) ||
-          a.gpu_name.localeCompare(b.gpu_name)
+          (a.context || '').localeCompare(b.context || '') ||
+          (a.node_name || '').localeCompare(b.node_name || '') ||
+          (a.gpu_name || '').localeCompare(b.gpu_name || '')
       ),
       contextErrors: contextErrors,
     };
