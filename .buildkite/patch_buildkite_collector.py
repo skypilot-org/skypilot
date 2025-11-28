@@ -283,9 +283,11 @@ def pytest_unconfigure(config):
 
     if plugin:
         api = API(os.environ)
+        numprocesses = config.getoption("numprocesses")
         xdist_enabled = (
             config.pluginmanager.getplugin("xdist") is not None
-            and config.getoption("numprocesses") is not None
+            and numprocesses is not None
+            and numprocesses > 0
         )
         is_xdist_worker = hasattr(config, 'workerinput')
 
@@ -320,14 +322,17 @@ def pytest_unconfigure(config):
     if plugin:
         logger.info("Buildkite plugin found, initializing API client")
         api = API(os.environ)
+        numprocesses = config.getoption("numprocesses")
         xdist_enabled = (
             config.pluginmanager.getplugin("xdist") is not None
-            and config.getoption("numprocesses") is not None
+            and numprocesses is not None
+            and numprocesses > 0
         )
         is_xdist_worker = hasattr(config, 'workerinput')
 
         is_controller = not xdist_enabled or (xdist_enabled and not is_xdist_worker)
 
+        logger.info(f"numprocesses: {numprocesses}")
         logger.info(f"xdist_enabled: {xdist_enabled}")
         logger.info(f"is_xdist_worker: {is_xdist_worker}")
         logger.info(f"is_controller: {is_controller}")
@@ -404,11 +409,18 @@ def pytest_unconfigure(config):
         logger.info("Buildkite plugin found, initializing API client")
         api = API(os.environ)''')
 
+        # Fix xdist_enabled check to require numprocesses > 0
+        content = re.sub(
+            r'xdist_enabled = \(\s*config\.pluginmanager\.getplugin\("xdist"\) is not None\s+and config\.getoption\("numprocesses"\) is not None\s*\)',
+            r'numprocesses = config.getoption("numprocesses")\n        xdist_enabled = (\n            config.pluginmanager.getplugin("xdist") is not None\n            and numprocesses is not None\n            and numprocesses > 0\n        )',
+            content)
+
         # Add xdist logging
         content = content.replace(
             'is_controller = not xdist_enabled or (xdist_enabled and not is_xdist_worker)',
             '''is_controller = not xdist_enabled or (xdist_enabled and not is_xdist_worker)
 
+        logger.info(f"numprocesses: {numprocesses}")
         logger.info(f"xdist_enabled: {xdist_enabled}")
         logger.info(f"is_xdist_worker: {is_xdist_worker}")
         logger.info(f"is_controller: {is_controller}")
