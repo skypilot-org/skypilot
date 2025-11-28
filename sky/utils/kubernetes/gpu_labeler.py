@@ -40,7 +40,9 @@ def cleanup(context: Optional[str] = None) -> Tuple[bool, str]:
             success = True
         except subprocess.CalledProcessError as e:
             output = e.output.decode('utf-8')
-            reason = 'Error deleting existing GPU labeler resources: ' + output
+            stderr = e.stderr.decode('utf-8')
+            reason = ('Error deleting existing GPU labeler resources: ' +
+                      output + stderr)
         return success, reason
 
 
