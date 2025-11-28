@@ -25,6 +25,12 @@ class ExtensionContext:
 
     Attributes:
         app: The FastAPI application instance.
+        rbac_rules: List of RBAC rules registered by the plugin.
+        Example:
+        [
+            ('user', RBACRule(path='/plugins/api/xx/*', method='POST')),
+            ('user', RBACRule(path='/plugins/api/xx/*', method='DELETE'))
+        ]
     """
 
     def __init__(self, app: FastAPI):
