@@ -1,13 +1,17 @@
 """ Seeweb Adaptor """
 import configparser
+import os
 import pathlib
+import threading
 from typing import Optional
 
 import pydantic
 import requests  # type: ignore
 
+from sky import sky_logging
 from sky.adaptors import common
 from sky.utils import annotations
+from sky.utils import ux_utils
 
 
 class SeewebError(Exception):
@@ -38,6 +42,143 @@ botocore = common.LazyImport('botocore',
                              import_error_message=_IMPORT_ERROR_MESSAGE)
 
 _LAZY_MODULES = (ecsapi, boto3, botocore)
+
+SEEWEB_PROFILE_NAME = 'seeweb'
+SEEWEB_CREDENTIALS_PATH = '~/.aws/credentials'
+SEEWEB_CONFIG_PATH = '~/.aws/config'
+_DEFAULT_ENDPOINT = 'https://cos3005.s3seeweb.it'
+_ENDPOINT_ENV_VAR = 'SEEWEB_S3_ENDPOINT'
+_INDENT_PREFIX = '    '
+
+_session_creation_lock = threading.RLock()
+logger = sky_logging.init_logger(__name__)
+
+
+def _get_credentials_path() -> str:
+    return os.path.expanduser(
+        os.environ.get('AWS_SHARED_CREDENTIALS_FILE', SEEWEB_CREDENTIALS_PATH))
+
+
+def _get_config_path() -> str:
+    return os.path.expanduser(
+        os.environ.get('AWS_CONFIG_FILE', SEEWEB_CONFIG_PATH))
+
+
+def _profile_exists(path: str, header: str) -> bool:
+    if not os.path.isfile(path):
+        return False
+    section = f'[{header}]'
+    with open(path, 'r', encoding='utf-8') as file:
+        for line in file:
+            if line.strip() == section:
+                return True
+    return False
+
+
+def _extract_endpoint_from_block(block: str) -> Optional[str]:
+    for raw_line in block.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith('#'):
+            continue
+        if 'endpoint_url' in line:
+            _, _, value = line.partition('=')
+            value = value.strip()
+            if value:
+                return value
+    return None
+
+
+def _profile_in_credentials() -> bool:
+    return _profile_exists(_get_credentials_path(), SEEWEB_PROFILE_NAME)
+
+
+def _profile_in_config() -> bool:
+    return _profile_exists(_get_config_path(), f'profile {SEEWEB_PROFILE_NAME}')
+
+
+def get_endpoint() -> str:
+    """Return the Seeweb Object Storage endpoint URL."""
+    env_override = os.environ.get(_ENDPOINT_ENV_VAR)
+    if env_override:
+        endpoint = env_override.strip()
+        return endpoint
+
+    config_path = _get_config_path()
+    if os.path.isfile(config_path):
+        parser = configparser.ConfigParser()
+        try:
+            parser.read(config_path)
+            section = f'profile {SEEWEB_PROFILE_NAME}'
+            if parser.has_section(section):
+                for key in ('endpoint_url', 'seeweb_endpoint_url'):
+                    if parser.has_option(section, key):
+                        value = parser.get(section, key).strip()
+                        if value:
+                            return value
+                if parser.has_option(section, 's3'):
+                    block = parser.get(section, 's3')
+                    endpoint_value = _extract_endpoint_from_block(block)
+                    if endpoint_value:
+                        return endpoint_value
+        except configparser.Error:
+            pass
+
+    env_fallback = os.environ.get('SEEWEB_ENDPOINT_URL')
+    if env_fallback:
+        endpoint = env_fallback.strip()
+        return endpoint
+    return _DEFAULT_ENDPOINT
+
+
+def get_seeweb_credentials(boto3_session):
+    """Gets Seeweb Object Storage credentials from boto3 session."""
+    seeweb_credentials = boto3_session.get_credentials()
+    if seeweb_credentials is None:
+        with ux_utils.print_exception_no_traceback():
+            raise SeewebCredentialsFileNotFound(
+                'Seeweb S3 credentials not found. Configure the '
+                f'[{SEEWEB_PROFILE_NAME}] profile via '
+                f'`aws configure --profile {SEEWEB_PROFILE_NAME}`.')
+    return seeweb_credentials.get_frozen_credentials()
+
+
+@annotations.lru_cache(scope='global')
+def session():
+    """Create a boto3 session for Seeweb Object Storage."""
+    with _session_creation_lock:
+        sess = boto3.session.Session(profile_name=SEEWEB_PROFILE_NAME)
+        return sess
+
+
+@annotations.lru_cache(scope='global')
+def resource(resource_name: str, **kwargs):
+    """Create a Seeweb S3 resource (e.g., 's3')."""
+    session_ = session()
+    creds = get_seeweb_credentials(session_)
+    endpoint = get_endpoint()
+    config = botocore.config.Config(s3={'addressing_style': 'path'})
+    return session_.resource(resource_name,
+                             endpoint_url=endpoint,
+                             aws_access_key_id=creds.access_key,
+                             aws_secret_access_key=creds.secret_key,
+                             config=config,
+                             **kwargs)
+
+
+@annotations.lru_cache(scope='global')
+def client(service_name: str):
+    """Create a Seeweb S3-compatible client (e.g., 's3')."""
+    session_ = session()
+    creds = get_seeweb_credentials(session_)
+    endpoint = get_endpoint()
+    config = botocore.config.Config(s3={'addressing_style': 'path'})
+    return session_.client(
+        service_name,
+        endpoint_url=endpoint,
+        aws_access_key_id=creds.access_key,
+        aws_secret_access_key=creds.secret_key,
+        config=config,
+    )
 
 
 @common.load_lazy_modules(_LAZY_MODULES)
@@ -88,16 +229,36 @@ def check_compute_credentials() -> bool:
 @common.load_lazy_modules(_LAZY_MODULES)
 def check_storage_credentials() -> bool:
     """Checks if the user has access credentials to Seeweb's storage service.
-
-    Mirrors compute credentials validation.
     """
-    return check_compute_credentials()
+    hints = []
+    if not _profile_in_credentials():
+        hints.append(
+            f'[{SEEWEB_PROFILE_NAME}] profile missing in '
+            f'{_get_credentials_path()}. Run:\n'
+            f'{_INDENT_PREFIX}aws configure --profile {SEEWEB_PROFILE_NAME}')
+    if not _profile_in_config():
+        hints.append(f'[{SEEWEB_PROFILE_NAME}] profile missing in '
+                     f'{_get_config_path()}. Set endpoint via:\n'
+                     f'{_INDENT_PREFIX}aws configure set endpoint_url '
+                     f'<SEEWEB_ENDPOINT> --profile {SEEWEB_PROFILE_NAME}')
+
+    if hints:
+        raise SeewebCredentialsFileNotFound('\n'.join(hints))
+
+    try:
+        s3_client = client('s3')
+        s3_client.list_buckets()
+    except Exception as e:  # pylint: disable=broad-except
+        raise SeewebAuthenticationError(
+            'Unable to authenticate with Seeweb Object Storage. '
+            'Verify credentials and endpoint.') from e
+    return True
 
 
 @common.load_lazy_modules(_LAZY_MODULES)
 @annotations.lru_cache(scope='global', maxsize=1)
-def client():
-    """Returns an authenticated ecsapi.Api object."""
+def ecs_client():
+    """Returns an authenticated ecsapi.Api object for compute APIs."""
     # Create authenticated client using the same credential pattern
     key_path = pathlib.Path('~/.seeweb_cloud/seeweb_keys').expanduser()
     if not key_path.exists():

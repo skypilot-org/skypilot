@@ -7,6 +7,7 @@ import textwrap
 from typing import Optional
 
 from sky import exceptions
+from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import command_runner
 
@@ -39,6 +40,7 @@ _BLOBFUSE_CACHE_DIR = ('~/.sky/blobfuse2_cache/'
                        '{storage_account_name}_{container_name}')
 # https://github.com/rclone/rclone/releases
 RCLONE_VERSION = 'v1.68.2'
+logger = sky_logging.init_logger(__name__)
 
 # A wrapper for goofys to choose the logging mechanism based on environment.
 _GOOFYS_WRAPPER = ('$(if [ -S /dev/log ] ; then '
@@ -145,6 +147,42 @@ def get_nebius_mount_cmd(nebius_profile_name: str,
         f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
         f'--s3-endpoint {endpoint_url} --daemon --allow-other')
     goofys_mount = (f'AWS_PROFILE={nebius_profile_name} {_GOOFYS_WRAPPER} '
+                    '-o allow_other '
+                    f'--stat-cache-ttl {_STAT_CACHE_TTL} '
+                    f'--type-cache-ttl {_TYPE_CACHE_TTL} '
+                    f'--endpoint {endpoint_url} '
+                    f'{bucket_name}{_bucket_sub_path} {mount_path}')
+
+    mount_cmd = (f'{arch_check}'
+                 f'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+                 f'  {rclone_mount}; '
+                 f'else '
+                 f'  {goofys_mount}; '
+                 f'fi')
+    return mount_cmd
+
+
+def get_seeweb_mount_cmd(profile_name: str,
+                         bucket_name: str,
+                         endpoint_url: str,
+                         mount_path: str,
+                         _bucket_sub_path: Optional[str] = None) -> str:
+    """Returns a command to mount Seeweb buckets."""
+    if _bucket_sub_path is None:
+        _bucket_sub_path = ''
+    else:
+        _bucket_sub_path = f':{_bucket_sub_path}'
+
+    arch_check = 'ARCH=$(uname -m) && '
+    rclone_mount = (
+        f'{FUSE3_INSTALL_CMD} && '
+        f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
+        f'AWS_PROFILE={profile_name} '
+        f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
+        f'--s3-endpoint {endpoint_url} --daemon --allow-other')
+    goofys_mount = (f'{FUSE3_INSTALL_CMD} && '
+                    f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
+                    f'AWS_PROFILE={profile_name} {_GOOFYS_WRAPPER} '
                     '-o allow_other '
                     f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                     f'--type-cache-ttl {_TYPE_CACHE_TTL} '
@@ -627,7 +665,7 @@ def get_mounting_script(
                 fi
             fi
         fi
-        echo "Mounting $SOURCE_BUCKET to $MOUNT_PATH with $MOUNT_BINARY..."
+        echo "Mounting bucket to $MOUNT_PATH with $MOUNT_BINARY..."
         set +e
         {mount_cmd}
         MOUNT_EXIT_CODE=$?
