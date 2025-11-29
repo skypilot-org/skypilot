@@ -533,8 +533,8 @@ def _request_execution_wrapper(request_id: str,
         # so that the "Request xxxx failed due to ..." log message will be
         # written to the original stdout and stderr file descriptors.
         _restore_output()
-        logger.info(f'Request {request_id} failed due to '
-                    f'{common_utils.format_exception(e)}')
+        logger.error(f'Request {request_id} failed due to '
+                     f'{common_utils.format_exception(e)}')
         return
     else:
         api_requests.set_request_succeeded(
