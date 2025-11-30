@@ -1,0 +1,106 @@
+# Config for multi-device full finetuning in full_finetune_distributed.py
+# using a Llama4 17Bx16E MoE model
+#
+# This config assumes that you've run the following command before launching:
+#   tune download meta-llama/Llama-4-Scout-17B-16E-Instruct
+#
+# To launch on 8 devices, run the following command from root:
+#   tune run --nproc_per_node 8 full_finetune_distributed --config llama4/scout_17B_16E_full
+#
+# You can add specific overrides through the command line. For example, to use a larger bsz:
+#   tune run --nproc_per_node 8 full_finetune_distributed --config llama4/scout_17B_16E_full batch_size=8
+#
+# This config was only tested on 8xA100 machine and 16xH100 machines.
+
+output_dir: /tmp/torchtune/llama4_17Bx16E/full
+
+# Modeling arguments
+model:
+  _component_: torchtune.models.llama4.llama4_scout_17b_16e
+
+tensor_parallel_dim: 2 # For multi-node training we recommend tensor_parallel_dim: 8
+tensor_parallel_plan:
+  _component_: torchtune.models.llama4.decoder_only_tp_plan
+data_parallel_shard_dim: -1 # Will infer based on TP dim, effectively controls FSDP
+data_parallel_replicate_dim: 1
+
+tokenizer:
+  _component_: torchtune.models.llama4.llama4_transform
+  path: /tmp/Llama-4-Scout-17B-16E-Instruct/tokenizer.model
+  max_seq_len: null
+  max_num_tiles: 16
+
+checkpointer:
+  _component_: torchtune.training.FullModelHFCheckpointer
+  checkpoint_dir: /tmp/Llama-4-Scout-17B-16E-Instruct
+  checkpoint_files:
+    filename_format: model-{}-of-{}.safetensors
+    max_filename: "00050"
+  recipe_checkpoint: null
+  output_dir: ${output_dir}
+  model_type: LLAMA4
+resume_from_checkpoint: False
+
+# Dataset and Sampler
+dataset:
+  _component_: torchtune.datasets.alpaca_cleaned_dataset
+  packed: False  # True increases speed
+  split: train[:95%]
+seed: null
+shuffle: True
+
+# Validation
+run_val_every_n_steps: null  # Change to an integer to enable validation every N steps
+dataset_val:
+  _component_: torchtune.datasets.alpaca_cleaned_dataset
+  split: train[95%:]
+batch_size_val: ${batch_size}
+
+# Training arguments
+epochs: 1
+max_steps_per_epoch: null
+batch_size: 1
+gradient_accumulation_steps: 1 # Use to increase effective batch size
+optimizer:
+  _component_: torch.optim.AdamW
+  lr: 2e-5
+  fused: False
+optimizer_in_bwd: False
+loss:
+  _component_: torchtune.modules.loss.LinearCrossEntropyLoss
+clip_grad_norm: null
+
+# cuda, cpu, rocm, xpu...
+device: cuda
+
+# Memory management / performance
+enable_activation_checkpointing: True
+enable_activation_offloading: False
+fsdp_cpu_offload: True
+# compile True means use torch.compile for all components
+# compile False means no torch.compile
+# compile Dictionary with keys: "model", "loss", "optimizer_step"
+# enables torch.compile only for specified components.
+compile: False
+#    model: True
+#    loss: True
+#    optimizer_step: False
+#    scale_grads: True
+
+# Reduced precision
+dtype: bf16
+
+# Log metrics during training
+metric_logger:
+  _component_: torchtune.training.metric_logging.WandBLogger
+  # to log to disk: 
+  # _component_: torchtune.training.metric_logging.DiskLogger
+  log_dir: ${output_dir}/logs
+log_every_n_steps: 1
+log_peak_memory_stats: True
+log_level: INFO  # DEBUG, WARN, etc.
+
+# Useful for understanding how to optimize memory and performance
+profiler:
+  _component_: torchtune.training.setup_torch_profiler
+  enabled: False
