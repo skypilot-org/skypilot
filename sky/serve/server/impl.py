@@ -47,6 +47,11 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
+# When a controller if firstly started, it might take a while for the endpoint
+# to be available, especially when the controller is on EKS. We add additional
+# retries for the controller endpoint for robustness.
+_INITIAL_SERVE_CONTROLLER_ENDPOINT_RETRY_CNT = 2
+
 
 def _rewrite_tls_credential_paths_and_get_tls_env_vars(
         service_name: str, task: 'task_lib.Task') -> Dict[str, Any]:
@@ -392,10 +397,20 @@ def up(
                         'check the logs above for more details.') from None
         else:
             if not serve_utils.is_consolidation_mode(pool) and not pool:
-                socket_endpoint = backend_utils.get_endpoints(
-                    controller_handle.cluster_name,
-                    lb_port,
-                    skip_status_check=True).get(lb_port)
+                socket_endpoint = None
+                retry_cnt = 0
+                while (socket_endpoint is None or retry_cnt <
+                       _INITIAL_SERVE_CONTROLLER_ENDPOINT_RETRY_CNT):
+                    retry_cnt += 1
+                    logger.debug(
+                        f'Querying endpoint for controller '
+                        f'{controller_handle.cluster_name} port {lb_port} '
+                        f'(retry {retry_cnt} of '
+                        f'{_INITIAL_SERVE_CONTROLLER_ENDPOINT_RETRY_CNT})')
+                    socket_endpoint = backend_utils.get_endpoints(
+                        controller_handle.cluster_name,
+                        lb_port,
+                        skip_status_check=True).get(lb_port)
             else:
                 socket_endpoint = f'localhost:{lb_port}'
             assert socket_endpoint is not None, (
