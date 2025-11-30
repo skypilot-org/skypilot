@@ -399,7 +399,7 @@ def up(
             if not serve_utils.is_consolidation_mode(pool) and not pool:
                 socket_endpoint = None
                 retry_cnt = 0
-                while (socket_endpoint is None or retry_cnt <
+                while (socket_endpoint is None and retry_cnt <
                        _INITIAL_SERVE_CONTROLLER_ENDPOINT_RETRY_CNT):
                     retry_cnt += 1
                     logger.debug(
