@@ -66,7 +66,7 @@ SkyPilot **makes Kubernetes easy for AI & Infra teams**:
 
 SkyPilot **unifies multiple clusters, clouds, and hardware**:
 
-- One interface to use reserved GPUs, Kubernetes clusters, or 16+ clouds
+- One interface to use reserved GPUs, Kubernetes clusters, Slurm clusters, or 20+ clouds
 - :ref:`Flexible provisioning <auto-failover>` of GPUs, TPUs, CPUs, with smart failover
 - :ref:`Team deployment <sky-api-server>` and resource sharing
 
@@ -208,7 +208,7 @@ SkyPilot **cuts your cloud costs & maximizes GPU availability**:
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
-Current supported infra: Kubernetes, AWS, GCP, Azure, OCI, Nebius, Lambda Cloud, RunPod, Fluidstack,
+Current supported infra: Kubernetes, Slurm, AWS, GCP, Azure, OCI, Nebius, Lambda Cloud, RunPod, Fluidstack,
 Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai, VMware vSphere, Seeweb, Prime Intellect.
 
 .. raw:: html
