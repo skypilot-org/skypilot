@@ -71,11 +71,11 @@ Create the configuration file:
        IdentityFile ~/.ssh/id_rsa
    EOF
 
-You can verify your SSH connection works by running:
+Verify your SSH connection works by running:
 
 .. code-block:: bash
 
-   $ ssh -F ~/.slurm/config mycluster1 "sinfo"
+   $ ssh -F ~/.slurm/config <cluster_name> "sinfo"
 
 Launching your first task
 -------------------------
