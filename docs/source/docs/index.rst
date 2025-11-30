@@ -27,6 +27,9 @@ SkyPilot is a system to run, manage, and scale AI workloads on any AI infrastruc
 SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
 **Infra teams** get a unified control plane to manage any AI compute — with advanced scheduling, scaling, and orchestration.
 
+..  Abstractions image source: https://drive.google.com/file/d/1egDS0xHXFUbUKS_63RyqYQLaZxmrSLZQ/view?usp=sharing
+..  To update: edit the .key, export to PDF, open in Photoshop, crop, save as PNG.
+
 .. image:: ../images/skypilot-abstractions-long-2.png
     :width: 90%
     :align: center
@@ -317,6 +320,7 @@ Read the research:
    :caption: Infra Choices
 
    ../reference/kubernetes/index
+   ../reference/slurm/index
    Using Existing Machines <../reservations/existing-machines>
    ../reservations/reservations
    Using Cloud VMs <../compute/cloud-vm>

@@ -249,6 +249,7 @@ This will produce a summary like:
     vSphere: enabled
     Cloudflare (for R2 object store): enabled
     Kubernetes: enabled
+    Slurm: enabled
 
 If any cloud's credentials or dependencies are missing, ``sky check`` will
 output hints on how to resolve them. You can also refer to the cloud setup
@@ -293,6 +294,35 @@ See :ref:`SkyPilot on Kubernetes <kubernetes-overview>` for more.
 
 .. tip::
    If you do not have access to a Kubernetes cluster, you can :ref:`deploy a local Kubernetes cluster on your laptop <kubernetes-setup-kind>` with ``sky local up``.
+
+.. _slurm-installation:
+
+Slurm
+~~~~~
+
+.. note::
+
+    Slurm support is currently in **early access**. If you're interested in trying it out,
+    please `fill out this form <https://forms.gle/rfdWQcd9oQgp41Hm8>`_ to get access.
+
+SkyPilot can run workloads on Slurm clusters. The only requirement is SSH access to a Slurm login node.
+
+To configure Slurm support, create a ``~/.slurm/config`` file with your Slurm cluster configuration and add the SSH credentials to connect to the Slurm login node.
+
+.. code-block:: shell
+
+  # Create the Slurm config directory
+  mkdir -p ~/.slurm
+
+  # Add your Slurm cluster configuration
+  cat > ~/.slurm/config << EOF
+  Host mycluster
+      HostName login.mycluster.myorg.com
+      User myusername
+      IdentityFile ~/.ssh/id_rsa
+  EOF
+
+See :ref:`SkyPilot on Slurm <slurm-overview>` for more.
 
 .. _aws-installation:
 
