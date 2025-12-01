@@ -2292,6 +2292,7 @@ def test_pools_num_jobs_rank(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server  # see note 1 above
 def test_pools_num_jobs_speed(generic_cloud: str):
     """Test that we can launch a large number of jobs quickly.
     """

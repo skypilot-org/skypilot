@@ -117,7 +117,7 @@ def _seed_test_jobs(_mock_managed_jobs_db_conn):
                           resources_str='{}',
                           metadata='{}')
         state.scheduler_set_waiting([job_id4], '/tmp/dag4.yaml',
-                                    '/tmp/user4.yaml', '/tmp/env4', None,75)
+                                    '/tmp/user4.yaml', '/tmp/env4', None, 75)
         await state.set_starting_async(job_id4, 0, 'run_789', time.time(), '{}',
                                        {}, mock_callback)
         await state.set_started_async(job_id4, 0, time.time(), mock_callback)
