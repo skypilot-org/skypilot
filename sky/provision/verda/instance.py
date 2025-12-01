@@ -129,31 +129,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             # Format: instance_type__vcpus__memory[__SPOT]
             instance_type = config.node_config['InstanceType']
             disk_size = config.node_config.get('DiskSize', 50) # Verda Cloud default disk size is 50GB
-            vcpus: int = -1
-            memory: int = -1
-            verda_instance_type = utils.get_verda_instance_type(instance_type)
             is_spot: bool = False
-            try:
-                # Split by '__'
-                parts = instance_type.split('__')
-                # Format: instance_type__vcpus__memory[__SPOT]
-                # For: 1A100.22V_80GB__22__120__SPOT
-                # parts[0] = 1A100.22V_80GB
-                # parts[1] = 22, parts[2] = 120, parts[3] = SPOT
-                if len(parts) >= 3:
-                    vcpu_str = parts[1]
-                    memory_str = parts[2]
-                    vcpus = int(vcpu_str)
-                    memory = int(memory_str)
-                    is_spot = parts[3] == 'SPOT' if len(parts) >= 4 else False
-            except (ValueError, IndexError) as e:
-                # If parsing fails, try to get from catalog
-                logger.warning(
-                    f'Failed to parse vCPUs/memory from instance type '
-                    f'{instance_type}: {e}')
-
-            if verda_instance_type is None:
-                raise ValueError(f'Invalid instance type: {instance_type}')
+           
 
             ssh_public_key = config.node_config['PublicKey']
             if ssh_public_key is None:
@@ -161,12 +138,12 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             ssh_key_id = find_ssh_key_id(ssh_public_key)
 
             response = verda_client().instances.create(
-                instance_type=verda_instance_type,
+                instance_type=instance_type,
                 hostname=f'{cluster_name_on_cloud}-{node_type}',
                 location=region,
                 is_spot=is_spot,
                 contract='PAY_AS_YOU_GO' if not is_spot else 'SPOT',
-                image='ubuntu-24.04-cuda-12.6-docker',
+                image='ubuntu-24.04-cuda-12.8-open-docker',
                 description='Created by SkyPilot',
                 ssh_key_ids=[ssh_key_id],
                 os_volume={ 'name': f'{cluster_name_on_cloud}-{node_type}', 'size': disk_size }

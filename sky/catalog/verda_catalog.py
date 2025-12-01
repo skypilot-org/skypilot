@@ -8,6 +8,7 @@ import typing
 from typing import Dict, List, Optional, Tuple, Union
 
 from sky.catalog import common
+from sky.adaptors.verda import verda_client
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
