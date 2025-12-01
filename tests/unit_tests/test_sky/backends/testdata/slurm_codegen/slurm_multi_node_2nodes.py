@@ -369,7 +369,7 @@ def run_bash_command_with_log_and_return_pid(
     return {'return_code': return_code, 'pid': os.getpid()}
 
 def _slurm_cleanup_handler(signum, _frame):
-    slurm_job_id = os.environ.get('SLURM_JOB_ID')
+    slurm_job_id = 67890
     assert slurm_job_id is not None, 'SLURM_JOB_ID is not set'
     try:
         # Query steps for this job: squeue -s -j JOBID -h -o "%i %j"
@@ -389,7 +389,8 @@ def _slurm_cleanup_handler(signum, _frame):
             if step_name == f'sky-3':
                 subprocess.run(['scancel', step_id],
                                 check=False, capture_output=True)
-    except Exception:
+    except Exception as e:
+        print(f'Error in _slurm_cleanup_handler: {e}', flush=True)
         pass
     # Re-raise to let default handler terminate.
     signal.signal(signum, signal.SIG_DFL)

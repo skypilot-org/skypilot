@@ -282,7 +282,7 @@ class SlurmCodeGen(TaskCodeGen):
         self._code.append(
             textwrap.dedent(f"""\
             def _slurm_cleanup_handler(signum, _frame):
-                slurm_job_id = os.environ.get('SLURM_JOB_ID')
+                slurm_job_id = {self._slurm_job_id!r}
                 assert slurm_job_id is not None, 'SLURM_JOB_ID is not set'
                 try:
                     # Query steps for this job: squeue -s -j JOBID -h -o "%i %j"
@@ -302,7 +302,8 @@ class SlurmCodeGen(TaskCodeGen):
                         if step_name == f'sky-{self.job_id}':
                             subprocess.run(['scancel', step_id],
                                             check=False, capture_output=True)
-                except Exception:
+                except Exception as e:
+                    print(f'Error in _slurm_cleanup_handler: {{e}}', flush=True)
                     pass
                 # Re-raise to let default handler terminate.
                 signal.signal(signum, signal.SIG_DFL)

@@ -1415,6 +1415,7 @@ class SlurmCommandRunner(SSHCommandRunner):
         cmd = (f'export {constants.SKY_RUNTIME_DIR_ENV_VAR}='
                f'"{self.skypilot_runtime_dir}" && '
                f'cd {self.sky_dir} && export HOME=$(pwd) && {cmd}')
-        cmd = f'ssh {self.slurm_node} {shlex.quote(cmd)}'
+        ssh_options = '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR'
+        cmd = f'ssh {ssh_options} {self.slurm_node} {shlex.quote(cmd)}'
 
         return super().run(cmd, **kwargs)
