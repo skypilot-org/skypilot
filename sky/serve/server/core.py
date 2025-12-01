@@ -66,7 +66,7 @@ def update(task: Optional['sky.Task'],
     return impl.update(task, service_name, mode, pool=False, workers=workers)
 
 
-def apply(request_id: str, body: payloads.ServeApplyBody) -> None:
+def apply(request_id: str, body: payloads.ServeApplyBody) -> None:  # pylint: disable=unused-argument
     """Apply a config to a service."""
     # Convert YAML string to Task object
     kwargs = body.to_kwargs()
