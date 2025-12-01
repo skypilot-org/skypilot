@@ -1621,6 +1621,7 @@ def scheduler_set_waiting(job_ids: List[int], dag_yaml_content: str,
                     job_info_table.c.original_user_yaml_content:
                         (original_user_yaml_content),
                     job_info_table.c.env_file_content: env_file_content,
+                    job_info_table.c.config_file_content: config_file_content,
                     job_info_table.c.priority: priority,
                 })
         session.commit()

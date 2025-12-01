@@ -185,8 +185,6 @@ def _consolidated_launch(
     run_script = '\n'.join(env_cmds + [run_script])
     # Dump script for high availability recovery.
     assert job_ids is not None, 'job_ids not set'
-    for job_id in job_ids:
-        managed_job_state.set_ha_recovery_script(job_id, run_script)
     backend.run_on_head(local_handle, run_script)
     job_ids_str_for_msg = _job_ids_to_str(job_ids)
     ux_utils.starting_message(f'Job submitted, ID: {job_ids_str_for_msg}')

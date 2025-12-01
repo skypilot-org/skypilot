@@ -964,8 +964,7 @@ class ControllerManager:
                     # Restore config file if needed
                     file_content_utils.restore_job_config_file(job_id)
 
-                    
-                    # Set SKYPILOT_JOB_RANK from job_id_to_rank mapping if 
+                    # Set SKYPILOT_JOB_RANK from job_id_to_rank mapping if
                     # available
                     if ('SKYPILOT_JOB_ID_TO_RANK' in env_vars and
                             env_vars['SKYPILOT_JOB_ID_TO_RANK']):
