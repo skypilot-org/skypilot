@@ -251,7 +251,10 @@ def test_scp_job_queue():
 @pytest.mark.no_slurm  # Slurm does not support num_nodes > 1 yet
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 def test_job_queue_multinode(generic_cloud: str, accelerator: Dict[str, str]):
-    accelerator = accelerator.get(generic_cloud, 'T4')
+    if generic_cloud in ('kubernetes', 'slurm'):
+        accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
+    else:
+        accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
     total_timeout_minutes = 30 if generic_cloud == 'azure' else 15
     test = smoke_tests_utils.Test(
