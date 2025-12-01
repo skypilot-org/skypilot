@@ -25,12 +25,13 @@ run: |
     # torchrun attempts to autodetect if the current node is the head node based
     # on the hostname, but this depends on network configuration and doesn't
     # work on some clouds, e.g. Nebius VMs. Force to "localhost" to work around.
-    # See https://github.com/pytorch/pytorch/issues/79388
+    # This is only needed for c10d rdzv backend, not static rendezvous.
+    # See https://github.com/pytorch/pytorch/issues/79388.
     if [ $SKYPILOT_NODE_RANK -eq 0 ]; then
         MASTER_ADDR=localhost
     fi
-
     echo "Starting distributed training, head node: $MASTER_ADDR"
+
     torchrun \
     --nnodes=$SKYPILOT_NUM_NODES \
     --nproc_per_node=$SKYPILOT_NUM_GPUS_PER_NODE \
