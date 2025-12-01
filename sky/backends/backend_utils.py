@@ -147,6 +147,19 @@ CLUSTER_TUNNEL_LOCK_TIMEOUT_SECONDS = 10.0
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
 
+# The maximum size of a command line arguments is 128 KB, i.e. the command
+# executed with /bin/sh should be less than 128KB.
+# https://github.com/torvalds/linux/blob/master/include/uapi/linux/binfmts.h
+#
+# If a user have very long run or setup commands, the generated command may
+# exceed the limit, as we directly include scripts in job submission commands.
+# If the command is too long, we instead write it to a file, rsync and execute
+# it.
+#
+# We use 100KB as a threshold to be safe for other arguments that
+# might be added during ssh.
+_MAX_INLINE_SCRIPT_LENGTH = 100 * 1024
+
 _ENDPOINTS_RETRY_MESSAGE = ('If the cluster was recently started, '
                             'please retry after a while.')
 
@@ -223,6 +236,18 @@ _RAY_YAML_KEYS_TO_REMOVE_FOR_HASH = [
 
 _ACK_MESSAGE = 'ack'
 _FORWARDING_FROM_MESSAGE = 'Forwarding from'
+
+
+def is_command_length_over_limit(command: str) -> bool:
+    """Check if the length of the command exceeds the limit.
+
+    We calculate the length of the command after quoting the command twice as
+    when it is executed by the CommandRunner, the command will be quoted twice
+    to ensure the correctness, which will add significant length to the command.
+    """
+
+    quoted_length = len(shlex.quote(shlex.quote(command)))
+    return quoted_length > _MAX_INLINE_SCRIPT_LENGTH
 
 
 def is_ip(s: str) -> bool:

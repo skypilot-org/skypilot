@@ -52,6 +52,7 @@ from sky.utils import resources_utils
 @pytest.mark.no_oci  # OCI does not have T4 gpus
 @pytest.mark.no_hyperbolic  # Hyperbolic has low availability of T4 GPUs
 @pytest.mark.no_seeweb  # Seeweb does not support T4 GPUs
+@pytest.mark.no_slurm  # Slurm does not support allocating fractional GPUs in a job. Run test_job_queue_multi_gpu instead
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
@@ -298,16 +299,16 @@ def test_job_queue_multi_gpu(generic_cloud: str):
         [
             f'sky launch -y -c {name} --infra {generic_cloud} --cpus 16 --gpus {accelerator}:4 examples/job_queue/cluster.yaml',
             # Submit job 1 with 1 GPU
-            f'sky exec {name} -n {name}-1 -d --gpus {accelerator}:1 "[[ \\$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1; num_devices=\\$(echo \\$CUDA_VISIBLE_DEVICES | tr \',\' \'\\n\' | wc -l); [[ \\$num_devices -eq 1 ]] || exit 1; sleep 15"',
+            f'sky exec {name} -n {name}-1 -d --gpus {accelerator}:1 "[[ \\$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1; num_devices=\\$(echo \\$CUDA_VISIBLE_DEVICES | tr \',\' \'\\n\' | wc -l); [[ \\$num_devices -eq 1 ]] || exit 1; sleep 30"',
             # Submit job 2 with 2 GPUs
-            f'sky exec {name} -n {name}-2 -d --gpus {accelerator}:2 "[[ \\$SKYPILOT_NUM_GPUS_PER_NODE -eq 2 ]] || exit 1; num_devices=\\$(echo \\$CUDA_VISIBLE_DEVICES | tr \',\' \'\\n\' | wc -l); [[ \\$num_devices -eq 2 ]] || exit 1; sleep 15"',
+            f'sky exec {name} -n {name}-2 -d --gpus {accelerator}:2 "[[ \\$SKYPILOT_NUM_GPUS_PER_NODE -eq 2 ]] || exit 1; num_devices=\\$(echo \\$CUDA_VISIBLE_DEVICES | tr \',\' \'\\n\' | wc -l); [[ \\$num_devices -eq 2 ]] || exit 1; sleep 30"',
             # Submit job 3 with 4 GPUs - should be blocked until the first two jobs complete
             f'sky exec {name} -n {name}-3 -d --gpus {accelerator}:4 "[[ \\$SKYPILOT_NUM_GPUS_PER_NODE -eq 4 ]] || exit 1; num_devices=\\$(echo \\$CUDA_VISIBLE_DEVICES | tr \',\' \'\\n\' | wc -l); [[ \\$num_devices -eq 4 ]] || exit 1"',
             # First two jobs should be running, and job 3 should be pending.
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-1 | grep RUNNING',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | grep RUNNING',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep PENDING',
-            'sleep 30',
+            'sleep 60',
             # Verify all jobs succeed.
             f'sky logs {name} 1 --status && sky logs {name} 1',
             f'sky logs {name} 2 --status && sky logs {name} 2',
@@ -325,15 +326,25 @@ def test_job_queue_multi_gpu(generic_cloud: str):
 @pytest.mark.no_hyperbolic
 def test_large_job_queue(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
+    # For Slurm, by default it will bind to physical cores, which means that when using instance types with
+    # simultaneous multithreading (SMT), we would only run half as many parallel tasks,
+    # as each task will get 1 core = 2 vCPUs.
+    # Plus slurm cant do fracttional CPUs, so we need to use more CPUs to ensure that we can run more tasks in parallel.
+    # So we need to use more CPUs to ensure that we can run more tasks in parallel.
+    # For other clouds, we use the default 8 CPUs.
+    cpus = 8 if generic_cloud != 'slurm' else 16 * 2
     test = smoke_tests_utils.Test(
         'large_job_queue',
         [
-            f'sky launch -y -c {name} --cpus 8 --infra {generic_cloud}',
+            f'sky launch -y -c {name} --cpus {cpus} --infra {generic_cloud}',
             f'for i in `seq 1 75`; do sky exec {name} -n {name}-$i -d "echo $i; sleep 100000000"; done',
             f'sky cancel -y {name} 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16',
             'sleep 90',
 
             # Each job takes 0.5 CPU and the default VM has 8 CPUs, so there should be 8 / 0.5 = 16 jobs running.
+            # Slurm is an exception here, where to get 16 parallel tasks running, we need an equal
+            # amount of physical cores, not vCPUs. So assuming the instance type in our slurm custer
+            # has two HW threads per core, we then need 16 * 2 = 32 physical cores.
             # The first 16 jobs are canceled, so there should be 75 - 32 = 43 jobs PENDING.
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep -v grep | grep PENDING | wc -l | grep 43',
             # Make sure the jobs are scheduled in FIFO order

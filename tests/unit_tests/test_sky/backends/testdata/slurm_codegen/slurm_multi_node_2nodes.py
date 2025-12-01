@@ -17,6 +17,9 @@ import threading
 import time
 from typing import Dict, List, Optional, Tuple, Union
 
+import signal
+from sky.backends import backend_utils
+
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -365,6 +368,35 @@ def run_bash_command_with_log_and_return_pid(
                                             streaming_prefix=streaming_prefix)
     return {'return_code': return_code, 'pid': os.getpid()}
 
+def _slurm_cleanup_handler(signum, _frame):
+    slurm_job_id = os.environ.get('SLURM_JOB_ID')
+    assert slurm_job_id is not None, 'SLURM_JOB_ID is not set'
+    try:
+        # Query steps for this job: squeue -s -j JOBID -h -o "%i %j"
+        # Output format: "JOBID.STEPID STEPNAME"
+        # TODO(kevin): This assumes that compute node is able
+        # to run client commands against the controller.
+        # Validate this assumption.
+        result = subprocess.run(
+            ['squeue', '-s', '-j', slurm_job_id, '-h', '-o', '%i %j'],
+            capture_output=True, text=True, check=False)
+        for line in result.stdout.strip().split('\n'):
+            if not line:
+                continue
+            parts = line.split()
+            assert len(parts) >= 2, 'Expected at least 2 parts'
+            step_id, step_name = parts[0], parts[1]
+            if step_name == f'sky-3':
+                subprocess.run(['scancel', step_id],
+                                check=False, capture_output=True)
+    except Exception:
+        pass
+    # Re-raise to let default handler terminate.
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+
+signal.signal(signal.SIGTERM, _slurm_cleanup_handler)
+
 autostop_lib.set_last_active_time_to_now()
 job_lib.set_status(3, job_lib.JobStatus.PENDING)
 has_setup_cmd = False
@@ -395,8 +427,6 @@ job_ip_list_str = '\n'.join(job_ip_rank_list)
 
 sky_env_vars_dict = {}
 sky_env_vars_dict['SKYPILOT_NODE_IPS'] = job_ip_list_str
-sky_env_vars_dict['SKYPILOT_NUM_NODES'] = os.environ.get('SLURM_NNODES') or os.environ.get('SLURM_JOB_NUM_NODES')
-sky_env_vars_dict['SKYPILOT_NODE_RANK'] = os.environ.get('SLURM_PROCID')
 sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = 3
 
 sky_env_vars_dict['SKYPILOT_TASK_ID'] = 'sky-2024-11-17-00-00-00-000002-cluster-3'
@@ -418,19 +448,36 @@ if script is not None:
     # Add prolog to signal allocation and wait for setup to finish.
     # We also need to source ~/.bashrc again to make it as if the
     # run section is run in a new shell, after setup is finished.
+    # Also setup SKYPILOT env vars from SLURM env vars.
     run_script = (
         f"touch {alloc_signal_file} && "
         f"while [ ! -f {setup_done_signal_file} ]; do sleep 0.05; done && "
         f"rm -f {setup_done_signal_file} && "
+        f"export SKYPILOT_NUM_NODES=${{SLURM_NNODES:-$SLURM_JOB_NUM_NODES}} && "
+        f"export SKYPILOT_NODE_RANK=$SLURM_PROCID && "
         "source ~/.bashrc && "
         + script
     )
     # Start exclusive srun in a thread to reserve allocation (similar to ray.get(pg.ready()))
     gpu_arg = f'--gpus-per-node=0' if 0 > 0 else ''
+
+    def build_srun_cmd(script, extra_flags):
+        script_path = None
+        srun_flags = f'srun --quiet --unbuffered --jobid=67890 --job-name=sky-3 --ntasks-per-node=1 {extra_flags}'
+        if backend_utils.is_command_length_over_limit(script):
+            with tempfile.NamedTemporaryFile('w', prefix='sky_srun_', suffix='.sh', delete=False) as f:
+                f.write(script)
+                script_path = f.name
+            srun_cmd = f'{srun_flags} bash {script_path}'
+        else:
+            srun_cmd = f'{srun_flags} bash -c {shlex.quote(script)}'
+        return srun_cmd, script_path
+
     def run_thread_func():
         # This blocks until Slurm allocates resources (--exclusive)
         # --mem=0 to match RayCodeGen's behavior where we don't explicitly request memory.
-        srun_cmd = f'srun --quiet --unbuffered --jobid=67890 --nodes=2 --cpus-per-task=2 --mem=0 --ntasks-per-node=1 {gpu_arg} --exclusive bash -c {shlex.quote(run_script)}'
+        run_flags = f'--nodes=2 --cpus-per-task=2 --mem=0 {gpu_arg} --exclusive'
+        srun_cmd, run_script_path = build_srun_cmd(run_script, run_flags)
         result = run_bash_command_with_log_and_return_pid(
             srun_cmd,
             log_path,
@@ -439,6 +486,8 @@ if script is not None:
             with_ray=False,
             streaming_prefix=f'{colorama.Fore.CYAN}(distributed_task, pid={{pid}}){colorama.Style.RESET_ALL} ',
         )
+        if run_script_path is not None:
+            os.remove(run_script_path)
         return result
 
     run_thread_result = {'result': None}
@@ -450,6 +499,18 @@ if script is not None:
 
     # Wait for allocation signal from inside srun
     while not os.path.exists(alloc_signal_file):
+        if not run_thread.is_alive():
+            # srun failed before creating the signal file.
+            run_thread.join()
+            result = run_thread_result['result']
+            returncode = int(result.get('return_code', 1))
+            pid = result.get('pid', os.getpid())
+            msg = f'ERROR: [31mJob 3\'s setup failed with return code {returncode} (pid={pid}).'
+            msg += f' See error logs above for more details.[0m'
+            print(msg, flush=True)
+            returncodes = [returncode]
+            job_lib.set_status(3, job_lib.JobStatus.FAILED_SETUP)
+            sys.exit(1)
         time.sleep(0.1)
 
     print('\x1b[2m└── \x1b[0mJob started. Streaming logs... \x1b[2m(Ctrl-C to exit log streaming; job will not be killed)\x1b[0m', flush=True)
@@ -464,7 +525,8 @@ if script is not None:
 
         # --overlap as we have already secured allocation with the srun for the run section,
         # and otherwise this srun would get blocked and deadlock.
-        setup_srun = f'srun --quiet --unbuffered --overlap --jobid=67890 --nodes={setup_num_nodes} --ntasks-per-node=1 bash -c {shlex.quote(setup_cmd)}'
+        setup_flags = f'--overlap --nodes={setup_num_nodes}'
+        setup_srun, setup_script_path = build_srun_cmd(setup_cmd, setup_flags)
 
         setup_result = run_bash_command_with_log_and_return_pid(
             setup_srun,
@@ -475,6 +537,9 @@ if script is not None:
             streaming_prefix=f'{colorama.Fore.CYAN}(setup pid={{pid}}){colorama.Style.RESET_ALL} ',
         )
 
+        if setup_script_path is not None:
+            os.remove(setup_script_path)
+
         setup_returncode = int(setup_result.get('return_code', 1))
         if setup_returncode != 0:
             setup_pid = setup_result.get('pid', os.getpid())
@@ -482,7 +547,6 @@ if script is not None:
             msg += f' See error logs above for more details.[0m'
             print(msg, flush=True)
             job_lib.set_status(3, job_lib.JobStatus.FAILED_SETUP)
-            time.sleep(1)
             sys.exit(1)
 
     job_lib.set_job_started(3)

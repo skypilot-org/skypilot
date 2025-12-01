@@ -1404,17 +1404,17 @@ class SlurmCommandRunner(SSHCommandRunner):
         # could be part of a shared filesystem.
         # And similarly for SKY_RUNTIME_DIR. See constants.\
         # SKY_RUNTIME_DIR_ENV_VAR for more details.
+        #
+        # SSH directly to the compute node instead of using srun.
+        # This avoids Slurm's proctrack/cgroup which kills all processes
+        # when the job step ends (including child processes launched as
+        # a separate process group), breaking background process spawning
+        # (e.g., JobScheduler._run_job which uses launch_new_process_tree).
+        # Note: proctrack/cgroup is enabled by default on Nebius'
+        # Managed Soperator.
         cmd = (f'export {constants.SKY_RUNTIME_DIR_ENV_VAR}='
                f'"{self.skypilot_runtime_dir}" && '
                f'cd {self.sky_dir} && export HOME=$(pwd) && {cmd}')
-
-        # Wrap the command in srun to execute on the specific compute node
-        # instead of the login node. This ensures conda and other
-        # installations happen on the compute node's local /tmp.
-        # --overlap allows multiple job steps to run simultaneously on the
-        # same allocation
-        cmd = (f'srun --quiet --overlap --jobid={self.job_id} '
-               f'--nodelist={self.slurm_node} '
-               f'--nodes=1 --ntasks=1 bash -c {shlex.quote(cmd)}')
+        cmd = f'ssh {self.slurm_node} {shlex.quote(cmd)}'
 
         return super().run(cmd, **kwargs)

@@ -196,18 +196,6 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
     pathlib.Path(directory_utils.get_sky_dir()) / 'backends' /
     'monkey_patches' / 'monkey_patch_ray_up.py')
 
-# The maximum size of a command line arguments is 128 KB, i.e. the command
-# executed with /bin/sh should be less than 128KB.
-# https://github.com/torvalds/linux/blob/master/include/uapi/linux/binfmts.h
-#
-# If a user have very long run or setup commands, the generated command may
-# exceed the limit, as we directly include scripts in job submission commands.
-# If the command is too long, we instead write it to a file, rsync and execute
-# it.
-#
-# We use 100KB as a threshold to be safe for other arguments that
-# might be added during ssh.
-_MAX_INLINE_SCRIPT_LENGTH = 100 * 1024
 _EXCEPTION_MSG_AND_RETURNCODE_FOR_DUMP_INLINE_SCRIPT = [
     ('too long', 255),
     ('request-uri too large', 1),
@@ -220,18 +208,6 @@ _RESOURCES_UNAVAILABLE_LOG = (
 
 # Number of seconds to wait locking the cluster before communicating with user.
 _CLUSTER_LOCK_TIMEOUT = 5.0
-
-
-def _is_command_length_over_limit(command: str) -> bool:
-    """Check if the length of the command exceeds the limit.
-
-    We calculate the length of the command after quoting the command twice as
-    when it is executed by the CommandRunner, the command will be quoted twice
-    to ensure the correctness, which will add significant length to the command.
-    """
-
-    quoted_length = len(shlex.quote(shlex.quote(command)))
-    return quoted_length > _MAX_INLINE_SCRIPT_LENGTH
 
 
 def _is_message_too_long(returncode: int,
@@ -4040,7 +4016,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 _dump_final_script(setup_script,
                                    constants.PERSISTENT_SETUP_SCRIPT_PATH)
 
-            if detach_setup or _is_command_length_over_limit(encoded_script):
+            if (detach_setup or
+                    backend_utils.is_command_length_over_limit(encoded_script)):
                 _dump_final_script(setup_script)
                 create_script_code = 'true'
             else:
@@ -4197,7 +4174,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
 
-        # Should also be ealier than _is_command_length_over_limit
+        # Should also be ealier than is_command_length_over_limit
         # Same reason as in _setup
         if self._dump_final_script:
             _dump_code_to_file(job_submit_cmd,
@@ -4230,7 +4207,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         tasks=managed_job_tasks,
                         user_id=managed_job_user_id)
 
-                if _is_command_length_over_limit(codegen):
+                if backend_utils.is_command_length_over_limit(codegen):
                     _dump_code_to_file(codegen)
                     queue_job_request = jobsv1_pb2.QueueJobRequest(
                         job_id=job_id,
@@ -4252,7 +4229,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 use_legacy = True
 
         if use_legacy:
-            if _is_command_length_over_limit(job_submit_cmd):
+            if backend_utils.is_command_length_over_limit(job_submit_cmd):
                 _dump_code_to_file(codegen)
                 job_submit_cmd = f'{mkdir_code} && {code}'
 
