@@ -924,6 +924,13 @@ def get_task_schema():
                 'type': 'array',
                 'items': get_volume_mount_schema(),
             },
+            'links': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': {
+                    'type': 'string'
+                },
+            },
             '_metadata': {
                 'type': 'object',
             },

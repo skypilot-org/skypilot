@@ -33,6 +33,7 @@ from sky.utils import env_options
 from sky.utils import registry
 from sky.utils import status_lib
 from sky.utils import ux_utils
+from sky.utils import instance_links as instance_links_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -567,6 +568,37 @@ class StrategyExecutor:
                         # At this point, a sky.launch() has succeeded. Cluster
                         # may be UP (no preemption since) or DOWN (newly
                         # preempted).
+                        # Auto-populate instance links if cluster is on a real cloud
+                        if self.cluster_name is not None and self.pool is None:
+                            try:
+                                handle = await context_utils.to_thread(
+                                    global_user_state.get_handle_from_cluster_name,
+                                    self.cluster_name)
+                                if (handle is not None and
+                                        hasattr(handle, 'cached_cluster_info') and
+                                        handle.cached_cluster_info is not None):
+                                    cluster_info = handle.cached_cluster_info
+                                    region = (handle.launched_resources.region
+                                              if hasattr(handle.launched_resources,
+                                                         'region') else None)
+                                    instance_links = (
+                                        instance_links_utils.generate_instance_links(
+                                            cluster_info, region=region))
+                                    if instance_links:
+                                        # Update task links
+                                        self.task.update_links(instance_links)
+                                        # Store links directly in database links column
+                                        await state.update_links_async(
+                                            self.job_id, self.task_id,
+                                            instance_links)
+                                        logger.debug(
+                                            f'Auto-populated instance links: '
+                                            f'{instance_links}')
+                            except Exception as e:  # pylint: disable=broad-except
+                                # Don't fail the launch if we can't generate links
+                                logger.debug(
+                                    f'Failed to auto-populate instance links: {e}')
+
                         job_submitted_at = await (
                             self._wait_until_job_starts_on_cluster())
                         if job_submitted_at is not None:

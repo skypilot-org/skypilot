@@ -807,6 +807,28 @@ function JobDetailsContent({
         </div>
       </div>
 
+      {/* Links section - spans both columns if there are links */}
+      {jobData.links &&
+        Object.keys(jobData.links).length > 0 && (
+          <div className="col-span-2">
+            <div className="text-gray-600 font-medium text-base mb-2">Links</div>
+            <div className="space-y-2">
+              {Object.entries(jobData.links).map(([label, url]) => (
+                <div key={label} className="flex items-center">
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:text-blue-800 hover:underline text-base"
+                  >
+                    {label}
+                  </a>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
       {/* Entrypoint section - spans both columns */}
       {(jobData.entrypoint || jobData.dag_yaml) && (
         <div className="col-span-2">
