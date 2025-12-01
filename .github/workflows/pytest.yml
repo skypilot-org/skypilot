@@ -64,13 +64,21 @@ jobs:
           # Use -e to include examples and tests folder in the path for unit
           # tests to access them.
           uv pip install -e ".[all]"
-          uv pip install pytest pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0
+          uv pip install pytest pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0 buildkite-test-collector
+      - name: Set branch name and commit message
+        id: set_env
+        run: |
+          echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+          echo "message=${{ github.event.pull_request.title }}" >> $GITHUB_OUTPUT
       - name: Run tests with pytest
         env:
           TEST_PATH: ${{ matrix.test-path }}
           TEST_NAME: ${{ matrix.test-name }}
+          BUILDKITE_ANALYTICS_TOKEN: ${{ secrets.BUILDKITE_ANALYTICS_TOKEN }}
         run: |
           source ~/test-env/bin/activate
+          export GITHUB_REF="${{ steps.set_env.outputs.branch }}"
+          export TEST_ANALYTICS_COMMIT_MESSAGE="${{ steps.set_env.outputs.message }}"
           if [[ "$TEST_NAME" == "No Parallel Tests" || "$TEST_NAME" == "Event Loop Lag Tests" ]]; then
             SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 eval "pytest -n 0 --dist no $TEST_PATH"
           else
@@ -105,12 +113,20 @@ jobs:
           uv pip install --prerelease=allow "azure-cli>=2.65.0"
           # Install limited dependencies only
           uv pip install -e ".[kubernetes,aws,gcp,azure]"
-          uv pip install pytest pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0
+          uv pip install pytest pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0 buildkite-test-collector
+      - name: Set branch name and commit message
+        id: set_env
+        run: |
+          echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+          echo "message=${{ github.event.pull_request.title }}" >> $GITHUB_OUTPUT
       - name: Run tests with pytest
         env:
           TEST_PATH: ${{ matrix.test-path }}
+          BUILDKITE_ANALYTICS_TOKEN: ${{ secrets.BUILDKITE_ANALYTICS_TOKEN }}
         run: |
           source ~/test-env/bin/activate
+          export GITHUB_REF="${{ steps.set_env.outputs.branch }}"
+          export TEST_ANALYTICS_COMMIT_MESSAGE="${{ steps.set_env.outputs.message }}"
           SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 eval "pytest -n 0 --dist no $TEST_PATH"
 
   failover-test:
@@ -142,8 +158,17 @@ jobs:
           # Use -e to include examples and tests folder in the path for unit
           # tests to access them.
           uv pip install -e ".[all]"
-          uv pip install pytest pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0 moto==5.1.2
+          uv pip install pytest pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0 moto==5.1.2 buildkite-test-collector
+      - name: Set branch name and commit message
+        id: set_env
+        run: |
+          echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+          echo "message=${{ github.event.pull_request.title }}" >> $GITHUB_OUTPUT
       - name: Run tests with pytest
+        env:
+          BUILDKITE_ANALYTICS_TOKEN: ${{ secrets.BUILDKITE_ANALYTICS_TOKEN }}
         run: |
           source ~/test-env/bin/activate
+          export GITHUB_REF="${{ steps.set_env.outputs.branch }}"
+          export TEST_ANALYTICS_COMMIT_MESSAGE="${{ steps.set_env.outputs.message }}"
           SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 4 --dist worksteal ${{ matrix.test-path }}
