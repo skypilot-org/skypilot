@@ -141,7 +141,9 @@ def init_db(func):
 
         with _db_init_lock:
             if _DB is None:
-                db_path = os.path.expanduser('~/.sky/jobs.db')
+                runtime_dir = os.path.expanduser(
+                    os.environ.get(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY, '~'))
+                db_path = os.path.join(runtime_dir, '.sky/jobs.db')
                 os.makedirs(pathlib.Path(db_path).parents[0], exist_ok=True)
                 _DB = db_utils.SQLiteConn(db_path, create_table)
         return func(*args, **kwargs)
@@ -631,7 +633,9 @@ def get_ray_port():
     If the port file does not exist, the cluster was launched before #1790,
     return the default port.
     """
-    port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
+    runtime_dir = os.path.expanduser(
+        os.environ.get(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY, '~'))
+    port_path = os.path.join(runtime_dir, constants.SKY_REMOTE_RAY_PORT_FILE)
     if not os.path.exists(port_path):
         return 6379
     port = json.load(open(port_path, 'r', encoding='utf-8'))['ray_port']
@@ -644,7 +648,9 @@ def get_job_submission_port():
     If the port file does not exist, the cluster was launched before #1790,
     return the default port.
     """
-    port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
+    runtime_dir = os.path.expanduser(
+        os.environ.get(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY, '~'))
+    port_path = os.path.join(runtime_dir, constants.SKY_REMOTE_RAY_PORT_FILE)
     if not os.path.exists(port_path):
         return 8265
     port = json.load(open(port_path, 'r',

@@ -470,7 +470,9 @@ def get_engine(
             engine = _postgres_engine_cache[conn_string]
     else:
         assert db_name is not None, 'db_name must be provided for SQLite'
-        db_path = os.path.expanduser(f'~/.sky/{db_name}.db')
+        runtime_dir = os.path.expanduser(
+            os.environ.get(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY, '~'))
+        db_path = os.path.join(runtime_dir, f'.sky/{db_name}.db')
         pathlib.Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
         if async_engine:
             # This is an AsyncEngine, instead of a (normal, synchronous) Engine,

@@ -39,11 +39,13 @@ _RAY_PRLIMIT = (
     'which prlimit && for id in $(pgrep -f raylet/raylet); '
     'do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;')
 
-_DUMP_RAY_PORTS = (
-    f'{constants.SKY_PYTHON_CMD} -c \'import json, os; '
-    f'json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
-    f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", '
-    'encoding="utf-8"))\';')
+_DUMP_RAY_PORTS = (f'{constants.SKY_PYTHON_CMD} -c \'import json, os; '
+                   f'runtime_dir = os.path.expanduser(os.environ.get('
+                   f'"{constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}", "~")); '
+                   f'json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
+                   f'open(os.path.join(runtime_dir, '
+                   f'"{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", '
+                   'encoding="utf-8"))\';')
 
 _RAY_PORT_COMMAND = (
     f'RAY_PORT=$({constants.SKY_PYTHON_CMD} -c '
