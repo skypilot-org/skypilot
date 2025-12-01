@@ -88,6 +88,32 @@ tests:
           path: spec.template.spec.containers[0].env[1].value
           value: "test-client-secret"
 
+  - it: should apply global extra envs to oauth2-proxy and redis
+    set:
+      global.extraEnvs:
+        - name: GLOBAL_ENV
+          value: global
+      auth.oauth.enabled: false
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      ingress.oauth2-proxy.client-id: "test-client-id"
+      ingress.oauth2-proxy.client-secret: "test-client-secret"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GLOBAL_ENV
+            value: global
+        template: templates/oauth2-proxy-deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GLOBAL_ENV
+            value: global
+        template: templates/oauth2-proxy-redis.yaml
+        documentIndex: 0
+
   - it: should configure oauth2-proxy with client credentials from secret (legacy)
     set:
       auth.oauth.enabled: false
@@ -257,6 +283,46 @@ tests:
           content:
             name: SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL
             value: "http://RELEASE-NAME-oauth2-proxy:4180"
+
+  - it: should apply global image pull secrets to oauth2-proxy pods
+    set:
+      global.imagePullSecrets[0].name: global-pull-secret
+      auth.oauth.enabled: true
+      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      auth.oauth.client-id: "test-client-id"
+      auth.oauth.client-secret: "test-client-secret"
+    asserts:
+      - contains:
+          path: spec.template.spec.imagePullSecrets
+          content:
+            name: global-pull-secret
+        template: templates/oauth2-proxy-deployment.yaml
+      - contains:
+          path: spec.template.spec.imagePullSecrets
+          content:
+            name: global-pull-secret
+        template: templates/oauth2-proxy-redis.yaml
+        documentIndex: 0
+
+  - it: should prefix oauth2-proxy images with the global image registry
+    set:
+      global.imageRegistry: registry.example.com/custom
+      auth.oauth.enabled: true
+      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      auth.oauth.client-id: "test-client-id"
+      auth.oauth.client-secret: "test-client-secret"
+      auth.oauth.image: oauth2/proxy:custom
+      auth.oauth.redis-image: redis/redis:custom
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.example.com/custom/oauth2/proxy:custom
+        template: templates/oauth2-proxy-deployment.yaml
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.example.com/custom/redis/redis:custom
+        template: templates/oauth2-proxy-redis.yaml
+        documentIndex: 0
 
   - it: should not create oauth2-proxy ingress when using new auth config
     set:

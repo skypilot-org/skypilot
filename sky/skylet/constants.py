@@ -100,7 +100,7 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '23'
+SKYLET_VERSION = '26'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -243,6 +243,21 @@ RAY_INSTALLATION_COMMANDS = (
     f'{{ {SKY_UV_RUN_CMD} '
     f'which ray > {SKY_RAY_PATH_FILE} || exit 1; }}; ')
 
+# Copy SkyPilot templates from the installed wheel to ~/sky_templates.
+# This must run after the skypilot wheel is installed.
+COPY_SKYPILOT_TEMPLATES_COMMANDS = (
+    f'{ACTIVATE_SKY_REMOTE_PYTHON_ENV}; '
+    f'{SKY_PYTHON_CMD} -c \''
+    'import sky_templates, shutil, os; '
+    'src = os.path.dirname(sky_templates.__file__); '
+    'dst = os.path.expanduser(\"~/sky_templates\"); '
+    'print(f\"Copying templates from {src} to {dst}...\"); '
+    'shutil.copytree(src, dst, dirs_exist_ok=True); '
+    'print(f\"Templates copied successfully\")\'; '
+    # Make scripts executable.
+    'find ~/sky_templates -type f ! -name "*.py" ! -name "*.md" '
+    '-exec chmod +x {} \\; ')
+
 SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     f'{SKY_UV_INSTALL_CMD};'
     f'{{ {SKY_UV_PIP_CMD} list | grep "skypilot " && '
@@ -372,6 +387,8 @@ SERVICE_ACCOUNT_TOKEN_ENV_VAR = (
 # SkyPilot environment variables
 SKYPILOT_NUM_NODES = f'{SKYPILOT_ENV_VAR_PREFIX}NUM_NODES'
 SKYPILOT_NODE_IPS = f'{SKYPILOT_ENV_VAR_PREFIX}NODE_IPS'
+SKYPILOT_SETUP_NUM_GPUS_PER_NODE = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}SETUP_NUM_GPUS_PER_NODE')
 SKYPILOT_NUM_GPUS_PER_NODE = f'{SKYPILOT_ENV_VAR_PREFIX}NUM_GPUS_PER_NODE'
 SKYPILOT_NODE_RANK = f'{SKYPILOT_ENV_VAR_PREFIX}NODE_RANK'
 
@@ -390,7 +407,9 @@ RCLONE_CACHE_REFRESH_INTERVAL = 10
 OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('docker', 'run_options'),
     ('nvidia_gpus', 'disable_ecc'),
+    ('ssh', 'custom_metadata'),
     ('ssh', 'pod_config'),
+    ('ssh', 'provision_timeout'),
     ('kubernetes', 'custom_metadata'),
     ('kubernetes', 'pod_config'),
     ('kubernetes', 'provision_timeout'),
@@ -422,6 +441,8 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     #   but the configs won't be applied)
     ('jobs', 'controller', 'consolidation_mode'),
     ('serve', 'controller', 'consolidation_mode'),
+    ('jobs', 'controller', 'controller_logs_gc_retention_hours'),
+    ('jobs', 'controller', 'task_logs_gc_retention_hours'),
 ]
 
 # Constants for Azure blob storage
@@ -457,6 +478,10 @@ SKY_USER_FILE_PATH = '~/.sky/generated'
 # Environment variable that is set to 'true' if this is a skypilot server.
 ENV_VAR_IS_SKYPILOT_SERVER = 'IS_SKYPILOT_SERVER'
 OVERRIDE_CONSOLIDATION_MODE = 'IS_SKYPILOT_JOB_CONTROLLER'
+IS_SKYPILOT_SERVE_CONTROLLER = 'IS_SKYPILOT_SERVE_CONTROLLER'
+
+SERVE_OVERRIDE_CONCURRENT_LAUNCHES = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}SERVE_OVERRIDE_CONCURRENT_LAUNCHES')
 
 # Environment variable that is set to 'true' if metrics are enabled.
 ENV_VAR_SERVER_METRICS_ENABLED = 'SKY_API_SERVER_METRICS_ENABLED'
@@ -472,6 +497,7 @@ ENV_VAR_DB_CONNECTION_URI = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_CONNECTION_URI')
 # authentication is enabled in the API server.
 ENV_VAR_ENABLE_BASIC_AUTH = 'ENABLE_BASIC_AUTH'
 SKYPILOT_INITIAL_BASIC_AUTH = 'SKYPILOT_INITIAL_BASIC_AUTH'
+SKYPILOT_INGRESS_BASIC_AUTH_ENABLED = 'SKYPILOT_INGRESS_BASIC_AUTH_ENABLED'
 ENV_VAR_ENABLE_SERVICE_ACCOUNTS = 'ENABLE_SERVICE_ACCOUNTS'
 
 # Enable debug logging for requests.
@@ -548,3 +574,6 @@ ENV_VAR_LOOP_LAG_THRESHOLD_MS = (SKYPILOT_ENV_VAR_PREFIX +
 
 ARM64_ARCH = 'arm64'
 X86_64_ARCH = 'x86_64'
+
+SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}SSH_DISABLE_LATENCY_MEASUREMENT')

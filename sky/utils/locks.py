@@ -155,7 +155,7 @@ class FileLock(DistributedLock):
         common_utils.remove_file_if_exists(self.lock_path)
 
     def is_locked(self) -> bool:
-        return self._filelock.is_locked()
+        return self._filelock.is_locked
 
 
 class PostgresLock(DistributedLock):
@@ -163,15 +163,20 @@ class PostgresLock(DistributedLock):
 
     Uses PostgreSQL advisory locks to implement distributed locking
     that works across multiple machines sharing the same database.
-    Reference:
-    https://www.postgresql.org/docs/current/explicit-locking.html
-    #ADVISORY-LOCKS
+    Supports both exclusive and shared lock modes.
+
+    References:
+    # pylint: disable=line-too-long
+    - https://www.postgresql.org/docs/current/explicit-locking.html#ADVISORY-LOCKS
+    - https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADVISORY-LOCKS
+    # TODO(cooperc): re-enable pylint line-too-long
     """
 
     def __init__(self,
                  lock_id: str,
                  timeout: Optional[float] = None,
-                 poll_interval: float = 1):
+                 poll_interval: float = 1,
+                 shared_lock: bool = False):
         """Initialize the postgres lock.
 
         Args:
@@ -179,10 +184,13 @@ class PostgresLock(DistributedLock):
             timeout: Maximum time to wait for lock acquisition.
             poll_interval: Interval in seconds to poll for lock acquisition,
                 default to 1 second to avoid storming the database.
+            shared_lock: Whether to use shared advisory lock or exclusive
+                advisory lock (default).
         """
         super().__init__(lock_id, timeout, poll_interval)
         # Convert string lock_id to integer for postgres advisory locks
         self._lock_key = self._string_to_lock_key(lock_id)
+        self._shared_lock = shared_lock
         self._acquired = False
         self._connection: Optional[sqlalchemy.pool.PoolProxiedConnection] = None
 
@@ -211,26 +219,32 @@ class PostgresLock(DistributedLock):
 
         start_time = time.time()
 
+        if self._shared_lock:
+            lock_func = 'pg_try_advisory_lock_shared'
+        else:
+            lock_func = 'pg_try_advisory_lock'
+
         try:
             while True:
-                cursor.execute('SELECT pg_try_advisory_lock(%s)',
-                               (self._lock_key,))
+                cursor.execute(f'SELECT {lock_func}(%s)', (self._lock_key,))
                 result = cursor.fetchone()[0]
 
                 if result:
                     self._acquired = True
                     return AcquireReturnProxy(self)
 
+                mode_str = ('shared' if self._shared_lock else 'exclusive')
                 if not blocking:
                     raise LockTimeout(
-                        f'Failed to immediately acquire postgres lock '
-                        f'{self.lock_id}')
+                        f'Failed to immediately acquire {mode_str} '
+                        f'postgres lock {self.lock_id}')
 
                 if (self.timeout is not None and
                         time.time() - start_time > self.timeout):
                     raise LockTimeout(
-                        f'Failed to acquire postgres lock {self.lock_id} '
-                        f'within {self.timeout} seconds')
+                        f'Failed to acquire {mode_str} postgres lock '
+                        f'{self.lock_id} within {self.timeout} '
+                        f'seconds')
 
                 time.sleep(self.poll_interval)
 
@@ -246,7 +260,11 @@ class PostgresLock(DistributedLock):
         connection_lost = False
         try:
             cursor = self._connection.cursor()
-            cursor.execute('SELECT pg_advisory_unlock(%s)', (self._lock_key,))
+            if self._shared_lock:
+                unlock_func = 'pg_advisory_unlock_shared'
+            else:
+                unlock_func = 'pg_advisory_unlock'
+            cursor.execute(f'SELECT {unlock_func}(%s)', (self._lock_key,))
             self._connection.commit()
             self._acquired = False
         except psycopg2.OperationalError as e:
@@ -271,10 +289,15 @@ class PostgresLock(DistributedLock):
             if self._connection is None:
                 self._connection = self._get_connection()
             cursor = self._connection.cursor()
-            cursor.execute('SELECT pg_advisory_unlock(%s)', (self._lock_key,))
+            if self._shared_lock:
+                unlock_func = 'pg_advisory_unlock_shared'
+            else:
+                unlock_func = 'pg_advisory_unlock'
+
+            cursor.execute(f'SELECT {unlock_func}(%s)', (self._lock_key,))
             result = cursor.fetchone()[0]
             if result:
-                # The lock is held by current routine and unlock suceed
+                # The lock is held by current routine and unlock succeed
                 self._connection.commit()
                 self._acquired = False
                 return
@@ -282,11 +305,15 @@ class PostgresLock(DistributedLock):
                 ('SELECT pid FROM pg_locks WHERE locktype = \'advisory\' '
                  'AND ((classid::bigint << 32) | objid::bigint) = %s'),
                 (self._lock_key,))
-            row = cursor.fetchone()
-            if row:
-                # The lock is still held by another routine, false unlock it
-                # by killing the PG connection of that routine.
-                cursor.execute('SELECT pg_terminate_backend(%s)', (row[0],))
+            rows = cursor.fetchall()
+            if rows:
+                # There can be multiple PIDs holding the lock, it is not enough
+                # to only kill some of them. For example, if pid 1 is holding a
+                # shared lock, and pid 2 is waiting to grab an exclusive lock,
+                # killing pid 1 will transfer the lock to pid 2, so the lock
+                # will still not be released.
+                for row in rows:
+                    cursor.execute('SELECT pg_terminate_backend(%s)', (row[0],))
                 self._connection.commit()
                 return
         except Exception as e:
@@ -327,7 +354,8 @@ class PostgresLock(DistributedLock):
 def get_lock(lock_id: str,
              timeout: Optional[float] = None,
              lock_type: Optional[str] = None,
-             poll_interval: Optional[float] = None) -> DistributedLock:
+             poll_interval: Optional[float] = None,
+             shared_lock: bool = False) -> DistributedLock:
     """Create a distributed lock instance.
 
     Args:
@@ -336,6 +364,9 @@ def get_lock(lock_id: str,
                  None means wait indefinitely.
         lock_type: Type of lock to create ('filelock' or 'postgres').
                    If None, auto-detect based on database configuration.
+        poll_interval: Interval in seconds to poll for lock acquisition.
+        shared_lock: Whether to use shared lock or exclusive lock (default).
+                     NOTE: Only applicable for PostgresLock.
 
     Returns:
         DistributedLock instance.
@@ -345,9 +376,24 @@ def get_lock(lock_id: str,
 
     if lock_type == 'postgres':
         if poll_interval is None:
-            return PostgresLock(lock_id, timeout)
-        return PostgresLock(lock_id, timeout, poll_interval)
+            return PostgresLock(lock_id, timeout, shared_lock=shared_lock)
+        return PostgresLock(lock_id,
+                            timeout,
+                            poll_interval,
+                            shared_lock=shared_lock)
     elif lock_type == 'filelock':
+        # The filelock library we use does not support shared locks.
+        # It explicitly uses fcntl.LOCK_EX on Unix systems,
+        # whereas fcntl.LOCK_SH is needed for shared locks.
+
+        # This should be fine as it should not introduce correctness issues,
+        # just that concurrency is reduced and so is performance, because
+        # read-only operations can't run at the same time, each of them need
+        # to wait to exclusively hold the lock.
+
+        # But given that we recommend users to use Postgres in production,
+        # the impact of this should be limited to local API server mostly.
+        del shared_lock
         if poll_interval is None:
             return FileLock(lock_id, timeout)
         return FileLock(lock_id, timeout, poll_interval)

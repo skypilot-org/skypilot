@@ -28,6 +28,7 @@ from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
+from sky.provision import volume as provision_volume
 from sky.skylet import constants
 from sky.utils import common
 from sky.utils import common_utils
@@ -59,6 +60,11 @@ def _bulk_provision(
     region_name = region.name
 
     start = time.time()
+
+    provision_volume.provision_ephemeral_volumes(cloud, region_name,
+                                                 cluster_name.name_on_cloud,
+                                                 bootstrap_config)
+
     # TODO(suquark): Should we cache the bootstrapped result?
     #  Currently it is not necessary as bootstrapping takes
     #  only ~3s, caching it seems over-engineering and could
@@ -237,6 +243,7 @@ def teardown_cluster(cloud_name: str, cluster_name: resources_utils.ClusterName,
         provision.terminate_instances(cloud_name, cluster_name.name_on_cloud,
                                       provider_config)
         metadata_utils.remove_cluster_metadata(cluster_name.name_on_cloud)
+        provision_volume.delete_ephemeral_volumes(provider_config)
     else:
         provision.stop_instances(cloud_name, cluster_name.name_on_cloud,
                                  provider_config)
@@ -485,12 +492,13 @@ def _post_provision_setup(
         # ready by the provisioner, and we use kubectl instead of SSH to run the
         # commands and rsync on the pods. SSH will still be ready after a while
         # for the users to SSH into the pod.
-        if cloud_name.lower() != 'kubernetes':
+        is_k8s_cloud = cloud_name.lower() in ['kubernetes', 'ssh']
+        if not is_k8s_cloud:
             logger.debug(
                 f'\nWaiting for SSH to be available for {cluster_name!r} ...')
             wait_for_ssh(cluster_info, ssh_credentials)
             logger.debug(f'SSH Connection ready for {cluster_name!r}')
-        vm_str = 'Instance' if cloud_name.lower() != 'kubernetes' else 'Pod'
+        vm_str = 'Instance' if not is_k8s_cloud else 'Pod'
         plural = '' if len(cluster_info.instances) == 1 else 's'
         verb = 'is' if len(cluster_info.instances) == 1 else 'are'
         indent_str = (ux_utils.INDENT_SYMBOL

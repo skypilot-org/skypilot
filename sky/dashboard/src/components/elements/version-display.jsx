@@ -8,6 +8,12 @@ export function VersionDisplay() {
 
   const getVersion = async () => {
     const data = await apiClient.get('/api/health');
+    if (!data.ok) {
+      console.error(
+        `API request /api/health failed with status ${data.status}`
+      );
+      return;
+    }
     const healthData = await data.json();
     if (healthData.version) {
       setVersion(healthData.version);

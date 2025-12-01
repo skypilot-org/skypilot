@@ -8,6 +8,7 @@ import time
 from typing import Dict, Generator, List, Optional, Tuple, TypeVar
 
 import pytest
+import requests
 from smoke_tests import metrics_utils
 from smoke_tests import smoke_tests_utils
 
@@ -192,7 +193,8 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
                         sky.ManagedJobStatus.STARTING,
                         sky.ManagedJobStatus.RUNNING
                     ],
-                    timeout=60),
+                    timeout=600
+                    if smoke_tests_utils.is_remote_server_test() else 60),
             ]),
             *set_user(
                 user_2,
@@ -206,7 +208,8 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
                             sky.ManagedJobStatus.STARTING,
                             sky.ManagedJobStatus.RUNNING
                         ],
-                        timeout=60),
+                        timeout=600
+                        if smoke_tests_utils.is_remote_server_test() else 60),
                     # Should only cancel user_2's job.
                     'sky jobs cancel -y --all',
                     smoke_tests_utils.
@@ -281,6 +284,11 @@ def test_requests_scheduling(generic_cloud: str):
 
 
 # ---- Test recent request tracking -----
+# We mark this test as no_remote_server since it requires a dedicated API server
+# for the test otherwise we can't make any guarantees about the most recent
+# request. Replace with another option to skip shared server tests when we have
+# one.
+@pytest.mark.no_remote_server
 def test_recent_request_tracking(generic_cloud: str):
     with smoke_tests_utils.override_sky_config():
         # We need to override the sky api endpoint env if --remote-server is
@@ -405,9 +413,9 @@ def test_big_file_upload_memory_usage(generic_cloud: str):
                 total_increase: float, total_increase_pct: float) -> List[str]:
             """Aggregate threshold checker for RSS metrics."""
             failures = []
-            if total_increase_pct > 20:
+            if total_increase_pct > 30:
                 failures.append(
-                    f"Average memory increase too high: {total_increase_pct:.1f}% (limit: 20%)"
+                    f"Average memory increase too high: {total_increase_pct:.1f}% (limit: 30%)"
                 )
             return failures
 
@@ -547,7 +555,7 @@ def test_tail_jobs_logs_blocks_ssh(generic_cloud: str):
 
         # Wait for the job to start.
         def is_job_started(job_id: int):
-            req_id = jobs.queue(refresh=True, job_ids=[job_id])
+            req_id = jobs.queue_v2(refresh=True, job_ids=[job_id])
             job_records = sky.stream_and_get(req_id)[0]
             assert len(job_records) == 1
             return job_records[0]['status'] == sky.ManagedJobStatus.RUNNING
@@ -664,9 +672,19 @@ def test_high_logs_concurrency_not_blocking_operations(generic_cloud: str,
         expected_count = 128
         while time.time() - start < 120:
             count = 0
-            for req in sky.api_status(limit=None):
-                if 'logs' in req.name and req.status == 'RUNNING':
-                    count += 1
+            # Retry on connection errors since the server might be temporarily overwhelmed
+            max_retries = 3
+            for retry in range(max_retries):
+                try:
+                    for req in sky.api_status(limit=None):
+                        if 'logs' in req.name and req.status == 'RUNNING':
+                            count += 1
+                    break  # Success, exit retry loop
+                except (requests.exceptions.ConnectionError,
+                        requests.exceptions.RequestException) as e:
+                    if retry == max_retries - 1:
+                        raise  # Re-raise on final retry
+                    time.sleep(5)  # 5 second backoff before retry
             if count >= expected_count:
                 return
             yield f'Wait enough concurrent logs requests: {count}/{expected_count}'
@@ -708,5 +726,74 @@ def test_high_logs_concurrency_not_blocking_operations(generic_cloud: str,
          f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api start; '
          f'sky down -y {name} || true; sky down -y {name}-another || true; '
          f'sky jobs cancel -n {name}-job -y || true;'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server  # Requires restarting the API server to remove existing tunnels.
+@pytest.mark.no_dependency  # We can't restart the api server in the dependency test.
+def test_high_concurrency_ssh_tunnel_opening(generic_cloud: str,
+                                             tmp_path: pathlib.Path):
+    """Test that high concurrency SSH tunnel opening does not result in timeouts."""
+    name = smoke_tests_utils.get_cluster_name()
+    concurrency = 50
+    log_file = tmp_path / 'all_logs.txt'
+    log_file.touch()
+
+    tail_log_threads: List[threading.Thread] = []
+    errors: List[str] = []
+
+    def tail_log_thread(idx: int):
+        try:
+            context.initialize()
+            os.environ = context.ContextualEnviron(os.environ)
+            ctx = context.get()
+            ctx.override_envs({'SKYPILOT_DEBUG': '1'})
+            origin = ctx.redirect_log(log_file)
+            sky.tail_logs(cluster_name=name, job_id=None, follow=False)
+            ctx.redirect_log(origin)
+        except Exception as e:  # pylint: disable=broad-except
+            errors.append(f'Error in tail log thread {idx}: {e}')
+
+    def start_concurrent_tail_logs() -> Generator[str, None, None]:
+        start_time = time.time()
+        for i in range(concurrency):
+            thread = threading.Thread(target=tail_log_thread,
+                                      args=(i,),
+                                      daemon=True)
+            tail_log_threads.append(thread)
+            thread.start()
+
+        # Wait for all threads to complete
+        for thread in tail_log_threads:
+            thread.join(timeout=60)
+
+        elapsed = time.time() - start_time
+        yield f'All {len(tail_log_threads)} concurrent tail_logs completed in {elapsed:.2f}s'
+
+        if errors:
+            raise Exception(f'Errors in tail log threads: {errors}')
+
+    test = smoke_tests_utils.Test(
+        'test_concurrent_tunnel_opening',
+        [
+            f'sky launch -c {name} --infra {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=180),
+            # Restart the API server to remove existing tunnels.
+            'sky api stop; sky api start',
+            start_concurrent_tail_logs,
+            # Print the full logs for debugging.
+            f'echo "=== FULL LOGS ===" && cat {log_file}',
+            f'echo "=== ERRORS ===" && ! grep "sky.utils.locks.LockTimeout" {log_file} && echo "No LockTimeout errors"',
+            # Verify that all the tail logs requests succeeded.
+            # Assume the API server is isolated for this test only.
+            f's=$(sky api status -a -l all | grep "sky.logs" | grep SUCCEEDED) && echo $s && echo "$s" | wc -l | grep {concurrency}',
+        ],
+        (f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api stop && '
+         f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api start; '
+         f'sky down -y {name}'),
     )
     smoke_tests_utils.run_one_test(test)

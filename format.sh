@@ -23,7 +23,11 @@ builtin cd "$ROOT" || exit 1
 
 YAPF_VERSION=$(yapf --version | awk '{print $2}')
 PYLINT_VERSION=$(pylint --version | head -n 1 | awk '{print $2}')
-PYLINT_QUOTES_VERSION=$(pip list | grep pylint-quotes | awk '{print $2}')
+PIP_LIST_CMD="pip list"
+if ! command -v pip >/dev/null 2>&1; then
+    PIP_LIST_CMD="uv pip list"
+fi
+PYLINT_QUOTES_VERSION=$($PIP_LIST_CMD | awk '/pylint-quotes/ {print $2}')
 MYPY_VERSION=$(mypy --version | awk '{print $2}')
 BLACK_VERSION=$(black --version | head -n 1 | awk '{print $2}')
 
@@ -50,12 +54,14 @@ YAPF_EXCLUDES=(
     '--exclude' 'build/**'
     '--exclude' 'sky/skylet/providers/ibm/**'
     '--exclude' 'sky/schemas/generated/**'
+    '--exclude' 'tests/unit_tests/test_sky/backends/testdata/**'
 )
 
 ISORT_YAPF_EXCLUDES=(
     '--sg' 'build/**'
     '--sg' 'sky/skylet/providers/ibm/**'
     '--sg' 'sky/schemas/generated/**'
+    '--sg' 'tests/unit_tests/test_sky/backends/testdata/**'
 )
 
 BLACK_INCLUDES=(
@@ -64,7 +70,7 @@ BLACK_INCLUDES=(
 
 PYLINT_FLAGS=(
     '--load-plugins'  'pylint_quotes'
-    '--ignore-paths' 'sky/schemas/generated'
+    '--ignore-paths' 'sky/schemas/generated|sky/skylet/providers/ibm'
 )
 
 # Format specified files

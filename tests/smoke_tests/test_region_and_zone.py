@@ -45,7 +45,7 @@ def test_aws_region():
     test = smoke_tests_utils.Test(
         'aws_region',
         [
-            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra */us-east-2 examples/minimal.yaml',
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra aws/us-east-2 examples/minimal.yaml',
             f'sky exec {name} examples/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky status -v | grep {name} | grep us-east-2',  # Ensure the region is correct.
@@ -277,13 +277,28 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     # should set the cluster to be launched in the same region.
     region_str = f'/centralus' if generic_cloud == 'azure' else ''
 
-    # Determine store type based on generic_cloud
-    if generic_cloud == 'aws':
-        store_type = 's3'
-    elif generic_cloud == 'gcp':
-        store_type = 'gcs'
-    else:
-        store_type = 'azure'
+    cloud_to_store_type = {
+        clouds.AWS().canonical_name(): 's3',
+        clouds.GCP().canonical_name(): 'gcs',
+        clouds.Azure().canonical_name(): 'azure',
+    }
+
+    enabled_cloud_storages = smoke_tests_utils.get_enabled_cloud_storages()
+
+    allowed_cloud_storages = [clouds.Azure(), clouds.AWS(), clouds.GCP()]
+    allowed_and_enabled = [
+        cloud_storage for cloud_storage in allowed_cloud_storages
+        if clouds.cloud_in_iterable(cloud_storage, enabled_cloud_storages)
+    ]
+    if len(allowed_and_enabled) == 0:
+        raise ValueError(f'No eligible enabled storage type found.')
+
+    store_type = cloud_to_store_type[allowed_and_enabled[0].canonical_name()]
+    # Try to match the generic_cloud with an enabled storage
+    for cloud_storage in allowed_and_enabled:
+        if cloud_storage.canonical_name() == generic_cloud:
+            store_type = cloud_to_store_type[cloud_storage.canonical_name()]
+            break
 
     if smoke_tests_utils.is_non_docker_remote_api_server():
         enabled_cloud_storages = smoke_tests_utils.get_enabled_cloud_storages()

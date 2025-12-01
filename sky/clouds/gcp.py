@@ -211,7 +211,9 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources.Resources'
+        cls,
+        resources: 'resources.Resources',
+        region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         unsupported = {}
         if gcp_utils.is_tpu_vm_pod(resources):
@@ -255,10 +257,15 @@ class GCP(clouds.Cloud):
 
     #### Regions/Zones ####
     @classmethod
-    def regions_with_offering(cls, instance_type: str,
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[clouds.Region]:
+    def regions_with_offering(
+        cls,
+        instance_type: str,
+        accelerators: Optional[Dict[str, int]],
+        use_spot: bool,
+        region: Optional[str],
+        zone: Optional[str],
+        resources: Optional['resources.Resources'] = None,
+    ) -> List[clouds.Region]:
         if accelerators is None:
             regions = catalog.get_region_zones_for_instance_type(instance_type,
                                                                  use_spot,
@@ -1179,8 +1186,8 @@ class GCP(clouds.Cloud):
             # These series don't support pd-standard, use pd-balanced for LOW.
             _propagate_disk_type(
                 lowest=tier2name[resources_utils.DiskTier.MEDIUM])
-        if instance_type.startswith('a3-ultragpu') or series == 'n4':
-            # a3-ultragpu instances only support hyperdisk-balanced.
+        if instance_type.startswith('a3-ultragpu') or series in ('n4', 'a4'):
+            # a3-ultragpu, n4, and a4 instances only support hyperdisk-balanced.
             _propagate_disk_type(all='hyperdisk-balanced')
 
         # Series specific handling

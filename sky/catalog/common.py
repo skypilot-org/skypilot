@@ -385,7 +385,7 @@ def get_hourly_cost_impl(
                              f'{instance_type!r}.')
     cheapest_idx = df[price_str].idxmin()
     cheapest = df.loc[cheapest_idx]
-    return cheapest[price_str]
+    return float(cheapest[price_str])
 
 
 def _get_value(value):

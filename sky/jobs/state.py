@@ -2,6 +2,7 @@
 # TODO(zhwu): maybe use file based status instead of database, so
 # that we can easily switch to a s3-based storage.
 import asyncio
+import collections
 import enum
 import functools
 import ipaddress
@@ -93,6 +94,7 @@ spot_table = sqlalchemy.Table(
     sqlalchemy.Column('specs', sqlalchemy.Text),
     sqlalchemy.Column('local_log_file', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('metadata', sqlalchemy.Text, server_default='{}'),
+    sqlalchemy.Column('logs_cleaned_at', sqlalchemy.Float, server_default=None),
 )
 
 job_info_table = sqlalchemy.Table(
@@ -106,8 +108,16 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('schedule_state', sqlalchemy.Text),
     sqlalchemy.Column('controller_pid', sqlalchemy.Integer,
                       server_default=None),
+    sqlalchemy.Column('controller_pid_started_at',
+                      sqlalchemy.Float,
+                      server_default=None),
     sqlalchemy.Column('dag_yaml_path', sqlalchemy.Text),
     sqlalchemy.Column('env_file_path', sqlalchemy.Text),
+    sqlalchemy.Column('dag_yaml_content', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('env_file_content', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('config_file_content',
+                      sqlalchemy.Text,
+                      server_default=None),
     sqlalchemy.Column('user_hash', sqlalchemy.Text),
     sqlalchemy.Column('workspace', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('priority',
@@ -115,6 +125,9 @@ job_info_table = sqlalchemy.Table(
                       server_default=str(constants.DEFAULT_PRIORITY)),
     sqlalchemy.Column('entrypoint', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('original_user_yaml_path',
+                      sqlalchemy.Text,
+                      server_default=None),
+    sqlalchemy.Column('original_user_yaml_content',
                       sqlalchemy.Text,
                       server_default=None),
     sqlalchemy.Column('pool', sqlalchemy.Text, server_default=None),
@@ -125,8 +138,12 @@ job_info_table = sqlalchemy.Table(
                       sqlalchemy.Integer,
                       server_default=None),
     sqlalchemy.Column('pool_hash', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('controller_logs_cleaned_at',
+                      sqlalchemy.Float,
+                      server_default=None),
 )
 
+# TODO(cooperc): drop the table in a migration
 ha_recovery_script_table = sqlalchemy.Table(
     'ha_recovery_script',
     Base.metadata,
@@ -313,6 +330,8 @@ async def _describe_task_transition_failure(session: sql_async.AsyncSession,
 # column names in the DB and it corresponds to the combined view
 # by joining the spot and job_info tables.
 def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
+    # WARNING: If you update these you may also need to update GetJobTable in
+    # the skylet ManagedJobsServiceImpl.
     return {
         '_job_id': r.get('job_id'),  # from spot table
         '_task_name': r.get('job_name'),  # deprecated, from spot table
@@ -339,13 +358,20 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'job_name': r.get('name'),  # from job_info table
         'schedule_state': r.get('schedule_state'),
         'controller_pid': r.get('controller_pid'),
+        'controller_pid_started_at': r.get('controller_pid_started_at'),
+        # the _path columns are for backwards compatibility, use the _content
+        # columns instead
         'dag_yaml_path': r.get('dag_yaml_path'),
         'env_file_path': r.get('env_file_path'),
+        'dag_yaml_content': r.get('dag_yaml_content'),
+        'env_file_content': r.get('env_file_content'),
+        'config_file_content': r.get('config_file_content'),
         'user_hash': r.get('user_hash'),
         'workspace': r.get('workspace'),
         'priority': r.get('priority'),
         'entrypoint': r.get('entrypoint'),
         'original_user_yaml_path': r.get('original_user_yaml_path'),
+        'original_user_yaml_content': r.get('original_user_yaml_content'),
         'pool': r.get('pool'),
         'current_cluster_name': r.get('current_cluster_name'),
         'job_id_on_pool_cluster': r.get('job_id_on_pool_cluster'),
@@ -567,8 +593,6 @@ _SPOT_STATUS_TO_COLOR = {
 class ManagedJobScheduleState(enum.Enum):
     """Captures the state of the job from the scheduler's perspective.
 
-    A job that predates the introduction of the scheduler will be INVALID.
-
     A newly created job will be INACTIVE.  The following transitions are valid:
     - INACTIVE -> WAITING: The job is "submitted" to the scheduler, and its job
       controller can be started.
@@ -605,14 +629,10 @@ class ManagedJobScheduleState(enum.Enum):
     briefly observe inconsistent states, like a job that just finished but
     hasn't yet transitioned to DONE.
     """
-    # This job may have been created before scheduler was introduced in #4458.
-    # This state is not used by scheduler but just for backward compatibility.
-    # TODO(cooperc): remove this in v0.11.0
     # TODO(luca): the only states we need are INACTIVE, WAITING, ALIVE, and
     # DONE. ALIVE = old LAUNCHING + ALIVE + ALIVE_BACKOFF + ALIVE_WAITING and
     # will represent jobs that are claimed by a controller. Delete the rest
     # in v0.13.0
-    INVALID = None
     # The job should be ignored by the scheduler.
     INACTIVE = 'INACTIVE'
     # The job is waiting to transition to LAUNCHING for the first time. The
@@ -642,7 +662,9 @@ class ManagedJobScheduleState(enum.Enum):
         """
         protobuf_to_enum = {
             managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_UNSPECIFIED: None,
-            managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_INVALID: cls.INVALID,
+            # TODO(cooperc): remove this in v0.13.0. See #8105.
+            managed_jobsv1_pb2.DEPRECATED_MANAGED_JOB_SCHEDULE_STATE_INVALID:
+                (None),
             managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_INACTIVE:
                 cls.INACTIVE,
             managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_WAITING: cls.WAITING,
@@ -665,8 +687,6 @@ class ManagedJobScheduleState(enum.Enum):
     def to_protobuf(self) -> 'managed_jobsv1_pb2.ManagedJobScheduleState':
         """Convert this Python enum value to protobuf enum value."""
         enum_to_protobuf = {
-            ManagedJobScheduleState.INVALID:
-                managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_INVALID,
             ManagedJobScheduleState.INACTIVE:
                 managed_jobsv1_pb2.MANAGED_JOB_SCHEDULE_STATE_INACTIVE,
             ManagedJobScheduleState.WAITING:
@@ -687,6 +707,12 @@ class ManagedJobScheduleState(enum.Enum):
             raise ValueError(f'Unknown ManagedJobScheduleState value: {self}')
 
         return enum_to_protobuf[self]
+
+
+ControllerPidRecord = collections.namedtuple('ControllerPidRecord', [
+    'pid',
+    'started_at',
+])
 
 
 # === Status transition functions ===
@@ -902,7 +928,14 @@ def set_failed(
 
 @_init_db
 def set_pending_cancelled(job_id: int):
-    """Set the job as pending cancelled, if it is in non-terminal states."""
+    """Set the job as cancelled, if it is PENDING and WAITING/INACTIVE.
+
+    This may fail if the job is not PENDING, e.g. another process has changed
+    its state in the meantime.
+
+    Returns:
+        True if the job was cancelled, False otherwise.
+    """
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         # Subquery to get the spot_job_ids that match the joined condition
@@ -1076,7 +1109,8 @@ def _get_all_task_ids_statuses(
 
 @_init_db
 def get_all_task_ids_names_statuses_logs(
-        job_id: int) -> List[Tuple[int, str, ManagedJobStatus, str]]:
+    job_id: int
+) -> List[Tuple[int, str, ManagedJobStatus, str, Optional[float]]]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         id_names = session.execute(
@@ -1085,9 +1119,10 @@ def get_all_task_ids_names_statuses_logs(
                 spot_table.c.task_name,
                 spot_table.c.status,
                 spot_table.c.local_log_file,
+                spot_table.c.logs_cleaned_at,
             ).where(spot_table.c.spot_job_id == job_id).order_by(
                 spot_table.c.task_id.asc())).fetchall()
-        return [(row[0], row[1], ManagedJobStatus(row[2]), row[3])
+        return [(row[0], row[1], ManagedJobStatus(row[2]), row[3], row[4])
                 for row in id_names]
 
 
@@ -1119,13 +1154,58 @@ def get_latest_task_id_status(
 
 
 @_init_db
-def get_job_controller_pid(job_id: int) -> Optional[int]:
+def get_job_controller_process(job_id: int) -> Optional[ControllerPidRecord]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        pid = session.execute(
-            sqlalchemy.select(job_info_table.c.controller_pid).where(
-                job_info_table.c.spot_job_id == job_id)).fetchone()
-        return pid[0] if pid else None
+        row = session.execute(
+            sqlalchemy.select(
+                job_info_table.c.controller_pid,
+                job_info_table.c.controller_pid_started_at).where(
+                    job_info_table.c.spot_job_id == job_id)).fetchone()
+        if row is None or row[0] is None:
+            return None
+        pid = row[0]
+        if pid < 0:
+            # Between #7051 and #7847, the controller pid was negative to
+            # indicate a controller process that can handle multiple jobs.
+            pid = -pid
+        return ControllerPidRecord(pid=pid, started_at=row[1])
+
+
+@_init_db
+def is_legacy_controller_process(job_id: int) -> bool:
+    """Check if the controller process is a legacy single-job controller process
+
+    After #7051, the controller process pid is negative to indicate a new
+    multi-job controller process.
+    After #7847, the controller process pid is changed back to positive, but
+    controller_pid_started_at will also be set.
+    """
+    # TODO(cooperc): Remove this function for 0.13.0
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.execute(
+            sqlalchemy.select(
+                job_info_table.c.controller_pid,
+                job_info_table.c.controller_pid_started_at).where(
+                    job_info_table.c.spot_job_id == job_id)).fetchone()
+        if row is None:
+            raise ValueError(f'Job {job_id} not found')
+        if row[0] is None:
+            # Job is from before #4485, so controller_pid is not set
+            # This is a legacy single-job controller process (running in ray!)
+            return True
+        started_at = row[1]
+        if started_at is not None:
+            # controller_pid_started_at is only set after #7847, so we know this
+            # must be a non-legacy multi-job controller process.
+            return False
+        pid = row[0]
+        if pid < 0:
+            # Between #7051 and #7847, the controller pid was negative to
+            # indicate a non-legacy multi-job controller process.
+            return False
+        return True
 
 
 def get_status(job_id: int) -> Optional[ManagedJobStatus]:
@@ -1152,8 +1232,8 @@ def get_failure_reason(job_id: int) -> Optional[str]:
 
 
 @_init_db
-def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
-    """Get managed jobs from the database."""
+def get_managed_job_tasks(job_id: int) -> List[Dict[str, Any]]:
+    """Get managed job tasks for a specific managed job id from the database."""
     assert _SQLALCHEMY_ENGINE is not None
 
     # Join spot and job_info tables to get the job name for each task.
@@ -1168,10 +1248,8 @@ def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
         spot_table.outerjoin(
             job_info_table,
             spot_table.c.spot_job_id == job_info_table.c.spot_job_id))
-    if job_id is not None:
-        query = query.where(spot_table.c.spot_job_id == job_id)
-    query = query.order_by(spot_table.c.spot_job_id.desc(),
-                           spot_table.c.task_id.asc())
+    query = query.where(spot_table.c.spot_job_id == job_id)
+    query = query.order_by(spot_table.c.task_id.asc())
     rows = None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.execute(query).fetchall()
@@ -1186,15 +1264,17 @@ def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
         job_dict['metadata'] = json.loads(job_dict['metadata'])
 
         # Add user YAML content for managed jobs.
-        yaml_path = job_dict.get('original_user_yaml_path')
-        if yaml_path:
-            try:
-                with open(yaml_path, 'r', encoding='utf-8') as f:
-                    job_dict['user_yaml'] = f.read()
-            except (FileNotFoundError, IOError, OSError):
-                job_dict['user_yaml'] = None
-        else:
-            job_dict['user_yaml'] = None
+        job_dict['user_yaml'] = job_dict.get('original_user_yaml_content')
+        if job_dict['user_yaml'] is None:
+            # Backwards compatibility - try to read from file path
+            yaml_path = job_dict.get('original_user_yaml_path')
+            if yaml_path:
+                try:
+                    with open(yaml_path, 'r', encoding='utf-8') as f:
+                        job_dict['user_yaml'] = f.read()
+                except (FileNotFoundError, IOError, OSError) as e:
+                    logger.debug('Failed to read original user YAML for job '
+                                 f'{job_id} from {yaml_path}: {e}')
 
         jobs.append(job_dict)
     return jobs
@@ -1408,7 +1488,13 @@ def get_managed_jobs_with_filters(
     page: Optional[int] = None,
     limit: Optional[int] = None,
 ) -> Tuple[List[Dict[str, Any]], int]:
-    """Get managed jobs from the database with filters."""
+    """Get managed jobs from the database with filters.
+
+    Returns:
+        A tuple containing
+         - the list of managed jobs
+         - the total number of managed jobs
+    """
     assert _SQLALCHEMY_ENGINE is not None
 
     count_query = build_managed_jobs_with_filters_query(
@@ -1447,7 +1533,8 @@ def get_managed_jobs_with_filters(
     jobs = []
     for row in rows:
         job_dict = _get_jobs_dict(row._mapping)  # pylint: disable=protected-access
-        job_dict['status'] = ManagedJobStatus(job_dict['status'])
+        if job_dict.get('status') is not None:
+            job_dict['status'] = ManagedJobStatus(job_dict['status'])
         if job_dict.get('schedule_state') is not None:
             job_dict['schedule_state'] = ManagedJobScheduleState(
                 job_dict['schedule_state'])
@@ -1457,15 +1544,22 @@ def get_managed_jobs_with_filters(
             job_dict['metadata'] = json.loads(job_dict['metadata'])
 
         # Add user YAML content for managed jobs.
-        yaml_path = job_dict.get('original_user_yaml_path')
-        if (not fields or 'user_yaml' in fields) and yaml_path:
-            try:
-                with open(yaml_path, 'r', encoding='utf-8') as f:
-                    job_dict['user_yaml'] = f.read()
-            except (FileNotFoundError, IOError, OSError):
-                job_dict['user_yaml'] = None
-        else:
-            job_dict['user_yaml'] = None
+        job_dict['user_yaml'] = job_dict.get('original_user_yaml_content')
+        if job_dict['user_yaml'] is None:
+            # Backwards compatibility - try to read from file path
+            yaml_path = job_dict.get('original_user_yaml_path')
+            if yaml_path:
+                try:
+                    with open(yaml_path, 'r', encoding='utf-8') as f:
+                        job_dict['user_yaml'] = f.read()
+                except (FileNotFoundError, IOError, OSError) as e:
+                    job_id = job_dict.get('job_id')
+                    if job_id is not None:
+                        logger.debug('Failed to read original user YAML for '
+                                     f'job {job_id} from {yaml_path}: {e}')
+                    else:
+                        logger.debug('Failed to read original user YAML from '
+                                     f'{yaml_path}: {e}')
 
         jobs.append(job_dict)
     return jobs, total
@@ -1511,31 +1605,58 @@ def get_task_specs(job_id: int, task_id: int) -> Dict[str, Any]:
 
 
 @_init_db
-def scheduler_set_waiting(job_id: int, dag_yaml_path: str,
-                          original_user_yaml_path: str, env_file_path: str,
-                          priority: int):
-    """Do not call without holding the scheduler lock.
-
-    Returns: Whether this is a recovery run or not.
-        If this is a recovery run, the job may already be in the WAITING
-        state and the update will not change the schedule_state (hence the
-        updated_count will be 0). In this case, we return True.
-        Otherwise, we return False.
-    """
+def scheduler_set_waiting(job_id: int, dag_yaml_content: str,
+                          original_user_yaml_content: str,
+                          env_file_content: str,
+                          config_file_content: Optional[str],
+                          priority: int) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         updated_count = session.query(job_info_table).filter(
-            sqlalchemy.and_(job_info_table.c.spot_job_id == job_id,)
-        ).update({
-            job_info_table.c.schedule_state:
-                ManagedJobScheduleState.WAITING.value,
-            job_info_table.c.dag_yaml_path: dag_yaml_path,
-            job_info_table.c.original_user_yaml_path: original_user_yaml_path,
-            job_info_table.c.env_file_path: env_file_path,
-            job_info_table.c.priority: priority,
-        })
+            sqlalchemy.and_(job_info_table.c.spot_job_id == job_id,)).update({
+                job_info_table.c.schedule_state:
+                    ManagedJobScheduleState.WAITING.value,
+                job_info_table.c.dag_yaml_content: dag_yaml_content,
+                job_info_table.c.original_user_yaml_content:
+                    (original_user_yaml_content),
+                job_info_table.c.env_file_content: env_file_content,
+                job_info_table.c.config_file_content: config_file_content,
+                job_info_table.c.priority: priority,
+            })
         session.commit()
         assert updated_count <= 1, (job_id, updated_count)
+
+
+@_init_db
+def get_job_file_contents(job_id: int) -> Dict[str, Optional[str]]:
+    """Return file information and stored contents for a managed job."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.execute(
+            sqlalchemy.select(
+                job_info_table.c.dag_yaml_path,
+                job_info_table.c.env_file_path,
+                job_info_table.c.dag_yaml_content,
+                job_info_table.c.env_file_content,
+                job_info_table.c.config_file_content,
+            ).where(job_info_table.c.spot_job_id == job_id)).fetchone()
+
+    if row is None:
+        return {
+            'dag_yaml_path': None,
+            'env_file_path': None,
+            'dag_yaml_content': None,
+            'env_file_content': None,
+            'config_file_content': None,
+        }
+
+    return {
+        'dag_yaml_path': row[0],
+        'env_file_path': row[1],
+        'dag_yaml_content': row[2],
+        'env_file_content': row[3],
+        'config_file_content': row[4],
+    }
 
 
 @_init_db
@@ -1737,7 +1858,8 @@ def get_nonterminal_job_ids_by_pool(pool: str,
 
 
 @_init_db_async
-async def get_waiting_job_async(pid: int) -> Optional[Dict[str, Any]]:
+async def get_waiting_job_async(
+        pid: int, pid_started_at: float) -> Optional[Dict[str, Any]]:
     """Get the next job that should transition to LAUNCHING.
 
     Selects the highest-priority WAITING or ALIVE_WAITING job and atomically
@@ -1755,9 +1877,6 @@ async def get_waiting_job_async(pid: int) -> Optional[Dict[str, Any]]:
         select_query = sqlalchemy.select(
             job_info_table.c.spot_job_id,
             job_info_table.c.schedule_state,
-            job_info_table.c.dag_yaml_path,
-            job_info_table.c.env_file_path,
-            job_info_table.c.controller_pid,
             job_info_table.c.pool,
         ).where(
             job_info_table.c.schedule_state.in_([
@@ -1776,10 +1895,7 @@ async def get_waiting_job_async(pid: int) -> Optional[Dict[str, Any]]:
 
         job_id = waiting_job_row[0]
         current_state = ManagedJobScheduleState(waiting_job_row[1])
-        dag_yaml_path = waiting_job_row[2]
-        env_file_path = waiting_job_row[3]
-        controller_pid = waiting_job_row[4]
-        pool = waiting_job_row[5]
+        pool = waiting_job_row[2]
 
         # Update the job state to LAUNCHING
         update_result = await session.execute(
@@ -1791,6 +1907,7 @@ async def get_waiting_job_async(pid: int) -> Optional[Dict[str, Any]]:
                     job_info_table.c.schedule_state:
                         ManagedJobScheduleState.LAUNCHING.value,
                     job_info_table.c.controller_pid: pid,
+                    job_info_table.c.controller_pid_started_at: pid_started_at,
                 }))
 
         if update_result.rowcount != 1:
@@ -1803,10 +1920,6 @@ async def get_waiting_job_async(pid: int) -> Optional[Dict[str, Any]]:
 
         return {
             'job_id': job_id,
-            'schedule_state': current_state,
-            'dag_yaml_path': dag_yaml_path,
-            'env_file_path': env_file_path,
-            'old_pid': controller_pid,
             'pool': pool,
         }
 
@@ -1823,53 +1936,6 @@ def get_workspace(job_id: int) -> str:
         if job_workspace is None:
             return constants.SKYPILOT_DEFAULT_WORKSPACE
         return job_workspace
-
-
-# === HA Recovery Script functions ===
-
-
-@_init_db
-def get_ha_recovery_script(job_id: int) -> Optional[str]:
-    """Get the HA recovery script for a job."""
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(ha_recovery_script_table).filter_by(
-            job_id=job_id).first()
-    if row is None:
-        return None
-    return row.script
-
-
-@_init_db
-def set_ha_recovery_script(job_id: int, script: str) -> None:
-    """Set the HA recovery script for a job."""
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        if (_SQLALCHEMY_ENGINE.dialect.name ==
-                db_utils.SQLAlchemyDialect.SQLITE.value):
-            insert_func = sqlite.insert
-        elif (_SQLALCHEMY_ENGINE.dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            insert_func = postgresql.insert
-        else:
-            raise ValueError('Unsupported database dialect')
-        insert_stmt = insert_func(ha_recovery_script_table).values(
-            job_id=job_id, script=script)
-        do_update_stmt = insert_stmt.on_conflict_do_update(
-            index_elements=[ha_recovery_script_table.c.job_id],
-            set_={ha_recovery_script_table.c.script: script})
-        session.execute(do_update_stmt)
-        session.commit()
-
-
-@_init_db
-def remove_ha_recovery_script(job_id: int) -> None:
-    """Remove the HA recovery script for a job."""
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.query(ha_recovery_script_table).filter_by(
-            job_id=job_id).delete()
-        session.commit()
 
 
 @_init_db_async
@@ -2294,16 +2360,30 @@ def reset_jobs_for_recovery() -> None:
             # Schedule state should be alive.
             job_info_table.c.schedule_state.isnot(None),
             (job_info_table.c.schedule_state !=
-             ManagedJobScheduleState.INVALID.value),
-            (job_info_table.c.schedule_state !=
              ManagedJobScheduleState.WAITING.value),
             (job_info_table.c.schedule_state !=
              ManagedJobScheduleState.DONE.value),
         ).update({
             job_info_table.c.controller_pid: None,
+            job_info_table.c.controller_pid_started_at: None,
             job_info_table.c.schedule_state:
                 (ManagedJobScheduleState.WAITING.value)
         })
+        session.commit()
+
+
+@_init_db
+def reset_job_for_recovery(job_id: int) -> None:
+    """Set a job to WAITING and remove PID, allowing it to be recovered."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(job_info_table).filter(
+            job_info_table.c.spot_job_id == job_id).update({
+                job_info_table.c.controller_pid: None,
+                job_info_table.c.controller_pid_started_at: None,
+                job_info_table.c.schedule_state:
+                    ManagedJobScheduleState.WAITING.value,
+            })
         session.commit()
 
 
@@ -2331,3 +2411,111 @@ def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:
         rows = session.execute(query).fetchall()
         job_ids = [row[0] for row in rows if row[0] is not None]
         return job_ids
+
+
+@_init_db
+def get_task_logs_to_clean(retention_seconds: int,
+                           batch_size: int) -> List[Dict[str, Any]]:
+    """Get the logs of job tasks to clean.
+
+    The logs of a task will only cleaned when:
+    - the job schedule state is DONE
+    - AND the end time of the task is older than the retention period
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        now = time.time()
+        result = session.execute(
+            sqlalchemy.select(
+                spot_table.c.spot_job_id,
+                spot_table.c.task_id,
+                spot_table.c.local_log_file,
+            ).select_from(
+                spot_table.join(
+                    job_info_table,
+                    spot_table.c.spot_job_id == job_info_table.c.spot_job_id,
+                )).
+            where(
+                sqlalchemy.and_(
+                    job_info_table.c.schedule_state.is_(
+                        ManagedJobScheduleState.DONE.value),
+                    spot_table.c.end_at.isnot(None),
+                    spot_table.c.end_at < (now - retention_seconds),
+                    spot_table.c.logs_cleaned_at.is_(None),
+                    # The local log file is set AFTER the task is finished,
+                    # add this condition to ensure the entire log file has
+                    # been written.
+                    spot_table.c.local_log_file.isnot(None),
+                )).limit(batch_size))
+        rows = result.fetchall()
+        return [{
+            'job_id': row[0],
+            'task_id': row[1],
+            'local_log_file': row[2]
+        } for row in rows]
+
+
+@_init_db
+def get_controller_logs_to_clean(retention_seconds: int,
+                                 batch_size: int) -> List[Dict[str, Any]]:
+    """Get the controller logs to clean.
+
+    The controller logs will only cleaned when:
+    - the job schedule state is DONE
+    - AND the end time of the latest task is older than the retention period
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        now = time.time()
+        result = session.execute(
+            sqlalchemy.select(job_info_table.c.spot_job_id,).select_from(
+                job_info_table.join(
+                    spot_table,
+                    job_info_table.c.spot_job_id == spot_table.c.spot_job_id,
+                )).where(
+                    sqlalchemy.and_(
+                        job_info_table.c.schedule_state.is_(
+                            ManagedJobScheduleState.DONE.value),
+                        spot_table.c.local_log_file.isnot(None),
+                        job_info_table.c.controller_logs_cleaned_at.is_(None),
+                    )).group_by(
+                        job_info_table.c.spot_job_id,
+                        job_info_table.c.current_cluster_name,
+                    ).having(
+                        sqlalchemy.func.max(
+                            spot_table.c.end_at).isnot(None),).having(
+                                sqlalchemy.func.max(spot_table.c.end_at) < (
+                                    now - retention_seconds)).limit(batch_size))
+        rows = result.fetchall()
+        return [{'job_id': row[0]} for row in rows]
+
+
+@_init_db
+def set_task_logs_cleaned(tasks: List[Tuple[int, int]], logs_cleaned_at: float):
+    """Set the task logs cleaned at."""
+    if not tasks:
+        return
+    task_keys = list(dict.fromkeys(tasks))
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.execute(
+            sqlalchemy.update(spot_table).where(
+                sqlalchemy.tuple_(spot_table.c.spot_job_id,
+                                  spot_table.c.task_id).in_(task_keys)).values(
+                                      logs_cleaned_at=logs_cleaned_at))
+        session.commit()
+
+
+@_init_db
+def set_controller_logs_cleaned(job_ids: List[int], logs_cleaned_at: float):
+    """Set the controller logs cleaned at."""
+    if not job_ids:
+        return
+    job_ids = list(dict.fromkeys(job_ids))
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.execute(
+            sqlalchemy.update(job_info_table).where(
+                job_info_table.c.spot_job_id.in_(job_ids)).values(
+                    controller_logs_cleaned_at=logs_cleaned_at))
+        session.commit()

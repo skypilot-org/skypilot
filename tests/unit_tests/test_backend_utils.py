@@ -7,6 +7,7 @@ from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.resources import Resources
 from sky.utils import common
+from sky.utils import common_utils
 from sky.utils import status_lib
 
 
@@ -135,8 +136,8 @@ def test_write_cluster_config_w_remote_identity(mock_fill_template,
 @mock.patch('sky.backends.backend_utils._get_yaml_path_from_cluster_name',
             return_value='/tmp/fake/path')
 @mock.patch('sky.utils.common_utils.fill_template')
-def test_write_cluster_config_w_post_provision_runcmd(mock_fill_template,
-                                                      *mocks):
+def test_write_cluster_config_w_post_provision_runcmd_aws(
+        mock_fill_template, *mocks):
     os.environ[
         skypilot_config.
         ENV_VAR_SKYPILOT_CONFIG] = './tests/test_yamls/test_aws_config_runcmd.yaml'
@@ -164,6 +165,41 @@ def test_write_cluster_config_w_post_provision_runcmd(mock_fill_template,
         'echo "hello world!"',
         ['ls', '-l', '/'],
     ]
+    mock_fill_template.assert_called_once()
+    assert mock_fill_template.call_args[0][
+        0] == cluster_config_template, "config template incorrect"
+    assert mock_fill_template.call_args[0][1][
+        'runcmd'] == expected_runcmd, "runcmd not passed correctly"
+
+
+@mock.patch.object(skypilot_config, '_global_config_context',
+                   skypilot_config.ConfigContext())
+@mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+            return_value=[])
+@mock.patch('sky.utils.common_utils.fill_template',
+            wraps=common_utils.fill_template)
+def test_write_cluster_config_w_post_provision_runcmd_kubernetes(
+        mock_fill_template, *mocks):
+    os.environ[
+        skypilot_config.
+        ENV_VAR_SKYPILOT_CONFIG] = './tests/test_yamls/test_k8s_config_runcmd.yaml'
+    skypilot_config.reload_config()
+
+    cloud = clouds.Kubernetes()
+    region = clouds.Region(name='fake-context')
+    resource = Resources(cloud=cloud, instance_type='4CPU--16GB')
+    cluster_config_template = 'kubernetes-ray.yml.j2'
+    backend_utils.write_cluster_config(
+        to_provision=resource,
+        num_nodes=2,
+        cluster_config_template=cluster_config_template,
+        cluster_name="display",
+        local_wheel_path=pathlib.Path('/tmp/fake'),
+        wheel_hash='b1bd84059bc0342f7843fcbe04ab563e',
+        region=region,
+        dryrun=True,
+        keep_launch_fields_in_existing_config=True)
+    expected_runcmd = ['echo "hello world!"']
     mock_fill_template.assert_called_once()
     assert mock_fill_template.call_args[0][
         0] == cluster_config_template, "config template incorrect"

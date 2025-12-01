@@ -28,7 +28,38 @@ Volumes on Kubernetes
 
 In Kubernetes clusters, PVCs (Persistent Volume Claims) request and bind to PV (Persistent Volume) resources. These persistent volumes can be backed by various storage backends, including **block storage** solutions (AWS EBS, GCP Persistent Disk) and **distributed file systems** (JuiceFS, Nebius shared file system, AWS EFS, GCP Filestore), etc.
 
-SkyPilot supports creating and managing PVC volumes in Kubernetes clusters through three commands:
+SkyPilot supports two types of volumes on Kubernetes:
+
+1. **Persistent volumes**: Managed independently through CLI commands with lifecycle separate from clusters
+2. **Ephemeral volumes**: Bound to cluster lifecycle, automatically created and deleted with the cluster
+
+.. list-table::
+   :widths: 30 35 35
+   :header-rows: 1
+
+   * - Feature
+     - Persistent Volumes
+     - Ephemeral Volumes
+   * - Lifecycle
+     - Independent (manually managed)
+     - Bound to cluster
+   * - Creation
+     - ``sky volumes apply``
+     - Automatic (in task YAML)
+   * - Deletion
+     - ``sky volumes delete``
+     - Automatic (with cluster)
+   * - Sharing across clusters
+     - Yes
+     - No (cluster-specific)
+   * - Use case
+     - Long-term data, shared datasets
+     - Temporary storage, caches
+
+Persistent volumes
+~~~~~~~~~~~~~~~~~~
+
+Persistent volumes are created and managed independently using the following commands:
 
 - ``sky volumes apply``: Create a new volume
 - ``sky volumes ls``: List all volumes
@@ -39,7 +70,7 @@ SkyPilot supports creating and managing PVC volumes in Kubernetes clusters throu
   Volumes are shared across users on a SkyPilot API server. A user can mount volumes created by other users. This is useful for sharing caches and data across users.
 
 Quickstart
-~~~~~~~~~~
+^^^^^^^^^^
 
 1. Prepare a volume YAML file:
 
@@ -50,6 +81,9 @@ Quickstart
      type: k8s-pvc
      infra: kubernetes  # or k8s or k8s/context
      size: 10Gi
+     # If the PVC already exists, set `use_existing` to true and
+     # set the `name` to the existing PVC name
+     # use_existing: true
      labels:
        key: value
      config:
@@ -76,10 +110,14 @@ Quickstart
      run: |
        echo "Hello, World!" > /mnt/data/hello.txt
 
+.. note::
+
+  For multi-node clusters, volumes are mounted to all nodes. You must configure ``config.access_mode`` to ``ReadWriteMany`` and use a ``storage_class_name`` that supports the ``ReadWriteMany`` access mode. Otherwise, SkyPilot will fail to launch the cluster.
+
 .. _volumes-on-kubernetes-manage:
 
 Managing volumes
-~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^
 
 List all volumes with ``sky volumes ls``:
 
@@ -119,7 +157,7 @@ You can also check the volumes in the SkyPilot dashboard.
     :width: 80%
 
 Filesystem volume examples
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 This section demonstrates how to configure and use distributed filesystems as SkyPilot volumes. We'll cover options like `JuiceFS <https://juicefs.com/docs/community/introduction/>`_ (a cloud-native distributed filesystem) and `Nebius shared file system <https://docs.nebius.com/compute/storage/types#filesystems>`_ (a high-performance shared storage solution).
 
@@ -240,6 +278,64 @@ This section demonstrates how to configure and use distributed filesystems as Sk
           $ sky launch -c nebius-cluster task.yaml
 
 
+Ephemeral volumes
+~~~~~~~~~~~~~~~~~
+
+Unlike persistent volumes that are managed independently, ephemeral volumes are automatically created when a cluster is launched and deleted when the cluster is terminated. This makes them ideal for temporary storage needs such as caches, intermediate results, or any data that should only exist for the duration of a cluster's lifetime.
+
+**Key characteristics:**
+
+- **Automatic lifecycle management**: No need to manually create or delete volumes
+- **Cluster-bound**: Created with the cluster and deleted when the cluster is terminated
+- **Simplified usage**: Defined directly in the task YAML with the cluster configuration
+- **Currently Kubernetes-only**: Only supported on Kubernetes clusters
+
+To use an ephemeral volume, simply specify the ``size`` field in the volumes section of your task YAML:
+
+.. code-block:: yaml
+
+  # task.yaml
+  resources:
+    infra: kubernetes
+    ...
+
+  volumes:
+    /mnt/cache:
+      size: 100Gi
+      #labels:        # optional
+      #  env: production
+      #config:        # optional
+      #  storage_class_name: csi-mounted-fs-path-sc  # optional
+      #  access_mode: ReadWriteMany                  # optional
+
+  run: |
+    echo "Using ephemeral volumes"
+    df -h /mnt/cache
+    echo "data" > /mnt/cache/temp.txt
+
+When you launch the cluster with ``sky launch``, the ephemeral volumes will be automatically created:
+
+.. code-block:: console
+
+  $ sky launch -c my-cluster task.yaml
+  # Ephemeral volumes are created automatically
+  $ sky volumes ls
+  Kubernetes PVCs:
+  NAME                       TYPE     INFRA                      SIZE  USER  WORKSPACE  AGE   STATUS  LAST_USE             USED_BY                  IS_EPHEMERAL
+  my-cluster-43dbb4ab-2f74bf k8s-pvc  Kubernetes/nebius-mk8s-vol 100Gi alice default    58m   IN_USE  2025-11-17 14:30:18  my-cluster-43dbb4ab-head True
+
+.. note::
+
+  For multi-node clusters, ephemeral volumes are mounted to all nodes. You must configure ``config.access_mode`` to ``ReadWriteMany`` and use a ``storage_class_name`` that supports the ``ReadWriteMany`` access mode. Otherwise, SkyPilot will fail to launch the cluster.
+
+When you terminate the cluster, the ephemeral volumes are automatically deleted:
+
+.. code-block:: console
+
+  $ sky down my-cluster
+  # Cluster and its ephemeral volumes are deleted
+
+
 .. _volumes-on-runpod:
 
 Volumes on RunPod
@@ -269,6 +365,9 @@ Quickstart
      type: runpod-network-volume
      infra: runpod/CA/CA-MTL-1  # DataCenterId (zone)
      size: 100Gi                # GiB
+     # If the RunPod network volume already exists, set `use_existing` to true and
+     # set the `name` to the existing RunPod network volume name
+     # use_existing: true
 
 2. Create the volume with ``sky volumes apply runpod-volume.yaml``:
 

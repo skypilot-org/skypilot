@@ -5,6 +5,9 @@
         "apiService": {
             "type": "object",
             "properties": {
+                "affinity": {
+                    "type": "object"
+                },
                 "annotations": {
                     "type": [
                         "object",
@@ -71,6 +74,12 @@
                 "image": {
                     "type": "string"
                 },
+                "imagePullPolicy": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
                 "initialBasicAuthCredentials": {
                     "type": "string"
                 },
@@ -107,6 +116,9 @@
                         }
                     }
                 },
+                "nodeSelector": {
+                    "type": "object"
+                },
                 "preDeployHook": {
                     "type": "string"
                 },
@@ -136,6 +148,9 @@
                 },
                 "terminationGracePeriodSeconds": {
                     "type": "integer"
+                },
+                "tolerations": {
+                    "type": "array"
                 },
                 "upgradeStrategy": {
                     "type": "string"
@@ -245,6 +260,9 @@
                 },
                 "secretAccessKeyKeyName": {
                     "type": "string"
+                },
+                "useCredentialsFile": {
+                    "type": "boolean"
                 }
             }
         },
@@ -266,7 +284,42 @@
                 "gcpSecretName": {
                     "type": "string"
                 },
+                "image": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
                 "projectId": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                }
+            }
+        },
+        "global": {
+            "type": "object",
+            "properties": {
+                "extraEnvs": {
+                    "type": [
+                        "array",
+                        "null"
+                    ],
+                    "items": {
+                        "type": "object"
+                    }
+                },
+                "imagePullSecrets": {
+                    "type": [
+                        "array",
+                        "null"
+                    ],
+                    "items": {
+                        "type": "object"
+                    }
+                },
+                "imageRegistry": {
                     "type": [
                         "string",
                         "null"
@@ -304,18 +357,6 @@
                 "host": {
                     "type": [
                         "string",
-                        "null"
-                    ]
-                },
-                "httpNodePort": {
-                    "type": [
-                        "number",
-                        "null"
-                    ]
-                },
-                "httpsNodePort": {
-                    "type": [
-                        "number",
                         "null"
                     ]
                 },
@@ -385,6 +426,14 @@
                 },
                 "path": {
                     "type": "string"
+                },
+                "tls": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
                 }
             }
         },

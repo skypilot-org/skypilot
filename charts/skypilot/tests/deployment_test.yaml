@@ -52,6 +52,73 @@ tests:
             name: KUBECONFIG
             value: /root/.kube/config:/var/skypilot/kubeconfig/config
 
+  # Tests for global image configuration
+  - it: should apply global image pull secrets to the API deployment
+    set:
+      global.imagePullSecrets[0].name: global-pull-secret
+    asserts:
+      - contains:
+          path: spec.template.spec.imagePullSecrets
+          content:
+            name: global-pull-secret
+
+  - it: should prefix API images with the global registry value
+    set:
+      global.imageRegistry: registry.example.com/custom
+      apiService.image: berkeleyskypilot/skypilot-nightly:latest
+      apiService.logs.retention.enabled: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.example.com/custom/berkeleyskypilot/skypilot-nightly:latest
+
+
+  - it: should replace original image registries when global registry override is set
+    set:
+      global.imageRegistry: registry.example.com/custom
+      apiService.image: gcr.io/skypilot-dev/sky:dev
+      apiService.logs.retention.enabled: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.example.com/custom/skypilot-dev/sky:dev
+      - equal:
+          path: spec.template.spec.containers[1].image
+          value: registry.example.com/custom/skypilot-dev/sky:dev
+
+  - it: should inject global extra envs into api containers and init containers
+    set:
+      global.extraEnvs:
+        - name: GLOBAL_ENV
+          value: global
+      awsCredentials.enabled: true
+      awsCredentials.useCredentialsFile: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GLOBAL_ENV
+            value: global
+      - contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: GLOBAL_ENV
+            value: global
+
+  - it: should prefix gcp credentials init container image with the global registry override
+    set:
+      global.imageRegistry: registry.example.com/custom
+      gcpCredentials.enabled: true
+      gcpCredentials.image: google/cloud-sdk:slim
+      gcpCredentials.projectId: test-project
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers
+          any: true
+          content:
+            name: setup-gcp-credentials
+            image: registry.example.com/custom/google/cloud-sdk:slim
+
   # Test cases for upgradeStrategy configuration
   - it: should use Recreate strategy by default
     asserts:
@@ -291,3 +358,135 @@ tests:
           pattern: "setup-r2-credentials"
       - notMatchRegexRaw:
           pattern: "R2_CREDENTIALS"
+
+  - it: should mount aws credentials from access key and secret key
+    set:
+      awsCredentials.enabled: true
+      awsCredentials.useCredentialsFile: false
+    asserts:
+      # Should have emptyDir volume
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: aws-config
+            emptyDir: {}
+      # Should mount the directory
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: aws-config
+            mountPath: /root/.aws
+            readOnly: true
+      # Should have init container
+      - contains:
+          path: spec.template.spec.initContainers
+          any: true
+          content:
+            name: create-aws-credentials
+
+  - it: should mount aws credentials from credentials file
+    set:
+      awsCredentials.enabled: true
+      awsCredentials.useCredentialsFile: true
+    asserts:
+      # Should have secret volume (not emptyDir)
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: aws-credentials-file
+            secret:
+              secretName: aws-credentials
+      # Should NOT have emptyDir volume
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: aws-config
+            emptyDir: {}
+      # Should mount the file with subPath
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: aws-credentials-file
+            mountPath: /root/.aws/credentials
+            subPath: credentials
+            readOnly: true
+      # Should NOT have init container
+      - notMatchRegexRaw:
+          pattern: "create-aws-credentials"
+
+  - it: should not mount aws credentials when disabled
+    set:
+      awsCredentials.enabled: false
+    asserts:
+      # Should NOT have aws-config volume
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: aws-config
+      # Should NOT have aws-credentials-file volume
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: aws-credentials-file
+      # Should NOT have volumeMount
+      - notMatchRegexRaw:
+          pattern: "mountPath: /root/.aws"
+      # Should NOT have init container
+      - notMatchRegexRaw:
+          pattern: "create-aws-credentials"
+
+  - it: should use custom secret name with access key and secret key
+    set:
+      awsCredentials.enabled: true
+      awsCredentials.useCredentialsFile: false
+      awsCredentials.awsSecretName: my-custom-secret
+      awsCredentials.accessKeyIdKeyName: my_key_id
+      awsCredentials.secretAccessKeyKeyName: my_secret_key
+    asserts:
+      # Init container should reference custom secret and keys
+      - contains:
+          path: spec.template.spec.initContainers
+          any: true
+          content:
+            env:
+              - name: AWS_ACCESS_KEY_ID
+                valueFrom:
+                  secretKeyRef:
+                    name: my-custom-secret
+                    key: my_key_id
+              - name: AWS_SECRET_ACCESS_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: my-custom-secret
+                    key: my_secret_key
+
+  - it: should use custom secret name with credentials file
+    set:
+      awsCredentials.enabled: true
+      awsCredentials.useCredentialsFile: true
+      awsCredentials.awsSecretName: my-aws-profiles
+    asserts:
+      # Volume should reference custom secret
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: aws-credentials-file
+            secret:
+              secretName: my-aws-profiles
+
+  - it: should default to accessKeyIdKeyName and secretAccessKeyKeyName when useCredentialsFile is unset
+    set:
+      awsCredentials.enabled: true
+    asserts:
+      # Should have init container
+      - contains:
+          path: spec.template.spec.initContainers
+          any: true
+          content:
+            name: create-aws-credentials
+      # Should have emptyDir volume
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: aws-config
+            emptyDir: {}

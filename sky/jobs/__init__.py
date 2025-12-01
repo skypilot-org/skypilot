@@ -11,6 +11,7 @@ from sky.jobs.client.sdk import pool_status
 from sky.jobs.client.sdk import pool_sync_down_logs
 from sky.jobs.client.sdk import pool_tail_logs
 from sky.jobs.client.sdk import queue
+from sky.jobs.client.sdk import queue_v2
 from sky.jobs.client.sdk import tail_logs
 from sky.jobs.constants import JOBS_CLUSTER_NAME_PREFIX_LENGTH
 from sky.jobs.constants import JOBS_CONTROLLER_LOGS_DIR
@@ -38,6 +39,7 @@ __all__ = [
     'cancel',
     'launch',
     'queue',
+    'queue_v2',
     'tail_logs',
     'dashboard',
     'download_logs',

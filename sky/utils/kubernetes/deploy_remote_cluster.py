@@ -57,39 +57,9 @@ def parse_args():
         dest='use_ssh_config',
         action='store_true',
         help='Use SSH config for host settings instead of explicit parameters')
-    #TODO(romilb): The `sky local up --ips` command is deprecated and these args are now captured in the ssh_node_pools.yaml file.
-    # Remove these args after 0.11.0 release.
-    parser.add_argument(
-        '--ips-file',
-        dest='ips_file',
-        help=
-        '[Deprecated, use --ssh-node-pools-file instead] File containing IP addresses or SSH host entries (one per line)'
-    )
-    parser.add_argument(
-        '--user',
-        help=
-        '[Deprecated, use --ssh-node-pools-file instead] Username to use for SSH (overridden by SSH config if host exists there)'
-    )
-    parser.add_argument(
-        '--ssh-key',
-        dest='ssh_key',
-        help=
-        '[Deprecated, use --ssh-node-pools-file instead] Path to SSH private key (overridden by SSH config if host exists there)'
-    )
-    parser.add_argument(
-        '--context-name',
-        dest='context_name',
-        default='default',
-        help=
-        '[Deprecated, use --ssh-node-pools-file instead] Kubernetes context name'
-    )
     parser.add_argument('--cleanup',
                         action='store_true',
                         help='Clean up the cluster')
-    parser.add_argument(
-        '--password',
-        help='[Deprecated, use --ssh-node-pools-file instead] Password for sudo'
-    )
 
     return parser.parse_args()
 
@@ -134,6 +104,7 @@ def run_remote(node,
                print_output=False,
                use_shell=False):
     """Run a command on a remote machine via SSH."""
+    ssh_cmd: List[str]
     if use_ssh_config:
         # Use SSH config for connection parameters
         ssh_cmd = ['ssh', node, cmd]
@@ -153,10 +124,8 @@ def run_remote(node,
         ssh_cmd.append(f'{user}@{node}' if user else node)
         ssh_cmd.append(cmd)
 
-    if use_shell:
-        ssh_cmd = ' '.join(ssh_cmd)
-
-    process = subprocess.run(ssh_cmd,
+    subprocess_cmd = ' '.join(ssh_cmd) if use_shell else ssh_cmd
+    process = subprocess.run(subprocess_cmd,
                              capture_output=True,
                              text=True,
                              check=False,
@@ -474,180 +443,129 @@ def main():
     if args.cleanup:
         print('SKYPILOT_CLEANUP_MODE: Cleanup mode activated')
 
-    # Check if using YAML configuration or command line arguments
-    if args.ips_file:
-        # Using command line arguments - legacy mode
-        if args.ssh_key and not os.path.isfile(
-                args.ssh_key) and not global_use_ssh_config:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'SSH key not found: {args.ssh_key}')
+    # Using YAML configuration
+    targets = ssh_utils.load_ssh_targets(args.ssh_node_pools_file)
+    clusters_config = ssh_utils.get_cluster_config(
+        targets, args.infra, file_path=args.ssh_node_pools_file)
 
-        if not os.path.isfile(args.ips_file):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'IPs file not found: {args.ips_file}')
+    # Print information about clusters being processed
+    num_clusters = len(clusters_config)
+    cluster_names = list(clusters_config.keys())
+    cluster_info = f'Found {num_clusters} Node Pool{"s" if num_clusters > 1 else ""}: {", ".join(cluster_names)}'
+    print(f'SKYPILOT_CLUSTER_INFO: {cluster_info}')
 
-        with open(args.ips_file, 'r', encoding='utf-8') as f:
-            hosts = [line.strip() for line in f if line.strip()]
+    # Process each cluster
+    for cluster_name, cluster_config in clusters_config.items():
+        try:
+            print(f'SKYPILOT_CURRENT_CLUSTER: {cluster_name}')
+            print(f'{YELLOW}==== Deploying cluster: {cluster_name} ====${NC}')
+            hosts_info = ssh_utils.prepare_hosts_info(cluster_name,
+                                                      cluster_config)
 
-        if not hosts:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Hosts file is empty or not formatted correctly.')
-
-        head_node = hosts[0]
-        worker_nodes = hosts[1:]
-        ssh_user = args.user if not global_use_ssh_config else ''
-        ssh_key = args.ssh_key if not global_use_ssh_config else ''
-        context_name = args.context_name
-        password = args.password
-
-        # Check if hosts are in SSH config
-        head_use_ssh_config = global_use_ssh_config or ssh_utils.check_host_in_ssh_config(
-            head_node)
-        worker_use_ssh_config = [
-            global_use_ssh_config or ssh_utils.check_host_in_ssh_config(node)
-            for node in worker_nodes
-        ]
-
-        # Single cluster deployment for legacy mode
-        deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name,
-                       password, head_use_ssh_config, worker_use_ssh_config,
-                       kubeconfig_path, args.cleanup)
-    else:
-        # Using YAML configuration
-        targets = ssh_utils.load_ssh_targets(args.ssh_node_pools_file)
-        clusters_config = ssh_utils.get_cluster_config(
-            targets, args.infra, file_path=args.ssh_node_pools_file)
-
-        # Print information about clusters being processed
-        num_clusters = len(clusters_config)
-        cluster_names = list(clusters_config.keys())
-        cluster_info = f'Found {num_clusters} Node Pool{"s" if num_clusters > 1 else ""}: {", ".join(cluster_names)}'
-        print(f'SKYPILOT_CLUSTER_INFO: {cluster_info}')
-
-        # Process each cluster
-        for cluster_name, cluster_config in clusters_config.items():
-            try:
-                print(f'SKYPILOT_CURRENT_CLUSTER: {cluster_name}')
+            if not hosts_info:
                 print(
-                    f'{YELLOW}==== Deploying cluster: {cluster_name} ====${NC}')
-                hosts_info = ssh_utils.prepare_hosts_info(
-                    cluster_name, cluster_config)
-
-                if not hosts_info:
-                    print(
-                        f'{RED}Error: No valid hosts found for cluster {cluster_name!r}. Skipping.{NC}'
-                    )
-                    continue
-
-                # Generate a unique context name for each cluster
-                context_name = args.context_name
-                if context_name == 'default':
-                    context_name = 'ssh-' + cluster_name
-
-                # Check cluster history
-                os.makedirs(NODE_POOLS_INFO_DIR, exist_ok=True)
-                history_yaml_file = os.path.join(
-                    NODE_POOLS_INFO_DIR, f'{context_name}-history.yaml')
-
-                history = None
-                if os.path.exists(history_yaml_file):
-                    print(
-                        f'{YELLOW}Loading history from {history_yaml_file}{NC}')
-                    with open(history_yaml_file, 'r', encoding='utf-8') as f:
-                        history = yaml.safe_load(f)
-                else:
-                    print(f'{YELLOW}No history found for {context_name}.{NC}')
-
-                history_workers_info = None
-                history_worker_nodes = None
-                history_use_ssh_config = None
-                # Do not support changing anything besides hosts for now
-                if history is not None:
-                    for key in ['user', 'identity_file', 'password']:
-                        if not args.cleanup and history.get(
-                                key) != cluster_config.get(key):
-                            raise ValueError(
-                                f'Cluster configuration has changed for field {key!r}. '
-                                f'Previous value: {history.get(key)}, '
-                                f'Current value: {cluster_config.get(key)}')
-                    history_hosts_info = ssh_utils.prepare_hosts_info(
-                        cluster_name, history)
-                    if not args.cleanup and history_hosts_info[0] != hosts_info[
-                            0]:
-                        raise ValueError(
-                            f'Cluster configuration has changed for master node. '
-                            f'Previous value: {history_hosts_info[0]}, '
-                            f'Current value: {hosts_info[0]}')
-                    history_workers_info = history_hosts_info[1:] if len(
-                        history_hosts_info) > 1 else []
-                    history_worker_nodes = [
-                        h['ip'] for h in history_workers_info
-                    ]
-                    history_use_ssh_config = [
-                        h.get('use_ssh_config', False)
-                        for h in history_workers_info
-                    ]
-
-                # Use the first host as the head node and the rest as worker nodes
-                head_host = hosts_info[0]
-                worker_hosts = hosts_info[1:] if len(hosts_info) > 1 else []
-
-                head_node = head_host['ip']
-                worker_nodes = [h['ip'] for h in worker_hosts]
-                ssh_user = head_host['user']
-                ssh_key = head_host['identity_file']
-                head_use_ssh_config = global_use_ssh_config or head_host.get(
-                    'use_ssh_config', False)
-                worker_use_ssh_config = [
-                    global_use_ssh_config or h.get('use_ssh_config', False)
-                    for h in worker_hosts
-                ]
-                password = head_host['password']
-
-                # Deploy this cluster
-                unsuccessful_workers = deploy_cluster(
-                    head_node,
-                    worker_nodes,
-                    ssh_user,
-                    ssh_key,
-                    context_name,
-                    password,
-                    head_use_ssh_config,
-                    worker_use_ssh_config,
-                    kubeconfig_path,
-                    args.cleanup,
-                    worker_hosts=worker_hosts,
-                    history_worker_nodes=history_worker_nodes,
-                    history_workers_info=history_workers_info,
-                    history_use_ssh_config=history_use_ssh_config)
-
-                if not args.cleanup:
-                    successful_hosts = []
-                    for host in cluster_config['hosts']:
-                        if isinstance(host, str):
-                            host_node = host
-                        else:
-                            host_node = host['ip']
-                        if host_node not in unsuccessful_workers:
-                            successful_hosts.append(host)
-                    cluster_config['hosts'] = successful_hosts
-                    with open(history_yaml_file, 'w', encoding='utf-8') as f:
-                        print(
-                            f'{YELLOW}Writing history to {history_yaml_file}{NC}'
-                        )
-                        yaml.dump(cluster_config, f)
-
-                print(
-                    f'{GREEN}==== Completed deployment for cluster: {cluster_name} ====${NC}'
+                    f'{RED}Error: No valid hosts found for cluster {cluster_name!r}. Skipping.{NC}'
                 )
-                successful_clusters.append(cluster_name)
-            except Exception as e:  # pylint: disable=broad-except
-                reason = str(e)
-                failed_clusters.append((cluster_name, reason))
-                print(
-                    f'{RED}Error deploying SSH Node Pool {cluster_name}: {reason}{NC}'
-                )  # Print for internal logging
+                continue
+
+            context_name = f'ssh-{cluster_name}'
+
+            # Check cluster history
+            os.makedirs(NODE_POOLS_INFO_DIR, exist_ok=True)
+            history_yaml_file = os.path.join(NODE_POOLS_INFO_DIR,
+                                             f'{context_name}-history.yaml')
+
+            history = None
+            if os.path.exists(history_yaml_file):
+                print(f'{YELLOW}Loading history from {history_yaml_file}{NC}')
+                with open(history_yaml_file, 'r', encoding='utf-8') as f:
+                    history = yaml.safe_load(f)
+            else:
+                print(f'{YELLOW}No history found for {context_name}.{NC}')
+
+            history_workers_info = None
+            history_worker_nodes = None
+            history_use_ssh_config = None
+            # Do not support changing anything besides hosts for now
+            if history is not None:
+                for key in ['user', 'identity_file', 'password']:
+                    if not args.cleanup and history.get(
+                            key) != cluster_config.get(key):
+                        raise ValueError(
+                            f'Cluster configuration has changed for field {key!r}. '
+                            f'Previous value: {history.get(key)}, '
+                            f'Current value: {cluster_config.get(key)}')
+                history_hosts_info = ssh_utils.prepare_hosts_info(
+                    cluster_name, history)
+                if not args.cleanup and history_hosts_info[0] != hosts_info[0]:
+                    raise ValueError(
+                        f'Cluster configuration has changed for master node. '
+                        f'Previous value: {history_hosts_info[0]}, '
+                        f'Current value: {hosts_info[0]}')
+                history_workers_info = history_hosts_info[1:] if len(
+                    history_hosts_info) > 1 else []
+                history_worker_nodes = [h['ip'] for h in history_workers_info]
+                history_use_ssh_config = [
+                    h.get('use_ssh_config', False) for h in history_workers_info
+                ]
+
+            # Use the first host as the head node and the rest as worker nodes
+            head_host = hosts_info[0]
+            worker_hosts = hosts_info[1:] if len(hosts_info) > 1 else []
+
+            head_node = head_host['ip']
+            worker_nodes = [h['ip'] for h in worker_hosts]
+            ssh_user = head_host['user']
+            ssh_key = head_host['identity_file']
+            head_use_ssh_config = global_use_ssh_config or head_host.get(
+                'use_ssh_config', False)
+            worker_use_ssh_config = [
+                global_use_ssh_config or h.get('use_ssh_config', False)
+                for h in worker_hosts
+            ]
+            password = head_host['password']
+
+            # Deploy this cluster
+            unsuccessful_workers = deploy_cluster(
+                head_node,
+                worker_nodes,
+                ssh_user,
+                ssh_key,
+                context_name,
+                password,
+                head_use_ssh_config,
+                worker_use_ssh_config,
+                kubeconfig_path,
+                args.cleanup,
+                worker_hosts=worker_hosts,
+                history_worker_nodes=history_worker_nodes,
+                history_workers_info=history_workers_info,
+                history_use_ssh_config=history_use_ssh_config)
+
+            if not args.cleanup:
+                successful_hosts = []
+                for host in cluster_config['hosts']:
+                    if isinstance(host, str):
+                        host_node = host
+                    else:
+                        host_node = host['ip']
+                    if host_node not in unsuccessful_workers:
+                        successful_hosts.append(host)
+                cluster_config['hosts'] = successful_hosts
+                with open(history_yaml_file, 'w', encoding='utf-8') as f:
+                    print(f'{YELLOW}Writing history to {history_yaml_file}{NC}')
+                    yaml.dump(cluster_config, f)
+
+            print(
+                f'{GREEN}==== Completed deployment for cluster: {cluster_name} ====${NC}'
+            )
+            successful_clusters.append(cluster_name)
+        except Exception as e:  # pylint: disable=broad-except
+            reason = str(e)
+            failed_clusters.append((cluster_name, reason))
+            print(
+                f'{RED}Error deploying SSH Node Pool {cluster_name}: {reason}{NC}'
+            )  # Print for internal logging
 
     if failed_clusters:
         action = 'clean' if args.cleanup else 'deploy'
@@ -1240,7 +1158,7 @@ def deploy_cluster(head_node,
             while ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu:' || ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu.product'; do
                 echo 'Waiting for GPU operator...'
                 sleep 5
-            done 
+            done
             echo 'GPU operator installed successfully.'
         """
         result = run_remote(head_node,

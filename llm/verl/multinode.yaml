@@ -63,15 +63,19 @@ setup: |
   rm -rf verl
   git clone https://github.com/volcengine/verl.git
   cd verl
-  
+
   # Create virtual environment and install dependencies
   uv venv --seed
   source .venv/bin/activate
-  
+
   # Install Verl and its dependencies (skip Megatron for this example)
   USE_MEGATRON=0 bash scripts/install_vllm_sglang_mcore.sh
   uv pip install --no-deps -e .
   uv pip install "ray[default]"  # For Ray dashboard
+
+  # Pin uvloop to 0.21.0 to work around asyncio event loop bug
+  # See: https://github.com/volcengine/verl/issues/3806
+  uv pip install "uvloop==0.21.0"
 
 run: |
   # Set up distributed training environment
@@ -79,10 +83,10 @@ run: |
   num_nodes=$(echo "$SKYPILOT_NODE_IPS" | wc -l)
   echo "Head IP: $head_ip"
   echo "Number of nodes: $num_nodes"
-  
+
   cd verl
   source .venv/bin/activate
-  
+
   # Create custom runtime environment configuration
   cat > runtime_env_custom.yaml <<EOF
   working_dir: ./
@@ -92,48 +96,36 @@ run: |
     CUDA_DEVICE_MAX_CONNECTIONS: "1"
     HF_HUB_ENABLE_HF_TRANSFER: "1"
   EOF
-  
-  # Ray cluster configuration
-  HEAD_PORT=6385
-  DASH_PORT=8280
-  
-  # Function to check if Ray is already running
-  is_ray_alive () {
-    ray status --address="$1:$HEAD_PORT" >/dev/null 2>&1
-  }
-  
+
   if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
     # Head node: prepare data, download model, start Ray head, and submit training job
     echo "Setting up head node..."
-    
+
     # Install additional dependencies for data processing
     uv pip install datasets transformers
-    
+
     # Prepare GSM8K dataset
     python3 examples/data_preprocess/gsm8k.py --local_dir ~/data/gsm8k
-    
+
     # Download model to cache
     python3 -c "import transformers; transformers.pipeline('text-generation', model='Qwen/Qwen2.5-0.5B-Instruct')"
-    
-    # Start Ray head node if not already running
-    if ! is_ray_alive "$head_ip"; then
-      echo "Starting Ray head node..."
-      ray start --head --node-ip-address="$head_ip" \
-          --port $HEAD_PORT --dashboard-port $DASH_PORT \
-          --dashboard-host=0.0.0.0 \
-          --dashboard-agent-listen-port=52366 \
-          --disable-usage-stats \
-          --num-gpus=$SKYPILOT_NUM_GPUS_PER_NODE
-      sleep 10
-    else
-      echo "Ray is already running at $head_ip:$HEAD_PORT, reusing existing instance"
-      ray status --address="$head_ip:$HEAD_PORT"
-    fi
-    
-    # Submit the training job to Ray
-    export RAY_ADDRESS="http://localhost:$DASH_PORT"
+  fi
+
+  # This script is only available on skypilot-nightly>=1.0.0.dev20251114
+  # If you are using an older version, you can copy and paste the script from:
+  # https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster
+  export RAY_HEAD_PORT=6385
+  export RAY_DASHBOARD_PORT=8280
+  export RAY_DASHBOARD_HOST=0.0.0.0
+  export RAY_DASHBOARD_AGENT_LISTEN_PORT=52366
+  export RAY_HEAD_IP_ADDRESS="$head_ip"
+  ~/sky_templates/ray/start_cluster
+
+  # Head node: submit training job
+  if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
+    export RAY_ADDRESS="http://localhost:8280"
     echo "Submitting training job to Ray cluster..."
-    
+
     ray job submit --address="$RAY_ADDRESS" --working-dir=. \
       --runtime-env=runtime_env_custom.yaml \
       -- python3 -m verl.trainer.main_ppo \
@@ -172,31 +164,4 @@ run: |
       # 2. Change trainer.logger to: trainer.logger=['console', 'wandb']
       # 3. Add: trainer.wandb_project='verl-rlhf'
       # 4. Add: trainer.wandb_run_name='${SKYPILOT_CLUSTER_NAME}-${SKYPILOT_TASK_ID}'
-  else
-    # Worker nodes: connect to Ray head
-    echo "Setting up worker node..."
-    echo "Head IP: $head_ip"
-    echo "HEAD_PORT: $HEAD_PORT"
-    echo "SKYPILOT_NUM_GPUS_PER_NODE: $SKYPILOT_NUM_GPUS_PER_NODE"
-
-    # Get this worker's IP address
-    worker_ip=$(hostname -I | awk '{print $1}')
-    echo "Worker IP: $worker_ip"
-
-    echo "Checking if worker $worker_ip is already in Ray cluster at $head_ip:$HEAD_PORT"
-    
-    if ray list nodes --address=$head_ip:$HEAD_PORT 2>/dev/null | grep -q "$worker_ip"; then
-      echo "Worker $worker_ip already connected to Ray cluster"
-      ray status --address=$head_ip:$HEAD_PORT
-    else
-      echo "Worker not connected, waiting for head node to start"
-      sleep 20
-      echo "Starting Ray worker"
-      ray start --address $head_ip:$HEAD_PORT --disable-usage-stats --num-gpus=$SKYPILOT_NUM_GPUS_PER_NODE
-      echo "Ray start exit code: $?"
-      
-      # Verify connection after starting
-      sleep 5
-      ray status --address=$head_ip:$HEAD_PORT
-    fi
   fi

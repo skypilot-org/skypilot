@@ -1,5 +1,5 @@
-# This example starts its own Ray cluster on port 6379, separate from SkyPilot's 
-# internal Ray cluster (port 6380). Do not use ray.init(address="auto") as it 
+# This example starts its own Ray cluster on port 6379, separate from SkyPilot's
+# internal Ray cluster (port 6380). Do not use ray.init(address="auto") as it
 # connects to SkyPilot's internal cluster, causing resource conflicts.
 
 resources:
@@ -22,15 +22,12 @@ run: |
   sudo chmod 777 -R /var/tmp
   source .venv/bin/activate
 
-  head_ip=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+  # This script is only available on skypilot-nightly>=1.0.0.dev20251114
+  # If you are using an older version, you can copy and paste the script from:
+  # https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster
+  ~/sky_templates/ray/start_cluster
+
   num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
   if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
-    ps aux | grep ray | grep 6379 &> /dev/null || ray start --head  --disable-usage-stats --port 6379
-    sleep 5
     python train.py --num-workers $num_nodes
-  else
-    sleep 5
-    ps aux | grep ray | grep 6379 &> /dev/null || ray start --address $head_ip:6379 --disable-usage-stats
-    # Add sleep to after `ray start` to give ray enough time to daemonize 
-    sleep 5
   fi

@@ -34,6 +34,7 @@ from smoke_tests import smoke_tests_utils
 
 from sky import serve
 from sky import skypilot_config
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 
@@ -210,9 +211,11 @@ def _get_skyserve_http_test(name: str, cloud: str,
     return test
 
 
-def _check_replica_in_status(name: str,
-                             check_tuples: List[Tuple[int, bool, str]],
-                             timeout_seconds: int = 0) -> str:
+def _check_replica_in_status(
+        name: str,
+        check_tuples: List[Tuple[int, bool, str]],
+        timeout_seconds: int = 0,
+        force_skip_provisioning_waiting: bool = False) -> str:
     """Check replicas' status and count in sky serve status
 
     We will check cpus=2, as all our tests use cpus=2.
@@ -227,6 +230,7 @@ def _check_replica_in_status(name: str,
     """
     # Build the check conditions
     check_conditions = []
+    skip_provisioning_waiting = False
     for check_tuple in check_tuples:
         count, is_spot, status = check_tuple
         resource_str = ''
@@ -236,9 +240,13 @@ def _check_replica_in_status(name: str,
             if is_spot:
                 spot_str = r'\[spot\]'
             resource_str = f'x{spot_str}(cpus=2, '
+        if 'PROVISIONING' in status:
+            skip_provisioning_waiting = True
         check_conditions.append(
             f'echo "$s" | grep "{resource_str}" | grep "{status}" | wc -l | '
             f'grep {count}')
+    if force_skip_provisioning_waiting:
+        skip_provisioning_waiting = True
 
     if timeout_seconds > 0:
         # Create a timeout mechanism that will wait up to timeout_seconds
@@ -276,8 +284,10 @@ def _check_replica_in_status(name: str,
         for condition in check_conditions:
             check_cmd += f'{condition} || exit 1; '
 
+    wait_provisioning_cmd = ('' if skip_provisioning_waiting else
+                             f'{_WAIT_PROVISION_REPR.format(name=name)}; ')
     return (f'{_SERVE_STATUS_WAIT.format(name=name)}; '
-            f'{_WAIT_PROVISION_REPR.format(name=name)}; '
+            f'{wait_provisioning_cmd} '
             f'{_WAIT_NO_NOT_READY.format(name=name)}; '
             f'echo "$s"; {check_cmd}')
 
@@ -956,7 +966,8 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
         f' sleep 5; s=$(sky serve status {name}); '
         '  echo "$s"; '
         'done')
-    four_spot_up_cmd = _check_replica_in_status(name, [(4, True, 'READY')])
+    four_spot_up_cmd = _check_replica_in_status(
+        name, [(4, True, 'READY')], force_skip_provisioning_waiting=True)
     update_check = [f'until ({four_spot_up_cmd}); do sleep 5; done; sleep 15;']
     if mode == 'rolling':
         # Check rolling update, it will terminate one of the old on-demand
@@ -982,17 +993,19 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
         # The two old on-demand instances will be in READY status
         # after autoscale update.
         TWO_OLD_ON_DEMAND_INSTANCES_STATUS_AFTER_AUTOSCALE = 'READY'
+    override_env = f'export {constants.SERVE_OVERRIDE_CONCURRENT_LAUNCHES}=4;'
     test = smoke_tests_utils.Test(
         f'test-skyserve-new-autoscaler-update-{mode}',
         [
-            f'sky serve up -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/update/new_autoscaler_before.yaml',
+            f'{override_env} sky serve up -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/update/new_autoscaler_before.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
             _check_service_version(name, "1"),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             's=$(curl $endpoint); echo "$s"; echo "$s" | grep "Hi, SkyPilot here"',
-            f'sky serve update {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --mode {mode} -y tests/skyserve/update/new_autoscaler_after.yaml',
+            f'{override_env} sky serve update {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --mode {mode} -y tests/skyserve/update/new_autoscaler_after.yaml',
             # Wait for update to be registered
             'sleep 90',
+            'sky status',
             wait_until_no_pending,
             _check_replica_in_status(name, [
                 (4, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
@@ -1346,4 +1359,55 @@ def test_skyserve_ha_kill_during_shutdown():
         env={
             skypilot_config.ENV_VAR_GLOBAL_CONFIG: 'tests/skyserve/high_availability/config.yaml'
         })
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.serve
+@pytest.mark.no_remote_server
+def test_skyserve_log_expansion_no_duplicates():
+    """Test that provision log expansion doesn't happen multiple times when
+    Kubernetes is pulling Docker images.
+
+    When a Kubernetes cluster needs to pull a Docker image, rich spinner
+    updates can produce hundreds of lines matching the provision log pattern.
+    This test verifies that the provision log is only expanded once, not
+    hundreds of times.
+    """
+    name = _get_service_name()
+    test = smoke_tests_utils.Test(
+        'test-skyserve-log-expansion-no-duplicates',
+        [
+            # Launch service with Docker image that may need pulling
+            f'sky serve up -n {name} -y {smoke_tests_utils.LOW_RESOURCE_ARG} tests/skyserve/log_expansion/kubernetes_docker_pull.yaml',
+            # Wait until service is ready (provisioning including image pull is complete)
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            # Sync down the replica logs and extract the log directory from output
+            f'log_output=$(sky serve logs {name} 1 --sync-down --no-follow 2>&1); '
+            # Extract the path from the line that matches "Service <name> logs: <path>"
+            # The output format is: "Service <name> logs: <path>" (may have log prefixes and color codes)
+            f'log_dir=$(echo "$log_output" | grep -oE "{name} logs: [^[:space:]]+" | sed "s/{name} logs: //" | sed "s/\\x1b\\[[0-9;]*m//g" | head -1); '
+            'if [ -z "$log_dir" ]; then '
+            '  echo "ERROR: Failed to extract log directory from output: $log_output"; '
+            '  echo "Extracted log_dir: [$log_dir]"; exit 1; '
+            'fi; '
+            'log_file="$log_dir/replica-1.log"; '
+            'if [ ! -f "$log_file" ]; then '
+            '  echo "ERROR: Log file not found at $log_file"; exit 1; '
+            'fi; '
+            'provision_count=$(grep -c "==================== Provisioning ====================" "$log_file" || echo "0"); '
+            'echo "Provision log section count: $provision_count"; '
+            # The fix ensures the provision log is only expanded once, not hundreds of times.
+            # Allow up to 2 occurrences: one from expansion and one from the provision log
+            # itself appearing in the replica log (e.g., in debug mode without expansion).
+            '[ "$provision_count" -le 2 ] || { '
+            '  echo "ERROR: Provision log section appears $provision_count times (expected <= 2)"; '
+            '  echo "This indicates duplicate log expansion is happening"; '
+            '  exit 1; '
+            '}',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+    )
     smoke_tests_utils.run_one_test(test)

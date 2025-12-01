@@ -29,10 +29,16 @@ spec:
     metadata:
       annotations:
         {{- if .Values.apiService.metrics.enabled }}
+        {{- if .Values.prometheus.useDedicatedScrapeConfig }}
+        skypilot.co/scrape: "true"
+        skypilot.co/path: "/metrics"
+        skypilot.co/port: {{ .Values.apiService.metrics.port | quote }}
+        {{- else}}
         # Well-known annotations for Prometheus to scrape the metrics.
         prometheus.io/scrape: "true"
         prometheus.io/path: "/metrics"
         prometheus.io/port: {{ .Values.apiService.metrics.port | quote }}
+        {{- end }}
         {{- end }}
         {{- if .Values.apiService.annotations }}
         {{- toYaml .Values.apiService.annotations | nindent 8 }}
@@ -50,10 +56,14 @@ spec:
       {{- end }}
       runtimeClassName: {{ .Values.runtimeClassName }}
       terminationGracePeriodSeconds: {{ .Values.apiService.terminationGracePeriodSeconds }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
       - name: skypilot-api
-        image: {{ .Values.apiService.image }}
-        imagePullPolicy: Always
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
+        imagePullPolicy: {{ .Values.apiService.imagePullPolicy }}
         {{- with .Values.securityContext }}
         securityContext:
           {{- toYaml . | nindent 10 }}
@@ -61,8 +71,11 @@ spec:
         resources:
           {{- toYaml .Values.apiService.resources | nindent 10 }}
         env:
-        {{- if .Values.apiService.extraEnvs }}
-        {{- toYaml .Values.apiService.extraEnvs | nindent 8 }}
+        {{- with $.Values.global.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- with .Values.apiService.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
         {{- end }}
         - name: SKYPILOT_DEV
           value: {{ .Values.apiService.skypilotDev | quote }}
@@ -77,6 +90,10 @@ spec:
         {{- end }}
         {{- if include "skypilot.serviceAccountAuthEnabled" . | trim | eq "true" }}
         - name: ENABLE_SERVICE_ACCOUNTS
+          value: "true"
+        {{- end }}
+        {{- if include "skypilot.ingressBasicAuthEnabled" . | trim | eq "true" }}
+        - name: SKYPILOT_INGRESS_BASIC_AUTH_ENABLED
           value: "true"
         {{- end }}
         {{- if .Values.gcpCredentials.enabled }}
@@ -212,18 +229,8 @@ spec:
           done
           {{- end }}
 
-          if sky api start -h | grep -q -- "--foreground"; then
-            mkdir -p /root/.sky/api_server
-            exec sky api start {{ include "skypilot.apiArgs" . }} --foreground  2>&1 | tee -a /root/.sky/api_server/server.log
-          else
-            # For backward compatibility, run in background if --foreground is not supported.
-            # TODO(aylei): this will be dropped in 0.11.0.
-            if sky api start {{ include "skypilot.apiArgs" . }}; then
-              tail -n+0 -f /root/.sky/api_server/server.log
-            else
-              cat /root/.sky/api_server/server.log
-            fi
-          fi
+          mkdir -p /root/.sky/api_server
+          exec sky api start {{ include "skypilot.apiArgs" . }} --foreground  2>&1 | tee -a /root/.sky/api_server/server.log
         ports:
         - containerPort: 46580
         livenessProbe:
@@ -269,9 +276,18 @@ spec:
           mountPath: /var/skypilot/ssh_keys
         {{- end }}
         {{- if .Values.awsCredentials.enabled }}
+        {{- if .Values.awsCredentials.useCredentialsFile }}
+        # Mount the credentials file directly from secret
+        - name: aws-credentials-file
+          mountPath: /root/.aws/credentials
+          subPath: credentials
+          readOnly: true
+        {{- else }}
+        # Mount emptyDir that will be populated by initContainer
         - name: aws-config
           mountPath: /root/.aws
           readOnly: true
+        {{- end }}
         {{- end }}
         {{- if .Values.r2Credentials.enabled }}
         - name: r2-config
@@ -323,7 +339,7 @@ spec:
         {{- end }}
       {{- if .Values.apiService.logs.retention.enabled }}
       - name: logrotate
-        image: {{ .Values.apiService.image }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         command: ["/bin/sh", "-c"]
         # Warn if logrotate is missing in the image and keep the sidecar running
         args:
@@ -354,13 +370,13 @@ spec:
           subPath: .sky
       {{- end }}
       initContainers:
-      {{- if .Values.awsCredentials.enabled }}
+      {{- if and .Values.awsCredentials.enabled (not .Values.awsCredentials.useCredentialsFile) }}
       - name: create-aws-credentials
         {{- with .Values.securityContext }}
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: {{ .Values.apiService.image }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -375,6 +391,9 @@ spec:
             sleep 600
           fi
         env:
+        {{- with $.Values.global.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         - name: AWS_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
@@ -395,7 +414,7 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: {{ .Values.apiService.image }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -422,6 +441,9 @@ spec:
           echo "Account ID:"
           cat /root/.cloudflare/accountid
         env:
+        {{- with $.Values.global.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         - name: R2_CREDENTIALS
           valueFrom:
             secretKeyRef:
@@ -442,9 +464,12 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: google/cloud-sdk:latest
+        image: {{ include "common.image" (dict "root" . "image" .Values.gcpCredentials.image) }}
         command: ["/bin/sh", "-c"]
         env:
+        {{- with $.Values.global.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         - name: GOOGLE_APPLICATION_CREDENTIALS
           value: /root/gcp-cred.json
         args:
@@ -464,7 +489,7 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: {{ .Values.apiService.image }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -479,6 +504,9 @@ spec:
             sleep 600
           fi
         env:
+        {{- with $.Values.global.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         - name: RUNPOD_API_KEY
           valueFrom:
             secretKeyRef:
@@ -494,7 +522,7 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: {{ .Values.apiService.image }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -508,6 +536,9 @@ spec:
             sleep 600
           fi
         env:
+        {{- with $.Values.global.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         - name: LAMBDA_API_KEY
           valueFrom:
             secretKeyRef:
@@ -523,7 +554,7 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: {{ .Values.apiService.image }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -537,6 +568,9 @@ spec:
             sleep 600
           fi
         env:
+        {{- with $.Values.global.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         - name: VAST_API_KEY
           valueFrom:
             secretKeyRef:
@@ -560,8 +594,16 @@ spec:
         emptyDir: {}
       {{- end }}
       {{- if .Values.awsCredentials.enabled }}
+      {{- if .Values.awsCredentials.useCredentialsFile }}
+      # Mount the credentials file directly from secret
+      - name: aws-credentials-file
+        secret:
+          secretName: {{ .Values.awsCredentials.awsSecretName }}
+      {{- else }}
+      # Mount emptyDir that will be populated by initContainer
       - name: aws-config
         emptyDir: {}
+      {{- end }}
       {{- end }}
       {{- if .Values.gcpCredentials.enabled }}
       - name: gcp-credentials
@@ -612,4 +654,16 @@ spec:
       {{- if .Values.r2Credentials.enabled }}
       - name: r2-config
         emptyDir: {}
+      {{- end }}
+      {{- with .Values.apiService.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.apiService.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.apiService.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
       {{- end }}
