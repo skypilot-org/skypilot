@@ -3,6 +3,7 @@ import json
 import typing
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
+from sky.serve import serve_utils
 from sky.serve.client import impl
 from sky.server import common as server_common
 from sky.server import rest
@@ -14,7 +15,6 @@ if typing.TYPE_CHECKING:
     import io
 
     import sky
-    from sky.serve import serve_utils
 
 
 @context.contextual
@@ -86,6 +86,39 @@ def update(
                        mode,
                        pool=False,
                        _need_confirmation=_need_confirmation)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+def apply(
+    task: Union['sky.Task', 'sky.Dag'],
+    workers: Optional[int],
+    service_name: str,
+    mode: 'serve_utils.UpdateMode' = serve_utils.DEFAULT_UPDATE_MODE,
+    # Internal only:
+    # pylint: disable=invalid-name
+    _need_confirmation: bool = False
+) -> server_common.RequestId[None]:
+    """Apply a config to a SkyServe service.
+
+    Please refer to the sky.cli.serve_apply for the document.
+
+    Args:
+        task: sky.Task to apply.
+        service_name: Name of the service.
+        mode: Update mode.
+        _need_confirmation: (Internal only) Whether to show a confirmation
+            prompt.
+
+    Returns:
+        The request ID of the apply request.
+    """
+    return impl.apply(task,
+                      workers=workers,
+                      service_name=service_name,
+                      mode=mode,
+                      pool=False,
+                      _need_confirmation=_need_confirmation)
 
 
 @usage_lib.entrypoint
