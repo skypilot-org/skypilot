@@ -287,9 +287,8 @@ def submit_jobs(job_ids: List[int], dag_yaml_path: str,
                 # job controller is still alive.
                 logger.warning(
                     f'Job {job_id} is still alive, skipping submission')
-                maybe_start_controllers(from_scheduler=True)
-            else:
-                job_ids_without_controller_process.append(job_id)
+                continue
+        job_ids_without_controller_process.append(job_id)
     job_ids = job_ids_without_controller_process
 
     with open(dag_yaml_path, 'r', encoding='utf-8') as dag_file:
