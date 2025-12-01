@@ -401,4 +401,7 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
                                        log_file,
                                        is_local=True))
 
+        # Store upload_id in the dag for server-side path resolution
+        dag.upload_id = upload_id
+
     return dag

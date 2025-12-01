@@ -1051,7 +1051,7 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
                         await zip_file.write(data)
 
     logger.info(f'Uploaded zip file: {zip_file_path}')
-    await unzip_file(zip_file_path, client_file_mounts_dir)
+    await unzip_file(zip_file_path, client_file_mounts_dir, upload_id)
     if total_chunks > 1:
         await context_utils.to_thread(shutil.rmtree, chunk_dir)
     return payloads.UploadZipFileResponse(
@@ -1069,33 +1069,22 @@ def _is_relative_to(path: pathlib.Path, parent: pathlib.Path) -> bool:
 
 
 async def unzip_file(zip_file_path: pathlib.Path,
-                     client_file_mounts_dir: pathlib.Path) -> None:
+                     client_file_mounts_dir: pathlib.Path,
+                     upload_id: str) -> None:
     """Unzips a zip file without blocking the event loop."""
 
     def _do_unzip() -> None:
         try:
+            # Extract to a dedicated directory with upload_id to avoid
+            # collisions
+            extract_dir = (client_file_mounts_dir / upload_id).resolve()
+            extract_dir.mkdir(parents=True, exist_ok=True)
+
             with zipfile.ZipFile(zip_file_path, 'r') as zipf:
-                cleaned_directories = set()
                 for member in zipf.infolist():
                     # Determine the new path
                     original_path = os.path.normpath(member.filename)
-                    new_path = client_file_mounts_dir / original_path.lstrip(
-                        '/')
-
-                    # Check if new_path is in a directory that already exists,
-                    # and if so, clean up the top-level directory.
-                    relative = new_path.relative_to(client_file_mounts_dir)
-                    if relative.parts:
-                        top_level = client_file_mounts_dir / relative.parts[0]
-                        if top_level not in cleaned_directories:
-                            try:
-                                logger.debug(
-                                    f'Removing existing directory: {top_level}')
-                                shutil.rmtree(top_level)
-                            except FileNotFoundError:
-                                # Directory does not exist, which is fine
-                                pass
-                        cleaned_directories.add(top_level)
+                    new_path = extract_dir / original_path.lstrip('/')
 
                     if (member.external_attr >> 28) == 0xA:
                         # Symlink. Read the target path and create a symlink.
@@ -1103,10 +1092,9 @@ async def unzip_file(zip_file_path: pathlib.Path,
                         target = zipf.read(member).decode()
                         assert not os.path.isabs(target), target
                         # Since target is a relative path, we need to check that
-                        # it is under `client_file_mounts_dir` for security.
+                        # it is under `extract_dir` for security.
                         full_target_path = (new_path.parent / target).resolve()
-                        if not _is_relative_to(full_target_path,
-                                               client_file_mounts_dir):
+                        if not _is_relative_to(full_target_path, extract_dir):
                             raise ValueError(
                                 f'Symlink target {target} leads to a '
                                 'file not in userspace. Aborted.')

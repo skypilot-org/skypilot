@@ -159,7 +159,10 @@ def dump_chain_dag_to_yaml_str(dag: dag_lib.Dag,
         The YAML string.
     """
     assert dag.is_chain(), dag
-    configs = [{'name': dag.name}]
+    dag_config = {'name': dag.name}
+    if dag.upload_id is not None:
+        dag_config['upload_id'] = dag.upload_id
+    configs = [dag_config]
     for task in dag.tasks:
         configs.append(
             task.to_yaml_config(
