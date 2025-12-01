@@ -44,6 +44,8 @@ Install SkyPilot using pip:
           # Seeweb is only supported for Python >= 3.10
           pip install "skypilot[seeweb]"
           pip install "skypilot[primeintellect]"
+          pip install "skypilot[cloudrift]"
+
 
           pip install "skypilot[all]"
 
@@ -81,6 +83,8 @@ Install SkyPilot using pip:
           # Seeweb is only supported for Python >= 3.10
           pip install "skypilot[seeweb]"
           pip install "skypilot-nightly[primeintellect]"
+          pip install "skypilot-nightly[cloudrift]"
+
 
           pip install "skypilot-nightly[all]"
 
@@ -119,6 +123,7 @@ Install SkyPilot using pip:
           # Seeweb is only supported for Python >= 3.10
           pip install -e ".[seeweb]"
           pip install -e ".[primeintellect]"
+          pip install -e ".[cloudrift]"
 
           pip install -e ".[all]"
 
@@ -248,6 +253,7 @@ This will produce a summary like:
     Seeweb: enabled
     vSphere: enabled
     Cloudflare (for R2 object store): enabled
+    CloudRift: enabled
     Kubernetes: enabled
 
 If any cloud's credentials or dependencies are missing, ``sky check`` will
@@ -551,6 +557,17 @@ Vast |community-badge|
   pip install "vastai-sdk>=0.1.12"
   mkdir -p ~/.config/vastai
   echo "<your_api_key_here>" > ~/.config/vastai/vast_api_key
+
+
+CloudRift |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+`CloudRift <https://www.cloudrift.ai/>`__ is a cloud provider that provides access go elastic GPU accelerated VMs. To configure CloudRift access, go to the `Keys <https://console.cloudrift.ai/keys/>`_ page on your CloudRift console to get your **API key**. Then, run:
+
+.. code-block:: shell
+
+  mkdir -p ~/.config/cloudrift
+  echo "<your_api_key_here>" > ~/.config/cloudrift/cloudrift_api_key
 
 
 
