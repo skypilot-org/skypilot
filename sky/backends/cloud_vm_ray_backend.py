@@ -2,7 +2,6 @@
 import copy
 import dataclasses
 import enum
-import inspect
 import json
 import math
 import os
@@ -5874,15 +5873,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_log_path=os.path.join(log_dir, 'setup.log'),
         )
 
-        if callable(task.run):
-            run_fn_code = textwrap.dedent(inspect.getsource(task.run))
-            run_fn_name = task.run.__name__
-            codegen.register_run_fn(run_fn_code, run_fn_name)
-
-        command_for_node = task.run if isinstance(task.run, str) else None
         codegen.add_task(
             1,
-            bash_script=command_for_node,
+            bash_script=task.run,
             env_vars=task_env_vars,
             task_name=task.name,
             resources_dict=backend_utils.get_task_demands_dict(task),
@@ -5924,11 +5917,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_cmd=self._setup_cmd,
             setup_log_path=os.path.join(log_dir, 'setup.log'),
         )
-
-        if callable(task.run):
-            run_fn_code = textwrap.dedent(inspect.getsource(task.run))
-            run_fn_name = task.run.__name__
-            codegen.register_run_fn(run_fn_code, run_fn_name)
 
         codegen.add_task(
             num_actual_nodes,
