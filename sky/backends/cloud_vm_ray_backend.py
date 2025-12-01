@@ -5880,7 +5880,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             codegen.register_run_fn(run_fn_code, run_fn_name)
 
         command_for_node = task.run if isinstance(task.run, str) else None
-        codegen.add_tasks(
+        codegen.add_task(
             1,
             bash_script=command_for_node,
             env_vars=task_env_vars,
@@ -5930,11 +5930,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
 
-        # TODO(zhwu): The resources limitation for multi-node ray.tune and
-        # horovod should be considered.
-        # Ray's per-node resources, to constrain scheduling each command to
-        # the corresponding node, represented by private IPs.
-        codegen.add_tasks(
+        codegen.add_task(
             num_actual_nodes,
             bash_script=task.run,
             env_vars=task_env_vars,

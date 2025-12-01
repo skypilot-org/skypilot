@@ -84,7 +84,7 @@ def test_single_node_with_gpu():
     )
 
     # Single node: no gang_scheduling_id passed
-    codegen.add_tasks(
+    codegen.add_task(
         1,
         bash_script='python train.py',
         task_name='train_task',
@@ -125,7 +125,7 @@ def test_multi_node_2nodes():
         setup_log_path='/sky/logs/setup.log',
     )
 
-    codegen.add_tasks(
+    codegen.add_task(
         num_nodes,
         bash_script='echo "Running on node $SKYPILOT_NODE_RANK"',
         task_name='distributed_task',

@@ -192,7 +192,7 @@ class TaskCodeGen:
         """
         raise NotImplementedError
 
-    def add_tasks(
+    def add_task(
         self,
         num_nodes: int,
         bash_script: Optional[str],
@@ -201,7 +201,7 @@ class TaskCodeGen:
         log_dir: str,
         env_vars: Optional[Dict[str, str]] = None,
     ) -> None:
-        """Generates code to run the bash command on each node."""
+        """Generates code to run the bash command on all num_nodes nodes."""
         raise NotImplementedError
 
     def add_epilogue(self) -> None:
@@ -517,32 +517,32 @@ class RayCodeGen(TaskCodeGen):
                 """),
         ]
 
-    def add_tasks(self,
-                  num_nodes: int,
-                  bash_script: Optional[str],
-                  task_name: Optional[str],
-                  resources_dict: Dict[str, float],
-                  log_dir: str,
-                  env_vars: Optional[Dict[str, str]] = None) -> None:
+    def add_task(self,
+                 num_nodes: int,
+                 bash_script: Optional[str],
+                 task_name: Optional[str],
+                 resources_dict: Dict[str, float],
+                 log_dir: str,
+                 env_vars: Optional[Dict[str, str]] = None) -> None:
         # TODO(zhwu): The resources limitation for multi-node ray.tune and
         # horovod should be considered.
         for i in range(num_nodes):
             # Ray's per-node resources, to constrain scheduling each command to
             # the corresponding node, represented by private IPs.
-            self.add_single_task(bash_script=bash_script,
-                                 task_name=task_name,
-                                 resources_dict=resources_dict.copy(),
-                                 log_dir=log_dir,
-                                 env_vars=env_vars,
-                                 gang_scheduling_id=i)
+            self._add_ray_task(bash_script=bash_script,
+                               task_name=task_name,
+                               resources_dict=resources_dict.copy(),
+                               log_dir=log_dir,
+                               env_vars=env_vars,
+                               gang_scheduling_id=i)
 
-    def add_single_task(self,
-                        bash_script: Optional[str],
-                        task_name: Optional[str],
-                        resources_dict: Dict[str, float],
-                        log_dir: str,
-                        env_vars: Optional[Dict[str, str]] = None,
-                        gang_scheduling_id: int = 0) -> None:
+    def _add_ray_task(self,
+                      bash_script: Optional[str],
+                      task_name: Optional[str],
+                      resources_dict: Dict[str, float],
+                      log_dir: str,
+                      env_vars: Optional[Dict[str, str]] = None,
+                      gang_scheduling_id: int = 0) -> None:
         """Generates code for a ray remote task that runs a bash command."""
         assert self._has_setup, 'Call add_setup() before add_task().'
 
