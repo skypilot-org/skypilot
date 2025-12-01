@@ -68,8 +68,19 @@ jobs:
       - name: Set branch name and commit message
         id: set_env
         run: |
-          echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
-          echo "message=${{ github.event.pull_request.title }}" >> $GITHUB_OUTPUT
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+            echo "message=${{ github.event.pull_request.title }}" >> $GITHUB_OUTPUT
+          else
+            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            # For push events after merge, head_commit.message contains the merge commit message
+            # which includes the PR title. For merge_group events, use merge_group.head_commit.message
+            if [ "${{ github.event_name }}" == "merge_group" ]; then
+              echo "message=${{ github.event.merge_group.head_commit.message }}" >> $GITHUB_OUTPUT
+            else
+              echo "message=${{ github.event.head_commit.message }}" >> $GITHUB_OUTPUT
+            fi
+          fi
       - name: Run tests with pytest
         env:
           TEST_PATH: ${{ matrix.test-path }}
@@ -117,8 +128,19 @@ jobs:
       - name: Set branch name and commit message
         id: set_env
         run: |
-          echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
-          echo "message=${{ github.event.pull_request.title }}" >> $GITHUB_OUTPUT
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+            echo "message=${{ github.event.pull_request.title }}" >> $GITHUB_OUTPUT
+          else
+            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            # For push events after merge, head_commit.message contains the merge commit message
+            # which includes the PR title. For merge_group events, use merge_group.head_commit.message
+            if [ "${{ github.event_name }}" == "merge_group" ]; then
+              echo "message=${{ github.event.merge_group.head_commit.message }}" >> $GITHUB_OUTPUT
+            else
+              echo "message=${{ github.event.head_commit.message }}" >> $GITHUB_OUTPUT
+            fi
+          fi
       - name: Run tests with pytest
         env:
           TEST_PATH: ${{ matrix.test-path }}
@@ -162,8 +184,19 @@ jobs:
       - name: Set branch name and commit message
         id: set_env
         run: |
-          echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
-          echo "message=${{ github.event.pull_request.title }}" >> $GITHUB_OUTPUT
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+            echo "message=${{ github.event.pull_request.title }}" >> $GITHUB_OUTPUT
+          else
+            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            # For push events after merge, head_commit.message contains the merge commit message
+            # which includes the PR title. For merge_group events, use merge_group.head_commit.message
+            if [ "${{ github.event_name }}" == "merge_group" ]; then
+              echo "message=${{ github.event.merge_group.head_commit.message }}" >> $GITHUB_OUTPUT
+            else
+              echo "message=${{ github.event.head_commit.message }}" >> $GITHUB_OUTPUT
+            fi
+          fi
       - name: Run tests with pytest
         env:
           BUILDKITE_ANALYTICS_TOKEN: ${{ secrets.BUILDKITE_ANALYTICS_TOKEN }}
