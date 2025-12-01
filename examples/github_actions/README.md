@@ -40,6 +40,7 @@ To create a service account key:
 
 - **Navigate to the Users page**: On the main page of the SkyPilot dashboard, click "Users".
 - **Access Service Account Settings**: Click "Service Accounts" located at the top of the page.
+> **Note:** If "Service Accounts" section does not exist on the dashboard, the API server is not using SSO. This section can be skipped.
 - **Create New Service Account**: Click "+ Create Service Account" button located at the top of the page and follow the instructions to create a service account token.
 
 ### GitHub: Define repository secrets
