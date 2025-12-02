@@ -3,10 +3,12 @@
 import os
 import signal
 import subprocess
+from typing import List
+
+import psutil
 
 from sky.skylet import constants
 from sky.skylet import runtime_utils
-from sky.utils import common_utils
 
 VERSION_FILE = runtime_utils.get_runtime_dir_path(constants.SKYLET_VERSION_FILE)
 SKYLET_LOG_FILE = runtime_utils.get_runtime_dir_path(constants.SKYLET_LOG_FILE)
@@ -14,36 +16,89 @@ PID_FILE = runtime_utils.get_runtime_dir_path(constants.SKYLET_PID_FILE)
 PORT_FILE = runtime_utils.get_runtime_dir_path(constants.SKYLET_PORT_FILE)
 
 
+def _is_running_skylet_process(pid: int) -> bool:
+    """Check if the process with given PID is actually a skylet process
+    and is still running.
+
+    Args:
+        pid: Process ID to check
+
+    Returns:
+        True if the process is running and is a skylet process
+    """
+    if pid <= 0:
+        return False
+    try:
+        process = psutil.Process(pid)
+        if not process.is_running():
+            return False
+        # Check if command line contains the skylet module identifier
+        cmdline = process.cmdline()
+        return any('sky.skylet.skylet' in arg for arg in cmdline)
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return False
+
+
+def _find_running_skylet_pids() -> List[int]:
+    """Find running skylet process IDs.
+
+    First checks the PID_FILE if it exists and validates the process.
+    Falls back to grep-based detection for backward compatibility.
+
+    Returns:
+        List of PIDs for running skylet processes (empty if none found)
+    """
+    if os.path.exists(PID_FILE):
+        try:
+            with open(PID_FILE, 'r', encoding='utf-8') as pid_file:
+                pid = int(pid_file.read().strip())
+            if _is_running_skylet_process(pid):
+                return [pid]
+        except (OSError, ValueError, IOError) as e:
+            # Don't fallback to grep-based detection as the existence of the
+            # PID file implies that we are on the new version, and there is
+            # possibility of there being multiple skylet processes running.
+            print(f'Error reading PID file {PID_FILE}: {e}')
+        return []
+    else:
+        # Fall back to grep-based detection for backward compatibility.
+        pids = []
+        proc = subprocess.run(
+            'ps aux | grep -v "grep" | grep "sky.skylet.skylet" | grep " -m"',
+            shell=True,
+            check=False,
+            capture_output=True,
+            text=True)
+        if proc.returncode == 0:
+            # Parse the output to extract PIDs (column 2)
+            for line in proc.stdout.strip().split('\n'):
+                if line:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        try:
+                            pids.append(int(parts[1]))
+                        except ValueError:
+                            continue
+        return pids
+
+
 def restart_skylet():
     # Kills old skylet if it is running.
     # TODO(zhwu): make the killing graceful, e.g., use a signal to tell
     # skylet to exit, instead of directly killing it.
 
-    # Kill only our skylet process (identified by stored PID)
-    if os.path.exists(PID_FILE):
+    # Find and kill running skylet processes
+    for pid in _find_running_skylet_pids():
         try:
-            with open(PID_FILE, 'r', encoding='utf-8') as pid_file:
-                old_pid = int(pid_file.read().strip())
-            # Check if process is still alive and kill it
-            try:
-                os.kill(old_pid, signal.SIGKILL)
-            except (OSError, ProcessLookupError):
-                # Assume process already died
-                pass
-        except (OSError, ValueError, IOError) as exc:
-            raise RuntimeError(f'Failed to read PID file {PID_FILE}: '
-                               f'{common_utils.format_exception(exc)}') from exc
-    else:
-        # Fall back to old behavior for backward compatibility
-        subprocess.run(
-            # We use -m to grep instead of {constants.SKY_PYTHON_CMD} -m
-            # to grep because need to handle the backward compatibility of
-            # the old skylet started before #3326, which does not use the
-            # full path to python.
-            'ps aux | grep "sky.skylet.skylet" | grep " -m "'
-            f'| awk \'{{print $2}}\' | xargs kill >> {SKYLET_LOG_FILE} 2>&1',
-            shell=True,
-            check=False)
+            os.kill(pid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            # Process died between detection and kill
+            pass
+    # Clean up the PID file
+    try:
+        os.remove(PID_FILE)
+    except OSError:
+        pass  # Best effort cleanup
 
     port = constants.SKYLET_GRPC_PORT
     subprocess.run(
@@ -63,25 +118,8 @@ def restart_skylet():
         v_f.write(constants.SKYLET_VERSION)
 
 
-# Check if our skylet is running by checking the PID file
-running = False
-if os.path.exists(PID_FILE):
-    try:
-        with open(PID_FILE, 'r', encoding='utf-8') as f:
-            pid = int(f.read().strip())
-        # Check if the process is still alive
-        os.kill(pid, 0)
-        running = True
-    except Exception as e:  # pylint: disable=broad-except
-        # Assume the process is not running and restart it
-        pass
-else:
-    # Fall back to grep-based check for backward compatibility
-    proc = subprocess.run(
-        'ps aux | grep -v "grep" | grep "sky.skylet.skylet" | grep " -m"',
-        shell=True,
-        check=False)
-    running = (proc.returncode == 0)
+# Check if our skylet is running
+running = bool(_find_running_skylet_pids())
 
 version_match = False
 found_version = None
