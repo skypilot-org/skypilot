@@ -1,4 +1,5 @@
 """SSH-based Kubernetes Cluster Deployment Script"""
+# pylint: disable=line-too-long
 import base64
 import concurrent.futures as cf
 import os

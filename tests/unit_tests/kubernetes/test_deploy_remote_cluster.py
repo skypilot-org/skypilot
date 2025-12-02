@@ -3,7 +3,7 @@
 import argparse
 from unittest import mock
 
-from sky.utils.kubernetes import deploy_remote_cluster
+from sky.utils.kubernetes import deploy_ssh_node_pools
 
 
 def test_deploy_remote_cluster():
@@ -40,7 +40,7 @@ def test_deploy_remote_cluster():
         mock_get_cluster_config.return_value = mock_cluster_config
         mock_prepare_hosts_info.return_value = mock_hosts_info
         mock_deploy_cluster.return_value = [mock_context_name]
-        deploy_remote_cluster.main()
+        deploy_ssh_node_pools.deploy_clusters()
         mock_deploy_cluster.assert_called_once()
         mock_load_ssh_targets.assert_called_once()
         mock_get_cluster_config.assert_called_once()
