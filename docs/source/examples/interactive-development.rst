@@ -261,6 +261,12 @@ Because marimo notebooks are stored as Python scripts on disk, they can
 immediately be used via `sky jobs` too. To demonstrate this, let's consider
 the following marimo notebook:
 
+.. image:: ../images/marimo-example.png
+  :width: 100%
+  :alt: marimo notebook example
+
+This is the underlying code for the marimo notebook:
+
 .. code-block:: python
 
     # /// script
