@@ -1,6 +1,5 @@
 """Tests for Kubernetes remote cluster deployment."""
 
-import argparse
 from unittest import mock
 
 from sky.utils.kubernetes import deploy_ssh_node_pools
@@ -8,13 +7,6 @@ from sky.utils.kubernetes import deploy_ssh_node_pools
 
 def test_deploy_remote_cluster():
     """Test to check if the remote cluster is deployed successfully."""
-    mock_args = argparse.Namespace(
-        cleanup=False,
-        infra='test-infra',
-        kubeconfig_path='~/.kube/config',
-        use_ssh_config=False,
-        ssh_node_pools_file='~/.sky/ssh_node_pools.yaml')
-
     mock_hosts_info = [{
         'name': 'test-host',
         'ip': '192.168.1.1',
@@ -30,17 +22,20 @@ def test_deploy_remote_cluster():
 
     mock_ssh_targets = [{'name': mock_context_name, 'hosts': ['test-host']}]
 
-    with mock.patch('sky.utils.kubernetes.deploy_ssh_node_pools.parse_args') as mock_parse_args, \
-         mock.patch('sky.utils.kubernetes.deploy_ssh_node_pools.ssh_utils.load_ssh_targets') as mock_load_ssh_targets, \
+    with mock.patch('sky.utils.kubernetes.deploy_ssh_node_pools.ssh_utils.load_ssh_targets') as mock_load_ssh_targets, \
          mock.patch('sky.utils.kubernetes.deploy_ssh_node_pools.ssh_utils.get_cluster_config') as mock_get_cluster_config, \
          mock.patch('sky.utils.kubernetes.deploy_ssh_node_pools.ssh_utils.prepare_hosts_info') as mock_prepare_hosts_info, \
          mock.patch('sky.utils.kubernetes.deploy_ssh_node_pools.deploy_cluster') as mock_deploy_cluster:
-        mock_parse_args.return_value = mock_args
         mock_load_ssh_targets.return_value = mock_ssh_targets
         mock_get_cluster_config.return_value = mock_cluster_config
         mock_prepare_hosts_info.return_value = mock_hosts_info
         mock_deploy_cluster.return_value = [mock_context_name]
-        deploy_ssh_node_pools.deploy_clusters()
+        deploy_ssh_node_pools.deploy_clusters(
+            cleanup=False,
+            infra='test-infra',
+            kubeconfig_path='~/.kube/config',
+            global_use_ssh_config=False,
+            ssh_node_pools_file='~/.sky/ssh_node_pools.yaml')
         mock_deploy_cluster.assert_called_once()
         mock_load_ssh_targets.assert_called_once()
         mock_get_cluster_config.assert_called_once()
