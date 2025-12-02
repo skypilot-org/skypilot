@@ -6,9 +6,9 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
+from sky.adaptors.verda import get_configuration
 from sky.utils import registry
 from sky.utils import resources_utils
-from sky.adaptors.verda import get_configuration
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -29,27 +29,22 @@ class Verda(clouds.Cloud):
     _REPR = "Verda"
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: "Stopping not supported.",
-        clouds.CloudImplementationFeatures.MULTI_NODE: (
-            "Multi-node not supported yet, as the interconnection among nodes "
-            "are non-trivial on Verda."
-        ),
-        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: (
-            "Customizing disk tier is not supported yet on Verda."
-        ),
-        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER: (
-            "Custom network tier is not supported yet on Verda."
-        ),
-        clouds.CloudImplementationFeatures.STORAGE_MOUNTING: (
-            "Mounting object stores is not supported on Verda. To read data "
-            "from object stores on Verda, use `mode: COPY` to copy the data "
-            "to local disk."
-        ),
-        clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS: (
-            "High availability controllers are not supported on Verda."
-        ),
-        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK: (
-            "Customized multiple network interfaces are not supported on " "Verda."
-        ),
+        clouds.CloudImplementationFeatures.MULTI_NODE:
+            ("Multi-node not supported yet, as the interconnection among nodes "
+             "are non-trivial on Verda."),
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
+            ("Customizing disk tier is not supported yet on Verda."),
+        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
+            ("Custom network tier is not supported yet on Verda."),
+        clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
+            ("Mounting object stores is not supported on Verda. To read data "
+             "from object stores on Verda, use `mode: COPY` to copy the data "
+             "to local disk."),
+        clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+            ("High availability controllers are not supported on Verda."),
+        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+            ("Customized multiple network interfaces are not supported on "
+             "Verda."),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _MAX_VOLUME_NAME_LEN_LIMIT = 30
@@ -79,8 +74,7 @@ class Verda(clouds.Cloud):
         # Hide MULTI_NODE feature behind experimental flag
         if os.getenv("SKYPILOT_EXPERIMENTAL_VERDA_MULTI_NODE", "") == "1":
             unsupported_features.pop(
-                clouds.CloudImplementationFeatures.MULTI_NODE, None
-            )
+                clouds.CloudImplementationFeatures.MULTI_NODE, None)
 
         return unsupported_features
 
@@ -104,8 +98,7 @@ class Verda(clouds.Cloud):
             f"regions_with_offering: {instance_type}, {use_spot}, {region}, {resources}"
         )
         regions = catalog.get_region_zones_for_instance_type(
-            instance_type, use_spot, "verda"
-        )
+            instance_type, use_spot, "verda")
         print(f"regions: {regions}")
         if region is not None:
             regions = [r for r in regions if r.name == region]
@@ -116,7 +109,8 @@ class Verda(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
-        return catalog.get_vcpus_mem_from_instance_type(instance_type, clouds="verda")
+        return catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                        clouds="verda")
 
     @classmethod
     def zones_provision_loop(
@@ -129,9 +123,11 @@ class Verda(clouds.Cloud):
         use_spot: bool = False,
     ) -> Iterator[Optional[List["clouds.Zone"]]]:
         del num_nodes  # unused
-        regions = cls.regions_with_offering(
-            instance_type, accelerators, use_spot, region=region, zone=None
-        )
+        regions = cls.regions_with_offering(instance_type,
+                                            accelerators,
+                                            use_spot,
+                                            region=region,
+                                            zone=None)
         for r in regions:
             assert r.zones is None, r
             yield r.zones
@@ -143,9 +139,11 @@ class Verda(clouds.Cloud):
         region: Optional[str] = None,
         zone: Optional[str] = None,
     ) -> float:
-        return catalog.get_hourly_cost(
-            instance_type, use_spot=use_spot, region=region, zone=zone, clouds="verda"
-        )
+        return catalog.get_hourly_cost(instance_type,
+                                       use_spot=use_spot,
+                                       region=region,
+                                       zone=zone,
+                                       clouds="verda")
 
     def accelerators_to_hourly_cost(
         self,
@@ -182,11 +180,9 @@ class Verda(clouds.Cloud):
 
     @classmethod
     def get_accelerators_from_instance_type(
-        cls, instance_type: str
-    ) -> Optional[Dict[str, Union[int, float]]]:
-        return catalog.get_accelerators_from_instance_type(
-            instance_type, clouds="verda"
-        )
+            cls, instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
+        return catalog.get_accelerators_from_instance_type(instance_type,
+                                                           clouds="verda")
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -210,8 +206,12 @@ class Verda(clouds.Cloud):
             )
 
         resources = resources.assert_launchable()
-        acc_dict = self.get_accelerators_from_instance_type(resources.instance_type)
-        custom_resources = resources_utils.make_ray_custom_resources_str(acc_dict)
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
+
+        image_id: str = _DEFAULT_IMAGE
 
         # Image selection logic
         if resources.image_id is None:
@@ -219,13 +219,9 @@ class Verda(clouds.Cloud):
 
             if image_id_override:
                 image_id = image_id_override
-            else:
-                image_id = _DEFAULT_IMAGE
-
-            image_id: Optional[str] = _DEFAULT_IMAGE
         elif resources.extract_docker_image() is not None:
             # Docker image specified
-            image_id = resources.extract_docker_image()
+            raise ValueError("Docker images are not supported on Verda.")
         else:
             # User specified an image_id
             if isinstance(resources.image_id, dict):
@@ -292,27 +288,25 @@ class Verda(clouds.Cloud):
                 return resources_utils.FeasibleResources([], [], None)
             else:
                 return resources_utils.FeasibleResources(
-                    _make([default_instance_type]), [], None
-                )
+                    _make([default_instance_type]), [], None)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        (instance_list, fuzzy_candidate_list) = (
-            catalog.get_instance_type_for_accelerator(
-                acc,
-                acc_count,
-                use_spot=resources.use_spot,
-                cpus=resources.cpus,
-                region=resources.region,
-                zone=resources.zone,
-                clouds="verda",
-            )
-        )
+        (instance_list,
+         fuzzy_candidate_list) = (catalog.get_instance_type_for_accelerator(
+             acc,
+             acc_count,
+             use_spot=resources.use_spot,
+             cpus=resources.cpus,
+             region=resources.region,
+             zone=resources.zone,
+             clouds="verda",
+         ))
         if instance_list is None:
-            return resources_utils.FeasibleResources([], fuzzy_candidate_list, None)
-        return resources_utils.FeasibleResources(
-            _make(instance_list), fuzzy_candidate_list, None
-        )
+            return resources_utils.FeasibleResources([], fuzzy_candidate_list,
+                                                     None)
+        return resources_utils.FeasibleResources(_make(instance_list),
+                                                 fuzzy_candidate_list, None)
 
     @classmethod
     def check_credentials(
@@ -347,7 +341,8 @@ class Verda(clouds.Cloud):
         return 0.0
 
     @classmethod
-    def is_volume_name_valid(cls, volume_name: str) -> Tuple[bool, Optional[str]]:
+    def is_volume_name_valid(cls,
+                             volume_name: str) -> Tuple[bool, Optional[str]]:
         """Validates that the volume name is valid for this cloud.
 
         - must be <= 30 characters

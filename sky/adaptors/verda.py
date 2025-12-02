@@ -1,8 +1,8 @@
 """Verda Cloud adaptor."""
 
 import functools
-import os
 from json import load as json_load
+import os
 
 from verda import VerdaClient
 
@@ -24,18 +24,13 @@ def import_package(func):
                 _verda_client = VerdaClient(
                     client_id=config["client_id"],
                     client_secret=config["client_secret"],
-                    base_url=(
-                        config["base_url"]
-                        if "base_url" in config
-                        else "https://api.datacrunch.io/v1"
-                    ),
-                    inference_key=config.get("inference_key", None)
-                )
+                    base_url=(config["base_url"] if "base_url" in config else
+                              "https://api.datacrunch.io/v1"),
+                    inference_key=config.get("inference_key", None))
             except ImportError as e:
                 raise ImportError(
                     f"Fail to import dependencies for Verda Cloud: {e}\n"
-                    'Try pip install "skypilot[verda]"'
-                ) from None
+                    'Try pip install "skypilot[verda]"') from None
         return func(*args, **kwargs)
 
     return wrapper
@@ -63,18 +58,17 @@ def get_configuration():
                 {
                     "client_id": os.environ["VERDA_CLIENT_ID"],
                     "client_secret": os.environ["VERDA_CLIENT_SECRET"],
-                    "base_url": os.environ.get(
-                        "VERDA_BASE_URL", "https://api.datacrunch.io/v1"
-                    ),
-                    "default_region": os.environ.get("VERDA_DEFAULT_REGION", "FIN-03"),
-                    "inference_key": os.environ.get("VERDA_INFERENCE_KEY", None),
+                    "base_url": os.environ.get("VERDA_BASE_URL",
+                                               "https://api.datacrunch.io/v1"),
+                    "default_region": os.environ.get("VERDA_DEFAULT_REGION",
+                                                     "FIN-03"),
+                    "inference_key": os.environ.get("VERDA_INFERENCE_KEY",
+                                                    None),
                 },
             )
 
-        if (
-            "DATACRUNCH_CLIENT_ID" in os.environ
-            and "DATACRUNCH_CLIENT_SECRET" in os.environ
-        ):
+        if ("DATACRUNCH_CLIENT_ID" in os.environ and
+                "DATACRUNCH_CLIENT_SECRET" in os.environ):
             # Configured via old env vars
             return (
                 True,
@@ -82,13 +76,12 @@ def get_configuration():
                 {
                     "client_id": os.environ["DATACRUNCH_CLIENT_ID"],
                     "client_secret": os.environ["DATACRUNCH_CLIENT_SECRET"],
-                    "base_url": os.environ.get(
-                        "DATACRUNCH_BASE_URL", "https://api.datacrunch.io/v1"
-                    ),
+                    "base_url": os.environ.get("DATACRUNCH_BASE_URL",
+                                               "https://api.datacrunch.io/v1"),
                     "default_region": os.environ.get(
-                        "DATACRUNCH_DEFAULT_REGION", "FIN-03"
-                    ),
-                    "inference_key": os.environ.get("DATACRUNCH_INFERENCE_KEY", None),
+                        "DATACRUNCH_DEFAULT_REGION", "FIN-03"),
+                    "inference_key": os.environ.get("DATACRUNCH_INFERENCE_KEY",
+                                                    None),
                 },
             )
 
@@ -97,21 +90,19 @@ def get_configuration():
         if not os.path.exists(config_file_path):
             return (
                 False,
-                (
-                    f"Verda Cloud configuration not found. "
-                    f"Please save your config.json as {config_file_path}\n"
-                    "    Credentials can be set up by:\n"
-                    "        $ mkdir -p ~/.verda\n"
-                    "        $ cat > ~/.verda/config.json << EOF\n"
-                    "        {\n"
-                    '          "client_id": "your-client-id",\n'
-                    '          "client_secret": "your-client-secret",\n'
-                    '          "base_url": "https://api.datacrunch.io/v1",\n'
-                    '          "default_region": "FIN-03",\n'
-                    '          "inference_key": "your-inference-key"\n'
-                    "        }\n"
-                    "        EOF"
-                ),
+                (f"Verda Cloud configuration not found. "
+                 f"Please save your config.json as {config_file_path}\n"
+                 "    Credentials can be set up by:\n"
+                 "        $ mkdir -p ~/.verda\n"
+                 "        $ cat > ~/.verda/config.json << EOF\n"
+                 "        {\n"
+                 '          "client_id": "your-client-id",\n'
+                 '          "client_secret": "your-client-secret",\n'
+                 '          "base_url": "https://api.datacrunch.io/v1",\n'
+                 '          "default_region": "FIN-03",\n'
+                 '          "inference_key": "your-inference-key"\n'
+                 "        }\n"
+                 "        EOF"),
                 {},
             )
 
@@ -122,28 +113,24 @@ def get_configuration():
         if "client_id" not in config or not config.get("client_id"):
             return (
                 False,
-                (
-                    f"Verda Cloud Client ID is missing or empty in {config_file_path}\n"
-                    "    Please ensure your config.json contains:\n"
-                    "        {\n"
-                    '          "client_id": "your-api-key",\n'
-                    '          "client_secret": "your-api-secret"\n'
-                    "        }"
-                ),
+                (f"Verda Cloud Client ID is missing or empty in {config_file_path}\n"
+                 "    Please ensure your config.json contains:\n"
+                 "        {\n"
+                 '          "client_id": "your-api-key",\n'
+                 '          "client_secret": "your-api-secret"\n'
+                 "        }"),
                 {},
             )
 
         if "client_secret" not in config or not config.get("client_secret"):
             return (
                 False,
-                (
-                    f"Verda Cloud Client Secret is missing or empty in {config_file_path}\n"
-                    "    Please ensure your config.json contains:\n"
-                    "        {\n"
-                    '          "client_id": "your-api-key",\n'
-                    '          "client_secret": "your-api-secret"\n'
-                    "        }"
-                ),
+                (f"Verda Cloud Client Secret is missing or empty in {config_file_path}\n"
+                 "    Please ensure your config.json contains:\n"
+                 "        {\n"
+                 '          "client_id": "your-api-key",\n'
+                 '          "client_secret": "your-api-secret"\n'
+                 "        }"),
                 {},
             )
         return True, None, config
@@ -151,23 +138,19 @@ def get_configuration():
     except (OSError, IOError) as e:
         return (
             False,
-            (
-                f"Error reading Verda Cloud credentials from {config_file_path}: {str(e)}\n"
-                "    Please ensure the file exists and is readable."
-            ),
+            (f"Error reading Verda Cloud credentials from {config_file_path}: {str(e)}\n"
+             "    Please ensure the file exists and is readable."),
             {},
         )
     except (KeyError, ValueError) as e:
         # KeyError for missing keys, ValueError for JSON decode errors
         return (
             False,
-            (
-                f"Error parsing Verda Cloud credentials from {config_file_path}: {str(e)}\n"
-                "    Please ensure your config.json is valid JSON and contains:\n"
-                "        {\n"
-                '          "client_id": "your-api-key",\n'
-                '          "client_secret": "your-api-secret"\n'
-                "        }"
-            ),
+            (f"Error parsing Verda Cloud credentials from {config_file_path}: {str(e)}\n"
+             "    Please ensure your config.json is valid JSON and contains:\n"
+             "        {\n"
+             '          "client_id": "your-api-key",\n'
+             '          "client_secret": "your-api-secret"\n'
+             "        }"),
             {},
         )
