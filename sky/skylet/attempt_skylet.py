@@ -1,12 +1,74 @@
 """Restarts skylet if version does not match"""
 
 import os
+import signal
 import subprocess
+from typing import List
+
+import psutil
 
 from sky.skylet import constants
 from sky.skylet import runtime_utils
 
 VERSION_FILE = runtime_utils.get_runtime_dir_path(constants.SKYLET_VERSION_FILE)
+SKYLET_LOG_FILE = runtime_utils.get_runtime_dir_path(constants.SKYLET_LOG_FILE)
+PID_FILE = runtime_utils.get_runtime_dir_path(constants.SKYLET_PID_FILE)
+PORT_FILE = runtime_utils.get_runtime_dir_path(constants.SKYLET_PORT_FILE)
+
+
+def _is_running_skylet_process(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        process = psutil.Process(pid)
+        if not process.is_running():
+            return False
+        # Check if command line contains the skylet module identifier
+        cmdline = process.cmdline()
+        return any('sky.skylet.skylet' in arg for arg in cmdline)
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess,
+            OSError) as e:
+        print(f'Error checking if skylet process {pid} is running: {e}')
+        return False
+
+
+def _find_running_skylet_pids() -> List[int]:
+    if os.path.exists(PID_FILE):
+        try:
+            with open(PID_FILE, 'r', encoding='utf-8') as pid_file:
+                pid = int(pid_file.read().strip())
+            if _is_running_skylet_process(pid):
+                return [pid]
+        except (OSError, ValueError, IOError) as e:
+            # Don't fallback to grep-based detection as the existence of the
+            # PID file implies that we are on the new version, and there is
+            # possibility of there being multiple skylet processes running,
+            # and we don't want to accidentally kill the wrong skylet(s).
+            print(f'Error reading PID file {PID_FILE}: {e}')
+        return []
+    else:
+        # Fall back to grep-based detection for backward compatibility.
+        pids = []
+        # We use -m to grep instead of {constants.SKY_PYTHON_CMD} -m to grep
+        # because need to handle the backward compatibility of the old skylet
+        # started before #3326, which does not use the full path to python.
+        proc = subprocess.run(
+            'ps aux | grep -v "grep" | grep "sky.skylet.skylet" | grep " -m"',
+            shell=True,
+            check=False,
+            capture_output=True,
+            text=True)
+        if proc.returncode == 0:
+            # Parse the output to extract PIDs (column 2)
+            for line in proc.stdout.strip().split('\n'):
+                if line:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        try:
+                            pids.append(int(parts[1]))
+                        except ValueError:
+                            continue
+        return pids
 
 
 def restart_skylet():
@@ -14,32 +76,39 @@ def restart_skylet():
     # TODO(zhwu): make the killing graceful, e.g., use a signal to tell
     # skylet to exit, instead of directly killing it.
 
-    subprocess.run(
-        # We use -m to grep instead of {constants.SKY_PYTHON_CMD} -m to grep
-        # because need to handle the backward compatibility of the old skylet
-        # started before #3326, which does not use the full path to python.
-        'ps aux | grep "sky.skylet.skylet" | grep " -m "'
-        '| awk \'{print $2}\' | xargs kill >> ~/.sky/skylet.log 2>&1',
-        shell=True,
-        check=False)
+    # Find and kill running skylet processes
+    for pid in _find_running_skylet_pids():
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            # Process died between detection and kill
+            pass
+    # Clean up the PID file
+    try:
+        os.remove(PID_FILE)
+    except OSError:
+        pass  # Best effort cleanup
+
+    port = constants.SKYLET_GRPC_PORT
     subprocess.run(
         # We have made sure that `attempt_skylet.py` is executed with the
         # skypilot runtime env activated, so that skylet can access the cloud
         # CLI tools.
-        f'nohup {constants.SKY_PYTHON_CMD} -m sky.skylet.skylet'
-        ' >> ~/.sky/skylet.log 2>&1 &',
+        f'nohup {constants.SKY_PYTHON_CMD} -m sky.skylet.skylet '
+        f'--port={port} '
+        f'>> {SKYLET_LOG_FILE} 2>&1 & echo $! > {PID_FILE}',
         shell=True,
         check=True)
+
+    with open(PORT_FILE, 'w', encoding='utf-8') as pf:
+        pf.write(str(port))
+
     with open(VERSION_FILE, 'w', encoding='utf-8') as v_f:
         v_f.write(constants.SKYLET_VERSION)
 
 
-proc = subprocess.run(
-    'ps aux | grep -v "grep" | grep "sky.skylet.skylet" | grep " -m"',
-    shell=True,
-    check=False)
-
-running = (proc.returncode == 0)
+# Check if our skylet is running
+running = bool(_find_running_skylet_pids())
 
 version_match = False
 found_version = None
