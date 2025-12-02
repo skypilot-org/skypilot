@@ -349,7 +349,7 @@ def setup_vast_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     return configure_ssh_info(config)
 
 def setup_verda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
-    """Sets up SSH authentication for Vast Cloud.
+    """Sets up SSH authentication for Verda Cloud.
     - Generates a new SSH key pair if one does not exist.
     - Adds the public SSH key to the user's Cloud account.
     """
