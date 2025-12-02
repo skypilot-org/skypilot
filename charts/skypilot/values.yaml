@@ -178,6 +178,11 @@ apiService:
   # @schema type: [string, null]
   imagePullPolicy: Always
 
+  # Add scheduling constraints to the API server pod
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
 # Authentication configuration for the API server
 # Refer to https://docs.skypilot.co/en/latest/reference/auth.html for more details.
 # @schema type: [object, null]

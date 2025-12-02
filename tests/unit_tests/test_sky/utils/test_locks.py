@@ -6,7 +6,7 @@ from unittest import mock
 import pytest
 
 from sky import global_user_state
-from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.utils import locks
 from sky.utils.db import db_utils
 
@@ -60,16 +60,16 @@ class TestFileLock:
     def setUp(self):
         """Setup test environment."""
         # Ensure locks directory exists
-        os.makedirs(constants.SKY_LOCKS_DIR, exist_ok=True)
+        os.makedirs(locks.SKY_LOCKS_DIR, exist_ok=True)
 
     def tearDown(self):
         """Clean up after tests."""
         # Clean up any test lock files
-        if os.path.exists(constants.SKY_LOCKS_DIR):
-            for file in os.listdir(constants.SKY_LOCKS_DIR):
+        if os.path.exists(locks.SKY_LOCKS_DIR):
+            for file in os.listdir(locks.SKY_LOCKS_DIR):
                 if file.startswith('.test_') and file.endswith('.lock'):
                     try:
-                        os.remove(os.path.join(constants.SKY_LOCKS_DIR, file))
+                        os.remove(os.path.join(locks.SKY_LOCKS_DIR, file))
                     except OSError:
                         pass
 
@@ -80,7 +80,7 @@ class TestFileLock:
         assert lock.lock_id == 'test_lock'
         assert lock.timeout is None  # Base class stores original None
         assert lock.poll_interval == 0.1
-        assert lock.lock_path == os.path.join(constants.SKY_LOCKS_DIR,
+        assert lock.lock_path == os.path.join(locks.SKY_LOCKS_DIR,
                                               '.test_lock.lock')
         # Internal filelock should have -1 for None timeout
         assert lock._filelock.timeout == -1
@@ -157,25 +157,26 @@ class TestFileLock:
             lock.force_unlock()
             assert not os.path.exists(lock.lock_path)
 
-    def test_file_lock_directories_created(self):
+    def test_file_lock_directories_created(self, tmp_path, monkeypatch):
         """Test that lock directories are created."""
-        # Use a temporary directory for this test to avoid conflicts
-        import tempfile
-        with tempfile.TemporaryDirectory() as temp_dir:
-            original_locks_dir = constants.SKY_LOCKS_DIR
-            try:
-                # Temporarily override the locks directory
-                constants.SKY_LOCKS_DIR = os.path.join(temp_dir, 'test_locks')
 
-                # Ensure directory doesn't exist initially
-                assert not os.path.exists(constants.SKY_LOCKS_DIR)
+        # SKY_RUNTIME_DIR is evaluated at import time, so we need to reload the module to get the new value.
+        # But we can't reload the module here as it affects other tests, so just manually
+        # test that runtime_utils.get_runtime_dir_path() respects SKY_RUNTIME_DIR.
+        monkeypatch.setenv('SKY_RUNTIME_DIR', str(tmp_path))
+        expected_locks_dir = str(tmp_path / '.sky/locks')
+        assert runtime_utils.get_runtime_dir_path(
+            '.sky/locks') == expected_locks_dir
 
-                # Creating a lock should create the directory
-                lock = locks.FileLock('test_dir_creation')
-                assert os.path.exists(constants.SKY_LOCKS_DIR)
-            finally:
-                # Restore original directory
-                constants.SKY_LOCKS_DIR = original_locks_dir
+        # Test that creating a lock creates the directory.
+        original_locks_dir = locks.SKY_LOCKS_DIR
+        try:
+            locks.SKY_LOCKS_DIR = expected_locks_dir
+            assert not os.path.exists(locks.SKY_LOCKS_DIR)
+            lock = locks.FileLock('test_dir_creation')
+            assert os.path.exists(locks.SKY_LOCKS_DIR)
+        finally:
+            locks.SKY_LOCKS_DIR = original_locks_dir
 
 
 class TestPostgresLock:

@@ -618,6 +618,9 @@ app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
 if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
     app.add_middleware(metrics.PrometheusMiddleware)
 app.add_middleware(APIVersionMiddleware)
+# The order of all the authentication-related middleware is important.
+# RBACMiddleware must precede all the auth middleware, so it can access
+# request.state.auth_user.
 app.add_middleware(RBACMiddleware)
 app.add_middleware(InternalDashboardPrefixMiddleware)
 app.add_middleware(GracefulShutdownMiddleware)
@@ -632,10 +635,6 @@ app.add_middleware(
     allow_methods=['*'],
     allow_headers=['*'],
     expose_headers=['X-Skypilot-Request-ID'])
-# The order of all the authentication-related middleware is important.
-# RBACMiddleware must precede all the auth middleware, so it can access
-# request.state.auth_user.
-app.add_middleware(RBACMiddleware)
 # Authentication based on oauth2-proxy.
 app.add_middleware(oauth2_proxy.OAuth2ProxyMiddleware)
 # AuthProxyMiddleware should precede BasicAuthMiddleware and
