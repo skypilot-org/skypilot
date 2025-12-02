@@ -1051,6 +1051,14 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
                         await zip_file.write(data)
 
     logger.info(f'Uploaded zip file: {zip_file_path}')
+
+    # Check client API version to determine extraction behavior
+    # New clients (API v24+) use upload_id subdirectory for isolation
+    # Old clients (API v23-) extract directly to maintain backward compatibility
+    version_info = versions.check_compatibility_at_server(request.headers)
+    if version_info and version_info.api_version < 24:
+        upload_id = ''
+
     await unzip_file(zip_file_path, client_file_mounts_dir, upload_id)
     if total_chunks > 1:
         await context_utils.to_thread(shutil.rmtree, chunk_dir)
@@ -1071,12 +1079,19 @@ def _is_relative_to(path: pathlib.Path, parent: pathlib.Path) -> bool:
 async def unzip_file(zip_file_path: pathlib.Path,
                      client_file_mounts_dir: pathlib.Path,
                      upload_id: str) -> None:
-    """Unzips a zip file without blocking the event loop."""
+    """Unzips a zip file without blocking the event loop.
+
+    Args:
+        zip_file_path: Path to the zip file to extract.
+        client_file_mounts_dir: Base directory for file mounts.
+        upload_id: Unique ID for this upload. If blank, extracts directly to
+            client_file_mounts_dir for backward compatibility with old clients.
+            If provided, extracts to {upload_id}/ subdirectory.
+    """
 
     def _do_unzip() -> None:
         try:
-            # Extract to a dedicated directory with upload_id to avoid
-            # collisions
+            # Can always use upload_id because it will be '' for old clients
             extract_dir = (client_file_mounts_dir / upload_id).resolve()
             extract_dir.mkdir(parents=True, exist_ok=True)
 
