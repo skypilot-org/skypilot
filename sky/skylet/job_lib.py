@@ -762,7 +762,7 @@ def update_job_status(job_ids: List[int],
     statuses = []
     for job_id in job_ids:
         # Per-job status lock is required because between the job status
-        # query and the job status update, the job status in the databse
+        # query and the job status update, the job status in the database
         # can be modified by the generated ray program.
         with filelock.FileLock(_get_lock_path(job_id)):
             status = None
