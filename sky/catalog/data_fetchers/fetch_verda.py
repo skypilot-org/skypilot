@@ -7,14 +7,14 @@ import json
 import logging
 import os
 import re
+import sys
 from typing import Dict, List, Tuple
 
 import requests
 
 from sky.adaptors.verda import get_configuration
 
-logger = logging.getLogger(__name__)
-
+logger = logging.getLogger("fetch_verda")
 
 def _get_oauth_token(base_url: str, client_id: str, client_secret: str) -> str:
     """Get OAuth access token using client credentials.
@@ -318,9 +318,16 @@ def create_catalog(output_path: str) -> None:
 
 
 def main() -> None:
-    """Main function to fetch and write Verda Cloud instance types and pricing info to a CSV file."""
-    logging.basicConfig(level=logging.INFO)
-    output_file = 'verda/vms.csv'
+    """
+    Write SkyPilot v8 catalog for Verda Cloud.
+    Requires Verda Cloud API, i.e. ~/.verda/config.json or VERDA_CLIENT_ID and VERDA_CLIENT_SECRET environment variables.
+    Will write to ~/.sky/catalogs/v8/verda/vms.csv if no file name is provided.
+
+    > python sky/catalog/data_fetchers/fetch_verda.py [<file-name>]
+    """
+    logging.basicConfig(level=logging.INFO,)
+    args = sys.argv[1:]
+    output_file = args[0] if args else '~/.sky/catalogs/v8/verda/vms.csv'
     create_catalog(output_file)
     logger.info('Done!')
 
