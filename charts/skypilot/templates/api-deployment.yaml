@@ -559,7 +559,7 @@ spec:
         command: ["/bin/sh", "-c"]
         args:
         - |
-          echo "Setting up DIGITALOCEAN credentials..."
+          echo "Setting up Digital Ocean credentials..."
           if [ -n "$DIGITALOCEAN_CREDENTIALS" ]; then
             echo "DIGITALOCEAN credentials found in environment variable."
             mkdir -p /.config/doctl
