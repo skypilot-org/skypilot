@@ -19,33 +19,37 @@ ENDPOINT = 'https://api.novita.ai/gpu-instance/openapi/v1/products'
 DEFAULT_NOVITA_API_KEY_PATH = os.path.expanduser('~/.novita/api_key')
 
 
-def parse_gpu_info(gpu_type: str, num_gpus: int, ram_per_gpu: int) -> Dict:
+def parse_gpu_info(instance: Dict) -> Dict:
     """Parse GPU information for the catalog."""
 
     manufacturer = 'NVIDIA'
-    if gpu_type == 'MI300X':
+    if instance['name'] == 'MI300X':
         manufacturer = 'AMD'
-    elif gpu_type == 'GAUDI2':
+    elif instance['name'] == 'GAUDI2':
         manufacturer = 'Intel'
 
     return {
-        'Gpus': [{
-            'Name': gpu_type,
+        'GpuInfo': {
+            'Id': instance['id'],
+            'Name': instance['name'],
             'Manufacturer': manufacturer,
-            'Count': float(num_gpus),
+            'Count': 1,
             'MemoryInfo': {
-                'SizeInMiB': ram_per_gpu
+                'SizeInGiB': instance['memoryPerGpu']
             },
-            'TotalGpuMemoryInMiB': ram_per_gpu * num_gpus
-        }]
+            'MinRootFS': instance['minRootFS'],
+            'MaxRootFS': instance['maxRootFS']
+        }
     }
 
 
 def create_catalog(api_key: str, output_path: str) -> None:
     """Create Novita catalog by fetching from API."""
-    headers = {'X-API-KEY': api_key}
+    headers = {'Authorization': f'Bearer {api_key}'}
 
     params = {'available': 'true'}
+
+    print(f'Headers: {headers}')
 
     response = requests.get(ENDPOINT,
                             headers=headers,
@@ -54,7 +58,12 @@ def create_catalog(api_key: str, output_path: str) -> None:
     response.raise_for_status()
 
     data = response.json()
-    instance_types = data.get('data', [])
+    dataArr = data.get('data', [])
+
+    # print(f'dataArr: {dataArr}')
+
+    instance_types = list(filter(lambda x: x.get('availableDeploy', False), dataArr))
+
 
     with open(output_path, mode='w', encoding='utf-8') as f:
         writer = csv.writer(f, delimiter=',', quotechar='"')
@@ -63,52 +72,37 @@ def create_catalog(api_key: str, output_path: str) -> None:
             'MemoryGiB', 'Price', 'Region', 'GpuInfo', 'SpotPrice'
         ])
 
+        print(f'instance_types: {instance_types}')
+
         for instance in instance_types:
-            config = instance['configuration']
-
-            cloud = instance['cloud']
-            shade_instance_type = instance['shade_instance_type']
-            instance_type = f'{cloud}_{shade_instance_type.replace("_", "-")}'
-            gpu_type = config['gpu_type'].replace('_', '-')
-            gpu_count = float(config['num_gpus'])
-            vcpus = float(config['vcpus'])
-            memory_gb = int(config['memory_in_gb'])
-
-            # Append "B" to instance_type and gpu_type if they end with "G"
-            if instance_type.endswith('G'):
-                instance_type += 'B'
-            if gpu_type.endswith('G'):
-                gpu_type += 'B'
-
-            # Replace "Gx" with "GBx" (case sensitive)
-            if 'Gx' in instance_type:
-                instance_type = instance_type.replace('Gx', 'GBx')
-
+            name = instance['name']
+            # id = instance['id']
+            vcpus = int(instance['cpuPerGpu'])
+            memory_gb = int(instance['memoryPerGpu'])
             # Price is in cents per hour, convert to dollars
-            price = float(instance['hourly_price']) / 100
+            price = float(instance['price']) / 100000
+            spotPrice = float(instance['spotPrice']) / 100000
+            gpu_count = 1
+            gpu_info = parse_gpu_info(instance)
 
-            # Create GPU info
-            gpuinfo = None
-            if gpu_count > 0:
-                gpuinfo_dict = parse_gpu_info(gpu_type, int(gpu_count),
-                                              int(config['vram_per_gpu_in_gb']))
-                gpuinfo = json.dumps(gpuinfo_dict).replace('"', '\'')
 
             # Write entry for each available region
-            for availability in instance.get('availability', []):
-                if availability['available'] and gpu_count > 0:
-                    region = availability['region']
+            for regionItem in instance.get('regions', []):
+                if gpu_count > 0:
+                    region = regionItem
                     writer.writerow([
-                        instance_type,
-                        gpu_type,
+                        f'{gpu_count}x_{name}',
+                        name,
+                        # id,
                         gpu_count,
                         vcpus,
                         memory_gb,
                         price,
                         region,
-                        gpuinfo,
-                        ''  # No spot pricing info available
+                        gpu_info,
+                        spotPrice
                     ])
+                    print(f'wrote row: {f"{gpu_count}x_{name}"}, {name}, {gpu_count}, {vcpus}, {memory_gb}, {price}, {region}, {gpu_info}, {spotPrice}')
 
 
 def get_api_key(cmdline_args: argparse.Namespace) -> str:
@@ -137,6 +131,7 @@ if __name__ == '__main__':
     parser.add_argument('--api-key-path',
                         help='path of file containing Novita API key.')
     args = parser.parse_args()
+    print(f'Fetching Novita catalog from {ENDPOINT}')
     os.makedirs('novita', exist_ok=True)
     create_catalog(get_api_key(args), 'novita/vms.csv')
     print('Novita catalog saved to novita/vms.csv')
