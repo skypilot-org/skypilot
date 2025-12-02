@@ -385,7 +385,11 @@ async function getKubernetesGPUsFromContexts(contextNames) {
       const result = contextNodeInfoResults[i];
       if (result.status === 'fulfilled') {
         contextToNodeInfo[contextNames[i]] = result.value;
-        console.log('[CONTEXT_DEBUG] Context node info result:', contextNames[i], result.value);
+        console.log(
+          '[CONTEXT_DEBUG] Context node info result:',
+          contextNames[i],
+          result.value
+        );
       } else {
         // Log the error but continue with other contexts
         const errorMessage =
