@@ -17,6 +17,7 @@ from sqlalchemy.ext import asyncio as sqlalchemy_async
 
 from sky import sky_logging
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 
 logger = sky_logging.init_logger(__name__)
 if typing.TYPE_CHECKING:
@@ -432,31 +433,45 @@ def get_engine(
         if async_engine:
             conn_string = conn_string.replace('postgresql://',
                                               'postgresql+asyncpg://')
-            # This is an AsyncEngine, instead of a (normal, synchronous) Engine,
-            # so we should not put it in the cache. Instead, just return.
-            return sqlalchemy_async.create_async_engine(
-                conn_string, poolclass=sqlalchemy.NullPool)
         with _db_creation_lock:
+            # We use the same cache for both sync and async engines
+            # because we change the conn_string in the async case,
+            # so they would not overlap.
             if conn_string not in _postgres_engine_cache:
-                logger.debug('Creating a new postgres engine with '
-                             f'maximum {_max_connections} connections')
+                engine_type = 'sync' if not async_engine else 'async'
+                logger.debug(
+                    f'Creating a new postgres {engine_type} engine with '
+                    f'maximum {_max_connections} connections')
                 if _max_connections == 0:
-                    _postgres_engine_cache[conn_string] = (
-                        sqlalchemy.create_engine(
-                            conn_string, poolclass=sqlalchemy.pool.NullPool))
+                    kw_args = {'poolclass': sqlalchemy.NullPool}
+                    if async_engine:
+                        _postgres_engine_cache[conn_string] = (
+                            sqlalchemy_async.create_async_engine(
+                                conn_string, **kw_args))
+                    else:
+                        _postgres_engine_cache[conn_string] = (
+                            sqlalchemy.create_engine(conn_string, **kw_args))
                 else:
-                    _postgres_engine_cache[conn_string] = (
-                        sqlalchemy.create_engine(
-                            conn_string,
-                            poolclass=sqlalchemy.pool.QueuePool,
-                            pool_size=_max_connections,
-                            max_overflow=max(0, 5 - _max_connections),
-                            pool_pre_ping=True,
-                            pool_recycle=1800))
+                    kw_args = {
+                        'pool_size': _max_connections,
+                        'max_overflow': max(0, 5 - _max_connections),
+                        'pool_pre_ping': True,
+                        'pool_recycle': 1800
+                    }
+                    if async_engine:
+                        kw_args[
+                            'poolclass'] = sqlalchemy.pool.AsyncAdaptedQueuePool
+                        _postgres_engine_cache[conn_string] = (
+                            sqlalchemy_async.create_async_engine(
+                                conn_string, **kw_args))
+                    else:
+                        kw_args['poolclass'] = sqlalchemy.pool.QueuePool
+                        _postgres_engine_cache[conn_string] = (
+                            sqlalchemy.create_engine(conn_string, **kw_args))
             engine = _postgres_engine_cache[conn_string]
     else:
         assert db_name is not None, 'db_name must be provided for SQLite'
-        db_path = os.path.expanduser(f'~/.sky/{db_name}.db')
+        db_path = runtime_utils.get_runtime_dir_path(f'.sky/{db_name}.db')
         pathlib.Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
         if async_engine:
             # This is an AsyncEngine, instead of a (normal, synchronous) Engine,

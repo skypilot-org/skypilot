@@ -1,5 +1,4 @@
 """Constants for SkyPilot."""
-import os
 from typing import List, Tuple
 
 from packaging import version
@@ -7,6 +6,23 @@ from packaging import version
 import sky
 from sky.setup_files import dependencies
 
+# The base directory for all SkyPilot runtime artifacts.
+# Historically, we have always used $HOME, but we couldn't
+# do that for Slurm, because $HOME typically points to a NFS
+# mounted directory, which does not work well with SQLite.
+# https://sqlite.org/faq.html#q5
+# Additionally, having the skypilot-runtime python venv be
+# on an NFS makes things very slow.
+SKY_RUNTIME_DIR = '${SKY_RUNTIME_DIR:-$HOME}'
+# Same as above but for use within python code instead of shell commands.
+# Example usage:
+# os.path.join(
+#    os.path.expanduser(os.environ.get(SKY_RUNTIME_DIR_ENV_VAR_KEY, '~')),
+#    '.sky/jobs.db')
+SKY_RUNTIME_DIR_ENV_VAR_KEY = 'SKY_RUNTIME_DIR'
+# We keep sky_logs and sky_workdir in $HOME, because
+# these are artifacts that users can access, and having
+# them be in $HOME makes it more convenient.
 SKY_LOGS_DIRECTORY = '~/sky_logs'
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
 SKY_IGNORE_FILE = '.skyignore'
@@ -25,7 +41,7 @@ SKY_REMOTE_RAY_PORT_DICT_STR = (
     f'"ray_dashboard_port":{SKY_REMOTE_RAY_DASHBOARD_PORT}}}')
 # The file contains the ports of the Ray cluster that SkyPilot launched,
 # i.e. the PORT_DICT_STR above.
-SKY_REMOTE_RAY_PORT_FILE = '~/.sky/ray_port.json'
+SKY_REMOTE_RAY_PORT_FILE = '.sky/ray_port.json'
 SKY_REMOTE_RAY_TEMPDIR = '/tmp/ray_skypilot'
 SKY_REMOTE_RAY_VERSION = '2.9.3'
 
@@ -35,8 +51,8 @@ SKY_UNSET_PYTHONPATH = 'env -u PYTHONPATH'
 # can use this path. This is useful for the case where the user has a custom
 # conda environment as a default environment, which is not the same as the one
 # used for installing SkyPilot runtime (ray and skypilot).
-SKY_PYTHON_PATH_FILE = '~/.sky/python_path'
-SKY_RAY_PATH_FILE = '~/.sky/ray_path'
+SKY_PYTHON_PATH_FILE = f'{SKY_RUNTIME_DIR}/.sky/python_path'
+SKY_RAY_PATH_FILE = f'{SKY_RUNTIME_DIR}/.sky/ray_path'
 SKY_GET_PYTHON_PATH_CMD = (f'[ -s {SKY_PYTHON_PATH_FILE} ] && '
                            f'cat {SKY_PYTHON_PATH_FILE} 2> /dev/null || '
                            'which python3')
@@ -53,7 +69,7 @@ SKY_RAY_CMD = (f'{SKY_PYTHON_CMD} $([ -s {SKY_RAY_PATH_FILE} ] && '
                f'cat {SKY_RAY_PATH_FILE} 2> /dev/null || which ray)')
 # Separate env for SkyPilot runtime dependencies.
 SKY_REMOTE_PYTHON_ENV_NAME = 'skypilot-runtime'
-SKY_REMOTE_PYTHON_ENV: str = f'~/{SKY_REMOTE_PYTHON_ENV_NAME}'
+SKY_REMOTE_PYTHON_ENV: str = f'{SKY_RUNTIME_DIR}/{SKY_REMOTE_PYTHON_ENV_NAME}'
 ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
 # uv is used for venv and pip, much faster than python implementations.
 SKY_UV_INSTALL_DIR = '"$HOME/.local/bin"'
@@ -74,7 +90,7 @@ SKY_UV_RUN_CMD: str = (f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} run '
 # not work when conda is used.
 DEACTIVATE_SKY_REMOTE_PYTHON_ENV = (
     'export PATH='
-    f'$(echo $PATH | sed "s|$(echo ~)/{SKY_REMOTE_PYTHON_ENV_NAME}/bin:||") && '
+    f'$(echo $PATH | sed "s|$(echo {SKY_REMOTE_PYTHON_ENV})/bin:||") && '
     'unset VIRTUAL_ENV && unset VIRTUAL_ENV_PROMPT')
 
 # Prefix for SkyPilot environment variables
@@ -100,12 +116,12 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '25'
+SKYLET_VERSION = '26'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
 SKYLET_LIB_VERSION = 4
-SKYLET_VERSION_FILE = '~/.sky/skylet_version'
+SKYLET_VERSION_FILE = '.sky/skylet_version'
 SKYLET_GRPC_PORT = 46590
 SKYLET_GRPC_TIMEOUT_SECONDS = 10
 
@@ -181,7 +197,7 @@ CONDA_INSTALLATION_COMMANDS = (
     'fi;'
     # Install uv for venv management and pip installation.
     f'{SKY_UV_INSTALL_CMD};'
-    # Create a separate conda environment for SkyPilot dependencies.
+    # Create a separate python environment for SkyPilot dependencies.
     f'[ -d {SKY_REMOTE_PYTHON_ENV} ] || '
     # Do NOT use --system-site-packages here, because if users upgrade any
     # packages in the base env, they interfere with skypilot dependencies.
@@ -242,6 +258,21 @@ RAY_INSTALLATION_COMMANDS = (
     f'[ -s {SKY_RAY_PATH_FILE} ] || '
     f'{{ {SKY_UV_RUN_CMD} '
     f'which ray > {SKY_RAY_PATH_FILE} || exit 1; }}; ')
+
+# Copy SkyPilot templates from the installed wheel to ~/sky_templates.
+# This must run after the skypilot wheel is installed.
+COPY_SKYPILOT_TEMPLATES_COMMANDS = (
+    f'{ACTIVATE_SKY_REMOTE_PYTHON_ENV}; '
+    f'{SKY_PYTHON_CMD} -c \''
+    'import sky_templates, shutil, os; '
+    'src = os.path.dirname(sky_templates.__file__); '
+    'dst = os.path.expanduser(\"~/sky_templates\"); '
+    'print(f\"Copying templates from {src} to {dst}...\"); '
+    'shutil.copytree(src, dst, dirs_exist_ok=True); '
+    'print(f\"Templates copied successfully\")\'; '
+    # Make scripts executable.
+    'find ~/sky_templates -type f ! -name "*.py" ! -name "*.md" '
+    '-exec chmod +x {} \\; ')
 
 SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     f'{SKY_UV_INSTALL_CMD};'
@@ -392,6 +423,7 @@ RCLONE_CACHE_REFRESH_INTERVAL = 10
 OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('docker', 'run_options'),
     ('nvidia_gpus', 'disable_ecc'),
+    ('ssh', 'custom_metadata'),
     ('ssh', 'pod_config'),
     ('ssh', 'provision_timeout'),
     ('kubernetes', 'custom_metadata'),
@@ -462,6 +494,10 @@ SKY_USER_FILE_PATH = '~/.sky/generated'
 # Environment variable that is set to 'true' if this is a skypilot server.
 ENV_VAR_IS_SKYPILOT_SERVER = 'IS_SKYPILOT_SERVER'
 OVERRIDE_CONSOLIDATION_MODE = 'IS_SKYPILOT_JOB_CONTROLLER'
+IS_SKYPILOT_SERVE_CONTROLLER = 'IS_SKYPILOT_SERVE_CONTROLLER'
+
+SERVE_OVERRIDE_CONCURRENT_LAUNCHES = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}SERVE_OVERRIDE_CONCURRENT_LAUNCHES')
 
 # Environment variable that is set to 'true' if metrics are enabled.
 ENV_VAR_SERVER_METRICS_ENABLED = 'SKY_API_SERVER_METRICS_ENABLED'
@@ -545,9 +581,6 @@ DEFAULT_PRIORITY = 0
 
 GRACE_PERIOD_SECONDS_ENV_VAR = SKYPILOT_ENV_VAR_PREFIX + 'GRACE_PERIOD_SECONDS'
 COST_REPORT_DEFAULT_DAYS = 30
-
-# The directory for file locks.
-SKY_LOCKS_DIR = os.path.expanduser('~/.sky/locks')
 
 ENV_VAR_LOOP_LAG_THRESHOLD_MS = (SKYPILOT_ENV_VAR_PREFIX +
                                  'DEBUG_LOOP_LAG_THRESHOLD_MS')

@@ -64,7 +64,7 @@ def encode_status(
         response_cluster = cluster.model_dump(exclude_none=True)
         # These default setting is needed because last_use and status_updated_at
         # used to be not optional.
-        # TODO(syang): remove this after v0.10.7 or v0.11.0
+        # TODO(syang): remove this after v0.12.0
         if 'last_use' not in response_cluster:
             response_cluster['last_use'] = ''
         if 'status_updated_at' not in response_cluster:
@@ -75,7 +75,7 @@ def encode_status(
         response_cluster['handle'] = pickle_and_encode(handle)
         # TODO (syang) We still need to return this field for backwards
         # compatibility.
-        # Remove this field at or after v0.10.7 or v0.11.0
+        # Remove this field at or after v0.12.0
         response_cluster['storage_mounts_metadata'] = pickle_and_encode(
             None)  # Always returns None.
         response.append(response_cluster)

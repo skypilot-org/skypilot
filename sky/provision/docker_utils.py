@@ -29,10 +29,11 @@ SETUP_ENV_VARS_CMD = (
 # Docker daemon may not be ready when the machine is firstly started. The error
 # message starts with the following string. We should wait for a while and retry
 # the command.
-DOCKER_PERMISSION_DENIED_STR = ('permission denied while trying to connect to '
-                                'the Docker daemon socket')
+DOCKER_PERMISSION_DENIED_STR = ('permission denied while trying to connect to ')
 
 DOCKER_SOCKET_NOT_READY_STR = ('Is the docker daemon running?')
+DOCKER_SOCKET_NOT_READY_STR_2 = (
+    'check if the path is correct and if the daemon is running')
 
 _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS = 30
 
@@ -185,7 +186,7 @@ class DockerInitializer:
         self.docker_config = docker_config
         self.container_name = docker_config['container_name']
         self.runner = runner
-        self.home_dir = None
+        self.home_dir: Optional[str] = None
         self.initialized = False
         # podman is not fully tested yet.
         use_podman = docker_config.get('use_podman', False)
@@ -228,7 +229,8 @@ class DockerInitializer:
                 separate_stderr=separate_stderr,
                 log_path=self.log_path)
             if (DOCKER_PERMISSION_DENIED_STR in stdout + stderr or
-                    DOCKER_SOCKET_NOT_READY_STR in stdout + stderr):
+                    DOCKER_SOCKET_NOT_READY_STR in stdout + stderr or
+                    DOCKER_SOCKET_NOT_READY_STR_2 in stdout + stderr):
                 if wait_for_docker_daemon:
                     if time.time(
                     ) - start > _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS:

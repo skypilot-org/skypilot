@@ -58,9 +58,13 @@ spec:
         app: {{ .Release.Name }}-oauth2-proxy
         skypilot.co/component: oauth2-proxy
     spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
       - name: oauth2-proxy
-        image: {{ index $oauth2 "image" | default "quay.io/oauth2-proxy/oauth2-proxy:v7.9.0" }}
+        image: {{ include "common.image" (dict "root" . "image" (default "quay.io/oauth2-proxy/oauth2-proxy:v7.9.0" (index $oauth2 "image"))) }}
         imagePullPolicy: IfNotPresent
         args:
         - --provider=oidc
@@ -91,6 +95,9 @@ spec:
         {{- end }}
         {{- end }}
         env:
+        {{- with .Values.global.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         - name: OAUTH2_PROXY_CLIENT_ID
           {{- if (index $oauth2 "client-details-from-secret") }}
           valueFrom:

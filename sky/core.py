@@ -1293,44 +1293,10 @@ def realtime_kubernetes_gpu_availability(
 # =================
 @usage_lib.entrypoint
 def local_up(gpus: bool,
-             ips: Optional[List[str]],
-             ssh_user: Optional[str],
-             ssh_key: Optional[str],
-             cleanup: bool,
-             context_name: Optional[str] = None,
-             password: Optional[str] = None,
              name: Optional[str] = None,
              port_start: Optional[int] = None) -> None:
-    """Creates a local or remote cluster."""
-
-    def _validate_args(ips, ssh_user, ssh_key, cleanup):
-        # If any of --ips, --ssh-user, or --ssh-key-path is specified,
-        # all must be specified
-        if bool(ips) or bool(ssh_user) or bool(ssh_key):
-            if not (ips and ssh_user and ssh_key):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'All ips, ssh_user, and ssh_key must be specified '
-                        'together.')
-
-        # --cleanup can only be used if --ips, --ssh-user and --ssh-key-path
-        # are all provided
-        if cleanup and not (ips and ssh_user and ssh_key):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'cleanup can only be used with ips, ssh_user and ssh_key.')
-
-    _validate_args(ips, ssh_user, ssh_key, cleanup)
-
-    # If remote deployment arguments are specified, run remote up script
-    if ips:
-        assert ssh_user is not None and ssh_key is not None
-        kubernetes_deploy_utils.deploy_remote_cluster(ips, ssh_user, ssh_key,
-                                                      cleanup, context_name,
-                                                      password)
-    else:
-        # Run local deployment (kind) if no remote args are specified
-        kubernetes_deploy_utils.deploy_local_cluster(name, port_start, gpus)
+    """Creates a local cluster."""
+    kubernetes_deploy_utils.deploy_local_cluster(name, port_start, gpus)
 
 
 def local_down(name: Optional[str] = None) -> None:

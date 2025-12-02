@@ -85,7 +85,7 @@ class EnvAwareHandler(rich_utils.RichSafeStreamHandler):
     @level.setter
     def level(self, level):
         # pylint: disable=protected-access
-        self._level = logging._checkLevel(level)
+        self._level = logging._checkLevel(level)  # type: ignore[attr-defined]
 
 
 _root_logger = logging.getLogger('sky')
@@ -146,7 +146,8 @@ def reload_logger():
     such as SKYPILOT_DEBUG.
     """
     global _default_handler
-    _root_logger.removeHandler(_default_handler)
+    if _default_handler is not None:
+        _root_logger.removeHandler(_default_handler)
     _default_handler = None
     _setup_logger()
 
@@ -210,12 +211,21 @@ def logging_enabled(logger: logging.Logger, level: int) -> bool:
 
 
 @contextlib.contextmanager
-def silent():
+def silent(should_silence: bool = True):
     """Make all sky_logging.print() and logger.{info, warning...} silent.
 
     We preserve the ERROR level logging, so that errors are
     still printed.
+
+    Args:
+        should_silence: Whether to actually suppress the logging. If False, this
+            is a no-op context manager. Provided for convenience when we want to
+            suppress logging conditionally.
     """
+    if not should_silence:
+        yield
+        return
+
     global print
     previous_level = _root_logger.level
     previous_is_silent = is_silent()

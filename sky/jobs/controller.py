@@ -20,6 +20,7 @@ from sky import core
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.data import data_utils
@@ -42,6 +43,11 @@ from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    import psutil
+else:
+    psutil = adaptors_common.LazyImport('psutil')
 
 logger = sky_logging.init_logger('sky.jobs.controller')
 
@@ -89,7 +95,7 @@ class JobController:
     - Loading the DAG and preparing per-task environment variables so each task
       has a stable global job identifier across recoveries.
     - Launching the task on the configured backend (``CloudVmRayBackend``),
-      optionally via a cluster pool.
+      optionally via a pool.
     - Persisting state transitions to the managed jobs state store
       (e.g., STARTING → RUNNING → SUCCEEDED/FAILED/CANCELLED).
     - Monitoring execution, downloading/streaming logs, detecting failures or
@@ -108,7 +114,7 @@ class JobController:
     - ``_dag`` / ``_dag_name``: The job definition and metadata loaded from the
       database-backed job YAML.
     - ``_backend``: Backend used to launch and manage clusters.
-    - ``_pool``: Optional pool name if using a cluster pool.
+    - ``_pool``: Optional pool name if using a pool.
     - ``starting`` / ``starting_lock`` / ``starting_signal``: Shared scheduler
       coordination primitives. ``starting_lock`` must be used for accessing
       ``starting_signal`` and ``starting``
@@ -134,7 +140,7 @@ class JobController:
                 scheduler state (e.g., the ``starting`` set).
             starting_signal: ``asyncio.Condition`` used to notify when a job
                 exits STARTING so more jobs can be admitted.
-            pool: Optional cluster pool name. When provided, the job is
+            pool: Optional pool name. When provided, the job is
                 submitted to the pool rather than launching a dedicated
                 cluster.
         """
@@ -362,7 +368,7 @@ class JobController:
         if self._pool is None:
             job_id_on_pool_cluster = None
         else:
-            # Update the cluster name when using cluster pool.
+            # Update the cluster name when using pool.
             cluster_name, job_id_on_pool_cluster = (
                 await
                 managed_job_state.get_pool_submit_info_async(self._job_id))
@@ -813,6 +819,7 @@ class ControllerManager:
         self._starting_signal = asyncio.Condition(lock=self._job_tasks_lock)
 
         self._pid = os.getpid()
+        self._pid_started_at = psutil.Process(self._pid).create_time()
 
     async def _cleanup(self, job_id: int, pool: Optional[str] = None):
         """Clean up the cluster(s) and storages.
@@ -930,9 +937,9 @@ class ControllerManager:
         assert ctx is not None, 'Context is not initialized'
         ctx.redirect_log(pathlib.Path(log_file))
 
-        logger.info('Starting job loop for %s', job_id)
-        logger.info('  log_file=%s', log_file)
-        logger.info('  pool=%s', pool)
+        logger.info(f'Starting job loop for {job_id}')
+        logger.info(f'  log_file={log_file}')
+        logger.info(f'  pool={pool}')
         logger.info(f'From controller {self._controller_uuid}')
         logger.info(f'  pid={self._pid}')
 
@@ -948,6 +955,10 @@ class ControllerManager:
                             ctx.override_envs({key: value})
                             logger.debug('Set environment variable: %s=%s', key,
                                          value)
+
+                    # Restore config file if needed
+                    file_content_utils.restore_job_config_file(job_id)
+
                     skypilot_config.reload_config()
                 else:  # pragma: no cover - defensive
                     logger.error('Context is None, cannot set environment '
@@ -1099,7 +1110,7 @@ class ControllerManager:
 
     async def monitor_loop(self):
         """Monitor the job loop."""
-        logger.info(f'Starting monitor loop for pid {os.getpid()}...')
+        logger.info(f'Starting monitor loop for pid {self._pid}...')
 
         while True:
             async with self._job_tasks_lock:
@@ -1110,7 +1121,7 @@ class ControllerManager:
             async with self._job_tasks_lock:
                 starting_count = len(self.starting)
 
-            if starting_count >= scheduler.LAUNCHES_PER_WORKER:
+            if starting_count >= controller_utils.LAUNCHES_PER_WORKER:
                 # launching a job takes around 1 minute, so lets wait half that
                 # time
                 await asyncio.sleep(30)
@@ -1120,9 +1131,9 @@ class ControllerManager:
             # ton of controllers, we need to limit the number of jobs that can
             # run on each controller, to achieve a total of 2000 jobs across all
             # controllers.
-            max_jobs = min(scheduler.MAX_JOBS_PER_WORKER,
-                           (scheduler.MAX_TOTAL_RUNNING_JOBS //
-                            scheduler.get_number_of_controllers()))
+            max_jobs = min(controller_utils.MAX_JOBS_PER_WORKER,
+                           (controller_utils.MAX_TOTAL_RUNNING_JOBS //
+                            controller_utils.get_number_of_jobs_controllers()))
 
             if len(running_tasks) >= max_jobs:
                 logger.info('Too many jobs running, waiting for 60 seconds')
@@ -1132,7 +1143,7 @@ class ControllerManager:
             # Check if there are any jobs that are waiting to launch
             try:
                 waiting_job = await managed_job_state.get_waiting_job_async(
-                    pid=-os.getpid())
+                    pid=self._pid, pid_started_at=self._pid_started_at)
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Failed to get waiting job: {e}')
                 await asyncio.sleep(5)

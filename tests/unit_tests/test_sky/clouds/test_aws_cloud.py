@@ -32,7 +32,12 @@ class TestGetImageRootDeviceName:
             'Images': [{
                 'ImageId': 'ami-0123456789abcdef0',
                 'RootDeviceName': '/dev/xvda'
-            }]
+            }],
+            'ResponseMetadata': {
+                'HTTPStatusCode': 200,
+                'RetryAttempts': 0,
+                'NextToken': None,
+            },
         }
         result = aws_mod.AWS.get_image_root_device_name('ami-0123456789abcdef0',
                                                         'us-west-2')
@@ -49,7 +54,12 @@ class TestGetImageRootDeviceName:
             'Images': [{
                 'ImageId': 'ami-0123456789abcdef1',
                 # No 'RootDeviceName'
-            }]
+            }],
+            'ResponseMetadata': {
+                'HTTPStatusCode': 200,
+                'RetryAttempts': 0,
+                'NextToken': None,
+            },
         }
         result = aws_mod.AWS.get_image_root_device_name('ami-0123456789abcdef1',
                                                         'us-west-2')
@@ -123,7 +133,7 @@ class TestGetImageRootDeviceName:
         assert 'not found' in str(ei.value)
         # Verify the debug log was called
         assert mock_logger.debug.called
-        debug_call_args = mock_logger.debug.call_args[0][0]
+        debug_call_args = mock_logger.debug.call_args_list[0][0][0]
         assert 'Failed to get image root device name' in debug_call_args
         assert 'ami-0deadbeef' in debug_call_args
         assert 'ap-south-1' in debug_call_args
@@ -132,7 +142,14 @@ class TestGetImageRootDeviceName:
     def test_image_not_found_raises_value_error(self, mock_aws):
         client = mock.Mock()
         mock_aws.client.return_value = client
-        client.describe_images.return_value = {'Images': []}
+        client.describe_images.return_value = {
+            'Images': [],
+            'ResponseMetadata': {
+                'HTTPStatusCode': 200,
+                'RetryAttempts': 0,
+                'NextToken': None,
+            },
+        }
 
         # Ensure botocore_exceptions returns real exception classes (not mocks)
         class DummyExceptions:
@@ -176,7 +193,12 @@ class TestGetImageSize:
                         'VolumeSize': 100
                     }
                 }]
-            }]
+            }],
+            'ResponseMetadata': {
+                'HTTPStatusCode': 200,
+                'RetryAttempts': 0,
+                'NextToken': None,
+            },
         }
         result = aws_mod.AWS.get_image_size('ami-0123456789abcdef0',
                                             'us-west-2')
@@ -277,7 +299,7 @@ class TestGetImageSize:
         assert 'not found' in str(ei.value)
         # Verify the debug log was called
         assert mock_logger.debug.called
-        debug_call_args = mock_logger.debug.call_args[0][0]
+        debug_call_args = mock_logger.debug.call_args_list[0][0][0]
         assert 'Failed to get image size' in debug_call_args
         assert 'ami-0deadbeef' in debug_call_args
         assert 'us-east-1' in debug_call_args
@@ -286,7 +308,14 @@ class TestGetImageSize:
     def test_image_not_found_raises_value_error(self, mock_aws):
         client = mock.Mock()
         mock_aws.client.return_value = client
-        client.describe_images.return_value = {'Images': []}
+        client.describe_images.return_value = {
+            'Images': [],
+            'ResponseMetadata': {
+                'HTTPStatusCode': 200,
+                'RetryAttempts': 0,
+                'NextToken': None,
+            },
+        }
 
         # Ensure botocore_exceptions returns real exception classes (not mocks)
         class DummyExceptions:
@@ -464,14 +493,27 @@ class TestEfaHelpers:
     def test_get_efa_image_id_missing_images_key_returns_none(self, mock_aws):
         client = mock.Mock()
         mock_aws.client.return_value = client
-        client.describe_images.return_value = {}
+        client.describe_images.return_value = {
+            'ResponseMetadata': {
+                'HTTPStatusCode': 200,
+                'RetryAttempts': 0,
+                'NextToken': None,
+            },
+        }
         assert aws_mod._get_efa_image_id('us-east-1') is None
 
     @mock.patch.object(aws_mod, 'aws')
     def test_get_efa_image_id_empty_images_returns_none(self, mock_aws):
         client = mock.Mock()
         mock_aws.client.return_value = client
-        client.describe_images.return_value = {'Images': []}
+        client.describe_images.return_value = {
+            'Images': [],
+            'ResponseMetadata': {
+                'HTTPStatusCode': 200,
+                'RetryAttempts': 0,
+                'NextToken': None,
+            },
+        }
         assert aws_mod._get_efa_image_id('us-east-2') is None
 
     @mock.patch.object(aws_mod, 'aws')
@@ -490,7 +532,12 @@ class TestEfaHelpers:
                     'State': 'deregistered',
                     'CreationDate': '2024-02-01T00:00:00.000Z',
                 },
-            ]
+            ],
+            'ResponseMetadata': {
+                'HTTPStatusCode': 200,
+                'RetryAttempts': 0,
+                'NextToken': None,
+            },
         }
         assert aws_mod._get_efa_image_id('us-west-1') is None
 
@@ -705,3 +752,24 @@ class TestAwsProfileAwareLruCache:
             else:
                 os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
             skypilot_config.reload_config()
+
+
+class TestAwsConfigFileEnvVar:
+    """Tests for AWS_CONFIG_FILE credential override."""
+
+    def test_get_credential_file_mounts_respects_env_override(
+            self, tmp_path, monkeypatch):
+        credential_file = tmp_path / 'aws_credentials'
+        credential_file.write_text('dummy')
+        monkeypatch.setenv('AWS_CONFIG_FILE', str(credential_file))
+
+        aws = aws_mod.AWS()
+        with mock.patch.object(
+                aws_mod.AWS,
+                '_current_identity_type',
+                return_value=aws_mod.AWSIdentityType.SHARED_CREDENTIALS_FILE):
+            mounts = aws.get_credential_file_mounts()
+
+        assert mounts == {
+            aws_mod._DEFAULT_AWS_CONFIG_PATH: str(credential_file)
+        }

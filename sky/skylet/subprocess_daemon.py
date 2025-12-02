@@ -156,7 +156,8 @@ def main():
         #   but if a subprocess calls setpgid(0, 0) to detach itself from the
         #   process group (usually to daemonize itself), the subprocess will
         #   not be killed.
-        pgid = get_pgid_if_leader(process.pid)
+        if process is not None:
+            pgid = get_pgid_if_leader(process.pid)
 
     if process is not None and parent_process is not None:
         # Wait for either parent or target process to exit

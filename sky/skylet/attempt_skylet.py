@@ -4,8 +4,9 @@ import os
 import subprocess
 
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 
-VERSION_FILE = os.path.expanduser(constants.SKYLET_VERSION_FILE)
+VERSION_FILE = runtime_utils.get_runtime_dir_path(constants.SKYLET_VERSION_FILE)
 
 
 def restart_skylet():

@@ -767,6 +767,30 @@ For detailed setup instructions (including how to set up external Prometheus and
 * :ref:`GPU Metrics Setup <api-server-gpu-metrics-setup>`
 
 
+Optional: Set up server-side debug logging
+------------------------------------------
+
+Client-side debug logging can be turned on for individual requests by setting the
+``SKYPILOT_DEBUG`` environment variable to ``1`` when submitting a request, e.g.
+
+.. code-block:: bash
+
+    SKYPILOT_DEBUG=1 sky status
+
+To enable debug logging for all requests on server side, set
+``SKYPILOT_SERVER_ENABLE_REQUEST_DEBUG_LOGGING`` to ``true`` in the Helm values:
+
+.. code-block:: bash
+
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+      --namespace $NAMESPACE \
+      --reuse-values \
+      --set-string 'apiService.extraEnvs[0].name=SKYPILOT_SERVER_ENABLE_REQUEST_DEBUG_LOGGING' \
+      --set-string 'apiService.extraEnvs[0].value=true'
+
+
+Debug level logs for each request are saved to ``~/.sky/logs/request_debug/<request_id>.log`` on the API server.
+Server-side debug logging does not affect output seen by the clients.
 
 Upgrade the API server
 -----------------------
@@ -922,29 +946,6 @@ If you want to use an existing service account and permissions that meet the :re
       --set rbac.create=false \
       --set rbac.serviceAccountName=my-existing-service-account
 
-
-.. _sky-migrate-legacy-service:
-
-.. dropdown:: Migrate from legacy NodePort service
-
-
-    If you are upgrading from an early 0.8.0 nightly with a previously deployed NodePort service (named ``${RELEASE_NAME}-ingress-controller-np``), an error will be raised to ask for migration. In addition, a new service will be created to expose the API server (using ``LoadBalancer`` service type by default). You can choose any of the following options to proceed the upgrade process based on your needs:
-
-    - Keep the legacy NodePort service and gradually migrate to the new LoadBalancer service:
-
-    Add ``--set ingress.nodePortEnabled=true`` to your ``helm upgrade`` command to keep the legacy NodePort service. Existing clients can continue to use the previous NodePort service. After all clients have been migrated to the new service, you can disable the legacy NodePort service by adding ``--set ingress.nodePortEnabled=false`` to the ``helm upgrade`` command.
-
-    - Disable the legacy NodePort service:
-
-    Add ``--set ingress.nodePortEnabled=false`` to your ``helm upgrade`` command to disable the legacy NodePort service. Clients will need to use the new service to connect to the API server.
-
-    .. note::
-
-        Make sure there is no clients using the NodePort service before disabling it.
-
-    .. note::
-
-        Refer to :ref:`sky-get-api-server-url` for how to customize and/or connect to the new service.
 
 .. _sky-api-server-helm-multiple-deploy:
 

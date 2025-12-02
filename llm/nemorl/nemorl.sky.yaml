@@ -37,20 +37,20 @@ run: |
   set -e
   sudo chmod 777 -R /var/tmp
   cd nemo-rl
-  head_ip=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+
+  # This script is only available on skypilot-nightly>=1.0.0.dev20251114
+  # If you are using an older version, you can copy and paste the script from:
+  # https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster
+  export RAY_CMD="uv run ray"
+  ~/sky_templates/ray/start_cluster
+
+
   num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
   if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
-    ps aux | grep ray | grep 6379 &> /dev/null || uv run ray start --head --disable-usage-stats --port 6379
-    sleep 5
     uv run ray status
     uv run python examples/run_dpo.py  \
       cluster.gpus_per_node=${SKYPILOT_NUM_GPUS_PER_NODE} \
       cluster.num_nodes=${SKYPILOT_NUM_NODES} \
       dpo.val_global_batch_size=32 \
       checkpointing.checkpoint_dir='results/dpo_llama81'
-  else
-    sleep 5
-    ps aux | grep ray | grep 6379 &> /dev/null || uv run ray start --address $head_ip:6379 --disable-usage-stats
-    # Add sleep to after `ray start` to give ray enough time to daemonize
-    sleep 5
   fi

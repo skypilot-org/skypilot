@@ -1,5 +1,6 @@
 'use client';
 
+import { getErrorMessageFromResponse } from '@/data/utils';
 import { ENDPOINT } from './constants';
 
 export const apiClient = {
@@ -44,7 +45,8 @@ export const apiClient = {
 
       // Handle all error status codes (4xx, 5xx, etc.)
       if (!fetchedData.ok) {
-        const msg = `API request to get ${path} result failed with status ${fetchedData.status}`;
+        const errorMessage = await getErrorMessageFromResponse(fetchedData);
+        const msg = `API request to get ${path} result failed with status ${fetchedData.status}, error: ${errorMessage}`;
         throw new Error(msg);
       }
 

@@ -246,10 +246,6 @@ async def websocket_to_stdout(websocket: ClientConnection,
 
 if __name__ == '__main__':
     server_url = sys.argv[1].strip('/')
-    if '://' not in server_url:
-        # Keep backward compatibility for legacy server URLs without protocol
-        # TODO(aylei): Remove this after 0.10.0
-        server_url = f'http://{server_url}'
 
     disable_latency_measurement = os.environ.get(
         skylet_constants.SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR, '0') == '1'

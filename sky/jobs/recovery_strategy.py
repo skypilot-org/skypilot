@@ -209,17 +209,21 @@ class StrategyExecutor:
             # should be functional with the `_try_cancel_if_cluster_is_init`
             # flag, i.e. it sends the cancel signal to the head node, which will
             # then kill the user process on remaining worker nodes.
-            # Only cancel the corresponding job for worker pool.
+            # Only cancel the corresponding job for pool.
             if self.pool is None:
-                kwargs = dict(all=True)
+                request_id = await context_utils.to_thread(
+                    sdk.cancel,
+                    cluster_name=self.cluster_name,
+                    all=True,
+                    _try_cancel_if_cluster_is_init=True,
+                )
             else:
-                kwargs = dict(job_ids=[self.job_id_on_pool_cluster])
-            request_id = await context_utils.to_thread(
-                sdk.cancel,
-                cluster_name=self.cluster_name,
-                **kwargs,
-                _try_cancel_if_cluster_is_init=True,
-            )
+                request_id = await context_utils.to_thread(
+                    sdk.cancel,
+                    cluster_name=self.cluster_name,
+                    job_ids=[self.job_id_on_pool_cluster],
+                    _try_cancel_if_cluster_is_init=True,
+                )
             logger.debug(f'sdk.cancel request ID: {request_id}')
             await context_utils.to_thread(
                 sdk.get,

@@ -1,4 +1,5 @@
 import { apiClient } from '@/data/connectors/client';
+import { getErrorMessageFromResponse } from '@/data/utils';
 
 export async function getVolumes() {
   try {
@@ -73,7 +74,8 @@ export async function deleteVolume(volumeName) {
     }
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
     if (!fetchedData.ok) {
-      msg = `Failed to delete volume with status ${fetchedData.status}`;
+      const errorMessage = await getErrorMessageFromResponse(fetchedData);
+      msg = `Failed to delete volume with status ${fetchedData.status}, error: ${errorMessage}`;
       console.error(msg);
       return { success: false, msg: msg };
     }
