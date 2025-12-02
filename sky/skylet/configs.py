@@ -5,7 +5,7 @@ import pathlib
 import threading
 from typing import Callable, Optional, Union
 
-from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.utils.db import db_utils
 
 _DB_PATH = None
@@ -30,9 +30,8 @@ def init_db(func: Callable):
 
         with _db_init_lock:
             if _DB_PATH is None:
-                runtime_dir = os.path.expanduser(
-                    os.environ.get(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY, '~'))
-                _DB_PATH = os.path.join(runtime_dir, '.sky/skylet_config.db')
+                _DB_PATH = runtime_utils.get_runtime_dir_path(
+                    '.sky/skylet_config.db')
                 os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
                 with db_utils.safe_cursor(
                         _DB_PATH
