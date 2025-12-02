@@ -101,8 +101,10 @@ def deploy_ssh_cluster(cleanup: bool = False,
             deploy_ssh_node_pools.deploy_clusters(
                 infra=infra, cleanup=cleanup, kubeconfig_path=kubeconfig_path)
         except Exception as e:
-            raise RuntimeError(
-                'Failed to deploy SkyPilot on some Node Pools.') from e
+            logger.error(str(e))
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    'Failed to deploy SkyPilot on some Node Pools.') from e
 
     logger.info('')
     if cleanup:

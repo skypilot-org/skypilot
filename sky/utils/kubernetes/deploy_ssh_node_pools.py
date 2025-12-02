@@ -99,6 +99,7 @@ def run_remote(node,
         ssh_cmd.append(cmd)
 
     subprocess_cmd = ' '.join(ssh_cmd) if use_shell else ssh_cmd
+    logger.error(f'!!!!{subprocess_cmd}')
     process = subprocess.run(subprocess_cmd,
                              capture_output=True,
                              text=True,
@@ -106,8 +107,8 @@ def run_remote(node,
                              shell=use_shell)
     if process.returncode != 0:
         if not silent:
-            logger.error(f'{RED}Error executing command {cmd} on {node}:{NC}\n'
-                         f'STDERR: {process.stderr}')
+            logger.error(f'{RED}Error executing command {cmd} on {node}:{NC} '
+                         f'{process.stderr}')
         return None
     if print_output:
         logger.info(process.stdout)
