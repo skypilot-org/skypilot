@@ -130,7 +130,9 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             instance_type = config.node_config['InstanceType']
             disk_size = config.node_config.get('DiskSize', 50) # Verda Cloud default disk size is 50GB
             is_spot: bool = False
-           
+
+            # Get image from node_config (populated from template)
+            image = config.node_config.get('ImageId', 'ubuntu-24.04-cuda-12.8-open-docker')
 
             ssh_public_key = config.node_config['PublicKey']
             if ssh_public_key is None:
@@ -143,7 +145,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 location=region,
                 is_spot=is_spot,
                 contract='PAY_AS_YOU_GO' if not is_spot else 'SPOT',
-                image='ubuntu-24.04-cuda-12.8-open-docker',
+                image=image,
                 description='Created by SkyPilot',
                 ssh_key_ids=[ssh_key_id],
                 os_volume={ 'name': f'{cluster_name_on_cloud}-{node_type}', 'size': disk_size }

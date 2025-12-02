@@ -2,7 +2,7 @@
 
 from importlib import util as import_lib_util
 import os
-import typing   
+import typing
 from json import load as json_load
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
@@ -16,7 +16,9 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
     from sky.utils import volume as volume_lib
 
-
+# Default images for Verda Cloud
+# These images are provided by Verda and include CUDA drivers
+_DEFAULT_IMAGE = 'ubuntu-24.04-cuda-12.8-open-docker'
 
 @registry.CLOUD_REGISTRY.register
 class Verda(clouds.Cloud):
@@ -188,9 +190,8 @@ class Verda(clouds.Cloud):
     ) -> Dict[str, Optional[Union[str, bool]]]:
         del zones, dryrun, cluster_name  # unused
 
-        if volume_mounts and len(volume_mounts) > 1:
-            raise ValueError(f'Verda only supports one network volume mount, '
-                             f'but {len(volume_mounts)} are specified.')
+        if num_nodes > 1:
+            raise ValueError(f'Verda currently only supports one node, but {num_nodes} are specified.')
 
         resources = resources.assert_launchable()
         acc_dict = self.get_accelerators_from_instance_type(
@@ -198,12 +199,35 @@ class Verda(clouds.Cloud):
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
+        # Image selection logic
         if resources.image_id is None:
-            image_id: Optional[str] = None  # Verda uses default images from API
+            image_id_override = os.getenv('SKYPILOT_VERDA_IMAGE_ID', '')
+            
+            if image_id_override:
+                image_id = image_id_override
+            else:
+                image_id = _DEFAULT_IMAGE
+
+            image_id: Optional[str] = _DEFAULT_IMAGE
         elif resources.extract_docker_image() is not None:
+            # Docker image specified
             image_id = resources.extract_docker_image()
         else:
-            image_id = resources.image_id.get(resources.region) if resources.image_id else None
+            # User specified an image_id
+            if isinstance(resources.image_id, dict):
+                # Region-specific image or region-agnostic image
+                if None in resources.image_id:
+                    # Region-agnostic image
+                    image_id = resources.image_id[None]
+                elif resources.region in resources.image_id:
+                    # Region-specific image
+                    image_id = resources.image_id[resources.region]
+                else:
+                    # Fallback to default if region not in dict
+                    image_id = _DEFAULT_IMAGE
+            else:
+                # Direct string image_id
+                image_id = resources.image_id
 
         instance_type = resources.instance_type
         use_spot = resources.use_spot
