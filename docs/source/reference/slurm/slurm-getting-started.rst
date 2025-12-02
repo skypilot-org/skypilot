@@ -5,8 +5,8 @@ Getting Started on Slurm
 
 .. note::
 
-    Slurm support is currently in **early access**. If you're interested in trying it out,
-    please `fill out this form <https://forms.gle/rfdWQcd9oQgp41Hm8>`_ to get access.
+    **Early Access:** Slurm support is under active development. If you're interested in trying it out,
+    please `fill out this form <https://forms.gle/rfdWQcd9oQgp41Hm8>`_.
 
 Quickstart
 ----------

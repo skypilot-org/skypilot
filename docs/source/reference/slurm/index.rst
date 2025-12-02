@@ -5,8 +5,8 @@ Using Slurm
 
 .. note::
 
-    Slurm support is currently in **early access**. If you're interested in trying it out,
-    please `fill out this form <https://forms.gle/rfdWQcd9oQgp41Hm8>`_ to get access.
+    **Early Access:** Slurm support is under active development. If you're interested in trying it out,
+    please `fill out this form <https://forms.gle/rfdWQcd9oQgp41Hm8>`_.
 
 SkyPilot tasks can be run on your Slurm clusters.
 The Slurm cluster gets added to the list of "clouds" in SkyPilot and SkyPilot
@@ -23,20 +23,20 @@ Why use SkyPilot on Slurm?
         .. grid:: 2
             :gutter: 3
 
-            .. grid-item-card::  🚀 Easy job submission
-                :text-align: center
-
-                No need to write complex sbatch scripts - write a simple SkyPilot YAML and run with one command ``sky launch``.
-
             .. grid-item-card::  🗂️ Multi-cluster made easy
                 :text-align: center
 
                 Access multiple Slurm clusters through one interface - no need to juggle different login nodes or sbatch scripts.
-
-            .. grid-item-card::  🌍 Portable workloads
+            
+            .. grid-item-card::  🌍 Unified interface for all infra
                 :text-align: center
 
                 The same SkyPilot YAML works on Slurm, Kubernetes, and cloud VMs - switch between them seamlessly.
+            
+            .. grid-item-card::  🚀 Easy job submission
+                :text-align: center
+
+                No need to write complex sbatch scripts - write a simple SkyPilot YAML and run with one command ``sky launch``.
 
             .. grid-item-card::  ☁️ Burst to the cloud
                 :text-align: center
@@ -55,7 +55,7 @@ Why use SkyPilot on Slurm?
 
                 Manage all your Slurm clusters from one interface - unified visibility and control across all your AI compute.
 
-            .. grid-item-card::  🧩 Unified platform for all Infrastructure
+            .. grid-item-card::  🧩 Unified platform for all infra
                 :text-align: center
 
                 Let users scale beyond your Slurm cluster to capacity on :ref:`clouds and Kubernetes <auto-failover>` without manual intervention.
