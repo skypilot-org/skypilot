@@ -1302,6 +1302,7 @@ def test_pools_single_yaml(generic_cloud: str):
             [
                 _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
                     pool_name=pool_name, pool_yaml=one_config_yaml.name),
+                'sleep 30',
                 (f's=$(sky jobs launch --pool {pool_name} {one_config_yaml.name} --name {job_name} -d -y); '
                  'echo "$s"; '
                  'echo; echo; echo "$s" | grep "Job submitted"'),
