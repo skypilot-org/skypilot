@@ -2297,7 +2297,7 @@ def test_pools_num_jobs_speed(generic_cloud: str):
             test_commands.append(launch_cmd)
 
             test = smoke_tests_utils.Test(
-                'test_pools_num_jobs_rank',
+                'test_pools_num_jobs_speed',
                 test_commands,
                 timeout=timeout * 2,  # Give extra time for multiple jobs
                 # Try to tear down multiple times since jobs may take a while
