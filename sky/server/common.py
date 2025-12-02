@@ -832,21 +832,20 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
 
     def _get_client_file_mounts_path(original_path: str,
                                      file_mounts_mapping: Dict[str, str],
-                                     upload_id: Optional[str]) -> str:
+                                     upload_id: str) -> str:
         mapped_path = file_mounts_mapping[original_path].lstrip('/')
-        if upload_id is not None:
-            # Files are extracted to client_file_mounts_dir/{upload_id}/
-            return str(client_file_mounts_dir / upload_id / mapped_path)
-        return str(client_file_mounts_dir / mapped_path)
+        # Files are extracted to client_file_mounts_dir/{upload_id}/
+        # This works for old clients because upload_id will be ''.
+        return str(client_file_mounts_dir / upload_id / mapped_path)
 
     task_configs = yaml_utils.read_yaml_all(str(client_task_path))
-    upload_id = None
+    upload_id = ''
     for task_config in task_configs:
         if task_config is None:
             continue
         # Extract upload_id from the first config (dag metadata)
-        if upload_id is None and 'upload_id' in task_config:
-            upload_id = task_config.pop('upload_id')
+        if not upload_id:
+            upload_id = task_config.pop('upload_id', '')
         file_mounts_mapping = task_config.pop('file_mounts_mapping', {})
         if not file_mounts_mapping:
             # We did not mount any files to new paths on the remote server
