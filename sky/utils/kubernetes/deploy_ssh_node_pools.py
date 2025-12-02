@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from typing import List, Set, Optional
+from typing import List, Optional, Set
 
 import yaml
 
@@ -34,7 +34,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 logger = sky_logging.init_logger(__name__)
 
 
-def run_command(cmd: str, shell: bool=False, silent: bool=False):
+def run_command(cmd, shell=False, silent=False):
     """Run a local command and return the output."""
     process = subprocess.run(cmd,
                              shell=shell,
@@ -43,9 +43,9 @@ def run_command(cmd: str, shell: bool=False, silent: bool=False):
                              check=False)
     if process.returncode != 0:
         if not silent:
-            logger.error(f'{RED}Error executing command: {cmd}{NC}')
-            logger.error(f'STDOUT: {process.stdout}')
-            logger.error(f'STDERR: {process.stderr}')
+            logger.error(f'{RED}Error executing command: {cmd}{NC}\n'
+                         f'STDOUT: {process.stdout}\n'
+                         f'STDERR: {process.stderr}')
         return None
     return process.stdout.strip()
 
@@ -106,8 +106,8 @@ def run_remote(node,
                              shell=use_shell)
     if process.returncode != 0:
         if not silent:
-            logger.error(f'{RED}Error executing command {cmd} on {node}:{NC}')
-            logger.error(f'STDERR: {process.stderr}')
+            logger.error(f'{RED}Error executing command {cmd} on {node}:{NC}\n'
+                         f'STDERR: {process.stderr}')
         return None
     if print_output:
         logger.info(process.stdout)
@@ -149,6 +149,7 @@ def cleanup_server_node(node,
                         askpass_block,
                         use_ssh_config=False):
     """Uninstall k3s and clean up the state on a server node."""
+    # TODO (kyuds): line 356, SkySSHUpLineProcessor rich spinner update
     logger.info(f'{YELLOW}Cleaning up head node {node}...{NC}')
     cmd = f"""
         {askpass_block}
@@ -158,8 +159,10 @@ def cleanup_server_node(node,
     """
     result = run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
     if result is None:
+        # TODO (kyuds): line 377 SkySSHUpLineProcessor
         logger.error(f'{RED}Failed to clean up head node ({node}).{NC}')
     else:
+        # TODO (kyuds): line 373 LP
         success_message(f'Node {node} cleaned up successfully.')
 
 
@@ -169,6 +172,7 @@ def cleanup_agent_node(node,
                        askpass_block,
                        use_ssh_config=False):
     """Uninstall k3s and clean up the state on an agent node."""
+    # TODO (kyuds): line 364, LP spinner update
     logger.info(f'{YELLOW}Cleaning up worker node {node}...{NC}')
     cmd = f"""
         {askpass_block}
@@ -178,8 +182,10 @@ def cleanup_agent_node(node,
     """
     result = run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
     if result is None:
+        # TODO (kyuds): line 381 LP
         logger.error(f'{RED}Failed to clean up worker node ({node}).{NC}')
     else:
+        # TODO (kyuds): line 373 LP
         success_message(f'Node {node} cleaned up successfully.')
 
 
@@ -200,8 +206,10 @@ def start_agent_node(node,
         """
     result = run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
     if result is None:
+        # TODO (kyuds): line 321 LP
         logger.error(f'{RED}Failed to deploy K3s on worker node ({node}).{NC}')
         return node, False, False
+    # TODO (kyuds): line 314 LP
     success_message(f'Kubernetes deployed on worker node ({node}).')
     # Check if worker node has a GPU
     if check_gpu(node, user, ssh_key, use_ssh_config=use_ssh_config):
@@ -408,10 +416,11 @@ def cleanup_kubectl_ssh_tunnel(context_name):
 
 def deploy_clusters(infra: Optional[str], 
                     ssh_node_pools_file: str = ssh_utils.DEFAULT_SSH_NODE_POOLS_PATH,
-                    kubeconfig_path: str = DEFAULT_KUBECONFIG_PATH,
+                    kubeconfig_path: Optional[str] = None,
                     global_use_ssh_config: bool = True,
                     cleanup: bool = True):
 
+    kubeconfig_path = kubeconfig_path or DEFAULT_KUBECONFIG_PATH
     kubeconfig_path = os.path.expanduser(kubeconfig_path)
 
     failed_clusters = []
@@ -419,6 +428,7 @@ def deploy_clusters(infra: Optional[str],
 
     # Print cleanup mode marker if applicable
     if cleanup:
+        # TODO (kyuds): line 220 LP, spinner update
         logger.info('SKYPILOT_CLEANUP_MODE: Cleanup mode activated')
 
     # Using YAML configuration
@@ -427,6 +437,7 @@ def deploy_clusters(infra: Optional[str],
         targets, infra, file_path=ssh_node_pools_file)
 
     # Print information about clusters being processed
+    # TODO (kyuds): line 230 LP
     num_clusters = len(clusters_config)
     cluster_names = list(clusters_config.keys())
     cluster_info = f'Found {num_clusters} Node Pool{"s" if num_clusters > 1 else ""}: {", ".join(cluster_names)}'
@@ -435,6 +446,7 @@ def deploy_clusters(infra: Optional[str],
     # Process each cluster
     for cluster_name, cluster_config in clusters_config.items():
         try:
+            # TODO (kyuds): line 239 LP, spinner update
             logger.info(f'SKYPILOT_CURRENT_CLUSTER: {cluster_name}')
             logger.info(f'{YELLOW}==== Deploying cluster: {cluster_name} ====${NC}')
             hosts_info = ssh_utils.prepare_hosts_info(cluster_name,
@@ -587,6 +599,7 @@ def deploy_cluster(head_node,
     k3s_token = 'mytoken'  # Any string can be used as the token
 
     # Pre-flight checks
+    # TODO (kyuds): line 275 LP
     logger.info(f'{YELLOW}Checking SSH connection to head node...{NC}')
     result = run_remote(
         head_node,
@@ -595,6 +608,7 @@ def deploy_cluster(head_node,
         ssh_key,
         use_ssh_config=head_use_ssh_config,
         # For SkySSHUpLineProcessor
+        # TODO (kyuds): figure out how to deal with this, line 280 LP
         print_output=True)
     if not cleanup and result is None:
         with ux_utils.print_exception_no_traceback():
@@ -670,6 +684,7 @@ def deploy_cluster(head_node,
     with cf.ThreadPoolExecutor() as executor:
 
         def run_cleanup_cmd(cmd):
+            # TODO (kyuds): spinner update, line 364 LP
             logger.info('Cleaning up worker nodes:', cmd)
             run_command(cmd, shell=True)
 
@@ -716,6 +731,7 @@ def deploy_cluster(head_node,
         logger.info(f'{GREEN}Cleanup completed successfully.{NC}')
 
         # Print completion marker for current cluster
+        # TODO (kyuds): line 262 LP
         logger.info(f'{GREEN}SKYPILOT_CLUSTER_COMPLETED: {NC}')
 
         return []
@@ -756,6 +772,7 @@ def deploy_cluster(head_node,
     # Step 1: Install k3s on the head node
     # Check if head node has a GPU
     install_gpu = False
+    # TODO (kyuds): line 287 LP, spinner update
     progress_message(f'Deploying Kubernetes on head node ({head_node})...')
     cmd = f"""
         {askpass_block}
@@ -785,6 +802,7 @@ def deploy_cluster(head_node,
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
                 f'Failed to deploy K3s on head node ({head_node}).')
+    # TODO (kyuds): line 297 LP
     success_message(f'K3s deployed on head node ({head_node}).')
 
     # Check if head node has a GPU
@@ -812,12 +830,14 @@ def deploy_cluster(head_node,
     def deploy_worker(args):
         (i, node, worker_hosts, history_workers_info, ssh_user, ssh_key,
          askpass_block, worker_use_ssh_config, master_addr, k3s_token) = args
+        # TODO (kyuds): line 305, LP spinner message
         progress_message(f'Deploying Kubernetes on worker node ({node})...')
 
         # If using YAML config with specific worker info
         if worker_hosts and i < len(worker_hosts):
             if history_workers_info is not None and worker_hosts[
                     i] in history_workers_info:
+                # TODO (kyuds): line 394 LP
                 logger.info(
                     f'{YELLOW}Worker node ({node}) already exists in history. '
                     f'Skipping...{NC}')
@@ -860,6 +880,7 @@ def deploy_cluster(head_node,
                 unsuccessful_workers.append(node)
 
     # Step 3: Configure local kubectl to connect to the cluster
+    # TODO (kyuds): line 328 LP, spinner message
     progress_message('Configuring local kubectl to connect to the cluster...')
 
     # Create temporary directory for kubeconfig operations
@@ -1106,14 +1127,17 @@ def deploy_cluster(head_node,
                              context_name,
                              use_ssh_config=head_use_ssh_config)
 
+    # TODO (kyuds): might need to replace to line 336, LP
     success_message(f'kubectl configured with new context \'{context_name}\'.')
 
+    # TODO (kyuds): line 386, LP
     logger.info(
         f'Cluster deployment completed. Kubeconfig saved to {kubeconfig_path}')
     logger.info('You can now run \'kubectl get nodes\' to verify the setup.')
 
     # Install GPU operator if a GPU was detected on any node
     if install_gpu:
+        # TODO (kyuds): line 342 LP
         logger.info(
             f'{YELLOW}GPU detected in the cluster. Installing Nvidia GPU Operator...{NC}'
         )
@@ -1147,6 +1171,7 @@ def deploy_cluster(head_node,
         if result is None:
             logger.error(f'{RED}Failed to install GPU Operator.{NC}')
         else:
+            # TODO (kyuds): line 134, LP
             success_message('GPU Operator installed.')
     else:
         logger.info(
@@ -1176,6 +1201,7 @@ def deploy_cluster(head_node,
         '  • Connect to pod with VSCode: code --remote ssh-remote+devbox "/home"'
     )
     # Print completion marker for current cluster
+    # TODO (kyuds): line 262, LP
     logger.info(f'{GREEN}SKYPILOT_CLUSTER_COMPLETED: {NC}')
 
     if unsuccessful_workers:
@@ -1183,6 +1209,7 @@ def deploy_cluster(head_node,
             f'"{worker}"' for worker in unsuccessful_workers
         ]
 
+        # TODO (kyuds): line 391, LP
         logger.info(
             f'{WARNING_YELLOW}Failed to deploy Kubernetes on the following nodes: '
             f'{", ".join(quoted_unsuccessful_workers)}. Please check '
