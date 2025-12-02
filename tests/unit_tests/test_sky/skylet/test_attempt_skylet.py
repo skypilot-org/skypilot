@@ -1,16 +1,21 @@
 """Unit tests for attempt_skylet module."""
-import importlib
 import signal
+import sys
 from unittest import mock
 
 import pytest
 
 from sky.skylet import constants
 
+MODULE_NAME = 'sky.skylet.attempt_skylet'
+
 
 @pytest.fixture
 def skylet_env(tmp_path, monkeypatch):
     """Shared fixture for skylet tests with isolated runtime directory."""
+    # Pop module to force fresh import with new env var
+    sys.modules.pop(MODULE_NAME, None)
+
     runtime_dir = tmp_path
     monkeypatch.setenv(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY, str(runtime_dir))
 
@@ -26,7 +31,7 @@ def skylet_env(tmp_path, monkeypatch):
     }
 
 
-class TestAttemptSkyletRunningCheck:
+class TestRunningCheck:
     """Test running check logic (PID file and grep fallback)."""
 
     def test_pid_file_process_alive(self, skylet_env, monkeypatch):
@@ -43,9 +48,8 @@ class TestAttemptSkyletRunningCheck:
         monkeypatch.setattr('subprocess.run', mock.Mock())
 
         from sky.skylet import attempt_skylet
-        importlib.reload(attempt_skylet)
 
-        assert attempt_skylet.running is True
+        assert attempt_skylet.running
         assert (pid, 0) in kill_calls
 
     def test_pid_file_process_dead(self, skylet_env, monkeypatch):
@@ -60,9 +64,8 @@ class TestAttemptSkyletRunningCheck:
         monkeypatch.setattr('subprocess.run', mock.Mock())
 
         from sky.skylet import attempt_skylet
-        importlib.reload(attempt_skylet)
 
-        assert attempt_skylet.running is False
+        assert not attempt_skylet.running
 
     def test_pid_file_invalid_content_raises_error(self, skylet_env):
         """PID file with invalid content raises RuntimeError on restart."""
@@ -70,7 +73,6 @@ class TestAttemptSkyletRunningCheck:
 
         with pytest.raises(RuntimeError) as exc_info:
             from sky.skylet import attempt_skylet
-            importlib.reload(attempt_skylet)
 
         assert 'Failed to read PID file' in str(exc_info.value)
 
@@ -83,9 +85,36 @@ class TestAttemptSkyletRunningCheck:
         monkeypatch.setattr('subprocess.run', lambda *a, **kw: mock_result)
 
         from sky.skylet import attempt_skylet
-        importlib.reload(attempt_skylet)
 
-        assert attempt_skylet.running is True
+        assert attempt_skylet.running
+
+
+class TestVersionMatch:
+    """Test version_match logic."""
+
+    def test_version_match_when_file_matches(self, skylet_env, monkeypatch):
+        """Version file with matching version -> version_match=True."""
+        skylet_env['pid_file'].write_text('12345')
+        skylet_env['version_file'].write_text(constants.SKYLET_VERSION)
+        monkeypatch.setattr('os.kill', lambda p, s: None)
+        monkeypatch.setattr('subprocess.run', mock.Mock())
+
+        from sky.skylet import attempt_skylet
+
+        assert attempt_skylet.version_match
+
+    def test_version_mismatch_when_file_stale(self, skylet_env, monkeypatch):
+        """Version file with stale version -> version_match=False."""
+        skylet_env['pid_file'].write_text('12345')
+        skylet_env['version_file'].write_text('old_version')
+        monkeypatch.setattr('os.kill', lambda p, s: None)
+        monkeypatch.setattr('subprocess.run', mock.Mock())
+        monkeypatch.setattr('sky.utils.common_utils.find_free_port',
+                            lambda x: 46590)
+
+        from sky.skylet import attempt_skylet
+
+        assert not attempt_skylet.version_match
 
 
 class TestRestartSkylet:
@@ -97,7 +126,6 @@ class TestRestartSkylet:
         self.env = skylet_env
 
         from sky.skylet import attempt_skylet
-        importlib.reload(attempt_skylet)
         self.restart_skylet = attempt_skylet.restart_skylet
 
     def test_handles_dead_process_gracefully(self, monkeypatch):
