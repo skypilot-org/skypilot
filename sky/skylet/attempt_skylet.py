@@ -57,7 +57,8 @@ def _find_running_skylet_pids() -> List[int]:
         except (OSError, ValueError, IOError) as e:
             # Don't fallback to grep-based detection as the existence of the
             # PID file implies that we are on the new version, and there is
-            # possibility of there being multiple skylet processes running.
+            # possibility of there being multiple skylet processes running,
+            # and we don't want to accidentally kill the wrong skylet(s).
             print(f'Error reading PID file {PID_FILE}: {e}')
         return []
     else:
