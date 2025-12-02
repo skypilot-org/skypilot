@@ -1,4 +1,5 @@
 """Unit tests for attempt_skylet module."""
+import importlib
 import signal
 import sys
 from unittest import mock
@@ -13,6 +14,12 @@ MODULE_NAME = 'sky.skylet.attempt_skylet'
 @pytest.fixture
 def skylet_env(tmp_path, monkeypatch):
     """Shared fixture for skylet tests with isolated runtime directory."""
+    # Clear module BEFORE setting env to ensure fresh import picks up new env
+    sys.modules.pop(MODULE_NAME, None)
+    parent = sys.modules.get('sky.skylet')
+    if parent and hasattr(parent, 'attempt_skylet'):
+        delattr(parent, 'attempt_skylet')
+
     runtime_dir = tmp_path
     monkeypatch.setenv(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY, str(runtime_dir))
 
@@ -44,7 +51,6 @@ class TestRunningCheck:
         monkeypatch.setattr('os.kill', mock_kill)
         monkeypatch.setattr('subprocess.run', mock.Mock())
 
-        sys.modules.pop(MODULE_NAME, None)
         from sky.skylet import attempt_skylet
 
         assert attempt_skylet.running
@@ -61,17 +67,20 @@ class TestRunningCheck:
         monkeypatch.setattr('os.kill', mock_kill)
         monkeypatch.setattr('subprocess.run', mock.Mock())
 
-        sys.modules.pop(MODULE_NAME, None)
         from sky.skylet import attempt_skylet
 
         assert not attempt_skylet.running
 
-    def test_pid_file_invalid_content_raises_error(self, skylet_env):
+    def test_pid_file_invalid_content_raises_error(self, skylet_env,
+                                                   monkeypatch):
         """PID file with invalid content raises RuntimeError on restart."""
         skylet_env['pid_file'].write_text('not_a_pid')
 
+        # Mock to prevent real system calls during module import
+        monkeypatch.setattr('os.kill', mock.Mock())
+        monkeypatch.setattr('subprocess.run', mock.Mock())
+
         with pytest.raises(RuntimeError) as exc_info:
-            sys.modules.pop(MODULE_NAME, None)
             from sky.skylet import attempt_skylet
 
         assert 'Failed to read PID file' in str(exc_info.value)
@@ -84,7 +93,6 @@ class TestRunningCheck:
         mock_result = mock.Mock(returncode=0)
         monkeypatch.setattr('subprocess.run', lambda *a, **kw: mock_result)
 
-        sys.modules.pop(MODULE_NAME, None)
         from sky.skylet import attempt_skylet
 
         assert attempt_skylet.running
@@ -100,7 +108,6 @@ class TestVersionMatch:
         monkeypatch.setattr('os.kill', lambda p, s: None)
         monkeypatch.setattr('subprocess.run', mock.Mock())
 
-        sys.modules.pop(MODULE_NAME, None)
         from sky.skylet import attempt_skylet
 
         assert attempt_skylet.version_match
@@ -111,10 +118,7 @@ class TestVersionMatch:
         skylet_env['version_file'].write_text('old_version')
         monkeypatch.setattr('os.kill', lambda p, s: None)
         monkeypatch.setattr('subprocess.run', mock.Mock())
-        monkeypatch.setattr('sky.utils.common_utils.find_free_port',
-                            lambda x: 46590)
 
-        sys.modules.pop(MODULE_NAME, None)
         from sky.skylet import attempt_skylet
 
         assert not attempt_skylet.version_match
@@ -131,7 +135,6 @@ class TestRestartSkylet:
         monkeypatch.setattr('os.kill', lambda p, s: None)
         monkeypatch.setattr('subprocess.run', mock.Mock())
 
-        sys.modules.pop(MODULE_NAME, None)
         from sky.skylet import attempt_skylet
         self.restart_skylet = attempt_skylet.restart_skylet
 
@@ -143,8 +146,6 @@ class TestRestartSkylet:
             'os.kill', lambda p, s: (_ for _ in ()).throw(ProcessLookupError()))
         mock_run = mock.Mock(return_value=mock.Mock(returncode=0))
         monkeypatch.setattr('subprocess.run', mock_run)
-        monkeypatch.setattr('sky.utils.common_utils.find_free_port',
-                            lambda x: 46590)
 
         self.restart_skylet()
         assert mock_run.called
@@ -182,10 +183,6 @@ class TestRestartSkylet:
 
         monkeypatch.setattr('subprocess.run', mock_run)
 
-        test_port = 46593
-        monkeypatch.setattr('sky.utils.common_utils.find_free_port',
-                            lambda x: test_port)
-
         self.restart_skylet()
 
         assert len(subprocess_calls) == 1
@@ -193,15 +190,16 @@ class TestRestartSkylet:
         # Killed old process by PID
         assert (old_pid, signal.SIGKILL) in killed_pids
 
-        # Started new skylet with correct port and PID capture
+        # Started new skylet with hardcoded port
         nohup_cmd = subprocess_calls[0]
-        assert f'--port={test_port}' in nohup_cmd
+        assert f'--port={constants.SKYLET_GRPC_PORT}' in nohup_cmd
         assert 'echo $!' in nohup_cmd
         assert str(self.env['pid_file']) in nohup_cmd
         assert str(self.env['log_file']) in nohup_cmd
 
         # Wrote port and version files
-        assert self.env['port_file'].read_text() == str(test_port)
+        assert self.env['port_file'].read_text() == str(
+            constants.SKYLET_GRPC_PORT)
         assert self.env['version_file'].read_text() == constants.SKYLET_VERSION
 
     def test_complete_flow_without_pid_file(self, monkeypatch):
@@ -217,10 +215,6 @@ class TestRestartSkylet:
 
         monkeypatch.setattr('subprocess.run', mock_run)
 
-        test_port = 46594
-        monkeypatch.setattr('sky.utils.common_utils.find_free_port',
-                            lambda x: test_port)
-
         self.restart_skylet()
 
         # 2 calls: grep kill + nohup
@@ -232,8 +226,9 @@ class TestRestartSkylet:
         assert 'xargs kill' in grep_cmd
 
         nohup_cmd = subprocess_calls[1]
-        assert f'--port={test_port}' in nohup_cmd
+        assert f'--port={constants.SKYLET_GRPC_PORT}' in nohup_cmd
 
         # Wrote files
-        assert self.env['port_file'].read_text() == str(test_port)
+        assert self.env['port_file'].read_text() == str(
+            constants.SKYLET_GRPC_PORT)
         assert self.env['version_file'].read_text() == constants.SKYLET_VERSION
