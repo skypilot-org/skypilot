@@ -122,6 +122,9 @@ SKYLET_VERSION = '26'
 # user can be notified to update their SkyPilot version on the remote cluster.
 SKYLET_LIB_VERSION = 4
 SKYLET_VERSION_FILE = '.sky/skylet_version'
+SKYLET_LOG_FILE = '.sky/skylet.log'
+SKYLET_PID_FILE = '.sky/skylet_pid'
+SKYLET_PORT_FILE = '.sky/skylet_port'
 SKYLET_GRPC_PORT = 46590
 SKYLET_GRPC_TIMEOUT_SECONDS = 10
 
