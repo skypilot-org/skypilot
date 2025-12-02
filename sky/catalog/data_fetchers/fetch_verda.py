@@ -327,7 +327,8 @@ def main() -> None:
     """
     logging.basicConfig(level=logging.INFO,)
     args = sys.argv[1:]
-    output_file = args[0] if args else '~/.sky/catalogs/v8/verda/vms.csv'
+    output_path = args[0] if args else '~/.sky/catalogs/v8/verda/vms.csv'
+    output_file = os.path.expanduser(output_path)
     create_catalog(output_file)
     logger.info('Done!')
 
