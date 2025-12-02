@@ -15,11 +15,14 @@ import psycopg2
 import sqlalchemy
 
 from sky import global_user_state
-from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.utils import common_utils
 from sky.utils.db import db_utils
 
 logger = logging.getLogger(__name__)
+
+# The directory for file locks.
+SKY_LOCKS_DIR = runtime_utils.get_runtime_dir_path('.sky/locks')
 
 
 class LockTimeout(RuntimeError):
@@ -127,9 +130,8 @@ class FileLock(DistributedLock):
             poll_interval: Interval in seconds to poll for lock acquisition.
         """
         super().__init__(lock_id, timeout, poll_interval)
-        os.makedirs(constants.SKY_LOCKS_DIR, exist_ok=True)
-        self.lock_path = os.path.join(constants.SKY_LOCKS_DIR,
-                                      f'.{lock_id}.lock')
+        os.makedirs(SKY_LOCKS_DIR, exist_ok=True)
+        self.lock_path = os.path.join(SKY_LOCKS_DIR, f'.{lock_id}.lock')
         if timeout is None:
             timeout = -1
         self._filelock: filelock.FileLock = filelock.FileLock(self.lock_path,
@@ -155,7 +157,7 @@ class FileLock(DistributedLock):
         common_utils.remove_file_if_exists(self.lock_path)
 
     def is_locked(self) -> bool:
-        return self._filelock.is_locked()
+        return self._filelock.is_locked
 
 
 class PostgresLock(DistributedLock):
@@ -169,6 +171,7 @@ class PostgresLock(DistributedLock):
     # pylint: disable=line-too-long
     - https://www.postgresql.org/docs/current/explicit-locking.html#ADVISORY-LOCKS
     - https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADVISORY-LOCKS
+    # TODO(cooperc): re-enable pylint line-too-long
     """
 
     def __init__(self,

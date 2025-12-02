@@ -230,6 +230,12 @@ class RequestWorker:
             fut = executor.submit_until_success(
                 _request_execution_wrapper, request_id, ignore_return_value,
                 self.num_db_connections_per_worker)
+            # Decrement the free executor count when a request starts
+            if metrics_utils.METRICS_ENABLED:
+                if self.schedule_type == api_requests.ScheduleType.LONG:
+                    metrics_utils.SKY_APISERVER_LONG_EXECUTORS.dec()
+                elif self.schedule_type == api_requests.ScheduleType.SHORT:
+                    metrics_utils.SKY_APISERVER_SHORT_EXECUTORS.dec()
             # Monitor the result of the request execution.
             threading.Thread(target=self.handle_task_result,
                              args=(fut, request_element),
@@ -264,9 +270,23 @@ class RequestWorker:
                 queue.put(request_element)
         except exceptions.ExecutionRetryableError as e:
             time.sleep(e.retry_wait_seconds)
+            # Reset the request status to PENDING so it can be picked up again.
+            # Assume retryable since the error is ExecutionRetryableError.
+            request_id, _, _ = request_element
+            with api_requests.update_request(request_id) as request_task:
+                assert request_task is not None, request_id
+                request_task.status = api_requests.RequestStatus.PENDING
             # Reschedule the request.
             queue = _get_queue(self.schedule_type)
             queue.put(request_element)
+            logger.info(f'Rescheduled request {request_id} for retry')
+        finally:
+            # Increment the free executor count when a request finishes
+            if metrics_utils.METRICS_ENABLED:
+                if self.schedule_type == api_requests.ScheduleType.LONG:
+                    metrics_utils.SKY_APISERVER_LONG_EXECUTORS.inc()
+                elif self.schedule_type == api_requests.ScheduleType.SHORT:
+                    metrics_utils.SKY_APISERVER_SHORT_EXECUTORS.inc()
 
     def run(self) -> None:
         # Handle the SIGTERM signal to abort the executor process gracefully.
@@ -288,6 +308,16 @@ class RequestWorker:
                 burst_workers=self.burstable_parallelism,
                 initializer=executor_initializer,
                 initargs=(proc_group,))
+            # Initialize the appropriate gauge for the number of free executors
+            total_executors = (self.garanteed_parallelism +
+                               self.burstable_parallelism)
+            if metrics_utils.METRICS_ENABLED:
+                if self.schedule_type == api_requests.ScheduleType.LONG:
+                    metrics_utils.SKY_APISERVER_LONG_EXECUTORS.set(
+                        total_executors)
+                elif self.schedule_type == api_requests.ScheduleType.SHORT:
+                    metrics_utils.SKY_APISERVER_SHORT_EXECUTORS.set(
+                        total_executors)
             while not self._cancel_event.is_set():
                 self.process_request(executor, queue)
         # TODO(aylei): better to distinct between KeyboardInterrupt and SIGTERM.

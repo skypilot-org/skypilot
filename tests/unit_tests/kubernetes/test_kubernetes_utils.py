@@ -4,6 +4,7 @@
 
 import collections
 import os
+import re
 import tempfile
 from typing import Optional
 import unittest
@@ -1770,26 +1771,17 @@ def test_combine_pod_config_fields_ssh_and_kubernetes_isolation():
 
 
 def test_hardcoded_kubernetes_functions_not_used_during_ssh_provisioning():
-    """Test that functions hardcoding cloud='kubernetes' would fail for SSH if called.
+    """Test that functions hardcoding cloud='kubernetes' would fail
+    for SSH if called."""
 
-    This test documents that certain functions (like merge_custom_metadata,
-    combine_metadata_fields) hardcode cloud='kubernetes' and would incorrectly
-    look up Kubernetes config even when provisioning SSH clusters.
-
-    Since SSH doesn't support custom_metadata (the only field these functions use),
-    this isn't currently a bug. But this test ensures we catch it if:
-    1. SSH adds support for custom_metadata in the future
-    2. Someone accidentally calls these functions from SSH provisioning
-    """
     from unittest.mock import patch
 
     from sky.utils import config_utils
 
     # Setup: Config with DIFFERENT custom_metadata for SSH vs Kubernetes
-    # (SSH doesn't actually support this today, but testing the principle)
     config_dict = {
         'ssh': {
-            'custom_metadata': {  # Not actually supported!
+            'custom_metadata': {
                 'metadata': {
                     'labels': {
                         'source': 'ssh-config'
@@ -1812,8 +1804,6 @@ def test_hardcoded_kubernetes_functions_not_used_during_ssh_provisioning():
     # during SSH provisioning with an SSH context
     ssh_context = 'ssh-my-cluster'
 
-    # The problem: merge_custom_metadata hardcodes cloud='kubernetes'
-    # So it would get the WRONG config
     with patch('sky.skypilot_config.get_effective_region_config') as mock_get:
         # Mock to return based on cloud parameter
         def get_config_side_effect(cloud,
@@ -1830,40 +1820,30 @@ def test_hardcoded_kubernetes_functions_not_used_during_ssh_provisioning():
         mock_get.side_effect = get_config_side_effect
 
         # Call merge_custom_metadata with SSH context
-        # (Note: SSH doesn't use this function in practice since it doesn't
-        # support custom_metadata, but testing the principle)
         original_metadata = {}
 
-        # This currently calls get_effective_region_config with cloud='kubernetes'
+        # This currently calls get_effective_region_config with cloud='ssh'
         utils.merge_custom_metadata(original_metadata, context=ssh_context)
 
-        # Verify it was called with 'kubernetes' (documenting current behavior)
-        # This is the BUG - it should use 'ssh' for SSH contexts
+        # Verify it was called with 'ssh'
         calls = mock_get.call_args_list
         custom_metadata_calls = [
             c for c in calls if c[1].get('keys') == ('custom_metadata',)
         ]
 
-        # Currently it hardcodes 'kubernetes' even for SSH context
-        # This documents the issue
         assert len(custom_metadata_calls) >= 1
-        assert custom_metadata_calls[0][1]['cloud'] == 'kubernetes', \
-            "merge_custom_metadata hardcodes cloud='kubernetes' - this would " \
-            "incorrectly use K8s config for SSH clusters if SSH supported custom_metadata"
-
-        # The metadata would have been merged with k8s config (wrong!)
-        # Since SSH doesn't support custom_metadata, this doesn't cause issues today
-        # But if SSH adds support, this test will catch the bug
+        assert custom_metadata_calls[0][1]['cloud'] == 'ssh', \
+            "custom_metadata should use SSH cloud"
 
 
 def test_combine_pod_config_fields_and_metadata_uses_correct_cloud():
     """Test that combine_pod_config_fields_and_metadata uses correct cloud for both parts.
 
     This function calls:
-    1. combine_pod_config_fields (which correctly uses cloud parameter) ✓
-    2. combine_metadata_fields (which hardcodes cloud='kubernetes') ✗
+    1. combine_pod_config_fields
+    2. combine_metadata_fields
 
-    This test verifies part 1 works, and documents that part 2 has hardcoded cloud.
+    This test verifies that both configs are handled properly by their respective clouds.
     """
     from unittest.mock import patch
 
@@ -1925,14 +1905,80 @@ def test_combine_pod_config_fields_and_metadata_uses_correct_cloud():
             c for c in config_calls if c['keys'] == ('custom_metadata',)
         ]
 
-        # pod_config should use 'ssh' (correct!)
+        # pod_config should use 'ssh'
         assert len(pod_config_calls) >= 1
         assert pod_config_calls[0]['cloud'] == 'ssh', \
             "pod_config should use SSH cloud"
 
-        # custom_metadata currently uses 'kubernetes' (documented limitation)
-        # This is okay for now since SSH doesn't support custom_metadata
-        if len(custom_metadata_calls) > 0:
-            assert custom_metadata_calls[0]['cloud'] == 'kubernetes', \
-                "combine_metadata_fields hardcodes cloud='kubernetes' - " \
-                "acceptable since SSH doesn't support custom_metadata"
+        # custom_metadata should use 'ssh'
+        assert len(custom_metadata_calls) >= 1
+        assert custom_metadata_calls[0]['cloud'] == 'ssh', \
+            "custom_metadata should use SSH cloud"
+
+
+@pytest.mark.parametrize('unsorted_pod_names, expected_sorted_pod_names', [
+    ([
+        'test-cluster-worker10', 'test-cluster-worker2', 'test-cluster-head',
+        'test-cluster-worker1', 'test-cluster-worker3'
+    ], [
+        'test-cluster-head', 'test-cluster-worker1', 'test-cluster-worker2',
+        'test-cluster-worker3', 'test-cluster-worker10'
+    ]),
+    ([
+        'test-cluster-worker1', 'test-cluster-worker20', 'test-cluster-head',
+        'test-cluster-worker3', 'test-cluster-worker2'
+    ], [
+        'test-cluster-head', 'test-cluster-worker1', 'test-cluster-worker2',
+        'test-cluster-worker3', 'test-cluster-worker20'
+    ]),
+    ([
+        'test-cluster-worker1', 'test-cluster-worker2', 'test-cluster-head',
+        'test-cluster-worker3', 'test-cluster-worker4'
+    ], [
+        'test-cluster-head', 'test-cluster-worker1', 'test-cluster-worker2',
+        'test-cluster-worker3', 'test-cluster-worker4'
+    ]),
+    ([
+        'test-cluster-head', 'test-cluster-worker1', 'test-cluster-worker2',
+        'test-cluster-worker3', 'test-cluster-worker4'
+    ], [
+        'test-cluster-head', 'test-cluster-worker1', 'test-cluster-worker2',
+        'test-cluster-worker3', 'test-cluster-worker4'
+    ]),
+    ([
+        'my-worker-head', 'my-worker-worker1', 'my-worker-worker2',
+        'my-worker-worker3', 'my-worker-worker4'
+    ], [
+        'my-worker-head', 'my-worker-worker1', 'my-worker-worker2',
+        'my-worker-worker3', 'my-worker-worker4'
+    ]),
+    ([
+        'my-worker-head', 'my-worker-worker1', 'extra-pod', 'my-worker-worker2',
+        'my-worker-worker3', 'my-worker-worker4'
+    ], [
+        'my-worker-head', 'my-worker-worker1', 'my-worker-worker2',
+        'my-worker-worker3', 'my-worker-worker4', 'extra-pod'
+    ]),
+])
+def test_filter_pods_sorts_by_name(unsorted_pod_names,
+                                   expected_sorted_pod_names):
+    """Test that filter_pods returns pods sorted correctly"""
+    mock_pod_list = mock.MagicMock()
+    mock_pod_list.items = []
+    for pod_name in unsorted_pod_names:
+        mock_pod = mock.MagicMock()
+        mock_pod.metadata.name = pod_name
+        mock_pod.metadata.deletion_timestamp = None
+        mock_pod_list.items.append(mock_pod)
+
+    with patch('sky.provision.kubernetes.utils.kubernetes.core_api'
+              ) as mock_core_api:
+        mock_core_api.return_value.list_namespaced_pod.return_value = mock_pod_list
+
+        result = utils.filter_pods(namespace='test-namespace',
+                                   context='test-context',
+                                   tag_filters={'test-label': 'test-value'})
+
+        # Verify the pods are returned in sorted order
+        pod_names = list(result.keys())
+        assert pod_names == expected_sorted_pod_names

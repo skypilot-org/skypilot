@@ -193,7 +193,8 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
                         sky.ManagedJobStatus.STARTING,
                         sky.ManagedJobStatus.RUNNING
                     ],
-                    timeout=60),
+                    timeout=600
+                    if smoke_tests_utils.is_remote_server_test() else 60),
             ]),
             *set_user(
                 user_2,
@@ -207,7 +208,8 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
                             sky.ManagedJobStatus.STARTING,
                             sky.ManagedJobStatus.RUNNING
                         ],
-                        timeout=60),
+                        timeout=600
+                        if smoke_tests_utils.is_remote_server_test() else 60),
                     # Should only cancel user_2's job.
                     'sky jobs cancel -y --all',
                     smoke_tests_utils.
@@ -282,6 +284,11 @@ def test_requests_scheduling(generic_cloud: str):
 
 
 # ---- Test recent request tracking -----
+# We mark this test as no_remote_server since it requires a dedicated API server
+# for the test otherwise we can't make any guarantees about the most recent
+# request. Replace with another option to skip shared server tests when we have
+# one.
+@pytest.mark.no_remote_server
 def test_recent_request_tracking(generic_cloud: str):
     with smoke_tests_utils.override_sky_config():
         # We need to override the sky api endpoint env if --remote-server is
@@ -548,7 +555,7 @@ def test_tail_jobs_logs_blocks_ssh(generic_cloud: str):
 
         # Wait for the job to start.
         def is_job_started(job_id: int):
-            req_id = jobs.queue(refresh=True, job_ids=[job_id])
+            req_id = jobs.queue_v2(refresh=True, job_ids=[job_id])
             job_records = sky.stream_and_get(req_id)[0]
             assert len(job_records) == 1
             return job_records[0]['status'] == sky.ManagedJobStatus.RUNNING

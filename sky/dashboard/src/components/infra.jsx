@@ -84,6 +84,7 @@ export function InfrastructureSection({
   isSSH = false, // To differentiate between SSH and Kubernetes
   actionButton = null, // Optional action button for the header
   contextWorkspaceMap = {}, // Mapping of contexts to workspaces
+  contextErrors = {}, // Mapping of contexts to error messages
 }) {
   // Add defensive check for contexts
   const safeContexts = contexts || [];
@@ -289,15 +290,19 @@ export function InfrastructureSection({
                             ) : (
                               <span
                                 className={
-                                  nodes.length === 0 ? 'text-gray-400' : ''
+                                  nodes.length === 0 && contextErrors[context]
+                                    ? 'text-gray-400'
+                                    : ''
                                 }
                                 title={
-                                  nodes.length === 0
-                                    ? 'Context may be unavailable or timed out'
+                                  nodes.length === 0 && contextErrors[context]
+                                    ? contextErrors[context]
                                     : ''
                                 }
                               >
-                                {nodes.length === 0 ? '0*' : nodes.length}
+                                {nodes.length === 0 && contextErrors[context]
+                                  ? '0*'
+                                  : nodes.length}
                               </span>
                             )}
                           </td>
@@ -1615,6 +1620,7 @@ export function GPUs() {
   const [enabledClouds, setEnabledClouds] = useState(0);
   const [contextStats, setContextStats] = useState({});
   const [contextWorkspaceMap, setContextWorkspaceMap] = useState({});
+  const [contextErrors, setContextErrors] = useState({});
 
   // Workspace-aware infrastructure state
   const [workspaceInfrastructure, setWorkspaceInfrastructure] = useState({});
@@ -1668,6 +1674,7 @@ export function GPUs() {
         setPerNodeGPUs([]);
         setContextStats({});
         setContextWorkspaceMap({});
+        setContextErrors({});
         setAvailableWorkspaces([]);
         setKubeDataLoaded(true);
         setKubeLoading(false);
@@ -1714,6 +1721,7 @@ export function GPUs() {
           perNodeGPUs: fetchedPerNodeGPUs,
           contextStats: fetchedContextStats,
           contextWorkspaceMap: fetchedContextWorkspaceMap,
+          contextErrors: fetchedContextErrors,
         } = infraData;
 
         setWorkspaceInfrastructure(fetchedWorkspaceInfrastructure || {});
@@ -1723,6 +1731,7 @@ export function GPUs() {
         setPerNodeGPUs(fetchedPerNodeGPUs || []);
         setContextStats(fetchedContextStats || {});
         setContextWorkspaceMap(fetchedContextWorkspaceMap || {});
+        setContextErrors(fetchedContextErrors || {});
 
         // Extract available workspaces from the workspace infrastructure data
         const workspaceNames = Object.keys(
@@ -1740,6 +1749,7 @@ export function GPUs() {
         setPerNodeGPUs([]);
         setContextStats({});
         setContextWorkspaceMap({});
+        setContextErrors({});
         setAvailableWorkspaces([]);
         setKubeDataLoaded(true);
         setKubeLoading(false);
@@ -1753,6 +1763,7 @@ export function GPUs() {
       setPerNodeGPUs([]);
       setContextStats({});
       setContextWorkspaceMap({});
+      setContextErrors({});
       setAvailableWorkspaces([]);
       setKubeDataLoaded(true);
       setKubeLoading(false);
@@ -2306,6 +2317,7 @@ export function GPUs() {
         isJobsDataLoading={sshAndKubeJobsDataLoading}
         isSSH={true}
         contextWorkspaceMap={contextWorkspaceMap}
+        contextErrors={contextErrors}
         actionButton={
           // TODO: Add back when SSH Node Pool add operation is more robust
           // <button
@@ -2337,6 +2349,7 @@ export function GPUs() {
         isJobsDataLoading={sshAndKubeJobsDataLoading}
         isSSH={false}
         contextWorkspaceMap={contextWorkspaceMap}
+        contextErrors={contextErrors}
       />
     );
   };

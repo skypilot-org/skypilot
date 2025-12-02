@@ -52,6 +52,42 @@ These load balancers will be automatically terminated when the cluster is delete
 
     To work around this issue, make sure all your ports have services running behind them.
 
+.. note::
+    **EKS Subnet Tagging Requirement**: For EKS clusters, the subnets used by your cluster must be tagged with the appropriate Kubernetes cluster tags for the AWS Load Balancer Controller to create Elastic Load Balancers (ELBs). If your LoadBalancer services are not getting external IPs assigned, ensure your subnets are tagged as follows:
+
+    .. code-block:: bash
+
+        # Replace <CLUSTER_NAME> with your EKS cluster name and <REGION> with your AWS region
+        # Replace <SUBNET_ID> with your subnet IDs (repeat for each subnet)
+        aws ec2 create-tags --region <REGION> \
+          --resources <SUBNET_ID> \
+          --tags Key=kubernetes.io/cluster/<CLUSTER_NAME>,Value=shared \
+                Key=kubernetes.io/role/elb,Value=1
+
+    For example, if your cluster name is ``my-eks-cluster`` in region ``us-east-2`` with subnets ``subnet-abc123`` and ``subnet-def456``:
+
+    .. code-block:: bash
+
+        aws ec2 create-tags --region us-east-2 \
+          --resources subnet-abc123 subnet-def456 \
+          --tags Key=kubernetes.io/cluster/my-eks-cluster,Value=shared \
+                Key=kubernetes.io/role/elb,Value=1
+
+    You can also use this script to automatically tag all subnets for your EKS cluster:
+
+    .. code-block:: bash
+
+        # Get cluster name and region from kubeconfig, then tag subnets
+        CLUSTER_NAME=$(kubectl config view --minify -o jsonpath='{.clusters[0].name}' | sed 's/.*\///')
+        REGION=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' | sed -n 's/.*\.eks\.\([^.]*\)\.amazonaws\.com.*/\1/p')
+        for SUBNET_ID in $(aws eks describe-cluster --name "$CLUSTER_NAME" --region "$REGION" --query 'cluster.resourcesVpcConfig.subnetIds' --output text); do
+          aws ec2 create-tags --region "$REGION" --resources "$SUBNET_ID" \
+            --tags "Key=kubernetes.io/cluster/$CLUSTER_NAME,Value=shared" \
+                   "Key=kubernetes.io/role/elb,Value=1"
+        done
+
+    This is required for both regular SkyPilot clusters and SkyServe services that use LoadBalancer mode on EKS.
+
 Internal load balancers
 ^^^^^^^^^^^^^^^^^^^^^^^
 

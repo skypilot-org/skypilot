@@ -88,8 +88,7 @@ def _insert_job_info(engine,
         return job_id
 
 
-@pytest.mark.asyncio
-async def test_get_task_logs_to_clean_async_basic(_mock_managed_jobs_db_conn):
+def test_get_task_logs_to_clean_basic(_mock_managed_jobs_db_conn):
     now = time.time()
     retention = 60
 
@@ -156,7 +155,7 @@ async def test_get_task_logs_to_clean_async_basic(_mock_managed_jobs_db_conn):
 
     state.scheduler_set_done(job_id)
 
-    res = await state.get_task_logs_to_clean_async(retention, batch_size=10)
+    res = state.get_task_logs_to_clean(retention, batch_size=10)
     # Only task 0 should be returned
     assert len(res) == 1
     assert res[0]['job_id'] == job_id
@@ -183,12 +182,11 @@ async def test_get_task_logs_to_clean_async_basic(_mock_managed_jobs_db_conn):
         logs_cleaned_at=None,
     )
 
-    res2 = await state.get_task_logs_to_clean_async(retention, batch_size=2)
+    res2 = state.get_task_logs_to_clean(retention, batch_size=2)
     assert len(res2) == 2  # limited by batch size
 
 
-@pytest.mark.asyncio
-async def test_set_task_logs_cleaned_async(_mock_managed_jobs_db_conn):
+def test_set_task_logs_cleaned(_mock_managed_jobs_db_conn):
     now = time.time()
     retention = 60
 
@@ -212,11 +210,11 @@ async def test_set_task_logs_cleaned_async(_mock_managed_jobs_db_conn):
 
     state.scheduler_set_done(job_id)
 
-    res = await state.get_task_logs_to_clean_async(retention, batch_size=10)
+    res = state.get_task_logs_to_clean(retention, batch_size=10)
     assert len(res) == 1
 
     ts = now
-    await state.set_task_logs_cleaned_async([(job_id, 0)], ts)
+    state.set_task_logs_cleaned([(job_id, 0)], ts)
 
     # Verify updated
     with orm.Session(state._SQLALCHEMY_ENGINE) as session:
@@ -229,13 +227,11 @@ async def test_set_task_logs_cleaned_async(_mock_managed_jobs_db_conn):
         assert row[0] == ts
 
     # Should no longer be returned
-    res2 = await state.get_task_logs_to_clean_async(retention, batch_size=10)
+    res2 = state.get_task_logs_to_clean(retention, batch_size=10)
     assert res2 == []
 
 
-@pytest.mark.asyncio
-async def test_get_controller_logs_to_clean_async_basic(
-        _mock_managed_jobs_db_conn):
+def test_get_controller_logs_to_clean_basic(_mock_managed_jobs_db_conn):
     now = time.time()
     retention = 60
 
@@ -304,8 +300,7 @@ async def test_get_controller_logs_to_clean_async_basic(
     )
     state.scheduler_set_done(job_d)
 
-    res = await state.get_controller_logs_to_clean_async(retention,
-                                                         batch_size=10)
+    res = state.get_controller_logs_to_clean(retention, batch_size=10)
     job_ids = {r['job_id'] for r in res}
     assert job_ids == {job_a}
 
@@ -335,19 +330,17 @@ async def test_get_controller_logs_to_clean_async_basic(
     )
     state.scheduler_set_done(job_f)
 
-    res2 = await state.get_controller_logs_to_clean_async(retention,
-                                                          batch_size=2)
+    res2 = state.get_controller_logs_to_clean(retention, batch_size=2)
     assert len(res2) == 2
 
 
-@pytest.mark.asyncio
-async def test_set_controller_logs_cleaned_async(_mock_managed_jobs_db_conn):
+def test_set_controller_logs_cleaned(_mock_managed_jobs_db_conn):
     now = time.time()
 
     job_id = _insert_job_info(state._SQLALCHEMY_ENGINE,
                               controller_logs_cleaned_at=None)
 
-    await state.set_controller_logs_cleaned_async([job_id], now)
+    state.set_controller_logs_cleaned([job_id], now)
 
     with orm.Session(state._SQLALCHEMY_ENGINE) as session:
         row = session.execute(

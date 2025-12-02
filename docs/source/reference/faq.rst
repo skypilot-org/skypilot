@@ -151,33 +151,33 @@ By default, SkyPilot supports most global regions on AWS and only supports the U
 
 .. code-block:: bash
 
-  version=$(python -c 'import sky; print(sky.clouds.service_catalog.constants.CATALOG_SCHEMA_VERSION)')
+  version=$(python -c 'import sky; print( sky.skylet.constants.CATALOG_SCHEMA_VERSION)')
   mkdir -p ~/.sky/catalogs/${version}
   cd ~/.sky/catalogs/${version}
   # GCP
   pip install lxml
   # Fetch U.S. regions for GCP
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp
+  python -m sky.catalog.data_fetchers.fetch_gcp
   # Fetch the specified zones for GCP
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp --zones northamerica-northeast1-a us-east1-b us-east1-c
+  python -m sky.catalog.data_fetchers.fetch_gcp --zones northamerica-northeast1-a us-east1-b us-east1-c
   # Fetch U.S. zones for GCP, excluding the specified zones
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp --exclude us-east1-a us-east1-b
+  python -m sky.catalog.data_fetchers.fetch_gcp --exclude us-east1-a us-east1-b
   # Fetch all regions for GCP
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp --all-regions
+  python -m sky.catalog.data_fetchers.fetch_gcp --all-regions
   # Run in single-threaded mode. This is useful when multiple processes don't work well with the GCP client due to SSL issues.
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp --single-threaded
+  python -m sky.catalog.data_fetchers.fetch_gcp --single-threaded
 
   # Azure
   # Fetch U.S. regions for Azure
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_azure
+  python -m sky.catalog.data_fetchers.fetch_azure
   # Fetch all regions for Azure
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_azure --all-regions
+  python -m sky.catalog.data_fetchers.fetch_azure --all-regions
   # Run in single-threaded mode. This is useful when multiple processes don't work well with the Azure client due to SSL issues.
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_azure --single-threaded
+  python -m sky.catalog.data_fetchers.fetch_azure --single-threaded
   # Fetch the specified regions for Azure
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_azure --regions japaneast australiaeast uksouth
+  python -m sky.catalog.data_fetchers.fetch_azure --regions japaneast australiaeast uksouth
   # Fetch U.S. regions for Azure, excluding the specified regions
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_azure --exclude centralus eastus
+  python -m sky.catalog.data_fetchers.fetch_azure --exclude centralus eastus
 
 To make your managed spot jobs potentially use all global regions, please log into the spot controller with ``ssh sky-spot-controller-<hash>``
 (the full name can be found in ``sky status``), and run the commands above.
@@ -193,7 +193,7 @@ Check out your schema version by running the following command:
 
 .. code-block:: bash
 
-  python -c "from sky.clouds import service_catalog; print(service_catalog.CATALOG_SCHEMA_VERSION)"
+  python -c "from sky.skylet import constants; print(constants.CATALOG_SCHEMA_VERSION)"
 
 You can customize the catalog files to your needs.
 For example, if you have access to special regions of GCP, add the data to ``~/.sky/catalogs/<schema-version>/gcp.csv``.

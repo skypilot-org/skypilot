@@ -151,6 +151,7 @@ setup_commands:
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     {{ conda_installation_commands }}
     {{ ray_skypilot_installation_commands }}
+    {{ copy_skypilot_templates_commands }}
   {%- if env_vars is defined %}
     {%- for env_var, env_value in env_vars.items() %}
     echo '{{env_var}}={{env_value}}' | sudo tee -a /etc/environment;

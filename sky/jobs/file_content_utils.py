@@ -10,6 +10,7 @@ import os
 from typing import Optional
 
 from sky import sky_logging
+from sky import skypilot_config
 from sky.jobs import state as managed_job_state
 
 logger = sky_logging.init_logger(__name__)
@@ -78,3 +79,50 @@ def get_job_env_content(job_id: int) -> Optional[str]:
 
     # Environment file is optional, so don't warn if not found
     return None
+
+
+def restore_job_config_file(job_id: int) -> None:
+    """Restore config file from database if SKYPILOT_CONFIG is set.
+
+    This reads the config file content from the database and writes it to the
+    path specified in the SKYPILOT_CONFIG environment variable. This ensures
+    that jobs can run on any controller, even if the original config file
+    doesn't exist on disk.
+
+    For backward compatibility with jobs submitted before config persistence was
+    implemented, we fall back to using the file if it already exists on disk.
+
+    Args:
+        job_id: The job ID
+    """
+    config_path = os.environ.get(skypilot_config.ENV_VAR_SKYPILOT_CONFIG)
+    if not config_path:
+        # No config file for this job
+        return
+
+    file_info = managed_job_state.get_job_file_contents(job_id)
+    config_content = file_info['config_file_content']
+
+    # Expand ~ in config path
+    config_path_expanded = os.path.expanduser(config_path)
+
+    if config_content is not None:
+        # Config content is in database - restore it
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(config_path_expanded), exist_ok=True)
+        # Write the config file
+        with open(config_path_expanded, 'w', encoding='utf-8') as f:
+            f.write(config_content)
+        logger.info(f'Restored config file for job {job_id} to '
+                    f'{config_path_expanded} ({len(config_content)} bytes)')
+    elif os.path.exists(config_path_expanded):
+        # Backward compatibility: config not in DB but file exists on disk
+        # This can happen for jobs submitted before config persistence
+        logger.debug(f'Config file for job {job_id} not in database, but '
+                     f'found on disk at {config_path_expanded}')
+    else:
+        # Config should exist but doesn't - warn about it
+        logger.warning(
+            f'SKYPILOT_CONFIG is set to {config_path} but config content not '
+            f'found in database or on disk for job {job_id}. The job may fail '
+            f'if it relies on custom config settings.')

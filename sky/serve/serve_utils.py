@@ -10,12 +10,11 @@ import pickle
 import re
 import shlex
 import shutil
-import threading
 import time
 import traceback
 import typing
-from typing import (Any, Callable, DefaultDict, Deque, Dict, Generic, Iterator,
-                    List, Optional, TextIO, Type, TypeVar, Union)
+from typing import (Any, Callable, DefaultDict, Deque, Dict, Iterator, List,
+                    Optional, TextIO, Type, Union)
 import uuid
 
 import colorama
@@ -158,50 +157,6 @@ _SIGNAL_TO_ERROR = {
     UserSignal.TERMINATE: exceptions.ServeUserTerminatedError,
 }
 
-# pylint: disable=invalid-name
-KeyType = TypeVar('KeyType')
-ValueType = TypeVar('ValueType')
-
-
-# Google style guide: Do not rely on the atomicity of built-in types.
-# Our launch and down process pool will be used by multiple threads,
-# therefore we need to use a thread-safe dict.
-# see https://google.github.io/styleguide/pyguide.html#218-threading
-class ThreadSafeDict(Generic[KeyType, ValueType]):
-    """A thread-safe dict."""
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self._dict: Dict[KeyType, ValueType] = dict(*args, **kwargs)
-        self._lock = threading.Lock()
-
-    def __getitem__(self, key: KeyType) -> ValueType:
-        with self._lock:
-            return self._dict.__getitem__(key)
-
-    def __setitem__(self, key: KeyType, value: ValueType) -> None:
-        with self._lock:
-            return self._dict.__setitem__(key, value)
-
-    def __delitem__(self, key: KeyType) -> None:
-        with self._lock:
-            return self._dict.__delitem__(key)
-
-    def __len__(self) -> int:
-        with self._lock:
-            return self._dict.__len__()
-
-    def __contains__(self, key: KeyType) -> bool:
-        with self._lock:
-            return self._dict.__contains__(key)
-
-    def items(self):
-        with self._lock:
-            return self._dict.items()
-
-    def values(self):
-        with self._lock:
-            return self._dict.values()
-
 
 class RequestsAggregator:
     """Base class for request aggregator."""
@@ -263,25 +218,23 @@ def _validate_consolidation_mode_config(current_is_consolidation_mode: bool,
     if current_is_consolidation_mode:
         controller_cn = controller.cluster_name
         if global_user_state.cluster_with_name_exists(controller_cn):
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.InconsistentConsolidationModeError(
-                    f'{colorama.Fore.RED}Consolidation mode for '
-                    f'{controller.controller_type} is enabled, but the '
-                    f'controller cluster {controller_cn} is still running. '
-                    'Please terminate the controller cluster first.'
-                    f'{colorama.Style.RESET_ALL}')
+            logger.warning(
+                f'{colorama.Fore.RED}Consolidation mode for '
+                f'{controller.controller_type} is enabled, but the controller '
+                f'cluster {controller_cn} is still running. Please terminate '
+                'the controller cluster first.'
+                f'{colorama.Style.RESET_ALL}')
     else:
         noun = 'pool' if pool else 'service'
         all_services = [
             svc for svc in serve_state.get_services() if svc['pool'] == pool
         ]
         if all_services:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.InconsistentConsolidationModeError(
-                    f'{colorama.Fore.RED}Consolidation mode for '
-                    f'{controller.controller_type} is disabled, but there are '
-                    f'still {len(all_services)} {noun}s running. Please '
-                    f'terminate those {noun}s first.{colorama.Style.RESET_ALL}')
+            logger.warning(
+                f'{colorama.Fore.RED}Consolidation mode for '
+                f'{controller.controller_type} is disabled, but there are '
+                f'still {len(all_services)} {noun}s running. Please terminate '
+                f'those {noun}s first.{colorama.Style.RESET_ALL}')
 
 
 @annotations.lru_cache(scope='request', maxsize=1)
@@ -291,14 +244,13 @@ def is_consolidation_mode(pool: bool = False) -> bool:
     consolidation_mode = skypilot_config.get_nested(
         (controller.controller_type, 'controller', 'consolidation_mode'),
         default_value=False)
-    # We should only do this check on API server, as the controller will not
-    # have related config and will always seemingly disabled for consolidation
-    # mode. Check #6611 for more details.
-    if (os.environ.get(skylet_constants.OVERRIDE_CONSOLIDATION_MODE) is not None
-            and controller.controller_type == 'jobs'):
+    if os.environ.get(skylet_constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
         # if we are in the job controller, we must always be in consolidation
         # mode.
         return True
+    # We should only do this check on API server, as the controller will not
+    # have related config and will always seemingly disabled for consolidation
+    # mode. Check #6611 for more details.
     if os.environ.get(skylet_constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         _validate_consolidation_mode_config(consolidation_mode, pool)
     return consolidation_mode
@@ -402,7 +354,7 @@ def validate_service_task(task: 'sky.Task', pool: bool) -> None:
                           if task.service.dynamic_ondemand_fallback else 'spot')
     for resource in list(task.resources):
         if resource.job_recovery is not None:
-            sys_name = 'SkyServe' if not pool else 'Cluster Pool'
+            sys_name = 'SkyServe' if not pool else 'Pool'
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'job_recovery is disabled for {sys_name}. '
                                  f'{sys_name} will replenish preempted spot '
@@ -421,7 +373,7 @@ def validate_service_task(task: 'sky.Task', pool: bool) -> None:
         if len(accelerators) > 1:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Heterogeneous clusters are not supported for '
-                                 'cluster pools please specify one accelerator '
+                                 'pools please specify one accelerator '
                                  'for all workers.')
 
     # Try to create a spot placer from the task yaml. Check if the task yaml
@@ -468,7 +420,7 @@ def validate_service_task(task: 'sky.Task', pool: bool) -> None:
             if (task.service.ports is not None or
                     requested_resources.ports is not None):
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError('Cannot specify ports in a cluster pool.')
+                    raise ValueError('Cannot specify ports in a pool.')
 
 
 def generate_service_name(pool: bool = False):
@@ -696,6 +648,18 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
     return message
 
 
+def get_yaml_content(service_name: str, version: int) -> str:
+    yaml_content = serve_state.get_yaml_content(service_name, version)
+    if yaml_content is not None:
+        return yaml_content
+    # Backward compatibility for old service records that
+    # does not dump the yaml content to version database.
+    # TODO(tian): Remove this after 2 minor releases, i.e. 0.13.0.
+    latest_yaml_path = generate_task_yaml_file_name(service_name, version)
+    with open(latest_yaml_path, 'r', encoding='utf-8') as f:
+        return f.read()
+
+
 def _get_service_status(
         service_name: str,
         pool: bool,
@@ -718,21 +682,30 @@ def _get_service_status(
 
     record['pool_yaml'] = ''
     if record['pool']:
-        latest_yaml_path = generate_task_yaml_file_name(service_name,
-                                                        record['version'])
-        raw_yaml_config = yaml_utils.read_yaml(latest_yaml_path)
-        original_config = raw_yaml_config.get('_user_specified_yaml')
-        if original_config is None:
-            # Fall back to old display format.
-            original_config = raw_yaml_config
-            original_config.pop('run', None)
-            svc: Dict[str, Any] = original_config.pop('service')
-            if svc is not None:
-                svc.pop('pool', None)  # Remove pool from service config
-                original_config['pool'] = svc  # Add pool to root config
+        version = record['version']
+        try:
+            yaml_content = get_yaml_content(service_name, version)
+            raw_yaml_config = yaml_utils.read_yaml_str(yaml_content)
+        except Exception as e:  # pylint: disable=broad-except
+            # If this is a consolidation mode running without an PVC, the file
+            # might lost after an API server update (restart). In such case, we
+            # don't want it to crash the command. Fall back to an empty string.
+            logger.error(f'Failed to read YAML for service {service_name} '
+                         f'with version {version}: {e}')
+            record['pool_yaml'] = ''
         else:
-            original_config = yaml_utils.safe_load(original_config)
-        record['pool_yaml'] = yaml_utils.dump_yaml_str(original_config)
+            original_config = raw_yaml_config.get('_user_specified_yaml')
+            if original_config is None:
+                # Fall back to old display format.
+                original_config = raw_yaml_config
+                original_config.pop('run', None)
+                svc: Dict[str, Any] = original_config.pop('service')
+                if svc is not None:
+                    svc.pop('pool', None)  # Remove pool from service config
+                    original_config['pool'] = svc  # Add pool to root config
+            else:
+                original_config = yaml_utils.safe_load(original_config)
+            record['pool_yaml'] = yaml_utils.dump_yaml_str(original_config)
 
     record['target_num_replicas'] = 0
     try:
@@ -856,7 +829,7 @@ def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
         logger.error(f'Service {service_name!r} does not exist.')
         return None
     if not service_status['pool']:
-        logger.error(f'Service {service_name!r} is not a cluster pool.')
+        logger.error(f'Service {service_name!r} is not a pool.')
         return None
     with filelock.FileLock(get_service_filelock_path(service_name)):
         logger.debug(f'Get next cluster name for pool {service_name!r}')
@@ -1142,9 +1115,11 @@ def get_latest_version_with_min_replicas(
     return active_versions[-1] if active_versions else None
 
 
-def _process_line(line: str,
-                  cluster_name: str,
-                  stop_on_eof: bool = False) -> Iterator[str]:
+def _process_line(
+        line: str,
+        cluster_name: str,
+        stop_on_eof: bool = False,
+        streamed_provision_log_paths: Optional[set] = None) -> Iterator[str]:
     # The line might be directing users to view logs, like
     # `✓ Cluster launched: new-http.  View logs at: *.log`
     # We should tail the detailed logs for user.
@@ -1159,6 +1134,20 @@ def _process_line(line: str,
     log_prompt = re.match(_SKYPILOT_LOG_PATTERN, line)
 
     def _stream_provision_path(p: pathlib.Path) -> Iterator[str]:
+        # Check if this provision log has already been streamed to avoid
+        # duplicate expansion. When a Kubernetes cluster needs to pull a Docker
+        # image, rich spinner updates can produce hundreds of lines matching
+        # _SKYPILOT_PROVISION_LOG_CMD_PATTERN (e.g., "Launching (1 pod(s)
+        # pending due to Pulling)... View logs: sky logs --provision ...").
+        # Without this check, the same provision log would be expanded hundreds
+        # of times, creating huge log files (30M+) and making users think the
+        # system is stuck in an infinite loop.
+        if streamed_provision_log_paths is not None:
+            resolved_path = str(p.resolve())
+            if resolved_path in streamed_provision_log_paths:
+                return
+            streamed_provision_log_paths.add(resolved_path)
+
         try:
             with open(p, 'r', newline='', encoding='utf-8') as f:
                 # Exit if >10s without new content to avoid hanging when INIT
@@ -1230,9 +1219,14 @@ def _follow_logs_with_provision_expanding(
     Yields:
         Log lines, including expanded content from referenced provision logs.
     """
+    streamed_provision_log_paths: set = set()
 
     def process_line(line: str) -> Iterator[str]:
-        yield from _process_line(line, cluster_name, stop_on_eof=stop_on_eof)
+        yield from _process_line(
+            line,
+            cluster_name,
+            stop_on_eof=stop_on_eof,
+            streamed_provision_log_paths=streamed_provision_log_paths)
 
     return log_utils.follow_logs(file,
                                  should_stop=should_stop,
@@ -1258,11 +1252,14 @@ def _capped_follow_logs_with_provision_expanding(
         Log lines, including expanded content from referenced provision logs.
     """
     all_lines: Deque[str] = collections.deque(maxlen=line_cap)
+    streamed_provision_log_paths: set = set()
 
     for line in log_list:
-        for processed in _process_line(line=line,
-                                       cluster_name=cluster_name,
-                                       stop_on_eof=False):
+        for processed in _process_line(
+                line=line,
+                cluster_name=cluster_name,
+                stop_on_eof=False,
+                streamed_provision_log_paths=streamed_provision_log_paths):
             all_lines.append(processed)
 
     yield from all_lines

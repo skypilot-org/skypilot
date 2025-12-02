@@ -14,7 +14,8 @@ import shutil
 import subprocess
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import (Any, Callable, Dict, List, Literal, Optional, Set, Tuple,
+                    Union)
 
 import ijson
 
@@ -109,8 +110,9 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
             return {
                 'NCCL_SOCKET_IFNAME': 'eth0',
                 'NCCL_IB_HCA': 'ibp',
-                'UCX_NET_DEVICES': ('ibp0:1,ibp1:1,ibp2:1,ibp3:1,'
-                                    'ibp4:1,ibp5:1,ibp6:1,ibp7:1')
+                # Restrict UCX to TCP to avoid unneccsary errors. NCCL doesn't use UCX
+                'UCX_TLS': 'tcp',
+                'UCX_NET_DEVICES': 'eth0',
             }
         else:
             # GCP clusters and generic clusters - environment variables are
@@ -1883,11 +1885,17 @@ class PodValidator:
 
         if isinstance(klass, str):
             if klass.startswith('list['):
-                sub_kls = re.match(r'list\[(.*)\]', klass).group(1)
+                match = re.match(r'list\[(.*)\]', klass)
+                if match is None:
+                    raise ValueError(f'Invalid list type format: {klass}')
+                sub_kls = match.group(1)
                 return [cls.__validate(sub_data, sub_kls) for sub_data in data]
 
             if klass.startswith('dict('):
-                sub_kls = re.match(r'dict\(([^,]*), (.*)\)', klass).group(2)
+                match = re.match(r'dict\(([^,]*), (.*)\)', klass)
+                if match is None:
+                    raise ValueError(f'Invalid dict type format: {klass}')
+                sub_kls = match.group(2)
                 return {k: cls.__validate(v, sub_kls) for k, v in data.items()}
 
             # convert str to class
@@ -2332,16 +2340,9 @@ class KubernetesInstanceType:
     @staticmethod
     def is_valid_instance_type(name: str) -> bool:
         """Returns whether the given name is a valid instance type."""
-        # Before https://github.com/skypilot-org/skypilot/pull/4756,
-        # the accelerators are appended with format "--{a}{type}",
-        # e.g. "4CPU--16GB--1V100".
-        # Check both patterns to keep backward compatibility.
-        # TODO(romilb): Backward compatibility, remove after 0.11.0.
-        prev_pattern = re.compile(
-            r'^(\d+(\.\d+)?CPU--\d+(\.\d+)?GB)(--\d+\S+)?$')
         pattern = re.compile(
             r'^(\d+(\.\d+)?CPU--\d+(\.\d+)?GB)(--[\w\d-]+:\d+)?$')
-        return bool(pattern.match(name)) or bool(prev_pattern.match(name))
+        return bool(pattern.match(name))
 
     @classmethod
     def _parse_instance_type(
@@ -2358,29 +2359,11 @@ class KubernetesInstanceType:
             r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_type>[\w\d-]+):(?P<accelerator_count>\d+))?$'  # pylint: disable=line-too-long
         )
         match = pattern.match(name)
-        # TODO(romilb): Backward compatibility, remove after 0.11.0.
-        prev_pattern = re.compile(
-            r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_count>\d+)(?P<accelerator_type>\S+))?$'  # pylint: disable=line-too-long
-        )
-        prev_match = prev_pattern.match(name)
         if match:
             cpus = float(match.group('cpus'))
             memory = float(match.group('memory'))
             accelerator_count = match.group('accelerator_count')
             accelerator_type = match.group('accelerator_type')
-            if accelerator_count:
-                accelerator_count = int(accelerator_count)
-                accelerator_type = str(accelerator_type)
-            else:
-                accelerator_count = None
-                accelerator_type = None
-            return cpus, memory, accelerator_count, accelerator_type
-        # TODO(romilb): Backward compatibility, remove after 0.11.0.
-        elif prev_match:
-            cpus = float(prev_match.group('cpus'))
-            memory = float(prev_match.group('memory'))
-            accelerator_count = prev_match.group('accelerator_count')
-            accelerator_type = prev_match.group('accelerator_type')
             if accelerator_count:
                 accelerator_count = int(accelerator_count)
                 accelerator_type = str(accelerator_type)
@@ -2721,9 +2704,11 @@ def combine_metadata_fields(cluster_yaml_obj: Dict[str, Any],
     Obeys the same add or update semantics as combine_pod_config_fields().
     """
     merged_cluster_yaml_obj = copy.deepcopy(cluster_yaml_obj)
+    context, cloud_str = get_cleaned_context_and_cloud_str(context)
+
     # Get custom_metadata from global config
     custom_metadata = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
+        cloud=cloud_str,
         region=context,
         keys=('custom_metadata',),
         default_value={})
@@ -2731,7 +2716,7 @@ def combine_metadata_fields(cluster_yaml_obj: Dict[str, Any],
     # Get custom_metadata from task-level config overrides
     override_custom_metadata = config_utils.get_cloud_config_value_from_dict(
         dict_config=cluster_config_overrides,
-        cloud='kubernetes',
+        cloud=cloud_str,
         region=context,
         keys=('custom_metadata',),
         default_value={})
@@ -2788,9 +2773,11 @@ def merge_custom_metadata(
 
     Merge is done in-place, so return is not required
     """
+    context, cloud_str = get_cleaned_context_and_cloud_str(context)
+
     # Get custom_metadata from global config
     custom_metadata = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
+        cloud=cloud_str,
         region=context,
         keys=('custom_metadata',),
         default_value={})
@@ -2799,7 +2786,7 @@ def merge_custom_metadata(
     if cluster_config_overrides is not None:
         override_custom_metadata = config_utils.get_cloud_config_value_from_dict(
             dict_config=cluster_config_overrides,
-            cloud='kubernetes',
+            cloud=cloud_str,
             region=context,
             keys=('custom_metadata',),
             default_value={})
@@ -3150,7 +3137,11 @@ def filter_pods(namespace: str,
                 context: Optional[str],
                 tag_filters: Dict[str, str],
                 status_filters: Optional[List[str]] = None) -> Dict[str, Any]:
-    """Filters pods by tags and status."""
+    """Filters pods by tags and status.
+
+    Returned dict is sorted by name, with workers sorted by their numeric suffix.
+    This ensures consistent ordering for SSH configuration and other operations.
+    """
     non_included_pod_statuses = POD_STATUSES.copy()
 
     field_selector = ''
@@ -3168,7 +3159,32 @@ def filter_pods(namespace: str,
     pods = [
         pod for pod in pod_list.items if pod.metadata.deletion_timestamp is None
     ]
-    return {pod.metadata.name: pod for pod in pods}
+
+    # Sort pods by name, with workers sorted by their numeric suffix.
+    # This ensures consistent ordering (e.g., cluster-head, cluster-worker1,
+    # cluster-worker2, cluster-worker3, ...) even when Kubernetes API
+    # returns them in arbitrary order. This works even if there were
+    # somehow pod names other than head/worker ones, and those end up at
+    # the end of the list.
+    def get_pod_sort_key(
+        pod: V1Pod
+    ) -> Union[Tuple[Literal[0], str], Tuple[Literal[1], int], Tuple[Literal[2],
+                                                                     str]]:
+        name = pod.metadata.name
+        name_suffix = name.split('-')[-1]
+        if name_suffix == 'head':
+            return (0, name)
+        elif name_suffix.startswith('worker'):
+            try:
+                return (1, int(name_suffix.split('worker')[-1]))
+            except (ValueError, IndexError):
+                return (2, name)
+        else:
+            return (2, name)
+
+    sorted_pods = sorted(pods, key=get_pod_sort_key)
+
+    return {pod.metadata.name: pod for pod in sorted_pods}
 
 
 def _remove_pod_annotation(pod: Any,
@@ -3728,3 +3744,13 @@ def should_exclude_pod_from_gpu_allocation(pod) -> bool:
         return True
 
     return False
+
+
+def get_cleaned_context_and_cloud_str(
+        context: Optional[str]) -> Tuple[Optional[str], str]:
+    """Return the cleaned context and relevant cloud string from a context."""
+    cloud_str = 'kubernetes'
+    if context is not None and context.startswith('ssh-'):
+        cloud_str = 'ssh'
+        context = context[len('ssh-'):]
+    return context, cloud_str

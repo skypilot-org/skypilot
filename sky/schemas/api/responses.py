@@ -191,6 +191,7 @@ class ManagedJobRecord(ResponseBaseModel):
     entrypoint: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
     controller_pid: Optional[int] = None
+    controller_pid_started_at: Optional[float] = None
     dag_yaml_path: Optional[str] = None
     env_file_path: Optional[str] = None
     last_recovered_at: Optional[float] = None
@@ -223,3 +224,4 @@ class VolumeRecord(ResponseBaseModel):
     status: Optional[str] = None
     usedby_pods: List[str]
     usedby_clusters: List[str]
+    is_ephemeral: bool = False

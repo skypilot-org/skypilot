@@ -745,6 +745,7 @@ def terminate_instances(
 
         # Make this multithreaded: modify all instances' SGs in parallel.
         def modify_instance_sg(instance):
+            assert default_sg is not None  # Type narrowing for mypy
             instance.modify_attribute(Groups=[default_sg.id])
             logger.debug(f'Instance {instance.id} modified to use default SG:'
                          f'{default_sg.id} for quick deletion.')

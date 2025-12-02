@@ -2,6 +2,7 @@ import { CLOUDS_LIST, COMMON_GPUS } from '@/data/connectors/constants';
 
 // Importing from the same directory
 import { apiClient } from '@/data/connectors/client';
+import { getErrorMessageFromResponse } from '@/data/utils';
 
 export async function getCloudInfrastructure(forceRefresh = false) {
   const dashboardCache = (await import('@/lib/cache')).default;
@@ -54,7 +55,7 @@ export async function getCloudInfrastructure(forceRefresh = false) {
             `/api/get?request_id=${checkId}`
           );
           if (!checkResult.ok) {
-            const msg = `Failed to get sky check result with status ${checkResult.status}`;
+            const msg = `Failed to get sky check result with status ${checkResult.status}, error: ${checkResult.statusText}`;
             throw new Error(msg);
           }
           const checkData = await checkResult.json();
@@ -206,6 +207,7 @@ export async function getWorkspaceInfrastructure() {
         perNodeGPUs: [],
         contextStats: {},
         contextWorkspaceMap: {},
+        contextErrors: {},
       };
     }
 
@@ -324,6 +326,7 @@ export async function getWorkspaceInfrastructure() {
       allGPUs: [],
       perContextGPUs: [],
       perNodeGPUs: [],
+      contextErrors: {},
     };
     try {
       gpuData = await getKubernetesGPUsFromContexts(validContexts);
@@ -339,6 +342,7 @@ export async function getWorkspaceInfrastructure() {
       perNodeGPUs: gpuData.perNodeGPUs || [],
       contextStats: contextStats,
       contextWorkspaceMap: contextWorkspaceMap,
+      contextErrors: gpuData.contextErrors || {},
     };
 
     console.log('[DEBUG] Final result:', finalResult);
@@ -361,21 +365,44 @@ async function getKubernetesGPUsFromContexts(contextNames) {
         allGPUs: [],
         perContextGPUs: [],
         perNodeGPUs: [],
+        contextErrors: {},
       };
     }
 
     const allGPUsSummary = {};
     const perContextGPUsData = {};
     const perNodeGPUs_dict = {};
+    const contextErrors = {};
 
     // Get all of the node info for all contexts in parallel and put them
     // in a dictionary keyed by context name.
-    const contextNodeInfoList = await Promise.all(
+    // Use Promise.allSettled to handle partial failures gracefully
+    const contextNodeInfoResults = await Promise.allSettled(
       contextNames.map((context) => getKubernetesPerNodeGPUs(context))
     );
     const contextToNodeInfo = {};
     for (let i = 0; i < contextNames.length; i++) {
-      contextToNodeInfo[contextNames[i]] = contextNodeInfoList[i];
+      const result = contextNodeInfoResults[i];
+      if (result.status === 'fulfilled') {
+        contextToNodeInfo[contextNames[i]] = result.value;
+        console.log(
+          '[CONTEXT_DEBUG] Context node info result:',
+          contextNames[i],
+          result.value
+        );
+      } else {
+        // Log the error but continue with other contexts
+        const errorMessage =
+          result.reason?.message ||
+          (typeof result.reason === 'string' && result.reason) ||
+          'Context may be unavailable or timed out';
+        console.warn(
+          `Failed to get node info for context ${contextNames[i]}:`,
+          errorMessage
+        );
+        contextToNodeInfo[contextNames[i]] = {};
+        contextErrors[contextNames[i]] = errorMessage;
+      }
     }
 
     // Populate the gpuToData map for each context.
@@ -392,7 +419,7 @@ async function getKubernetesGPUsFromContexts(contextNames) {
             continue;
           }
 
-          const gpuName = nodeData['accelerator_type'];
+          const gpuName = nodeData['accelerator_type'] || '-';
           const totalCount = nodeData['total']?.['accelerator_count'] || 0;
           const freeCount = nodeData['free']?.['accelerators_available'] || 0;
 
@@ -492,23 +519,28 @@ async function getKubernetesGPUsFromContexts(contextNames) {
       }
     }
 
+    console.log('[CONTEXT_DEBUG] All GPUs summary:', allGPUsSummary);
+    console.log('[CONTEXT_DEBUG] Per context GPUs data:', perContextGPUsData);
+    console.log('[CONTEXT_DEBUG] Per node GPUs data:', perNodeGPUs_dict);
+    console.log('[CONTEXT_DEBUG] Context errors:', contextErrors);
     return {
       allGPUs: Object.values(allGPUsSummary).sort((a, b) =>
-        a.gpu_name.localeCompare(b.gpu_name)
+        (a.gpu_name || '').localeCompare(b.gpu_name || '')
       ),
       perContextGPUs: Object.values(perContextGPUsData)
         .flat()
         .sort(
           (a, b) =>
-            a.context.localeCompare(b.context) ||
-            a.gpu_name.localeCompare(b.gpu_name)
+            (a.context || '').localeCompare(b.context || '') ||
+            (a.gpu_name || '').localeCompare(b.gpu_name || '')
         ),
       perNodeGPUs: Object.values(perNodeGPUs_dict).sort(
         (a, b) =>
-          a.context.localeCompare(b.context) ||
-          a.node_name.localeCompare(b.node_name) ||
-          a.gpu_name.localeCompare(b.gpu_name)
+          (a.context || '').localeCompare(b.context || '') ||
+          (a.node_name || '').localeCompare(b.node_name || '') ||
+          (a.gpu_name || '').localeCompare(b.gpu_name || '')
       ),
+      contextErrors: contextErrors,
     };
   } catch (error) {
     console.error('[infra.jsx] Error in getKubernetesGPUsFromContexts:', error);
@@ -522,7 +554,7 @@ async function getKubernetesPerNodeGPUs(context) {
       context: context,
     });
     if (!response.ok) {
-      const msg = `Failed to get kubernetes node info with status ${response.status}`;
+      const msg = `Failed to get kubernetes node info for context ${context} with status ${response.status}, error: ${response.statusText}`;
       throw new Error(msg);
     }
     const id =
@@ -533,24 +565,9 @@ async function getKubernetesPerNodeGPUs(context) {
       throw new Error(msg);
     }
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
-    if (fetchedData.status === 500) {
-      try {
-        const data = await fetchedData.json();
-        if (data.detail && data.detail.error) {
-          try {
-            const error = JSON.parse(data.detail.error);
-            const msg = `Context ${context} unavailable: ${error.message}`;
-            throw new Error(msg);
-          } catch (jsonError) {
-            console.error('Error parsing JSON:', jsonError);
-          }
-        }
-      } catch (parseError) {
-        console.error('Error parsing JSON:', parseError);
-      }
-    }
     if (!fetchedData.ok) {
-      const msg = `Failed to get kubernetes node info result with status ${fetchedData.status}`;
+      const errorMessage = await getErrorMessageFromResponse(fetchedData);
+      const msg = `Failed to get kubernetes node info result for context ${context} with status ${fetchedData.status}, error: ${errorMessage}`;
       throw new Error(msg);
     }
     const data = await fetchedData.json();
@@ -661,7 +678,7 @@ export async function getCloudGPUs() {
       gpus_only: true,
     });
     if (!response.ok) {
-      const msg = `Failed to get cloud GPUs with status ${response.status}`;
+      const msg = `Failed to get cloud GPUs with status ${response.status}, error: ${response.statusText}`;
       throw new Error(msg);
     }
     const id =
@@ -672,24 +689,9 @@ export async function getCloudGPUs() {
       throw new Error(msg);
     }
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
-    if (fetchedData.status === 500) {
-      try {
-        const data = await fetchedData.json();
-        if (data.detail && data.detail.error) {
-          try {
-            const error = JSON.parse(data.detail.error);
-            const msg = `Error fetching cloud GPUs: ${error.message}`;
-            throw new Error(msg);
-          } catch (jsonError) {
-            console.error('Error parsing JSON:', jsonError);
-          }
-        }
-      } catch (parseError) {
-        console.error('Error parsing JSON:', parseError);
-      }
-    }
     if (!fetchedData.ok) {
-      const msg = `Failed to get cloud GPUs result with status ${fetchedData.status}`;
+      const errorMessage = await getErrorMessageFromResponse(fetchedData);
+      const msg = `Failed to get cloud GPUs result with status ${fetchedData.status}, error: ${errorMessage}`;
       throw new Error(msg);
     }
     const data = await fetchedData.json();
@@ -753,7 +755,7 @@ export async function getDetailedGpuInfo(filter) {
       all_regions: true,
     });
     if (!response.ok) {
-      const msg = `Failed to get detailed GPU info with status ${response.status}`;
+      const msg = `Failed to get detailed GPU info with status ${response.status}, error: ${response.statusText}`;
       throw new Error(msg);
     }
     const id =
@@ -765,7 +767,8 @@ export async function getDetailedGpuInfo(filter) {
     }
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
     if (!fetchedData.ok) {
-      const msg = `Failed to get detailed GPU info result with status ${fetchedData.status}`;
+      const errorMessage = await getErrorMessageFromResponse(fetchedData);
+      const msg = `Failed to get detailed GPU info result with status ${fetchedData.status}, error: ${errorMessage}`;
       throw new Error(msg);
     }
 
