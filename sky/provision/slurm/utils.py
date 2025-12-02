@@ -101,7 +101,7 @@ class SlurmInstanceType:
                 accelerator_count = int(accelerator_count)
                 # This is to revert the accelerator types with spaces back to
                 # the original format.
-                accelerator_type = str(accelerator_type).replace('_', ' ')
+                accelerator_type = str(accelerator_type).replace(' ', '_')
             else:
                 accelerator_count = None
                 accelerator_type = None
@@ -269,19 +269,21 @@ def check_instance_fits(cluster: str,
         assert acc_count is not None, (acc_type, acc_count)
 
         gpu_nodes = []
+        # GRES string format: 'gpu:acc_type:acc_count(optional_extra_info)'
+        # Examples:
+        # - gpu:nvidia_h100_80gb_hbm3:8(S:0-1)
+        # - gpu:a10g:8
+        # - gpu:l4:1
+        gres_pattern = re.compile(r'^gpu:([^:]+):(\d+)')
         for node in nodes:
             _, _, gres_str, _ = node.split()
-            # gres_str is like 'gpu:acc_type:acc_count'
-            gres_list = gres_str.split(':')
             # Extract the GPU type and count from the GRES string
-            if len(gres_list) >= 3:
-                node_acc_type = gres_list[1].lower()
-                try:
-                    node_acc_count = int(gres_list[2])
-                except (ValueError, IndexError):
-                    continue
-            else:
+            match = gres_pattern.match(gres_str)
+            if not match:
                 continue
+
+            node_acc_type = match.group(1).lower()
+            node_acc_count = int(match.group(2))
 
             # TODO(jwj): Handle status check.
 
