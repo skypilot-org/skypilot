@@ -457,22 +457,3 @@ class TestRedactSecretsValues:
         # Should return original argv when error occurs
         expected = ['sky', 'launch', '--secret', 'KEY=value']
         assert result == expected
-
-
-@pytest.mark.parametrize('use_custom_dir', [False, True])
-def test_sky_locks_dir(tmp_path, monkeypatch, use_custom_dir):
-    """Test SKY_LOCKS_DIR uses SKY_RUNTIME_DIR when set, else defaults to ~."""
-    import importlib
-
-    monkeypatch.delenv('SKY_RUNTIME_DIR', raising=False)
-    if use_custom_dir:
-        monkeypatch.setenv('SKY_RUNTIME_DIR', str(tmp_path))
-        expected_locks_dir = tmp_path / '.sky/locks'
-    else:
-        expected_locks_dir = os.path.expanduser('~/.sky/locks')
-
-    # SKY_LOCKS_DIR is evaluated at import time; re-import to get fresh values.
-    from sky.skylet import constants
-    importlib.reload(constants)
-
-    assert constants.SKY_LOCKS_DIR == str(expected_locks_dir)

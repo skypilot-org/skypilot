@@ -6,8 +6,12 @@ import subprocess
 
 from sky.skylet import constants
 from sky.skylet import runtime_utils
+from sky.utils import common_utils
 
 VERSION_FILE = runtime_utils.get_runtime_dir_path(constants.SKYLET_VERSION_FILE)
+SKYLET_LOG_FILE = runtime_utils.get_runtime_dir_path(constants.SKYLET_LOG_FILE)
+PID_FILE = runtime_utils.get_runtime_dir_path(constants.SKYLET_PID_FILE)
+PORT_FILE = runtime_utils.get_runtime_dir_path(constants.SKYLET_PORT_FILE)
 
 
 def restart_skylet():
