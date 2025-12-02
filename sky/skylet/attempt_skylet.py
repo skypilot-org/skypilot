@@ -66,6 +66,9 @@ def _find_running_skylet_pids() -> List[int]:
     else:
         # Fall back to grep-based detection for backward compatibility.
         pids = []
+        # We use -m to grep instead of {constants.SKY_PYTHON_CMD} -m to grep
+        # because need to handle the backward compatibility of the old skylet
+        # started before #3326, which does not use the full path to python.
         proc = subprocess.run(
             'ps aux | grep -v "grep" | grep "sky.skylet.skylet" | grep " -m"',
             shell=True,
