@@ -1,5 +1,4 @@
 """Constants for SkyPilot."""
-import os
 from typing import List, Tuple
 
 from packaging import version
@@ -582,11 +581,6 @@ DEFAULT_PRIORITY = 0
 
 GRACE_PERIOD_SECONDS_ENV_VAR = SKYPILOT_ENV_VAR_PREFIX + 'GRACE_PERIOD_SECONDS'
 COST_REPORT_DEFAULT_DAYS = 30
-
-# The directory for file locks.
-SKY_LOCKS_DIR = os.path.join(
-    os.path.expanduser(os.environ.get(SKY_RUNTIME_DIR_ENV_VAR_KEY, '~')),
-    '.sky/locks')
 
 ENV_VAR_LOOP_LAG_THRESHOLD_MS = (SKYPILOT_ENV_VAR_PREFIX +
                                  'DEBUG_LOOP_LAG_THRESHOLD_MS')
