@@ -37,9 +37,10 @@ def _get_oauth_token(base_url: str, client_id: str, client_secret: str) -> str:
     }
     headers = {'Content-type': 'application/json'}
 
-    response = requests.post(
-        token_url, json=payload, headers=headers, timeout=30
-    )
+    response = requests.post(token_url,
+                             json=payload,
+                             headers=headers,
+                             timeout=30)
     response.raise_for_status()
 
     token_data = response.json()
@@ -65,9 +66,9 @@ def _fetch_instance_types(base_url: str, token: str) -> List[Dict]:
     return response.json()
 
 
-def _fetch_instance_availability(
-    base_url: str, token: str, is_spot: bool = False
-) -> List[Dict]:
+def _fetch_instance_availability(base_url: str,
+                                 token: str,
+                                 is_spot: bool = False) -> List[Dict]:
     """Fetch instance availability for different regions.
 
     Args:
@@ -89,15 +90,14 @@ def _fetch_instance_availability(
 
 
 def _build_availability_map(
-    base_url: str, token: str
-) -> Dict[str, Dict[str, Tuple[bool, bool]]]:
+        base_url: str, token: str) -> Dict[str, Dict[str, Tuple[bool, bool]]]:
     """Build a map of instance types to regions and their availability."""
     availability_map: Dict[str, Dict[str, Tuple[bool, bool]]] = {}
 
     # Fetch on-demand availability
-    on_demand_availability = _fetch_instance_availability(
-        base_url, token, is_spot=False
-    )
+    on_demand_availability = _fetch_instance_availability(base_url,
+                                                          token,
+                                                          is_spot=False)
     for location_data in on_demand_availability:
         location_code = location_data.get('location_code', '')
         availabilities = location_data.get('availabilities', [])
@@ -112,9 +112,9 @@ def _build_availability_map(
             )
 
     # Fetch spot availability
-    spot_availability = _fetch_instance_availability(
-        base_url, token, is_spot=True
-    )
+    spot_availability = _fetch_instance_availability(base_url,
+                                                     token,
+                                                     is_spot=True)
     for location_data in spot_availability:
         location_code = location_data.get('location_code', '')
         availabilities = location_data.get('availabilities', [])
@@ -145,16 +145,12 @@ def _extract_gpu_model(instance: Dict) -> str:
         return instance['model']
 
     # Fall back to extracting from GPU description
-    if (
-        'gpu' in instance
-        and instance['gpu']
-        and 'description' in instance['gpu']
-    ):
+    if ('gpu' in instance and instance['gpu'] and
+            'description' in instance['gpu']):
         gpu_desc = instance['gpu'].get('description', '')
         # Extract model name (e.g., "RTX A6000" from "1x NVIDIA RTX A6000 48GB")
-        match = re.search(
-            r'(?:NVIDIA\s+)?([A-Z0-9]+\s+[A-Z0-9]+|[A-Z0-9]+)', gpu_desc
-        )
+        match = re.search(r'(?:NVIDIA\s+)?([A-Z0-9]+\s+[A-Z0-9]+|[A-Z0-9]+)',
+                          gpu_desc)
         if match:
             return match.group(1).strip()
 
@@ -183,9 +179,8 @@ def _format_accelerator_name(gpu_model: str, gpu_memory_gb: float) -> str:
     return accelerator_name
 
 
-def _build_gpu_info(
-    accelerator_name: str, num_gpus: int, gpu_memory_gb: float
-) -> str:
+def _build_gpu_info(accelerator_name: str, num_gpus: int,
+                    gpu_memory_gb: float) -> str:
     """Build GpuInfo JSON string.
 
     Args:
@@ -202,13 +197,13 @@ def _build_gpu_info(
     gpu_memory_mib = int(gpu_memory_gb * 1024)
     total_gpu_memory_mib = gpu_memory_mib * num_gpus
     gpu_info_dict = {
-        'Gpus': [
-            {
-                'Name': accelerator_name,
-                'Count': num_gpus,
-                'MemoryInfo': {'SizeInMiB': gpu_memory_mib},
-            }
-        ],
+        'Gpus': [{
+            'Name': accelerator_name,
+            'Count': num_gpus,
+            'MemoryInfo': {
+                'SizeInMiB': gpu_memory_mib
+            },
+        }],
         'TotalGpuMemoryInMiB': total_gpu_memory_mib,
     }
     # Convert to JSON string (csv.writer will handle proper escaping)
@@ -243,8 +238,7 @@ def create_catalog(output_path: str) -> None:
     logger.info('Fetching instance availability...')
     availability_map = _build_availability_map(base_url, token)
     logger.info(
-        f'Fetched availability for {len(availability_map)} instance types'
-    )
+        f'Fetched availability for {len(availability_map)} instance types')
 
     # Create output directory if needed
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -255,20 +249,18 @@ def create_catalog(output_path: str) -> None:
         writer = csv.writer(f, quoting=csv.QUOTE_MINIMAL)
 
         # Write header
-        writer.writerow(
-            [
-                'InstanceType',
-                'UpstreamCloudId',
-                'vCPUs',
-                'MemoryGiB',
-                'AcceleratorName',
-                'AcceleratorCount',
-                'GpuInfo',
-                'Region',
-                'Price',
-                'SpotPrice',
-            ]
-        )
+        writer.writerow([
+            'InstanceType',
+            'UpstreamCloudId',
+            'vCPUs',
+            'MemoryGiB',
+            'AcceleratorName',
+            'AcceleratorCount',
+            'GpuInfo',
+            'Region',
+            'Price',
+            'SpotPrice',
+        ])
 
         for instance in instance_types:
             try:
@@ -279,39 +271,29 @@ def create_catalog(output_path: str) -> None:
                 gpu_data = instance.get('gpu', {})
                 gpu_memory_data = instance.get('gpu_memory', {})
 
-                vcpus = (
-                    float(cpu_data.get('number_of_cores', 0)) if cpu_data else 0
-                )
-                memory_gib = (
-                    float(memory_data.get('size_in_gigabytes', 0))
-                    if memory_data
-                    else 0
-                )
+                vcpus = (float(cpu_data.get('number_of_cores', 0))
+                         if cpu_data else 0)
+                memory_gib = (float(memory_data.get('size_in_gigabytes', 0))
+                              if memory_data else 0)
                 price = float(instance.get('price_per_hour', 0))
                 # Get spot price if available, otherwise use regular price
                 spot_price_raw = instance.get('spot_price') or instance.get(
-                    'spot_price_per_hour'
-                )
+                    'spot_price_per_hour')
                 spot_price = float(spot_price_raw) if spot_price_raw else price
 
                 # GPU information
                 num_gpus = gpu_data.get('number_of_gpus', 0) if gpu_data else 0
-                gpu_memory_gb = (
-                    gpu_memory_data.get('size_in_gigabytes', 0)
-                    if gpu_memory_data
-                    else 0
-                )
+                gpu_memory_gb = (gpu_memory_data.get('size_in_gigabytes', 0)
+                                 if gpu_memory_data else 0)
 
                 # Extract and format GPU model
                 gpu_model = _extract_gpu_model(instance)
                 accelerator_name = _format_accelerator_name(
-                    gpu_model, gpu_memory_gb
-                )
+                    gpu_model, gpu_memory_gb)
 
                 # Build GpuInfo JSON string
-                gpu_info = _build_gpu_info(
-                    accelerator_name, num_gpus, gpu_memory_gb
-                )
+                gpu_info = _build_gpu_info(accelerator_name, num_gpus,
+                                           gpu_memory_gb)
 
                 # Get available regions for this instance type
                 available_regions = availability_map.get(instance_type_id, {})
@@ -334,33 +316,28 @@ def create_catalog(output_path: str) -> None:
                         continue
 
                     # Use empty string if no spot pricing is available
-                    effective_spot_price = (
-                        spot_price
-                        if (spot_available and spot_price != price)
-                        else ''
-                    )
+                    effective_spot_price = (spot_price if
+                                            (spot_available and
+                                             spot_price != price) else '')
 
                     # Write formatted name entry
                     if num_gpus > 0 and accelerator_name and gpu_memory_gb > 0:
-                        writer.writerow(
-                            [
-                                instance_type_id,
-                                instance_type_id,
-                                vcpus,
-                                memory_gib,
-                                accelerator_name,
-                                float(num_gpus),
-                                gpu_info,
-                                region,
-                                price,
-                                effective_spot_price,
-                            ]
-                        )
+                        writer.writerow([
+                            instance_type_id,
+                            instance_type_id,
+                            vcpus,
+                            memory_gib,
+                            accelerator_name,
+                            float(num_gpus),
+                            gpu_info,
+                            region,
+                            price,
+                            effective_spot_price,
+                        ])
             except Exception as e:  # pylint: disable=broad-except
                 instance_type_id = instance.get('instance_type', 'unknown')
                 logger.warning(
-                    f'Error processing instance type {instance_type_id}: {e}'
-                )
+                    f'Error processing instance type {instance_type_id}: {e}')
                 continue
 
     logger.info(f'Verda catalog saved to {output_path}')
@@ -378,9 +355,7 @@ def main() -> None:
 
     > python sky/catalog/data_fetchers/fetch_verda.py [<file-name>]
     """
-    logging.basicConfig(
-        level=logging.INFO,
-    )
+    logging.basicConfig(level=logging.INFO,)
     args = sys.argv[1:]
     output_path = args[0] if args else '~/.sky/catalogs/v8/verda/vms.csv'
     output_file = os.path.expanduser(output_path)
