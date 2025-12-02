@@ -3872,24 +3872,32 @@ def show_gpus(
 
     def _format_slurm_node_info() -> str:
         node_table = log_utils.create_table([
-            'NODE_NAME',
+            'CLUSTER',
+            'NODE',
             'PARTITION',
             'STATE',
-            'GPU_NAME',
+            'GPU',
             'UTILIZATION',
         ])
 
-        nodes_info = sdk.stream_and_get(sdk.slurm_node_info())
+        # Get all cluster names
+        slurm_cluster_names = clouds.Slurm.existing_allowed_clusters()
 
-        for node_info in nodes_info:
-            node_table.add_row([
-                node_info.get('node_name'),
-                node_info.get('partition', '-'),
-                node_info.get('node_state'),
-                node_info.get('gpu_type', '-'),
-                (f'{node_info.get("free_gpus", 0)} of '
-                 f'{node_info.get("total_gpus", 0)} free'),
-            ])
+        # Query each cluster
+        for cluster_name in slurm_cluster_names:
+            nodes_info = sdk.stream_and_get(
+                sdk.slurm_node_info(slurm_cluster_name=cluster_name))
+
+            for node_info in nodes_info:
+                node_table.add_row([
+                    cluster_name,
+                    node_info.get('node_name'),
+                    node_info.get('partition', '-'),
+                    node_info.get('node_state'),
+                    node_info.get('gpu_type') or '',
+                    (f'{node_info.get("free_gpus", 0)} of '
+                     f'{node_info.get("total_gpus", 0)} free'),
+                ])
 
         slurm_per_node_msg = 'Slurm per node accelerator availability'
         # Optional: Add hint message if needed, similar to k8s

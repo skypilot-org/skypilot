@@ -371,12 +371,15 @@ def _get_slurm_node_info_list(
         gres_match = gres_gpu_pattern.search(gres_str)
 
         total_gpus = 0
-        gpu_type_from_sinfo = 'GPU'  # Default if no type in GRES
+        gpu_type_from_sinfo = None  # Default to None for CPU-only nodes
         if gres_match:
             try:
                 total_gpus = int(gres_match.group(4))
-                gpu_type_from_sinfo = (gres_match.group(3).upper()
-                                       if gres_match.group(3) else 'GPU')
+                if gres_match.group(3):
+                    gpu_type_from_sinfo = gres_match.group(3).upper()
+                # If total_gpus > 0 but no type, default to 'GPU'
+                elif total_gpus > 0:
+                    gpu_type_from_sinfo = 'GPU'
             except ValueError:
                 logger.warning(
                     f'Could not parse GPU count from GRES for {node_name}.')
