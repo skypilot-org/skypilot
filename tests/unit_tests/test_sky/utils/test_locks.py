@@ -1,12 +1,12 @@
 """Unit tests for sky.utils.locks module."""
 
-import importlib
 import os
 from unittest import mock
 
 import pytest
 
 from sky import global_user_state
+from sky.skylet import runtime_utils
 from sky.utils import locks
 from sky.utils.db import db_utils
 
@@ -159,22 +159,24 @@ class TestFileLock:
 
     def test_file_lock_directories_created(self, tmp_path, monkeypatch):
         """Test that lock directories are created."""
-        # Import locks locally to avoid affecting other tests with reload.
-        from sky.utils import locks as locks_local
 
-        # Set tempdir using SKY_RUNTIME_DIR.
+        # SKY_RUNTIME_DIR is evaluated at import time, so we need to reload the module to get the new value.
+        # But we can't reload the module here as it affects other tests, so just manually
+        # test that runtime_utils.get_runtime_dir_path() respects SKY_RUNTIME_DIR.
         monkeypatch.setenv('SKY_RUNTIME_DIR', str(tmp_path))
-        expected_locks_dir = tmp_path / '.sky/locks'
-        # SKY_LOCKS_DIR is evaluated at import time; re-import to get fresh
-        # values.
-        importlib.reload(locks_local)
+        expected_locks_dir = str(tmp_path / '.sky/locks')
+        assert runtime_utils.get_runtime_dir_path(
+            '.sky/locks') == expected_locks_dir
 
-        assert locks_local.SKY_LOCKS_DIR == str(expected_locks_dir)
-
-        # Test that creating a lock creates the directory
-        assert not os.path.exists(locks_local.SKY_LOCKS_DIR)
-        lock = locks_local.FileLock('test_dir_creation')
-        assert os.path.exists(locks_local.SKY_LOCKS_DIR)
+        # Test that creating a lock creates the directory.
+        original_locks_dir = locks.SKY_LOCKS_DIR
+        try:
+            locks.SKY_LOCKS_DIR = expected_locks_dir
+            assert not os.path.exists(locks.SKY_LOCKS_DIR)
+            lock = locks.FileLock('test_dir_creation')
+            assert os.path.exists(locks.SKY_LOCKS_DIR)
+        finally:
+            locks.SKY_LOCKS_DIR = original_locks_dir
 
 
 class TestPostgresLock:
