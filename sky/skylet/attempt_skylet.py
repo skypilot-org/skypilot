@@ -45,11 +45,7 @@ def restart_skylet():
             shell=True,
             check=False)
 
-    # TODO(kevin): Handle race conditions here. Race conditions can only
-    # happen on Slurm, where there could be multiple clusters running in
-    # one network namespace. For other clouds, the behaviour will be that
-    # it always gets port 46590 (default port).
-    port = common_utils.find_free_port(constants.SKYLET_GRPC_PORT)
+    port = constants.SKYLET_GRPC_PORT
     subprocess.run(
         # We have made sure that `attempt_skylet.py` is executed with the
         # skypilot runtime env activated, so that skylet can access the cloud
