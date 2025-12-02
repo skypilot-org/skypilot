@@ -258,7 +258,7 @@ marimo as SkyPilot jobs
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 Because marimo notebooks are stored as Python scripts on disk, they can
-immediately be used via `sky jobs` too. To demonstrate this, let's consider
+immediately be used via ``sky jobs`` too. To demonstrate this, let's consider
 the following marimo notebook:
 
 .. image:: ../images/marimo-example.png
@@ -298,7 +298,7 @@ This is the underlying code for the marimo notebook:
         app.run()
 
 
-This notebook uses `mo.cli_args()` to parse any command-line arguments passed to the notebook.
+This notebook uses ``mo.cli_args()`` to parse any command-line arguments passed to the notebook.
 You can confirm this locally by running the notebook with the following command:
 
 .. code-block:: bash
@@ -336,7 +336,7 @@ yaml file like this:
     run: uv run demo.py --hello world --demo works --lr 0.01
 
 
-You can now submit this job to `sky` using the following command:
+You can now submit this job to ``sky`` using the following command:
 
 .. code-block:: bash
 
@@ -344,7 +344,7 @@ You can now submit this job to `sky` using the following command:
 
 This command will provision cloud resources and then launch the job. You can monitor
 the job status by checking logs in the terminal, but you can also check the dashboard
-by running `sky dashboard`.
+by running ``sky dashboard``.
 
 This is what the dashboard of the job looks like after it is done.
 
