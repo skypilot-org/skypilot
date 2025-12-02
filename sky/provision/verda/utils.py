@@ -1,4 +1,4 @@
-"""Verda (DataCrunch) library wrapper for SkyPilot."""
+"""Verda Cloud (formerly DataCrunch) library wrapper for SkyPilot."""
 
 from typing import Optional
 from sky.catalog import common as catalog_common

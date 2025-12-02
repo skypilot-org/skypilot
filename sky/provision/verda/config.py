@@ -1,4 +1,4 @@
-"""Verda (DataCrunch) configuration bootstrapping."""
+"""Verda Cloud (formerly DataCrunch) configuration bootstrapping."""
 
 from sky.provision import common
 
