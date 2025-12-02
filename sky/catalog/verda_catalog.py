@@ -7,7 +7,6 @@ query instance types and pricing information for Verda Cloud.
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
-from sky.adaptors.verda import verda_client
 from sky.catalog import common
 
 if typing.TYPE_CHECKING:
