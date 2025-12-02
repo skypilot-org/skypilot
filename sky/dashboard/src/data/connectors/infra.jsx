@@ -385,6 +385,7 @@ async function getKubernetesGPUsFromContexts(contextNames) {
       const result = contextNodeInfoResults[i];
       if (result.status === 'fulfilled') {
         contextToNodeInfo[contextNames[i]] = result.value;
+        console.log('[CONTEXT_DEBUG] Context node info result:', contextNames[i], result.value);
       } else {
         // Log the error but continue with other contexts
         const errorMessage =
@@ -393,7 +394,7 @@ async function getKubernetesGPUsFromContexts(contextNames) {
           'Context may be unavailable or timed out';
         console.warn(
           `Failed to get node info for context ${contextNames[i]}:`,
-          result.reason
+          errorMessage
         );
         contextToNodeInfo[contextNames[i]] = {};
         contextErrors[contextNames[i]] = errorMessage;
@@ -514,10 +515,10 @@ async function getKubernetesGPUsFromContexts(contextNames) {
       }
     }
 
-    console.log('[DEBUG] All GPUs summary:', allGPUsSummary);
-    console.log('[DEBUG] Per context GPUs data:', perContextGPUsData);
-    console.log('[DEBUG] Per node GPUs data:', perNodeGPUs_dict);
-    console.log('[DEBUG] Context errors:', contextErrors);
+    console.log('[CONTEXT_DEBUG] All GPUs summary:', allGPUsSummary);
+    console.log('[CONTEXT_DEBUG] Per context GPUs data:', perContextGPUsData);
+    console.log('[CONTEXT_DEBUG] Per node GPUs data:', perNodeGPUs_dict);
+    console.log('[CONTEXT_DEBUG] Context errors:', contextErrors);
     return {
       allGPUs: Object.values(allGPUsSummary).sort((a, b) =>
         (a.gpu_name || '').localeCompare(b.gpu_name || '')
