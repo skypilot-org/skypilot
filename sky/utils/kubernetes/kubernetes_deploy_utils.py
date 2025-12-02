@@ -91,16 +91,14 @@ def deploy_ssh_cluster(cleanup: bool = False,
     """
     check_ssh_cluster_dependencies()
 
-    if cleanup:
-        msg_str = 'Cleaning up SSH Node Pools...'
-    else:
-        msg_str = 'Initializing SSH Node Pools...'
+    action = 'Cleanup' if cleanup else 'Deployment'
+    msg_str = f'Initializing SSH Node Pools {action}...'
 
     with rich_utils.safe_status(ux_utils.spinner_message(msg_str)):
         try:
             deploy_ssh_node_pools.deploy_clusters(
                 infra=infra, cleanup=cleanup, kubeconfig_path=kubeconfig_path)
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             logger.error(str(e))
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
@@ -120,7 +118,7 @@ def deploy_ssh_cluster(cleanup: bool = False,
                     f'sky check ssh'
                     f'{colorama.Style.RESET_ALL}` to verify access, '
                     f'`{colorama.Style.BRIGHT}sky launch --infra ssh'
-                    f'{colorama.Style.RESET_ALL}` to launch a cluster. ')))
+                    f'{colorama.Style.RESET_ALL}` to launch a cluster.')))
 
 
 def generate_kind_config(port_start: int,

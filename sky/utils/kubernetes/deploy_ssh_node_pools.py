@@ -11,9 +11,11 @@ import sys
 import tempfile
 from typing import List, Optional, Set
 
+import colorama
 import yaml
 
 from sky import sky_logging
+from sky.utils import rich_utils
 from sky.utils import ux_utils
 from sky.utils.kubernetes import ssh_utils
 
@@ -23,6 +25,9 @@ GREEN = '\033[0;32m'
 YELLOW = '\033[1;33m'
 WARNING_YELLOW = '\x1b[33m'
 NC = '\033[0m'  # No color
+DIM = colorama.Style.DIM
+CYAN = colorama.Fore.CYAN
+RESET_ALL = colorama.Style.RESET_ALL
 
 DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
 SSH_CONFIG_PATH = os.path.expanduser('~/.ssh/config')
@@ -143,14 +148,18 @@ def success_message(message):
     logger.info(f'{GREEN}✔ {message}{NC}')
 
 
+def force_update_status(message):
+    """Force update rich spinner status."""
+    rich_utils.force_update_status(ux_utils.spinner_message(message))
+
+
 def cleanup_server_node(node,
                         user,
                         ssh_key,
                         askpass_block,
                         use_ssh_config=False):
     """Uninstall k3s and clean up the state on a server node."""
-    # TODO (kyuds): line 356, SkySSHUpLineProcessor rich spinner update
-    logger.info(f'{YELLOW}Cleaning up head node {node}...{NC}')
+    force_update_status(f'Cleaning up head node ({node})...')
     cmd = f"""
         {askpass_block}
         echo 'Uninstalling k3s...' &&
@@ -159,10 +168,8 @@ def cleanup_server_node(node,
     """
     result = run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
     if result is None:
-        # TODO (kyuds): line 377 SkySSHUpLineProcessor
         logger.error(f'{RED}Failed to clean up head node ({node}).{NC}')
     else:
-        # TODO (kyuds): line 373 LP
         success_message(f'Node {node} cleaned up successfully.')
 
 
@@ -172,8 +179,7 @@ def cleanup_agent_node(node,
                        askpass_block,
                        use_ssh_config=False):
     """Uninstall k3s and clean up the state on an agent node."""
-    # TODO (kyuds): line 364, LP spinner update
-    logger.info(f'{YELLOW}Cleaning up worker node {node}...{NC}')
+    force_update_status(f'Cleaning up worker node ({node})...')
     cmd = f"""
         {askpass_block}
         echo 'Uninstalling k3s...' &&
@@ -182,10 +188,8 @@ def cleanup_agent_node(node,
     """
     result = run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
     if result is None:
-        # TODO (kyuds): line 381 LP
         logger.error(f'{RED}Failed to clean up worker node ({node}).{NC}')
     else:
-        # TODO (kyuds): line 373 LP
         success_message(f'Node {node} cleaned up successfully.')
 
 
@@ -198,7 +202,7 @@ def start_agent_node(node,
                      use_ssh_config=False):
     """Start a k3s agent node.
     Returns: if the start is successful, and if the node has a GPU."""
-    logger.info(f'{YELLOW}Deploying worker node ({node}).')
+    logger.info(f'Deploying worker node ({node}).')
     cmd = f"""
             {askpass_block}
             curl -sfL https://get.k3s.io | K3S_NODE_NAME={node} INSTALL_K3S_EXEC='agent --node-label skypilot-ip={node}' \
@@ -206,11 +210,9 @@ def start_agent_node(node,
         """
     result = run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
     if result is None:
-        # TODO (kyuds): line 321 LP
-        logger.error(f'{RED}Failed to deploy K3s on worker node ({node}).{NC}')
+        logger.error(f'{RED}✗ Failed to deploy K3s on worker node ({node}).{NC}')
         return node, False, False
-    # TODO (kyuds): line 314 LP
-    success_message(f'Kubernetes deployed on worker node ({node}).')
+    success_message(f'SkyPilot runtime successfully deployed on worker node ({node}).')
     # Check if worker node has a GPU
     if check_gpu(node, user, ssh_key, use_ssh_config=use_ssh_config):
         logger.info(f'{YELLOW}GPU detected on worker node ({node}).{NC}')
@@ -392,9 +394,9 @@ def setup_kubectl_ssh_tunnel(head_node,
     return port
 
 
-def cleanup_kubectl_ssh_tunnel(context_name):
+def cleanup_kubectl_ssh_tunnel(cluster_name, context_name):
     """Clean up the SSH tunnel for a specific context"""
-    progress_message(f'Cleaning up SSH tunnel for context {context_name}...')
+    progress_message(f'Cleaning up SSH tunnel for `{cluster_name}`...')
 
     # Path to cleanup script
     cleanup_script = os.path.join(SCRIPT_DIR, 'cleanup-tunnel.sh')
@@ -409,7 +411,7 @@ def cleanup_kubectl_ssh_tunnel(context_name):
                        stderr=subprocess.DEVNULL,
                        check=False)
 
-        success_message(f'SSH tunnel for context {context_name} cleaned up')
+        success_message(f'SSH tunnel for `{cluster_name}` cleaned up.')
     else:
         logger.error(f'{YELLOW}Cleanup script not found: {cleanup_script}{NC}')
 
@@ -426,29 +428,22 @@ def deploy_clusters(infra: Optional[str],
     failed_clusters = []
     successful_clusters = []
 
-    # Print cleanup mode marker if applicable
-    if cleanup:
-        # TODO (kyuds): line 220 LP, spinner update
-        logger.info('SKYPILOT_CLEANUP_MODE: Cleanup mode activated')
-
     # Using YAML configuration
     targets = ssh_utils.load_ssh_targets(ssh_node_pools_file)
     clusters_config = ssh_utils.get_cluster_config(
         targets, infra, file_path=ssh_node_pools_file)
 
     # Print information about clusters being processed
-    # TODO (kyuds): line 230 LP
     num_clusters = len(clusters_config)
     cluster_names = list(clusters_config.keys())
     cluster_info = f'Found {num_clusters} Node Pool{"s" if num_clusters > 1 else ""}: {", ".join(cluster_names)}'
-    logger.info(f'SKYPILOT_CLUSTER_INFO: {cluster_info}')
+    logger.info(f'{colorama.Fore.CYAN}{cluster_info}{colorama.Style.RESET_ALL}')
 
     # Process each cluster
     for cluster_name, cluster_config in clusters_config.items():
         try:
-            # TODO (kyuds): line 239 LP, spinner update
-            logger.info(f'SKYPILOT_CURRENT_CLUSTER: {cluster_name}')
-            logger.info(f'{YELLOW}==== Deploying cluster: {cluster_name} ====${NC}')
+            action = 'Cleaning up' if cleanup else 'Deploying'
+            force_update_status(f'{action} Node Pool: {cluster_name}')
             hosts_info = ssh_utils.prepare_hosts_info(cluster_name,
                                                       cluster_config)
 
@@ -467,11 +462,11 @@ def deploy_clusters(infra: Optional[str],
 
             history = None
             if os.path.exists(history_yaml_file):
-                logger.info(f'{YELLOW}Loading history from {history_yaml_file}{NC}')
+                logger.debug(f'Loading history from {history_yaml_file}')
                 with open(history_yaml_file, 'r', encoding='utf-8') as f:
                     history = yaml.safe_load(f)
             else:
-                logger.info(f'{YELLOW}No history found for {context_name}.{NC}')
+                logger.debug(f'No history found for {context_name}.')
 
             history_workers_info = None
             history_worker_nodes = None
@@ -517,6 +512,7 @@ def deploy_clusters(infra: Optional[str],
 
             # Deploy this cluster
             unsuccessful_workers = deploy_cluster(
+                cluster_name,
                 head_node,
                 worker_nodes,
                 ssh_user,
@@ -543,19 +539,20 @@ def deploy_clusters(infra: Optional[str],
                         successful_hosts.append(host)
                 cluster_config['hosts'] = successful_hosts
                 with open(history_yaml_file, 'w', encoding='utf-8') as f:
-                    logger.info(f'{YELLOW}Writing history to {history_yaml_file}{NC}')
+                    logger.debug(f'Writing history to {history_yaml_file}')
                     yaml.dump(cluster_config, f)
 
+            action = 'cleanup' if cleanup else 'deployment'
             logger.info(
-                f'{GREEN}==== Completed deployment for cluster: {cluster_name} ====${NC}'
+                f'{colorama.Fore.CYAN}Completed {action} for cluster: {cluster_name}{colorama.Style.RESET_ALL}'
             )
             successful_clusters.append(cluster_name)
         except Exception as e:  # pylint: disable=broad-except
             reason = str(e)
             failed_clusters.append((cluster_name, reason))
-            logger.error(
-                f'{RED}Error deploying SSH Node Pool {cluster_name}: {reason}{NC}'
-            )  # Print for internal logging
+            logger.debug(
+                f'Error deploying SSH Node Pool `{cluster_name}`: {reason}'
+            )
 
     if failed_clusters:
         action = 'clean' if cleanup else 'deploy'
@@ -566,7 +563,8 @@ def deploy_clusters(infra: Optional[str],
         raise RuntimeError(msg)
 
 
-def deploy_cluster(head_node,
+def deploy_cluster(cluster_name,
+                   head_node,
                    worker_nodes,
                    ssh_user,
                    ssh_key,
@@ -599,17 +597,16 @@ def deploy_cluster(head_node,
     k3s_token = 'mytoken'  # Any string can be used as the token
 
     # Pre-flight checks
-    # TODO (kyuds): line 275 LP
-    logger.info(f'{YELLOW}Checking SSH connection to head node...{NC}')
+    logger.info(f'Checking SSH connection to head node...')
     result = run_remote(
         head_node,
         f'echo \'SSH connection successful ({head_node})\'',
         ssh_user,
         ssh_key,
-        use_ssh_config=head_use_ssh_config,
-        # For SkySSHUpLineProcessor
-        # TODO (kyuds): figure out how to deal with this, line 280 LP
-        print_output=True)
+        use_ssh_config=head_use_ssh_config)
+    if result.startswith('SSH connection successful'):
+        success_message(f'SSH connection established to head node {head_node}.')
+
     if not cleanup and result is None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
@@ -630,9 +627,9 @@ def deploy_cluster(head_node,
                 history_worker_nodes, history_workers_info,
                 history_use_ssh_config):
             if worker_hosts is not None and history_info not in worker_hosts:
-                logger.info(
-                    f'{YELLOW}Worker node {history_node} not found in YAML config. '
-                    f'Removing from history...{NC}')
+                logger.debug(
+                    f'Worker node {history_node} not found in YAML config. '
+                    'Removing from history...')
                 worker_nodes_to_cleanup.append(
                     dict(
                         node=history_node,
@@ -668,8 +665,6 @@ def deploy_cluster(head_node,
                     use_ssh_config=use_ssh_config,
                 ))
 
-        logger.info(f'{YELLOW}Starting cleanup...{NC}')
-
         # Clean up head node
         cleanup_server_node(head_node,
                             ssh_user,
@@ -677,24 +672,20 @@ def deploy_cluster(head_node,
                             askpass_block,
                             use_ssh_config=head_use_ssh_config)
     # Clean up worker nodes
+    force_update_status(f'Cleaning up worker nodes [{cluster_name}]')
     with cf.ThreadPoolExecutor() as executor:
         executor.map(lambda kwargs: cleanup_agent_node(**kwargs),
                      worker_nodes_to_cleanup)
 
     with cf.ThreadPoolExecutor() as executor:
-
-        def run_cleanup_cmd(cmd):
-            # TODO (kyuds): spinner update, line 364 LP
-            logger.info('Cleaning up worker nodes:', cmd)
-            run_command(cmd, shell=True)
-
-        executor.map(run_cleanup_cmd, remove_worker_cmds)
+        executor.map(lambda cmd: run_command(cmd, shell=True),
+                     remove_worker_cmds)
 
     if cleanup:
 
         # Remove the context from local kubeconfig if it exists
         if os.path.isfile(kubeconfig_path):
-            progress_message(
+            logger.debug(
                 f'Removing context {context_name!r} from local kubeconfig...')
             run_command(['kubectl', 'config', 'delete-context', context_name],
                         shell=False)
@@ -717,7 +708,7 @@ def deploy_cluster(head_node,
                 run_command(['kubectl', 'config', 'unset', 'current-context'],
                             shell=False)
 
-            success_message(
+            logger.debug(
                 f'Context {context_name!r} removed from local kubeconfig.')
 
         for file in [history_yaml_file, cert_file_path, key_file_path]:
@@ -726,17 +717,12 @@ def deploy_cluster(head_node,
 
         # Clean up SSH tunnel after clean up kubeconfig, because the kubectl
         # will restart the ssh tunnel if it's not running.
-        cleanup_kubectl_ssh_tunnel(context_name)
+        cleanup_kubectl_ssh_tunnel(cluster_name, context_name)
 
-        logger.info(f'{GREEN}Cleanup completed successfully.{NC}')
-
-        # Print completion marker for current cluster
-        # TODO (kyuds): line 262 LP
-        logger.info(f'{GREEN}SKYPILOT_CLUSTER_COMPLETED: {NC}')
-
+        success_message(f'Node Pool `{cluster_name}` cleaned up successfully.')
         return []
 
-    logger.info(f'{YELLOW}Checking TCP Forwarding Options...{NC}')
+    logger.debug(f'Checking TCP Forwarding Options...')
     cmd = (
         'if [ "$(sudo sshd -T | grep allowtcpforwarding)" = "allowtcpforwarding yes" ]; then '
         f'echo "TCP Forwarding already enabled on head node ({head_node})."; '
@@ -751,8 +737,6 @@ def deploy_cluster(head_node,
         ssh_user,
         ssh_key,
         use_ssh_config=head_use_ssh_config,
-        # For SkySSHUpLineProcessor
-        print_output=True,
         use_shell=True)
     if result is None:
         with ux_utils.print_exception_no_traceback():
@@ -772,8 +756,7 @@ def deploy_cluster(head_node,
     # Step 1: Install k3s on the head node
     # Check if head node has a GPU
     install_gpu = False
-    # TODO (kyuds): line 287 LP, spinner update
-    progress_message(f'Deploying Kubernetes on head node ({head_node})...')
+    force_update_status(f'Deploying SkyPilot runtime on head node ({head_node}).')
     cmd = f"""
         {askpass_block}
         curl -sfL https://get.k3s.io | K3S_TOKEN={k3s_token} K3S_NODE_NAME={head_node} sudo -E -A sh - &&
@@ -802,8 +785,7 @@ def deploy_cluster(head_node,
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
                 f'Failed to deploy K3s on head node ({head_node}).')
-    # TODO (kyuds): line 297 LP
-    success_message(f'K3s deployed on head node ({head_node}).')
+    success_message(f'SkyPilot runtime successfully deployed on head node ({head_node}).')
 
     # Check if head node has a GPU
     install_gpu = False
@@ -824,23 +806,20 @@ def deploy_cluster(head_node,
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(f'Failed to SSH to head node ({head_node}). '
                                f'Please check the SSH configuration.')
-    logger.info(f'{GREEN}Master node internal IP: {master_addr}{NC}')
+    logger.debug(f'Master node internal IP: {master_addr}')
 
     # Step 2: Install k3s on worker nodes and join them to the master node
     def deploy_worker(args):
         (i, node, worker_hosts, history_workers_info, ssh_user, ssh_key,
          askpass_block, worker_use_ssh_config, master_addr, k3s_token) = args
-        # TODO (kyuds): line 305, LP spinner message
-        progress_message(f'Deploying Kubernetes on worker node ({node})...')
 
         # If using YAML config with specific worker info
         if worker_hosts and i < len(worker_hosts):
             if history_workers_info is not None and worker_hosts[
                     i] in history_workers_info:
-                # TODO (kyuds): line 394 LP
                 logger.info(
-                    f'{YELLOW}Worker node ({node}) already exists in history. '
-                    f'Skipping...{NC}')
+                    f'{colorama.Style.DIM}✔ SkyPilot runtime already deployed on worker node {node}. '
+                    f'Skipping...{colorama.Style.RESET_ALL}')
                 return node, True, False
             worker_user = worker_hosts[i]['user']
             worker_key = worker_hosts[i]['identity_file']
@@ -864,6 +843,7 @@ def deploy_cluster(head_node,
     unsuccessful_workers = []
 
     # Deploy workers in parallel using thread pool
+    force_update_status(f'Deploying SkyPilot runtime on worker nodes [{cluster_name}]')
     with cf.ThreadPoolExecutor() as executor:
         futures = []
         for i, node in enumerate(worker_nodes):
@@ -880,8 +860,7 @@ def deploy_cluster(head_node,
                 unsuccessful_workers.append(node)
 
     # Step 3: Configure local kubectl to connect to the cluster
-    # TODO (kyuds): line 328 LP, spinner message
-    progress_message('Configuring local kubectl to connect to the cluster...')
+    force_update_status(f'Setting up SkyPilot configuration [{cluster_name}]')
 
     # Create temporary directory for kubeconfig operations
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -971,8 +950,8 @@ def deploy_cluster(head_node,
                         has_end = '-----END CERTIFICATE-----' in cert_pem
 
                         if not has_begin or not has_end:
-                            logger.warning(
-                                f'{YELLOW}Warning: Certificate data missing PEM markers, attempting to fix...{NC}'
+                            logger.debug(
+                                'Warning: Certificate data missing PEM markers, attempting to fix...'
                             )
                             # Add PEM markers if missing
                             if not has_begin:
@@ -987,8 +966,8 @@ def deploy_cluster(head_node,
 
                         # Verify the file was written correctly
                         if os.path.getsize(cert_file_path) > 0:
-                            logger.info(
-                                f'{GREEN}Successfully saved certificate data ({len(cert_pem)} bytes){NC}'
+                            logger.debug(
+                                f'Successfully saved certificate data ({len(cert_pem)} bytes)'
                             )
 
                             # Quick validation of PEM format
@@ -1003,8 +982,8 @@ def deploy_cluster(head_node,
                             if not first_line.startswith(
                                     '-----BEGIN') or not last_line.startswith(
                                         '-----END'):
-                                logger.warning(
-                                    f'{YELLOW}Warning: Certificate may not be in proper PEM format{NC}'
+                                logger.debug(
+                                    'Warning: Certificate may not be in proper PEM format'
                                 )
                         else:
                             logger.error(f'{RED}Error: Certificate file is empty{NC}')
@@ -1051,8 +1030,8 @@ def deploy_cluster(head_node,
                             ])
 
                             if not has_begin or not has_end:
-                                logger.warning(
-                                    f'{YELLOW}Warning: Key data missing PEM markers, attempting to fix...{NC}'
+                                logger.debug(
+                                    'Warning: Key data missing PEM markers, attempting to fix...'
                                 )
                                 # Add PEM markers if missing
                                 if not has_begin:
@@ -1071,8 +1050,8 @@ def deploy_cluster(head_node,
 
                         # Verify the file was written correctly
                         if os.path.getsize(key_file_path) > 0:
-                            logger.info(
-                                f'{GREEN}Successfully saved key data ({len(key_pem)} bytes){NC}'
+                            logger.debug(
+                                f'Successfully saved key data ({len(key_pem)} bytes)'
                             )
 
                             # Quick validation of PEM format
@@ -1087,8 +1066,8 @@ def deploy_cluster(head_node,
                             if not first_line.startswith(
                                     '-----BEGIN') or not last_line.startswith(
                                         '-----END'):
-                                logger.info(
-                                    f'{YELLOW}Warning: Key may not be in proper PEM format{NC}'
+                                logger.debug(
+                                    'Warning: Key may not be in proper PEM format'
                                 )
                         else:
                             logger.error(f'{RED}Error: Key file is empty{NC}')
@@ -1098,11 +1077,11 @@ def deploy_cluster(head_node,
         # First check if context name exists and delete it if it does
         # TODO(romilb): Should we throw an error here instead?
         run_command(['kubectl', 'config', 'delete-context', context_name],
-                    shell=False)
+                    shell=False, silent=True)
         run_command(['kubectl', 'config', 'delete-cluster', context_name],
-                    shell=False)
+                    shell=False, silent=True)
         run_command(['kubectl', 'config', 'delete-user', context_name],
-                    shell=False)
+                    shell=False, silent=True)
 
         # Merge the configurations using kubectl
         merged_config = os.path.join(temp_dir, 'merged_config')
@@ -1127,20 +1106,12 @@ def deploy_cluster(head_node,
                              context_name,
                              use_ssh_config=head_use_ssh_config)
 
-    # TODO (kyuds): might need to replace to line 336, LP
-    success_message(f'kubectl configured with new context \'{context_name}\'.')
-
-    # TODO (kyuds): line 386, LP
-    logger.info(
-        f'Cluster deployment completed. Kubeconfig saved to {kubeconfig_path}')
-    logger.info('You can now run \'kubectl get nodes\' to verify the setup.')
+    logger.debug(f'kubectl configured with new context \'{context_name}\'.')
+    success_message(f'SkyPilot runtime is up [{cluster_name}].')
 
     # Install GPU operator if a GPU was detected on any node
     if install_gpu:
-        # TODO (kyuds): line 342 LP
-        logger.info(
-            f'{YELLOW}GPU detected in the cluster. Installing Nvidia GPU Operator...{NC}'
-        )
+        force_update_status(f'Configuring NVIDIA GPUs [{cluster_name}]')
         cmd = f"""
             {askpass_block}
             curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 &&
@@ -1171,48 +1142,26 @@ def deploy_cluster(head_node,
         if result is None:
             logger.error(f'{RED}Failed to install GPU Operator.{NC}')
         else:
-            # TODO (kyuds): line 134, LP
             success_message('GPU Operator installed.')
     else:
-        logger.info(
-            f'{YELLOW}No GPUs detected. Skipping GPU Operator installation.{NC}'
-        )
-
-    # Configure SkyPilot
-    progress_message('Configuring SkyPilot...')
+        logger.debug('No GPUs detected. Skipping GPU Operator installation.')
 
     # The env var KUBECONFIG ensures sky check uses the right kubeconfig
     os.environ['KUBECONFIG'] = kubeconfig_path
-    run_command(['sky', 'check', 'kubernetes'], shell=False)
+    run_command(['sky', 'check', 'ssh'], shell=False)
 
     success_message('SkyPilot configured successfully.')
-
-    # Display final success message
-    logger.info(
-        f'{GREEN}==== 🎉 Kubernetes cluster deployment completed successfully 🎉 ====${NC}'
-    )
-    logger.info(
-        'You can now interact with your Kubernetes cluster through SkyPilot: ')
-    logger.info('  • List available GPUs: sky show-gpus --cloud kubernetes')
-    logger.info(
-        '  • Launch a GPU development pod: sky launch -c devbox --cloud kubernetes'
-    )
-    logger.info(
-        '  • Connect to pod with VSCode: code --remote ssh-remote+devbox "/home"'
-    )
-    # Print completion marker for current cluster
-    # TODO (kyuds): line 262, LP
-    logger.info(f'{GREEN}SKYPILOT_CLUSTER_COMPLETED: {NC}')
 
     if unsuccessful_workers:
         quoted_unsuccessful_workers = [
             f'"{worker}"' for worker in unsuccessful_workers
         ]
 
-        # TODO (kyuds): line 391, LP
         logger.info(
             f'{WARNING_YELLOW}Failed to deploy Kubernetes on the following nodes: '
             f'{", ".join(quoted_unsuccessful_workers)}. Please check '
             f'the logs for more details.{NC}')
+    else:
+        success_message(f'Node Pool `{cluster_name}` deployed successfully.')
 
     return unsuccessful_workers
