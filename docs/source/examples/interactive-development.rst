@@ -257,15 +257,16 @@ the terminal that marimo provides from the browser.
 marimo as SkyPilot jobs
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-Because marimo notebooks are stored as Python scripts on disk, they can
-immediately be used via ``sky jobs`` too. To demonstrate this, let's consider
-the following marimo notebook:
+Because marimo notebooks are stored as Python scripts on disk. This means that once you've
+written your code interactively, you can immediately use it as a SkyPilot job.
+
+To demonstrate this, let's consider the following marimo notebook:
 
 .. image:: ../images/marimo-example.png
   :width: 100%
   :alt: marimo notebook example
 
-This is the underlying code for the marimo notebook:
+This is the underlying code:
 
 .. code-block:: python
 
@@ -299,6 +300,9 @@ This is the underlying code for the marimo notebook:
 
 
 This notebook uses ``mo.cli_args()`` to parse any command-line arguments passed to the notebook.
+A more real-life use-case would take such arguments to train a PyTorch model, but this
+tutorial will omit the details of training a model for sake of simplicity.
+
 You can confirm this locally by running the notebook with the following command:
 
 .. code-block:: bash
@@ -344,7 +348,7 @@ You can now submit this job to ``sky`` using the following command:
 
 This command will provision cloud resources and then launch the job. You can monitor
 the job status by checking logs in the terminal, but you can also check the dashboard
-by running ``sky dashboard``.
+by running :code:`sky dashboard`.
 
 This is what the dashboard of the job looks like after it is done.
 
