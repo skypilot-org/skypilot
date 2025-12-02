@@ -45,8 +45,8 @@ def test_deploy_remote_cluster():
         for call in mock_deploy_cluster.call_args_list:
             # context_name is the 5th positional argument
             # deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, ...)
-            if len(call.args) >= 5:
-                context_name = call.args[4]
+            if len(call.args) >= 6:
+                context_name = call.args[5]
             assert context_name == expected_context_name, (
                 f"mock_deploy_cluster was not called with context_name='{expected_context_name}', "
                 f"but was called with context_name={context_name}")
