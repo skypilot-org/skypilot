@@ -17,15 +17,6 @@ PORT_FILE = runtime_utils.get_runtime_dir_path(constants.SKYLET_PORT_FILE)
 
 
 def _is_running_skylet_process(pid: int) -> bool:
-    """Check if the process with given PID is actually a skylet process
-    and is still running.
-
-    Args:
-        pid: Process ID to check
-
-    Returns:
-        True if the process is running and is a skylet process
-    """
     if pid <= 0:
         return False
     try:
@@ -42,14 +33,6 @@ def _is_running_skylet_process(pid: int) -> bool:
 
 
 def _find_running_skylet_pids() -> List[int]:
-    """Find running skylet process IDs.
-
-    First checks the PID_FILE if it exists and validates the process.
-    Falls back to grep-based detection for backward compatibility.
-
-    Returns:
-        List of PIDs for running skylet processes (empty if none found)
-    """
     if os.path.exists(PID_FILE):
         try:
             with open(PID_FILE, 'r', encoding='utf-8') as pid_file:
