@@ -1,4 +1,4 @@
-# Scaling Document OCR with DeepSeek and SkyPilot Pools
+# Scaling Document OCR Batch Inference with DeepSeek and SkyPilot Pools
 
 This example demonstrates how to use [DeepSeek OCR](https://github.com/deepseek-ai/DeepSeek-OCR) with SkyPilot's pools feature to process large volumes of scanned documents in parallel.
 
