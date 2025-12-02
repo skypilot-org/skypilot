@@ -6,6 +6,9 @@ global:
   # Specify imagePullSecrets for all components in the chart.
   # @schema type: [array, null]; item: object
   imagePullSecrets: null
+  # Specify extra environment variables to set on all components in the chart.
+  # @schema type: [array, null]; item: object
+  extraEnvs: null
 
 
 apiService:
@@ -174,6 +177,11 @@ apiService:
   # Image pull policy for the API server pod
   # @schema type: [string, null]
   imagePullPolicy: Always
+
+  # Add scheduling constraints to the API server pod
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
 
 # Authentication configuration for the API server
 # Refer to https://docs.skypilot.co/en/latest/reference/auth.html for more details.

@@ -110,6 +110,10 @@ Quickstart
      run: |
        echo "Hello, World!" > /mnt/data/hello.txt
 
+.. note::
+
+  For multi-node clusters, volumes are mounted to all nodes. You must configure ``config.access_mode`` to ``ReadWriteMany`` and use a ``storage_class_name`` that supports the ``ReadWriteMany`` access mode. Otherwise, SkyPilot will fail to launch the cluster.
+
 .. _volumes-on-kubernetes-manage:
 
 Managing volumes
@@ -319,6 +323,10 @@ When you launch the cluster with ``sky launch``, the ephemeral volumes will be a
   Kubernetes PVCs:
   NAME                       TYPE     INFRA                      SIZE  USER  WORKSPACE  AGE   STATUS  LAST_USE             USED_BY                  IS_EPHEMERAL
   my-cluster-43dbb4ab-2f74bf k8s-pvc  Kubernetes/nebius-mk8s-vol 100Gi alice default    58m   IN_USE  2025-11-17 14:30:18  my-cluster-43dbb4ab-head True
+
+.. note::
+
+  For multi-node clusters, ephemeral volumes are mounted to all nodes. You must configure ``config.access_mode`` to ``ReadWriteMany`` and use a ``storage_class_name`` that supports the ``ReadWriteMany`` access mode. Otherwise, SkyPilot will fail to launch the cluster.
 
 When you terminate the cluster, the ephemeral volumes are automatically deleted:
 

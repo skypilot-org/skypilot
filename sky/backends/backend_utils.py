@@ -3150,12 +3150,11 @@ def refresh_cluster_records() -> None:
     Raises:
         None
     """
-    exclude_managed_clusters = True
-    if env_options.Options.SHOW_DEBUG_INFO.get():
-        exclude_managed_clusters = False
+    # We force to exclude managed clusters to avoid multiple sources
+    # manipulating them. For example, SkyServe assumes the replica manager
+    # is the only source of truth for the cluster status.
     cluster_names = set(
-        global_user_state.get_cluster_names(
-            exclude_managed_clusters=exclude_managed_clusters,))
+        global_user_state.get_cluster_names(exclude_managed_clusters=True))
 
     # TODO(syang): we should try not to leak
     # request info in backend_utils.py.
@@ -3631,6 +3630,26 @@ def check_rsync_installed() -> None:
                 ' it is not installed. For Debian/Ubuntu system, '
                 'install it with:\n'
                 '  $ sudo apt install rsync') from None
+
+
+def check_stale_runtime_on_remote(returncode: int, stderr: str,
+                                  cluster_name: str) -> None:
+    """Raises RuntimeError if remote SkyPilot runtime needs to be updated.
+
+    We detect this by parsing certain backward-incompatible error messages from
+    `stderr`. Typically due to the local client version just got updated, and
+    the remote runtime is an older version.
+    """
+    if returncode != 0:
+        if 'SkyPilot runtime is too old' in stderr:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'{colorama.Fore.RED}SkyPilot runtime needs to be updated '
+                    f'on the remote cluster: {cluster_name}. To update, run '
+                    '(existing jobs will not be interrupted): '
+                    f'{colorama.Style.BRIGHT}sky start -f -y '
+                    f'{cluster_name}{colorama.Style.RESET_ALL}'
+                    f'\n--- Details ---\n{stderr.strip()}\n') from None
 
 
 def get_endpoints(cluster: str,

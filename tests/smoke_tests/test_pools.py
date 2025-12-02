@@ -12,6 +12,12 @@ from sky.skylet import events
 from sky.utils import common_utils
 from sky.utils import yaml_utils
 
+# 1. TODO(lloyd): Marking below tests as no_remote_server since PR#7332 changed
+# the resource management logic for pools reducing the number of concurrent
+# pools that can be running. This leads to build failures on the shared GKE
+# test cluster. Remove this when consolidation mode is enabled by default or
+# we have an option to not allow shared env tests.
+
 _LAUNCH_POOL_AND_CHECK_SUCCESS = (
     's=$(sky jobs pool apply -p {pool_name} {pool_yaml} -y); '
     'echo "$s"; '
@@ -306,6 +312,7 @@ def get_worker_cluster_name(pool_name: str, worker_id: int):
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
 @pytest.mark.skip(
     'Skipping vllm pool test until more remote server testing is done.')
+@pytest.mark.no_remote_server  # see note 1 above
 def test_vllm_pool(generic_cloud: str, accelerator: Dict[str, str]):
     if generic_cloud == 'kubernetes':
         accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
@@ -436,6 +443,7 @@ def test_vllm_pool(generic_cloud: str, accelerator: Dict[str, str]):
             smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server  # see note 1 above
 def test_setup_logs_in_starting_pool(generic_cloud: str):
     """Test that setup logs are streamed in starting state."""
     # Do a very long setup so we know the setup logs are streamed in
@@ -461,6 +469,7 @@ def test_setup_logs_in_starting_pool(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server  # see note 1 above
 def test_setup_logs_in_pool_exits(generic_cloud: str):
     """Test that setup logs are streamed and exit once the setup is complete."""
     """We omit --no-follow to test that we exit."""
@@ -482,6 +491,7 @@ def test_setup_logs_in_pool_exits(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server  # see note 1 above
 def test_update_workers(generic_cloud: str):
     """Test that we can update the number of workers in a pool, both
     up and down.
@@ -511,6 +521,7 @@ def test_update_workers(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server  # see note 1 above
 def test_update_workers_and_yaml(generic_cloud: str):
     """Test that we error if the user specifies a yaml and --workers.
     """
@@ -530,6 +541,7 @@ def test_update_workers_and_yaml(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server  # see note 1 above
 def test_update_workers_no_pool(generic_cloud: str):
     """Test that we error if the user specifies a yaml and --workers.
     """
@@ -549,6 +561,7 @@ def test_update_workers_no_pool(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_queueing(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     pool_config = basic_pool_conf(num_workers=1,
@@ -588,6 +601,7 @@ def test_pool_queueing(generic_cloud: str):
 
 
 @pytest.mark.aws
+@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_preemption(generic_cloud: str):
     region = 'us-east-2'
     name = smoke_tests_utils.get_cluster_name()
@@ -642,6 +656,7 @@ def test_pool_preemption(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_job_cancel_running(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
@@ -683,6 +698,7 @@ def test_pool_job_cancel_running(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_job_cancel_instant(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
@@ -722,6 +738,7 @@ def test_pool_job_cancel_instant(generic_cloud: str):
 
 
 @pytest.mark.aws
+@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_job_cancel_recovery(generic_cloud: str):
     region = 'us-east-2'
     name = smoke_tests_utils.get_cluster_name()
@@ -781,6 +798,7 @@ def test_pool_job_cancel_recovery(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_job_cancel_running_multiple(generic_cloud: str):
     num_jobs = 4
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
@@ -837,6 +855,7 @@ def test_pool_job_cancel_running_multiple(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_job_cancel_running_multiple_simultaneous(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     num_jobs = 4
@@ -891,6 +910,7 @@ def test_pool_job_cancel_running_multiple_simultaneous(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_job_cancel_instant_multiple(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     num_jobs = 4
@@ -941,6 +961,7 @@ def test_pool_job_cancel_instant_multiple(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_job_cancel_instant_multiple_simultaneous(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     num_jobs = 4
@@ -988,6 +1009,7 @@ def test_pool_job_cancel_instant_multiple_simultaneous(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server  # see note 1 above
 def test_pools_job_cancel_no_jobs(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
@@ -1013,6 +1035,7 @@ def test_pools_job_cancel_no_jobs(generic_cloud: str):
 
 
 # TODO(Lloyd): Remove once heterogeneous pools are supported.
+@pytest.mark.no_remote_server  # see note 1 above
 def test_heterogeneous_pool(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
@@ -1034,6 +1057,7 @@ def test_heterogeneous_pool(generic_cloud: str):
 
 
 #(TODO): Remove once heterogeneous pools are supported.
+@pytest.mark.no_remote_server  # see note 1 above
 def test_heterogeneous_pool_counts(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
@@ -1054,8 +1078,7 @@ def test_heterogeneous_pool_counts(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-# This test is failing on shared gke postgres test cluster, we should remove this after we fix it.
-@pytest.mark.no_remote_server
+@pytest.mark.no_remote_server  # see note 1 above
 def test_pools_num_jobs_basic(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
@@ -1096,6 +1119,7 @@ def test_pools_num_jobs_basic(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_worker_assignment_in_queue(generic_cloud: str):
     """Test that sky jobs queue shows the worker assignment for running jobs."""
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
@@ -1133,6 +1157,7 @@ def test_pool_worker_assignment_in_queue(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server  # see note 1 above
 def test_pools_num_jobs_option(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
@@ -1170,6 +1195,7 @@ def test_pools_num_jobs_option(generic_cloud: str):
 
 
 @pytest.mark.gcp
+@pytest.mark.no_remote_server  # see note 1 above
 def test_pools_setup_num_gpus(generic_cloud: str):
     """Test that the number of GPUs is set correctly in the setup script."""
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
@@ -1196,6 +1222,7 @@ def test_pools_setup_num_gpus(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server  # see note 1 above
 def test_pools_single_yaml(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
@@ -1223,6 +1250,7 @@ def test_pools_single_yaml(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server  # see note 1 above
 def test_pools_double_launch(generic_cloud: str):
     """Test that we can launch a pool with the same name twice.
     """
@@ -1249,17 +1277,42 @@ def test_pools_double_launch(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-def check_pool_not_in_status(pool_name: str):
-    """Check that a pool does not appear in `sky jobs pool status`."""
-    return (f's=$(sky jobs pool status); '
-            f'echo "$s"; '
-            f'if echo "$s" | grep "{pool_name}"; then '
-            f'  echo "ERROR: Pool {pool_name} still exists in pool status"; '
-            f'  exit 1; '
-            f'fi; '
-            f'echo "Pool {pool_name} correctly removed from pool status"')
+def check_pool_not_in_status(pool_name: str,
+                             timeout: int = 30,
+                             time_between_checks: int = 5):
+    """Check that a pool does not appear in `sky jobs pool status`.
+    
+    Args:
+        pool_name: The name of the pool to check for.
+        timeout: Maximum time in seconds to wait for the pool to be removed.
+        time_between_checks: Time in seconds to wait between checks.
+    """
+    return (
+        'start_time=$SECONDS; '
+        'while true; do '
+        f'if (( $SECONDS - $start_time > {timeout} )); then '
+        f'  echo "Timeout after {timeout} seconds waiting for pool {pool_name} to be removed"; '
+        f'  s=$(sky jobs pool status); '
+        f'  echo "$s"; '
+        f'  if echo "$s" | grep "{pool_name}"; then '
+        f'    echo "ERROR: Pool {pool_name} still exists in pool status"; '
+        f'    exit 1; '
+        f'  fi; '
+        f'  exit 0; '
+        'fi; '
+        f's=$(sky jobs pool status); '
+        'echo "$s"; '
+        f'if ! echo "$s" | grep "{pool_name}"; then '
+        f'  echo "Pool {pool_name} correctly removed from pool status"; '
+        '  break; '
+        'fi; '
+        f'echo "Waiting for pool {pool_name} to be removed..."; '
+        f'sleep {time_between_checks}; '
+        'done')
 
 
+@pytest.mark.resource_heavy
+@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_down_all_with_running_jobs(generic_cloud: str):
     """Test that `sky jobs pool down -a -y` cancels running jobs and removes pools.
     
@@ -1286,49 +1339,66 @@ def test_pool_down_all_with_running_jobs(generic_cloud: str):
         run_cmd='sleep infinity',
     )
 
-    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
-        with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
-            write_yaml(pool_yaml, pool_config)
-            write_yaml(job_yaml, job_config)
+    # Configure jobs controller resources: 4 cores and 20GB memory
+    controller_config = {
+        'jobs': {
+            'controller': {
+                'resources': {
+                    'cpus': '4+',
+                    'memory': '32+',
+                }
+            }
+        }
+    }
 
-            test = smoke_tests_utils.Test(
-                'test_pool_down_all_with_running_jobs',
-                [
-                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
-                        pool_name=pool_name_1, pool_yaml=pool_yaml.name),
-                    wait_until_pool_ready(pool_name_1, timeout=timeout),
-                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
-                        pool_name=pool_name_2, pool_yaml=pool_yaml.name),
-                    wait_until_pool_ready(pool_name_2, timeout=timeout),
-                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
-                        pool_name=pool_name_1,
-                        job_yaml=job_yaml.name,
-                        job_name=job_name_1),
-                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
-                        pool_name=pool_name_2,
-                        job_yaml=job_yaml.name,
-                        job_name=job_name_2),
-                    wait_until_job_status(job_name_1, ['RUNNING'],
-                                          timeout=timeout),
-                    wait_until_job_status(job_name_2, ['RUNNING'],
-                                          timeout=timeout),
-                    'sky jobs pool down -a -y',
-                    # Wait a bit for cancellation to propagate
-                    'sleep 10',
-                    wait_until_job_status(
-                        job_name_1, ['CANCELLED'], bad_statuses=[], timeout=30),
-                    wait_until_job_status(
-                        job_name_2, ['CANCELLED'], bad_statuses=[], timeout=30),
-                    check_pool_not_in_status(pool_name_1),
-                    check_pool_not_in_status(pool_name_2),
-                ],
-                timeout=timeout,
-                teardown=cancel_jobs_and_teardown_pool(pool_name_1, timeout=5) +
-                cancel_jobs_and_teardown_pool(pool_name_2, timeout=5),
-            )
-            smoke_tests_utils.run_one_test(test)
+    with smoke_tests_utils.override_sky_config(config_dict=controller_config):
+        with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+            with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
+                write_yaml(pool_yaml, pool_config)
+                write_yaml(job_yaml, job_config)
+
+                test = smoke_tests_utils.Test(
+                    'test_pool_down_all_with_running_jobs',
+                    [
+                        _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                            pool_name=pool_name_1, pool_yaml=pool_yaml.name),
+                        wait_until_pool_ready(pool_name_1, timeout=timeout),
+                        _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                            pool_name=pool_name_2, pool_yaml=pool_yaml.name),
+                        wait_until_pool_ready(pool_name_2, timeout=timeout),
+                        _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
+                            pool_name=pool_name_1,
+                            job_yaml=job_yaml.name,
+                            job_name=job_name_1),
+                        _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
+                            pool_name=pool_name_2,
+                            job_yaml=job_yaml.name,
+                            job_name=job_name_2),
+                        wait_until_job_status(job_name_1, ['RUNNING'],
+                                              timeout=timeout),
+                        wait_until_job_status(job_name_2, ['RUNNING'],
+                                              timeout=timeout),
+                        'sky jobs pool down -a -y',
+                        # Wait a bit for cancellation to propagate
+                        'sleep 10',
+                        wait_until_job_status(job_name_1, ['CANCELLED'],
+                                              bad_statuses=[],
+                                              timeout=30),
+                        wait_until_job_status(job_name_2, ['CANCELLED'],
+                                              bad_statuses=[],
+                                              timeout=30),
+                        check_pool_not_in_status(pool_name_1),
+                        check_pool_not_in_status(pool_name_2),
+                    ],
+                    timeout=timeout,
+                    teardown=cancel_jobs_and_teardown_pool(pool_name_1,
+                                                           timeout=5) +
+                    cancel_jobs_and_teardown_pool(pool_name_2, timeout=5),
+                )
+                smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_down_single_pool(generic_cloud: str):
     """Test that `sky jobs pool down <pool_name> -y` downs a single pool.
     
@@ -1375,7 +1445,7 @@ def test_pool_down_single_pool(generic_cloud: str):
                     'sleep 10',
                     wait_until_job_status(
                         job_name, ['CANCELLED'], bad_statuses=[], timeout=30),
-                    check_pool_not_in_status(pool_name),
+                    check_pool_not_in_status(pool_name, timeout=30),
                 ],
                 timeout=timeout,
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),

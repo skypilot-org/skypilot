@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from sky.backends.cloud_vm_ray_backend import RayCodeGen
+from sky.backends import task_codegen
 
 TESTDATA_DIR = Path(__file__).parent / 'testdata' / 'ray_codegen'
 
@@ -65,7 +65,7 @@ def test_single_node_with_gpu():
 
     Mirrors usage in _execute_task_one_node() with GPU and setup.
     """
-    codegen = RayCodeGen()
+    codegen = task_codegen.RayCodeGen()
     codegen.add_prologue(job_id=2)
 
     resources_dict = {'CPU': 4.0, 'GPU': 1.0}
@@ -74,8 +74,8 @@ def test_single_node_with_gpu():
         'MODEL_NAME': 'resnet50',
     }
 
-    codegen.add_gang_scheduling_placement_group_and_setup(
-        num_nodes=1,
+    codegen.add_setup(
+        1,
         resources_dict=resources_dict,
         stable_cluster_internal_ips=['10.0.0.1'],
         env_vars=task_env_vars,
@@ -84,10 +84,11 @@ def test_single_node_with_gpu():
     )
 
     # Single node: no gang_scheduling_id passed
-    codegen.add_ray_task(
+    codegen.add_task(
+        1,
         bash_script='python train.py',
         task_name='train_task',
-        ray_resources_dict={
+        resources_dict={
             'CPU': 4.0,
             'GPU': 1.0
         },
@@ -106,7 +107,7 @@ def test_multi_node_2nodes():
 
     Mirrors usage in _execute_task_n_nodes() for basic multi-node setup.
     """
-    codegen = RayCodeGen()
+    codegen = task_codegen.RayCodeGen()
     codegen.add_prologue(job_id=3)
 
     num_nodes = 2
@@ -115,8 +116,8 @@ def test_multi_node_2nodes():
         'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000002-cluster-3',
     }
 
-    codegen.add_gang_scheduling_placement_group_and_setup(
-        num_nodes=num_nodes,
+    codegen.add_setup(
+        num_nodes,
         resources_dict=resources_dict,
         stable_cluster_internal_ips=['10.0.0.1', '10.0.0.2'],
         env_vars=task_env_vars,
@@ -124,16 +125,14 @@ def test_multi_node_2nodes():
         setup_log_path='/sky/logs/setup.log',
     )
 
-    # Multi-node: loop and add task for each node with gang_scheduling_id
-    for i in range(num_nodes):
-        codegen.add_ray_task(
-            bash_script='echo "Running on node $SKYPILOT_NODE_RANK"',
-            task_name='distributed_task',
-            ray_resources_dict={'CPU': 2.0},
-            log_dir='/sky/logs/tasks',
-            env_vars=task_env_vars,
-            gang_scheduling_id=i,
-        )
+    codegen.add_task(
+        num_nodes,
+        bash_script='echo "Running on node $SKYPILOT_NODE_RANK"',
+        task_name='distributed_task',
+        resources_dict={'CPU': 2.0},
+        log_dir='/sky/logs/tasks',
+        env_vars=task_env_vars,
+    )
 
     codegen.add_epilogue()
 

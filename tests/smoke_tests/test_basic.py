@@ -637,8 +637,9 @@ def test_core_api_sky_launch_exec(generic_cloud: str):
             cluster_exist = False
             status_request_id = (
                 smoke_tests_utils.get_dashboard_cluster_status_request_id())
-            status_response = (smoke_tests_utils.get_response_from_request_id(
-                status_request_id))
+            status_response = (
+                smoke_tests_utils.get_response_from_request_id_dashboard(
+                    status_request_id))
             for cluster in status_response:
                 if cluster['name'] == name:
                     cluster_exist = True
@@ -700,8 +701,9 @@ def test_jobs_launch_and_logs(generic_cloud: str):
             # Check the job status from the dashboard
             queue_request_id = (
                 smoke_tests_utils.get_dashboard_jobs_queue_request_id())
-            queue_response = (smoke_tests_utils.get_response_from_request_id(
-                queue_request_id))
+            queue_response = (
+                smoke_tests_utils.get_response_from_request_id_dashboard(
+                    queue_request_id))
             job_exist = False
             for job in queue_response:
                 if job['job_id'] == job_id:
@@ -1775,3 +1777,27 @@ def test_cluster_setup_num_gpus():
             teardown=f'sky down -y {name}',
         )
         smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.aws
+def test_launch_retry_until_up():
+    """Test that retry until up considers more resources after trying all zones."""
+    cluster_name = smoke_tests_utils.get_cluster_name()
+    timeout = 180
+    test = smoke_tests_utils.Test(
+        'launch-retry-until-up',
+        [
+            # Launch something we'll never get.
+            f's=$(timeout {timeout} sky launch -c {cluster_name} --gpus B200:8 --infra aws echo hi -y -d --retry-until-up --use-spot 2>&1 || true) && '
+            # Check that "Retry after" appears in the output
+            'echo "$s" | grep -q "Retry after" && '
+            # Find the first occurrence of "Retry after" and get its line number
+            'RETRY_LINE=$(echo "$s" | grep -n "Retry after" | head -1 | cut -d: -f1) && '
+            # Check that "Considered resources" appears after the first "Retry after"
+            # We do this by extracting all lines after RETRY_LINE and checking if "Considered resources" appears
+            'echo "$s" | tail -n +$((RETRY_LINE + 1)) | grep -q "Considered resources"'
+        ],
+        timeout=200,  # Slightly more than 180 to account for test overhead
+        teardown=f'sky down -y {cluster_name}',
+    )
+    smoke_tests_utils.run_one_test(test)

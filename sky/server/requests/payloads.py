@@ -72,7 +72,6 @@ EXTERNAL_LOCAL_ENV_VARS = [
 ]
 
 
-@annotations.lru_cache(scope='global')
 def request_body_env_vars() -> dict:
     env_vars = {}
     for env_var in os.environ:
@@ -695,12 +694,6 @@ class ListAcceleratorCountsBody(RequestBody):
 class LocalUpBody(RequestBody):
     """The request body for the local up endpoint."""
     gpus: bool = True
-    ips: Optional[List[str]] = None
-    ssh_user: Optional[str] = None
-    ssh_key: Optional[str] = None
-    cleanup: bool = False
-    context_name: Optional[str] = None
-    password: Optional[str] = None
     name: Optional[str] = None
     port_start: Optional[int] = None
 

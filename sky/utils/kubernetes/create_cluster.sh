@@ -4,8 +4,8 @@
 set -e
 
 # Images
-IMAGE="us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest"
-IMAGE_GPU="us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot-gpu:latest"
+IMAGE="us-docker.pkg.dev/sky-dev-465/skypilotk8s/skypilot:latest"
+IMAGE_GPU="us-docker.pkg.dev/sky-dev-465/skypilotk8s/skypilot-gpu:latest"
 
 # Arguments
 NAME=$1

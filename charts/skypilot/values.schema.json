@@ -5,6 +5,9 @@
         "apiService": {
             "type": "object",
             "properties": {
+                "affinity": {
+                    "type": "object"
+                },
                 "annotations": {
                     "type": [
                         "object",
@@ -113,6 +116,9 @@
                         }
                     }
                 },
+                "nodeSelector": {
+                    "type": "object"
+                },
                 "preDeployHook": {
                     "type": "string"
                 },
@@ -142,6 +148,9 @@
                 },
                 "terminationGracePeriodSeconds": {
                     "type": "integer"
+                },
+                "tolerations": {
+                    "type": "array"
                 },
                 "upgradeStrategy": {
                     "type": "string"
@@ -292,6 +301,15 @@
         "global": {
             "type": "object",
             "properties": {
+                "extraEnvs": {
+                    "type": [
+                        "array",
+                        "null"
+                    ],
+                    "items": {
+                        "type": "object"
+                    }
+                },
                 "imagePullSecrets": {
                     "type": [
                         "array",

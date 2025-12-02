@@ -15,6 +15,7 @@ from sky import clouds
 from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
+from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.server.requests import request_names
 from sky.skylet import autostop_lib
@@ -478,7 +479,9 @@ def _execute_dag(
                     cluster_name, status_lib.ClusterStatus.INIT,
                     'Syncing files to cluster',
                     global_user_state.ClusterEventType.STATUS_CHANGE)
-            backend.sync_workdir(handle, task.workdir, task.envs_and_secrets)
+            envs_and_secrets = task_lib.get_plaintext_envs_and_secrets(
+                task.envs_and_secrets)
+            backend.sync_workdir(handle, task.workdir, envs_and_secrets)
 
         if do_file_mounts:
             if cluster_name is not None:
