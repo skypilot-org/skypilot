@@ -2,13 +2,11 @@
 
 import importlib
 import os
-import sys
 from unittest import mock
 
 import pytest
 
 from sky import global_user_state
-from sky.skylet import constants
 from sky.utils import locks
 from sky.utils.db import db_utils
 
@@ -161,23 +159,22 @@ class TestFileLock:
 
     def test_file_lock_directories_created(self, tmp_path, monkeypatch):
         """Test that lock directories are created."""
+        # Import locks locally to avoid affecting other tests with reload.
+        from sky.utils import locks as locks_local
 
         # Set tempdir using SKY_RUNTIME_DIR.
         monkeypatch.setenv('SKY_RUNTIME_DIR', str(tmp_path))
         expected_locks_dir = tmp_path / '.sky/locks'
-        print(f'expected_locks_dir: {expected_locks_dir}',
-              file=sys.stderr,
-              flush=True)
         # SKY_LOCKS_DIR is evaluated at import time; re-import to get fresh
         # values.
-        importlib.reload(locks)
+        importlib.reload(locks_local)
 
-        assert locks.SKY_LOCKS_DIR == str(expected_locks_dir)
+        assert locks_local.SKY_LOCKS_DIR == str(expected_locks_dir)
 
         # Test that creating a lock creates the directory
-        assert not os.path.exists(locks.SKY_LOCKS_DIR)
-        lock = locks.FileLock('test_dir_creation')
-        assert os.path.exists(locks.SKY_LOCKS_DIR)
+        assert not os.path.exists(locks_local.SKY_LOCKS_DIR)
+        lock = locks_local.FileLock('test_dir_creation')
+        assert os.path.exists(locks_local.SKY_LOCKS_DIR)
 
 
 class TestPostgresLock:
