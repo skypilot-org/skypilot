@@ -99,7 +99,6 @@ def run_remote(node,
         ssh_cmd.append(cmd)
 
     subprocess_cmd = ' '.join(ssh_cmd) if use_shell else ssh_cmd
-    logger.error(f'!!!!{subprocess_cmd}')
     process = subprocess.run(subprocess_cmd,
                              capture_output=True,
                              text=True,
@@ -418,7 +417,7 @@ def cleanup_kubectl_ssh_tunnel(context_name):
 def deploy_clusters(infra: Optional[str], 
                     ssh_node_pools_file: str = ssh_utils.DEFAULT_SSH_NODE_POOLS_PATH,
                     kubeconfig_path: Optional[str] = None,
-                    global_use_ssh_config: bool = True,
+                    global_use_ssh_config: bool = False,
                     cleanup: bool = True):
 
     kubeconfig_path = kubeconfig_path or DEFAULT_KUBECONFIG_PATH
