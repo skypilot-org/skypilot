@@ -82,7 +82,7 @@ def run_remote(node,
                use_shell=False,
                silent=False):
     """Run a command on a remote machine via SSH.
-    
+
     silent is used for gpu checking (will show error logs when no gpus are found)"""
     ssh_cmd: List[str]
     if use_ssh_config:
@@ -417,7 +417,7 @@ def cleanup_kubectl_ssh_tunnel(cluster_name, context_name):
         logger.error(f'{YELLOW}Cleanup script not found: {cleanup_script}{NC}')
 
 
-def deploy_clusters(infra: Optional[str], 
+def deploy_clusters(infra: Optional[str],
                     ssh_node_pools_file: str = ssh_utils.DEFAULT_SSH_NODE_POOLS_PATH,
                     kubeconfig_path: Optional[str] = None,
                     global_use_ssh_config: bool = False,
@@ -598,7 +598,7 @@ def deploy_cluster(cluster_name,
     k3s_token = 'mytoken'  # Any string can be used as the token
 
     # Pre-flight checks
-    logger.info(f'Checking SSH connection to head node...')
+    logger.info(f'Checking SSH connection to head node ({head_node})...')
     result = run_remote(
         head_node,
         f'echo \'SSH connection successful ({head_node})\'',
@@ -723,7 +723,7 @@ def deploy_cluster(cluster_name,
         success_message(f'Node Pool `{cluster_name}` cleaned up successfully.')
         return []
 
-    logger.debug(f'Checking TCP Forwarding Options...')
+    logger.debug('Checking TCP Forwarding Options...')
     cmd = (
         'if [ "$(sudo sshd -T | grep allowtcpforwarding)" = "allowtcpforwarding yes" ]; then '
         f'echo "TCP Forwarding already enabled on head node ({head_node})."; '
