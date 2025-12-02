@@ -35,7 +35,9 @@ def _is_running_skylet_process(pid: int) -> bool:
         # Check if command line contains the skylet module identifier
         cmdline = process.cmdline()
         return any('sky.skylet.skylet' in arg for arg in cmdline)
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess,
+            OSError) as e:
+        print(f'Error checking if skylet process {pid} is running: {e}')
         return False
 
 
