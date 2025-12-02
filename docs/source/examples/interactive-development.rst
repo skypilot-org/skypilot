@@ -299,7 +299,7 @@ This is the underlying code:
         app.run()
 
 
-This notebook uses ``mo.cli_args()`` to parse any command-line arguments passed to the notebook.
+This notebook uses :code:`mo.cli_args()` to parse any command-line arguments passed to the notebook.
 A more real-life use-case would take such arguments to train a PyTorch model, but this
 tutorial will omit the details of training a model for sake of simplicity.
 
