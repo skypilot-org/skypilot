@@ -226,8 +226,8 @@ port that you want marimo to use:
 Inside the cluster, you can run the following commands to start marimo.
 
 .. note::
-    By starting the notebook this way it runs in a completely sandboxed environment. The `uvx` command ensures that
-    we can use `marimo` without installing it in a pre-existing environment and the `--sandbox` flag
+    By starting the notebook this way it runs in a completely sandboxed environment. The ``uvx`` command ensures that
+    we can use ``marimo`` without installing it in a pre-existing environment and the ``--sandbox`` flag
     makes sure that any dependencies of the notebook are installed in a separate environment too.
 
 .. code-block:: bash
