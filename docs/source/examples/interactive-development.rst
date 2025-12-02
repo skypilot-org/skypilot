@@ -214,9 +214,9 @@ marimo notebooks
 ~~~~~~~~~~~~~~~~~
 
 marimo notebooks are a modern alternative to traditional Jupyter notebooks, stored
-as Python scripts on disk. They are also fully reproducible thanks to the `uv` integration.
+as Python scripts on disk. They are also fully reproducible thanks to the ``uv`` integration.
 
-To start a marimo notebook interactively via `sky`, you can connect to the machine and forward the
+To start a marimo notebook interactively via ``sky``, you can connect to the machine and forward the
 port that you want marimo to use:
 
 .. code-block:: bash
