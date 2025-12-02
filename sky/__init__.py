@@ -175,6 +175,7 @@ __all__ = [
     'Fluidstack',
     'Nebius',
     'Hyperbolic',
+    "Novita",
     'Shadeform',
     'Seeweb',
     'Optimizer',

@@ -36,6 +36,7 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import runpod
 from sky.adaptors import seeweb as seeweb_adaptor
+from sky.adaptors import novita as novita_adaptor
 from sky.adaptors import shadeform as shadeform_adaptor
 from sky.adaptors import vast
 from sky.provision.fluidstack import fluidstack_utils
@@ -375,6 +376,48 @@ def setup_hyperbolic_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     config.setdefault('auth', {})
     config['auth']['ssh_user'] = 'ubuntu'
     config['auth']['ssh_public_key'] = public_key_path
+
+    return configure_ssh_info(config)
+
+
+def setup_novita_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sets up SSH authentication for Novita.
+    - Generates a new SSH key pair if one does not exist.
+    - Adds the public SSH key to the user's Novita account.
+
+    Note: This assumes there is a Novita Python SDK available.
+    If no official SDK exists, this function would need to use direct API calls.
+    """
+
+    _, public_key_path = auth_utils.get_or_generate_keys()
+    ssh_key_id = None
+
+    with open(public_key_path, 'r', encoding='utf-8') as f:
+        public_key = f.read().strip()
+
+    try:
+        # Add SSH key to Novita using our utility functions
+        ssh_key_id = novita_adaptor.add_ssh_key_to_novita(public_key)
+
+    except ImportError as e:
+        # If required dependencies are missing
+        logger.warning(
+            f'Failed to add Novita SSH key due to missing dependencies: '
+            f'{e}. Manually configure SSH keys in your Novita account.')
+
+    except Exception as e:
+        logger.warning(f'Failed to set up Novita authentication: {e}')
+        raise exceptions.CloudUserIdentityError(
+            'Failed to set up SSH authentication for Novita. '
+            f'Please ensure your Novita credentials are configured: {e}'
+        ) from e
+
+    if ssh_key_id is None:
+        raise Exception('Failed to add SSH key to Novita')
+
+    # Configure SSH info in the config
+    config['auth']['ssh_public_key'] = public_key_path
+    config['auth']['ssh_key_id'] = ssh_key_id
 
     return configure_ssh_info(config)
 
