@@ -8,33 +8,25 @@ import pytest
 from sky.skylet import attempt_skylet
 
 
-def test_version_file_default_runtime_dir(monkeypatch):
-    """Test VERSION_FILE uses default ~ when SKY_RUNTIME_DIR not set."""
+@pytest.mark.parametrize('use_custom_dir', [False, True])
+def test_version_file_runtime_dir(tmp_path, monkeypatch, use_custom_dir):
+    """Test VERSION_FILE respects SKY_RUNTIME_DIR overrides."""
     monkeypatch.delenv('SKY_RUNTIME_DIR', raising=False)
+    if use_custom_dir:
+        monkeypatch.setenv('SKY_RUNTIME_DIR', str(tmp_path))
 
     # Mock subprocess and file operations to prevent actual execution
     with mock.patch('subprocess.run'), \
          mock.patch('builtins.open', mock.mock_open()), \
          mock.patch('os.path.exists', return_value=True):
-        # RUNTIME_DIR is evaluated at import time, re-import to get fresh values
+        # RUNTIME_DIR is evaluated at import time; re-import for fresh values.
         importlib.reload(attempt_skylet)
 
-        expected_path = os.path.expanduser('~/.sky/skylet_version')
+        if use_custom_dir:
+            expected_path = str(tmp_path / '.sky/skylet_version')
+        else:
+            expected_path = os.path.expanduser('~/.sky/skylet_version')
         assert attempt_skylet.VERSION_FILE == expected_path
-
-
-def test_version_file_custom_runtime_dir(tmp_path, monkeypatch):
-    """Test VERSION_FILE uses custom SKY_RUNTIME_DIR when set."""
-    monkeypatch.setenv('SKY_RUNTIME_DIR', str(tmp_path))
-
-    # Mock subprocess and file operations to prevent actual execution
-    with mock.patch('subprocess.run'), \
-         mock.patch('builtins.open', mock.mock_open()), \
-         mock.patch('os.path.exists', return_value=True):
-        importlib.reload(attempt_skylet)
-
-        expected_path = tmp_path / '.sky/skylet_version'
-        assert attempt_skylet.VERSION_FILE == str(expected_path)
 
 
 def test_runtime_dir_variable_construction(tmp_path, monkeypatch):
