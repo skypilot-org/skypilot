@@ -129,7 +129,10 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             # Format: instance_type__vcpus__memory[__SPOT]
             instance_type = config.node_config['InstanceType']
             disk_size = config.node_config.get('DiskSize', 50) # Verda Cloud default disk size is 50GB
-            is_spot: bool = False
+            is_spot = config.node_config.get('use_spot', None)
+
+            if is_spot is None:
+                is_spot = config.node_config.get('Preemptible', None)
 
             # Get image from node_config (populated from template)
             image = config.node_config.get('ImageId', 'ubuntu-24.04-cuda-12.8-open-docker')
@@ -143,7 +146,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 instance_type=instance_type,
                 hostname=f'{cluster_name_on_cloud}-{node_type}',
                 location=region,
-                is_spot=is_spot,
+                is_spot=is_spot if is_spot is not None else False,
                 contract='PAY_AS_YOU_GO' if not is_spot else 'SPOT',
                 image=image,
                 description='Created by SkyPilot',
