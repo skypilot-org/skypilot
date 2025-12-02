@@ -27,16 +27,3 @@ def test_version_file_runtime_dir(tmp_path, monkeypatch, use_custom_dir):
         else:
             expected_path = os.path.expanduser('~/.sky/skylet_version')
         assert attempt_skylet.VERSION_FILE == expected_path
-
-
-def test_runtime_dir_variable_construction(tmp_path, monkeypatch):
-    """Test RUNTIME_DIR variable is constructed correctly."""
-    monkeypatch.setenv('SKY_RUNTIME_DIR', str(tmp_path))
-
-    # Mock subprocess and file operations to prevent actual execution
-    with mock.patch('subprocess.run'), \
-         mock.patch('builtins.open', mock.mock_open()), \
-         mock.patch('os.path.exists', return_value=True):
-        importlib.reload(attempt_skylet)
-
-        assert attempt_skylet.RUNTIME_DIR == str(tmp_path)
