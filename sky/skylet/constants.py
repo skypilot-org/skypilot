@@ -17,7 +17,9 @@ from sky.setup_files import dependencies
 SKY_RUNTIME_DIR = '${SKY_RUNTIME_DIR:-$HOME}'
 # Same as above but for use within python code instead of shell commands.
 # Example usage:
-# os.environ.get(SKY_RUNTIME_DIR_ENV_VAR_KEY, '~')
+# os.path.join(
+#    os.path.expanduser(os.environ.get(SKY_RUNTIME_DIR_ENV_VAR_KEY, '~')),
+#    '.sky/jobs.db')
 SKY_RUNTIME_DIR_ENV_VAR_KEY = 'SKY_RUNTIME_DIR'
 # We keep sky_logs and sky_workdir in $HOME, because
 # these are artifacts that users can access, and having
