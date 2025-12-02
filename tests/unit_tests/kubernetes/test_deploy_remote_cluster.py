@@ -30,11 +30,11 @@ def test_deploy_remote_cluster():
 
     mock_ssh_targets = [{'name': mock_context_name, 'hosts': ['test-host']}]
 
-    with mock.patch('sky.utils.kubernetes.deploy_remote_cluster.parse_args') as mock_parse_args, \
-         mock.patch('sky.utils.kubernetes.deploy_remote_cluster.ssh_utils.load_ssh_targets') as mock_load_ssh_targets, \
-         mock.patch('sky.utils.kubernetes.deploy_remote_cluster.ssh_utils.get_cluster_config') as mock_get_cluster_config, \
-         mock.patch('sky.utils.kubernetes.deploy_remote_cluster.ssh_utils.prepare_hosts_info') as mock_prepare_hosts_info, \
-         mock.patch('sky.utils.kubernetes.deploy_remote_cluster.deploy_cluster') as mock_deploy_cluster:
+    with mock.patch('sky.utils.kubernetes.deploy_ssh_node_pools.parse_args') as mock_parse_args, \
+         mock.patch('sky.utils.kubernetes.deploy_ssh_node_pools.ssh_utils.load_ssh_targets') as mock_load_ssh_targets, \
+         mock.patch('sky.utils.kubernetes.deploy_ssh_node_pools.ssh_utils.get_cluster_config') as mock_get_cluster_config, \
+         mock.patch('sky.utils.kubernetes.deploy_ssh_node_pools.ssh_utils.prepare_hosts_info') as mock_prepare_hosts_info, \
+         mock.patch('sky.utils.kubernetes.deploy_ssh_node_pools.deploy_cluster') as mock_deploy_cluster:
         mock_parse_args.return_value = mock_args
         mock_load_ssh_targets.return_value = mock_ssh_targets
         mock_get_cluster_config.return_value = mock_cluster_config
