@@ -9,6 +9,7 @@ from paramiko.config import SSHConfig
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import slurm
+from sky.utils import annotations
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -176,6 +177,46 @@ def get_partition_from_config(provider_config: Dict[str, Any]) -> str:
     The concept of partition can be mapped to a cloud zone.
     """
     return provider_config.get('partition', DEFAULT_PARTITION)
+
+
+@annotations.lru_cache(scope='request')
+def get_cluster_default_partition(cluster_name: str) -> str:
+    """Get the default partition for a Slurm cluster.
+
+    Queries the Slurm cluster for the partition marked with an asterisk (*)
+    in sinfo output. Falls back to DEFAULT_PARTITION if the query fails or
+    no default partition is found.
+
+    Args:
+        cluster_name: Name of the Slurm cluster.
+
+    Returns:
+        The default partition name for the cluster.
+    """
+    try:
+        ssh_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
+        ssh_config_dict = ssh_config.lookup(cluster_name)
+    except Exception as e:
+        raise ValueError(
+            f'Failed to load SSH configuration from {DEFAULT_SLURM_PATH}: '
+            f'{common_utils.format_exception(e)}') from e
+
+    client = slurm.SlurmClient(
+        ssh_config_dict['hostname'],
+        int(ssh_config_dict.get('port', 22)),
+        ssh_config_dict['user'],
+        ssh_config_dict['identityfile'][0],
+        ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+    )
+
+    default_partition = client.get_default_partition()
+    if default_partition is None:
+        # TODO(kevin): Have a way to specify default partition in
+        # ~/.sky/config.yaml if needed, in case a Slurm cluster
+        # really does not have a default partition.
+        raise ValueError('No default partition found for cluster '
+                         f'{cluster_name}.')
+    return default_partition
 
 
 def get_all_slurm_cluster_names() -> List[str]:

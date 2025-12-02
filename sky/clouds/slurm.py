@@ -302,6 +302,8 @@ class Slurm(clouds.Cloud):
         acc_count = s.accelerator_count if s.accelerator_count else 0
         acc_type = s.accelerator_type if s.accelerator_type else None
 
+        default_partition = slurm_utils.get_cluster_default_partition(cluster)
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -310,7 +312,7 @@ class Slurm(clouds.Cloud):
             'accelerator_count': str(acc_count),
             'accelerator_type': acc_type,
             'slurm_cluster': cluster,
-            'slurm_partition': slurm_utils.DEFAULT_PARTITION,
+            'slurm_partition': default_partition,
             # TODO(jwj): Pass SSH config in a smarter way
             'ssh_hostname': ssh_config_dict['hostname'],
             'ssh_port': str(ssh_config_dict.get('port', 22)),

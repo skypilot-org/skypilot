@@ -363,3 +363,28 @@ class SlurmClient:
                      f'{job_name}: {stdout}')
 
         return job_id
+
+    def get_default_partition(self) -> Optional[str]:
+        """Get the default partition for the Slurm cluster.
+
+        Returns the partition marked with an asterisk (*) in sinfo output.
+
+        Returns:
+            The default partition name, or None if it cannot be determined.
+        """
+        cmd = 'sinfo -h -o "%P"'
+        rc, stdout, stderr = self._runner.run(cmd,
+                                              require_outputs=True,
+                                              stream_logs=False)
+        if rc != 0:
+            logger.debug(f'Failed to get default partition: {stderr}')
+            return None
+
+        for line in stdout.strip().splitlines():
+            partition = line.strip()
+            if partition.endswith('*'):
+                # Remove asterisk
+                return partition[:-1]
+
+        logger.debug('No default partition found in sinfo output')
+        return None

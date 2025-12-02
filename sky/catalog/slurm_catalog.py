@@ -98,8 +98,6 @@ def list_accelerators_realtime(
     """
     del gpus_only, all_regions, require_price
 
-    partition_filter = slurm_utils.DEFAULT_PARTITION
-
     enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
         cloud.CloudCapability.COMPUTE)
     if not sky_clouds.cloud_in_iterable(sky_clouds.Slurm(), enabled_clouds):
@@ -113,6 +111,8 @@ def list_accelerators_realtime(
         slurm_cluster = all_clusters[0]
     else:
         slurm_cluster = region_filter
+
+    partition_filter = slurm_utils.get_cluster_default_partition(slurm_cluster)
 
     # Call the helper function to get node info
     slurm_nodes_info = slurm_utils.slurm_node_info(
