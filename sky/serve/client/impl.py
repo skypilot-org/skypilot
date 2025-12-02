@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import click
 
-from sky import exceptions
 from sky.client import common as client_common
 from sky.server import common as server_common
 from sky.server.requests import payloads
@@ -120,11 +119,12 @@ def apply(
     # pylint: disable=invalid-name
     _need_confirmation: bool = False
 ) -> server_common.RequestId[None]:
+    noun = 'pool' if pool else 'service'
+
     if pool:
         # Avoid circular import.
         from sky.client import sdk  # pylint: disable=import-outside-toplevel
 
-        noun = 'pool' if pool else 'service'
         # There are two cases here. If task is None, we should be trying to
         # update the number of workers in the pool. If task is not None, we
         # should be trying to apply a new config to the pool.
@@ -188,32 +188,38 @@ def apply(
         # Avoid circular import.
         from sky.client import sdk  # pylint: disable=import-outside-toplevel
 
-        print(f'Checking status of service {service_name!r}...')
-        service_records = None
-        try:
-            # Pylint Fix: Broken into multiple lines to fit 80 chars
-            service_records = sdk.stream_and_get(
-                status([service_name], pool=False))
-        except exceptions.ClusterNotUpError:
-            # Logic Fix: We catch the error and do nothing (pass),
-            # so we fall through to the 'up()' call below.
-            pass
+        dag = dag_utils.convert_entrypoint_to_dag(task)
+        with admin_policy_utils.apply_and_use_config_in_current_request(
+                dag,
+                request_name=request_names.AdminPolicyRequestName.SERVE_APPLY,
+                at_client_side=True) as dag:
+            sdk.validate(dag)
+            request_id = sdk.optimize(dag)
+            sdk.stream_and_get(request_id)
+            if _need_confirmation:
+                prompt = (f'Applying config to {noun} {service_name!r}. '
+                          'Proceed?')
+                if prompt is not None:
+                    click.confirm(prompt,
+                                  default=True,
+                                  abort=True,
+                                  show_default=True)
 
-        if service_records:
-            print(f'Service {service_name!r} already exists. Updating...')
-            return update(task,
-                          service_name,
-                          mode,
-                          pool=False,
-                          _need_confirmation=_need_confirmation)
+            dag = client_common.upload_mounts_to_api_server(dag)
+            dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
 
-        print(f'Service {service_name!r} not found. '
-              'Launching new service...')
-        up(task,
-           service_name,
-           pool=False,
-           _need_confirmation=_need_confirmation)
-        return typing.cast(server_common.RequestId[None], None)
+            body = payloads.ServeApplyBody(
+                task=dag_str,
+                service_name=service_name,
+                mode=mode,
+            )
+
+            response = server_common.make_authenticated_request(
+                'POST',
+                '/serve/apply',
+                json=json.loads(body.model_dump_json()),
+                timeout=(5, None))
+            return server_common.get_request_id(response)
 
 
 def down(

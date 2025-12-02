@@ -3,80 +3,66 @@ from unittest import mock
 
 import pytest
 
-from sky import exceptions
+import sky
 from sky.serve.client import impl
 
-# Note: decorators are applied bottom-up, so arguments are injected in reverse order.
-# Order: stream_and_get -> mock_stream, status -> mock_status, update -> mock_update, up -> mock_up
 
-
-@mock.patch('sky.serve.client.impl.up')
-@mock.patch('sky.serve.client.impl.update')
-@mock.patch('sky.serve.client.impl.status')  # <--- ADDED THIS
+# Mock dependencies to prevent real network calls
+@mock.patch('sky.server.common.check_server_healthy_or_start_fn')
 @mock.patch('sky.client.sdk.stream_and_get')
-def test_apply_creates_service_when_not_found(mock_stream, mock_status,
-                                              mock_update, mock_up):
+@mock.patch('sky.server.common.make_authenticated_request')
+@mock.patch('sky.client.common.upload_mounts_to_api_server')
+@mock.patch('sky.client.sdk.optimize')
+@mock.patch('sky.client.sdk.validate')
+def test_apply_sends_request_correctly(mock_validate, mock_optimize,
+                                       mock_upload, mock_request, mock_stream,
+                                       mock_server_check):
     """
-    Scenario: User runs 'apply'. Service does NOT exist.
-    Expected: Code calls 'up()' (Create).
+    Scenario: User runs 'apply'.
+    Expected: Client processes the DAG and sends a POST request to '/serve/apply'.
     """
-    # 1. Simulate "Service Not Found" (stream_and_get returns empty list)
-    mock_stream.return_value = []
+    # 1. SETUP: Create a valid Task object
+    task = sky.Task(run="echo hello")
+    service_name = "test-service"
 
-    # 2. Call the function
-    impl.apply(task="dummy_task",
+    # 2. SETUP: Configure the Mocks
+    mock_optimize.return_value = "request-id"
+    mock_upload.side_effect = lambda dag: dag
+
+    # --- FIX FOR RUNTIME ERROR ---
+    # Create a fake HTTP Response object that looks like a success
+    mock_response = mock.Mock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"request_id": "job-123"}
+    # Tell the request mock to return this fake response
+    mock_request.return_value = mock_response
+    # -----------------------------
+
+    # 3. EXECUTE: Call the function
+    impl.apply(task=task,
                workers=None,
-               service_name="test-service",
-               mode="update_mode")
+               service_name=service_name,
+               mode="replace")
 
-    # 3. Assertions
-    mock_up.assert_called_once()  # Should call UP
-    mock_update.assert_not_called()  # Should NOT call UPDATE
+    # 4. ASSERTIONS
 
+    # Ensure validation and optimization happened
+    mock_validate.assert_called_once()
+    mock_optimize.assert_called_once()
+    mock_upload.assert_called_once()
 
-@mock.patch('sky.serve.client.impl.up')
-@mock.patch('sky.serve.client.impl.update')
-@mock.patch('sky.serve.client.impl.status')
-@mock.patch('sky.client.sdk.stream_and_get')
-def test_apply_creates_service_when_cluster_down(mock_stream, mock_status,
-                                                 mock_update, mock_up):
-    """
-    Scenario: User runs 'apply'. Controller is DOWN (ClusterNotUpError).
-    Expected: Code catches error and calls 'up()' (Create).
-    """
-    # 1. Simulate "Controller Down" exception
-    mock_stream.side_effect = exceptions.ClusterNotUpError("Controller is down")
+    # Verify we called the backend endpoint correctly
+    assert mock_request.call_count == 1
 
-    # 2. Call the function
-    impl.apply(task="dummy_task",
-               workers=None,
-               service_name="test-service",
-               mode="update_mode")
+    args, kwargs = mock_request.call_args
+    method = args[0]
+    endpoint = args[1]
 
-    # 3. Assertions
-    mock_up.assert_called_once()  # Should call UP
-    mock_update.assert_not_called()  # Should NOT call UPDATE
+    assert method == 'POST'
+    assert endpoint == '/serve/apply'
 
-
-@mock.patch('sky.serve.client.impl.up')
-@mock.patch('sky.serve.client.impl.update')
-@mock.patch('sky.serve.client.impl.status')
-@mock.patch('sky.client.sdk.stream_and_get')
-def test_apply_updates_service_when_exists(mock_stream, mock_status,
-                                           mock_update, mock_up):
-    """
-    Scenario: User runs 'apply'. Service ALREADY exists.
-    Expected: Code calls 'update()' (Update).
-    """
-    # 1. Simulate "Service Found" (Returns a list with one record)
-    mock_stream.return_value = [{'name': 'test-service', 'status': 'READY'}]
-
-    # 2. Call the function
-    impl.apply(task="dummy_task",
-               workers=None,
-               service_name="test-service",
-               mode="update_mode")
-
-    # 3. Assertions
-    mock_update.assert_called_once()  # Should call UPDATE
-    mock_up.assert_not_called()  # Should NOT call UP
+    # Verify payload contains service name
+    payload = kwargs['json']
+    assert payload['service_name'] == service_name
+    assert payload['mode'] == 'replace'
+    assert 'task' in payload
