@@ -963,6 +963,7 @@ def write_cluster_config(
                 'ray_port': constants.SKY_REMOTE_RAY_PORT,
                 'ray_dashboard_port': constants.SKY_REMOTE_RAY_DASHBOARD_PORT,
                 'ray_temp_dir': constants.SKY_REMOTE_RAY_TEMPDIR,
+                'dump_port_command': instance_setup.DUMP_RAY_PORTS,
                 # Sky-internal constants.
                 'sky_ray_cmd': constants.SKY_RAY_CMD,
                 # pip install needs to have python env activated to make sure
