@@ -1,5 +1,5 @@
 pool:
-  workers: 4
+  workers: 3
 
 resources:
   accelerators: L40S:1

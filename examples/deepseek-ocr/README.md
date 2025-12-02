@@ -2,6 +2,8 @@
 
 This example demonstrates how to use [DeepSeek OCR](https://github.com/deepseek-ai/DeepSeek-OCR) with SkyPilot's pools feature to process large volumes of scanned documents in parallel.
 
+See the [blog post](https://blog.skypilot.co/skypilot-pools-deepseek-ocr) for a detailed walkthrough.
+
 ## Use case
 
 Enterprise AI systems like RAG-based tools often struggle with scanned documents and images because traditional OCR loses document structure. DeepSeek OCR uses vision-language models to:
@@ -17,67 +19,9 @@ This example shows how to scale DeepSeek OCR processing across multiple GPU work
 1. [Kaggle API credentials](https://www.kaggle.com/docs/api) (`~/.kaggle/kaggle.json`)
 2. S3 bucket for output storage
 
-## Running the example
+## Quick start: Single-node testing
 
-### Step 1: Create the pool
-
-```bash
-sky jobs pool apply -p deepseek-ocr-pool pool.yaml
-```
-
-This spins up 4 GPU workers (`workers: 4`) with DeepSeek OCR and the dataset pre-loaded.
-
-### Step 2: Check pool status
-
-```bash
-sky jobs pool status deepseek-ocr-pool
-```
-
-Wait for all workers to show `READY` status.
-
-### Step 3: Submit batch jobs
-
-```bash
-sky jobs launch --pool deepseek-ocr-pool --num-jobs 10 job.yaml
-```
-
-This submits 10 parallel jobs to process the entire dataset. Four will start immediately (one per worker), and the rest will queue up.
-
-### Step 4: Monitor progress
-
-View the dashboard:
-```bash
-sky dashboard
-```
-
-Check job queue:
-```bash
-sky jobs queue
-```
-
-View logs:
-```bash
-sky jobs logs <job-id>
-```
-
-### Step 5: Scale as needed
-
-To process faster, scale up the pool:
-```bash
-sky jobs pool apply --pool deepseek-ocr-pool --workers 10
-sky jobs launch --pool deepseek-ocr-pool --num-jobs 20 job.yaml
-```
-
-### Step 6: Cleanup
-
-When done, tear down the pool:
-```bash
-sky jobs pool down deepseek-ocr-pool
-```
-
-## Single-node processing for testing
-
-For quick testing on a single node without pools, create a `test-single.yaml` YAML that combines pool setup with a simple run command:
+For quick testing on a single node without pools, create a `test-single.yaml` YAML that combines setup with a simple run command:
 
 ```yaml
 # test-single.yaml
@@ -119,14 +63,78 @@ Then launch with:
 sky launch -c deepseek-ocr-test test-single.yaml
 ```
 
-Note: Processing the entire dataset on a single node will be slow. Use pools for production workloads.
+Note: Processing the entire dataset on a single node will be slow. Use pools (below) for production workloads.
+
+## Scaling with pools
+
+### Step 1: Create the pool
+
+```bash
+sky jobs pool apply -p deepseek-ocr-pool pool.yaml
+```
+
+This spins up 3 GPU workers (`workers: 3`) with DeepSeek OCR and the dataset pre-loaded.
+
+### Step 2: Check pool status
+
+```bash
+sky jobs pool status deepseek-ocr-pool
+```
+
+Wait for all workers to show `READY` status.
+
+![Pool Workers](https://raw.githubusercontent.com/skypilot-org/skypilot/master/examples/deepseek-ocr/images/pool_workers.png)
+
+### Step 3: Submit batch jobs
+
+```bash
+sky jobs launch --pool deepseek-ocr-pool --num-jobs 10 job.yaml
+```
+
+This submits 10 parallel jobs to process the entire dataset. Four will start immediately (one per worker), and the rest will queue up.
+
+### Step 4: Monitor progress
+
+View the dashboard:
+```bash
+sky dashboard
+```
+
+![SkyPilot Dashboard Running Jobs](https://raw.githubusercontent.com/skypilot-org/skypilot/master/examples/deepseek-ocr/images/skypilot_dashboard_running_jobs.png)
+
+Check job queue:
+```bash
+sky jobs queue
+```
+
+View logs:
+```bash
+sky jobs logs <job-id>
+```
+
+### Step 5: Scale as needed
+
+To process faster, scale up the pool:
+```bash
+sky jobs pool apply --pool deepseek-ocr-pool --workers 10
+sky jobs launch --pool deepseek-ocr-pool --num-jobs 20 job.yaml
+```
+
+![Scale Pool Workers](https://raw.githubusercontent.com/skypilot-org/skypilot/master/examples/deepseek-ocr/images/scale_pool_workers.png)
+
+### Step 6: Cleanup
+
+When done, tear down the pool:
+```bash
+sky jobs pool down deepseek-ocr-pool
+```
 
 ## How it works
 
 ### Pool configuration (`pool.yaml`)
 
 The pool YAML defines the worker infrastructure:
-- **Workers**: Number of GPU instances (default: 4)
+- **Workers**: Number of GPU instances
 - **Resources**: L40S GPU per worker
 - **File mounts**: Kaggle credentials and S3 output bucket
 - **Setup**: Runs once per worker to install dependencies and download the dataset
