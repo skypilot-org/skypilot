@@ -151,6 +151,7 @@ Vsphere = clouds.Vsphere
 Fluidstack = clouds.Fluidstack
 Nebius = clouds.Nebius
 Hyperbolic = clouds.Hyperbolic
+Novita = clouds.Novita
 Shadeform = clouds.Shadeform
 Seeweb = clouds.Seeweb
 
