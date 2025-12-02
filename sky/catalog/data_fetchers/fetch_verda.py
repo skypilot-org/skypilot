@@ -360,11 +360,10 @@ def create_catalog(output_path: str) -> None:
 
 
 def main() -> None:
-    """
-    Write SkyPilot v8 catalog for Verda Cloud.
+    """Write SkyPilot v8 catalog for Verda Cloud.
+
     This is authenticated API request, so you need Verda Cloud API credentials configured,
     i.e. ~/.verda/config.json or VERDA_CLIENT_ID and VERDA_CLIENT_SECRET environment variables.
-
     Will write to ~/.sky/catalogs/v8/verda/vms.csv if no file name is provided.
 
     > python sky/catalog/data_fetchers/fetch_verda.py [<file-name>]

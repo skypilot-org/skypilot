@@ -38,8 +38,7 @@ def import_package(func):
 
 @import_package
 def verda_client():
-    """
-    Return the configured Verda Client.
+    """Return the configured Verda Client.
     See https://github.com/verda-cloud/sdk-python for more details.
     """
     if _verda_client is None:
@@ -48,9 +47,12 @@ def verda_client():
 
 
 def get_configuration():
-    """Checks known config file exists and is valid. Also supports using env vars instead."""
+    """Checks known config file exists and is valid.
+    Also supports using env vars instead.
+    """
     try:
-        if "VERDA_CLIENT_ID" in os.environ and "VERDA_CLIENT_SECRET" in os.environ:
+        if ("VERDA_CLIENT_ID" in os.environ and
+            "VERDA_CLIENT_SECRET" in os.environ):
             # Configured via new env vars
             return (
                 True,
@@ -68,7 +70,7 @@ def get_configuration():
             )
 
         if ("DATACRUNCH_CLIENT_ID" in os.environ and
-                "DATACRUNCH_CLIENT_SECRET" in os.environ):
+            "DATACRUNCH_CLIENT_SECRET" in os.environ):
             # Configured via old env vars
             return (
                 True,

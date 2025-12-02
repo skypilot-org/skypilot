@@ -332,6 +332,8 @@ class Verda(clouds.Cloud):
         return catalog.instance_type_exists(instance_type, "verda")
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
+        if zone is not None:
+            raise ValueError("Verda does not support zones.")
         return catalog.validate_region_zone(region, zone, clouds="verda")
 
     @classmethod
