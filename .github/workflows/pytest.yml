@@ -71,7 +71,7 @@ jobs:
           if [ "${{ github.event_name }}" == "pull_request" ]; then
             echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
             {
-              echo "message=<<EOF"
+              echo "message<<EOF"
               echo "${{ github.event.pull_request.title }}"
               echo "EOF"
             } >> $GITHUB_OUTPUT
@@ -80,7 +80,7 @@ jobs:
             # For push events after merge, head_commit.message contains the merge commit message
             # which includes the PR title. For merge_group events, use merge_group.head_commit.message
             {
-              echo "message=<<EOF"
+              echo "message<<EOF"
               if [ "${{ github.event_name }}" == "merge_group" ]; then
                 echo "${{ github.event.merge_group.head_commit.message }}"
               else
@@ -203,7 +203,7 @@ jobs:
           if [ "${{ github.event_name }}" == "pull_request" ]; then
             echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
             {
-              echo "message=<<EOF"
+              echo "message<<EOF"
               echo "${{ github.event.pull_request.title }}"
               echo "EOF"
             } >> $GITHUB_OUTPUT
@@ -212,7 +212,7 @@ jobs:
             # For push events after merge, head_commit.message contains the merge commit message
             # which includes the PR title. For merge_group events, use merge_group.head_commit.message
             {
-              echo "message=<<EOF"
+              echo "message<<EOF"
               if [ "${{ github.event_name }}" == "merge_group" ]; then
                 echo "${{ github.event.merge_group.head_commit.message }}"
               else
