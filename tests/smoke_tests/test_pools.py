@@ -195,7 +195,7 @@ def wait_until_job_status_by_id(
     return s
 
 
-def check_logs(job_id: int, expected_pattern: str):
+def check_logs(job_name: str, expected_pattern: str):
     """Check that job logs contain the expected pattern.
 
     Args:
@@ -203,13 +203,13 @@ def check_logs(job_id: int, expected_pattern: str):
         expected_pattern: The pattern to grep for in the logs.
     """
     return (
-        f'logs=$(sky jobs logs --controller {job_id} --no-follow 2>&1); '
+        f'logs=$(sky jobs logs --controller -n {job_name} --no-follow 2>&1); '
         f'echo "$logs"; '
         f'if ! echo "$logs" | grep "{expected_pattern}"; then '
-        f'  echo "ERROR: Job {job_id} logs do not contain expected pattern: {expected_pattern}"; '
+        f'  echo "ERROR: Job {job_name} logs do not contain expected pattern: {expected_pattern}"; '
         f'  exit 1; '
         f'fi; '
-        f'echo "Job {job_id} logs contain expected pattern: {expected_pattern}"'
+        f'echo "Job {job_name} logs contain expected pattern: {expected_pattern}"'
     )
 
 
@@ -1155,7 +1155,7 @@ def test_pools_num_jobs_basic(generic_cloud: str):
         with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
             write_yaml(pool_yaml, pool_config)
             write_yaml(job_yaml, job_config)
-            job_ids = list(range(2, 2 + num_jobs))
+            job_names = [f'{name}-job-{i}' for i in range(num_jobs)]
             test = smoke_tests_utils.Test(
                 'test_pools_num_jobs',
                 [
@@ -1164,16 +1164,16 @@ def test_pools_num_jobs_basic(generic_cloud: str):
                     f'sky jobs launch --pool {pool_name} {job_yaml.name} --num-jobs {num_jobs} -d -y',
                     # Wait for the jobs to succeed.
                     *[
-                        wait_until_job_status_by_id(job_id, ['SUCCEEDED'],
-                                                    timeout=timeout)
-                        for job_id in job_ids
+                        wait_until_job_status(job_name, ['SUCCEEDED'],
+                                              timeout=timeout)
+                        for job_name in job_names
                     ],
                     # Sleep to ensure the job logs are ready.
                     'sleep 30',
                     # Check that the job logs contain the correct number of jobs.
                     *[
-                        check_logs(job_id, f'Running with {num_jobs} jobs')
-                        for job_id in job_ids
+                        check_logs(job_name, f'Running with {num_jobs} jobs')
+                        for job_name in job_names
                     ],
                 ],
                 timeout=timeout,
