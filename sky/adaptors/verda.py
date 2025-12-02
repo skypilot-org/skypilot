@@ -52,7 +52,7 @@ def get_configuration():
     """
     try:
         if ("VERDA_CLIENT_ID" in os.environ and
-            "VERDA_CLIENT_SECRET" in os.environ):
+                "VERDA_CLIENT_SECRET" in os.environ):
             # Configured via new env vars
             return (
                 True,
@@ -70,7 +70,7 @@ def get_configuration():
             )
 
         if ("DATACRUNCH_CLIENT_ID" in os.environ and
-            "DATACRUNCH_CLIENT_SECRET" in os.environ):
+                "DATACRUNCH_CLIENT_SECRET" in os.environ):
             # Configured via old env vars
             return (
                 True,
