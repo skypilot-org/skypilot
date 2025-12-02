@@ -28,23 +28,23 @@ Why use SkyPilot on Slurm?
 
                 No need to write complex sbatch scripts - write a simple SkyPilot YAML and run with one command ``sky launch``.
 
-            .. grid-item-card::  🔄 Portable workloads
-                :text-align: center
-
-                The same SkyPilot task YAML works on Slurm, Kubernetes, and cloud VMs - switch between them seamlessly.
-
             .. grid-item-card::  🗂️ Multi-cluster made easy
                 :text-align: center
 
                 Access multiple Slurm clusters through one interface - no need to juggle different login nodes or sbatch scripts.
 
+            .. grid-item-card::  🌍 Portable workloads
+                :text-align: center
+
+                The same SkyPilot YAML works on Slurm, Kubernetes, and cloud VMs - switch between them seamlessly.
+
             .. grid-item-card::  ☁️ Burst to the cloud
                 :text-align: center
 
-                HPC cluster is full? SkyPilot seamlessly gets resources on the cloud to get your job running sooner.
+                Slurm cluster is full? SkyPilot seamlessly gets resources on the cloud to get your job running sooner.
 
 
-    .. tab-item:: For HPC Admins
+    .. tab-item:: For Slurm Admins
         :sync: why-admins-tab
 
         .. grid:: 2
@@ -53,7 +53,7 @@ Why use SkyPilot on Slurm?
             .. grid-item-card::  🛠️ Manage multiple Slurm clusters
                 :text-align: center
 
-                Manage all your Slurm clusters from one interface - unified visibility and control across your entire HPC fleet.
+                Manage all your Slurm clusters from one interface - unified visibility and control across all your AI compute.
 
             .. grid-item-card::  🧩 Unified platform for all Infrastructure
                 :text-align: center
@@ -68,7 +68,7 @@ Why use SkyPilot on Slurm?
             .. grid-item-card::  🌍 Portable AI workloads
                 :text-align: center
 
-                Enable users to write workloads once and run them on Slurm, Kubernetes, or cloud with the same interface.
+                Enable users to write workloads once and run them on Slurm, Kubernetes, or cloud VMs with the same interface.
 
 
 Table of contents

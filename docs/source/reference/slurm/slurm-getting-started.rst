@@ -40,8 +40,8 @@ In a typical workflow:
 
 1. A cluster administrator sets up a Slurm cluster and provides users with SSH access to the login node.
 
-2. Users configure their ``~/.slurm/config`` file with connection details for their Slurm cluster(s).
-   SkyPilot reads this configuration file to communicate with the cluster.
+2. Users configure the ``~/.slurm/config`` file with connection details for their Slurm cluster(s).
+   SkyPilot reads this configuration file to communicate with the cluster(s).
 
 Configuring Slurm clusters
 --------------------------
@@ -93,8 +93,8 @@ Once you have configured your Slurm cluster:
      ...
      Slurm: enabled
        Allowed clusters:
-         `✔ mycluster1`
-         `✔ mycluster2`
+         ✔ mycluster1
+         ✔ mycluster2
      ...
 
 
@@ -113,6 +113,7 @@ Once you have configured your Slurm cluster:
         ---------------------------------------------------------------------------------------------------
          Slurm (mycluster1)      -                 2       4         -        0.00          ✔
          Slurm (mycluster2)      -                 2       4         -        0.00
+         Kubernetes (myk8s)      -                 2       4         -        0.00
          AWS (us-east-1)         m6i.large         2       8         -        0.10
          GCP (us-central1-a)     n2-standard-2     2       8         -        0.10
         ---------------------------------------------------------------------------------------------------
@@ -203,6 +204,7 @@ Current limitations
 
 Slurm support in SkyPilot is under active development. The following features are not yet supported:
 
+* **Multinode jobs**: multinode jobs will be supported soon on Slurm.
 * **Autostop**: Slurm clusters cannot be automatically terminated after idle time.
 * **Custom images**: Docker or custom container images are not supported.
 * **SkyServe**: Serving deployments on Slurm is not yet supported.
@@ -212,9 +214,11 @@ FAQs
 
 * **How does SkyPilot interact with Slurm?**
 
-  SkyPilot submits jobs to Slurm using ``sbatch``. Each SkyPilot "cluster" corresponds to a Slurm job.
-  When you run ``sky launch``, SkyPilot creates an sbatch script that requests the specified resources
-  and runs a long-lived process with the SkyPilot runtime.
+  Each SkyPilot "cluster" corresponds to a Slurm job. When you run ``sky launch``, SkyPilot creates an sbatch script that requests the specified resources
+  and runs a long-lived process with the SkyPilot runtime. 
+  
+  SkyPilot uses slurm CLI commands on the login node to interact with the cluster. It submits jobs using ``sbatch``, views the status of jobs using ``squeue``, and terminates jobs using ``scancel``.
+  
 
 * **Which user are jobs submitted as?**
 
@@ -229,7 +233,7 @@ FAQs
 
 * **What partition does SkyPilot use?**
 
-  We use the default partition for the Slurm cluster. Partition support coming soon.
+  We use the default partition for the Slurm cluster. Choosing a specific partition will be supported soon.
 
 * **Can SkyPilot provision a Slurm cluster for me?**
 
