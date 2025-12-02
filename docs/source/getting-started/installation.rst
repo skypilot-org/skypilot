@@ -36,6 +36,7 @@ Install SkyPilot using pip:
           pip install "skypilot[fluidstack]"
           pip install "skypilot[paperspace]"
           pip install "skypilot[cudo]"
+          pip install "skypilot[shadeform]"
           # IBM is only supported for Python <= 3.11
           pip install "skypilot[ibm]"
           # SCP is only supported for Python <= 3.11
@@ -75,6 +76,7 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[paperspace]"
           pip install "skypilot-nightly[do]"
           pip install "skypilot-nightly[cudo]"
+          pip install "skypilot-nightly[shadeform]"
           pip install "skypilot-nightly[ibm]"
           pip install "skypilot-nightly[scp]"
           pip install "skypilot-nightly[vsphere]"
@@ -113,6 +115,7 @@ Install SkyPilot using pip:
           pip install -e ".[fluidstack]"
           pip install -e ".[paperspace]"
           pip install -e ".[cudo]"
+          pip install -e ".[shadeform]"
           pip install -e ".[ibm]"
           pip install -e ".[scp]"
           pip install -e ".[vsphere]"
@@ -243,6 +246,7 @@ This will produce a summary like:
     Paperspace: enabled
     Fluidstack: enabled
     Cudo: enabled
+    Shadeform: enabled
     IBM: enabled
     SCP: enabled
     Seeweb: enabled
@@ -605,8 +609,15 @@ Cudo Compute |community-badge|
 
 If you want to want to use SkyPilot with a different Cudo Compute account or project, run :code:`cudoctl init` again.
 
+Shadeform |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+`Shadeform <https://www.shadeform.ai/>`_ is a cloud GPU marketplace that offers GPUs across a variety of vetted cloud providers. To configure Shadeform access, go to the `API Key Management <https://platform.shadeform.ai/settings/api>`_ page within your Shadeform account to generate a key and then add it to :code:`~/.shadeform/api_key`:
 
+.. code-block:: shell
+
+  mkdir -p ~/.shadeform
+  echo "<your_api_key_here>" > ~/.shadeform/api_key
 
 IBM |community-badge|
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
