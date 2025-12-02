@@ -53,7 +53,7 @@ boto3-stubs[s3,ec2,sts,iam,service-quotas]
 psycopg2-binary==2.9.10
 
 # For helm okta test
-selenium==4.33.0
+#selenium==4.33.0
 webdriver-manager==4.0.2
 
 # For grpcio/protobuf code generation
@@ -75,3 +75,6 @@ protobuf==5.26.1
 # pydantic<2.12 avoids pulling pydantic-core 2.41.x. Revisit once upstream
 # resolves the import or we align versions accordingly.
 pydantic<2.12
+
+# For testing Verda
+verda>=1.17.4
