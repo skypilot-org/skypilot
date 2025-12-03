@@ -1403,7 +1403,7 @@ class SlurmCommandRunner(SSHCommandRunner):
         # used by a cluster, and in Slurm that is not the case, as $HOME
         # could be part of a shared filesystem.
         # And similarly for SKY_RUNTIME_DIR. See constants.\
-        # SKY_RUNTIME_DIR_ENV_VAR for more details.
+        # SKY_RUNTIME_DIR_ENV_VAR_KEY for more details.
         #
         # SSH directly to the compute node instead of using srun.
         # This avoids Slurm's proctrack/cgroup which kills all processes
@@ -1412,7 +1412,7 @@ class SlurmCommandRunner(SSHCommandRunner):
         # (e.g., JobScheduler._run_job which uses launch_new_process_tree).
         # Note: proctrack/cgroup is enabled by default on Nebius'
         # Managed Soperator.
-        cmd = (f'export {constants.SKY_RUNTIME_DIR_ENV_VAR}='
+        cmd = (f'export {constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}='
                f'"{self.skypilot_runtime_dir}" && '
                f'cd {self.sky_dir} && export HOME=$(pwd) && {cmd}')
         ssh_options = ('-o StrictHostKeyChecking=no '

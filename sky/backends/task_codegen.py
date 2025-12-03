@@ -654,7 +654,11 @@ class SlurmCodeGen(TaskCodeGen):
 
         self._code.append(
             textwrap.dedent("""\
+            import colorama
+            import copy
+            import multiprocessing
             import signal
+            import threading
             from sky.backends import backend_utils
             """))
         self._add_skylet_imports()
@@ -755,7 +759,7 @@ class SlurmCodeGen(TaskCodeGen):
             job_ip_list_str = '\\n'.join(job_ip_rank_list)
             """))
 
-    def add_tasks(
+    def add_task(
         self,
         num_nodes: int,
         bash_script: Optional[str],
