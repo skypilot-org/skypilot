@@ -61,7 +61,6 @@ setup_commands:
     {{ initial_setup_command }}
     {%- endfor %}
     mkdir -p ~/.ssh; touch ~/.ssh/config; which patch > /dev/null || sudo apt install -y patch;
-    {{ setup_sky_dirs_commands }}
     {{ conda_installation_commands }}
     {{ ray_skypilot_installation_commands }}
     {{ copy_skypilot_templates_commands }}

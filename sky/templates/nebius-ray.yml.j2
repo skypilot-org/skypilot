@@ -149,7 +149,6 @@ setup_commands:
     sudo pkill -9 dpkg;
     sudo dpkg --configure -a;
     mkdir -p ~/.ssh; touch ~/.ssh/config;
-    {{ setup_sky_dirs_commands }}
     {{ conda_installation_commands }}
     {{ ray_skypilot_installation_commands }}
     {{ copy_skypilot_templates_commands }}

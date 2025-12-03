@@ -266,7 +266,6 @@ setup_commands:
     sudo pkill -9 apt-get;
     sudo dpkg --configure --force-overwrite -a;
     mkdir -p ~/.ssh; touch ~/.ssh/config;
-    {{ setup_sky_dirs_commands }}
     {{ conda_installation_commands }}
     source ~/.bashrc;
   {%- if tpu_vm %}

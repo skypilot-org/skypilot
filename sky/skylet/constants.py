@@ -230,6 +230,7 @@ _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'
 RAY_INSTALLATION_COMMANDS = (
     f'{SKY_UV_INSTALL_CMD};'
+    f'{SETUP_SKY_DIRS_COMMANDS}'
     # Print the PATH in provision.log to help debug PATH issues.
     'echo PATH=$PATH; '
     # Install setuptools<=69.5.1 to avoid the issue with the latest setuptools
