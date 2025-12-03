@@ -515,46 +515,28 @@ def test_multi_echo(generic_cloud: str):
             'echo "Found at least 15 RUNNING jobs, proceeding"; ').format(
                 cluster_name=name)
 
-    # Wait until no jobs are running
-    wait_until_no_running = (
-        'start_time=$SECONDS; '
-        'while true; do '
-        's=$(sky queue {cluster_name}); '
-        'echo "$s"; '
-        'echo; '
-        'echo; '
-        'running_count=$(echo "$s" | grep "RUNNING" | wc -l); '
-        'echo "Current RUNNING jobs: $running_count"; '
-        'if [ "$running_count" -eq 0 ]; then '
-        '  echo "No running jobs found, proceeding"; '
-        '  break; '
-        'fi; '
-        'if echo "$s" | grep "FAILED"; then '
-        '  echo "Found FAILED jobs, exiting"; '
-        '  exit 1; '
-        'fi; '
-        'echo "Waiting for all jobs to finish running..."; '
-        'sleep 10; '
-        'done').format(cluster_name=name)
+    # Build commands list - skip API server restart for remote server tests
+    commands = []
+    if not is_remote:
+        # TODO(aylei): also test local API server after we have rate limit in local mode
+        # Use deploy mode to avoid ulimited concurrency requests exhausts the CPU
+        commands.append('sky api stop && sky api start --deploy')
+
+    commands.extend([
+        f'python examples/multi_echo.py {name} {generic_cloud} {int(use_spot)} {accelerator}',
+        wait_for_no_failures,
+        # Make sure that our job scheduler is fast enough to have at least
+        # 15 RUNNING jobs in parallel.
+        wait_for_15_running,
+        # Final check for failures
+        f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
+        # This is to make sure we can finish job 32 before the test timeout.
+        f'until sky logs {name} 32 --status; do echo "Waiting for job 32 to finish..."; sleep 10; done',
+    ])
 
     test = smoke_tests_utils.Test(
         'multi_echo',
-        [
-            # TODO(aylei): also test local API server after we have rate limit in local mode
-            # Use deploy mode to avoid ulimited concurrency requests exhausts the CPU
-            'sky api stop && sky api start --deploy',
-            f'python examples/multi_echo.py {name} {generic_cloud} {int(use_spot)} {accelerator}',
-            wait_for_no_failures,
-            # Make sure that our job scheduler is fast enough to have at least
-            # 15 RUNNING jobs in parallel.
-            wait_for_15_running,
-            # Final check for failures
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
-            # This is to make sure we can finish job 32 before the test timeout.
-            f'until sky logs {name} 32 --status; do echo "Waiting for job 32 to finish..."; sleep 1; done',
-            # Wait until no jobs are running
-            wait_until_no_running,
-        ] +
+        commands +
         # Ensure jobs succeeded.
         [
             smoke_tests_utils.
@@ -570,7 +552,8 @@ def test_multi_echo(generic_cloud: str):
             # unfulfilled' error.  If process not found, grep->ssh returns 1.
             f'ssh {name} \'ps aux | grep "[/]"monitor.py\''
         ],
-        (f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api stop && '
+        (f'sky down -y {name}' if is_remote else
+         f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api stop && '
          f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api start; '
          f'sky down -y {name}'),
         timeout=20 * 60,
