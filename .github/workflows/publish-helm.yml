@@ -151,4 +151,4 @@ jobs:
           # Show what's being committed for debugging
           git status
           git commit -m "${{ inputs.commit_message || format('Updated from ref: {0}', github.sha) }}"
-          git push origin testing-main
+          git push origin main:testing-main
