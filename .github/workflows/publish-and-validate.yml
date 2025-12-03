@@ -71,7 +71,7 @@ jobs:
             # Use --pre so that pre-release versions (e.g. rcs) will be selected
             if [ "${{ inputs.repository_type }}" == "test-pypi" ]; then
               echo "Installing from Test PyPI..."
-              pip install --no-cache-dir --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple ${{ inputs.package_name }}
+              pip install --no-cache-dir --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple ${{ inputs.package_name }}'<1'
             else
               echo "Installing from PyPI..."
               pip install --no-cache-dir --pre ${{ inputs.package_name }}
