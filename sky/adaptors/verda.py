@@ -4,7 +4,11 @@ import functools
 from json import load as json_load
 import os
 
-from verda import VerdaClient
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from verda import VerdaClient
+
 
 _verda_client = None
 
@@ -21,11 +25,12 @@ def import_package(func):
                 if not configured:
                     raise Exception(error)
 
+                from verda import VerdaClient  # pylint: disable=import-outside-toplevel
                 _verda_client = VerdaClient(
                     client_id=config['client_id'],
                     client_secret=config['client_secret'],
                     base_url=(config['base_url'] if 'base_url' in config else
-                              'https://api.datacrunch.io/v1'),
+                              'https://api.verda.com/v1'),
                     inference_key=config.get('inference_key', None),
                 )
             except ImportError as e:
@@ -38,7 +43,7 @@ def import_package(func):
 
 
 @import_package
-def verda_client():
+def verda_client() -> 'VerdaClient':
     """Return the configured Verda Client.
     See https://github.com/verda-cloud/sdk-python for more details.
     """
