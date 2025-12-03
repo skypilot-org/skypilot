@@ -34,7 +34,6 @@ def test_deploy_remote_cluster():
             cleanup=False,
             infra='test-infra',
             kubeconfig_path='~/.kube/config',
-            global_use_ssh_config=False,
             ssh_node_pools_file='~/.sky/ssh_node_pools.yaml')
         mock_deploy_cluster.assert_called_once()
         mock_load_ssh_targets.assert_called_once()
