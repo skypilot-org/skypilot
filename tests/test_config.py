@@ -868,6 +868,7 @@ def test_override_skypilot_config_warning_deduplication(monkeypatch, tmp_path):
         run_id_2 = 'test-run-id-2'
 
         # Test 1: Warning appears once per run_id
+        annotations.clear_request_level_cache()
         monkeypatch.setenv(usage_constants.USAGE_RUN_ID_ENV_VAR, run_id_1)
         override_configs_1 = {'aws': {'vpc_name': 'override-vpc',}}
         with skypilot_config.override_skypilot_config(override_configs_1):
@@ -890,6 +891,7 @@ def test_override_skypilot_config_warning_deduplication(monkeypatch, tmp_path):
         assert cache_entry_run_id_1 in skypilot_config._WARNED_DISALLOWED_KEYS_CACHE
 
         # Change run_id and verify it's different
+        annotations.clear_request_level_cache()
         monkeypatch.setenv(usage_constants.USAGE_RUN_ID_ENV_VAR, run_id_2)
         assert os.environ.get(usage_constants.USAGE_RUN_ID_ENV_VAR) == run_id_2
 
@@ -913,6 +915,7 @@ def test_override_skypilot_config_warning_deduplication(monkeypatch, tmp_path):
         mock_logger.warning.reset_mock()
 
         # Test 3: Backward compatibility - warning appears when run_id is not set
+        annotations.clear_request_level_cache()
         monkeypatch.delenv(usage_constants.USAGE_RUN_ID_ENV_VAR, raising=False)
         override_configs_no_run_id = {'aws': {'vpc_name': 'override-vpc',}}
         with skypilot_config.override_skypilot_config(
@@ -923,6 +926,7 @@ def test_override_skypilot_config_warning_deduplication(monkeypatch, tmp_path):
         mock_logger.warning.reset_mock()
 
         # Test 4: Different disallowed keys get separate warnings
+        annotations.clear_request_level_cache()
         monkeypatch.setenv(usage_constants.USAGE_RUN_ID_ENV_VAR, run_id_1)
         override_configs_different_key = {
             'aws': {
@@ -958,6 +962,7 @@ def test_override_skypilot_config_warning_cache_clearing(monkeypatch, tmp_path):
         # Each run_id creates a unique cache entry
         for i in range(1000):
             run_id = f'test-run-id-{i}'
+            annotations.clear_request_level_cache()
             monkeypatch.setenv(usage_constants.USAGE_RUN_ID_ENV_VAR, run_id)
             # Create fresh dict for each iteration since pop_nested modifies it
             override_configs = {'aws': {'vpc_name': 'override-vpc',}}
@@ -970,6 +975,7 @@ def test_override_skypilot_config_warning_cache_clearing(monkeypatch, tmp_path):
         # Add one more entry (1001st), which should NOT trigger cache clearing yet
         # (clearing happens when cache > 1000, i.e., at 1001)
         run_id_1000 = 'test-run-id-1000'
+        annotations.clear_request_level_cache()
         monkeypatch.setenv(usage_constants.USAGE_RUN_ID_ENV_VAR, run_id_1000)
         override_configs_1000 = {'aws': {'vpc_name': 'override-vpc',}}
         with skypilot_config.override_skypilot_config(override_configs_1000):
@@ -979,6 +985,7 @@ def test_override_skypilot_config_warning_cache_clearing(monkeypatch, tmp_path):
 
         # Add one more entry (1002nd), which should trigger cache clearing
         run_id_1001 = 'test-run-id-1001'
+        annotations.clear_request_level_cache()
         monkeypatch.setenv(usage_constants.USAGE_RUN_ID_ENV_VAR, run_id_1001)
         override_configs_1001 = {'aws': {'vpc_name': 'override-vpc',}}
         with skypilot_config.override_skypilot_config(override_configs_1001):
