@@ -4,14 +4,65 @@
    :alt: Community Maintained
 
 Installation
-==================
+============
 
-Install SkyPilot using pip:
+Install SkyPilot
+----------------
+
+SkyPilot supports installation with ``pip`` or ``uv``.
 
 .. tab-set::
+  .. tab-item:: pip
+    :sync: pip-tab
 
-    .. tab-item:: Latest Release
-        :sync: latest-release-tab
+    .. code-block:: shell
+
+      # Recommended: use a new conda env to avoid package conflicts.
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      conda create -y -n sky python=3.10
+      conda activate sky
+
+      pip install skypilot
+  
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # Create a virtual environment with pip pre-installed (required for SkyPilot)
+      uv venv --seed --python 3.10
+      source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+      uv pip install skypilot
+
+    .. note::
+
+      The ``--seed`` flag is **required** as it ensures ``pip`` is installed in the virtual environment.
+      SkyPilot needs ``pip`` to build wheels for remote cluster setup.
+    
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # Install as a globally available tool with pip included
+      uv tool install --with pip skypilot
+
+    .. note::
+
+      The ``--with pip`` flag is **required** when using ``uv tool install``.
+      Without it, SkyPilot will fail when building wheels for remote clusters.
+
+
+.. dropdown:: Install SkyPilot from nightly build or source
+
+    SkyPilot provides nightly builds and source code for the latest features and for development.
+
+    **Install from nightly build:**
+
+    .. tab-set::
+      .. tab-item:: pip
+        :sync: pip-tab
 
         .. code-block:: shell
 
@@ -20,145 +71,9 @@ Install SkyPilot using pip:
           conda create -y -n sky python=3.10
           conda activate sky
 
-          # Choose your infra:
-
-          pip install "skypilot[kubernetes]"
-          pip install "skypilot[aws]"
-          pip install "skypilot[gcp]"
-          pip install "skypilot[azure]"
-          pip install "skypilot[coreweave]"
-          # Nebius is only supported for Python >= 3.10
-          pip install "skypilot[nebius]"
-          # Clouds below are supported/maintained by community/cloud providers.
-          pip install "skypilot[oci]"
-          pip install "skypilot[lambda]"
-          pip install "skypilot[runpod]"
-          pip install "skypilot[fluidstack]"
-          pip install "skypilot[paperspace]"
-          pip install "skypilot[cudo]"
-          pip install "skypilot[shadeform]"
-          # IBM is only supported for Python <= 3.11
-          pip install "skypilot[ibm]"
-          # SCP is only supported for Python <= 3.11
-          pip install "skypilot[scp]"
-          pip install "skypilot[vsphere]"
-          # Seeweb is only supported for Python >= 3.10
-          pip install "skypilot[seeweb]"
-          pip install "skypilot[primeintellect]"
-
-          pip install "skypilot[all]"
-
-
-    .. tab-item:: Nightly
-        :sync: nightly-tab
-
-        .. code-block:: shell
-
-          # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.13.
-          conda create -y -n sky python=3.10
-          conda activate sky
-
-          # Choose your infra:
-
-          pip install "skypilot-nightly[kubernetes]"
-          pip install "skypilot-nightly[aws]"
-          pip install "skypilot-nightly[gcp]"
-          pip install "skypilot-nightly[azure]"
-          pip install "skypilot-nightly[coreweave]"
-          # Nebius is only supported for Python >= 3.10
-          pip install "skypilot-nightly[nebius]"
-          # Clouds below are supported/maintained by community/cloud providers.
-          pip install "skypilot-nightly[oci]"
-          pip install "skypilot-nightly[lambda]"
-          pip install "skypilot-nightly[runpod]"
-          pip install "skypilot-nightly[fluidstack]"
-          pip install "skypilot-nightly[paperspace]"
-          pip install "skypilot-nightly[do]"
-          pip install "skypilot-nightly[cudo]"
-          pip install "skypilot-nightly[shadeform]"
-          pip install "skypilot-nightly[ibm]"
-          pip install "skypilot-nightly[scp]"
-          pip install "skypilot-nightly[vsphere]"
-          # Seeweb is only supported for Python >= 3.10
-          pip install "skypilot[seeweb]"
-          pip install "skypilot-nightly[primeintellect]"
-
-          pip install "skypilot-nightly[all]"
-
-
-    .. tab-item:: From Source
-        :sync: from-source-tab
-
-        .. code-block:: shell
-
-          # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.13.
-          conda create -y -n sky python=3.10
-          conda activate sky
-
-          git clone https://github.com/skypilot-org/skypilot.git
-          cd skypilot
-
-          # Choose your infra:
-
-          pip install -e ".[kubernetes]"
-          pip install -e ".[aws]"
-          pip install -e ".[gcp]"
-          pip install -e ".[azure]"
-          # Nebius is only supported for Python >= 3.10
-          pip install -e ".[nebius]"
-          # Clouds below are supported/maintained by community/cloud providers.
-          pip install -e ".[oci]"
-          pip install -e ".[lambda]"
-          pip install -e ".[runpod]"
-          pip install -e ".[fluidstack]"
-          pip install -e ".[paperspace]"
-          pip install -e ".[cudo]"
-          pip install -e ".[shadeform]"
-          pip install -e ".[ibm]"
-          pip install -e ".[scp]"
-          pip install -e ".[vsphere]"
-          # Seeweb is only supported for Python >= 3.10
-          pip install -e ".[seeweb]"
-          pip install -e ".[primeintellect]"
-
-          pip install -e ".[all]"
-
-To use more than one cloud, combine the pip extras:
-
-.. tab-set::
-
-    .. tab-item:: Latest Release
-        :sync: latest-release-tab
-
-        .. code-block:: shell
-
-          pip install -U "skypilot[kubernetes,aws,gcp]"
-
-    .. tab-item:: Nightly
-        :sync: nightly-tab
-
-        .. code-block:: shell
-
-          pip install -U "skypilot-nightly[kubernetes,aws,gcp]"
-
-    .. tab-item:: From Source
-        :sync: from-source-tab
-
-        .. code-block:: shell
-
-          pip install -e ".[kubernetes,aws,gcp]"
-
-
-Installing via ``uv``
-----------------------
-
-SkyPilot can be installed using `uv <https://github.com/astral-sh/uv>`_, a fast Python package installer:
-
-.. tab-set::
-
-    .. tab-item:: uv venv
+          pip install skypilot-nightly
+      
+      .. tab-item:: uv venv
         :sync: uv-venv-tab
 
         .. code-block:: shell
@@ -167,37 +82,29 @@ SkyPilot can be installed using `uv <https://github.com/astral-sh/uv>`_, a fast 
           uv venv --seed --python 3.10
           source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-          # Install SkyPilot with your chosen cloud providers
-          uv pip install "skypilot[kubernetes,aws,gcp]"
+          uv pip install skypilot-nightly
 
-          # Azure CLI has an issue with uv, and requires '--prerelease allow'.
-          uv pip install --prerelease allow azure-cli
-          uv pip install "skypilot[azure]"
-
-        .. note::
-
-          The ``--seed`` flag is **required** as it ensures ``pip`` is installed in the virtual environment.
-          SkyPilot needs ``pip`` to build wheels for remote cluster setup.
-
-    .. tab-item:: uv tool
+      .. tab-item:: uv tool
         :sync: uv-tool-tab
 
         .. code-block:: shell
 
           # Install as a globally available tool with pip included
-          uv tool install --with pip "skypilot[aws,gcp]"
+          uv tool install --with pip skypilot-nightly
 
-          # Or with all cloud providers
-          uv tool install --with pip "skypilot[all]"
+    **Install from source:**
 
-          # Now you can use sky directly
-          sky check
+    .. code-block:: shell
 
-        .. note::
+      # Recommended: use a new conda env to avoid package conflicts.
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      conda create -y -n sky python=3.10
+      conda activate sky
 
-          The ``--with pip`` flag is **required** when using ``uv tool install``.
-          Without it, SkyPilot will fail when building wheels for remote clusters.
+      git clone https://github.com/skypilot-org/skypilot.git
+      cd skypilot
 
+      pip install -e . 
 
 Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.
 
@@ -206,6 +113,13 @@ Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick w
   After upgrading SkyPilot, use ``sky api stop`` to enable the new version.
   See :ref:`upgrade-skypilot` for more details.
 
+
+Install cloud dependencies
+--------------------------
+
+.. note:: This step is not required if connecting to a remote API server.
+
+Refer to the :ref:`cloud setup section <cloud-account-setup>` to download the necessary dependencies for the clouds you want to use.
 
 Connect to a remote API server (optional)
 --------------------------------------------------
@@ -217,8 +131,6 @@ If your team has set up a remote :ref:`SkyPilot API server <sky-api-server>`, co
   sky api login
 
 This is an optional step---by default, SkyPilot automatically starts and uses a local API server.  See more details in :ref:`sky-api-server-connect`.
-
-
 
 .. _verify-cloud-access:
 
