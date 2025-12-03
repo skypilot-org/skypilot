@@ -2,9 +2,6 @@ import functools
 import getpass
 import hashlib
 import io
-import copy
-import colorama
-import multiprocessing
 import os
 import pathlib
 import selectors
@@ -13,7 +10,6 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-import threading
 import time
 from typing import Dict, List, Optional, Tuple, Union
 
