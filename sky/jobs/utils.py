@@ -1481,7 +1481,7 @@ def get_managed_job_queue(
     # function will add the necessary dependent fields to the list, for
     # example, if the caller specifies `['user_name']`, the `_update_fields`
     # function will add `['user_hash']` to the list.
-    if fields is not None:
+    if isinstance(fields, list) and len(fields) > 0:
         updated_fields, cluster_handle_required = _update_fields(fields)
 
     total_no_filter = managed_job_state.get_managed_jobs_total()
