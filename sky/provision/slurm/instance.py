@@ -13,15 +13,17 @@ from sky.provision.slurm import utils as slurm_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import status_lib
+from sky.utils import subprocess_utils
 from sky.utils import timeline
 
 logger = sky_logging.init_logger(__name__)
 
-SHARED_SKY_DIRECTORY_NAME = '.sky_clusters'
 # TODO(kevin): This assumes $HOME is in a shared filesystem.
 # We should probably make it configurable, and add a check
 # during sky check.
-SHARED_ROOT_SKY_DIRECTORY = f'~/{SHARED_SKY_DIRECTORY_NAME}'
+SHARED_ROOT_SKY_DIRECTORY = '~/.sky_clusters'
+PROVISION_SCRIPTS_DIRECTORY_NAME = '.sky_provision'
+PROVISION_SCRIPTS_DIRECTORY = f'~/{PROVISION_SCRIPTS_DIRECTORY_NAME}'
 
 POLL_INTERVAL_SECONDS = 2
 # Default KillWait is 30 seconds, so we add some buffer time here.
@@ -32,6 +34,14 @@ def _sky_cluster_home_dir(cluster_name_on_cloud: str) -> str:
     """Returns the SkyPilot cluster's home directory path on the Slurm cluster.
     """
     return f'{SHARED_ROOT_SKY_DIRECTORY}/{cluster_name_on_cloud}'
+
+
+def _sbatch_provision_script_path(filename: str) -> str:
+    """Returns the path to the sbatch provision script on the login node."""
+    # Put sbatch script in $HOME instead of /tmp as there can be
+    # multiple login nodes, and different SSH connections
+    # can land on different login nodes.
+    return f'{PROVISION_SCRIPTS_DIRECTORY}/{filename}'
 
 
 def _skypilot_runtime_dir(cluster_name_on_cloud: str) -> str:
@@ -149,8 +159,8 @@ def _create_virtual_instance(
     provision_script = textwrap.dedent(f"""\
         #!/bin/bash
         #SBATCH --job-name={cluster_name_on_cloud}
-        #SBATCH --output={SHARED_SKY_DIRECTORY_NAME}/slurm-%j.out
-        #SBATCH --error={SHARED_SKY_DIRECTORY_NAME}/slurm-%j.out
+        #SBATCH --output={PROVISION_SCRIPTS_DIRECTORY_NAME}/slurm-%j.out
+        #SBATCH --error={PROVISION_SCRIPTS_DIRECTORY_NAME}/slurm-%j.out
         #SBATCH --nodes={num_nodes}
         #SBATCH --wait-all-nodes=1
         #SBATCH --cpus-per-task={int(resources["cpus"])}
@@ -183,25 +193,29 @@ def _create_virtual_instance(
 
     # To bootstrap things, we need to do it with SSHCommandRunner first.
     # SlurmCommandRunner is for after the virtual instances are created.
-    controller_node_runner = command_runner.SSHCommandRunner(
+    login_node_runner = command_runner.SSHCommandRunner(
         (ssh_host, ssh_port),
         ssh_user,
         ssh_key,
         ssh_proxy_command=ssh_proxy_command,
     )
 
-    # Rsync the provision script to a temporary location on the controller node
-    with tempfile.NamedTemporaryFile(mode='w',
-                                     prefix='sky_provision_',
-                                     delete=True) as f:
+    cmd = f'mkdir -p {PROVISION_SCRIPTS_DIRECTORY}'
+    rc, stdout, stderr = login_node_runner.run(cmd,
+                                               require_outputs=True,
+                                               stream_logs=False)
+    subprocess_utils.handle_returncode(
+        rc,
+        cmd,
+        'Failed to create provision scripts directory on login node.',
+        stderr=f'{stdout}\n{stderr}')
+    # Rsync the provision script to the login node
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=True) as f:
         f.write(provision_script)
         f.flush()
         src_path = f.name
-        tgt_path = f'/tmp/sky_provision_{cluster_name_on_cloud}.sh'
-        controller_node_runner.rsync(src_path,
-                                     tgt_path,
-                                     up=True,
-                                     stream_logs=False)
+        tgt_path = _sbatch_provision_script_path(f'{cluster_name_on_cloud}.sh')
+        login_node_runner.rsync(src_path, tgt_path, up=True, stream_logs=False)
 
     job_id = client.submit_job(partition, cluster_name_on_cloud, tgt_path)
     logger.debug(f'Successfully submitted Slurm job {job_id} for cluster '
